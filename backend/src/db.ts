@@ -260,6 +260,8 @@ CREATE INDEX IF NOT EXISTS idx_docker_managed_services_enabled
 CREATE TABLE IF NOT EXISTS docker_update_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     managed_service_id INTEGER,
+    app_slug TEXT NOT NULL DEFAULT '',
+    service_name TEXT NOT NULL DEFAULT '',
     event_type TEXT NOT NULL,
     from_tag TEXT,
     to_tag TEXT,
@@ -396,6 +398,8 @@ export function ensureDockerUpdateEventsSetNull(targetDb: MigrationDatabase): vo
     const managedServiceId = columns.find(
         (column) => column.name === "managed_service_id"
     );
+    const appSlug = columns.find((column) => column.name === "app_slug");
+    const serviceName = columns.find((column) => column.name === "service_name");
     const foreignKeys = targetDb
         .prepare("PRAGMA foreign_key_list(docker_update_events)")
         .all();
@@ -407,10 +411,17 @@ export function ensureDockerUpdateEventsSetNull(targetDb: MigrationDatabase): vo
     if (
         !managedServiceId ||
         (Number(managedServiceId.notnull || 0) === 0 &&
-            String(serviceForeignKey?.on_delete || "").toUpperCase() === "SET NULL")
+            String(serviceForeignKey?.on_delete || "").toUpperCase() === "SET NULL" &&
+            appSlug &&
+            serviceName)
     ) {
         return;
     }
+
+    const oldAppSlug = appSlug ? "NULLIF(docker_update_events_old.app_slug, '')" : "NULL";
+    const oldServiceName = serviceName
+        ? "NULLIF(docker_update_events_old.service_name, '')"
+        : "NULL";
 
     targetDb.exec("BEGIN IMMEDIATE");
     try {
@@ -419,6 +430,8 @@ export function ensureDockerUpdateEventsSetNull(targetDb: MigrationDatabase): vo
             CREATE TABLE docker_update_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 managed_service_id INTEGER,
+                app_slug TEXT NOT NULL DEFAULT '',
+                service_name TEXT NOT NULL DEFAULT '',
                 event_type TEXT NOT NULL,
                 from_tag TEXT,
                 to_tag TEXT,
@@ -430,13 +443,29 @@ export function ensureDockerUpdateEventsSetNull(targetDb: MigrationDatabase): vo
                 FOREIGN KEY(managed_service_id) REFERENCES docker_managed_services(id) ON DELETE SET NULL
             );
             INSERT INTO docker_update_events (
-                id, managed_service_id, event_type, from_tag, to_tag, from_digest,
-                to_digest, message, details_json, created_at
+                id, managed_service_id, app_slug, service_name, event_type,
+                from_tag, to_tag, from_digest, to_digest, message, details_json,
+                created_at
             )
             SELECT
-                id, managed_service_id, event_type, from_tag, to_tag, from_digest,
-                to_digest, message, details_json, created_at
-            FROM docker_update_events_old;
+                docker_update_events_old.id,
+                CASE
+                    WHEN docker_managed_services.id IS NULL THEN NULL
+                    ELSE docker_update_events_old.managed_service_id
+                END,
+                COALESCE(docker_managed_services.app_slug, ${oldAppSlug}, ''),
+                COALESCE(docker_managed_services.service_name, ${oldServiceName}, ''),
+                docker_update_events_old.event_type,
+                docker_update_events_old.from_tag,
+                docker_update_events_old.to_tag,
+                docker_update_events_old.from_digest,
+                docker_update_events_old.to_digest,
+                docker_update_events_old.message,
+                docker_update_events_old.details_json,
+                docker_update_events_old.created_at
+            FROM docker_update_events_old
+            LEFT JOIN docker_managed_services
+                ON docker_managed_services.id = docker_update_events_old.managed_service_id;
             DROP TABLE docker_update_events_old;
             CREATE INDEX IF NOT EXISTS idx_docker_update_events_created_at
                 ON docker_update_events(created_at DESC);

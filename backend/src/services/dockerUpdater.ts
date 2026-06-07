@@ -511,11 +511,13 @@ function insertEvent(
 ) {
     db.prepare(
         `INSERT INTO docker_update_events (
-            managed_service_id, event_type, from_tag, to_tag, from_digest, to_digest,
-            message, details_json, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            managed_service_id, app_slug, service_name, event_type, from_tag, to_tag,
+            from_digest, to_digest, message, details_json, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
         service.id,
+        service.app_slug,
+        service.service_name,
         eventType,
         service.current_tag,
         service.latest_tag,

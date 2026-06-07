@@ -214,7 +214,9 @@ test("migrates docker updater events to preserve service deletion history", asyn
         testDb.exec("PRAGMA foreign_keys = ON");
         testDb.exec(`
             CREATE TABLE docker_managed_services (
-                id INTEGER PRIMARY KEY AUTOINCREMENT
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                app_slug TEXT NOT NULL,
+                service_name TEXT NOT NULL
             );
             CREATE TABLE docker_update_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -231,7 +233,8 @@ test("migrates docker updater events to preserve service deletion history", asyn
             );
             CREATE INDEX IF NOT EXISTS idx_docker_update_events_created_at
                 ON docker_update_events(created_at DESC);
-            INSERT INTO docker_managed_services (id) VALUES (1);
+            INSERT INTO docker_managed_services (id, app_slug, service_name)
+            VALUES (1, 'media', 'web');
             INSERT INTO docker_update_events (
                 id, managed_service_id, event_type, created_at
             ) VALUES (7, 1, 'updated', '2026-06-07T00:00:00.000Z');
@@ -241,9 +244,75 @@ test("migrates docker updater events to preserve service deletion history", asyn
         testDb.prepare("DELETE FROM docker_managed_services WHERE id = 1").run();
 
         const event = testDb
-            .prepare("SELECT managed_service_id FROM docker_update_events WHERE id = 7")
-            .get() as { managed_service_id: number | null } | undefined;
+            .prepare(
+                `SELECT managed_service_id, app_slug, service_name
+                 FROM docker_update_events WHERE id = 7`
+            )
+            .get() as
+            | {
+                  managed_service_id: number | null;
+                  app_slug: string;
+                  service_name: string;
+              }
+            | undefined;
         assert.equal(event?.managed_service_id, null);
+        assert.equal(event?.app_slug, "media");
+        assert.equal(event?.service_name, "web");
+    } finally {
+        testDb.close();
+        await cleanup();
+    }
+});
+
+test("nulls orphaned docker updater event service ids during migration", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const { cleanup, result } = await importWithTempDb("dockerEventsOrphan");
+    const testDb = new DatabaseSync(":memory:");
+    try {
+        testDb.exec(`
+            CREATE TABLE docker_managed_services (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                app_slug TEXT NOT NULL,
+                service_name TEXT NOT NULL
+            );
+            CREATE TABLE docker_update_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                managed_service_id INTEGER,
+                app_slug TEXT NOT NULL DEFAULT '',
+                service_name TEXT NOT NULL DEFAULT '',
+                event_type TEXT NOT NULL,
+                from_tag TEXT,
+                to_tag TEXT,
+                from_digest TEXT,
+                to_digest TEXT,
+                message TEXT,
+                details_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL
+            );
+            INSERT INTO docker_update_events (
+                id, managed_service_id, app_slug, service_name, event_type, created_at
+            ) VALUES (
+                8, 404, 'deleted', 'worker', 'updated', '2026-06-07T00:00:00.000Z'
+            );
+        `);
+
+        result.__testing.ensureDockerUpdateEventsSetNull(testDb);
+
+        const event = testDb
+            .prepare(
+                `SELECT managed_service_id, app_slug, service_name
+                 FROM docker_update_events WHERE id = 8`
+            )
+            .get() as
+            | {
+                  managed_service_id: number | null;
+                  app_slug: string;
+                  service_name: string;
+              }
+            | undefined;
+        assert.equal(event?.managed_service_id, null);
+        assert.equal(event?.app_slug, "deleted");
+        assert.equal(event?.service_name, "worker");
     } finally {
         testDb.close();
         await cleanup();

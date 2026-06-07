@@ -873,8 +873,8 @@ async function getDockerUpdaterEvents(limit: number) {
             `SELECT
                 CAST(e.id AS TEXT) AS id,
                 CAST(e.managed_service_id AS TEXT) AS managed_service_id,
-                COALESCE(s.app_slug, '') AS app_slug,
-                COALESCE(s.service_name, '') AS service_name,
+                COALESCE(NULLIF(e.app_slug, ''), s.app_slug, '') AS app_slug,
+                COALESCE(NULLIF(e.service_name, ''), s.service_name, '') AS service_name,
                 e.event_type,
                 COALESCE(e.from_tag, '') AS from_tag,
                 COALESCE(e.to_tag, '') AS to_tag,
