@@ -100,15 +100,15 @@ export async function refreshCacheKey(key: string) {
     if (result.refreshed.length === 0) {
         throw new Error(`Cache key not found after refresh: ${key}`);
     }
-    const invalidRefreshedEntry = result.refreshed.find(
+    const invalidRefreshedIndex = result.refreshed.findIndex(
         (entry) => typeof entry !== "string"
     );
-    if (invalidRefreshedEntry !== undefined) {
+    if (invalidRefreshedIndex !== -1) {
         throw new Error(
-            `Invalid refreshed cache key for ${key}: ${JSON.stringify(invalidRefreshedEntry)}`
+            `Invalid refreshed cache key for ${key}: ${JSON.stringify(result.refreshed[invalidRefreshedIndex])}`
         );
     }
-    const refreshedKeys = [...new Set(result.refreshed)];
+    const refreshedKeys = [...new Set(result.refreshed as string[])];
     const refreshedRows = await Promise.all(
         refreshedKeys.map((refreshKey) => getCacheEntry(refreshKey))
     );

@@ -74,6 +74,7 @@ test.beforeEach(() => {
 });
 
 test.afterEach(() => {
+    db.exec("DELETE FROM scheduled_job_runs; DELETE FROM scheduled_jobs;");
     __testing.setActionExecutorForTests(undefined);
 });
 

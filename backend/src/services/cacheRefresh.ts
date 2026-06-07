@@ -368,7 +368,7 @@ async function fetchJson(url: string, headers: Record<string, string> = {}) {
 }
 
 async function fetchMoltbookJson(path: string) {
-    const apiKey = process.env.MOLTBOOK_API_KEY;
+    const apiKey = process.env.MOLTBOOK_API_KEY?.trim();
     if (!apiKey) {
         throw new Error("MOLTBOOK_API_KEY is not configured");
     }
@@ -988,7 +988,7 @@ async function refreshWalgBackupCache() {
 }
 
 async function checkOpenRouterQuota() {
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    const apiKey = process.env.OPENROUTER_API_KEY?.trim();
     if (!apiKey) return { status: "not_configured" };
     const [keyInfo, creditsInfo] = await Promise.all([
         fetchJson("https://openrouter.ai/api/v1/key", {
@@ -1010,7 +1010,7 @@ async function checkOpenRouterQuota() {
 }
 
 async function checkElevenLabsQuota() {
-    const apiKey = process.env.ELEVENLABS_API_KEY;
+    const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
     if (!apiKey) return { status: "not_configured" };
     const data = asRecord(
         await fetchJson("https://api.elevenlabs.io/v1/user", {
@@ -1037,7 +1037,7 @@ async function checkElevenLabsQuota() {
 }
 
 async function checkSyntheticQuota() {
-    const apiKey = process.env.SYNTHETIC_API_KEY;
+    const apiKey = process.env.SYNTHETIC_API_KEY?.trim();
     if (!apiKey) return { status: "not_configured" };
     const data = asRecord(
         await fetchJson("https://api.synthetic.new/v2/quotas", {

@@ -209,7 +209,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
             { name: "mira_2026" }
         );
 
-        await withEnv({ MOLTBOOK_API_KEY: undefined }, async () => {
+        await withEnv({ MOLTBOOK_API_KEY: "   " }, async () => {
             await assert.rejects(() => refreshMoltbookCache(), /MOLTBOOK_API_KEY/u);
             await assert.rejects(
                 () => refreshCacheProducer("moltbook.home"),
@@ -726,9 +726,9 @@ if (args.includes("capture-pane")) {
     it("covers quota producer helper fallback branches directly", async () => {
         await withEnv(
             {
-                OPENROUTER_API_KEY: undefined,
-                ELEVENLABS_API_KEY: undefined,
-                SYNTHETIC_API_KEY: undefined,
+                OPENROUTER_API_KEY: "   ",
+                ELEVENLABS_API_KEY: "   ",
+                SYNTHETIC_API_KEY: "   ",
                 QUOTAS_CODEX_HOME: path.join(tempDir, "codex-home"),
             },
             async () => {

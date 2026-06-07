@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { constants } from "node:fs";
+import { constants, type PathLike } from "node:fs";
 import fsPromises from "node:fs/promises";
 import {
     chmod,
@@ -139,7 +139,8 @@ describe("log rotation service", { concurrency: false }, () => {
             []
         );
         const noOwnerFile = path.join(tempDir, "no-owner.log");
-        await __testing.createNoFollowFile(noOwnerFile, 0o600);
+        const noOwnerHandle = await __testing.createNoFollowFile(noOwnerFile, 0o600);
+        await noOwnerHandle.close();
         assert.equal(await readFile(noOwnerFile, "utf8"), "");
         const ownerFile = path.join(tempDir, "owner.log");
         const chownCalls: Array<{ uid: number; gid: number }> = [];
@@ -153,9 +154,32 @@ describe("log rotation service", { concurrency: false }, () => {
             },
             stat: async () => ({ uid: 0, gid: 0 }),
         }));
-        await __testing.createNoFollowFile(ownerFile, 0o600, { uid: 123, gid: 456 });
+        const ownerHandle = await __testing.createNoFollowFile(ownerFile, 0o600, {
+            uid: 123,
+            gid: 456,
+        });
+        await ownerHandle.close();
         assert.deepEqual(chownCalls, [{ uid: 123, gid: 456 }]);
         assert.deepEqual(closeCalls, [ownerFile]);
+        mock.restoreAll();
+        mock.method(fsPromises, "open", async () => ({
+            close: async () => {
+                closeCalls.push("failed-owner");
+            },
+            stat: async () => {
+                throw new Error("created stat failed");
+            },
+        }));
+        await assert.rejects(
+            () =>
+                __testing.createNoFollowFile(
+                    path.join(tempDir, "failed-owner.log"),
+                    0o600,
+                    { uid: 123, gid: 456 }
+                ),
+            /created stat failed/u
+        );
+        assert.deepEqual(closeCalls, [ownerFile, "failed-owner"]);
         mock.restoreAll();
         assert.equal(
             await __testing.assertSafePath(path.join(tempDir, "missing.log"), [tempDir]),
@@ -237,6 +261,40 @@ describe("log rotation service", { concurrency: false }, () => {
         );
         assert.equal(await readFile(`${gzipSource}.gz`, "utf8"), "already exists");
         await rm(`${gzipSource}.gz`, { force: true });
+        const deleteSource = path.join(tempDir, "delete-source.log");
+        await writeFile(deleteSource, "delete me", "utf8");
+        const originalRename = fsPromises.rename;
+        let sawTombstoneRename = false;
+        const deleteRenameMock = mock.method(
+            fsPromises,
+            "rename",
+            async (from: PathLike, to: PathLike) => {
+                const fromPath = String(from);
+                const toPath = String(to);
+                if (fromPath === deleteSource && toPath.includes(".delete-")) {
+                    sawTombstoneRename = true;
+                    return originalRename(from, to);
+                }
+                if (sawTombstoneRename && fromPath.includes(".delete-")) {
+                    return originalRename(from, to);
+                }
+                throw new Error("unexpected rename");
+            }
+        );
+        const deleteUnlinkMock = mock.method(fsPromises, "unlink", async () => {
+            throw new Error("delete failed");
+        });
+        try {
+            await assert.rejects(
+                () => __testing.unlinkVerified(deleteSource, [tempDir]),
+                /delete failed/u
+            );
+            assert.equal(await readFile(deleteSource, "utf8"), "delete me");
+            assert.equal(sawTombstoneRename, true);
+        } finally {
+            deleteRenameMock.mock.restore();
+            deleteUnlinkMock.mock.restore();
+        }
         const outsideGzipTarget = path.join(os.tmpdir(), `mira-gzip-${Date.now()}`);
         await symlink(outsideGzipTarget, `${gzipSource}.gz`);
         await assert.rejects(

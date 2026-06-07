@@ -365,19 +365,28 @@ async function assertFileIdentity(
 
 async function unlinkVerified(filePath: string, approvedRoots: string[]): Promise<void> {
     const file = await openVerifiedFile(filePath, approvedRoots, constants.O_RDONLY);
+    const tombstonePath = `${filePath}.delete-${process.pid}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}`;
     try {
         await assertFileIdentity(filePath, file.stat, approvedRoots);
+        await assertSafeNewFileParent(tombstonePath, approvedRoots);
+        await fs.rename(filePath, tombstonePath);
+        await assertFileIdentity(tombstonePath, file.stat, approvedRoots);
+        await fs.unlink(tombstonePath);
+    } catch (error) {
+        await fs.rename(tombstonePath, filePath).catch(() => {});
+        throw error;
     } finally {
         await file.handle.close();
     }
-    await fs.unlink(filePath);
 }
 
 async function createNoFollowFile(
     filePath: string,
     mode: number,
     owner?: { uid: number; gid: number }
-): Promise<void> {
+): Promise<fs.FileHandle> {
     const handle = await fs.open(
         filePath,
         constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
@@ -390,8 +399,10 @@ async function createNoFollowFile(
                 await handle.chown(owner.uid, owner.gid);
             }
         }
-    } finally {
+        return handle;
+    } catch (error) {
         await handle.close();
+        throw error;
     }
 }
 
@@ -402,11 +413,10 @@ async function gzipFile(filePath: string, approvedRoots: string[]): Promise<stri
     let closed = false;
     try {
         await assertSafeNewFileParent(gzPath, approvedRoots);
-        await createNoFollowFile(gzPath, source.stat.mode & 0o777, {
+        destination = await createNoFollowFile(gzPath, source.stat.mode & 0o777, {
             uid: source.stat.uid,
             gid: source.stat.gid,
         });
-        destination = await fs.open(gzPath, constants.O_WRONLY | constants.O_NOFOLLOW);
         await gzipPipeline(
             createReadStream("", {
                 fd: source.handle.fd,
@@ -426,7 +436,7 @@ async function gzipFile(filePath: string, approvedRoots: string[]): Promise<stri
         destination = null;
         await source.handle.close();
         closed = true;
-        await fs.unlink(filePath);
+        await unlinkVerified(filePath, approvedRoots);
         return gzPath;
     } catch (error) {
         await destination?.close().catch(() => {});
@@ -462,14 +472,10 @@ async function rotateCopyTruncate(
     approvedRoots: string[]
 ): Promise<string> {
     await assertSafeNewFileParent(archivePath, approvedRoots);
-    await createNoFollowFile(archivePath, file.stat.mode & 0o777, {
+    const destination = await createNoFollowFile(archivePath, file.stat.mode & 0o777, {
         uid: file.stat.uid,
         gid: file.stat.gid,
     });
-    const destination = await fs.open(
-        archivePath,
-        constants.O_WRONLY | constants.O_NOFOLLOW
-    );
     try {
         await pipeline(
             createReadStream("", { fd: file.handle.fd, autoClose: false, start: 0 }),
@@ -493,10 +499,11 @@ async function rotateRename(
     await assertFileIdentity(filePath, file.stat, approvedRoots);
     await fs.rename(filePath, archivePath);
     try {
-        await createNoFollowFile(filePath, file.stat.mode & 0o777, {
+        const replacement = await createNoFollowFile(filePath, file.stat.mode & 0o777, {
             uid: file.stat.uid,
             gid: file.stat.gid,
         });
+        await replacement.close();
     } catch (error) {
         await fs.rename(archivePath, filePath).catch(() => {});
         throw error;
@@ -1184,6 +1191,7 @@ export const __testing = {
     releaseLogRotationLock,
     resolveGlob,
     shouldRotate,
+    unlinkVerified,
     caughtMessage,
     resetElevatedLogRotationExecFileRunner() {
         elevatedLogRotationExecFileRunner = execFileAsync as ExecFileRunner;
