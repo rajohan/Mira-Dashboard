@@ -61,7 +61,7 @@ export function LogRotationCard() {
                 </Card>
                 <Card className="p-4">
                     <div className="text-primary-400 text-sm">Schedule</div>
-                    <div className="mt-2 text-lg font-semibold">02:10 daily</div>
+                    <div className="mt-2 text-lg font-semibold">03:30 daily</div>
                 </Card>
                 <Card className="p-4">
                     <div className="text-primary-400 text-sm">Retention</div>

@@ -1060,6 +1060,12 @@ async function applyServiceUpdate(
 export async function runDockerUpdaterService(
     serviceId?: number
 ): Promise<DockerUpdaterStepResult[]> {
+    const requestedService =
+        serviceId === undefined
+            ? undefined
+            : (db
+                  .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
+                  .get(serviceId) as ManagedServiceRow | undefined);
     const register = await registerDockerUpdaterServices();
     if (!register.ok) {
         return [register];
@@ -1072,11 +1078,24 @@ export async function runDockerUpdaterService(
             .get(serviceId) as ManagedServiceRow | undefined;
         const poll = service ? await pollDockerUpdaterRegistries(service.id) : undefined;
         if (!service) {
+            if (requestedService?.last_status === "unsupported_registry") {
+                return [
+                    register,
+                    {
+                        step: `manual-update:${serviceLabel(requestedService)}`,
+                        ok: false,
+                        code: "UNSUPPORTED_REGISTRY",
+                        stdout: "",
+                        stderr: `Unsupported image registry: ${imageRegistry(requestedService.image_repo)}`,
+                    },
+                ];
+            }
             return [
                 register,
                 {
                     step: "manual-update",
                     ok: false,
+                    code: "NOT_FOUND",
                     stdout: "",
                     stderr: "Docker updater service not found",
                 },
@@ -1099,8 +1118,22 @@ export async function runDockerUpdaterService(
                 {
                     step: "manual-update",
                     ok: false,
+                    code: "NOT_FOUND",
                     stdout: "",
                     stderr: "Docker updater service not found after registry poll",
+                },
+            ];
+        }
+        if (refreshedService.last_status === "unsupported_registry") {
+            return [
+                register,
+                poll,
+                {
+                    step: `manual-update:${serviceLabel(refreshedService)}`,
+                    ok: false,
+                    code: "UNSUPPORTED_REGISTRY",
+                    stdout: "",
+                    stderr: `Unsupported image registry: ${imageRegistry(refreshedService.image_repo)}`,
                 },
             ];
         }

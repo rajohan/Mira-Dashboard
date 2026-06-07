@@ -15,7 +15,13 @@ interface HttpStatusError extends Error {
 }
 
 function httpStatusCode(error: unknown): number {
-    return (error as HttpStatusError).statusCode || 500;
+    if (typeof error === "object" && error !== null) {
+        const statusCode = (error as HttpStatusError).statusCode;
+        if (typeof statusCode === "number") {
+            return statusCode;
+        }
+    }
+    return 500;
 }
 
 function asyncRoute(handler: RequestHandler): RequestHandler {

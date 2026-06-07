@@ -195,6 +195,13 @@ function acquireCodexTrustConfigLock(
                                 removeFile(reclaimedPath, { force: true });
                                 continue;
                             }
+                            try {
+                                if (sameFileStat(stat, statFile(reclaimedPath))) {
+                                    renameFile(reclaimedPath, lockPath);
+                                }
+                            } catch {
+                                // Best effort: preserve the live lock path if a newer owner won.
+                            }
                         } catch (renameError) {
                             if (
                                 renameError instanceof Error &&
@@ -258,6 +265,15 @@ async function acquireCodexTrustConfigLockAsync(
                             if (sameFileStat(lockStat, reclaimedStat)) {
                                 await removeFile(reclaimedPath, { force: true });
                                 continue;
+                            }
+                            try {
+                                if (
+                                    sameFileStat(lockStat, await statFile(reclaimedPath))
+                                ) {
+                                    await renameFile(reclaimedPath, lockPath);
+                                }
+                            } catch {
+                                // Best effort: preserve the live lock path if a newer owner won.
                             }
                         } catch (renameError) {
                             if (
@@ -643,8 +659,14 @@ function summarizeStatus(lines: string[]) {
         workTree: line[1] ?? " ",
         line,
     }));
+    const unmergedStatuses = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
     return {
-        staged: chars.filter(({ index }) => index !== " " && index !== "?").length,
+        staged: chars.filter(
+            ({ index, workTree }) =>
+                index !== " " &&
+                index !== "?" &&
+                !unmergedStatuses.has(`${index}${workTree}`)
+        ).length,
         modified: chars.filter(({ workTree }) => workTree === "M").length,
         deleted: chars.filter(({ index, workTree }) => index === "D" || workTree === "D")
             .length,

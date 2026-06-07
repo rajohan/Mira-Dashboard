@@ -9,7 +9,13 @@ import { db } from "../db.js";
 import { withEnv } from "../testUtils/env.js";
 
 const originalFetch = globalThis.fetch;
-type StepResult = { step: string; ok: boolean; stdout: string; stderr: string };
+type StepResult = {
+    code?: string;
+    ok: boolean;
+    stderr: string;
+    stdout: string;
+    step: string;
+};
 
 async function writeExecutable(filePath: string, script: string) {
     await writeFile(filePath, script, "utf8");
@@ -1055,6 +1061,10 @@ setTimeout(() => process.exit(0), 30);
             .prepare("SELECT last_status FROM docker_managed_services WHERE id = 720")
             .get() as { last_status: string };
         assert.equal(row.last_status, "unsupported_registry");
+        const manualSteps = (await updater.runDockerUpdaterService(720)) as StepResult[];
+        assert.equal(manualSteps.at(-1)?.step, "manual-update:external/swag");
+        assert.equal(manualSteps.at(-1)?.ok, false);
+        assert.equal(manualSteps.at(-1)?.code, "UNSUPPORTED_REGISTRY");
     });
 
     it("does not block a manual update on unrelated registry failures", async () => {
@@ -1117,6 +1127,40 @@ setTimeout(() => process.exit(0), 30);
         });
 
         assert.match(await readFile(composePath, "utf8"), /image: nginx:2/u);
+    });
+
+    it("reports unsupported registries for registered manual services", async () => {
+        const appsRoot = path.join(tempDir, "apps");
+        const appDir = path.join(appsRoot, "unsupported-compose");
+        await mkdir(appDir, { recursive: true });
+        await writeFile(
+            path.join(appDir, "compose.yaml"),
+            `services:
+  swag:
+    image: lscr.io/linuxserver/swag:latest
+    labels:
+      mira.updater.tagPattern: "latest"
+`,
+            "utf8"
+        );
+
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
+            const updater = await import(
+                `./dockerUpdater.js?unsupported-compose=${Date.now()}`
+            );
+            await updater.registerDockerUpdaterServices();
+            const service = db
+                .prepare(
+                    "SELECT id FROM docker_managed_services WHERE service_name = 'swag'"
+                )
+                .get() as { id: number };
+            const steps = (await updater.runDockerUpdaterService(
+                service.id
+            )) as StepResult[];
+            assert.equal(steps.at(-1)?.step, "manual-update:unsupported-compose/swag");
+            assert.equal(steps.at(-1)?.ok, false);
+            assert.equal(steps.at(-1)?.code, "UNSUPPORTED_REGISTRY");
+        });
     });
 
     it("skips manual apply when a fresh poll finds no tag update", async () => {

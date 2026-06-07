@@ -712,7 +712,7 @@ if (args.includes("capture-pane")) {
                 "",
             ]),
             {
-                staged: 3,
+                staged: 2,
                 modified: 2,
                 deleted: 1,
                 untracked: 1,
@@ -1157,6 +1157,76 @@ if (args.includes("capture-pane")) {
                 }),
             /exists/u
         );
+        const mismatchRenameCalls: Array<[string, string]> = [];
+        let mismatchStatCalls = 0;
+        assert.throws(
+            () =>
+                __testing.acquireCodexTrustConfigLock(lockPath, {
+                    now: (() => {
+                        let calls = 0;
+                        return () => {
+                            calls += 1;
+                            return calls === 1 ? 0 : 10_000 + 5 * 60 * 1000;
+                        };
+                    })(),
+                    open: () => {
+                        throw existsError;
+                    },
+                    rename: (from, to) => {
+                        mismatchRenameCalls.push([String(from), String(to)]);
+                    },
+                    stat: () => {
+                        mismatchStatCalls += 1;
+                        if (mismatchStatCalls === 2) {
+                            return { dev: 9, ino: 9, mtimeMs: 1 } as never;
+                        }
+                        return { dev: 1, ino: 2, mtimeMs: 1 } as never;
+                    },
+                }),
+            /exists/u
+        );
+        assert.deepEqual(mismatchRenameCalls, [
+            [lockPath, `${lockPath}.reclaimed.${process.pid}`],
+            [`${lockPath}.reclaimed.${process.pid}`, lockPath],
+        ]);
+        const failedRestoreRenameCalls: Array<[string, string]> = [];
+        assert.throws(
+            () =>
+                __testing.acquireCodexTrustConfigLock(lockPath, {
+                    now: (() => {
+                        let calls = 0;
+                        return () => {
+                            calls += 1;
+                            return calls === 1 ? 0 : 10_000 + 5 * 60 * 1000;
+                        };
+                    })(),
+                    open: () => {
+                        throw existsError;
+                    },
+                    rename: (from, to) => {
+                        failedRestoreRenameCalls.push([String(from), String(to)]);
+                        if (failedRestoreRenameCalls.length === 2) {
+                            throw new Error("restore denied");
+                        }
+                    },
+                    stat: (() => {
+                        let calls = 0;
+                        return () => {
+                            calls += 1;
+                            return {
+                                dev: calls === 2 ? 9 : 1,
+                                ino: calls === 2 ? 9 : 2,
+                                mtimeMs: 1,
+                            } as never;
+                        };
+                    })(),
+                }),
+            /exists/u
+        );
+        assert.deepEqual(failedRestoreRenameCalls, [
+            [lockPath, `${lockPath}.reclaimed.${process.pid}`],
+            [`${lockPath}.reclaimed.${process.pid}`, lockPath],
+        ]);
         let statCalls = 0;
         assert.throws(
             () =>
@@ -1351,6 +1421,76 @@ if (args.includes("capture-pane")) {
                 }),
             /exists/u
         );
+        const asyncMismatchRenameCalls: Array<[string, string]> = [];
+        let asyncMismatchStatCalls = 0;
+        await assert.rejects(
+            () =>
+                __testing.acquireCodexTrustConfigLockAsync(lockPath, {
+                    now: (() => {
+                        let calls = 0;
+                        return () => {
+                            calls += 1;
+                            return calls === 1 ? 0 : 10_000 + 5 * 60 * 1000;
+                        };
+                    })(),
+                    open: async () => {
+                        throw existsError;
+                    },
+                    rename: async (from, to) => {
+                        asyncMismatchRenameCalls.push([String(from), String(to)]);
+                    },
+                    stat: async () => {
+                        asyncMismatchStatCalls += 1;
+                        if (asyncMismatchStatCalls === 2) {
+                            return { dev: 9, ino: 9, mtimeMs: 1 } as never;
+                        }
+                        return { dev: 1, ino: 2, mtimeMs: 1 } as never;
+                    },
+                }),
+            /exists/u
+        );
+        assert.deepEqual(asyncMismatchRenameCalls, [
+            [lockPath, `${lockPath}.reclaimed.${process.pid}`],
+            [`${lockPath}.reclaimed.${process.pid}`, lockPath],
+        ]);
+        const asyncFailedRestoreRenameCalls: Array<[string, string]> = [];
+        await assert.rejects(
+            () =>
+                __testing.acquireCodexTrustConfigLockAsync(lockPath, {
+                    now: (() => {
+                        let calls = 0;
+                        return () => {
+                            calls += 1;
+                            return calls === 1 ? 0 : 10_000 + 5 * 60 * 1000;
+                        };
+                    })(),
+                    open: async () => {
+                        throw existsError;
+                    },
+                    rename: async (from, to) => {
+                        asyncFailedRestoreRenameCalls.push([String(from), String(to)]);
+                        if (asyncFailedRestoreRenameCalls.length === 2) {
+                            throw new Error("restore denied");
+                        }
+                    },
+                    stat: (() => {
+                        let calls = 0;
+                        return async () => {
+                            calls += 1;
+                            return {
+                                dev: calls === 2 ? 9 : 1,
+                                ino: calls === 2 ? 9 : 2,
+                                mtimeMs: 1,
+                            } as never;
+                        };
+                    })(),
+                }),
+            /exists/u
+        );
+        assert.deepEqual(asyncFailedRestoreRenameCalls, [
+            [lockPath, `${lockPath}.reclaimed.${process.pid}`],
+            [`${lockPath}.reclaimed.${process.pid}`, lockPath],
+        ]);
         let statCalls = 0;
         await assert.rejects(
             () =>

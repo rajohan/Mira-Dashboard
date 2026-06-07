@@ -413,6 +413,18 @@ function updateNextRunFromLatestJob(jobId: string): void {
     ).run(freshJob.enabled ? computeNextRunIso(freshJob) : null, nowIso(), freshJob.id);
 }
 
+function shouldRescheduleCompletedRun(
+    jobId: string,
+    triggerType: ScheduledJobTriggerType
+): boolean {
+    if (triggerType === "schedule") {
+        return true;
+    }
+    const latest = getScheduledJob(jobId);
+    const now = nowIso();
+    return Boolean(latest?.enabled && latest.nextRunAt && latest.nextRunAt <= now);
+}
+
 function reconcileStaleRunningRuns(): void {
     if (staleRunningRunsReconciled) {
         return;
@@ -662,12 +674,12 @@ export async function runScheduledJob(
     try {
         const output = await executeScheduledJob(job);
         finishRun(runId, "success", "Job completed", output);
-        if (triggerType === "schedule") {
+        if (shouldRescheduleCompletedRun(job.id, triggerType)) {
             updateNextRunFromLatestJob(job.id);
         }
     } catch (error) {
         finishRun(runId, "failed", errorMessage(error, "Job failed"), {});
-        if (triggerType === "schedule") {
+        if (shouldRescheduleCompletedRun(job.id, triggerType)) {
             updateNextRunFromLatestJob(job.id);
         }
     } finally {

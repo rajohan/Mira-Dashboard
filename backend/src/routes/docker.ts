@@ -904,6 +904,9 @@ function manualUpdaterFailureStatus(code: string): number {
     if (code === "CONFLICT") {
         return 409;
     }
+    if (code === "UNSUPPORTED_REGISTRY") {
+        return 422;
+    }
     return 500;
 }
 

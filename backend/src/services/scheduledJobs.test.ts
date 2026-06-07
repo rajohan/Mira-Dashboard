@@ -170,6 +170,17 @@ test("runs jobs and records success or failure", async () => {
     assert.equal(getScheduledJob("cache.weather")?.lastRun?.status, "success");
     assert.equal(getScheduledJob("cache.weather")?.nextRunAt, nextRunBeforeManualSuccess);
 
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+        "2026-06-06T00:00:00.000Z",
+        "cache.weather"
+    );
+    const manualDueSuccess = await runScheduledJob("cache.weather");
+    assert.equal(manualDueSuccess.status, "success");
+    assert.notEqual(
+        getScheduledJob("cache.weather")?.nextRunAt,
+        "2026-06-06T00:00:00.000Z"
+    );
+
     __testing.setActionExecutorForTests(async () => {
         updateScheduledJob("cache.weather", { enabled: false, intervalSeconds: 7200 });
         return { updated: true };
@@ -205,10 +216,16 @@ test("runs jobs and records success or failure", async () => {
     assert.equal(failure.message, "boom");
 
     updateScheduledJob("cache.weather", { enabled: true, intervalSeconds: 7200 });
-    const nextRunBeforeManualFailure = getScheduledJob("cache.weather")?.nextRunAt;
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+        "2026-06-06T00:00:00.000Z",
+        "cache.weather"
+    );
     const manualFailure = await runScheduledJob("cache.weather");
     assert.equal(manualFailure.status, "failed");
-    assert.equal(getScheduledJob("cache.weather")?.nextRunAt, nextRunBeforeManualFailure);
+    assert.notEqual(
+        getScheduledJob("cache.weather")?.nextRunAt,
+        "2026-06-06T00:00:00.000Z"
+    );
 
     await assert.rejects(runScheduledJob("missing"), /not found/u);
 });

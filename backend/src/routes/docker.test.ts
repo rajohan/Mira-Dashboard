@@ -647,8 +647,8 @@ async function seedDockerUpdaterState(tempDir: string): Promise<void> {
     db.prepare(
         `INSERT INTO docker_update_events (
             id, managed_service_id, event_type, from_tag, to_tag, from_digest,
-            to_digest, message, details_json, created_at
-        ) VALUES (7, 1, 'updated', '1.0.0', '1.0.1', 'sha256:old', 'sha256:new', NULL, '{}', ?)`
+            to_digest, message, details_json, app_slug, service_name, created_at
+        ) VALUES (7, 1, 'updated', '1.0.0', '1.0.1', 'sha256:old', 'sha256:new', NULL, '{}', 'media', 'app', ?)`
     ).run("2026-05-11 12:00:00");
 }
 
@@ -807,6 +807,7 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(__testing.manualUpdaterFailureStatus("NOT_FOUND"), 404);
         assert.equal(__testing.manualUpdaterFailureStatus("DISABLED"), 400);
         assert.equal(__testing.manualUpdaterFailureStatus("CONFLICT"), 409);
+        assert.equal(__testing.manualUpdaterFailureStatus("UNSUPPORTED_REGISTRY"), 422);
         assert.equal(__testing.manualUpdaterFailureStatus("APPLY_FAILED"), 500);
         assert.equal(
             __testing.firstFailedStepCode([
