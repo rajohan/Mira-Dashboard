@@ -484,6 +484,7 @@ describe("Docker page", () => {
         expect(await screen.findByText(/updated=1 failed=0/)).toBeInTheDocument();
 
         docker.manualUpdate.mockResolvedValueOnce({
+            success: true,
             result: { summary: { failed: 1, updated: 1 } },
             stderr: "",
         });

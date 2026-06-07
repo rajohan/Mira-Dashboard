@@ -62,6 +62,13 @@ jobs:
                   flags: frontend
                   name: frontend
                   fail_ci_if_error: true
+                  # codecov-action@v6 supports use_pypi; this intentionally uses the PyPI CLI path.
+                  # Security tradeoff: use_pypi: true bypasses Codecov's binary CLI integrity checks.
+                  # Accepted while upstream signature verification is unreliable; see
+                  # https://github.com/codecov/codecov-action#arguments and
+                  # https://docs.codecov.com/docs/the-codecov-cli#integrity-checking-the-binary.
+                  # TODO(security, revisit 2026-09-01): check Codecov action/CLI release notes monthly;
+                  # record the decision in the Dashboard PR/CI security tracking issue before changing.
                   use_pypi: true
 
     backend-checks:
@@ -124,6 +131,13 @@ jobs:
                   flags: backend
                   name: backend
                   fail_ci_if_error: true
+                  # codecov-action@v6 supports use_pypi; this intentionally uses the PyPI CLI path.
+                  # Security tradeoff: use_pypi: true bypasses Codecov's binary CLI integrity checks.
+                  # Accepted while upstream signature verification is unreliable; see
+                  # https://github.com/codecov/codecov-action#arguments and
+                  # https://docs.codecov.com/docs/the-codecov-cli#integrity-checking-the-binary.
+                  # TODO(security, revisit 2026-09-01): check Codecov action/CLI release notes monthly;
+                  # record the decision in the Dashboard PR/CI security tracking issue before changing.
                   use_pypi: true
 
     e2e-smoke:

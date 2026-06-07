@@ -56,6 +56,7 @@ export interface DockerUpdaterStepResult {
     ok: boolean;
     stdout: string;
     stderr: string;
+    code?: "NOT_FOUND" | "DISABLED" | "CONFLICT" | "UNSUPPORTED_REGISTRY";
 }
 
 interface ManagedServiceRow {
@@ -456,8 +457,9 @@ async function lookupLatest(service: ManagedServiceRow) {
     const registry = imageRegistry(service.image_repo);
     if (!SUPPORTED_REGISTRIES.has(registry)) {
         return {
-            latestTag: service.current_tag,
-            latestDigest: service.current_digest,
+            latestTag: null,
+            latestDigest: null,
+            unsupported: true,
         };
     }
     return registry === "ghcr.io" ? lookupGhcr(service) : lookupDockerHub(service);
@@ -791,8 +793,8 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
             tag_match_pattern = excluded.tag_match_pattern,
             enabled = excluded.enabled,
             metadata_json = excluded.metadata_json,
-            last_checked_at = excluded.last_checked_at,
-            last_status = excluded.last_status`
+            last_checked_at = docker_managed_services.last_checked_at,
+            last_status = docker_managed_services.last_status`
     );
     db.exec("BEGIN");
     try {
@@ -888,6 +890,17 @@ export async function pollDockerUpdaterRegistries(
     for (const service of services) {
         try {
             const latest = await lookupLatest(service);
+            if ("unsupported" in latest && latest.unsupported) {
+                const error = `Unsupported image registry: ${imageRegistry(service.image_repo)}`;
+                failures.push({ service: serviceLabel(service), error });
+                db.prepare(
+                    `UPDATE docker_managed_services
+                     SET latest_tag = NULL, latest_digest = NULL,
+                         last_checked_at = ?, last_status = 'unsupported_registry'
+                     WHERE id = ?`
+                ).run(timestamp, service.id);
+                continue;
+            }
             const updatedService = {
                 ...service,
                 latest_tag: latest.latestTag ?? null,
@@ -958,14 +971,25 @@ async function applyServiceUpdate(
             .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
             .get(service.id) as ManagedServiceRow | undefined;
         if (!lockedService || lockedService.enabled !== 1) {
+            const code = lockedService ? "DISABLED" : "NOT_FOUND";
             return {
                 step: `${eventPrefix}-update:${serviceLabel(service)}`,
                 ok: false,
+                code,
                 stdout: "",
                 stderr: "Docker updater service not found or disabled",
             };
         }
         const target = buildTargetImageRef(lockedService);
+        if (!hasUpdate(lockedService)) {
+            return {
+                step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
+                ok: false,
+                code: "CONFLICT",
+                stdout: "",
+                stderr: "No update available",
+            };
+        }
         try {
             const result = await applyComposeUpdateUnlocked(lockedService, target);
             db.prepare(

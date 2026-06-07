@@ -37,6 +37,7 @@ const originalPath = process.env.PATH;
 const originalDockerRoot = process.env.MIRA_DOCKER_ROOT;
 const originalDockerAppsRoot = process.env.MIRA_DOCKER_APPS_ROOT;
 const originalDockerBin = process.env.MIRA_DOCKER_BIN;
+const originalComposeWrapper = process.env.MIRA_DOCKER_COMPOSE_WRAPPER;
 const originalUpdaterSkipRegistry = process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
 const fakeEnvKeys = [
     "MIRA_DOCKER_COMPOSE_WRAPPER",
@@ -663,12 +664,19 @@ describe("docker routes", { concurrency: false }, () => {
         } else {
             process.env.MIRA_DOCKER_BIN = originalDockerBin;
         }
+        if (originalComposeWrapper === undefined) {
+            delete process.env.MIRA_DOCKER_COMPOSE_WRAPPER;
+        } else {
+            process.env.MIRA_DOCKER_COMPOSE_WRAPPER = originalComposeWrapper;
+        }
         if (originalUpdaterSkipRegistry === undefined) {
             delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
         } else {
             process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY = originalUpdaterSkipRegistry;
         }
-        db.exec("DELETE FROM docker_update_events; DELETE FROM docker_managed_services;");
+        db.exec(
+            "DELETE FROM docker_update_events; DELETE FROM docker_managed_services; DELETE FROM notifications WHERE source IN ('docker', 'docker-updater');"
+        );
         __testing.setDockerBinForTests(originalDockerBin);
         __testing.setDockerExecPidWaitTimeoutForTests();
         if (tempDir) {
@@ -748,6 +756,30 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(__testing.parseDockerSizeToBytes("1.5 MB"), 1_572_864);
         assert.equal(__testing.parseDockerSizeToBytes("1XB"), 0);
         assert.equal(__testing.trimOutput("x".repeat(120_000)).length, 100_000);
+        assert.equal(
+            __testing.manualUpdaterFailureCode("service not found"),
+            "NOT_FOUND"
+        );
+        assert.equal(__testing.manualUpdaterFailureCode("service disabled"), "DISABLED");
+        assert.equal(__testing.manualUpdaterFailureCode("boom"), "APPLY_FAILED");
+        assert.equal(__testing.manualUpdaterFailureCode("boom", "CONFLICT"), "CONFLICT");
+        assert.equal(__testing.manualUpdaterFailureStatus("NOT_FOUND"), 404);
+        assert.equal(__testing.manualUpdaterFailureStatus("DISABLED"), 409);
+        assert.equal(__testing.manualUpdaterFailureStatus("CONFLICT"), 409);
+        assert.equal(__testing.manualUpdaterFailureStatus("APPLY_FAILED"), 500);
+        assert.equal(
+            __testing.firstFailedStepCode([
+                { step: "ok", ok: true, stdout: "", stderr: "" },
+                {
+                    step: "failed",
+                    ok: false,
+                    code: "CONFLICT",
+                    stdout: "",
+                    stderr: "No update available",
+                },
+            ]),
+            "CONFLICT"
+        );
         assert.equal(__testing.resolveManualUpdateServiceId("12", { serviceId: 3 }), 12);
         assert.equal(__testing.resolveManualUpdateServiceId("", { serviceId: 3 }), 3);
         assert.equal(__testing.resolveManualUpdateServiceId("0", { serviceId: 3 }), null);
@@ -759,6 +791,7 @@ describe("docker routes", { concurrency: false }, () => {
         assert.deepEqual(await __testing.getContainerInspectMap([]), new Map());
         assert.deepEqual(await __testing.runManualUpdaterForService(987_654), {
             success: false,
+            code: "NOT_FOUND",
             output: {},
             stderr: "Docker updater service not found",
             steps: [
@@ -792,6 +825,7 @@ describe("docker routes", { concurrency: false }, () => {
             }),
             {
                 success: false,
+                code: "DISABLED",
                 output: {},
                 stderr: "Docker updater service is disabled",
                 steps: [

@@ -52,7 +52,11 @@ describe("docker updater service", { concurrency: false }, () => {
     afterEach(async () => {
         mock.restoreAll();
         globalThis.fetch = originalFetch;
-        process.env.PATH = originalPath;
+        if (originalPath === undefined) {
+            delete process.env.PATH;
+        } else {
+            process.env.PATH = originalPath;
+        }
         db.exec(
             "DELETE FROM docker_update_events; DELETE FROM docker_managed_services; DELETE FROM notifications;"
         );
@@ -570,6 +574,92 @@ process.stdout.write("updated\n");
         assert.match(await readFile(composePath, "utf8"), /repo\/app:1/u);
     });
 
+    it("does not apply an update when the locked DB row is already current", async () => {
+        const updater = await import(`./dockerUpdater.js?current=${Date.now()}`);
+        const service = {
+            id: 710,
+            app_slug: "current",
+            service_name: "web",
+            compose_path: path.join(tempDir, "current", "compose.yaml"),
+            image_repo: "repo/app",
+            compose_image_ref: "repo/app:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "1",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: "1",
+            enabled: 1,
+        };
+        db.prepare(
+            `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+        ).run(service);
+
+        assert.deepEqual(await updater.__testing.applyServiceUpdate(service, "manual"), {
+            step: "manual-update:current/web",
+            ok: false,
+            code: "CONFLICT",
+            stdout: "",
+            stderr: "No update available",
+        });
+    });
+
+    it("does not apply an update when the locked DB row is disabled", async () => {
+        const updater = await import(`./dockerUpdater.js?disabled=${Date.now()}`);
+        const service = {
+            id: 711,
+            app_slug: "disabled",
+            service_name: "web",
+            compose_path: path.join(tempDir, "disabled", "compose.yaml"),
+            image_repo: "repo/app",
+            compose_image_ref: "repo/app:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: "2",
+            enabled: 0,
+        };
+        db.prepare(
+            `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+        ).run(service);
+
+        const result = await updater.__testing.applyServiceUpdate(
+            { ...service, enabled: 1 },
+            "manual"
+        );
+        assert.equal(result.ok, false);
+        assert.equal(result.code, "DISABLED");
+        assert.match(result.stderr, /not found or disabled/u);
+    });
+
     it("accepts arm64 v8 registry variants for linux/arm64 services", async () => {
         const updater = await import(`./dockerUpdater.js?platform-v8=${Date.now()}`);
 
@@ -919,6 +1009,30 @@ setTimeout(() => process.exit(0), 30);
                 "Docker updater service not found after registry poll"
             );
         });
+    });
+
+    it("records unsupported registries during polling", async () => {
+        const updater = await import(`./dockerUpdater.js?unsupported=${Date.now()}`);
+        db.prepare(
+            `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                720, 'external', 'swag', '/tmp/compose.yaml', 'lscr.io/linuxserver/swag',
+                'lscr.io/linuxserver/swag:latest', 'services.swag.image', 'latest', NULL,
+                NULL, NULL, 'notify', 'tag', 'exact', 'latest', 1, '{}'
+            )`
+        ).run();
+
+        const result = await updater.pollDockerUpdaterRegistries(720);
+        assert.equal(result.ok, false);
+        assert.match(result.stderr, /Unsupported image registry: lscr.io/u);
+        const row = db
+            .prepare("SELECT last_status FROM docker_managed_services WHERE id = 720")
+            .get() as { last_status: string };
+        assert.equal(row.last_status, "unsupported_registry");
     });
 
     it("does not block a manual update on unrelated registry failures", async () => {
@@ -1540,20 +1654,28 @@ setTimeout(() => process.exit(0), 30);
                 latestDigest: "sha256:amd64",
             }
         );
-        process.env.MIRA_DOCKER_UPDATER_PLATFORM = "linux/amd64";
-        assert.deepEqual(
-            await updater.__testing.lookupDockerHub({
-                ...baseService,
-                tag_match_type: "regex",
-                tag_match_pattern: String.raw`^\d$`,
-                metadata_json: "{bad json",
-            }),
-            {
-                latestTag: "3",
-                latestDigest: "sha256:amd64",
+        const originalPlatform = process.env.MIRA_DOCKER_UPDATER_PLATFORM;
+        try {
+            process.env.MIRA_DOCKER_UPDATER_PLATFORM = "linux/amd64";
+            assert.deepEqual(
+                await updater.__testing.lookupDockerHub({
+                    ...baseService,
+                    tag_match_type: "regex",
+                    tag_match_pattern: String.raw`^\d$`,
+                    metadata_json: "{bad json",
+                }),
+                {
+                    latestTag: "3",
+                    latestDigest: "sha256:amd64",
+                }
+            );
+        } finally {
+            if (originalPlatform === undefined) {
+                delete process.env.MIRA_DOCKER_UPDATER_PLATFORM;
+            } else {
+                process.env.MIRA_DOCKER_UPDATER_PLATFORM = originalPlatform;
             }
-        );
-        delete process.env.MIRA_DOCKER_UPDATER_PLATFORM;
+        }
         const archDescriptor = Object.getOwnPropertyDescriptor(process, "arch");
         Object.defineProperty(process, "arch", {
             configurable: true,
@@ -1601,20 +1723,28 @@ setTimeout(() => process.exit(0), 30);
                 Object.defineProperty(process, "arch", archDescriptor);
             }
         }
-        process.env.MIRA_DOCKER_UPDATER_PLATFORM = "linux/amd64";
-        assert.deepEqual(
-            await updater.__testing.lookupDockerHub({
-                ...baseService,
-                tag_match_type: "regex",
-                tag_match_pattern: String.raw`^\d$`,
-                metadata_json: undefined,
-            }),
-            {
-                latestTag: "3",
-                latestDigest: "sha256:amd64",
+        const originalSecondPlatform = process.env.MIRA_DOCKER_UPDATER_PLATFORM;
+        try {
+            process.env.MIRA_DOCKER_UPDATER_PLATFORM = "linux/amd64";
+            assert.deepEqual(
+                await updater.__testing.lookupDockerHub({
+                    ...baseService,
+                    tag_match_type: "regex",
+                    tag_match_pattern: String.raw`^\d$`,
+                    metadata_json: undefined,
+                }),
+                {
+                    latestTag: "3",
+                    latestDigest: "sha256:amd64",
+                }
+            );
+        } finally {
+            if (originalSecondPlatform === undefined) {
+                delete process.env.MIRA_DOCKER_UPDATER_PLATFORM;
+            } else {
+                process.env.MIRA_DOCKER_UPDATER_PLATFORM = originalSecondPlatform;
             }
-        );
-        delete process.env.MIRA_DOCKER_UPDATER_PLATFORM;
+        }
         assert.equal(updater.__testing.parseNextLink(null), null);
         assert.equal(
             updater.__testing.parseNextLink(
@@ -1794,7 +1924,7 @@ setTimeout(() => process.exit(0), 30);
                 ...baseService,
                 image_repo: "lscr.io/linuxserver/swag",
             }),
-            { latestTag: "1", latestDigest: "sha256:old" }
+            { latestTag: null, latestDigest: null, unsupported: true }
         );
         assert.deepEqual(
             await updater.__testing.lookupLatest({
@@ -1803,7 +1933,7 @@ setTimeout(() => process.exit(0), 30);
                 latest_tag: null,
                 latest_digest: null,
             }),
-            { latestTag: "1", latestDigest: "sha256:old" }
+            { latestTag: null, latestDigest: null, unsupported: true }
         );
 
         const acceptHeaders: string[] = [];

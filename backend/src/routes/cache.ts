@@ -83,8 +83,21 @@ export function mapCacheRowForResponse(row: CacheEntryRow) {
 
 /** Performs refresh cache key. */
 export async function refreshCacheKey(key: string) {
-    const result = (await cacheRefreshRunner(key)) as { refreshed?: unknown };
-    if (!Array.isArray(result.refreshed) || result.refreshed.length === 0) {
+    const result = (await cacheRefreshRunner(key)) as
+        | { refreshed?: unknown }
+        | null
+        | undefined;
+    if (result === null || result === undefined) {
+        throw new TypeError(
+            `Invalid refreshed payload for ${key}: result is null or undefined`
+        );
+    }
+    if (!Array.isArray(result.refreshed)) {
+        throw new TypeError(
+            `Invalid refreshed payload for ${key}: refreshed must be an array`
+        );
+    }
+    if (result.refreshed.length === 0) {
         throw new Error(`Cache key not found after refresh: ${key}`);
     }
     const invalidRefreshedEntry = result.refreshed.find(

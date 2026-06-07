@@ -958,11 +958,20 @@ describe("log rotation service", { concurrency: false }, () => {
             );
             const archives = await __testing.listArchives(
                 file,
-                { archivePaths: [centralArchive] },
+                { archivePaths: [centralArchive], archiveRetentionScope: "basename" },
                 [root, archiveRoot]
             );
             assert.deepEqual(
                 archives.map((entry) => entry.path),
+                [centralArchive]
+            );
+            const parentScopedArchives = await __testing.listArchives(
+                file,
+                { archivePaths: [centralArchive], archiveRetentionScope: "parent" },
+                [root, archiveRoot]
+            );
+            assert.deepEqual(
+                parentScopedArchives.map((entry) => entry.path),
                 [centralArchive]
             );
         } finally {
@@ -1226,7 +1235,7 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(await readFile(copyPlain, "utf8"), "");
         assert.equal(await readFile(copyGzip, "utf8"), "");
         assert.equal(summary.rotatedFiles, 2);
-        assert.equal(summary.compressedFiles, 2);
+        assert.equal(summary.compressedFiles, 1);
     });
 
     it("verifies opened log file identity before rotation", async () => {

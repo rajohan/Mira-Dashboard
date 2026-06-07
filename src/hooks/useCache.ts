@@ -30,6 +30,27 @@ interface CacheRefreshResponse {
     entries?: CacheEnvelope<unknown>[];
 }
 
+function refreshedEntryKeys(result: { results: CacheRefreshResponse[] }) {
+    return [
+        ...new Set(
+            result.results.flatMap((response) => {
+                if (Array.isArray(response.entries)) {
+                    return response.entries
+                        .map((entry) => entry.key)
+                        .filter(
+                            (key): key is string =>
+                                typeof key === "string" && key.length > 0
+                        );
+                }
+                return typeof response.entry?.key === "string" &&
+                    response.entry.key.length > 0
+                    ? [response.entry.key]
+                    : [];
+            })
+        ),
+    ];
+}
+
 /** Defines cache keys. */
 export const cacheKeys = {
     all: ["cache"] as const,
@@ -79,36 +100,15 @@ export function useRefreshCacheEntry() {
 
             return { keys, results };
         },
-        onSuccess: async (_result, keysToken) => {
-            const keys = keysToken
-                .split(",")
-                .map((key) => key.trim())
-                .filter(Boolean);
-
+        onSuccess: async (_result) => {
+            const keys = refreshedEntryKeys(_result);
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
                 ...keys.map((key) =>
                     queryClient.invalidateQueries({ queryKey: cacheKeys.entry(key) })
                 ),
-                ...(keys.some((key) => key === "moltbook" || key.startsWith("moltbook."))
-                    ? [
-                          queryClient.invalidateQueries({ queryKey: ["moltbook"] }),
-                          queryClient.invalidateQueries({
-                              queryKey: cacheKeys.entry("moltbook.home"),
-                          }),
-                          queryClient.invalidateQueries({
-                              queryKey: cacheKeys.entry("moltbook.feed.hot"),
-                          }),
-                          queryClient.invalidateQueries({
-                              queryKey: cacheKeys.entry("moltbook.feed.new"),
-                          }),
-                          queryClient.invalidateQueries({
-                              queryKey: cacheKeys.entry("moltbook.profile"),
-                          }),
-                          queryClient.invalidateQueries({
-                              queryKey: cacheKeys.entry("moltbook.my-content"),
-                          }),
-                      ]
+                ...(keys.some((key) => key.startsWith("moltbook."))
+                    ? [queryClient.invalidateQueries({ queryKey: ["moltbook"] })]
                     : []),
             ]);
         },

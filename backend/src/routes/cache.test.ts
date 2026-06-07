@@ -349,7 +349,33 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         });
         try {
             await assert.rejects(() => refreshCacheKey("custom.scalar"), {
-                message: "Cache key not found after refresh: custom.scalar",
+                message:
+                    "Invalid refreshed payload for custom.scalar: refreshed must be an array",
+            });
+        } finally {
+            __testing.resetCacheRefreshForTests();
+        }
+    });
+
+    it("rejects null refresh output before reading refreshed keys", async () => {
+        __testing.setCacheRefreshRunnerForTests(
+            async () => null as unknown as { refreshed: string[] }
+        );
+        try {
+            await assert.rejects(() => refreshCacheKey("custom.null"), {
+                message:
+                    "Invalid refreshed payload for custom.null: result is null or undefined",
+            });
+        } finally {
+            __testing.resetCacheRefreshForTests();
+        }
+    });
+
+    it("rejects refresh output with an empty refreshed key list", async () => {
+        __testing.setCacheRefreshRunnerForTests(async () => ({ refreshed: [] }));
+        try {
+            await assert.rejects(() => refreshCacheKey("custom.empty"), {
+                message: "Cache key not found after refresh: custom.empty",
             });
         } finally {
             __testing.resetCacheRefreshForTests();

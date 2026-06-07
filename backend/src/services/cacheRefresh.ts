@@ -6,6 +6,7 @@ import {
     readFileSync,
     renameSync,
     rmSync,
+    statSync,
     writeFileSync,
 } from "node:fs";
 import { promisify } from "node:util";
@@ -14,6 +15,9 @@ import { db } from "../db.js";
 
 const execFileAsync = promisify(execFile);
 const codexTrustConfigLocks = new Map<string, Promise<void>>();
+const CODEX_TRUST_LOCK_TIMEOUT_MS = 5_000;
+const CODEX_TRUST_LOCK_RETRY_MS = 100;
+const CODEX_TRUST_STALE_LOCK_MS = 5 * 60 * 1000;
 
 type CacheTtlUnit = "hours" | "minutes";
 type JsonRecord = Record<string, unknown>;
@@ -104,8 +108,71 @@ function toCurrencyNumber(value: unknown): number | null {
     if (typeof value !== "string") {
         return null;
     }
-    const parsed = Number(value.replaceAll(/[^0-9.-]/gu, ""));
+    const cleaned = value.replaceAll(/[^0-9.-]/gu, "");
+    if (cleaned === "" || !/\d/u.test(cleaned)) {
+        return null;
+    }
+    const parsed = Number(cleaned);
     return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sleepSync(ms: number): void {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+type CodexTrustConfigLockDependencies = {
+    now?: () => number;
+    open?: typeof openSync;
+    rm?: typeof rmSync;
+    sleep?: typeof sleepSync;
+    stat?: typeof statSync;
+};
+
+function acquireCodexTrustConfigLock(
+    lockPath: string,
+    dependencies: CodexTrustConfigLockDependencies = {}
+): number {
+    const now = dependencies.now ?? Date.now;
+    const openFile = dependencies.open ?? openSync;
+    const removeFile = dependencies.rm ?? rmSync;
+    const sleep = dependencies.sleep ?? sleepSync;
+    const statFile = dependencies.stat ?? statSync;
+    const startedAt = now();
+    let staleRecoveryAttempted = false;
+    for (;;) {
+        try {
+            return openFile(lockPath, "wx", 0o600);
+        } catch (error) {
+            if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) {
+                throw error;
+            }
+            const elapsedMs = now() - startedAt;
+            if (elapsedMs < CODEX_TRUST_LOCK_TIMEOUT_MS) {
+                sleep(CODEX_TRUST_LOCK_RETRY_MS);
+                continue;
+            }
+            if (!staleRecoveryAttempted) {
+                staleRecoveryAttempted = true;
+                try {
+                    const stat = statFile(lockPath);
+                    if (now() - stat.mtimeMs > CODEX_TRUST_STALE_LOCK_MS) {
+                        removeFile(lockPath, { force: true });
+                        continue;
+                    }
+                } catch (statError) {
+                    if (
+                        statError instanceof Error &&
+                        "code" in statError &&
+                        statError.code === "ENOENT"
+                    ) {
+                        continue;
+                    }
+                    throw statError;
+                }
+            }
+            throw error;
+        }
+    }
 }
 
 export function writeCacheSuccess(options: CacheWriteOptions): void {
@@ -939,7 +1006,7 @@ function updateCodexTrustConfig(codexHome: string) {
     let lockHandle: number | null = null;
     try {
         mkdirSync(codexHome, { recursive: true });
-        lockHandle = openSync(lockPath, "wx", 0o600);
+        lockHandle = acquireCodexTrustConfigLock(lockPath);
         const configPath = `${codexHome}/config.toml`;
         let existing = "";
         try {
@@ -1194,6 +1261,8 @@ export const __testing = {
     buildQuotaMissingProviders,
     cleanPanelText,
     codexTrustConfigLocks,
+    acquireCodexTrustConfigLock,
+    sleepSync,
     ensureCodexTrustConfig,
     errorMessage,
     fetchSpydebergWeather,

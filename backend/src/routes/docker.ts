@@ -13,7 +13,10 @@ import {
     objectFallback,
     stringFallback,
 } from "../lib/values.js";
-import { runDockerUpdaterService } from "../services/dockerUpdater.js";
+import {
+    type DockerUpdaterStepResult,
+    runDockerUpdaterService,
+} from "../services/dockerUpdater.js";
 
 const execFileAsync = promisify(execFile);
 const DOCKER_ROOT = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
@@ -782,6 +785,7 @@ async function runManualUpdaterForService(
     if (!service) {
         return {
             success: false,
+            code: "NOT_FOUND",
             output: {},
             stderr: "Docker updater service not found",
             steps: [
@@ -797,6 +801,7 @@ async function runManualUpdaterForService(
     if (!service.enabled) {
         return {
             success: false,
+            code: "DISABLED",
             output: {},
             stderr: "Docker updater service is disabled",
             steps: [
@@ -812,14 +817,17 @@ async function runManualUpdaterForService(
     const serviceId = service.id;
     const steps = await runDockerUpdaterService(serviceId);
     if (steps.some((step) => !step.ok)) {
+        const stderr = steps
+            .filter((step) => !step.ok)
+            .map((step) => step.stderr)
+            .filter(Boolean)
+            .join("\n");
+        const stepCode = firstFailedStepCode(steps);
         return {
             success: false,
+            code: manualUpdaterFailureCode(stderr, stepCode),
             output: {},
-            stderr: steps
-                .filter((step) => !step.ok)
-                .map((step) => step.stderr)
-                .filter(Boolean)
-                .join("\n"),
+            stderr,
             steps,
         };
     }
@@ -830,6 +838,7 @@ async function runManualUpdaterForService(
 
     return {
         success: true,
+        code: "OK",
         output: {
             serviceId,
             summary: { updated: updated.length, failed: 0 },
@@ -842,6 +851,33 @@ async function runManualUpdaterForService(
         failed: [],
         steps,
     };
+}
+
+function manualUpdaterFailureCode(stderr: string, stepCode?: string): string {
+    if (stepCode) {
+        return stepCode;
+    }
+    if (stderr.includes("not found")) {
+        return "NOT_FOUND";
+    }
+    if (stderr.includes("disabled")) {
+        return "DISABLED";
+    }
+    return "APPLY_FAILED";
+}
+
+function manualUpdaterFailureStatus(code: string): number {
+    if (code === "NOT_FOUND") {
+        return 404;
+    }
+    if (code === "DISABLED" || code === "CONFLICT") {
+        return 409;
+    }
+    return 500;
+}
+
+function firstFailedStepCode(steps: DockerUpdaterStepResult[]): string | undefined {
+    return steps.find((step) => !step.ok && step.code)?.code;
 }
 
 /** Performs run updater command. */
@@ -1165,6 +1201,9 @@ export const __testing = {
     parseJsonField,
     hasUpdaterCandidate,
     extractTrailingJson,
+    firstFailedStepCode,
+    manualUpdaterFailureCode,
+    manualUpdaterFailureStatus,
     dockerExecJobs,
     cleanupDockerExecJobs,
     activeDockerExecJobCount,
@@ -1264,11 +1303,14 @@ export default function dockerRoutes(app: express.Application): void {
             const result = await runManualUpdaterForService(service);
             const updatedService =
                 (await getDockerUpdaterServiceById(service.id)) ?? service;
-            res.status(result.success ? 200 : 500).json({
+            res.status(
+                result.success ? 200 : manualUpdaterFailureStatus(result.code)
+            ).json({
                 success: result.success,
                 service: updatedService,
                 result: result.output,
                 stderr: result.stderr,
+                steps: result.steps,
             });
         })
     );

@@ -132,6 +132,15 @@ function startBackupJob(type: BackupJob["type"], command: string) {
     if (existingJob?.status === "running") {
         return existingJob;
     }
+    if (existingJob) {
+        backupJobs.delete(existingJob.id);
+        if (type === "kopia" && activeKopiaJobId === existingJob.id) {
+            activeKopiaJobId = null;
+        }
+        if (type === "walg" && activeWalgJobId === existingJob.id) {
+            activeWalgJobId = null;
+        }
+    }
 
     const jobId = randomUUID();
     const job: BackupJob = {
@@ -184,9 +193,6 @@ function startBackupJob(type: BackupJob["type"], command: string) {
             const cacheKey =
                 type === "kopia" ? "backup.kopia.status" : "backup.walg.status";
             job.refreshPending = true;
-            job.status = "done";
-            job.code = code;
-            job.endedAt = Date.now();
             void refreshBackupCacheWithTimeout(cacheKey)
                 .catch((error: unknown) => {
                     const refreshMessage = errorMessage(error, "Unknown error");
@@ -195,6 +201,9 @@ function startBackupJob(type: BackupJob["type"], command: string) {
                     );
                 })
                 .finally(() => {
+                    job.status = "done";
+                    job.code = code;
+                    job.endedAt = Date.now();
                     job.refreshPending = false;
                 });
             return;
@@ -229,10 +238,24 @@ function startWalgBackupJob() {
 export const __testing = {
     trimOutput,
     getCurrentJob,
+    startBackupJob,
     mapJob,
     getBackupShell,
     getDockerBin,
     shellQuote,
+    clearJobsForTest(): void {
+        backupJobs.clear();
+        activeKopiaJobId = null;
+        activeWalgJobId = null;
+    },
+    setActiveJobForTest(type: BackupJob["type"], job: BackupJob): void {
+        backupJobs.set(job.id, job);
+        if (type === "kopia") {
+            activeKopiaJobId = job.id;
+        } else {
+            activeWalgJobId = job.id;
+        }
+    },
     setSpawnBackupProcessForTest(nextSpawn?: typeof spawn): void {
         spawnBackupProcess = nextSpawn ?? spawn;
     },

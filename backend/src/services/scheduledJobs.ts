@@ -435,6 +435,14 @@ function getDefaultActionTarget(job: DefaultScheduledJob): string {
     return target;
 }
 
+function computeDefaultNextRunIso(job: DefaultScheduledJob): string {
+    try {
+        return computeNextRunIso(job);
+    } catch {
+        return nowIso();
+    }
+}
+
 /** Seeds built-in scheduled jobs in SQLite. */
 export function seedDefaultScheduledJobs(): void {
     reconcileStaleRunningRuns();
@@ -463,7 +471,7 @@ export function seedDefaultScheduledJobs(): void {
             job.actionType ?? "cache.refresh",
             getDefaultActionTarget(job),
             JSON.stringify(job.settings ?? {}),
-            timestamp,
+            computeDefaultNextRunIso(job),
             timestamp,
             timestamp
         );
@@ -637,6 +645,15 @@ export async function runScheduledJob(
             statusCode: 409,
         });
     }
+    if (triggerType === "schedule") {
+        const freshJob = getScheduledJob(job.id);
+        const now = nowIso();
+        if (!freshJob?.enabled || !freshJob.nextRunAt || freshJob.nextRunAt > now) {
+            throw Object.assign(new Error("Scheduled job not enabled or not due"), {
+                statusCode: 409,
+            });
+        }
+    }
 
     const runId = createRun(job, triggerType);
     runningJobs.add(job.id);
@@ -746,6 +763,7 @@ export function stopScheduledJobScheduler(): void {
 
 export const __testing = {
     defaultJobs,
+    computeDefaultNextRunIso,
     seedDefaultScheduledJobs,
     getDefaultActionTargetForTests: getDefaultActionTarget,
     isScheduledJobRaceError,

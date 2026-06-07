@@ -61,10 +61,8 @@ test("creates built-in jobs with interval and precise daily schedules", () => {
         __testing.defaultJobs.some((defaultJob) => defaultJob.id === item.id)
     )) {
         assert.ok(job.nextRunAt);
-        assert.ok(
-            new Date(job.nextRunAt).getTime() <= beforeList,
-            `${job.id} should be due immediately after first seed`
-        );
+        const nextRunTime = new Date(job.nextRunAt).getTime();
+        assert.ok(nextRunTime > beforeList, `${job.id} should not be due immediately`);
     }
 });
 
@@ -88,6 +86,34 @@ test("computes next daily run for today or tomorrow", () => {
         expectedNextDay.toISOString()
     );
     assert.throws(() => __testing.nextDailyRunIso("25:00"), /HH:mm/u);
+    assert.ok(
+        new Date(
+            __testing.computeDefaultNextRunIso({
+                id: "test.interval",
+                name: "Test interval",
+                description: "Test interval",
+                cacheKey: "system.host",
+                scheduleType: "interval",
+                intervalSeconds: 60,
+                timeOfDay: null,
+                cronExpression: null,
+            })
+        ).getTime() > Date.now()
+    );
+    assert.ok(
+        new Date(
+            __testing.computeDefaultNextRunIso({
+                id: "test.invalid",
+                name: "Test invalid",
+                description: "Test invalid",
+                cacheKey: "system.host",
+                scheduleType: "daily",
+                intervalSeconds: 60,
+                timeOfDay: "nope",
+                cronExpression: null,
+            })
+        ).getTime() <= Date.now()
+    );
 });
 
 test("updates enable state, interval schedules, and daily schedules", () => {
@@ -148,6 +174,10 @@ test("runs jobs and records success or failure", async () => {
         updateScheduledJob("cache.weather", { enabled: false, intervalSeconds: 7200 });
         return { updated: true };
     });
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+        "2026-06-06T00:00:00.000Z",
+        "cache.weather"
+    );
     const concurrentPatch = await runScheduledJob("cache.weather", "schedule");
     assert.equal(concurrentPatch.status, "success");
     const patchedJob = getScheduledJob("cache.weather");
@@ -165,6 +195,10 @@ test("runs jobs and records success or failure", async () => {
     __testing.setActionExecutorForTests(async () => {
         throw new Error("boom");
     });
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+        "2026-06-06T00:00:00.000Z",
+        "cache.quotas"
+    );
     const failure = await runScheduledJob("cache.quotas", "schedule");
     assert.equal(failure.status, "failed");
     assert.equal(failure.triggerType, "schedule");
@@ -339,6 +373,24 @@ test("runs due scheduled jobs and skips jobs already running", async () => {
     } finally {
         prepareMock.mock.restore();
     }
+});
+
+test("rejects scheduled runs that are disabled or no longer due", async () => {
+    updateScheduledJob("cache.weather", { enabled: false });
+    await assert.rejects(() => runScheduledJob("cache.weather", "schedule"), {
+        message: "Scheduled job not enabled or not due",
+        statusCode: 409,
+    });
+
+    updateScheduledJob("cache.weather", { enabled: true, intervalSeconds: 60 });
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+        "2999-01-01T00:00:00.000Z",
+        "cache.weather"
+    );
+    await assert.rejects(() => runScheduledJob("cache.weather", "schedule"), {
+        message: "Scheduled job not enabled or not due",
+        statusCode: 409,
+    });
 });
 
 test("reconciles stale persisted running runs once on scheduler initialization", () => {

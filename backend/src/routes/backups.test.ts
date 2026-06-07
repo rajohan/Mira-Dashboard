@@ -3,6 +3,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import { after, before, beforeEach, describe, it } from "node:test";
 
 import express from "express";
@@ -172,6 +173,46 @@ describe("backup routes", () => {
         assert.deepEqual(walg.body, { job: null });
     });
 
+    it("reclaims completed active jobs before starting replacement backup jobs", () => {
+        backupTesting.clearJobsForTest();
+        backupTesting.setSpawnBackupProcessForTest(() => {
+            let closeListener: ((code: number) => void) | null = null;
+            const child = {
+                stderr: new PassThrough(),
+                stdout: new PassThrough(),
+                on(event: string, listener: (code: number) => void) {
+                    if (event === "close") {
+                        closeListener = listener;
+                    }
+                    return this;
+                },
+            };
+            queueMicrotask(() => closeListener?.(0));
+            return child as never;
+        });
+        try {
+            for (const type of ["kopia", "walg"] as const) {
+                backupTesting.setActiveJobForTest(type, {
+                    id: `old-${type}`,
+                    type,
+                    status: "done",
+                    code: 0,
+                    stdout: "",
+                    stderr: "",
+                    startedAt: 1,
+                    endedAt: 2,
+                    refreshPending: true,
+                });
+                const job = backupTesting.startBackupJob(type, "true");
+                assert.notEqual(job.id, `old-${type}`);
+                assert.equal(job.status, "running");
+            }
+        } finally {
+            backupTesting.setSpawnBackupProcessForTest();
+            backupTesting.clearJobsForTest();
+        }
+    });
+
     it("starts and completes Kopia backup jobs through the configured shell", async () => {
         const started = await requestJson<{
             ok: boolean;
@@ -190,6 +231,14 @@ describe("backup routes", () => {
         assert.match(done.stdout, /\/opt\/docker\/apps\/kopia\/backup\.sh/);
         assert.equal(done.stderr, "backup warning\n");
         assert.ok(refreshedKeys.includes("backup.kopia.status"));
+
+        const restarted = await requestJson<{
+            ok: boolean;
+            job: { id: string; type: string; status: string; code: number | null };
+        }>(server, "/api/backups/kopia/run", { method: "POST" });
+        assert.equal(restarted.status, 200);
+        assert.notEqual(restarted.body.job.id, started.body.job.id);
+        await waitForDone(server, "/api/backups/kopia");
     });
 
     it("starts and completes WAL-G backup jobs through the configured shell", async () => {
@@ -210,6 +259,14 @@ describe("backup routes", () => {
         assert.match(done.stdout, /'docker' exec walg/);
         assert.equal(done.stderr, "backup warning\n");
         assert.ok(refreshedKeys.includes("backup.walg.status"));
+
+        const restarted = await requestJson<{
+            ok: boolean;
+            job: { id: string; type: string; status: string; code: number | null };
+        }>(server, "/api/backups/walg/run", { method: "POST" });
+        assert.equal(restarted.status, 200);
+        assert.notEqual(restarted.body.job.id, started.body.job.id);
+        await waitForDone(server, "/api/backups/walg");
     });
 
     it("uses configured Docker binary for WAL-G backup jobs", async () => {
@@ -305,11 +362,7 @@ describe("backup routes", () => {
             try {
                 await brokenServer.close();
             } finally {
-                try {
-                    process.env.MIRA_BACKUP_SHELL = await installFakeShell(tempDir);
-                } finally {
-                    await rm(brokenTempDir, { recursive: true, force: true });
-                }
+                await rm(brokenTempDir, { recursive: true, force: true });
             }
         }
     });

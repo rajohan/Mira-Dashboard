@@ -397,14 +397,11 @@ async function gzipFile(filePath: string, approvedRoots: string[]): Promise<stri
     let closed = false;
     try {
         await assertSafeNewFileParent(gzPath, approvedRoots);
-        destination = await fs.open(
-            gzPath,
-            constants.O_WRONLY |
-                constants.O_CREAT |
-                constants.O_EXCL |
-                constants.O_NOFOLLOW,
-            0o640
-        );
+        await createNoFollowFile(gzPath, source.stat.mode & 0o777, {
+            uid: source.stat.uid,
+            gid: source.stat.gid,
+        });
+        destination = await fs.open(gzPath, constants.O_WRONLY | constants.O_NOFOLLOW);
         await gzipPipeline(
             createReadStream("", {
                 fd: source.handle.fd,
@@ -419,6 +416,7 @@ async function gzipFile(filePath: string, approvedRoots: string[]): Promise<stri
             })
         );
         await assertFileIdentity(filePath, source.stat, approvedRoots);
+        await fs.utimes(gzPath, source.stat.atime, source.stat.mtime);
         await destination.close();
         destination = null;
         await source.handle.close();
@@ -461,10 +459,21 @@ async function rotateCopyTruncate(
     compress: boolean,
     approvedRoots: string[]
 ): Promise<string> {
+    await assertSafeNewFileParent(archivePath, approvedRoots);
+    await createNoFollowFile(archivePath, file.stat.mode & 0o777, {
+        uid: file.stat.uid,
+        gid: file.stat.gid,
+    });
+    const destination = await fs.open(
+        archivePath,
+        constants.O_WRONLY | constants.O_NOFOLLOW
+    );
     await pipeline(
         createReadStream("", { fd: file.handle.fd, autoClose: false, start: 0 }),
-        createWriteStream(archivePath, { flags: "wx" })
+        createWriteStream("", { fd: destination.fd, autoClose: false, start: 0 })
     );
+    await destination.close();
+    await fs.utimes(archivePath, file.stat.atime, file.stat.mtime);
     await file.handle.truncate(0);
     return compress ? gzipFile(archivePath, approvedRoots) : archivePath;
 }
@@ -496,6 +505,24 @@ function managedArchiveRegexFor(filePath: string): RegExp {
     );
 }
 
+function archiveMatchesRetentionScope(
+    filePath: string,
+    archivePath: string,
+    policy: LogRotationPolicy
+): boolean {
+    if (policy.archiveRetentionScope === "basename") {
+        const archiveBase = path.basename(archivePath).replace(ROTATED_SUFFIX_RE, "");
+        return archiveBase === path.basename(filePath);
+    }
+    if (policy.archiveRetentionScope === "parent") {
+        return (
+            path.dirname(path.dirname(archivePath)) ===
+            path.dirname(path.dirname(filePath))
+        );
+    }
+    return path.dirname(archivePath) === path.dirname(filePath);
+}
+
 async function listArchives(
     filePath: string,
     policy: LogRotationPolicy,
@@ -511,7 +538,10 @@ async function listArchives(
         archives.push({ path: fullPath, mtimeMs: stat.mtimeMs, compress: false });
     }
     for (const pattern of policy.archivePaths ?? []) {
-        for (const archivePath of await resolveGlob(pattern)) {
+        for (const archivePath of await resolveGlob(pattern, {
+            missingOk: Boolean(policy.missingOk),
+        })) {
+            if (!archiveMatchesRetentionScope(filePath, archivePath, policy)) continue;
             const safe = await assertSafePath(archivePath, approvedRoots);
             if (!safe) continue;
             const stat = await fs.stat(archivePath);
@@ -612,7 +642,9 @@ async function listArchiveOnlyArchives(
     >();
 
     for (const pattern of policy.archivePaths as string[]) {
-        for (const archivePath of await resolveGlob(pattern)) {
+        for (const archivePath of await resolveGlob(pattern, {
+            missingOk: Boolean(policy.missingOk),
+        })) {
             const safe = await assertSafePath(archivePath, approvedRoots);
             if (!safe) continue;
             const stat = await fs.stat(archivePath);

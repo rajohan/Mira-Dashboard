@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it, mock } from "node:test";
 
 import { db } from "../db.js";
 import { withEnv } from "../testUtils/env.js";
@@ -569,7 +569,10 @@ if (args.includes("capture-pane")) {
         assert.equal(__testing.toCurrencyNumber(12), 12);
         assert.equal(__testing.toCurrencyNumber(Number.NaN), null);
         assert.equal(__testing.toCurrencyNumber("USD 1,234.50"), 1234.5);
-        assert.equal(__testing.toCurrencyNumber("USD nope"), 0);
+        assert.equal(__testing.toCurrencyNumber("USD nope"), null);
+        assert.equal(__testing.toCurrencyNumber("USD -"), null);
+        assert.equal(__testing.toCurrencyNumber("USD .-"), null);
+        assert.equal(__testing.toCurrencyNumber("USD 1.2.3"), null);
         assert.equal(__testing.toCurrencyNumber("-"), null);
         assert.equal(__testing.toCurrencyNumber({}), null);
         assert.equal(__testing.openMeteoCodeToDescription(2), "Partly cloudy");
@@ -965,6 +968,125 @@ if (args.includes("capture-pane")) {
                 }
             );
         });
+    });
+
+    it("recovers stale Codex trust config locks", async () => {
+        const codexHome = path.join(tempDir, "codex-lock");
+        await mkdir(codexHome, { recursive: true });
+        const lockPath = path.join(codexHome, "config.toml.lock");
+        await writeFile(lockPath, "stale", "utf8");
+        const staleTime = new Date(Date.now() - 10 * 60 * 1000);
+        await utimes(lockPath, staleTime, staleTime);
+        const originalNow = Date.now.bind(Date);
+        let calls = 0;
+        const nowMock = mock.method(Date, "now", () => {
+            calls += 1;
+            return originalNow() + (calls > 1 ? 10_000 : 0);
+        });
+        let handle: number | null = null;
+        try {
+            handle = __testing.acquireCodexTrustConfigLock(lockPath);
+            assert.equal(typeof handle, "number");
+        } finally {
+            nowMock.mock.restore();
+            if (handle !== null) {
+                const { closeSync, rmSync } = await import("node:fs");
+                closeSync(handle);
+                rmSync(lockPath, { force: true });
+            }
+        }
+    });
+
+    it("rethrows unexpected Codex trust lock acquisition errors", () => {
+        assert.throws(
+            () =>
+                __testing.acquireCodexTrustConfigLock(
+                    path.join(tempDir, "missing-parent", "config.toml.lock")
+                ),
+            /ENOENT/u
+        );
+    });
+
+    it("covers Codex trust lock retry and stale-lock edge cases", () => {
+        const lockPath = path.join(tempDir, "config.toml.lock");
+        const existsError = Object.assign(new Error("exists"), { code: "EEXIST" });
+        let openCalls = 0;
+        let sleepCalls = 0;
+        assert.equal(
+            __testing.acquireCodexTrustConfigLock(lockPath, {
+                now: () => 1_000,
+                open: () => {
+                    openCalls += 1;
+                    if (openCalls === 1) throw existsError;
+                    return 123;
+                },
+                sleep: () => {
+                    sleepCalls += 1;
+                },
+            }),
+            123
+        );
+        assert.equal(sleepCalls, 1);
+
+        let missingLockOpenCalls = 0;
+        assert.equal(
+            __testing.acquireCodexTrustConfigLock(lockPath, {
+                now: (() => {
+                    let calls = 0;
+                    return () => {
+                        calls += 1;
+                        return calls === 1 ? 0 : 10_000;
+                    };
+                })(),
+                open: () => {
+                    missingLockOpenCalls += 1;
+                    if (missingLockOpenCalls === 1) throw existsError;
+                    return 456;
+                },
+                stat: () => {
+                    throw Object.assign(new Error("gone"), { code: "ENOENT" });
+                },
+            }),
+            456
+        );
+
+        assert.throws(
+            () =>
+                __testing.acquireCodexTrustConfigLock(lockPath, {
+                    now: (() => {
+                        let calls = 0;
+                        return () => {
+                            calls += 1;
+                            return calls === 1 ? 0 : 10_000;
+                        };
+                    })(),
+                    open: () => {
+                        throw existsError;
+                    },
+                    stat: () => ({ mtimeMs: 9_999 }) as never,
+                }),
+            /exists/u
+        );
+        assert.throws(
+            () =>
+                __testing.acquireCodexTrustConfigLock(lockPath, {
+                    now: (() => {
+                        let calls = 0;
+                        return () => {
+                            calls += 1;
+                            return calls === 1 ? 0 : 10_000;
+                        };
+                    })(),
+                    open: () => {
+                        throw existsError;
+                    },
+                    stat: () => {
+                        throw Object.assign(new Error("stat failed"), { code: "EACCES" });
+                    },
+                }),
+            /stat failed/u
+        );
+        __testing.sleepSync(0);
     });
 
     it("covers remaining producer fallback lines", async () => {

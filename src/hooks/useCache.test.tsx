@@ -71,11 +71,18 @@ describe("cache hooks", () => {
     });
 
     it("refreshes comma-separated entries and invalidates related queries", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
-            ok: true,
-            status: 200,
-            json: async () => ({ ok: true, entry: { key: "moltbook.home" } }),
-        });
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ ok: true, entry: { key: "system.host" } }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ ok: true, entry: { key: "moltbook.home" } }),
+            });
         vi.stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
         const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");

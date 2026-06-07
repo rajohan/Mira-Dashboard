@@ -398,6 +398,9 @@ test("maps manual duplicate run status codes", async () => {
         finishExecution();
         await first;
     } finally {
+        if (typeof finishExecution === "function") {
+            finishExecution();
+        }
         await server.close();
     }
 });
