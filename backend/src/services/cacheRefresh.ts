@@ -1375,7 +1375,7 @@ export async function refreshCacheProducer(key: string) {
     };
 
     if (key === "moltbook") {
-        return refreshWithFailureRecord(refreshMoltbookCache, [...MOLTBOOK_CACHE_KEYS]);
+        return refreshWithFailureRecord(refreshMoltbookCache);
     }
     if (MOLTBOOK_CACHE_KEYS.has(key)) {
         return refreshWithFailureRecord(() =>

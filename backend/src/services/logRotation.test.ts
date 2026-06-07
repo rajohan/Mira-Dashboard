@@ -463,12 +463,48 @@ describe("log rotation service", { concurrency: false }, () => {
                 stdout: "not json",
             }));
             const malformed = await runElevatedLogRotationService({ dryRun: false });
-            assert.deepEqual(malformed.result, {});
+            assert.equal(malformed.result.ok, false);
+            assert.equal(
+                malformed.result.error,
+                "Failed to parse elevated log rotation JSON"
+            );
+            assert.match(String(malformed.result.parseError), /not json/u);
+            assert.equal(malformed.result.stdout, "not json");
             assert.match(
                 malformed.stderr,
                 /helper warning\nFailed to parse elevated log rotation JSON: /u
             );
             assert.match(malformed.stderr, /stdout: not json/u);
+            __testing.setElevatedLogRotationExecFileRunner(async () => ({
+                stderr: "helper warning",
+                stdout: "",
+            }));
+            const emptyOutput = await runElevatedLogRotationService({
+                dryRun: false,
+            });
+            assert.deepEqual(emptyOutput.result, {
+                ok: false,
+                error: "Elevated log rotation returned empty JSON output",
+            });
+            assert.equal(
+                emptyOutput.stderr,
+                "helper warning\nElevated log rotation returned empty JSON output"
+            );
+            __testing.setElevatedLogRotationExecFileRunner(async () => ({
+                stderr: "",
+                stdout: "",
+            }));
+            const emptyOutputWithoutStderr = await runElevatedLogRotationService({
+                dryRun: false,
+            });
+            assert.deepEqual(emptyOutputWithoutStderr.result, {
+                ok: false,
+                error: "Elevated log rotation returned empty JSON output",
+            });
+            assert.equal(
+                emptyOutputWithoutStderr.stderr,
+                "Elevated log rotation returned empty JSON output"
+            );
             __testing.setElevatedLogRotationExecFileRunner(async () => ({
                 stderr: "",
                 stdout: "still not json",
@@ -476,7 +512,16 @@ describe("log rotation service", { concurrency: false }, () => {
             const malformedWithoutStderr = await runElevatedLogRotationService({
                 dryRun: false,
             });
-            assert.deepEqual(malformedWithoutStderr.result, {});
+            assert.equal(malformedWithoutStderr.result.ok, false);
+            assert.equal(
+                malformedWithoutStderr.result.error,
+                "Failed to parse elevated log rotation JSON"
+            );
+            assert.match(
+                String(malformedWithoutStderr.result.parseError),
+                /still not json/u
+            );
+            assert.equal(malformedWithoutStderr.result.stdout, "still not json");
             assert.match(
                 malformedWithoutStderr.stderr,
                 /^Failed to parse elevated log rotation JSON: /u

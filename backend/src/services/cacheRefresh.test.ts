@@ -226,7 +226,16 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         );
     });
 
-    it("records grouped Moltbook refresh failures on concrete cache keys", async () => {
+    it("records grouped Moltbook refresh failures without poisoning concrete cache keys", async () => {
+        writeCacheSuccess({
+            key: "moltbook.home",
+            data: { ok: true },
+            source: "backend-test",
+            ttl: 5,
+            ttlUnit: "minutes",
+            metadata: { producer: "moltbook" },
+        });
+
         await withEnv({ MOLTBOOK_API_KEY: undefined }, async () => {
             await assert.rejects(
                 () => refreshCacheProducer("moltbook"),
@@ -234,22 +243,14 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
             );
         });
 
-        for (const key of [
-            "moltbook.home",
-            "moltbook.feed.hot",
-            "moltbook.feed.new",
-            "moltbook.profile",
-            "moltbook.my-content",
-        ]) {
-            const row = cacheRow(key);
-            assert.equal(row.status, "error");
-            assert.match(row.error_message ?? "", /MOLTBOOK_API_KEY/u);
-            assert.equal(row.metadata.producer, "refreshCacheProducer");
-        }
-        const syntheticRows = db
-            .prepare("SELECT COUNT(*) AS count FROM cache_entries WHERE key = 'moltbook'")
-            .get() as { count: number };
-        assert.equal(syntheticRows.count, 0);
+        const concreteRow = cacheRow("moltbook.home");
+        assert.equal(concreteRow.status, "fresh");
+        assert.deepEqual(concreteRow.data, { ok: true });
+
+        const groupedRow = cacheRow("moltbook");
+        assert.equal(groupedRow.status, "error");
+        assert.match(groupedRow.error_message ?? "", /MOLTBOOK_API_KEY/u);
+        assert.equal(groupedRow.metadata.producer, "refreshCacheProducer");
     });
 
     it("refreshes weather through wttr and falls back to Open-Meteo", async () => {

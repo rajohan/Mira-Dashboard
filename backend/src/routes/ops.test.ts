@@ -311,8 +311,11 @@ describe("ops routes", () => {
                 stdout: "",
             }));
             assert.deepEqual(await runLogRotation({ dryRun: false }), {
-                result: {},
-                stderr: "",
+                result: {
+                    ok: false,
+                    error: "Elevated log rotation returned empty JSON output",
+                },
+                stderr: "Elevated log rotation returned empty JSON output",
             });
         } finally {
             __testing.resetLogRotationRunner();

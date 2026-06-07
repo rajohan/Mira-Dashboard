@@ -1145,7 +1145,11 @@ export async function runElevatedLogRotationService(options: {
     });
     const trimmed = stdout.trim();
     if (!trimmed) {
-        return { result: {}, stderr };
+        const error = "Elevated log rotation returned empty JSON output";
+        return {
+            result: { ok: false, error },
+            stderr: stderr ? `${stderr}\n${error}` : error,
+        };
     }
     try {
         return {
@@ -1156,7 +1160,12 @@ export async function runElevatedLogRotationService(options: {
         const parseError = caughtMessage(error);
         const parseContext = `Failed to parse elevated log rotation JSON: ${parseError}; stdout: ${trimmed}`;
         return {
-            result: {},
+            result: {
+                ok: false,
+                error: "Failed to parse elevated log rotation JSON",
+                parseError,
+                stdout: trimmed,
+            },
             stderr: stderr ? `${stderr}\n${parseContext}` : parseContext,
         };
     }
