@@ -452,7 +452,6 @@ export function seedDefaultScheduledJobs(): void {
     `);
     const timestamp = nowIso();
     for (const job of defaultJobs) {
-        const initialNextRunAt = computeNextRunIso(job);
         insert.run(
             job.id,
             job.name,
@@ -464,7 +463,7 @@ export function seedDefaultScheduledJobs(): void {
             job.actionType ?? "cache.refresh",
             getDefaultActionTarget(job),
             JSON.stringify(job.settings ?? {}),
-            initialNextRunAt,
+            timestamp,
             timestamp,
             timestamp
         );
@@ -666,7 +665,6 @@ export async function runScheduledJob(
 }
 
 async function runDueJobs(): Promise<void> {
-    seedDefaultScheduledJobs();
     const rows = db
         .prepare(
             `SELECT * FROM scheduled_jobs

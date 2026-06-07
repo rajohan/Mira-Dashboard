@@ -1628,6 +1628,13 @@ setTimeout(() => process.exit(0), 30);
             ),
             null
         );
+        assert.equal(
+            updater.__testing.parseNextLink(
+                '</v2/owner/app/tags/list?n=100&last=1.0.0>; rel="next"',
+                "https://ghcr.io/v2/owner/app/tags/list"
+            ),
+            "https://ghcr.io/v2/owner/app/tags/list?n=100&last=1.0.0"
+        );
 
         globalThis.fetch = (async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();

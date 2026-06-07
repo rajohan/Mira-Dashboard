@@ -62,8 +62,8 @@ test("creates built-in jobs with interval and precise daily schedules", () => {
     )) {
         assert.ok(job.nextRunAt);
         assert.ok(
-            new Date(job.nextRunAt).getTime() >= beforeList,
-            `${job.id} should be scheduled from its configured schedule`
+            new Date(job.nextRunAt).getTime() <= beforeList,
+            `${job.id} should be due immediately after first seed`
         );
     }
 });
@@ -368,6 +368,9 @@ test("reconciles stale persisted running runs once on scheduler initialization",
 
 test("continues due-job tick across expected per-job races", async () => {
     const timestamp = "2000-01-01T00:00:00.000Z";
+    for (const job of __testing.defaultJobs) {
+        db.prepare("UPDATE scheduled_jobs SET enabled = 0 WHERE id = ?").run(job.id);
+    }
     for (const [id, target] of [
         ["custom.race", "race"],
         ["custom.next", "next"],

@@ -256,7 +256,7 @@ async function fetchRegistryJson(url: string): Promise<JsonRecord> {
     return body;
 }
 
-function parseNextLink(header: string | null): string | null {
+function parseNextLink(header: string | null, baseUrl?: string): string | null {
     if (!header) return null;
     for (const part of header.split(",")) {
         const [rawUrl, ...params] = part.trim().split(";");
@@ -265,7 +265,8 @@ function parseNextLink(header: string | null): string | null {
             rawUrl?.startsWith("<") &&
             rawUrl.endsWith(">")
         ) {
-            return rawUrl.slice(1, -1);
+            const link = rawUrl.slice(1, -1);
+            return baseUrl ? new URL(link, baseUrl).toString() : link;
         }
     }
     return null;
@@ -421,7 +422,7 @@ async function lookupGhcr(service: ManagedServiceRow) {
                     ? body.tags.filter((item): item is string => typeof item === "string")
                     : [])
             );
-            tagsUrl = parseNextLink(headers.get("link"));
+            tagsUrl = parseNextLink(headers.get("link"), tagsUrl);
         }
         const candidates = tags
             .filter((candidate) => candidate && tagMatches(service, candidate))
