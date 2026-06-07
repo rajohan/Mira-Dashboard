@@ -235,6 +235,7 @@ describe("log rotation service", { concurrency: false }, () => {
             () => __testing.gzipFile(gzipSource, [tempDir]),
             /EEXIST|file already exists/u
         );
+        assert.equal(await readFile(`${gzipSource}.gz`, "utf8"), "already exists");
         await rm(`${gzipSource}.gz`, { force: true });
         const outsideGzipTarget = path.join(os.tmpdir(), `mira-gzip-${Date.now()}`);
         await symlink(outsideGzipTarget, `${gzipSource}.gz`);
@@ -262,6 +263,7 @@ describe("log rotation service", { concurrency: false }, () => {
         } finally {
             await rm(outsideSafeRoot, { recursive: true, force: true });
         }
+        await rm(`${gzipSource}.gz`, { force: true });
         __testing.setGzipPipelineForTests(async () => {
             throw new Error("gzip pipeline failed");
         });
@@ -930,11 +932,15 @@ describe("log rotation service", { concurrency: false }, () => {
 
     it("skips archive paths that fail approved-root validation during retention", async () => {
         const root = path.join(tempDir, "logs");
+        const archiveRoot = path.join(tempDir, "archives");
         await mkdir(root);
+        await mkdir(archiveRoot);
         const file = path.join(root, "app.log");
         const archive = path.join(root, "other.log.2020-01-01T00-00-00Z");
+        const centralArchive = path.join(archiveRoot, "app.log.2020-01-01T00-00-00Z");
         await writeFile(file, "log", "utf8");
         await writeFile(archive, "archive", "utf8");
+        await writeFile(centralArchive, "central archive", "utf8");
         const realpathMock = mock.method(
             fsPromises,
             "realpath",
@@ -949,6 +955,15 @@ describe("log rotation service", { concurrency: false }, () => {
             assert.deepEqual(
                 await __testing.listArchives(file, { archivePaths: [archive] }, [root]),
                 []
+            );
+            const archives = await __testing.listArchives(
+                file,
+                { archivePaths: [centralArchive] },
+                [root, archiveRoot]
+            );
+            assert.deepEqual(
+                archives.map((entry) => entry.path),
+                [centralArchive]
             );
         } finally {
             realpathMock.mock.restore();
@@ -1211,7 +1226,7 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(await readFile(copyPlain, "utf8"), "");
         assert.equal(await readFile(copyGzip, "utf8"), "");
         assert.equal(summary.rotatedFiles, 2);
-        assert.equal(summary.compressedFiles, 1);
+        assert.equal(summary.compressedFiles, 2);
     });
 
     it("verifies opened log file identity before rotation", async () => {

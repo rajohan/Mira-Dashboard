@@ -952,41 +952,44 @@ async function applyServiceUpdate(
     eventPrefix: "auto" | "manual"
 ): Promise<DockerUpdaterStepResult> {
     return withComposeUpdateLock(service, async () => {
-        const lockedRow = db
+        const lockedService = db
             .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
             .get(service.id) as ManagedServiceRow | undefined;
-        const lockedService = lockedRow ?? service;
+        if (!lockedService || lockedService.enabled !== 1) {
+            return {
+                step: `${eventPrefix}-update:${serviceLabel(service)}`,
+                ok: false,
+                stdout: "",
+                stderr: "Docker updater service not found or disabled",
+            };
+        }
         const target = buildTargetImageRef(lockedService);
         try {
             const result = await applyComposeUpdateUnlocked(lockedService, target);
-            if (lockedRow) {
-                db.prepare(
-                    `UPDATE docker_managed_services
-                     SET compose_image_ref = ?, current_tag = ?, current_digest = ?,
-                         last_updated_at = ?, last_checked_at = ?, last_status = 'updated'
-                     WHERE id = ?`
-                ).run(
-                    target,
-                    lockedService.latest_tag,
-                    lockedService.pin_mode === "digest"
-                        ? lockedService.latest_digest
-                        : lockedService.current_digest,
-                    nowIso(),
-                    nowIso(),
-                    lockedService.id
-                );
-                insertEvent(
-                    lockedService,
-                    `${eventPrefix}_update_succeeded`,
-                    "Docker service updated",
-                    { targetComposeImageRef: target }
-                );
-                createNotification(
-                    "Docker service updated",
-                    `${serviceLabel(lockedService)} updated to ${target}`,
-                    `docker:updater:updated:${lockedService.id}:${target}`
-                );
-            }
+            db.prepare(
+                `UPDATE docker_managed_services
+                 SET compose_image_ref = ?, current_tag = ?, current_digest = ?,
+                     last_updated_at = ?, last_checked_at = ?, last_status = 'updated'
+                 WHERE id = ?`
+            ).run(
+                target,
+                lockedService.latest_tag,
+                lockedService.latest_digest,
+                nowIso(),
+                nowIso(),
+                lockedService.id
+            );
+            insertEvent(
+                lockedService,
+                `${eventPrefix}_update_succeeded`,
+                "Docker service updated",
+                { targetComposeImageRef: target }
+            );
+            createNotification(
+                "Docker service updated",
+                `${serviceLabel(lockedService)} updated to ${target}`,
+                `docker:updater:updated:${lockedService.id}:${target}`
+            );
             return {
                 step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
                 ok: true,
@@ -995,22 +998,20 @@ async function applyServiceUpdate(
             };
         } catch (error) {
             const message = caughtMessage(error);
-            if (lockedRow) {
-                db.prepare(
-                    `UPDATE docker_managed_services
-                     SET last_checked_at = ?, last_status = ?
-                     WHERE id = ?`
-                ).run(nowIso(), `${eventPrefix}_update_failed`, lockedService.id);
-                insertEvent(lockedService, `${eventPrefix}_update_failed`, message, {
-                    targetComposeImageRef: target,
-                });
-                createNotification(
-                    `Docker ${eventPrefix} update failed`,
-                    `${serviceLabel(lockedService)}: ${message}`,
-                    `docker:updater:${eventPrefix}-failed:${lockedService.id}:${nowIso().slice(0, 10)}`,
-                    "error"
-                );
-            }
+            db.prepare(
+                `UPDATE docker_managed_services
+                 SET last_checked_at = ?, last_status = ?
+                 WHERE id = ?`
+            ).run(nowIso(), `${eventPrefix}_update_failed`, lockedService.id);
+            insertEvent(lockedService, `${eventPrefix}_update_failed`, message, {
+                targetComposeImageRef: target,
+            });
+            createNotification(
+                `Docker ${eventPrefix} update failed`,
+                `${serviceLabel(lockedService)}: ${message}`,
+                `docker:updater:${eventPrefix}-failed:${lockedService.id}:${nowIso().slice(0, 10)}`,
+                "error"
+            );
             return {
                 step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
                 ok: false,

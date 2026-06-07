@@ -259,7 +259,7 @@ CREATE INDEX IF NOT EXISTS idx_docker_managed_services_enabled
 
 CREATE TABLE IF NOT EXISTS docker_update_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    managed_service_id INTEGER NOT NULL,
+    managed_service_id INTEGER,
     event_type TEXT NOT NULL,
     from_tag TEXT,
     to_tag TEXT,
@@ -268,7 +268,7 @@ CREATE TABLE IF NOT EXISTS docker_update_events (
     message TEXT,
     details_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
-    FOREIGN KEY(managed_service_id) REFERENCES docker_managed_services(id) ON DELETE CASCADE
+    FOREIGN KEY(managed_service_id) REFERENCES docker_managed_services(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_docker_update_events_created_at
@@ -391,11 +391,74 @@ export function ensureCacheEntriesUpdatedAtNullable(targetDb: MigrationDatabase)
     }
 }
 
+export function ensureDockerUpdateEventsSetNull(targetDb: MigrationDatabase): void {
+    const columns = targetDb.prepare("PRAGMA table_info(docker_update_events)").all();
+    const managedServiceId = columns.find(
+        (column) => column.name === "managed_service_id"
+    );
+    const foreignKeys = targetDb
+        .prepare("PRAGMA foreign_key_list(docker_update_events)")
+        .all();
+    const serviceForeignKey = foreignKeys.find(
+        (foreignKey) =>
+            foreignKey.from === "managed_service_id" &&
+            foreignKey.table === "docker_managed_services"
+    );
+    if (
+        !managedServiceId ||
+        (Number(managedServiceId.notnull || 0) === 0 &&
+            String(serviceForeignKey?.on_delete || "").toUpperCase() === "SET NULL")
+    ) {
+        return;
+    }
+
+    targetDb.exec("BEGIN IMMEDIATE");
+    try {
+        targetDb.exec(`
+            ALTER TABLE docker_update_events RENAME TO docker_update_events_old;
+            CREATE TABLE docker_update_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                managed_service_id INTEGER,
+                event_type TEXT NOT NULL,
+                from_tag TEXT,
+                to_tag TEXT,
+                from_digest TEXT,
+                to_digest TEXT,
+                message TEXT,
+                details_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(managed_service_id) REFERENCES docker_managed_services(id) ON DELETE SET NULL
+            );
+            INSERT INTO docker_update_events (
+                id, managed_service_id, event_type, from_tag, to_tag, from_digest,
+                to_digest, message, details_json, created_at
+            )
+            SELECT
+                id, managed_service_id, event_type, from_tag, to_tag, from_digest,
+                to_digest, message, details_json, created_at
+            FROM docker_update_events_old;
+            DROP TABLE docker_update_events_old;
+            CREATE INDEX IF NOT EXISTS idx_docker_update_events_created_at
+                ON docker_update_events(created_at DESC);
+        `);
+        targetDb.exec("COMMIT");
+    } catch (error) {
+        try {
+            targetDb.exec("ROLLBACK");
+        } catch {
+            // Preserve the migration failure that triggered rollback.
+        }
+        throw error;
+    }
+}
+
+ensureDockerUpdateEventsSetNull(db);
 ensureCacheEntriesUpdatedAtNullable(db);
 await ensureTaskAutomationColumn(db);
 
 export const __testing = {
     assertDuplicateColumnError,
+    ensureDockerUpdateEventsSetNull,
     ensureCacheEntriesUpdatedAtNullable,
     isDuplicateColumnError,
 };

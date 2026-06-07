@@ -21,6 +21,14 @@ function expectSingleRefresh(refreshed: Awaited<ReturnType<typeof refreshCacheKe
     return refreshed;
 }
 
+function restorePath(originalPath: string | undefined): void {
+    if (originalPath === undefined) {
+        delete process.env.PATH;
+    } else {
+        process.env.PATH = originalPath;
+    }
+}
+
 const baseRow = {
     key: "quotas.summary",
     data: '{"usage":12}',
@@ -264,7 +272,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
                     /spawn docker ENOENT/u
                 );
             } finally {
-                process.env.PATH = originalPath;
+                restorePath(originalPath);
             }
 
             __testing.setCacheRefreshCommandForTests("missing.key", refreshCommand);
@@ -486,7 +494,7 @@ process.stdout.write(JSON.stringify([
             assert.equal((refreshed.data as { backupCount?: number }).backupCount, 2);
             assert.equal((refreshed.data as { ok?: boolean }).ok, true);
         } finally {
-            process.env.PATH = originalPath;
+            restorePath(originalPath);
         }
     });
 });

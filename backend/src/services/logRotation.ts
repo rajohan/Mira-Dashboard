@@ -427,7 +427,6 @@ async function gzipFile(filePath: string, approvedRoots: string[]): Promise<stri
         return gzPath;
     } catch (error) {
         await destination?.close().catch(() => {});
-        await fs.unlink(gzPath).catch(() => {});
         if (!closed) {
             await source.handle.close().catch(() => {});
         }
@@ -513,7 +512,6 @@ async function listArchives(
     }
     for (const pattern of policy.archivePaths ?? []) {
         for (const archivePath of await resolveGlob(pattern)) {
-            if (path.dirname(archivePath) !== dir) continue;
             const safe = await assertSafePath(archivePath, approvedRoots);
             if (!safe) continue;
             const stat = await fs.stat(archivePath);

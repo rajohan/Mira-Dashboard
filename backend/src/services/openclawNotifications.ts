@@ -66,7 +66,7 @@ function insertUpdateAvailableNotification(current: string, latest: string): voi
 let running = false;
 let monitorTimer: NodeJS.Timeout | undefined;
 
-/** Performs run OpenClaw notification check. */
+/** Returns false only when a check is attempted and fails; concurrent calls are non-failure skips. */
 export async function runOpenClawNotificationCheck(): Promise<boolean> {
     if (running) {
         return true;

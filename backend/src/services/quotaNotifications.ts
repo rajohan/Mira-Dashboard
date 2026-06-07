@@ -205,7 +205,7 @@ function handleQuotaBucket(
 
 let running = false;
 
-/** Performs run quota notification check. */
+/** Returns false only when a check is attempted and fails; concurrent calls are non-failure skips. */
 export async function runQuotaNotificationCheck(): Promise<boolean> {
     if (running) {
         return true;

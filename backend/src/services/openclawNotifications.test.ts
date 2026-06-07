@@ -112,8 +112,8 @@ describe("OpenClaw update notifications", () => {
         assert.equal(getState().is_armed, 1);
         assert.equal(getState().last_latest, null);
 
-        await runOpenClawNotificationCheck();
-        await runOpenClawNotificationCheck();
+        assert.equal(await runOpenClawNotificationCheck(), true);
+        assert.equal(await runOpenClawNotificationCheck(), true);
 
         const notifications = openClawNotifications();
         assert.equal(notifications.length, 1);
@@ -140,11 +140,11 @@ describe("OpenClaw update notifications", () => {
     });
 
     it("rearms when no update is available and alerts for a new latest version", async () => {
-        await runOpenClawNotificationCheck();
+        assert.equal(await runOpenClawNotificationCheck(), true);
 
         process.env.FAKE_OPENCLAW_UPDATE_AVAILABLE = "false";
         seedSystemHostCache();
-        await runOpenClawNotificationCheck();
+        assert.equal(await runOpenClawNotificationCheck(), true);
 
         const rearmed = db
             .prepare(
@@ -159,7 +159,7 @@ describe("OpenClaw update notifications", () => {
         process.env.FAKE_OPENCLAW_UPDATE_AVAILABLE = "true";
         process.env.FAKE_OPENCLAW_LATEST = "v2026.6.0";
         seedSystemHostCache();
-        await runOpenClawNotificationCheck();
+        assert.equal(await runOpenClawNotificationCheck(), true);
 
         assert.deepEqual(
             openClawNotifications().map((notification) => notification.dedupe_key),
@@ -169,14 +169,14 @@ describe("OpenClaw update notifications", () => {
 
     it("ignores concurrent checks and malformed version cache rows", async () => {
         const first = runOpenClawNotificationCheck();
-        await runOpenClawNotificationCheck();
-        await first;
+        assert.equal(await runOpenClawNotificationCheck(), true);
+        assert.equal(await first, true);
         assert.equal(openClawNotifications().length, 1);
         const stateBeforeMalformedCache = getState();
 
         process.env.FAKE_OPENCLAW_MISSING_VERSION = "true";
         seedSystemHostCache();
-        await runOpenClawNotificationCheck();
+        assert.equal(await runOpenClawNotificationCheck(), false);
         assert.equal(openClawNotifications().length, 1);
         assert.deepEqual(getState(), stateBeforeMalformedCache);
     });

@@ -86,7 +86,7 @@ describe("quota notifications", () => {
     });
 
     it("creates quota notifications for crossed thresholds and rearms after hysteresis", async () => {
-        await runQuotaNotificationCheck();
+        assert.equal(await runQuotaNotificationCheck(), true);
 
         const notifications = quotaNotifications();
         assert.deepEqual(
@@ -115,7 +115,7 @@ describe("quota notifications", () => {
 
         process.env.FAKE_OPENROUTER_PERCENT = "70";
         seedQuotasCache();
-        await runQuotaNotificationCheck();
+        assert.equal(await runQuotaNotificationCheck(), true);
 
         const rearmed = (
             db
@@ -167,7 +167,7 @@ describe("quota notifications", () => {
         });
         seedQuotasCache();
 
-        await runQuotaNotificationCheck();
+        assert.equal(await runQuotaNotificationCheck(), true);
 
         assert.deepEqual(
             quotaNotifications().map((notification) => notification.dedupe_key),
@@ -200,7 +200,11 @@ describe("quota notifications", () => {
             errors.push(args);
         };
         try {
-            await Promise.all([runQuotaNotificationCheck(), runQuotaNotificationCheck()]);
+            const concurrentResults = await Promise.all([
+                runQuotaNotificationCheck(),
+                runQuotaNotificationCheck(),
+            ]);
+            assert.equal(concurrentResults.includes(false), true);
             assert.equal(errors.length > 0, true);
             assert.equal(errors[0]?.[0], "[QuotaNotifications] check failed");
 
@@ -268,7 +272,7 @@ describe("quota notifications", () => {
         });
         seedQuotasCache();
 
-        await runQuotaNotificationCheck();
+        assert.equal(await runQuotaNotificationCheck(), true);
 
         assert.deepEqual(
             quotaNotifications().map((notification) => notification.dedupe_key),

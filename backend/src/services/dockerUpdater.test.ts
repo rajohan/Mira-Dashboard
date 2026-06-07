@@ -527,7 +527,7 @@ process.stdout.write("updated\n");
         assert.equal(row.current_digest, "sha256:new");
     });
 
-    it("can apply an update from the passed service when the locked DB row is gone", async () => {
+    it("does not apply an update when the locked DB row is gone", async () => {
         const appDir = path.join(tempDir, "missing-row-apply");
         const binDir = path.join(tempDir, "bin");
         await mkdir(appDir, { recursive: true });
@@ -565,8 +565,9 @@ process.stdout.write("updated\n");
 
         const result = await updater.__testing.applyServiceUpdate(service, "manual");
 
-        assert.equal(result.ok, true);
-        assert.match(await readFile(composePath, "utf8"), /repo\/app:2/u);
+        assert.equal(result.ok, false);
+        assert.match(result.stderr, /not found or disabled/u);
+        assert.match(await readFile(composePath, "utf8"), /repo\/app:1/u);
     });
 
     it("accepts arm64 v8 registry variants for linux/arm64 services", async () => {
@@ -843,14 +844,13 @@ setTimeout(() => process.exit(0), 30);
         });
 
         assert.match(await readFile(composePath, "utf8"), /image: nginx:3/u);
-        assert.equal(
-            fetchUrls.some((url) => url.includes("linuxserver")),
-            false
-        );
-        assert.equal(
-            fetchUrls.some((url) => url.includes("linuxserver")),
-            false
-        );
+        const updatedService = db
+            .prepare(
+                "SELECT current_tag, current_digest FROM docker_managed_services WHERE service_name = 'web'"
+            )
+            .get() as { current_tag: string; current_digest: string | null };
+        assert.equal(updatedService.current_tag, "3");
+        assert.equal(updatedService.current_digest, "sha256:new");
 
         await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
             const updater = await import(

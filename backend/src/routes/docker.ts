@@ -854,7 +854,7 @@ export async function runDockerUpdaterNow() {
 /** Represents one docker updater event row. */
 interface DockerUpdaterEventRow {
     id: string;
-    managed_service_id: string;
+    managed_service_id: string | null;
     app_slug: string | null;
     service_name: string | null;
     event_type: string;
@@ -890,7 +890,8 @@ async function getDockerUpdaterEvents(limit: number) {
 
     return rows.map((row) => ({
         id: Number(row.id),
-        managedServiceId: Number(row.managed_service_id),
+        managedServiceId:
+            row.managed_service_id === null ? null : Number(row.managed_service_id),
         appSlug: row.app_slug,
         serviceName: row.service_name,
         eventType: row.event_type,
