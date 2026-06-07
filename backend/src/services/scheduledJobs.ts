@@ -609,12 +609,14 @@ async function executeScheduledJob(job: ScheduledJob): Promise<Record<string, un
         return { steps };
     }
     if (job.actionType === "notification.openclaw") {
+        await cacheRefreshRunner("system.host");
         if ((await openClawNotificationRunner()) === false) {
             throw new Error("OpenClaw notification check failed");
         }
         return { checked: true };
     }
     if (job.actionType === "notification.quota") {
+        await cacheRefreshRunner("quotas.summary");
         if ((await quotaNotificationRunner()) === false) {
             throw new Error("Quota notification check failed");
         }

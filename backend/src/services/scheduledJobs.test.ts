@@ -252,7 +252,9 @@ test("runs combined Moltbook and backend-owned jobs through scheduler actions", 
     assert.deepEqual(quotas.output, { checked: true });
     assert.deepEqual(refreshedKeys.slice(1), [
         "backup.walg.status",
+        "system.host",
         "notification.openclaw",
+        "quotas.summary",
         "notification.quotas",
     ]);
 
@@ -273,6 +275,10 @@ test("runs combined Moltbook and backend-owned jobs through scheduler actions", 
     assert.match(failedDockerFallback.message ?? "", /poll failed/u);
 
     __testing.setActionRunnersForTests({
+        cacheRefresh: async (key) => {
+            refreshedKeys.push(key);
+            return { key };
+        },
         openClawNotification: async () => false,
         quotaNotification: async () => false,
         logRotation: async () => ({ ok: false }),
