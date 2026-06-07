@@ -431,7 +431,7 @@ async function lookupGhcr(service: ManagedServiceRow) {
         tag = candidates.at(-1) ?? tag;
     }
     if (!tag) {
-        return { latestTag: service.latest_tag, latestDigest: service.latest_digest };
+        return { latestTag: service.current_tag, latestDigest: service.current_digest };
     }
     const { body, headers } = await fetchRegistryJsonWithHeaders(
         `https://ghcr.io/v2/${repo}/manifests/${tag}`,
@@ -995,12 +995,17 @@ async function applyServiceUpdate(
             db.prepare(
                 `UPDATE docker_managed_services
                  SET compose_image_ref = ?, current_tag = ?, current_digest = ?,
+                     tag_match_pattern = CASE
+                         WHEN tag_match_type = 'exact' THEN ?
+                         ELSE tag_match_pattern
+                     END,
                      last_updated_at = ?, last_checked_at = ?, last_status = 'updated'
                  WHERE id = ?`
             ).run(
                 target,
                 lockedService.latest_tag,
                 lockedService.latest_digest,
+                lockedService.latest_tag,
                 nowIso(),
                 nowIso(),
                 lockedService.id

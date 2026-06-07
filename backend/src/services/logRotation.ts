@@ -748,7 +748,7 @@ function readLogRotationState(): LogRotationState {
     try {
         const parsed = JSON.parse(row.data_json) as Partial<LogRotationState>;
         return {
-            version: parsed.version === 1 ? 1 : 1,
+            version: 1,
             files:
                 parsed.files &&
                 typeof parsed.files === "object" &&

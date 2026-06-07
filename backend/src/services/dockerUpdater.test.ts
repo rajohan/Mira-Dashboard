@@ -520,15 +520,17 @@ process.stdout.write("updated\n");
         assert.match(await readFile(composePath, "utf8"), /repo\/app:2@sha256:new/u);
         const row = db
             .prepare(
-                `SELECT current_tag, current_digest
+                `SELECT current_tag, current_digest, tag_match_pattern
                  FROM docker_managed_services WHERE id = ?`
             )
             .get(service.id) as {
             current_digest: string | null;
             current_tag: string | null;
+            tag_match_pattern: string | null;
         };
         assert.equal(row.current_tag, "2");
         assert.equal(row.current_digest, "sha256:new");
+        assert.equal(row.tag_match_pattern, "2");
     });
 
     it("does not apply an update when the locked DB row is gone", async () => {
@@ -1440,7 +1442,7 @@ setTimeout(() => process.exit(0), 30);
                 current_tag: null,
                 tag_match_pattern: null,
             }),
-            { latestTag: "2", latestDigest: "sha256:new" }
+            { latestTag: null, latestDigest: "sha256:old" }
         );
         globalThis.fetch = (async () =>
             ({
@@ -1964,6 +1966,26 @@ setTimeout(() => process.exit(0), 30);
             latestTag: "1",
             latestDigest: "sha256:body",
         });
+        globalThis.fetch = (async (input) => {
+            assert.match(String(input), /\/tags\/list/u);
+            return {
+                ok: true,
+                headers: new Headers(),
+                json: async () => ({ tags: ["stable"] }),
+            } as Response;
+        }) as typeof fetch;
+        assert.deepEqual(
+            await updater.__testing.lookupGhcr({
+                ...baseService,
+                current_tag: null,
+                current_digest: "sha256:current",
+                latest_tag: "2",
+                latest_digest: "sha256:stale",
+                tag_match_type: "regex",
+                tag_match_pattern: String.raw`^\d$`,
+            }),
+            { latestTag: null, latestDigest: "sha256:current" }
+        );
 
         db.prepare(
             `INSERT INTO docker_managed_services (

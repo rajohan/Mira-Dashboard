@@ -1,14 +1,15 @@
 import { execFile } from "node:child_process";
+import { openSync, renameSync, rmSync, type Stats, statSync } from "node:fs";
 import {
-    closeSync,
-    mkdirSync,
-    openSync,
-    readFileSync,
-    renameSync,
-    rmSync,
-    statSync,
-    writeFileSync,
-} from "node:fs";
+    type FileHandle,
+    mkdir,
+    open,
+    readFile,
+    rename,
+    rm,
+    stat,
+    writeFile,
+} from "node:fs/promises";
 import { promisify } from "node:util";
 
 import { db } from "../db.js";
@@ -121,6 +122,12 @@ function sleepSync(ms: number): void {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+
 type CodexTrustConfigLockDependencies = {
     now?: () => number;
     open?: typeof openSync;
@@ -130,10 +137,22 @@ type CodexTrustConfigLockDependencies = {
     stat?: typeof statSync;
 };
 
-function sameFileStat(
-    left: NonNullable<ReturnType<typeof statSync>>,
-    right: NonNullable<ReturnType<typeof statSync>>
-): boolean {
+type CodexTrustConfigFileHandle = Pick<FileHandle, "close">;
+
+type AsyncCodexTrustConfigLockDependencies = {
+    now?: () => number;
+    open?: (
+        path: string,
+        flags: string,
+        mode: number
+    ) => Promise<CodexTrustConfigFileHandle>;
+    remove?: typeof rm;
+    rename?: typeof rename;
+    sleep?: typeof sleep;
+    stat?: typeof stat;
+};
+
+function sameFileStat(left: Stats, right: Stats): boolean {
     return (
         left.mtimeMs === right.mtimeMs && left.dev === right.dev && left.ino === right.ino
     );
@@ -174,6 +193,70 @@ function acquireCodexTrustConfigLock(
                             const reclaimedStat = statFile(reclaimedPath);
                             if (sameFileStat(stat, reclaimedStat)) {
                                 removeFile(reclaimedPath, { force: true });
+                                continue;
+                            }
+                        } catch (renameError) {
+                            if (
+                                renameError instanceof Error &&
+                                "code" in renameError &&
+                                renameError.code === "ENOENT"
+                            ) {
+                                continue;
+                            }
+                        }
+                        throw error;
+                    }
+                } catch (statError) {
+                    if (
+                        statError instanceof Error &&
+                        "code" in statError &&
+                        statError.code === "ENOENT"
+                    ) {
+                        continue;
+                    }
+                    throw statError;
+                }
+            }
+            throw error;
+        }
+    }
+}
+
+async function acquireCodexTrustConfigLockAsync(
+    lockPath: string,
+    dependencies: AsyncCodexTrustConfigLockDependencies = {}
+): Promise<CodexTrustConfigFileHandle> {
+    const now = dependencies.now ?? Date.now;
+    const openFile = dependencies.open ?? open;
+    const removeFile = dependencies.remove ?? rm;
+    const renameFile = dependencies.rename ?? rename;
+    const sleepFor = dependencies.sleep ?? sleep;
+    const statFile = dependencies.stat ?? stat;
+    const startedAt = now();
+    let staleRecoveryAttempted = false;
+    for (;;) {
+        try {
+            return await openFile(lockPath, "wx", 0o600);
+        } catch (error) {
+            if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) {
+                throw error;
+            }
+            const elapsedMs = now() - startedAt;
+            if (elapsedMs < CODEX_TRUST_LOCK_TIMEOUT_MS) {
+                await sleepFor(CODEX_TRUST_LOCK_RETRY_MS);
+                continue;
+            }
+            if (!staleRecoveryAttempted) {
+                staleRecoveryAttempted = true;
+                try {
+                    const lockStat = await statFile(lockPath);
+                    if (now() - lockStat.mtimeMs > CODEX_TRUST_STALE_LOCK_MS) {
+                        const reclaimedPath = `${lockPath}.reclaimed.${process.pid}`;
+                        try {
+                            await renameFile(lockPath, reclaimedPath);
+                            const reclaimedStat = await statFile(reclaimedPath);
+                            if (sameFileStat(lockStat, reclaimedStat)) {
+                                await removeFile(reclaimedPath, { force: true });
                                 continue;
                             }
                         } catch (renameError) {
@@ -704,7 +787,29 @@ async function refreshSystemCache() {
 }
 
 function getSnapshotTime(snapshot: { endTime: string | null; startTime: string | null }) {
-    return new Date(snapshot.endTime ?? snapshot.startTime ?? 0).getTime();
+    return firstValidTimestamp(snapshot.endTime, snapshot.startTime);
+}
+
+function firstValidTimestamp(...values: Array<string | null | undefined>): number {
+    for (const value of values) {
+        if (!value) continue;
+        const timestamp = new Date(value).getTime();
+        if (Number.isFinite(timestamp)) {
+            return timestamp;
+        }
+    }
+    return 0;
+}
+
+function firstValidTimestampValue(
+    ...values: Array<string | null | undefined>
+): string | null {
+    for (const value of values) {
+        if (value && Number.isFinite(new Date(value).getTime())) {
+            return value;
+        }
+    }
+    return null;
 }
 
 function summarizeKopiaSnapshot(value: unknown) {
@@ -806,12 +911,14 @@ async function refreshKopiaBackupCache() {
 
 function summarizeWalgBackup(value: unknown) {
     const backup = asRecord(value);
+    const modified = firstValidTimestampValue(
+        stringOrNull(backup.modified),
+        stringOrNull(backup.finish_time),
+        stringOrNull(backup.time)
+    );
     return {
         backupName: stringOrNull(backup.backup_name),
-        modified:
-            stringOrNull(backup.modified) ??
-            stringOrNull(backup.finish_time) ??
-            stringOrNull(backup.time),
+        modified,
         time: stringOrNull(backup.time),
         startTime: stringOrNull(backup.start_time),
         finishTime: stringOrNull(backup.finish_time),
@@ -821,7 +928,7 @@ function summarizeWalgBackup(value: unknown) {
 }
 
 function getWalgBackupTime(backup: { modified: string | null }) {
-    return new Date(backup.modified ?? 0).getTime();
+    return firstValidTimestamp(backup.modified);
 }
 
 async function refreshWalgBackupCache() {
@@ -1020,7 +1127,7 @@ async function ensureCodexTrustConfig(codexHome: string) {
         await existing;
         return;
     }
-    const update = Promise.resolve().then(() => updateCodexTrustConfig(codexHome));
+    const update = updateCodexTrustConfig(codexHome);
     codexTrustConfigLocks.set(codexHome, update);
     try {
         await update;
@@ -1029,16 +1136,16 @@ async function ensureCodexTrustConfig(codexHome: string) {
     }
 }
 
-function updateCodexTrustConfig(codexHome: string) {
+async function updateCodexTrustConfig(codexHome: string) {
     const lockPath = `${codexHome}/config.toml.lock`;
-    let lockHandle: number | null = null;
+    let lockHandle: CodexTrustConfigFileHandle | null = null;
     try {
-        mkdirSync(codexHome, { recursive: true });
-        lockHandle = acquireCodexTrustConfigLock(lockPath);
+        await mkdir(codexHome, { recursive: true });
+        lockHandle = await acquireCodexTrustConfigLockAsync(lockPath);
         const configPath = `${codexHome}/config.toml`;
         let existing = "";
         try {
-            existing = readFileSync(configPath, "utf8");
+            existing = await readFile(configPath, "utf8");
         } catch (error) {
             if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
                 throw error;
@@ -1055,13 +1162,13 @@ function updateCodexTrustConfig(codexHome: string) {
             const separator = existing ? "\n" : "";
             const next = `${existing}${prefix}${separator}${additions.join("\n")}`;
             const tempPath = `${configPath}.${process.pid}.tmp`;
-            writeFileSync(tempPath, next, { mode: 0o600 });
-            renameSync(tempPath, configPath);
+            await writeFile(tempPath, next, { mode: 0o600 });
+            await rename(tempPath, configPath);
         }
     } finally {
         if (lockHandle !== null) {
-            closeSync(lockHandle);
-            rmSync(lockPath, { force: true });
+            await lockHandle.close();
+            await rm(lockPath, { force: true });
         }
     }
 }
@@ -1290,7 +1397,9 @@ export const __testing = {
     cleanPanelText,
     codexTrustConfigLocks,
     acquireCodexTrustConfigLock,
+    acquireCodexTrustConfigLockAsync,
     sleepSync,
+    sleep,
     ensureCodexTrustConfig,
     errorMessage,
     fetchSpydebergWeather,

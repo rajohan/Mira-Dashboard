@@ -667,6 +667,13 @@ if (args.includes("capture-pane")) {
             }),
             new Date("2099-01-01T00:00:00.000Z").getTime()
         );
+        assert.equal(
+            __testing.getSnapshotTime({
+                endTime: "not-a-date",
+                startTime: "2099-01-01T00:00:00.000Z",
+            }),
+            new Date("2099-01-01T00:00:00.000Z").getTime()
+        );
         assert.equal(__testing.getSnapshotTime({ endTime: null, startTime: null }), 0);
         assert.equal(
             __testing.summarizeWalgBackup({
@@ -677,6 +684,13 @@ if (args.includes("capture-pane")) {
         assert.equal(
             __testing.summarizeWalgBackup({ time: "2099-01-02T00:00:00.000Z" }).modified,
             "2099-01-02T00:00:00.000Z"
+        );
+        assert.equal(
+            __testing.summarizeWalgBackup({
+                modified: "not-a-date",
+                finish_time: "2099-01-03T00:00:00.000Z",
+            }).modified,
+            "2099-01-03T00:00:00.000Z"
         );
         assert.equal(__testing.getWalgBackupTime({ modified: null }), 0);
         assert.equal(__testing.errorMessage("plain failure"), "plain failure");
@@ -819,6 +833,20 @@ if (args.includes("capture-pane")) {
             () => __testing.ensureCodexTrustConfig(codexHomeBadConfig),
             /EISDIR|illegal operation/u
         );
+
+        const asyncLockPath = path.join(tempDir, "codex-async.lock");
+        await writeFile(asyncLockPath, "held", "utf8");
+        let timerFired = false;
+        const pendingLock = __testing.acquireCodexTrustConfigLockAsync(asyncLockPath);
+        setTimeout(() => {
+            timerFired = true;
+        }, 0);
+        await __testing.sleep(25);
+        assert.equal(timerFired, true);
+        await rm(asyncLockPath, { force: true });
+        const asyncLock = await pendingLock;
+        await asyncLock.close();
+        await rm(asyncLockPath, { force: true });
 
         await withEnv(
             {
@@ -1192,6 +1220,199 @@ if (args.includes("capture-pane")) {
             /stat failed/u
         );
         __testing.sleepSync(0);
+    });
+
+    it("covers async Codex trust lock retry and stale-lock edge cases", async () => {
+        const lockPath = path.join(tempDir, "config.toml.lock");
+        const existsError = Object.assign(new Error("exists"), { code: "EEXIST" });
+        const handle = { close: async () => {} };
+        let openCalls = 0;
+        let sleepCalls = 0;
+        assert.equal(
+            await __testing.acquireCodexTrustConfigLockAsync(lockPath, {
+                now: () => 1_000,
+                open: async () => {
+                    openCalls += 1;
+                    if (openCalls === 1) throw existsError;
+                    return handle;
+                },
+                sleep: async () => {
+                    sleepCalls += 1;
+                },
+            }),
+            handle
+        );
+        assert.equal(sleepCalls, 1);
+
+        await assert.rejects(
+            () =>
+                __testing.acquireCodexTrustConfigLockAsync(lockPath, {
+                    open: async () => {
+                        throw Object.assign(new Error("open denied"), { code: "EACCES" });
+                    },
+                }),
+            /open denied/u
+        );
+
+        let missingLockOpenCalls = 0;
+        assert.equal(
+            await __testing.acquireCodexTrustConfigLockAsync(lockPath, {
+                now: (() => {
+                    let calls = 0;
+                    return () => {
+                        calls += 1;
+                        return calls === 1 ? 0 : 10_000;
+                    };
+                })(),
+                open: async () => {
+                    missingLockOpenCalls += 1;
+                    if (missingLockOpenCalls === 1) throw existsError;
+                    return handle;
+                },
+                stat: async () => {
+                    throw Object.assign(new Error("gone"), { code: "ENOENT" });
+                },
+            }),
+            handle
+        );
+
+        let reclaimedOpenCalls = 0;
+        let reclaimedRemovedPath: string | null = null;
+        let reclaimedStatCalls = 0;
+        assert.equal(
+            await __testing.acquireCodexTrustConfigLockAsync(lockPath, {
+                now: (() => {
+                    let calls = 0;
+                    return () => {
+                        calls += 1;
+                        return calls === 1 ? 0 : 10_000 + 5 * 60 * 1000;
+                    };
+                })(),
+                open: async () => {
+                    reclaimedOpenCalls += 1;
+                    if (reclaimedOpenCalls === 1) throw existsError;
+                    return handle;
+                },
+                remove: async (reclaimedPath) => {
+                    reclaimedRemovedPath = String(reclaimedPath);
+                },
+                rename: async () => {},
+                stat: async () => {
+                    reclaimedStatCalls += 1;
+                    return { dev: 1, ino: 2, mtimeMs: 1 } as never;
+                },
+            }),
+            handle
+        );
+        assert.equal(reclaimedRemovedPath, `${lockPath}.reclaimed.${process.pid}`);
+        assert.equal(reclaimedStatCalls, 2);
+
+        await assert.rejects(
+            () =>
+                __testing.acquireCodexTrustConfigLockAsync(lockPath, {
+                    now: (() => {
+                        let calls = 0;
+                        return () => {
+                            calls += 1;
+                            return calls === 1 ? 0 : 10_000;
+                        };
+                    })(),
+                    open: async () => {
+                        throw existsError;
+                    },
+                    stat: async () => ({ mtimeMs: 9_999 }) as never,
+                }),
+            /exists/u
+        );
+        await assert.rejects(
+            () =>
+                __testing.acquireCodexTrustConfigLockAsync(lockPath, {
+                    now: (() => {
+                        let calls = 0;
+                        return () => {
+                            calls += 1;
+                            return calls === 1 ? 0 : 10_000 + 5 * 60 * 1000;
+                        };
+                    })(),
+                    open: async () => {
+                        throw existsError;
+                    },
+                    rename: async () => {
+                        throw Object.assign(new Error("rename denied"), {
+                            code: "EACCES",
+                        });
+                    },
+                    stat: async () => ({ dev: 1, ino: 2, mtimeMs: 1 }) as never,
+                }),
+            /exists/u
+        );
+        let statCalls = 0;
+        await assert.rejects(
+            () =>
+                __testing.acquireCodexTrustConfigLockAsync(lockPath, {
+                    now: (() => {
+                        let calls = 0;
+                        return () => {
+                            calls += 1;
+                            return calls === 1 ? 0 : 10_000 + 5 * 60 * 1000;
+                        };
+                    })(),
+                    open: async () => {
+                        throw existsError;
+                    },
+                    rename: async () => {},
+                    stat: async () => {
+                        statCalls += 1;
+                        return {
+                            dev: statCalls === 1 ? 1 : 3,
+                            ino: statCalls === 1 ? 2 : 4,
+                            mtimeMs: 1,
+                        } as never;
+                    },
+                }),
+            /exists/u
+        );
+        let renameMissingOpenCalls = 0;
+        assert.equal(
+            await __testing.acquireCodexTrustConfigLockAsync(lockPath, {
+                now: (() => {
+                    let calls = 0;
+                    return () => {
+                        calls += 1;
+                        return calls === 1 ? 0 : 10_000 + 5 * 60 * 1000;
+                    };
+                })(),
+                open: async () => {
+                    renameMissingOpenCalls += 1;
+                    if (renameMissingOpenCalls === 1) throw existsError;
+                    return handle;
+                },
+                rename: async () => {
+                    throw Object.assign(new Error("gone"), { code: "ENOENT" });
+                },
+                stat: async () => ({ dev: 1, ino: 2, mtimeMs: 1 }) as never,
+            }),
+            handle
+        );
+        await assert.rejects(
+            () =>
+                __testing.acquireCodexTrustConfigLockAsync(lockPath, {
+                    now: (() => {
+                        let calls = 0;
+                        return () => {
+                            calls += 1;
+                            return calls === 1 ? 0 : 10_000;
+                        };
+                    })(),
+                    open: async () => {
+                        throw existsError;
+                    },
+                    stat: async () => {
+                        throw Object.assign(new Error("stat failed"), { code: "EACCES" });
+                    },
+                }),
+            /stat failed/u
+        );
     });
 
     it("covers remaining producer fallback lines", async () => {
