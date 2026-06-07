@@ -527,6 +527,48 @@ process.stdout.write("updated\n");
         assert.equal(row.current_digest, "sha256:new");
     });
 
+    it("can apply an update from the passed service when the locked DB row is gone", async () => {
+        const appDir = path.join(tempDir, "missing-row-apply");
+        const binDir = path.join(tempDir, "bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        const composePath = path.join(appDir, "compose.yaml");
+        await writeFile(
+            composePath,
+            "services:\n  web:\n    image: repo/app:1\n",
+            "utf8"
+        );
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            "#!/usr/bin/env node\nprocess.exit(0);\n"
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(`./dockerUpdater.js?missing-row=${Date.now()}`);
+        const service = {
+            id: 999,
+            app_slug: "missing-row-apply",
+            service_name: "web",
+            compose_path: composePath,
+            image_repo: "repo/app",
+            compose_image_ref: "repo/app:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+
+        const result = await updater.__testing.applyServiceUpdate(service, "manual");
+
+        assert.equal(result.ok, true);
+        assert.match(await readFile(composePath, "utf8"), /repo\/app:2/u);
+    });
+
     it("accepts arm64 v8 registry variants for linux/arm64 services", async () => {
         const updater = await import(`./dockerUpdater.js?platform-v8=${Date.now()}`);
 
@@ -635,6 +677,9 @@ setTimeout(() => process.exit(0), 30);
 
         await withEnv({ SEEN_COMPOSE_IMAGES: seenPath }, async () => {
             const first = updater.__testing.applyServiceUpdate(baseService, "manual");
+            db.prepare(
+                "UPDATE docker_managed_services SET latest_tag = '3' WHERE id = ?"
+            ).run(workerService.id);
             const second = updater.__testing.applyServiceUpdate(workerService, "manual");
             const results = await Promise.all([first, second]);
 
@@ -646,11 +691,11 @@ setTimeout(() => process.exit(0), 30);
 
         assert.equal(
             await readFile(seenPath, "utf8"),
-            "repo/app:2,repo/worker:1\nrepo/app:2,repo/worker:2\n"
+            "repo/app:2,repo/worker:1\nrepo/app:2,repo/worker:3\n"
         );
         const composeText = await readFile(composePath, "utf8");
         assert.match(composeText, /repo\/app:2/u);
-        assert.match(composeText, /repo\/worker:2/u);
+        assert.match(composeText, /repo\/worker:3/u);
     });
 
     it("removes stale services after an empty successful compose scan", async () => {
@@ -1489,6 +1534,7 @@ setTimeout(() => process.exit(0), 30);
                 latestDigest: "sha256:amd64",
             }
         );
+        process.env.MIRA_DOCKER_UPDATER_PLATFORM = "linux/amd64";
         assert.deepEqual(
             await updater.__testing.lookupDockerHub({
                 ...baseService,
@@ -1498,9 +1544,10 @@ setTimeout(() => process.exit(0), 30);
             }),
             {
                 latestTag: "3",
-                latestDigest: process.arch === "x64" ? "sha256:amd64" : "sha256:v8",
+                latestDigest: "sha256:amd64",
             }
         );
+        delete process.env.MIRA_DOCKER_UPDATER_PLATFORM;
         const archDescriptor = Object.getOwnPropertyDescriptor(process, "arch");
         Object.defineProperty(process, "arch", {
             configurable: true,
@@ -1562,14 +1609,42 @@ setTimeout(() => process.exit(0), 30);
             }
         );
         delete process.env.MIRA_DOCKER_UPDATER_PLATFORM;
+        assert.equal(updater.__testing.parseNextLink(null), null);
+        assert.equal(
+            updater.__testing.parseNextLink(
+                '<https://ghcr.io/v2/owner/app/tags/list?n=100>; rel="next"'
+            ),
+            "https://ghcr.io/v2/owner/app/tags/list?n=100"
+        );
+        assert.equal(
+            updater.__testing.parseNextLink(
+                '<https://ghcr.io/v2/owner/app/tags/list?n=100>; rel="last"'
+            ),
+            null
+        );
+        assert.equal(
+            updater.__testing.parseNextLink(
+                'https://ghcr.io/v2/owner/app/tags/list?n=100; rel="next"'
+            ),
+            null
+        );
 
         globalThis.fetch = (async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();
             if (url.endsWith("/tags/list")) {
                 return {
                     ok: true,
+                    headers: new Headers({
+                        link: '<https://ghcr.io/v2/owner/app/tags/list?n=100&last=1.0.0>; rel="next"',
+                    }),
+                    json: async () => ({ tags: ["1.0.0", "dev"] }),
+                } as Response;
+            }
+            if (url.includes("/tags/list?n=100&last=1.0.0")) {
+                return {
+                    ok: true,
                     headers: new Headers(),
-                    json: async () => ({ tags: ["1.0.0", "2.0.0", "dev"] }),
+                    json: async () => ({ tags: ["2.0.0"] }),
                 } as Response;
             }
             return {
@@ -1879,6 +1954,69 @@ setTimeout(() => process.exit(0), 30);
 
         assert.equal(result.ok, false);
         assert.match(result.stderr, /compose failed/u);
+    });
+
+    it("re-applies the restored compose file after compose update failure", async () => {
+        const appDir = path.join(tempDir, "rollback-reapply");
+        const binDir = path.join(tempDir, "bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        const composePath = path.join(appDir, "compose.yaml");
+        const callLogPath = path.join(tempDir, "compose-calls.log");
+        const originalCompose = "services:\n  web:\n    image: nginx:1\n";
+        await writeFile(composePath, originalCompose, "utf8");
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            String.raw`#!/usr/bin/env node
+const fs = require("node:fs");
+fs.appendFileSync(${JSON.stringify(callLogPath)}, "compose\n");
+if (fs.readFileSync(${JSON.stringify(callLogPath)}, "utf8").split("\n").filter(Boolean).length === 1) {
+  process.stderr.write("compose failed\n");
+  process.exit(12);
+}
+process.exit(0);
+`
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(`./dockerUpdater.js?rollback-reapply=${Date.now()}`);
+        const service = {
+            id: 1,
+            app_slug: "rollback-reapply",
+            service_name: "web",
+            compose_path: composePath,
+            image_repo: "nginx",
+            compose_image_ref: "nginx:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+        db.prepare(
+            `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+        ).run(service);
+
+        const result = await updater.__testing.applyServiceUpdate(service, "manual");
+
+        assert.equal(result.ok, false);
+        assert.match(result.stderr, /compose failed/u);
+        assert.equal(await readFile(composePath, "utf8"), originalCompose);
+        assert.equal(await readFile(callLogPath, "utf8"), "compose\ncompose\n");
     });
 
     it("restores the compose file when writing the updated file fails", async () => {

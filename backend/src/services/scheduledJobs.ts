@@ -435,8 +435,8 @@ function getDefaultActionTarget(job: DefaultScheduledJob): string {
     return target;
 }
 
-/** Ensures built-in scheduled jobs exist in SQLite. */
-export function ensureDefaultScheduledJobs(): void {
+/** Seeds built-in scheduled jobs in SQLite. */
+export function seedDefaultScheduledJobs(): void {
     reconcileStaleRunningRuns();
     const deleteJob = db.prepare(`DELETE FROM scheduled_jobs WHERE id = ?`);
     for (const id of obsoleteDefaultJobIds) {
@@ -473,7 +473,6 @@ export function ensureDefaultScheduledJobs(): void {
 
 /** Lists scheduled jobs with latest run metadata. */
 export function listScheduledJobs(): ScheduledJob[] {
-    ensureDefaultScheduledJobs();
     const rows = db
         .prepare(`SELECT * FROM scheduled_jobs ORDER BY name ASC`)
         .all() as unknown as ScheduledJobRow[];
@@ -482,7 +481,6 @@ export function listScheduledJobs(): ScheduledJob[] {
 
 /** Returns a scheduled job by ID. */
 export function getScheduledJob(id: string): ScheduledJob | null {
-    ensureDefaultScheduledJobs();
     const row = db
         .prepare(`SELECT * FROM scheduled_jobs WHERE id = ? LIMIT 1`)
         .get(id) as ScheduledJobRow | undefined;
@@ -668,7 +666,7 @@ export async function runScheduledJob(
 }
 
 async function runDueJobs(): Promise<void> {
-    ensureDefaultScheduledJobs();
+    seedDefaultScheduledJobs();
     const rows = db
         .prepare(
             `SELECT * FROM scheduled_jobs
@@ -721,7 +719,7 @@ export function startScheduledJobScheduler(): void {
     if (scheduler) {
         return;
     }
-    ensureDefaultScheduledJobs();
+    seedDefaultScheduledJobs();
     scheduler = setInterval(() => {
         if (schedulerTickRunning) {
             return;
@@ -750,7 +748,7 @@ export function stopScheduledJobScheduler(): void {
 
 export const __testing = {
     defaultJobs,
-    ensureDefaultScheduledJobs,
+    seedDefaultScheduledJobs,
     getDefaultActionTargetForTests: getDefaultActionTarget,
     isScheduledJobRaceError,
     nextDailyRunIso,

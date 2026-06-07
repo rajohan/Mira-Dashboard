@@ -387,6 +387,23 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
                 ["moltbook.home", "moltbook.feed.hot"]
             );
             assert.equal(refreshed[0]?.source, "aggregate");
+
+            db.prepare(
+                "DELETE FROM cache_entries WHERE key IN ('moltbook.home', 'moltbook.feed.hot')"
+            ).run();
+            const routeRefresh = await fetch(
+                `${server.baseUrl}/api/cache/moltbook/refresh`,
+                { method: "POST" }
+            );
+            const routeBody = (await routeRefresh.json()) as {
+                entries: Array<{ key: string }>;
+                ok: boolean;
+            };
+            assert.equal(routeBody.ok, true);
+            assert.deepEqual(
+                routeBody.entries.map((entry) => entry.key),
+                ["moltbook.home", "moltbook.feed.hot"]
+            );
         } finally {
             __testing.resetCacheRefreshForTests();
         }

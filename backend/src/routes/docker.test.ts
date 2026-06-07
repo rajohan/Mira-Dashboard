@@ -1884,6 +1884,37 @@ describe("docker routes", { concurrency: false }, () => {
                 createdAt: "2026-05-11 12:00:00",
             },
         ]);
+        db.prepare("DELETE FROM docker_managed_services WHERE id = 1").run();
+        db.exec("PRAGMA foreign_keys = OFF");
+        try {
+            db.prepare(
+                `INSERT INTO docker_update_events (
+                    id, managed_service_id, event_type, from_tag, to_tag,
+                    from_digest, to_digest, message, created_at
+                ) VALUES (99, 1, 'orphaned', '1.0.1', '1.0.2',
+                    'sha256:new', 'sha256:newer', 'removed service', '2026-05-11 13:00:00')`
+            ).run();
+        } finally {
+            db.exec("PRAGMA foreign_keys = ON");
+        }
+        const orphanEvents = await requestJson<{
+            events: Array<{ appSlug: string; id: number; serviceName: string }>;
+        }>(server, "/api/docker/updater/events?limit=500");
+        assert.equal(orphanEvents.status, 200);
+        assert.deepEqual(orphanEvents.body.events[0], {
+            id: 99,
+            managedServiceId: 1,
+            appSlug: "",
+            serviceName: "",
+            eventType: "orphaned",
+            fromTag: "1.0.1",
+            toTag: "1.0.2",
+            fromDigest: "sha256:new",
+            toDigest: "sha256:newer",
+            message: null,
+            createdAt: "2026-05-11 13:00:00",
+        });
+        await seedDockerUpdaterState(tempDir);
 
         const invalid = await requestJson<{ error: string }>(
             server,
@@ -2107,6 +2138,7 @@ describe("docker routes", { concurrency: false }, () => {
             const manualFailure = await requestJson<{
                 success: boolean;
                 result: Record<string, never>;
+                service: { lastStatus: string | null };
                 stderr: string;
             }>(server, "/api/docker/updater/services/1/update", {
                 method: "POST",
@@ -2114,6 +2146,7 @@ describe("docker routes", { concurrency: false }, () => {
             });
             assert.equal(manualFailure.status, 500);
             assert.equal(manualFailure.body.success, false);
+            assert.equal(manualFailure.body.service.lastStatus, "manual_update_failed");
             assert.deepEqual(manualFailure.body.result, {});
             assert.match(manualFailure.body.stderr, /compose failed/u);
         });

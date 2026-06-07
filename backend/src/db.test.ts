@@ -6,6 +6,39 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+async function importWithTempDb(token: string): Promise<{
+    result: Awaited<typeof import("./db.js")>;
+    cleanup: () => Promise<void>;
+}> {
+    const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), `mira-db-${token}-`));
+    process.env.MIRA_DASHBOARD_DB_PATH = path.join(tempDir, "test.db");
+    let result: Awaited<typeof import("./db.js")>;
+    try {
+        result = await import(`./db.js?${token}=${randomUUID()}`);
+    } catch (error) {
+        if (originalDbPath === undefined) {
+            delete process.env.MIRA_DASHBOARD_DB_PATH;
+        } else {
+            process.env.MIRA_DASHBOARD_DB_PATH = originalDbPath;
+        }
+        await rm(tempDir, { recursive: true, force: true });
+        throw error;
+    }
+    return {
+        result,
+        cleanup: async () => {
+            (result.db as { close(): void }).close();
+            if (originalDbPath === undefined) {
+                delete process.env.MIRA_DASHBOARD_DB_PATH;
+            } else {
+                process.env.MIRA_DASHBOARD_DB_PATH = originalDbPath;
+            }
+            await rm(tempDir, { recursive: true, force: true });
+        },
+    };
+}
+
 test("uses process cwd data directory when no explicit db path is configured", async () => {
     const originalCwd = process.cwd();
     const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
@@ -74,7 +107,7 @@ test("uses configured db path when provided", async () => {
 });
 
 test("classifies duplicate-column migration errors", async () => {
-    const result = await import(`./db.js?migrationHelpers=${randomUUID()}`);
+    const { cleanup, result } = await importWithTempDb("migrationHelpers");
     try {
         assert.equal(
             result.__testing.isDuplicateColumnError(
@@ -92,7 +125,7 @@ test("classifies duplicate-column migration errors", async () => {
             /syntax error/u
         );
     } finally {
-        (result.db as { close(): void }).close();
+        await cleanup();
     }
 });
 
@@ -164,7 +197,7 @@ test("migrates cache updated_at to nullable while preserving rows", async () => 
 });
 
 test("rolls back failed cache updated_at nullable migrations", async () => {
-    const result = await import(`./db.js?cacheNullableRollback=${randomUUID()}`);
+    const { cleanup, result } = await importWithTempDb("cacheNullableRollback");
     const calls: string[] = [];
     const targetDb = {
         prepare: () => ({
@@ -187,12 +220,12 @@ test("rolls back failed cache updated_at nullable migrations", async () => {
         assert.match(calls[1], /ALTER TABLE cache_entries RENAME/u);
         assert.equal(calls[2], "ROLLBACK");
     } finally {
-        (result.db as { close(): void }).close();
+        await cleanup();
     }
 });
 
 test("preserves cache migration failures when rollback also fails", async () => {
-    const result = await import(`./db.js?cacheNullableRollbackFailure=${randomUUID()}`);
+    const { cleanup, result } = await importWithTempDb("cacheNullableRollbackFailure");
     const targetDb = {
         prepare: () => ({
             all: () => [{ name: "updated_at", notnull: 1 }],
@@ -213,6 +246,6 @@ test("preserves cache migration failures when rollback also fails", async () => 
             /migration failed/u
         );
     } finally {
-        (result.db as { close(): void }).close();
+        await cleanup();
     }
 });

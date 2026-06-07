@@ -235,6 +235,45 @@ describe("log rotation service", { concurrency: false }, () => {
             () => __testing.gzipFile(gzipSource, [tempDir]),
             /EEXIST|file already exists/u
         );
+        await rm(`${gzipSource}.gz`, { force: true });
+        const outsideGzipTarget = path.join(os.tmpdir(), `mira-gzip-${Date.now()}`);
+        await symlink(outsideGzipTarget, `${gzipSource}.gz`);
+        await assert.rejects(
+            () => __testing.gzipFile(gzipSource, [tempDir]),
+            /EEXIST|file already exists/u
+        );
+        await __testing.assertSafeNewFileParent(`${gzipSource}.gz`, [tempDir]);
+        await assert.rejects(
+            () =>
+                __testing.assertSafeNewFileParent(`${gzipSource}.gz`, [
+                    path.join(tempDir, "missing-root"),
+                ]),
+            /No approved roots exist/u
+        );
+        const outsideSafeRoot = await mkdtemp(path.join(os.tmpdir(), "mira-gzip-root-"));
+        try {
+            await assert.rejects(
+                () =>
+                    __testing.assertSafeNewFileParent(`${gzipSource}.gz`, [
+                        outsideSafeRoot,
+                    ]),
+                /Unsafe path outside approved roots/u
+            );
+        } finally {
+            await rm(outsideSafeRoot, { recursive: true, force: true });
+        }
+        __testing.setGzipPipelineForTests(async () => {
+            throw new Error("gzip pipeline failed");
+        });
+        try {
+            await assert.rejects(
+                () => __testing.gzipFile(gzipSource, [tempDir]),
+                /gzip pipeline failed/u
+            );
+            await assert.rejects(() => fsPromises.access(`${gzipSource}.gz`));
+        } finally {
+            __testing.resetGzipPipeline();
+        }
         const gzipDeniedRoot = path.join(tempDir, "gzip-denied");
         await mkdir(gzipDeniedRoot);
         const gzipDeniedSource = path.join(gzipDeniedRoot, "source.log");
@@ -334,9 +373,10 @@ describe("log rotation service", { concurrency: false }, () => {
             async (
                 file: string,
                 args: readonly string[] | undefined,
-                options: { env: NodeJS.ProcessEnv; maxBuffer: number }
+                options: { env: NodeJS.ProcessEnv; maxBuffer: number; timeout?: number }
             ) => {
                 commands.push({ args: args ?? [], env: options.env, file });
+                assert.equal(options.timeout, 30_000);
                 return {
                     stderr: "helper warning",
                     stdout: JSON.stringify({ ok: true }),

@@ -28,11 +28,10 @@ async function startServer(configPath: string): Promise<TestServer> {
     const { runLogRotationService } = await import(
         `../services/logRotation.js?test=${Date.now()}`
     );
-    __testing.setElevatedLogRotationRunner(async () => ({
-        result: (await runLogRotationService({ dryRun: false })) as unknown as Record<
-            string,
-            unknown
-        >,
+    __testing.setElevatedLogRotationRunner(async (options: { dryRun: boolean }) => ({
+        result: (await runLogRotationService({
+            dryRun: options.dryRun,
+        })) as unknown as Record<string, unknown>,
         stderr: "",
     }));
     const app = express();

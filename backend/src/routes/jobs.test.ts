@@ -67,6 +67,7 @@ async function requestJson<T>(
 
 test.beforeEach(() => {
     db.exec("DELETE FROM scheduled_job_runs; DELETE FROM scheduled_jobs;");
+    __testing.seedDefaultScheduledJobs();
     __testing.setActionExecutorForTests(async (job) => ({
         actionTarget: job.actionTarget,
     }));
@@ -196,6 +197,14 @@ test("returns validation and missing job errors", async () => {
                 body: { patch: { intervalSeconds: 10 } },
             }
         );
+        const unknownPatch = await requestJson<{ error: string }>(
+            server,
+            "/api/jobs/cache.weather",
+            {
+                method: "PATCH",
+                body: { patch: { enabled: true, surprise: true } },
+            }
+        );
         const invalidPatchFields = await Promise.all(
             [
                 { enabled: "true" },
@@ -240,6 +249,8 @@ test("returns validation and missing job errors", async () => {
         );
         assert.equal(serviceValidationPatch.status, 400);
         assert.match(serviceValidationPatch.body.error, /integer >= 60/u);
+        assert.equal(unknownPatch.status, 400);
+        assert.equal(unknownPatch.body.error, "invalid patch field: surprise");
         assert.deepEqual(
             invalidPatchFields.map((response) => [response.status, response.body.error]),
             [
@@ -362,14 +373,21 @@ test("covers jobs route status fallback helper", () => {
 
 test("maps manual duplicate run status codes", async () => {
     const server = await startServer();
+    let finishExecution!: () => void;
+    const started = new Promise<void>((resolve) => {
+        __testing.setActionExecutorForTests(async () => {
+            resolve();
+            await new Promise<void>((finish) => {
+                finishExecution = finish;
+            });
+            return { ok: true };
+        });
+    });
     try {
-        __testing.setActionExecutorForTests(
-            () => new Promise((resolve) => setTimeout(() => resolve({ ok: true }), 30))
-        );
         const first = fetch(`${server.baseUrl}/api/jobs/cache.weather/run`, {
             method: "POST",
         });
-        await new Promise((resolve) => setImmediate(resolve));
+        await started;
         const duplicate = await requestJson<{ error: string }>(
             server,
             "/api/jobs/cache.weather/run",
@@ -377,6 +395,7 @@ test("maps manual duplicate run status codes", async () => {
         );
         assert.equal(duplicate.status, 409);
         assert.equal(duplicate.body.error, "Scheduled job is already running");
+        finishExecution();
         await first;
     } finally {
         await server.close();

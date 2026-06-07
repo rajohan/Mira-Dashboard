@@ -855,8 +855,8 @@ export async function runDockerUpdaterNow() {
 interface DockerUpdaterEventRow {
     id: string;
     managed_service_id: string;
-    app_slug: string;
-    service_name: string;
+    app_slug: string | null;
+    service_name: string | null;
     event_type: string;
     from_tag: string;
     to_tag: string;
@@ -873,8 +873,8 @@ async function getDockerUpdaterEvents(limit: number) {
             `SELECT
                 CAST(e.id AS TEXT) AS id,
                 CAST(e.managed_service_id AS TEXT) AS managed_service_id,
-                s.app_slug,
-                s.service_name,
+                COALESCE(s.app_slug, '') AS app_slug,
+                COALESCE(s.service_name, '') AS service_name,
                 e.event_type,
                 COALESCE(e.from_tag, '') AS from_tag,
                 COALESCE(e.to_tag, '') AS to_tag,
@@ -882,7 +882,7 @@ async function getDockerUpdaterEvents(limit: number) {
                 COALESCE(e.to_digest, '') AS to_digest,
                 e.created_at
              FROM docker_update_events e
-             JOIN docker_managed_services s ON s.id = e.managed_service_id
+             LEFT JOIN docker_managed_services s ON s.id = e.managed_service_id
              ORDER BY e.created_at DESC
              LIMIT ?`
         )
@@ -1261,9 +1261,8 @@ export default function dockerRoutes(app: express.Application): void {
             }
 
             const result = await runManualUpdaterForService(service);
-            const updatedService = result.success
-                ? ((await getDockerUpdaterServiceById(service.id)) ?? service)
-                : service;
+            const updatedService =
+                (await getDockerUpdaterServiceById(service.id)) ?? service;
             res.status(result.success ? 200 : 500).json({
                 success: result.success,
                 service: updatedService,

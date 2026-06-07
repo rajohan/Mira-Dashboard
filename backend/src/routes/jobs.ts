@@ -26,10 +26,21 @@ function asyncRoute(handler: RequestHandler): RequestHandler {
 }
 
 const scheduleTypes = new Set<ScheduledJobScheduleType>(["interval", "daily", "cron"]);
+const allowedPatchFields = new Set([
+    "enabled",
+    "intervalSeconds",
+    "scheduleType",
+    "timeOfDay",
+]);
 const validationErrorPattern =
     /intervalSeconds must be an integer >= 60|scheduleType must be interval, daily, or cron|timeOfDay must be HH:mm|cron schedule is not implemented yet/u;
 
 function invalidPatchField(patch: Record<string, unknown>): string | null {
+    for (const key of Object.keys(patch)) {
+        if (!allowedPatchFields.has(key)) {
+            return key;
+        }
+    }
     if (patch.enabled !== undefined && typeof patch.enabled !== "boolean") {
         return "enabled";
     }

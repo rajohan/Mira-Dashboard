@@ -152,7 +152,10 @@ export async function runSelectedAction(options: {
     }
     setActionError("");
     try {
-        await runJob.mutateAsync({ id: job.id });
+        const result = await runJob.mutateAsync({ id: job.id });
+        if (result.ok === false) {
+            setActionError(result.run?.message || "Action failed");
+        }
     } catch (error) {
         setActionError(actionErrorMessage(error));
     }

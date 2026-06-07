@@ -15,6 +15,7 @@ import {
 
 test.beforeEach(() => {
     db.exec("DELETE FROM scheduled_job_runs; DELETE FROM scheduled_jobs;");
+    __testing.seedDefaultScheduledJobs();
     __testing.setActionExecutorForTests(undefined);
     __testing.setActionRunnersForTests(undefined);
     __testing.resetStaleRunningRunReconciliationForTests();
@@ -159,6 +160,7 @@ test("runs jobs and records success or failure", async () => {
         db.prepare("SELECT id FROM scheduled_jobs WHERE id = ?").get("cache.weather"),
         undefined
     );
+    __testing.seedDefaultScheduledJobs();
 
     __testing.setActionExecutorForTests(async () => {
         throw new Error("boom");
@@ -356,6 +358,7 @@ test("reconciles stale persisted running runs once on scheduler initialization",
         ) VALUES ('custom.stale', 'running', 'schedule', ?, '{}')`
     ).run(timestamp);
 
+    __testing.seedDefaultScheduledJobs();
     const job = getScheduledJob("custom.stale");
 
     assert.equal(job?.lastRun?.status, "failed");

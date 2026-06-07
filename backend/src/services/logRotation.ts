@@ -24,10 +24,11 @@ const LOCK_RECLAIM_DIR = `${LOCK_FILE}.reclaim`;
 type ExecFileRunner = (
     file: string,
     args: readonly string[] | undefined,
-    options: { env: NodeJS.ProcessEnv; maxBuffer: number }
+    options: { env: NodeJS.ProcessEnv; maxBuffer: number; timeout?: number }
 ) => Promise<{ stderr: string; stdout: string }>;
 
 let elevatedLogRotationExecFileRunner: ExecFileRunner = execFileAsync as ExecFileRunner;
+let gzipPipeline = pipeline;
 
 function caughtMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -276,6 +277,29 @@ async function assertSafePath(
     return true;
 }
 
+async function assertSafeNewFileParent(
+    filePath: string,
+    approvedRoots: string[]
+): Promise<void> {
+    const parent = await fs.realpath(path.dirname(filePath));
+    const resolvedRoots = await Promise.all(
+        approvedRoots.map(async (root) => {
+            try {
+                return await fs.realpath(root);
+            } catch {
+                return null;
+            }
+        })
+    );
+    const realRoots = resolvedRoots.filter((root): root is string => root !== null);
+    if (realRoots.length === 0) {
+        throw new Error(`No approved roots exist: ${approvedRoots.join(", ")}`);
+    }
+    if (!realRoots.some((root) => isUnderRoot(parent, root))) {
+        throw new Error(`Unsafe path outside approved roots: ${filePath}`);
+    }
+}
+
 async function openVerifiedLogFile(
     filePath: string,
     approvedRoots: string[]
@@ -369,23 +393,41 @@ async function createNoFollowFile(
 async function gzipFile(filePath: string, approvedRoots: string[]): Promise<string> {
     const source = await openVerifiedFile(filePath, approvedRoots, constants.O_RDONLY);
     const gzPath = `${filePath}.gz`;
+    let destination: fs.FileHandle | null = null;
     let closed = false;
     try {
-        await pipeline(
+        await assertSafeNewFileParent(gzPath, approvedRoots);
+        destination = await fs.open(
+            gzPath,
+            constants.O_WRONLY |
+                constants.O_CREAT |
+                constants.O_EXCL |
+                constants.O_NOFOLLOW,
+            0o640
+        );
+        await gzipPipeline(
             createReadStream("", {
                 fd: source.handle.fd,
                 autoClose: false,
                 start: 0,
             }),
             createGzip(),
-            createWriteStream(gzPath, { flags: "wx" })
+            createWriteStream("", {
+                fd: destination.fd,
+                autoClose: false,
+                start: 0,
+            })
         );
         await assertFileIdentity(filePath, source.stat, approvedRoots);
+        await destination.close();
+        destination = null;
         await source.handle.close();
         closed = true;
         await fs.unlink(filePath);
         return gzPath;
     } catch (error) {
+        await destination?.close().catch(() => {});
+        await fs.unlink(gzPath).catch(() => {});
         if (!closed) {
             await source.handle.close().catch(() => {});
         }
@@ -1056,6 +1098,7 @@ export async function runElevatedLogRotationService(options: {
     const { stderr, stdout } = await elevatedLogRotationExecFileRunner("sudo", args, {
         env: elevatedLogRotationEnvironment(),
         maxBuffer: 1024 * 1024,
+        timeout: 30_000,
     });
     const trimmed = stdout.trim();
     return {
@@ -1088,6 +1131,7 @@ export const __testing = {
     archiveRetentionKey,
     assertFileIdentity,
     assertSafePath,
+    assertSafeNewFileParent,
     byteLimitFromMb,
     get defaultConfigPath() {
         return defaultConfigPath();
@@ -1110,6 +1154,12 @@ export const __testing = {
     },
     setElevatedLogRotationExecFileRunner(runner: ExecFileRunner) {
         elevatedLogRotationExecFileRunner = runner;
+    },
+    resetGzipPipeline() {
+        gzipPipeline = pipeline;
+    },
+    setGzipPipelineForTests(runner: typeof pipeline) {
+        gzipPipeline = runner;
     },
 };
 

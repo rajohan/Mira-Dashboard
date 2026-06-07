@@ -256,6 +256,21 @@ async function fetchRegistryJson(url: string): Promise<JsonRecord> {
     return body;
 }
 
+function parseNextLink(header: string | null): string | null {
+    if (!header) return null;
+    for (const part of header.split(",")) {
+        const [rawUrl, ...params] = part.trim().split(";");
+        if (
+            params.some((param) => param.trim() === 'rel="next"') &&
+            rawUrl?.startsWith("<") &&
+            rawUrl.endsWith(">")
+        ) {
+            return rawUrl.slice(1, -1);
+        }
+    }
+    return null;
+}
+
 async function fetchRegistryJsonWithHeaders(
     url: string,
     options: RegistryFetchOptions = {}
@@ -397,9 +412,18 @@ async function lookupGhcr(service: ManagedServiceRow) {
     const repo = stripRegistry(service.image_repo);
     let tag = service.current_tag || service.tag_match_pattern;
     if (service.tag_match_pattern) {
-        const tagsData = await fetchRegistryJson(`https://ghcr.io/v2/${repo}/tags/list`);
-        const candidates = (Array.isArray(tagsData.tags) ? tagsData.tags : [])
-            .filter((item): item is string => typeof item === "string")
+        const tags: string[] = [];
+        let tagsUrl: string | null = `https://ghcr.io/v2/${repo}/tags/list`;
+        while (tagsUrl) {
+            const { body, headers } = await fetchRegistryJsonWithHeaders(tagsUrl);
+            tags.push(
+                ...(Array.isArray(body.tags)
+                    ? body.tags.filter((item): item is string => typeof item === "string")
+                    : [])
+            );
+            tagsUrl = parseNextLink(headers.get("link"));
+        }
+        const candidates = tags
             .filter((candidate) => candidate && tagMatches(service, candidate))
             .sort(compareTags);
         tag = candidates.at(-1) || tag;
@@ -554,40 +578,62 @@ async function withComposeUpdateLock<T>(
     }
 }
 
-async function applyComposeUpdate(service: ManagedServiceRow, targetImageRef: string) {
+async function applyComposeUpdateUnlocked(
+    service: ManagedServiceRow,
+    targetImageRef: string
+) {
     if (!service.compose_image_field) {
         throw new Error(
             `Service ${serviceLabel(service)} is missing compose image field`
         );
     }
     const composeImageField = service.compose_image_field;
-    return withComposeUpdateLock(service, async () => {
-        const composePath = service.compose_path;
-        const raw = fs.readFileSync(composePath, "utf8");
-        const doc = YAML.parse(raw) as JsonRecord;
-        setNestedValue(doc, composeImageField, targetImageRef);
+    const composePath = service.compose_path;
+    const raw = fs.readFileSync(composePath, "utf8");
+    const doc = YAML.parse(raw) as JsonRecord;
+    setNestedValue(doc, composeImageField, targetImageRef);
+    try {
+        fs.writeFileSync(composePath, YAML.stringify(doc));
+        const command = getComposeCommand(composePath, service.service_name);
+        const { stdout, stderr } = await execFileAsync(command.file, command.args, {
+            cwd: path.dirname(composePath),
+            env: process.env,
+            maxBuffer: 10 * 1024 * 1024,
+            timeout: 180_000,
+        });
+        return { stdout: String(stdout), stderr: String(stderr) };
+    } catch (error) {
+        let restored = false;
         try {
-            fs.writeFileSync(composePath, YAML.stringify(doc));
-            const command = getComposeCommand(composePath, service.service_name);
-            const { stdout, stderr } = await execFileAsync(command.file, command.args, {
-                cwd: path.dirname(composePath),
-                env: process.env,
-                maxBuffer: 10 * 1024 * 1024,
-                timeout: 180_000,
+            fs.writeFileSync(composePath, raw);
+            restored = true;
+        } catch (rollbackError) {
+            console.error("[DockerUpdater] Failed to restore compose file", {
+                composePath,
+                rollbackError,
             });
-            return { stdout: String(stdout), stderr: String(stderr) };
-        } catch (error) {
-            try {
-                fs.writeFileSync(composePath, raw);
-            } catch (rollbackError) {
-                console.error("[DockerUpdater] Failed to restore compose file", {
-                    composePath,
-                    rollbackError,
-                });
-            }
-            throw error;
         }
-    });
+        if (restored) {
+            try {
+                const command = getComposeCommand(composePath, service.service_name);
+                await execFileAsync(command.file, command.args, {
+                    cwd: path.dirname(composePath),
+                    env: process.env,
+                    maxBuffer: 10 * 1024 * 1024,
+                    timeout: 180_000,
+                });
+            } catch (rollbackError) {
+                console.error(
+                    "[DockerUpdater] Failed to re-apply restored compose file",
+                    {
+                        composePath,
+                        rollbackError,
+                    }
+                );
+            }
+        }
+        throw error;
+    }
 }
 
 function booleanLabel(value: string | undefined, fallback = false): boolean {
@@ -904,64 +950,74 @@ async function applyServiceUpdate(
     service: ManagedServiceRow,
     eventPrefix: "auto" | "manual"
 ): Promise<DockerUpdaterStepResult> {
-    const target = buildTargetImageRef(service);
-    try {
-        const result = await applyComposeUpdate(service, target);
-        db.prepare(
-            `UPDATE docker_managed_services
-             SET compose_image_ref = ?, current_tag = ?, current_digest = ?,
-                 last_updated_at = ?, last_checked_at = ?, last_status = 'updated'
-             WHERE id = ?`
-        ).run(
-            target,
-            service.latest_tag,
-            service.pin_mode === "digest"
-                ? service.latest_digest
-                : service.current_digest,
-            nowIso(),
-            nowIso(),
-            service.id
-        );
-        insertEvent(
-            service,
-            `${eventPrefix}_update_succeeded`,
-            "Docker service updated",
-            { targetComposeImageRef: target }
-        );
-        createNotification(
-            "Docker service updated",
-            `${serviceLabel(service)} updated to ${target}`,
-            `docker:updater:updated:${service.id}:${target}`
-        );
-        return {
-            step: `${eventPrefix}-update:${serviceLabel(service)}`,
-            ok: true,
-            stdout: result.stdout,
-            stderr: result.stderr,
-        };
-    } catch (error) {
-        const message = caughtMessage(error);
-        db.prepare(
-            `UPDATE docker_managed_services
-             SET last_checked_at = ?, last_status = ?
-             WHERE id = ?`
-        ).run(nowIso(), `${eventPrefix}_update_failed`, service.id);
-        insertEvent(service, `${eventPrefix}_update_failed`, message, {
-            targetComposeImageRef: target,
-        });
-        createNotification(
-            `Docker ${eventPrefix} update failed`,
-            `${serviceLabel(service)}: ${message}`,
-            `docker:updater:${eventPrefix}-failed:${service.id}:${nowIso().slice(0, 10)}`,
-            "error"
-        );
-        return {
-            step: `${eventPrefix}-update:${serviceLabel(service)}`,
-            ok: false,
-            stdout: "",
-            stderr: message,
-        };
-    }
+    return withComposeUpdateLock(service, async () => {
+        const lockedRow = db
+            .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
+            .get(service.id) as ManagedServiceRow | undefined;
+        const lockedService = lockedRow ?? service;
+        const target = buildTargetImageRef(lockedService);
+        try {
+            const result = await applyComposeUpdateUnlocked(lockedService, target);
+            if (lockedRow) {
+                db.prepare(
+                    `UPDATE docker_managed_services
+                     SET compose_image_ref = ?, current_tag = ?, current_digest = ?,
+                         last_updated_at = ?, last_checked_at = ?, last_status = 'updated'
+                     WHERE id = ?`
+                ).run(
+                    target,
+                    lockedService.latest_tag,
+                    lockedService.pin_mode === "digest"
+                        ? lockedService.latest_digest
+                        : lockedService.current_digest,
+                    nowIso(),
+                    nowIso(),
+                    lockedService.id
+                );
+                insertEvent(
+                    lockedService,
+                    `${eventPrefix}_update_succeeded`,
+                    "Docker service updated",
+                    { targetComposeImageRef: target }
+                );
+                createNotification(
+                    "Docker service updated",
+                    `${serviceLabel(lockedService)} updated to ${target}`,
+                    `docker:updater:updated:${lockedService.id}:${target}`
+                );
+            }
+            return {
+                step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
+                ok: true,
+                stdout: result.stdout,
+                stderr: result.stderr,
+            };
+        } catch (error) {
+            const message = caughtMessage(error);
+            if (lockedRow) {
+                db.prepare(
+                    `UPDATE docker_managed_services
+                     SET last_checked_at = ?, last_status = ?
+                     WHERE id = ?`
+                ).run(nowIso(), `${eventPrefix}_update_failed`, lockedService.id);
+                insertEvent(lockedService, `${eventPrefix}_update_failed`, message, {
+                    targetComposeImageRef: target,
+                });
+                createNotification(
+                    `Docker ${eventPrefix} update failed`,
+                    `${serviceLabel(lockedService)}: ${message}`,
+                    `docker:updater:${eventPrefix}-failed:${lockedService.id}:${nowIso().slice(0, 10)}`,
+                    "error"
+                );
+            }
+            return {
+                step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
+                ok: false,
+                stdout: "",
+                stderr: message,
+            };
+        }
+    });
 }
 
 export async function runDockerUpdaterService(
@@ -1060,6 +1116,7 @@ export const __testing = {
     isSafeTagRegexPattern,
     lookupLatest,
     parseBearerChallenge,
+    parseNextLink,
     setNestedValue,
     servicesFromCompose,
     stripRegistry,

@@ -239,6 +239,17 @@ describe("Jobs page", () => {
 
         expect(await screen.findByText("run failed")).toBeInTheDocument();
 
+        hooks.runJob.mockResolvedValueOnce({
+            ok: false,
+            run: { message: "backend failed" },
+        });
+        await user.click(screen.getByRole("button", { name: /Run now/u }));
+        expect(await screen.findByText("backend failed")).toBeInTheDocument();
+
+        hooks.runJob.mockResolvedValueOnce({ ok: false, run: {} });
+        await user.click(screen.getByRole("button", { name: /Run now/u }));
+        expect(await screen.findByText("Action failed")).toBeInTheDocument();
+
         hooks.updateJob.mockRejectedValueOnce("toggle failed");
         await user.click(screen.getByRole("switch", { name: "Enabled" }));
         expect(await screen.findByText("toggle failed")).toBeInTheDocument();

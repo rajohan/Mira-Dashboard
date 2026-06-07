@@ -38,7 +38,7 @@ interface BackupJob {
 
 /** Represents the backup job API response. */
 interface BackupJobResponse {
-    job: BackupJob | null;
+    job: ReturnType<typeof mapJob>;
 }
 
 const backupJobs = new Map<string, BackupJob>();
@@ -87,6 +87,7 @@ function getCurrentJob(activeJobId: string | null, clear: () => void) {
 
     if (job.status === "done" && !job.refreshPending) {
         clear();
+        backupJobs.delete(job.id);
     }
 
     return job;
@@ -121,6 +122,7 @@ function mapJob(job: BackupJob | null) {
         stderr: job.stderr,
         startedAt: job.startedAt,
         endedAt: job.endedAt,
+        refreshPending: job.refreshPending === true,
     };
 }
 
