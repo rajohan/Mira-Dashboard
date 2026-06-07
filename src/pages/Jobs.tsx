@@ -353,7 +353,7 @@ export function Jobs() {
                                     }}
                                     label="Enabled"
                                     description="Disabled jobs can still be run manually."
-                                    disabled={updateJob.isPending}
+                                    disabled={updateJob.isPending || isCronSchedule}
                                 />
                                 {isCronSchedule ? (
                                     <div className="border-primary-700 bg-primary-950/60 rounded-lg border p-3">

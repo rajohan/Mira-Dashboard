@@ -40,13 +40,32 @@ async function startServer(configPath: string): Promise<TestServer> {
     opsRoutes(app);
     const server = http.createServer(app);
 
-    await new Promise<void>((resolve) => server.listen(0, resolve));
+    await new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
+            server.off("error", onError);
+            server.off("listening", onListening);
+        };
+        const onListening = () => {
+            cleanup();
+            resolve();
+        };
+        const onError = (error: Error) => {
+            cleanup();
+            reject(error);
+        };
+        server.once("listening", onListening);
+        server.once("error", onError);
+        server.listen(0);
+    });
     const address = server.address();
     assert.ok(address && typeof address === "object");
 
     return {
         baseUrl: `http://127.0.0.1:${address.port}`,
-        close: () => new Promise((resolve) => server.close(() => resolve())),
+        close: () =>
+            new Promise((resolve, reject) =>
+                server.close((error) => (error ? reject(error) : resolve()))
+            ),
     };
 }
 

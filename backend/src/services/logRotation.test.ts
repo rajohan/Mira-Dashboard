@@ -412,7 +412,7 @@ describe("log rotation service", { concurrency: false }, () => {
         const writeMock = mock.method(process.stdout, "write", () => true);
         try {
             process.env.MIRA_LOG_ROTATION_CONFIG = configPath;
-            process.argv = [process.execPath, "--dry-run", "--json"];
+            process.argv = [process.execPath, "log-rotation-test", "--dry-run", "--json"];
             const { runLogRotationCli } = await import(
                 `${pathToFileURL(modulePath).href}?cli=${Date.now()}`
             );
@@ -1082,6 +1082,7 @@ describe("log rotation service", { concurrency: false }, () => {
     });
 
     it("forwards dashboard DB path to elevated log rotation", () => {
+        const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
         process.env.MIRA_DASHBOARD_DB_PATH = path.join(tempDir, "dashboard.sqlite");
         try {
             assert.equal(
@@ -1089,7 +1090,11 @@ describe("log rotation service", { concurrency: false }, () => {
                 process.env.MIRA_DASHBOARD_DB_PATH
             );
         } finally {
-            delete process.env.MIRA_DASHBOARD_DB_PATH;
+            if (originalDbPath === undefined) {
+                delete process.env.MIRA_DASHBOARD_DB_PATH;
+            } else {
+                process.env.MIRA_DASHBOARD_DB_PATH = originalDbPath;
+            }
         }
     });
 

@@ -44,7 +44,12 @@ async function withFetch(
     callback: () => Promise<void>
 ) {
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-        const url = typeof input === "string" ? input : input.toString();
+        const url =
+            input instanceof Request
+                ? input.url
+                : input instanceof URL
+                  ? input.toString()
+                  : String(input);
         const body = handler(url, init);
         return {
             ok: !(body && typeof body === "object" && "httpStatus" in body),
