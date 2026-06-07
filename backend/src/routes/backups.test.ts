@@ -427,6 +427,7 @@ describe("backup routes", () => {
             assert.equal(started.body.ok, true);
             assert.equal(started.body.job.type, "walg");
 
+            let sawPendingRefresh = false;
             for (let attempt = 0; attempt < 30; attempt += 1) {
                 const pending = await requestJson<{
                     job: {
@@ -435,12 +436,13 @@ describe("backup routes", () => {
                         stderr: string;
                     } | null;
                 }>(server, "/api/backups/walg");
-                if (pending.body.job?.status === "done" && refresh.reject) {
-                    assert.equal(pending.body.job.refreshPending, true);
+                if (pending.body.job?.refreshPending && refresh.reject) {
+                    assert.equal(pending.body.job.status, "running");
                     assert.equal(
                         pending.body.job.stderr.includes("Status refresh failed"),
                         false
                     );
+                    sawPendingRefresh = true;
                     break;
                 }
                 await new Promise((resolve) => setTimeout(resolve, 10));
@@ -448,6 +450,7 @@ describe("backup routes", () => {
             if (!refresh.reject) {
                 assert.fail("Backup refresh did not start");
             }
+            assert.equal(sawPendingRefresh, true);
             refresh.reject(new Error("refresh crashed"));
 
             for (let attempt = 0; attempt < 30; attempt += 1) {

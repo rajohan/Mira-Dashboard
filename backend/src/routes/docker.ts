@@ -898,7 +898,10 @@ function manualUpdaterFailureStatus(code: string): number {
     if (code === "NOT_FOUND") {
         return 404;
     }
-    if (code === "DISABLED" || code === "CONFLICT") {
+    if (code === "DISABLED") {
+        return 400;
+    }
+    if (code === "CONFLICT") {
         return 409;
     }
     return 500;

@@ -17,7 +17,7 @@ interface TestServer {
 }
 
 function dockerNotifications() {
-    return db
+    const rows = db
         .prepare(
             `SELECT title, type, dedupe_key, metadata_json, is_read
              FROM notifications
@@ -31,6 +31,7 @@ function dockerNotifications() {
         title: string;
         type: string;
     }>;
+    return rows.map((row) => ({ ...row }));
 }
 
 const originalPath = process.env.PATH;
@@ -551,6 +552,7 @@ async function seedDockerUpdaterState(tempDir: string): Promise<void> {
             "    image: repo/app:1.0.0@sha256:old",
             "    labels:",
             '      mira.updater.autoUpdate: "true"',
+            '      mira.updater.tagPattern: "1.0.1"',
             "  disabled:",
             "    image: repo/disabled:1",
             "  current:",
@@ -803,7 +805,7 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(__testing.manualUpdaterFailureCode("boom"), "APPLY_FAILED");
         assert.equal(__testing.manualUpdaterFailureCode("boom", "CONFLICT"), "CONFLICT");
         assert.equal(__testing.manualUpdaterFailureStatus("NOT_FOUND"), 404);
-        assert.equal(__testing.manualUpdaterFailureStatus("DISABLED"), 409);
+        assert.equal(__testing.manualUpdaterFailureStatus("DISABLED"), 400);
         assert.equal(__testing.manualUpdaterFailureStatus("CONFLICT"), 409);
         assert.equal(__testing.manualUpdaterFailureStatus("APPLY_FAILED"), 500);
         assert.equal(
@@ -2184,15 +2186,30 @@ describe("docker routes", { concurrency: false }, () => {
         );
         assert.equal(run.status, 200);
         assert.equal(run.body.success, true);
-        assert.deepEqual(
-            run.body.steps.map((step) => step.step),
-            ["register", "poll"]
+        assert.equal(
+            run.body.steps.some((step) => step.step === "auto-update:media/app"),
+            true
         );
         assert.equal(
             run.body.steps.every((step) => step.ok),
             true
         );
-        assert.deepEqual(dockerNotifications(), []);
+        assert.deepEqual(dockerNotifications(), [
+            {
+                dedupe_key: "docker:updater:updated:1:repo/app:1.0.1@sha256:new",
+                is_read: 0,
+                metadata_json: "{}",
+                title: "Docker service updated",
+                type: "info",
+            },
+            {
+                dedupe_key: "docker:updater:updates-available",
+                is_read: 0,
+                metadata_json: "{}",
+                title: "Docker updates available",
+                type: "info",
+            },
+        ]);
 
         await seedDockerUpdaterState(tempDir);
         await withEnvValue("MIRA_FAKE_DOCKER_COMPOSE_FAIL", "1", async () => {
@@ -2205,15 +2222,12 @@ describe("docker routes", { concurrency: false }, () => {
                 )
             );
             assert.equal(failedRun.status, 200);
-            assert.equal(failedRun.body.success, true);
-            assert.deepEqual(
-                failedRun.body.steps.map((step) => step.step),
-                ["register", "poll"]
+            assert.equal(failedRun.body.success, false);
+            const failedAutoStep = failedRun.body.steps.find(
+                (step) => step.step === "auto-update:media/app"
             );
-            assert.equal(
-                failedRun.body.steps.every((step) => step.ok),
-                true
-            );
+            assert.equal(failedAutoStep?.ok, false);
+            assert.match(failedAutoStep?.stderr ?? "", /compose failed/u);
             const failedAgain = await withDockerUpdaterFetch(() =>
                 withEnvValue("MIRA_DOCKER_UPDATER_SKIP_REGISTRY", undefined, () =>
                     requestJson<{ success: boolean }>(server, "/api/docker/updater/run", {
@@ -2223,7 +2237,7 @@ describe("docker routes", { concurrency: false }, () => {
                 )
             );
             assert.equal(failedAgain.status, 200);
-            assert.equal(failedAgain.body.success, true);
+            assert.equal(failedAgain.body.success, false);
         });
     });
 
@@ -2246,12 +2260,12 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(success.body.success, true);
         assert.deepEqual(success.body.result, {
             serviceId: 1,
-            summary: { updated: 0, failed: 0 },
-            updated: [],
+            summary: { updated: 1, failed: 0 },
+            updated: [1],
             failed: [],
         });
-        assert.equal(success.body.service.currentTag, "1.0.0");
-        assert.equal(success.body.service.lastStatus, "current");
+        assert.equal(success.body.service.currentTag, "1.0.1");
+        assert.equal(success.body.service.lastStatus, "updated");
         assert.equal(success.body.stderr, "");
 
         await seedDockerUpdaterState(tempDir);
