@@ -837,9 +837,7 @@ setTimeout(() => process.exit(0), 30);
                 MIRA_DOCKER_UPDATER_PLATFORM: "linux/arm64",
             },
             async () => {
-                const updater = await import(
-                    `./dockerUpdater.js?manual=${Date.now()}`
-                );
+                const updater = await import(`./dockerUpdater.js?manual=${Date.now()}`);
                 await updater.registerDockerUpdaterServices();
                 const service = db
                     .prepare(
