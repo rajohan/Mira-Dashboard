@@ -551,7 +551,9 @@ async function seedDockerUpdaterState(tempDir: string): Promise<void> {
         "utf8"
     );
 
-    db.exec("DELETE FROM docker_update_events; DELETE FROM docker_managed_services;");
+    db.exec(
+        "DELETE FROM docker_update_events; DELETE FROM docker_managed_services; DELETE FROM notifications WHERE source IN ('docker', 'docker-updater');"
+    );
     db.prepare(
         `INSERT INTO docker_managed_services (
             id, app_slug, service_name, compose_path, image_repo, compose_image_ref,

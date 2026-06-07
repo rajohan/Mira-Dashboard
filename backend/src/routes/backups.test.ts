@@ -141,6 +141,7 @@ describe("backup routes", () => {
 
     before(async () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-backup-routes-"));
+        backupTesting.clearJobsForTest();
         backupTesting.setRefreshBackupCacheForTest(async (key) => {
             refreshedKeys.push(key);
             return { refreshed: [key] };
@@ -149,10 +150,12 @@ describe("backup routes", () => {
     });
 
     beforeEach(() => {
+        backupTesting.clearJobsForTest();
         refreshedKeys.length = 0;
     });
 
     after(async () => {
+        backupTesting.clearJobsForTest();
         backupTesting.setRefreshBackupCacheForTest();
         await server.close();
         if (originalBackupShell === undefined) {

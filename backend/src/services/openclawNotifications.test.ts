@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 
 import { db } from "../db.js";
@@ -61,14 +58,12 @@ function seedSystemHostCache({
 }
 
 describe("OpenClaw update notifications", () => {
-    let tempDir: string;
     let runOpenClawNotificationCheck: () => Promise<boolean>;
     let startOpenClawNotificationMonitor: (intervalMs?: number) => void;
     let getState: () => { is_armed: number; last_latest: string | null };
     let stopOpenClawNotificationMonitorForTest: () => void;
 
     before(async () => {
-        tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-openclaw-notifications-"));
         const openClawNotifications = await import("./openclawNotifications.js");
         ({ runOpenClawNotificationCheck, startOpenClawNotificationMonitor } =
             openClawNotifications);
@@ -104,7 +99,6 @@ describe("OpenClaw update notifications", () => {
         } else {
             process.env.FAKE_OPENCLAW_MISSING_VERSION = originalMissingVersion;
         }
-        await rm(tempDir, { recursive: true, force: true });
     });
 
     it("creates one update notification per latest version and disarms repeated alerts", async () => {

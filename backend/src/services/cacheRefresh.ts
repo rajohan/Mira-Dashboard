@@ -681,16 +681,18 @@ export async function refreshGitCache() {
             ? statusShort.output.split("\n").filter(Boolean)
             : [];
         const statusSummary = summarizeStatus(porcelain);
+        const dirty = statusShort.ok ? statusSummary.total > 0 : true;
         repos.push({
             ...repo,
             exists: true,
             branch: branch.ok ? branch.output || null : null,
             head: head.ok ? head.output || null : null,
             remote: remote.ok ? remote.output.split(/\s+/u)[1] || null : null,
-            dirty: statusSummary.total > 0,
+            dirty,
             statusSummary,
             statusShort: porcelain.slice(0, 25),
             statusTruncated: porcelain.length > 25,
+            ...(statusShort.ok ? {} : { statusError: statusShort.output }),
             checkedAt: nowIso(),
         });
     }
@@ -1249,9 +1251,10 @@ tmux send-keys -t "$SESSION" Enter
 for i in $(seq 1 20); do OUT=$(tmux capture-pane -pt "$SESSION" -S -320 || true); echo "$OUT" | grep -Eiq "5h limit:|Weekly limit:" && break; sleep 1; done
 printf "%s\n" "$OUT"
 `;
-        const { stdout } = await execFileAsync("bash", ["-lc", command], {
+        const { stdout } = await execFileAsync("bash", ["-c", command], {
             env: {
-                ...process.env,
+                PATH: process.env.PATH,
+                NODE_ENV: process.env.NODE_ENV,
                 MIRA_QUOTA_CODEX_BIN: codexPath,
                 MIRA_QUOTA_CODEX_HOME: codexHome,
             },

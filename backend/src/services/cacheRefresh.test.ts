@@ -345,13 +345,18 @@ else if (command === "status --short") {
                 key: string;
                 dirty: boolean;
                 statusSummary?: { total: number };
+                statusError?: string;
             }>;
         };
-        assert.deepEqual(data.dirtyRepos, ["openclaw"]);
+        assert.deepEqual(data.dirtyRepos, ["openclaw", "mira-dashboard"]);
         assert.deepEqual(data.missingRepos, ["docker"]);
         assert.equal(
             data.repos.find((repo) => repo.key === "mira-dashboard")?.dirty,
-            false
+            true
+        );
+        assert.match(
+            data.repos.find((repo) => repo.key === "mira-dashboard")?.statusError || "",
+            /git -C .*mira-dashboard status --short/u
         );
         assert.equal(
             data.repos.find((repo) => repo.key === "openclaw")?.statusSummary?.total,

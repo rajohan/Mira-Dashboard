@@ -67,6 +67,9 @@ describe("cache hooks", () => {
             await result.current.mutateAsync("system.host");
         });
 
+        expect(invalidateSpy).toHaveBeenCalledWith({
+            queryKey: cacheKeys.entry("system.host"),
+        });
         expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ["moltbook"] });
     });
 

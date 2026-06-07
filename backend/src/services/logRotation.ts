@@ -942,7 +942,7 @@ export async function runLogRotationService(
             }
             const matched = new Set<string>();
             try {
-                for (const pattern of group.paths!) {
+                for (const pattern of policy.paths!) {
                     for (const file of await resolveGlob(pattern, {
                         missingOk: policy.missingOk,
                     })) {
@@ -950,7 +950,7 @@ export async function runLogRotationService(
                     }
                 }
                 const excluded = new Set<string>();
-                for (const pattern of group.excludePaths || []) {
+                for (const pattern of policy.excludePaths || []) {
                     for (const file of await resolveGlob(pattern, {
                         missingOk: policy.missingOk,
                     })) {

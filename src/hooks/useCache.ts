@@ -102,12 +102,15 @@ export function useRefreshCacheEntry() {
         },
         onSuccess: async (_result) => {
             const keys = refreshedEntryKeys(_result);
+            const invalidationKeys = keys.length > 0 ? keys : _result.keys;
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
-                ...keys.map((key) =>
+                ...invalidationKeys.map((key) =>
                     queryClient.invalidateQueries({ queryKey: cacheKeys.entry(key) })
                 ),
-                ...(keys.some((key) => key === "moltbook" || key.startsWith("moltbook."))
+                ...(invalidationKeys.some(
+                    (key) => key === "moltbook" || key.startsWith("moltbook.")
+                )
                     ? [queryClient.invalidateQueries({ queryKey: ["moltbook"] })]
                     : []),
             ]);
