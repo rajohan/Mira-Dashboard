@@ -831,17 +831,25 @@ setTimeout(() => process.exit(0), 30);
             } as Response;
         }) as typeof fetch;
 
-        await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
-            const updater = await import(`./dockerUpdater.js?manual=${Date.now()}`);
-            await updater.registerDockerUpdaterServices();
-            const service = db
-                .prepare(
-                    "SELECT id FROM docker_managed_services WHERE service_name = 'web'"
-                )
-                .get() as { id: number };
-            const steps = await updater.runDockerUpdaterService(service.id);
-            assert.equal(steps.at(-1)?.ok, true);
-        });
+        await withEnv(
+            {
+                MIRA_DOCKER_APPS_ROOT: appsRoot,
+                MIRA_DOCKER_UPDATER_PLATFORM: "linux/arm64",
+            },
+            async () => {
+                const updater = await import(
+                    `./dockerUpdater.js?manual=${Date.now()}`
+                );
+                await updater.registerDockerUpdaterServices();
+                const service = db
+                    .prepare(
+                        "SELECT id FROM docker_managed_services WHERE service_name = 'web'"
+                    )
+                    .get() as { id: number };
+                const steps = await updater.runDockerUpdaterService(service.id);
+                assert.equal(steps.at(-1)?.ok, true);
+            }
+        );
 
         assert.match(await readFile(composePath, "utf8"), /image: nginx:3/u);
         const updatedService = db
