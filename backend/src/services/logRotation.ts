@@ -1128,7 +1128,7 @@ export async function runElevatedLogRotationService(options: {
     const { stderr, stdout } = await elevatedLogRotationExecFileRunner("sudo", args, {
         env: elevatedLogRotationEnvironment(),
         maxBuffer: 1024 * 1024,
-        timeout: 30_000,
+        timeout: 10 * 60_000,
     });
     const trimmed = stdout.trim();
     return {

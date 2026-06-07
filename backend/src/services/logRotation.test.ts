@@ -378,7 +378,7 @@ describe("log rotation service", { concurrency: false }, () => {
                 options: { env: NodeJS.ProcessEnv; maxBuffer: number; timeout?: number }
             ) => {
                 commands.push({ args: args ?? [], env: options.env, file });
-                assert.equal(options.timeout, 30_000);
+                assert.equal(options.timeout, 10 * 60_000);
                 return {
                     stderr: "helper warning",
                     stdout: JSON.stringify({ ok: true }),
