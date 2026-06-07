@@ -84,7 +84,7 @@ describe("cache hooks", () => {
             .mockResolvedValueOnce({
                 ok: true,
                 status: 200,
-                json: async () => ({ ok: true, entry: { key: "moltbook.home" } }),
+                json: async () => ({ ok: true }),
             });
         vi.stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
@@ -111,6 +111,9 @@ describe("cache hooks", () => {
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: cacheKeys.heartbeat() });
         expect(invalidateSpy).toHaveBeenCalledWith({
             queryKey: cacheKeys.entry("system.host"),
+        });
+        expect(invalidateSpy).toHaveBeenCalledWith({
+            queryKey: cacheKeys.entry("moltbook.home"),
         });
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["moltbook"] });
     });

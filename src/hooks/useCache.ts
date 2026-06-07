@@ -101,8 +101,9 @@ export function useRefreshCacheEntry() {
             return { keys, results };
         },
         onSuccess: async (_result) => {
-            const keys = refreshedEntryKeys(_result);
-            const invalidationKeys = keys.length > 0 ? keys : _result.keys;
+            const invalidationKeys = [
+                ...new Set([..._result.keys, ...refreshedEntryKeys(_result)]),
+            ];
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
                 ...invalidationKeys.map((key) =>

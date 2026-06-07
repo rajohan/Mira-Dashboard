@@ -71,9 +71,12 @@ export function useUpdateScheduledJob() {
                 timeOfDay?: string | null;
             };
         }) =>
-            apiPatchRequired<{ ok: boolean; job: ScheduledJob }>(`/jobs/${id}`, {
-                patch,
-            }),
+            apiPatchRequired<{ ok: boolean; job: ScheduledJob }>(
+                `/jobs/${encodeURIComponent(id)}`,
+                {
+                    patch,
+                }
+            ),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: jobKeys.list() });
         },
@@ -84,7 +87,9 @@ export function useRunScheduledJob() {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: ({ id }: { id: string }) =>
-            apiPostRequired<{ ok: boolean; run: ScheduledJobRun }>(`/jobs/${id}/run`),
+            apiPostRequired<{ ok: boolean; run: ScheduledJobRun }>(
+                `/jobs/${encodeURIComponent(id)}/run`
+            ),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: jobKeys.list() });
         },

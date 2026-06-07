@@ -50,14 +50,14 @@ describe("job hooks", () => {
 
         await act(async () => {
             await result.current.mutateAsync({
-                id: "cache.weather",
+                id: "custom/job",
                 patch: { enabled: false },
             });
         });
 
         expect(fetchMock).toHaveBeenNthCalledWith(
             1,
-            "/api/jobs/cache.weather",
+            "/api/jobs/custom%2Fjob",
             expect.objectContaining({ method: "PATCH" })
         );
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: jobKeys.list() });
@@ -78,12 +78,12 @@ describe("job hooks", () => {
         });
 
         await act(async () => {
-            await result.current.mutateAsync({ id: "cache.weather" });
+            await result.current.mutateAsync({ id: "custom/job" });
         });
 
         expect(fetchMock).toHaveBeenNthCalledWith(
             1,
-            "/api/jobs/cache.weather/run",
+            "/api/jobs/custom%2Fjob/run",
             expect.objectContaining({ method: "POST" })
         );
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: jobKeys.list() });

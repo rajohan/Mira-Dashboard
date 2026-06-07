@@ -519,7 +519,15 @@ async function withDockerUpdaterFetch<T>(callback: () => Promise<T>): Promise<T>
             headers: new Headers(),
             json: async () =>
                 url.endsWith("/tags/1.0.1")
-                    ? { digest: "sha256:new" }
+                    ? {
+                          images: [
+                              {
+                                  architecture: process.arch === "arm64" ? "arm64" : "amd64",
+                                  digest: "sha256:new",
+                                  os: "linux",
+                              },
+                          ],
+                      }
                     : { results: [{ name: "1.0.1" }] },
         } as Response;
     }) as typeof fetch;
