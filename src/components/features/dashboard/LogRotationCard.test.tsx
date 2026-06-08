@@ -1,13 +1,18 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LogRotationCard } from "./LogRotationCard";
 
 const hooks = vi.hoisted(() => ({
+    useScheduledJobs: vi.fn(),
     useLogRotationStatus: vi.fn(),
     useRunLogRotationDryRun: vi.fn(),
     useRunLogRotationNow: vi.fn(),
+}));
+
+vi.mock("../../../hooks/useJobs", () => ({
+    useScheduledJobs: hooks.useScheduledJobs,
 }));
 
 vi.mock("../../../hooks/useLogRotation", () => ({
@@ -17,6 +22,21 @@ vi.mock("../../../hooks/useLogRotation", () => ({
 }));
 
 describe("LogRotationCard", () => {
+    beforeEach(() => {
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: null,
+                    id: "ops.log-rotation",
+                    intervalSeconds: 86_400,
+                    scheduleType: "daily",
+                    settings: { daily: true, keep: 3, maxSizeMb: 10 },
+                    timeOfDay: "03:30",
+                },
+            ],
+        });
+    });
+
     it("renders log rotation status and runs dry-run/real actions", async () => {
         const dryRunMutate = vi.fn();
         const realRunMutate = vi.fn();

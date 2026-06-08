@@ -193,6 +193,9 @@ function startBackupJob(type: BackupJob["type"], command: string) {
             const cacheKey =
                 type === "kopia" ? "backup.kopia.status" : "backup.walg.status";
             job.refreshPending = true;
+            job.status = "done";
+            job.code = code;
+            job.endedAt = Date.now();
             void refreshBackupCacheWithTimeout(cacheKey)
                 .catch((error: unknown) => {
                     const refreshMessage = errorMessage(error, "Unknown error");
@@ -201,9 +204,6 @@ function startBackupJob(type: BackupJob["type"], command: string) {
                     );
                 })
                 .finally(() => {
-                    job.status = "done";
-                    job.code = code;
-                    job.endedAt = Date.now();
                     job.refreshPending = false;
                 });
             return;

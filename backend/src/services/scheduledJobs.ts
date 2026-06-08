@@ -194,7 +194,7 @@ const defaultJobs: ReadonlyArray<DefaultScheduledJob> = [
         description: "Rotate approved file logs using the backend ops runner.",
         actionType: "ops.logRotation",
         actionTarget: "log-rotation",
-        settings: { dryRun: false },
+        settings: { daily: true, dryRun: false, keep: 3, maxSizeMb: 10 },
         scheduleType: "daily",
         intervalSeconds: 24 * 60 * 60,
         timeOfDay: "03:30",

@@ -379,22 +379,27 @@ function imageMatchesPlatform(image: JsonRecord, platform: string): boolean {
 
 async function lookupDockerHub(service: ManagedServiceRow) {
     const repo = normalizeDockerHubRepo(stripRegistry(service.image_repo));
-    const tags: unknown[] = [];
-    let tagsUrl: string | null =
-        `https://hub.docker.com/v2/repositories/${repo}/tags?page_size=100`;
-    while (tagsUrl) {
-        const tagsData = await fetchJson(tagsUrl);
-        if (Array.isArray(tagsData.results)) {
-            tags.push(...tagsData.results);
+    let latestTag = service.current_tag;
+    if (service.tag_match_type === "regex") {
+        const tags: unknown[] = [];
+        let tagsUrl: string | null =
+            `https://hub.docker.com/v2/repositories/${repo}/tags?page_size=100`;
+        while (tagsUrl) {
+            const tagsData = await fetchJson(tagsUrl);
+            if (Array.isArray(tagsData.results)) {
+                tags.push(...tagsData.results);
+            }
+            const next = typeof tagsData.next === "string" ? tagsData.next : "";
+            tagsUrl = next || null;
         }
-        const next = typeof tagsData.next === "string" ? tagsData.next : "";
-        tagsUrl = next || null;
+        const candidates = tags
+            .map((item) => String(asRecord(item).name || ""))
+            .filter((tag: string) => tag && tagMatches(service, tag))
+            .sort(compareTags);
+        latestTag = candidates.at(-1) || service.current_tag;
+    } else if (service.tag_match_pattern) {
+        latestTag = service.tag_match_pattern;
     }
-    const candidates = tags
-        .map((item) => String(asRecord(item).name || ""))
-        .filter((tag: string) => tag && tagMatches(service, tag))
-        .sort(compareTags);
-    const latestTag = candidates.at(-1) || service.current_tag;
     let latestDigest = service.current_digest;
     if (latestTag) {
         const tagData = await fetchJson(

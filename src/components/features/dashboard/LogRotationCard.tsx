@@ -1,5 +1,6 @@
 import { FlaskConical, Play, RotateCw } from "lucide-react";
 
+import { useScheduledJobs } from "../../../hooks/useJobs";
 import {
     useLogRotationStatus,
     useRunLogRotationDryRun,
@@ -11,11 +12,27 @@ import { Card } from "../../ui/Card";
 
 /** Renders the log rotation card UI. */
 export function LogRotationCard() {
+    const jobs = useScheduledJobs();
+    const logRotationJob = jobs.data?.find((job) => job.id === "ops.log-rotation");
     const status = useLogRotationStatus(30_000);
     const dryRun = useRunLogRotationDryRun();
     const realRun = useRunLogRotationNow();
     const lastAction = realRun.data || dryRun.data;
     const lastRun = status.data?.lastRun;
+    const scheduleDisplay =
+        logRotationJob?.scheduleType === "daily" && logRotationJob.timeOfDay
+            ? `${logRotationJob.timeOfDay} daily`
+            : logRotationJob?.scheduleType === "interval"
+              ? `${Math.round(logRotationJob.intervalSeconds / 60)} min interval`
+              : logRotationJob?.cronExpression || "—";
+    const keep = logRotationJob?.settings.keep;
+    const maxSizeMb = logRotationJob?.settings.maxSizeMb;
+    const daily = logRotationJob?.settings.daily;
+    const retentionDisplay = typeof keep === "number" ? `${keep} archives` : "—";
+    const thresholdDisplay =
+        typeof maxSizeMb === "number"
+            ? `${maxSizeMb} MB${daily === true ? " / daily" : ""}`
+            : "—";
 
     return (
         <Card className="overflow-hidden">
@@ -61,15 +78,15 @@ export function LogRotationCard() {
                 </Card>
                 <Card className="p-4">
                     <div className="text-primary-400 text-sm">Schedule</div>
-                    <div className="mt-2 text-lg font-semibold">03:30 daily</div>
+                    <div className="mt-2 text-lg font-semibold">{scheduleDisplay}</div>
                 </Card>
                 <Card className="p-4">
                     <div className="text-primary-400 text-sm">Retention</div>
-                    <div className="mt-2 text-lg font-semibold">3 archives</div>
+                    <div className="mt-2 text-lg font-semibold">{retentionDisplay}</div>
                 </Card>
                 <Card className="p-4">
                     <div className="text-primary-400 text-sm">Rotate at</div>
-                    <div className="mt-2 text-lg font-semibold">10 MB / daily</div>
+                    <div className="mt-2 text-lg font-semibold">{thresholdDisplay}</div>
                 </Card>
                 <Card className="p-4">
                     <div className="text-primary-400 text-sm">Last run</div>

@@ -1137,12 +1137,38 @@ export async function runElevatedLogRotationService(options: {
     if (options.dryRun) {
         args.push("--dry-run");
     }
-    const { stderr, stdout } = await elevatedLogRotationExecFileRunner("sudo", args, {
-        encoding: "utf8",
-        env: elevatedLogRotationEnvironment(),
-        maxBuffer: 1024 * 1024,
-        timeout: 10 * 60_000,
-    });
+    let stderr: string;
+    let stdout: string;
+    try {
+        const output = await elevatedLogRotationExecFileRunner("sudo", args, {
+            encoding: "utf8",
+            env: elevatedLogRotationEnvironment(),
+            maxBuffer: 1024 * 1024,
+            timeout: 10 * 60_000,
+        });
+        stderr = output.stderr;
+        stdout = output.stdout;
+    } catch (error) {
+        const failedOutput = error as { stderr?: unknown; stdout?: unknown };
+        stderr = typeof failedOutput.stderr === "string" ? failedOutput.stderr : "";
+        stdout = typeof failedOutput.stdout === "string" ? failedOutput.stdout : "";
+        const trimmedFailure = stdout.trim();
+        if (trimmedFailure) {
+            try {
+                return {
+                    result: JSON.parse(trimmedFailure) as Record<string, unknown>,
+                    stderr,
+                };
+            } catch {
+                // Fall through to a structured failure with the captured output.
+            }
+        }
+        const failureMessage = caughtMessage(error);
+        return {
+            result: { ok: false, error: failureMessage, stdout: trimmedFailure },
+            stderr: stderr ? `${stderr}\n${failureMessage}` : failureMessage,
+        };
+    }
     const trimmed = stdout.trim();
     if (!trimmed) {
         const error = "Elevated log rotation returned empty JSON output";

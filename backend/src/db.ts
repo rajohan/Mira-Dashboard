@@ -453,8 +453,16 @@ export function ensureDockerUpdateEventsSetNull(targetDb: MigrationDatabase): vo
                     WHEN docker_managed_services.id IS NULL THEN NULL
                     ELSE docker_update_events_old.managed_service_id
                 END,
-                COALESCE(docker_managed_services.app_slug, ${oldAppSlug}, ''),
-                COALESCE(docker_managed_services.service_name, ${oldServiceName}, ''),
+                COALESCE(
+                    ${oldAppSlug},
+                    docker_managed_services.app_slug,
+                    ''
+                ),
+                COALESCE(
+                    ${oldServiceName},
+                    docker_managed_services.service_name,
+                    ''
+                ),
                 docker_update_events_old.event_type,
                 docker_update_events_old.from_tag,
                 docker_update_events_old.to_tag,

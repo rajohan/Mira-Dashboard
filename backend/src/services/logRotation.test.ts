@@ -535,6 +535,38 @@ describe("log rotation service", { concurrency: false }, () => {
                 /^Failed to parse elevated log rotation JSON: /u
             );
             assert.match(malformedWithoutStderr.stderr, /stdout: still not json/u);
+            __testing.setElevatedLogRotationExecFileRunner(async () => {
+                throw Object.assign(new Error("sudo failed"), {
+                    stderr: "helper warning",
+                    stdout: JSON.stringify({ ok: false, error: "child failed" }),
+                });
+            });
+            assert.deepEqual(await runElevatedLogRotationService({ dryRun: false }), {
+                result: { ok: false, error: "child failed" },
+                stderr: "helper warning",
+            });
+            __testing.setElevatedLogRotationExecFileRunner(async () => {
+                throw Object.assign(new Error("sudo failed"), {
+                    stderr: "helper warning",
+                    stdout: "not json",
+                });
+            });
+            const rejectedMalformed = await runElevatedLogRotationService({
+                dryRun: false,
+            });
+            assert.deepEqual(rejectedMalformed.result, {
+                ok: false,
+                error: "sudo failed",
+                stdout: "not json",
+            });
+            assert.equal(rejectedMalformed.stderr, "helper warning\nsudo failed");
+            __testing.setElevatedLogRotationExecFileRunner(async () => {
+                throw new Error("sudo missing");
+            });
+            assert.deepEqual(await runElevatedLogRotationService({ dryRun: false }), {
+                result: { ok: false, error: "sudo missing", stdout: "" },
+                stderr: "sudo missing",
+            });
             assert.equal(commands[0]?.file, "sudo");
             assert.deepEqual(commands[0]?.args.slice(0, 3), [
                 "-n",

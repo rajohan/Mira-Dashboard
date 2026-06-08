@@ -2320,7 +2320,7 @@ describe("docker routes", { concurrency: false }, () => {
             const fallbackFailure = await requestJson<{
                 error: string;
                 success: boolean;
-                service: null;
+                service: unknown;
                 stderr: string;
             }>(server, "/api/docker/updater/services/1/update", {
                 method: "POST",
@@ -2329,8 +2329,58 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(fallbackFailure.status, 409);
             assert.equal(fallbackFailure.body.success, false);
             assert.equal(fallbackFailure.body.error, "No update available");
-            assert.equal(fallbackFailure.body.service, null);
+            assert.deepEqual(fallbackFailure.body.service, {
+                appSlug: "media",
+                composeImageRef: "repo/app:1.0.0",
+                currentDigest: "sha256:old",
+                currentTag: "1.0.0",
+                enabled: true,
+                id: 1,
+                imageRepo: "repo/app",
+                lastCheckedAt: "2026-05-11",
+                lastStatus: "update_available",
+                lastUpdatedAt: null,
+                latestDigest: "sha256:new",
+                latestTag: "1.0.1",
+                metadata: { owner: "mira" },
+                pinMode: "digest",
+                policy: "auto",
+                serviceName: "app",
+                updateAvailable: true,
+            });
             assert.equal(fallbackFailure.body.stderr, "No update available");
+        } finally {
+            __testing.setDockerUpdaterServiceRunnerForTests();
+        }
+
+        await seedDockerUpdaterState(tempDir);
+        try {
+            __testing.setDockerUpdaterServiceRunnerForTests(async () => {
+                db.prepare("DELETE FROM docker_managed_services WHERE id = 1").run();
+                return [
+                    {
+                        step: "manual-update:media/app",
+                        ok: false,
+                        code: "NOT_FOUND",
+                        stdout: "",
+                        stderr: "Service not found",
+                    },
+                ];
+            });
+            const missingFailure = await requestJson<{
+                error: string;
+                success: boolean;
+                service: unknown;
+                stderr: string;
+            }>(server, "/api/docker/updater/services/1/update", {
+                method: "POST",
+                body: {},
+            });
+            assert.equal(missingFailure.status, 404);
+            assert.equal(missingFailure.body.success, false);
+            assert.equal(missingFailure.body.error, "Service not found");
+            assert.equal(missingFailure.body.service, null);
+            assert.equal(missingFailure.body.stderr, "Service not found");
         } finally {
             __testing.setDockerUpdaterServiceRunnerForTests();
         }
@@ -2344,7 +2394,16 @@ describe("docker routes", { concurrency: false }, () => {
                 headers: new Headers(),
                 json: async () =>
                     url.endsWith("/tags/1.0.0")
-                        ? { digest: "sha256:old" }
+                        ? {
+                              images: [
+                                  {
+                                      architecture:
+                                          process.arch === "arm64" ? "arm64" : "amd64",
+                                      digest: "sha256:old",
+                                      os: "linux",
+                                  },
+                              ],
+                          }
                         : { results: [{ name: "1.0.0" }] },
             } as Response;
         }) as typeof fetch;

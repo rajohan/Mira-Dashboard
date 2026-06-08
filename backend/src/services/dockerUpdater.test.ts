@@ -18,7 +18,11 @@ type StepResult = {
 };
 
 async function writeExecutable(filePath: string, script: string) {
-    await writeFile(filePath, script, "utf8");
+    const normalizedScript = script.replace(
+        /^#!\/usr\/bin\/env node/u,
+        `#!${process.execPath}`
+    );
+    await writeFile(filePath, normalizedScript, "utf8");
     await chmod(filePath, 0o755);
 }
 

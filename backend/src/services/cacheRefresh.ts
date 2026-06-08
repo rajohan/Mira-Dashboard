@@ -1390,7 +1390,9 @@ async function refreshCacheProducerUnlocked(key: string) {
     };
 
     if (key === "moltbook") {
-        return refreshWithFailureRecord(refreshMoltbookCache);
+        return refreshWithFailureRecord(refreshMoltbookCache, [
+            ...MOLTBOOK_CACHE_KEY_LIST,
+        ]);
     }
     if (MOLTBOOK_CACHE_KEYS.has(key)) {
         return refreshWithFailureRecord(() =>
@@ -1430,7 +1432,11 @@ async function refreshCacheProducerUnlocked(key: string) {
 
 export async function refreshCacheProducer(key: string) {
     const scopeKey = cacheRefreshScopeKey(key);
-    const existing = inFlightCacheRefreshes.get(scopeKey);
+    const existing =
+        inFlightCacheRefreshes.get(scopeKey) ??
+        [...inFlightCacheRefreshes.entries()].find(([inFlightKey]) =>
+            scopeKey.startsWith(`${inFlightKey}.`)
+        )?.[1];
     if (existing) {
         return existing;
     }

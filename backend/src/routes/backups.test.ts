@@ -437,7 +437,7 @@ describe("backup routes", () => {
                     } | null;
                 }>(server, "/api/backups/walg");
                 if (pending.body.job?.refreshPending && refresh.reject) {
-                    assert.equal(pending.body.job.status, "running");
+                    assert.equal(pending.body.job.status, "done");
                     assert.equal(
                         pending.body.job.stderr.includes("Status refresh failed"),
                         false
