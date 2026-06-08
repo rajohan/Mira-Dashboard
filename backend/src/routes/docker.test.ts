@@ -2069,6 +2069,12 @@ describe("docker routes", { concurrency: false }, () => {
             "UPDATE docker_managed_services SET last_status = 'registry_check_failed' WHERE id = 3"
         );
         markStackAsFailed.run();
+        db.prepare(
+            "UPDATE docker_managed_services SET last_status = 'unsupported_registry' WHERE id = 2"
+        ).run();
+        db.prepare(
+            "UPDATE docker_managed_services SET last_status = NULL WHERE id = 1"
+        ).run();
         const services = await requestJson<{
             services: Array<{
                 id: number;
@@ -2088,7 +2094,7 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(services.body.summary.total, 3);
         assert.equal(services.body.summary.enabled, 2);
         assert.equal(services.body.summary.updateAvailable, 2);
-        assert.equal(services.body.summary.failed, 1);
+        assert.equal(services.body.summary.failed, 2);
         assert.deepEqual(services.body.services[0]?.metadata, { owner: "mira" });
         assert.deepEqual(services.body.services[2]?.metadata, {});
 

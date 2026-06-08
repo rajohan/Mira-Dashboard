@@ -539,6 +539,23 @@ function insertEvent(
     );
 }
 
+function insertEventBestEffort(
+    service: ManagedServiceRow,
+    eventType: string,
+    message: string,
+    details: Record<string, unknown> = {}
+) {
+    try {
+        insertEvent(service, eventType, message, details);
+    } catch (error) {
+        console.error("[DockerUpdater] Failed to persist update event", {
+            error: caughtMessage(error),
+            eventType,
+            service: serviceLabel(service),
+        });
+    }
+}
+
 function createNotification(
     title: string,
     description: string,
@@ -559,6 +576,23 @@ function createNotification(
             updated_at = excluded.updated_at,
             occurred_at = excluded.occurred_at`
     ).run(title, description, type, dedupeKey, timestamp, timestamp, timestamp);
+}
+
+function createNotificationBestEffort(
+    title: string,
+    description: string,
+    dedupeKey: string,
+    type: "info" | "error" = "info"
+) {
+    try {
+        createNotification(title, description, dedupeKey, type);
+    } catch (error) {
+        console.error("[DockerUpdater] Failed to persist notification", {
+            dedupeKey,
+            error: caughtMessage(error),
+            title,
+        });
+    }
 }
 
 function composeUpdateLockKey(service: ManagedServiceRow): string {
@@ -938,7 +972,7 @@ export async function pollDockerUpdaterRegistries(
             checked.push(serviceLabel(service));
             if (updateAvailable) {
                 updates.push(serviceLabel(service));
-                insertEvent(
+                insertEventBestEffort(
                     updatedService,
                     "update_available",
                     "Docker update available"
@@ -958,7 +992,7 @@ export async function pollDockerUpdaterRegistries(
         }
     }
     if (updates.length > 0) {
-        createNotification(
+        createNotificationBestEffort(
             "Docker updates available",
             updates.join(", "),
             "docker:updater:updates-available"
@@ -1028,13 +1062,13 @@ async function applyServiceUpdate(
                 nowIso(),
                 lockedService.id
             );
-            insertEvent(
+            insertEventBestEffort(
                 lockedService,
                 `${eventPrefix}_update_succeeded`,
                 "Docker service updated",
                 { targetComposeImageRef: target }
             );
-            createNotification(
+            createNotificationBestEffort(
                 "Docker service updated",
                 `${serviceLabel(lockedService)} updated to ${target}`,
                 `docker:updater:updated:${lockedService.id}:${target}`
@@ -1052,10 +1086,15 @@ async function applyServiceUpdate(
                  SET last_checked_at = ?, last_status = ?
                  WHERE id = ?`
             ).run(nowIso(), `${eventPrefix}_update_failed`, lockedService.id);
-            insertEvent(lockedService, `${eventPrefix}_update_failed`, message, {
-                targetComposeImageRef: target,
-            });
-            createNotification(
+            insertEventBestEffort(
+                lockedService,
+                `${eventPrefix}_update_failed`,
+                message,
+                {
+                    targetComposeImageRef: target,
+                }
+            );
+            createNotificationBestEffort(
                 `Docker ${eventPrefix} update failed`,
                 `${serviceLabel(lockedService)}: ${message}`,
                 `docker:updater:${eventPrefix}-failed:${lockedService.id}:${nowIso().slice(0, 10)}`,
@@ -1121,9 +1160,7 @@ export async function runDockerUpdaterService(
             );
         }
         const refreshedService = db
-            .prepare(
-                "SELECT * FROM docker_managed_services WHERE id = ? AND enabled = 1 LIMIT 1"
-            )
+            .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
             .get(serviceId) as ManagedServiceRow | undefined;
         if (!refreshedService) {
             return [
@@ -1135,6 +1172,19 @@ export async function runDockerUpdaterService(
                     code: "NOT_FOUND",
                     stdout: "",
                     stderr: "Docker updater service not found after registry poll",
+                },
+            ];
+        }
+        if (refreshedService.enabled !== 1) {
+            return [
+                register,
+                poll,
+                {
+                    step: `manual-update:${serviceLabel(refreshedService)}`,
+                    ok: false,
+                    code: "DISABLED",
+                    stdout: "",
+                    stderr: "Docker updater service not found or disabled",
                 },
             ];
         }

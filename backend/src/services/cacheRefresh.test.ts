@@ -580,6 +580,43 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         });
     });
 
+    it("reuses an in-flight Moltbook subkey refresh for full requests", async () => {
+        await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
+            let hotFetches = 0;
+            let releaseHot: (() => void) | undefined;
+            globalThis.fetch = (async (input: string | URL | Request) => {
+                const url = input instanceof Request ? input.url : String(input);
+                if (url.includes("/feed?sort=hot")) {
+                    hotFetches += 1;
+                    await new Promise<void>((resolve) => {
+                        releaseHot = resolve;
+                    });
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({ posts: [{ id: "hot" }] }),
+                    } as Response;
+                }
+                throw new Error(`Unexpected Moltbook URL: ${url}`);
+            }) as typeof fetch;
+
+            const hotRefresh = refreshCacheProducer("moltbook.feed.hot");
+            while (!releaseHot) {
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+            const fullRefresh = refreshCacheProducer("moltbook");
+            releaseHot();
+
+            const expected = { refreshed: ["moltbook.feed.hot"] };
+            assert.deepEqual(await Promise.all([hotRefresh, fullRefresh]), [
+                expected,
+                expected,
+            ]);
+            assert.equal(hotFetches, 1);
+        });
+    });
+
     it("rejects unsupported Moltbook subkeys while a full refresh is in flight", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             let releaseHome: (() => void) | undefined;

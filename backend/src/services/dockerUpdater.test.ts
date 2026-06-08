@@ -1031,8 +1031,9 @@ setTimeout(() => process.exit(0), 30);
             );
             assert.equal(
                 disabledAfterPoll.at(-1)?.stderr,
-                "Docker updater service not found after registry poll"
+                "Docker updater service not found or disabled"
             );
+            assert.equal(disabledAfterPoll.at(-1)?.code, "DISABLED");
         });
     });
 
@@ -1264,6 +1265,164 @@ setTimeout(() => process.exit(0), 30);
         });
 
         assert.match(await readFile(composePath, "utf8"), /image: nginx:1/u);
+    });
+
+    it("reports a disabled manual service after a successful fresh poll", async () => {
+        const appsRoot = path.join(tempDir, "apps");
+        const appDir = path.join(appsRoot, "manual-disabled-after-poll");
+        const binDir = path.join(tempDir, "bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        await writeFile(
+            path.join(appDir, "compose.yaml"),
+            `services:
+  target:
+    image: nginx:1
+    labels:
+      mira.updater.tagPattern: "^[0-9]+$"
+      mira.updater.tagPatternIsRegex: "true"
+`,
+            "utf8"
+        );
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            "#!/usr/bin/env node\nprocess.stdout.write('unexpected apply\\n');\n"
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
+            const updater = await import(
+                `./dockerUpdater.js?manual-disabled-after-poll=${Date.now()}`
+            );
+            await updater.registerDockerUpdaterServices();
+            const service = db
+                .prepare(
+                    "SELECT id FROM docker_managed_services WHERE service_name = 'target'"
+                )
+                .get() as { id: number };
+            let disabled = false;
+            globalThis.fetch = (async (input: string | URL | Request) => {
+                const url = typeof input === "string" ? input : input.toString();
+                if (!disabled) {
+                    disabled = true;
+                    db.prepare(
+                        "UPDATE docker_managed_services SET enabled = 0 WHERE id = ?"
+                    ).run(service.id);
+                }
+                return {
+                    ok: true,
+                    headers: new Headers(),
+                    json: async () =>
+                        url.endsWith("/tags/2")
+                            ? { digest: "sha256:new" }
+                            : { results: [{ name: "1" }, { name: "2" }] },
+                } as Response;
+            }) as typeof fetch;
+
+            const steps = (await updater.runDockerUpdaterService(
+                service.id
+            )) as StepResult[];
+            assert.deepEqual(
+                steps.map((step) => [step.step, step.ok, step.code]),
+                [
+                    ["register", true, undefined],
+                    ["poll", true, undefined],
+                    [
+                        "manual-update:manual-disabled-after-poll/target",
+                        false,
+                        "DISABLED",
+                    ],
+                ]
+            );
+        });
+    });
+
+    it("keeps update results when event and notification persistence fail", async () => {
+        const appDir = path.join(tempDir, "best-effort-persistence");
+        const binDir = path.join(tempDir, "bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        const composePath = path.join(appDir, "compose.yaml");
+        await writeFile(
+            composePath,
+            `services:
+  target:
+    image: nginx:1
+`,
+            "utf8"
+        );
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            "#!/usr/bin/env node\nprocess.stdout.write('updated\\n');\n"
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input.toString();
+            return {
+                ok: true,
+                headers: new Headers(),
+                json: async () =>
+                    url.endsWith("/tags/2")
+                        ? {
+                              images: [
+                                  {
+                                      architecture:
+                                          process.arch === "x64" ? "amd64" : process.arch,
+                                      digest: "sha256:new",
+                                      os: "linux",
+                                  },
+                              ],
+                          }
+                        : { results: [{ name: "1" }, { name: "2" }] },
+            } as Response;
+        }) as typeof fetch;
+
+        const consoleErrorMock = mock.method(console, "error", () => {});
+        db.prepare(
+            `INSERT INTO docker_managed_services (
+                app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                'best-effort-persistence', 'target', ?, 'nginx', 'nginx:1',
+                'services.target.image', '1', 'sha256:old', NULL, NULL, 'notify',
+                'tag', 'regex', '^[0-9]+$', 1, '{}'
+            )`
+        ).run(composePath);
+        db.exec(`
+            CREATE TEMP TRIGGER docker_update_events_fail
+            BEFORE INSERT ON docker_update_events
+            BEGIN
+                SELECT RAISE(FAIL, 'event persistence failed');
+            END;
+            CREATE TEMP TRIGGER notifications_fail
+            BEFORE INSERT ON notifications
+            BEGIN
+                SELECT RAISE(FAIL, 'notification persistence failed');
+            END;
+        `);
+        try {
+            const updater = await import(
+                `./dockerUpdater.js?best-effort-persistence=${Date.now()}`
+            );
+            const poll = await updater.pollDockerUpdaterRegistries();
+            assert.equal(poll.ok, true);
+            const service = db
+                .prepare(
+                    "SELECT * FROM docker_managed_services WHERE service_name = 'target'"
+                )
+                .get();
+            const apply = await updater.__testing.applyServiceUpdate(service, "manual");
+            assert.equal(apply.ok, true);
+            assert.equal(consoleErrorMock.mock.callCount(), 4);
+        } finally {
+            db.exec(`
+                DROP TRIGGER IF EXISTS docker_update_events_fail;
+                DROP TRIGGER IF EXISTS notifications_fail;
+            `);
+            consoleErrorMock.mock.restore();
+        }
     });
 
     it("covers updater helper fallback branches directly", async () => {

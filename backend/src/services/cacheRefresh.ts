@@ -1494,15 +1494,15 @@ async function refreshCacheProducerUnlocked(key: string) {
 
 export async function refreshCacheProducer(key: string) {
     const scopeKey = cacheRefreshScopeKey(key);
-    const exactExisting = inFlightCacheRefreshes.get(scopeKey);
-    const parentExisting =
-        exactExisting === undefined && isSupportedCacheProducerKey(key)
-            ? [...inFlightCacheRefreshes.entries()].find(([inFlightKey]) =>
+    const existing = isSupportedCacheProducerKey(key)
+        ? [...inFlightCacheRefreshes.entries()].find(
+              ([inFlightKey]) =>
+                  inFlightKey === scopeKey ||
+                  inFlightKey.startsWith(`${scopeKey}.`) ||
                   scopeKey.startsWith(`${inFlightKey}.`)
-              )?.[1]
-            : undefined;
-    const existing = exactExisting ?? parentExisting;
-    if (existing) {
+          )?.[1]
+        : undefined;
+    if (existing !== undefined) {
         return existing;
     }
     const refresh = refreshCacheProducerUnlocked(key);

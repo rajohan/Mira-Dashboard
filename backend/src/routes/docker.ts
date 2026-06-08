@@ -1279,6 +1279,7 @@ export default function dockerRoutes(app: express.Application): void {
                         "auto_update_failed",
                         "manual_update_failed",
                         "registry_check_failed",
+                        "unsupported_registry",
                     ].includes(service.lastStatus || "")
                 ).length,
             };
