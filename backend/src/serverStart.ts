@@ -70,7 +70,9 @@ export function handleServerListening(): void {
                     "[Backend] Failed to stop scheduled job scheduler:"
                 );
             }
-            rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
+            if (gatewayStarted) {
+                rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
+            }
         });
         afterBackgroundServicesStartedForTest?.();
     } catch (error) {

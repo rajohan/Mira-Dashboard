@@ -319,6 +319,60 @@ test("nulls orphaned docker updater event service ids during migration", async (
     }
 });
 
+test("adds nullable service ids to legacy docker updater events", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const { cleanup, result } = await importWithTempDb("dockerEventsLegacy");
+    const testDb = new DatabaseSync(":memory:");
+    try {
+        testDb.exec(`
+            CREATE TABLE docker_managed_services (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                app_slug TEXT NOT NULL,
+                service_name TEXT NOT NULL
+            );
+            CREATE TABLE docker_update_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                app_slug TEXT NOT NULL DEFAULT '',
+                service_name TEXT NOT NULL DEFAULT '',
+                event_type TEXT NOT NULL,
+                from_tag TEXT,
+                to_tag TEXT,
+                from_digest TEXT,
+                to_digest TEXT,
+                message TEXT,
+                details_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL
+            );
+            INSERT INTO docker_update_events (
+                id, app_slug, service_name, event_type, created_at
+            ) VALUES (
+                9, 'legacy', 'web', 'updated', '2026-06-07T00:00:00.000Z'
+            );
+        `);
+
+        result.__testing.ensureDockerUpdateEventsSetNull(testDb);
+
+        const event = testDb
+            .prepare(
+                `SELECT managed_service_id, app_slug, service_name
+                 FROM docker_update_events WHERE id = 9`
+            )
+            .get() as
+            | {
+                  managed_service_id: number | null;
+                  app_slug: string;
+                  service_name: string;
+              }
+            | undefined;
+        assert.equal(event?.managed_service_id, null);
+        assert.equal(event?.app_slug, "legacy");
+        assert.equal(event?.service_name, "web");
+    } finally {
+        testDb.close();
+        await cleanup();
+    }
+});
+
 test("rolls back failed docker updater event migrations", async () => {
     const { cleanup, result } = await importWithTempDb("dockerEventsRollback");
     const calls: string[] = [];

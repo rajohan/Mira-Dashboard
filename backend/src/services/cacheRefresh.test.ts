@@ -912,6 +912,13 @@ if (args.includes("capture-pane")) {
         assert.equal(__testing.toCurrencyNumber("USD 1.2.3"), null);
         assert.equal(__testing.toCurrencyNumber("-"), null);
         assert.equal(__testing.toCurrencyNumber({}), null);
+        const missingValue = undefined;
+        assert.equal(__testing.toNullableNumber(null), null);
+        assert.equal(__testing.toNullableNumber(missingValue), null);
+        assert.equal(__testing.toNullableNumber(""), null);
+        assert.equal(__testing.toNullableNumber("   "), null);
+        assert.equal(__testing.toNullableNumber("nope"), null);
+        assert.equal(__testing.toNullableNumber("75"), 75);
         assert.equal(__testing.openMeteoCodeToDescription(2), "Partly cloudy");
         assert.equal(__testing.openMeteoCodeToDescription(48), "Fog");
         assert.equal(__testing.openMeteoCodeToDescription(53), "Drizzle");

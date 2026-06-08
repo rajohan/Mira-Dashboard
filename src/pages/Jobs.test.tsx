@@ -355,6 +355,7 @@ describe("Jobs page", () => {
         const user = userEvent.setup();
         render(<Jobs />);
 
+        await user.click(screen.getByRole("button", { name: /Git.*Daily/u }));
         await user.click(screen.getByRole("button", { name: /Schedule type/u }));
         await user.click(screen.getByRole("menuitem", { name: /Interval/u }));
 

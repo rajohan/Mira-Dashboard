@@ -409,15 +409,18 @@ export function ensureDockerUpdateEventsSetNull(targetDb: MigrationDatabase): vo
             foreignKey.table === "docker_managed_services"
     );
     if (
-        !managedServiceId ||
-        (Number(managedServiceId.notnull || 0) === 0 &&
-            String(serviceForeignKey?.on_delete || "").toUpperCase() === "SET NULL" &&
-            appSlug &&
-            serviceName)
+        managedServiceId &&
+        Number(managedServiceId.notnull || 0) === 0 &&
+        String(serviceForeignKey?.on_delete || "").toUpperCase() === "SET NULL" &&
+        appSlug &&
+        serviceName
     ) {
         return;
     }
 
+    const oldManagedServiceId = managedServiceId
+        ? "docker_update_events_old.managed_service_id"
+        : "NULL";
     const oldAppSlug = appSlug ? "NULLIF(docker_update_events_old.app_slug, '')" : "NULL";
     const oldServiceName = serviceName
         ? "NULLIF(docker_update_events_old.service_name, '')"
@@ -451,7 +454,7 @@ export function ensureDockerUpdateEventsSetNull(targetDb: MigrationDatabase): vo
                 docker_update_events_old.id,
                 CASE
                     WHEN docker_managed_services.id IS NULL THEN NULL
-                    ELSE docker_update_events_old.managed_service_id
+                    ELSE ${oldManagedServiceId}
                 END,
                 COALESCE(
                     ${oldAppSlug},
@@ -473,7 +476,7 @@ export function ensureDockerUpdateEventsSetNull(targetDb: MigrationDatabase): vo
                 docker_update_events_old.created_at
             FROM docker_update_events_old
             LEFT JOIN docker_managed_services
-                ON docker_managed_services.id = docker_update_events_old.managed_service_id;
+                ON docker_managed_services.id = ${oldManagedServiceId};
             DROP TABLE docker_update_events_old;
             CREATE INDEX IF NOT EXISTS idx_docker_update_events_created_at
                 ON docker_update_events(created_at DESC);

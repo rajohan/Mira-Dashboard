@@ -1086,11 +1086,8 @@ export async function runDockerUpdaterService(
     }
     if (serviceId !== undefined) {
         const service = db
-            .prepare(
-                "SELECT * FROM docker_managed_services WHERE id = ? AND enabled = 1 LIMIT 1"
-            )
+            .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
             .get(serviceId) as ManagedServiceRow | undefined;
-        const poll = service ? await pollDockerUpdaterRegistries(service.id) : undefined;
         if (!service) {
             return [
                 register,
@@ -1105,6 +1102,19 @@ export async function runDockerUpdaterService(
                 },
             ];
         }
+        if (service.enabled !== 1) {
+            return [
+                register,
+                {
+                    step: `manual-update:${serviceLabel(service)}`,
+                    ok: false,
+                    code: "DISABLED",
+                    stdout: "",
+                    stderr: "Docker updater service not found or disabled",
+                },
+            ];
+        }
+        const poll = await pollDockerUpdaterRegistries(service.id);
         if (!register.ok || !poll?.ok) {
             return [register, poll].filter(
                 (step): step is DockerUpdaterStepResult => step !== undefined

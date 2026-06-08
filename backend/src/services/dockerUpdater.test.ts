@@ -256,6 +256,10 @@ process.stdout.write("updated\n");
     image: alpine:3
     labels:
       mira.updater.autoUpdate: "true"
+  disabled:
+    image: alpine:3
+    labels:
+      mira.updater.enabled: "false"
 `,
             "utf8"
         );
@@ -325,6 +329,18 @@ process.stdout.write("updated\n");
 
                 const missing = await runDockerUpdaterService(99_999);
                 assert.equal(missing.at(-1)?.stderr, "Docker updater service not found");
+
+                const disabledService = db
+                    .prepare(
+                        "SELECT id FROM docker_managed_services WHERE service_name = 'disabled'"
+                    )
+                    .get() as { id: number };
+                const disabled = await runDockerUpdaterService(disabledService.id);
+                assert.equal(disabled.at(-1)?.code, "DISABLED");
+                assert.equal(
+                    disabled.at(-1)?.stderr,
+                    "Docker updater service not found or disabled"
+                );
             }
         );
     });
