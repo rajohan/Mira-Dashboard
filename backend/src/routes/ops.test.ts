@@ -261,6 +261,10 @@ describe("ops routes", () => {
 
     it("runs dry-run log rotation without changing files or state", async () => {
         const before = await readFile(logPath, "utf8");
+        const statusBefore = await requestJson<unknown>(
+            server,
+            "/api/ops/log-rotation/status"
+        );
         const response = await requestJson<{
             success: boolean;
             result: { ok: boolean; dryRun: boolean; rotatedFiles: number };
@@ -273,6 +277,13 @@ describe("ops routes", () => {
         assert.equal(response.body.result.rotatedFiles, 1);
         assert.equal(response.body.stderr, "");
         assert.equal(await readFile(logPath, "utf8"), before);
+        const statusAfter = await requestJson<unknown>(
+            server,
+            "/api/ops/log-rotation/status"
+        );
+        assert.equal(statusBefore.status, 200);
+        assert.equal(statusAfter.status, 200);
+        assert.deepEqual(statusAfter.body, statusBefore.body);
     });
 
     it("runs real log rotation through the elevated helper", async () => {

@@ -91,6 +91,22 @@ interface DefaultScheduledJob {
     cronExpression: string | null;
 }
 
+export class ScheduledJobValidationError extends Error {
+    statusCode = 400;
+    code = "SCHEDULED_JOB_VALIDATION_ERROR";
+
+    constructor(message: string) {
+        super(message);
+        this.name = "ScheduledJobValidationError";
+    }
+}
+
+export function isScheduledJobValidationError(
+    error: unknown
+): error is ScheduledJobValidationError {
+    return error instanceof ScheduledJobValidationError;
+}
+
 type CacheRefreshRunner = (key: string) => Promise<unknown>;
 type DockerUpdaterStep = { step: string; ok: boolean; stderr?: string };
 type DockerUpdaterRunner = () => Promise<DockerUpdaterStep[]>;
@@ -547,7 +563,7 @@ export function updateScheduledJob(
         timeOfDay,
     });
     if (validationError) {
-        throw new Error(validationError);
+        throw new ScheduledJobValidationError(validationError);
     }
 
     const timestamp = nowIso();

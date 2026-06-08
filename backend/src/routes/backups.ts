@@ -126,8 +126,37 @@ function mapJob(job: BackupJob | null) {
     };
 }
 
+function clearActiveBackupJob(type: BackupJob["type"], jobId: string): void {
+    backupJobs.delete(jobId);
+    if (type === "kopia" && activeKopiaJobId === jobId) {
+        activeKopiaJobId = null;
+    }
+    if (type === "walg" && activeWalgJobId === jobId) {
+        activeWalgJobId = null;
+    }
+}
+
+function waitForChildSpawn(child: ChildProcess): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const onSpawn = () => {
+            cleanup();
+            resolve();
+        };
+        const onError = (error: Error) => {
+            cleanup();
+            reject(error);
+        };
+        function cleanup() {
+            child.off("spawn", onSpawn);
+            child.off("error", onError);
+        }
+        child.once("spawn", onSpawn);
+        child.once("error", onError);
+    });
+}
+
 /** Performs start backup job. */
-function startBackupJob(type: BackupJob["type"], command: string) {
+async function startBackupJob(type: BackupJob["type"], command: string) {
     const existingJob = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
     if (existingJob?.status === "running") {
         return existingJob;
@@ -168,13 +197,7 @@ function startBackupJob(type: BackupJob["type"], command: string) {
             env: process.env,
         });
     } catch (error) {
-        backupJobs.delete(jobId);
-        if (activeKopiaJobId === jobId) {
-            activeKopiaJobId = null;
-        }
-        if (activeWalgJobId === jobId) {
-            activeWalgJobId = null;
-        }
+        clearActiveBackupJob(type, jobId);
         throw error;
     }
 
@@ -218,6 +241,13 @@ function startBackupJob(type: BackupJob["type"], command: string) {
         job.stderr = trimOutput(`${job.stderr}\n${error.message}`.trim());
         job.endedAt = Date.now();
     });
+
+    try {
+        await waitForChildSpawn(child);
+    } catch (error) {
+        clearActiveBackupJob(type, jobId);
+        throw error;
+    }
 
     return job;
 }
@@ -277,7 +307,7 @@ export default function backupRoutes(
         "/api/backups/kopia/run",
         asyncRoute(
             async (_req, res) => {
-                const job = startKopiaBackupJob();
+                const job = await startKopiaBackupJob();
                 res.json({ ok: true, job: mapJob(job) });
             },
             { fallback: "Failed to start Kopia backup" }
@@ -292,7 +322,7 @@ export default function backupRoutes(
         "/api/backups/walg/run",
         asyncRoute(
             async (_req, res) => {
-                const job = startWalgBackupJob();
+                const job = await startWalgBackupJob();
                 res.json({ ok: true, job: mapJob(job) });
             },
             { fallback: "Failed to start WAL-G backup" }

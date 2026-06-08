@@ -1365,6 +1365,19 @@ function cacheRefreshScopeKey(key: string): string {
     return key === "moltbook" ? "moltbook" : key;
 }
 
+function isSupportedCacheProducerKey(key: string): boolean {
+    return (
+        key === "moltbook" ||
+        MOLTBOOK_CACHE_KEYS.has(key) ||
+        key === "weather.spydeberg" ||
+        key === "git.workspace" ||
+        key === "system.host" ||
+        key === "backup.kopia.status" ||
+        key === "backup.walg.status" ||
+        key === "quotas.summary"
+    );
+}
+
 async function refreshCacheProducerUnlocked(key: string) {
     const refreshWithFailureRecord = async (
         refresh: () => Promise<{ refreshed: string[] }>,
@@ -1432,11 +1445,14 @@ async function refreshCacheProducerUnlocked(key: string) {
 
 export async function refreshCacheProducer(key: string) {
     const scopeKey = cacheRefreshScopeKey(key);
-    const existing =
-        inFlightCacheRefreshes.get(scopeKey) ??
-        [...inFlightCacheRefreshes.entries()].find(([inFlightKey]) =>
-            scopeKey.startsWith(`${inFlightKey}.`)
-        )?.[1];
+    const exactExisting = inFlightCacheRefreshes.get(scopeKey);
+    const parentExisting =
+        exactExisting === undefined && isSupportedCacheProducerKey(key)
+            ? [...inFlightCacheRefreshes.entries()].find(([inFlightKey]) =>
+                  scopeKey.startsWith(`${inFlightKey}.`)
+              )?.[1]
+            : undefined;
+    const existing = exactExisting ?? parentExisting;
     if (existing) {
         return existing;
     }

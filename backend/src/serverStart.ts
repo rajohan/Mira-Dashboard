@@ -10,6 +10,34 @@ import {
 
 let isStarting = false;
 let afterBackgroundServicesStartedForTest: (() => void) | undefined;
+let closeCleanup: (() => void) | undefined;
+
+function rollback(fn: () => void, label: string): void {
+    try {
+        fn();
+    } catch (cleanupError) {
+        console.error(label, cleanupError);
+    }
+}
+
+function installCloseCleanup(cleanup: () => void): void {
+    if (closeCleanup) {
+        server.off("close", closeCleanup);
+    }
+    closeCleanup = () => {
+        closeCleanup = undefined;
+        cleanup();
+    };
+    server.once("close", closeCleanup);
+}
+
+function removeCloseCleanup(): void {
+    if (!closeCleanup) {
+        return;
+    }
+    server.off("close", closeCleanup);
+    closeCleanup = undefined;
+}
 
 /** Starts Gateway and the scheduled job scheduler after the HTTP server is listening. */
 export function handleServerListening(): void {
@@ -28,16 +56,21 @@ export function handleServerListening(): void {
 
         startScheduledJobScheduler();
         scheduledJobSchedulerStarted = true;
+        installCloseCleanup(() => {
+            if (scheduledJobSchedulerStarted) {
+                rollback(
+                    stopScheduledJobScheduler,
+                    "[Backend] Failed to stop scheduled job scheduler:"
+                );
+            }
+            if (gatewayStarted) {
+                rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
+            }
+        });
         afterBackgroundServicesStartedForTest?.();
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
-        const rollback = (fn: () => void, label: string): void => {
-            try {
-                fn();
-            } catch (cleanupError) {
-                console.error(label, cleanupError);
-            }
-        };
+        removeCloseCleanup();
         if (scheduledJobSchedulerStarted) {
             rollback(
                 stopScheduledJobScheduler,
@@ -101,6 +134,7 @@ if (shouldStartOnImport()) {
 }
 
 export const __testing = {
+    removeCloseCleanup,
     setAfterBackgroundServicesStartedForTest(callback: (() => void) | undefined): void {
         afterBackgroundServicesStartedForTest = callback;
     },

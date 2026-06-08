@@ -3,6 +3,7 @@ import express, { type RequestHandler } from "express";
 import { asyncRoute as baseAsyncRoute, errorMessage } from "../lib/errors.js";
 import {
     getScheduledJob,
+    isScheduledJobValidationError,
     listScheduledJobs,
     runScheduledJob,
     type ScheduledJobScheduleType,
@@ -44,8 +45,6 @@ const allowedPatchFields = new Set([
     "scheduleType",
     "timeOfDay",
 ]);
-const validationErrorPattern =
-    /intervalSeconds must be an integer >= 60|scheduleType must be interval, daily, or cron|timeOfDay must be HH:mm|cron schedule is not implemented yet/u;
 
 function invalidPatchField(patch: Record<string, unknown>): string | null {
     for (const key of Object.keys(patch)) {
@@ -160,9 +159,8 @@ export default function jobsRoutes(app: express.Application): void {
                     timeOfDay,
                 });
             } catch (error) {
-                const message = errorMessage(error, "Invalid scheduled job patch");
-                if (validationErrorPattern.test(message)) {
-                    res.status(400).json({ error: message });
+                if (isScheduledJobValidationError(error)) {
+                    res.status(error.statusCode).json({ error: error.message });
                     return;
                 }
                 throw error;

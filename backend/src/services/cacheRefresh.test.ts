@@ -501,6 +501,59 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         });
     });
 
+    it("rejects unsupported Moltbook subkeys while a full refresh is in flight", async () => {
+        await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
+            let releaseHome: (() => void) | undefined;
+            globalThis.fetch = (async (input: string | URL | Request) => {
+                const url = input instanceof Request ? input.url : String(input);
+                if (url.includes("/home")) {
+                    await new Promise<void>((resolve) => {
+                        releaseHome = resolve;
+                    });
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({ agent: { name: "mira_2026" } }),
+                    } as Response;
+                }
+                if (url.includes("/feed?sort=hot") || url.includes("/feed?sort=new")) {
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({ posts: [] }),
+                    } as Response;
+                }
+                if (url.includes("/agents/profile")) {
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({
+                            agent: { name: "mira_2026" },
+                            recentPosts: [],
+                            recentComments: [],
+                        }),
+                    } as Response;
+                }
+                throw new Error(`Unexpected Moltbook URL: ${url}`);
+            }) as typeof fetch;
+
+            const fullRefresh = refreshCacheProducer("moltbook");
+            while (!releaseHome) {
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+
+            await assert.rejects(
+                () => refreshCacheProducer("moltbook.unknown"),
+                /Unsupported Moltbook cache key/u
+            );
+            releaseHome();
+            await fullRefresh;
+        });
+    });
+
     it("refreshes git workspace status with dirty, clean, and missing repos", async () => {
         const binDir = path.join(tempDir, "bin");
         await import("node:fs/promises").then((fs) => fs.mkdir(binDir));

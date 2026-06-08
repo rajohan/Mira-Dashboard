@@ -996,6 +996,79 @@ describe("log rotation service", { concurrency: false }, () => {
         await rm(lockPath, { force: true });
     });
 
+    it("returns null when stale lock reacquire loses the final create race", async () => {
+        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        await mkdir(path.dirname(lockPath), { recursive: true });
+        await writeFile(lockPath, "not-a-pid\n", "utf8");
+        const originalOpen = fsPromises.open.bind(fsPromises);
+        let createAttempts = 0;
+        const openMock = mock.method(
+            fsPromises,
+            "open",
+            (
+                target: Parameters<typeof fsPromises.open>[0],
+                flags?: Parameters<typeof fsPromises.open>[1],
+                mode?: Parameters<typeof fsPromises.open>[2]
+            ) => {
+                if (String(target) === lockPath && flags === "wx") {
+                    createAttempts += 1;
+                    if (createAttempts === 2) {
+                        const error = new Error(
+                            "lost create race"
+                        ) as NodeJS.ErrnoException;
+                        error.code = "EEXIST";
+                        throw error;
+                    }
+                }
+                return originalOpen(target, flags, mode);
+            }
+        );
+        try {
+            assert.equal(await __testing.acquireLogRotationLock(false), null);
+        } finally {
+            openMock.mock.restore();
+            await rm(lockPath, { force: true });
+        }
+    });
+
+    it("rethrows unexpected errors from stale lock reacquire", async () => {
+        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        await mkdir(path.dirname(lockPath), { recursive: true });
+        await writeFile(lockPath, "not-a-pid\n", "utf8");
+        const originalOpen = fsPromises.open.bind(fsPromises);
+        let createAttempts = 0;
+        const openMock = mock.method(
+            fsPromises,
+            "open",
+            (
+                target: Parameters<typeof fsPromises.open>[0],
+                flags?: Parameters<typeof fsPromises.open>[1],
+                mode?: Parameters<typeof fsPromises.open>[2]
+            ) => {
+                if (String(target) === lockPath && flags === "wx") {
+                    createAttempts += 1;
+                    if (createAttempts === 2) {
+                        const error = new Error(
+                            "reacquire denied"
+                        ) as NodeJS.ErrnoException;
+                        error.code = "EACCES";
+                        throw error;
+                    }
+                }
+                return originalOpen(target, flags, mode);
+            }
+        );
+        try {
+            await assert.rejects(
+                () => __testing.acquireLogRotationLock(false),
+                /reacquire denied/u
+            );
+        } finally {
+            openMock.mock.restore();
+            await rm(lockPath, { force: true });
+        }
+    });
+
     it("rethrows unexpected stale lock reclaim setup errors", async () => {
         const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
         await mkdir(path.dirname(lockPath), { recursive: true });

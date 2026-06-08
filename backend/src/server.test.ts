@@ -753,10 +753,16 @@ describe("server bootstrap", () => {
         console.error = (...args: unknown[]) => {
             errors.push(args);
         };
+        gateway.shutdown = () => {
+            shutdownCalled = true;
+        };
         try {
             process.env.OPENCLAW_TOKEN = "test-token";
             handleServerListening();
             assert.equal(initializedToken, "test-token");
+            server.emit("close");
+            assert.equal(shutdownCalled, true);
+            shutdownCalled = false;
             stopScheduledJobScheduler();
             gateway.init = () => {
                 throw new Error("gateway failed");
@@ -772,9 +778,6 @@ describe("server bootstrap", () => {
             closeCalled = false;
             gateway.init = (token: string) => {
                 initializedToken = token;
-            };
-            gateway.shutdown = () => {
-                shutdownCalled = true;
             };
             let intervalCalls = 0;
             globalThis.setInterval = ((...args: Parameters<typeof setInterval>) => {
@@ -944,6 +947,7 @@ describe("server bootstrap", () => {
             globalThis.setInterval = originalSetInterval;
             gateway.shutdown = originalShutdown;
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
+            serverStartTesting.removeCloseCleanup();
             stopScheduledJobScheduler();
             if (originalListeningDescriptor) {
                 Object.defineProperty(server, "listening", originalListeningDescriptor);

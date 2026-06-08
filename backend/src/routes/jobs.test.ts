@@ -401,7 +401,15 @@ test("maps manual duplicate run status codes", async () => {
         assert.equal(duplicate.status, 409);
         assert.equal(duplicate.body.error, "Scheduled job is already running");
         finishExecution();
-        await first;
+        const firstResponse = await first;
+        assert.equal(firstResponse.status, 200);
+        const firstBody = (await firstResponse.json()) as {
+            ok: boolean;
+            run: { status: string; jobId: string };
+        };
+        assert.equal(firstBody.ok, true);
+        assert.equal(firstBody.run.status, "success");
+        assert.equal(firstBody.run.jobId, "cache.weather");
     } finally {
         if (typeof finishExecution === "function") {
             finishExecution();

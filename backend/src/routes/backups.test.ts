@@ -12,6 +12,39 @@ import { withEnv } from "../testUtils/env.js";
 import backupRoutes from "./backups.js";
 import { __testing as backupTesting } from "./backups.js";
 
+type FakeBackupListener = (...args: unknown[]) => void;
+
+function createFakeBackupChild() {
+    const listeners = new Map<string, Set<FakeBackupListener>>();
+    const child = {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        on(event: string, listener: FakeBackupListener) {
+            const eventListeners = listeners.get(event) ?? new Set();
+            eventListeners.add(listener);
+            listeners.set(event, eventListeners);
+            return this;
+        },
+        once(event: string, listener: FakeBackupListener) {
+            const onceListener: FakeBackupListener = (...args) => {
+                this.off(event, onceListener);
+                listener(...args);
+            };
+            return this.on(event, onceListener);
+        },
+        off(event: string, listener: FakeBackupListener) {
+            listeners.get(event)?.delete(listener);
+            return this;
+        },
+        emit(event: string, ...args: unknown[]) {
+            for (const listener of listeners.get(event) ?? []) {
+                listener(...args);
+            }
+        },
+    };
+    return child;
+}
+
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
@@ -176,21 +209,13 @@ describe("backup routes", () => {
         assert.deepEqual(walg.body, { job: null });
     });
 
-    it("reclaims completed active jobs before starting replacement backup jobs", () => {
+    it("reclaims completed active jobs before starting replacement backup jobs", async () => {
         backupTesting.clearJobsForTest();
         backupTesting.setSpawnBackupProcessForTest(() => {
-            let closeListener: ((code: number) => void) | null = null;
-            const child = {
-                stderr: new PassThrough(),
-                stdout: new PassThrough(),
-                on(event: string, listener: (code: number) => void) {
-                    if (event === "close") {
-                        closeListener = listener;
-                    }
-                    return this;
-                },
-            };
-            queueMicrotask(() => closeListener?.(0));
+            const child = createFakeBackupChild();
+            queueMicrotask(() => {
+                child.emit("spawn");
+            });
             return child as never;
         });
         try {
@@ -206,10 +231,39 @@ describe("backup routes", () => {
                     endedAt: 2,
                     refreshPending: true,
                 });
-                const job = backupTesting.startBackupJob(type, "true");
+                const job = await backupTesting.startBackupJob(type, "true");
                 assert.notEqual(job.id, `old-${type}`);
                 assert.equal(job.status, "running");
             }
+        } finally {
+            backupTesting.setSpawnBackupProcessForTest();
+            backupTesting.clearJobsForTest();
+        }
+    });
+
+    it("does not acknowledge backup jobs that fail to spawn", async () => {
+        backupTesting.setSpawnBackupProcessForTest(() => {
+            const child = createFakeBackupChild();
+            queueMicrotask(() => {
+                child.emit("error", new Error("spawn failed"));
+            });
+            return child as never;
+        });
+        try {
+            const response = await requestJson<{ error: string }>(
+                server,
+                "/api/backups/kopia/run",
+                { method: "POST" }
+            );
+
+            assert.equal(response.status, 500);
+            assert.match(response.body.error, /spawn failed/u);
+            const current = await requestJson<{ job: null }>(
+                server,
+                "/api/backups/kopia"
+            );
+            assert.equal(current.status, 200);
+            assert.equal(current.body.job, null);
         } finally {
             backupTesting.setSpawnBackupProcessForTest();
             backupTesting.clearJobsForTest();
@@ -340,7 +394,7 @@ describe("backup routes", () => {
         }
     });
 
-    it("marks jobs done when the backup process fails to spawn", async () => {
+    it("does not acknowledge backup jobs when the configured shell is missing", async () => {
         const brokenTempDir = await mkdtemp(
             path.join(os.tmpdir(), "mira-backup-broken-")
         );
@@ -348,19 +402,20 @@ describe("backup routes", () => {
             path.join(brokenTempDir, "missing-shell")
         );
         try {
-            const started = await requestJson<{
-                ok: boolean;
-                job: { status: string; code: number | null };
-            }>(brokenServer, "/api/backups/kopia/run", { method: "POST" });
-            assert.equal(started.status, 200);
-            assert.equal(started.body.ok, true);
-            assert.equal(started.body.job.status, "running");
-            assert.equal(started.body.job.code, null);
+            const started = await requestJson<{ error: string }>(
+                brokenServer,
+                "/api/backups/kopia/run",
+                { method: "POST" }
+            );
+            assert.equal(started.status, 500);
+            assert.match(started.body.error, /ENOENT|missing-shell/u);
 
-            const done = await waitForDone(brokenServer, "/api/backups/kopia");
-            assert.equal(done.status, "done");
-            assert.notEqual(done.code, 0);
-            assert.match(done.stderr, /ENOENT|missing-shell/);
+            const current = await requestJson<{ job: null }>(
+                brokenServer,
+                "/api/backups/kopia"
+            );
+            assert.equal(current.status, 200);
+            assert.equal(current.body.job, null);
         } finally {
             try {
                 await brokenServer.close();

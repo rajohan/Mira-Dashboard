@@ -861,7 +861,18 @@ async function reclaimStaleLogRotationLock(openLock: () => Promise<fs.FileHandle
                 throw error;
             }
         });
-        return openLock();
+        try {
+            return await openLock();
+        } catch (error) {
+            if (
+                error instanceof Error &&
+                "code" in error &&
+                (error as NodeJS.ErrnoException).code === "EEXIST"
+            ) {
+                return null;
+            }
+            throw error;
+        }
     } finally {
         await fs.rmdir(LOCK_RECLAIM_DIR).catch(() => {});
     }
