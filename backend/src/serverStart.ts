@@ -63,9 +63,7 @@ export function handleServerListening(): void {
                     "[Backend] Failed to stop scheduled job scheduler:"
                 );
             }
-            if (gatewayStarted) {
-                rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
-            }
+            rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
         });
         afterBackgroundServicesStartedForTest?.();
     } catch (error) {
@@ -133,9 +131,13 @@ if (shouldStartOnImport()) {
     startBackendServer();
 }
 
-export const __testing = {
+function setAfterBackgroundServicesStartedForTest(
+    callback: (() => void) | undefined
+): void {
+    afterBackgroundServicesStartedForTest = callback;
+}
+
+export const __testing = Object.freeze({
     removeCloseCleanup,
-    setAfterBackgroundServicesStartedForTest(callback: (() => void) | undefined): void {
-        afterBackgroundServicesStartedForTest = callback;
-    },
-};
+    setAfterBackgroundServicesStartedForTest,
+});

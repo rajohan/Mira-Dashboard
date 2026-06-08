@@ -264,8 +264,11 @@ async function assertSafePath(
         approvedRoots.map(async (root) => {
             try {
                 return await fs.realpath(root);
-            } catch {
-                return null;
+            } catch (error) {
+                if (isMissingPathError(error)) {
+                    return null;
+                }
+                throw error;
             }
         })
     );

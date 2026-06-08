@@ -545,11 +545,14 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                 await new Promise((resolve) => setTimeout(resolve, 0));
             }
 
-            await assert.rejects(
-                () => refreshCacheProducer("moltbook.unknown"),
-                /Unsupported Moltbook cache key/u
-            );
-            releaseHome();
+            try {
+                await assert.rejects(
+                    () => refreshCacheProducer("moltbook.unknown"),
+                    /Unsupported Moltbook cache key/u
+                );
+            } finally {
+                releaseHome();
+            }
             await fullRefresh;
         });
     });

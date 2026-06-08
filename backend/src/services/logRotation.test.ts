@@ -194,6 +194,35 @@ describe("log rotation service", { concurrency: false }, () => {
             ]),
             true
         );
+        const originalRealpath = fsPromises.realpath.bind(fsPromises);
+        const realpathMock = mock.method(
+            fsPromises,
+            "realpath",
+            (
+                target: Parameters<typeof fsPromises.realpath>[0],
+                options?: Parameters<typeof fsPromises.realpath>[1]
+            ) => {
+                if (String(target).endsWith("denied-root")) {
+                    const error = new Error(
+                        "approved root denied"
+                    ) as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalRealpath(target, options);
+            }
+        );
+        try {
+            await assert.rejects(
+                () =>
+                    __testing.assertSafePath(safeFile, [
+                        path.join(tempDir, "denied-root"),
+                    ]),
+                /approved root denied/u
+            );
+        } finally {
+            realpathMock.mock.restore();
+        }
         await assert.rejects(
             () =>
                 __testing.assertSafePath(safeFile, [path.join(tempDir, "missing-root")]),
