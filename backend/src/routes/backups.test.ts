@@ -167,6 +167,16 @@ async function waitForDone(
     throw new Error("Backup job did not finish");
 }
 
+async function waitForRefresh(key: string, refreshedKeys: string[]): Promise<void> {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (refreshedKeys.includes(key)) {
+            return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(`Backup refresh did not finish for ${key}`);
+}
+
 describe("backup routes", () => {
     let server: TestServer;
     let tempDir: string;
@@ -321,6 +331,7 @@ describe("backup routes", () => {
         assert.equal(done.code, 0);
         assert.match(done.stdout, /\/opt\/docker\/apps\/kopia\/backup\.sh/);
         assert.equal(done.stderr, "backup warning\n");
+        await waitForRefresh("backup.kopia.status", refreshedKeys);
         assert.ok(refreshedKeys.includes("backup.kopia.status"));
 
         const restarted = await requestJson<{
@@ -349,6 +360,7 @@ describe("backup routes", () => {
         assert.equal(done.code, 0);
         assert.match(done.stdout, /'docker' exec walg/);
         assert.equal(done.stderr, "backup warning\n");
+        await waitForRefresh("backup.walg.status", refreshedKeys);
         assert.ok(refreshedKeys.includes("backup.walg.status"));
 
         const restarted = await requestJson<{
@@ -378,6 +390,7 @@ describe("backup routes", () => {
                 done.stdout,
                 /'\/tmp\/mira docker' exec walg \/bin\/sh \/usr\/local\/bin\/backup-push\.sh/u
             );
+            await waitForRefresh("backup.walg.status", refreshedKeys);
             assert.ok(refreshedKeys.includes("backup.walg.status"));
         });
     });

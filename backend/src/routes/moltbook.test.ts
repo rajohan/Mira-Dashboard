@@ -120,7 +120,7 @@ describe("moltbook routes", () => {
         if (server) {
             await server.close();
         }
-        await clearCacheEntries();
+        clearCacheEntries();
     });
 
     it("returns cached Moltbook home metadata", async () => {

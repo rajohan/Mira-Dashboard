@@ -1497,7 +1497,9 @@ export async function refreshCacheProducer(key: string) {
     const existing = isSupportedCacheProducerKey(key)
         ? [...inFlightCacheRefreshes.entries()].find(
               ([inFlightKey]) =>
-                  inFlightKey === scopeKey || scopeKey.startsWith(`${inFlightKey}.`)
+                  inFlightKey === scopeKey ||
+                  scopeKey.startsWith(`${inFlightKey}.`) ||
+                  inFlightKey.startsWith(`${scopeKey}.`)
           )?.[1]
         : undefined;
     if (existing !== undefined) {

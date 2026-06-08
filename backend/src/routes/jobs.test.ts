@@ -79,6 +79,7 @@ test.before(async () => {
 });
 
 test.after(async () => {
+    db.close();
     if (originalDbPath === undefined) {
         delete process.env.MIRA_DASHBOARD_DB_PATH;
     } else {

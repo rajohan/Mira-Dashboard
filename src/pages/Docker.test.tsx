@@ -387,6 +387,7 @@ describe("Docker page", () => {
         docker.deleteImage.mockResolvedValue(Promise.resolve());
         docker.deleteVolume.mockResolvedValue(Promise.resolve());
         docker.manualUpdate.mockResolvedValue({
+            success: true,
             result: { summary: { failed: 0, updated: 1 } },
             stderr: "",
         });
@@ -676,7 +677,11 @@ describe("Docker page", () => {
     it("covers fallback action output, persisted updater data, and modal close handlers", async () => {
         const user = userEvent.setup();
         docker.action.mockResolvedValueOnce({ output: "" });
-        docker.manualUpdate.mockResolvedValueOnce({ stderr: "manual warning" });
+        docker.manualUpdate.mockResolvedValueOnce({
+            success: true,
+            result: { summary: { failed: 0, updated: 1 } },
+            stderr: "manual warning",
+        });
         docker.prune.mockResolvedValueOnce({});
         docker.useRunDockerUpdater.mockReturnValue({
             data: { last: true },
@@ -741,7 +746,7 @@ describe("Docker page", () => {
 
         await user.click(screen.getByRole("button", { name: "Update now" }));
         await user.click(screen.getAllByRole("button", { name: "Update now" }).at(-1)!);
-        expect(await screen.findByText(/updated=0 failed=0/)).toBeInTheDocument();
+        expect(await screen.findByText(/updated=1 failed=0/)).toBeInTheDocument();
         expect(screen.getByText(/manual warning/)).toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: "Prune images" }));
@@ -845,7 +850,6 @@ describe("Docker page", () => {
         } as Response);
         docker.runUpdater.mockRejectedValueOnce("updater boom");
         docker.manualUpdate.mockRejectedValueOnce(new Error("manual failed"));
-        docker.prune.mockRejectedValueOnce(new Error("prune failed"));
         docker.deleteImage.mockRejectedValueOnce(new Error("delete failed"));
 
         render(<Docker />);
@@ -865,6 +869,7 @@ describe("Docker page", () => {
         expect(await screen.findByText(/Manual update failed/)).toBeInTheDocument();
         expect(screen.getByText(/manual failed/)).toBeInTheDocument();
 
+        docker.prune.mockRejectedValueOnce(new Error("prune failed"));
         await user.click(screen.getByRole("button", { name: "Prune volumes" }));
         expect(
             await screen.findByText(/Failed to remove unused Docker volumes/)

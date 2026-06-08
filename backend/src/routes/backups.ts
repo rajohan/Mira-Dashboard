@@ -54,24 +54,24 @@ function trimOutput(text: string): string {
 }
 
 /** Refreshes backup status cache with a bounded best-effort timeout. */
-async function refreshBackupCacheWithTimeout(key: string, timeoutMs = 30_000) {
+function refreshBackupCacheWithTimeout(key: string, timeoutMs = 30_000) {
     let timeout: NodeJS.Timeout | null = null;
-    try {
-        await Promise.race([
-            refreshBackupCache(key),
-            new Promise((_, reject) => {
-                timeout = setTimeout(
-                    () => reject(new Error("Status refresh timed out")),
-                    timeoutMs
-                );
-                timeout.unref();
-            }),
-        ]);
-    } finally {
+    const refresh = refreshBackupCache(key);
+    const timed = Promise.race([
+        refresh,
+        new Promise((_, reject) => {
+            timeout = setTimeout(
+                () => reject(new Error("Status refresh timed out")),
+                timeoutMs
+            );
+            timeout.unref();
+        }),
+    ]).finally(() => {
         if (timeout) {
             clearTimeout(timeout);
         }
-    }
+    });
+    return { refresh, timed };
 }
 
 /** Returns current job. */
@@ -216,16 +216,18 @@ async function startBackupJob(type: BackupJob["type"], command: string) {
             job.status = "done";
             job.code = code;
             job.endedAt = Date.now();
-            void refreshBackupCacheWithTimeout(cacheKey)
-                .catch((error: unknown) => {
-                    const refreshMessage = errorMessage(error, "Unknown error");
-                    job.stderr = trimOutput(
-                        `${job.stderr}\nStatus refresh failed: ${refreshMessage}`.trim()
-                    );
-                })
+            const refresh = refreshBackupCacheWithTimeout(cacheKey);
+            void refresh.timed.catch((error: unknown) => {
+                const refreshMessage = errorMessage(error, "Unknown error");
+                job.stderr = trimOutput(
+                    `${job.stderr}\nStatus refresh failed: ${refreshMessage}`.trim()
+                );
+            });
+            void refresh.refresh
                 .finally(() => {
                     job.refreshPending = false;
-                });
+                })
+                .catch(() => {});
             return;
         }
         job.status = "done";
