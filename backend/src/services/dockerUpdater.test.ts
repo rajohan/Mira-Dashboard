@@ -1570,6 +1570,63 @@ setTimeout(() => process.exit(0), 30);
             ),
             true
         );
+        assert.equal(
+            updater.__testing.needsFullTagScan({
+                ...baseService,
+                tag_match_type: "exact",
+                tag_match_pattern: "1",
+            }),
+            false
+        );
+        assert.equal(
+            updater.__testing.needsFullTagScan({
+                ...baseService,
+                tag_match_type: "regex",
+                tag_match_pattern: "",
+            }),
+            false
+        );
+        assert.equal(
+            updater.__testing.needsFullTagScan({
+                ...baseService,
+                tag_match_type: "regex",
+                tag_match_pattern: "a".repeat(129),
+            }),
+            false
+        );
+        assert.equal(
+            updater.__testing.needsFullTagScan({
+                ...baseService,
+                tag_match_type: "regex",
+                tag_match_pattern: "[",
+            }),
+            false
+        );
+        assert.equal(
+            updater.__testing.needsFullTagScan({
+                ...baseService,
+                tag_match_type: "regex",
+                tag_match_pattern: "^1$",
+            }),
+            false
+        );
+        assert.equal(
+            updater.__testing.needsFullTagScan({
+                ...baseService,
+                tag_match_type: "regex",
+                tag_match_pattern: String.raw`^\d+$`,
+            }),
+            true
+        );
+        assert.equal(
+            updater.__testing.needsFullTagScan({
+                ...baseService,
+                current_tag: null,
+                tag_match_type: "regex",
+                tag_match_pattern: String.raw`^\d+$`,
+            }),
+            true
+        );
         assert.equal(updater.__testing.hasUpdate(baseService), true);
         assert.equal(
             updater.__testing.hasUpdate({

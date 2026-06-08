@@ -410,6 +410,150 @@ test("rolls back failed docker updater event migrations", async () => {
     }
 });
 
+test("retries transient cache updated_at nullable migration locks", async () => {
+    const { cleanup, result } = await importWithTempDb("cacheRetry");
+    const calls: string[] = [];
+    let beginAttempts = 0;
+    const targetDb = {
+        prepare: () => ({
+            all: () => [{ name: "updated_at", notnull: 1 }],
+        }),
+        exec: (sql: string) => {
+            calls.push(sql);
+            if (sql === "BEGIN IMMEDIATE") {
+                beginAttempts += 1;
+                if (beginAttempts < 2) {
+                    const error = new Error("database is locked") as Error & {
+                        code: string;
+                    };
+                    error.code = "SQLITE_BUSY";
+                    throw error;
+                }
+            }
+        },
+    };
+
+    try {
+        result.__testing.ensureCacheEntriesUpdatedAtNullable(targetDb);
+        assert.equal(beginAttempts, 2);
+        assert.deepEqual(
+            calls.filter((call) => call === "ROLLBACK" || call === "COMMIT"),
+            ["ROLLBACK", "COMMIT"]
+        );
+    } finally {
+        await cleanup();
+    }
+});
+
+test("rethrows the final transient cache migration lock after retries", async () => {
+    const { cleanup, result } = await importWithTempDb("cacheRetryExhausted");
+    let beginAttempts = 0;
+    const targetDb = {
+        prepare: () => ({
+            all: () => [{ name: "updated_at", notnull: 1 }],
+        }),
+        exec: (sql: string) => {
+            if (sql === "BEGIN IMMEDIATE") {
+                beginAttempts += 1;
+                const error = new Error(
+                    `database is locked ${beginAttempts}`
+                ) as Error & {
+                    code: string;
+                };
+                error.code = "SQLITE_LOCKED";
+                throw error;
+            }
+        },
+    };
+
+    try {
+        assert.throws(
+            () => result.__testing.ensureCacheEntriesUpdatedAtNullable(targetDb),
+            /database is locked 4/u
+        );
+    } finally {
+        await cleanup();
+    }
+});
+
+test("retries transient docker event migration locks", async () => {
+    const { cleanup, result } = await importWithTempDb("dockerEventsRetry");
+    let migrationAttempts = 0;
+    const targetDb = {
+        prepare: (sql: string) => ({
+            all: () =>
+                sql.includes("foreign_key_list")
+                    ? [
+                          {
+                              from: "managed_service_id",
+                              on_delete: "CASCADE",
+                              table: "docker_managed_services",
+                          },
+                      ]
+                    : [{ name: "managed_service_id", notnull: 1 }],
+        }),
+        exec: (sql: string) => {
+            if (sql.includes("ALTER TABLE docker_update_events RENAME")) {
+                migrationAttempts += 1;
+                if (migrationAttempts < 2) {
+                    const error = new Error(
+                        "SQLITE_BUSY: database is locked"
+                    ) as Error & {
+                        code: string;
+                    };
+                    error.code = "SQLITE_BUSY";
+                    throw error;
+                }
+            }
+        },
+    };
+
+    try {
+        result.__testing.ensureDockerUpdateEventsSetNull(targetDb);
+        assert.equal(migrationAttempts, 2);
+    } finally {
+        await cleanup();
+    }
+});
+
+test("rethrows the final transient docker event migration lock after retries", async () => {
+    const { cleanup, result } = await importWithTempDb("dockerEventsRetryExhausted");
+    let migrationAttempts = 0;
+    const targetDb = {
+        prepare: (sql: string) => ({
+            all: () =>
+                sql.includes("foreign_key_list")
+                    ? [
+                          {
+                              from: "managed_service_id",
+                              on_delete: "CASCADE",
+                              table: "docker_managed_services",
+                          },
+                      ]
+                    : [{ name: "managed_service_id", notnull: 1 }],
+        }),
+        exec: (sql: string) => {
+            if (sql.includes("ALTER TABLE docker_update_events RENAME")) {
+                migrationAttempts += 1;
+                const error = new Error(
+                    `SQLITE_LOCKED: database is locked ${migrationAttempts}`
+                ) as Error & { code: string };
+                error.code = "SQLITE_LOCKED";
+                throw error;
+            }
+        },
+    };
+
+    try {
+        assert.throws(
+            () => result.__testing.ensureDockerUpdateEventsSetNull(targetDb),
+            /database is locked 4/u
+        );
+    } finally {
+        await cleanup();
+    }
+});
+
 test("migrates nullable docker updater event tables with missing foreign keys", async () => {
     const { cleanup, result } = await importWithTempDb("dockerEventsMissingFk");
     const calls: string[] = [];

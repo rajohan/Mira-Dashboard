@@ -6,6 +6,7 @@ import {
     chmod,
     mkdir,
     mkdtemp,
+    open,
     readFile,
     rm,
     symlink,
@@ -1587,6 +1588,49 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(await readFile(copyGzip, "utf8"), "");
         assert.equal(summary.rotatedFiles, 2);
         assert.equal(summary.compressedFiles, 1);
+    });
+
+    it("removes incomplete copytruncate archives and reports cleanup failures", async () => {
+        const root = path.join(tempDir, "copytruncate-cleanup");
+        await mkdir(root);
+        const logPath = path.join(root, "app.log");
+        const archivePath = path.join(root, "app.log.2026-06-08T00-00-00.000Z");
+        await writeFile(logPath, "pending archive", "utf8");
+        const source = await open(logPath, "r+");
+        const stat = await source.stat();
+        const unlinkMock = mock.method(fsPromises, "unlink", async (target: PathLike) => {
+            if (String(target) === archivePath) {
+                throw Object.assign(new Error("unlink denied"), { code: "EACCES" });
+            }
+        });
+        const warnMock = mock.method(console, "warn", () => {});
+        try {
+            await assert.rejects(
+                () =>
+                    __testing.rotateCopyTruncate(
+                        {
+                            handle: {
+                                fd: source.fd,
+                                truncate: async () => {
+                                    throw new Error("truncate failed");
+                                },
+                            },
+                            stat,
+                        } as never,
+                        archivePath,
+                        false,
+                        [root]
+                    ),
+                /truncate failed/u
+            );
+            assert.equal(unlinkMock.mock.callCount(), 1);
+            assert.equal(warnMock.mock.callCount(), 1);
+        } finally {
+            unlinkMock.mock.restore();
+            warnMock.mock.restore();
+            await source.close();
+            await rm(archivePath, { force: true });
+        }
     });
 
     it("verifies opened log file identity before rotation", async () => {

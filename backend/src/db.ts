@@ -55,6 +55,10 @@ async function sleep(milliseconds: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function sleepSync(milliseconds: number): void {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -353,44 +357,57 @@ export function ensureCacheEntriesUpdatedAtNullable(targetDb: MigrationDatabase)
         return;
     }
 
-    targetDb.exec("BEGIN IMMEDIATE");
-    try {
-        targetDb.exec(`
-            ALTER TABLE cache_entries RENAME TO cache_entries_old;
-            CREATE TABLE cache_entries (
-                key TEXT PRIMARY KEY,
-                data_json TEXT,
-                source TEXT NOT NULL,
-                updated_at TEXT,
-                last_attempt_at TEXT NOT NULL,
-                expires_at TEXT NOT NULL,
-                status TEXT NOT NULL,
-                error_code TEXT,
-                error_message TEXT,
-                consecutive_failures INTEGER NOT NULL DEFAULT 0,
-                metadata_json TEXT NOT NULL DEFAULT '{}'
-            );
-            INSERT INTO cache_entries (
-                key, data_json, source, updated_at, last_attempt_at, expires_at,
-                status, error_code, error_message, consecutive_failures, metadata_json
-            )
-            SELECT
-                key, data_json, source, updated_at, last_attempt_at, expires_at,
-                status, error_code, error_message, consecutive_failures, metadata_json
-            FROM cache_entries_old;
-            DROP TABLE cache_entries_old;
-            CREATE INDEX IF NOT EXISTS idx_cache_entries_status ON cache_entries(status);
-            CREATE INDEX IF NOT EXISTS idx_cache_entries_expires_at ON cache_entries(expires_at);
-        `);
-        targetDb.exec("COMMIT");
-    } catch (error) {
-        try {
-            targetDb.exec("ROLLBACK");
-        } catch {
-            // Preserve the migration failure that triggered rollback.
+    let lastError: unknown;
+    for (const delay of [0, 10, 25, 50]) {
+        if (delay > 0) {
+            sleepSync(delay);
         }
-        throw error;
+
+        try {
+            targetDb.exec("BEGIN IMMEDIATE");
+            targetDb.exec(`
+                ALTER TABLE cache_entries RENAME TO cache_entries_old;
+                CREATE TABLE cache_entries (
+                    key TEXT PRIMARY KEY,
+                    data_json TEXT,
+                    source TEXT NOT NULL,
+                    updated_at TEXT,
+                    last_attempt_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    error_code TEXT,
+                    error_message TEXT,
+                    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                    metadata_json TEXT NOT NULL DEFAULT '{}'
+                );
+                INSERT INTO cache_entries (
+                    key, data_json, source, updated_at, last_attempt_at, expires_at,
+                    status, error_code, error_message, consecutive_failures, metadata_json
+                )
+                SELECT
+                    key, data_json, source, updated_at, last_attempt_at, expires_at,
+                    status, error_code, error_message, consecutive_failures, metadata_json
+                FROM cache_entries_old;
+                DROP TABLE cache_entries_old;
+                CREATE INDEX IF NOT EXISTS idx_cache_entries_status ON cache_entries(status);
+                CREATE INDEX IF NOT EXISTS idx_cache_entries_expires_at ON cache_entries(expires_at);
+            `);
+            targetDb.exec("COMMIT");
+            return;
+        } catch (error) {
+            try {
+                targetDb.exec("ROLLBACK");
+            } catch {
+                // Preserve the migration failure that triggered rollback.
+            }
+            lastError = error;
+            if (!isTransientSqliteLock(error)) {
+                throw error;
+            }
+        }
     }
+
+    throw lastError;
 }
 
 export function ensureDockerUpdateEventsSetNull(targetDb: MigrationDatabase): void {
@@ -426,70 +443,83 @@ export function ensureDockerUpdateEventsSetNull(targetDb: MigrationDatabase): vo
         ? "NULLIF(docker_update_events_old.service_name, '')"
         : "NULL";
 
-    targetDb.exec("BEGIN IMMEDIATE");
-    try {
-        targetDb.exec(`
-            ALTER TABLE docker_update_events RENAME TO docker_update_events_old;
-            CREATE TABLE docker_update_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                managed_service_id INTEGER,
-                app_slug TEXT NOT NULL DEFAULT '',
-                service_name TEXT NOT NULL DEFAULT '',
-                event_type TEXT NOT NULL,
-                from_tag TEXT,
-                to_tag TEXT,
-                from_digest TEXT,
-                to_digest TEXT,
-                message TEXT,
-                details_json TEXT NOT NULL DEFAULT '{}',
-                created_at TEXT NOT NULL,
-                FOREIGN KEY(managed_service_id) REFERENCES docker_managed_services(id) ON DELETE SET NULL
-            );
-            INSERT INTO docker_update_events (
-                id, managed_service_id, app_slug, service_name, event_type,
-                from_tag, to_tag, from_digest, to_digest, message, details_json,
-                created_at
-            )
-            SELECT
-                docker_update_events_old.id,
-                CASE
-                    WHEN docker_managed_services.id IS NULL THEN NULL
-                    ELSE ${oldManagedServiceId}
-                END,
-                COALESCE(
-                    ${oldAppSlug},
-                    docker_managed_services.app_slug,
-                    ''
-                ),
-                COALESCE(
-                    ${oldServiceName},
-                    docker_managed_services.service_name,
-                    ''
-                ),
-                docker_update_events_old.event_type,
-                docker_update_events_old.from_tag,
-                docker_update_events_old.to_tag,
-                docker_update_events_old.from_digest,
-                docker_update_events_old.to_digest,
-                docker_update_events_old.message,
-                docker_update_events_old.details_json,
-                docker_update_events_old.created_at
-            FROM docker_update_events_old
-            LEFT JOIN docker_managed_services
-                ON docker_managed_services.id = ${oldManagedServiceId};
-            DROP TABLE docker_update_events_old;
-            CREATE INDEX IF NOT EXISTS idx_docker_update_events_created_at
-                ON docker_update_events(created_at DESC);
-        `);
-        targetDb.exec("COMMIT");
-    } catch (error) {
-        try {
-            targetDb.exec("ROLLBACK");
-        } catch {
-            // Preserve the migration failure that triggered rollback.
+    let lastError: unknown;
+    for (const delay of [0, 10, 25, 50]) {
+        if (delay > 0) {
+            sleepSync(delay);
         }
-        throw error;
+
+        try {
+            targetDb.exec("BEGIN IMMEDIATE");
+            targetDb.exec(`
+                ALTER TABLE docker_update_events RENAME TO docker_update_events_old;
+                CREATE TABLE docker_update_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    managed_service_id INTEGER,
+                    app_slug TEXT NOT NULL DEFAULT '',
+                    service_name TEXT NOT NULL DEFAULT '',
+                    event_type TEXT NOT NULL,
+                    from_tag TEXT,
+                    to_tag TEXT,
+                    from_digest TEXT,
+                    to_digest TEXT,
+                    message TEXT,
+                    details_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(managed_service_id) REFERENCES docker_managed_services(id) ON DELETE SET NULL
+                );
+                INSERT INTO docker_update_events (
+                    id, managed_service_id, app_slug, service_name, event_type,
+                    from_tag, to_tag, from_digest, to_digest, message, details_json,
+                    created_at
+                )
+                SELECT
+                    docker_update_events_old.id,
+                    CASE
+                        WHEN docker_managed_services.id IS NULL THEN NULL
+                        ELSE ${oldManagedServiceId}
+                    END,
+                    COALESCE(
+                        ${oldAppSlug},
+                        docker_managed_services.app_slug,
+                        ''
+                    ),
+                    COALESCE(
+                        ${oldServiceName},
+                        docker_managed_services.service_name,
+                        ''
+                    ),
+                    docker_update_events_old.event_type,
+                    docker_update_events_old.from_tag,
+                    docker_update_events_old.to_tag,
+                    docker_update_events_old.from_digest,
+                    docker_update_events_old.to_digest,
+                    docker_update_events_old.message,
+                    docker_update_events_old.details_json,
+                    docker_update_events_old.created_at
+                FROM docker_update_events_old
+                LEFT JOIN docker_managed_services
+                    ON docker_managed_services.id = ${oldManagedServiceId};
+                DROP TABLE docker_update_events_old;
+                CREATE INDEX IF NOT EXISTS idx_docker_update_events_created_at
+                    ON docker_update_events(created_at DESC);
+            `);
+            targetDb.exec("COMMIT");
+            return;
+        } catch (error) {
+            try {
+                targetDb.exec("ROLLBACK");
+            } catch {
+                // Preserve the migration failure that triggered rollback.
+            }
+            lastError = error;
+            if (!isTransientSqliteLock(error)) {
+                throw error;
+            }
+        }
     }
+
+    throw lastError;
 }
 
 ensureDockerUpdateEventsSetNull(db);

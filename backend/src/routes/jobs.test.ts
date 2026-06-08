@@ -1,18 +1,23 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
 import http from "node:http";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import express from "express";
-
-import { db } from "../db.js";
-import { __testing } from "../services/scheduledJobs.js";
-import jobsRoutes from "./jobs.js";
-import { __testing as jobsRouteTesting } from "./jobs.js";
 
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
 }
+
+let tempDir: string;
+let db: (typeof import("../db.js"))["db"];
+let scheduledJobsTesting: (typeof import("../services/scheduledJobs.js"))["__testing"];
+let jobsRoutes: (typeof import("./jobs.js"))["default"];
+let jobsRouteTesting: (typeof import("./jobs.js"))["__testing"];
+const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
 
 async function startServer(): Promise<TestServer> {
     const app = express();
@@ -65,17 +70,34 @@ async function requestJson<T>(
     };
 }
 
+test.before(async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-jobs-route-"));
+    process.env.MIRA_DASHBOARD_DB_PATH = path.join(tempDir, "jobs.sqlite");
+    ({ db } = await import("../db.js"));
+    ({ __testing: scheduledJobsTesting } = await import("../services/scheduledJobs.js"));
+    ({ default: jobsRoutes, __testing: jobsRouteTesting } = await import("./jobs.js"));
+});
+
+test.after(async () => {
+    if (originalDbPath === undefined) {
+        delete process.env.MIRA_DASHBOARD_DB_PATH;
+    } else {
+        process.env.MIRA_DASHBOARD_DB_PATH = originalDbPath;
+    }
+    await rm(tempDir, { recursive: true, force: true });
+});
+
 test.beforeEach(() => {
     db.exec("DELETE FROM scheduled_job_runs; DELETE FROM scheduled_jobs;");
-    __testing.seedDefaultScheduledJobs();
-    __testing.setActionExecutorForTests(async (job) => ({
+    scheduledJobsTesting.seedDefaultScheduledJobs();
+    scheduledJobsTesting.setActionExecutorForTests(async (job) => ({
         actionTarget: job.actionTarget,
     }));
 });
 
 test.afterEach(() => {
     db.exec("DELETE FROM scheduled_job_runs; DELETE FROM scheduled_jobs;");
-    __testing.setActionExecutorForTests(undefined);
+    scheduledJobsTesting.setActionExecutorForTests(undefined);
 });
 
 test("lists, fetches, updates, and runs backend scheduled jobs", async () => {
@@ -351,7 +373,7 @@ test("maps scheduled job patch races and unexpected update errors", async () => 
 test("maps manual run failures", async () => {
     const server = await startServer();
     try {
-        __testing.setActionExecutorForTests(async () => {
+        scheduledJobsTesting.setActionExecutorForTests(async () => {
             throw new Error("refresh failed");
         });
         const failedRun = await requestJson<{
@@ -380,7 +402,7 @@ test("maps manual duplicate run status codes", async () => {
     let finishExecution!: () => void;
     let first: Promise<Response> | null = null;
     const started = new Promise<void>((resolve) => {
-        __testing.setActionExecutorForTests(async () => {
+        scheduledJobsTesting.setActionExecutorForTests(async () => {
             resolve();
             await new Promise<void>((finish) => {
                 finishExecution = finish;

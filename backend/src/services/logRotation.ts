@@ -479,17 +479,32 @@ async function rotateCopyTruncate(
         uid: file.stat.uid,
         gid: file.stat.gid,
     });
+    let committed = false;
     try {
         await pipeline(
             createReadStream("", { fd: file.handle.fd, autoClose: false, start: 0 }),
             createWriteStream("", { fd: destination.fd, autoClose: false, start: 0 })
         );
         await fs.utimes(archivePath, file.stat.atime, file.stat.mtime);
-    } finally {
         await destination.close();
+        await file.handle.truncate(0);
+        committed = true;
+        return compress ? gzipFile(archivePath, approvedRoots) : archivePath;
+    } catch (error) {
+        if (!committed) {
+            await fs.unlink(archivePath).catch((unlinkError: unknown) => {
+                if (!isMissingPathError(unlinkError)) {
+                    console.warn(
+                        "[LogRotation] Failed to remove incomplete archive:",
+                        unlinkError
+                    );
+                }
+            });
+        }
+        throw error;
+    } finally {
+        await destination.close().catch(() => {});
     }
-    await file.handle.truncate(0);
-    return compress ? gzipFile(archivePath, approvedRoots) : archivePath;
 }
 
 async function rotateRename(
@@ -1262,6 +1277,7 @@ export const __testing = {
     openVerifiedLogFile,
     readLogRotationState,
     releaseLogRotationLock,
+    rotateCopyTruncate,
     resolveGlob,
     shouldRotate,
     unlinkVerified,

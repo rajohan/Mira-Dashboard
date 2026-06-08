@@ -2032,18 +2032,21 @@ describe("pull request routes", () => {
         assert.equal(deploy.body.deployment.status, "building");
         assert.equal(deploy.body.deployment.commit, undefined);
         assert.equal(deploy.body.deployment.note, "Deploy started");
-        const finishedDeploy = await waitForDeploymentStatus(
-            deploy.body.deployment.id,
-            "restart-scheduled",
-            tempDir
-        );
-        assert.equal(finishedDeploy.commit, "abc1234");
-        assert.equal(
-            finishedDeploy.note,
-            "Build passed; restart + health check scheduled"
-        );
-        releaseDeploymentLockInDb(deploy.body.deployment.id, tempDir);
-        await waitForDeploymentLockReleased(tempDir);
+        try {
+            const finishedDeploy = await waitForDeploymentStatus(
+                deploy.body.deployment.id,
+                "restart-scheduled",
+                tempDir
+            );
+            assert.equal(finishedDeploy.commit, "abc1234");
+            assert.equal(
+                finishedDeploy.note,
+                "Build passed; restart + health check scheduled"
+            );
+        } finally {
+            releaseDeploymentLockInDb(deploy.body.deployment.id, tempDir);
+            await waitForDeploymentLockReleased(tempDir);
+        }
 
         await mkdir(path.join(tempDir, "worktrees", "add-playwright-smoke-tests"), {
             recursive: true,
@@ -2062,13 +2065,16 @@ describe("pull request routes", () => {
             assert.equal(approveAndDeploy.status, 200);
             assert.equal(approveAndDeploy.body.message, "PR #10 merged; deploy started");
             assert.equal(approveAndDeploy.body.deployment.status, "building");
-            await waitForDeploymentStatus(
-                approveAndDeploy.body.deployment.id,
-                "restart-scheduled",
-                tempDir
-            );
-            releaseDeploymentLockInDb(approveAndDeploy.body.deployment.id, tempDir);
-            await waitForDeploymentLockReleased(tempDir);
+            try {
+                await waitForDeploymentStatus(
+                    approveAndDeploy.body.deployment.id,
+                    "restart-scheduled",
+                    tempDir
+                );
+            } finally {
+                releaseDeploymentLockInDb(approveAndDeploy.body.deployment.id, tempDir);
+                await waitForDeploymentLockReleased(tempDir);
+            }
         } finally {
             restoreGitEnv();
         }

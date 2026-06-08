@@ -9,7 +9,7 @@ import { after, before, describe, it, mock } from "node:test";
 
 import express from "express";
 
-import { db } from "../db.js";
+let db: (typeof import("../db.js"))["db"];
 
 interface TestServer {
     baseUrl: string;
@@ -40,6 +40,7 @@ const originalDockerAppsRoot = process.env.MIRA_DOCKER_APPS_ROOT;
 const originalDockerBin = process.env.MIRA_DOCKER_BIN;
 const originalComposeWrapper = process.env.MIRA_DOCKER_COMPOSE_WRAPPER;
 const originalUpdaterSkipRegistry = process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
+const originalDashboardDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
 const fakeEnvKeys = [
     "MIRA_DOCKER_COMPOSE_WRAPPER",
     "MIRA_FAKE_DOCKER_EMPTY",
@@ -658,6 +659,8 @@ describe("docker routes", { concurrency: false }, () => {
 
     before(async () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-docker-routes-"));
+        process.env.MIRA_DASHBOARD_DB_PATH = path.join(tempDir, "docker.sqlite");
+        ({ db } = await import("../db.js"));
         await installFakeDocker(tempDir);
         process.env.MIRA_DOCKER_ROOT = tempDir;
         process.env.MIRA_DOCKER_APPS_ROOT = path.join(tempDir, "apps");
@@ -715,9 +718,17 @@ describe("docker routes", { concurrency: false }, () => {
         } else {
             process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY = originalUpdaterSkipRegistry;
         }
-        db.exec(
-            "DELETE FROM docker_update_events; DELETE FROM docker_managed_services; DELETE FROM notifications WHERE source IN ('docker', 'docker-updater');"
-        );
+        if (db) {
+            db.exec(
+                "DELETE FROM docker_update_events; DELETE FROM docker_managed_services; DELETE FROM notifications WHERE source IN ('docker', 'docker-updater');"
+            );
+            db.close();
+        }
+        if (originalDashboardDbPath === undefined) {
+            delete process.env.MIRA_DASHBOARD_DB_PATH;
+        } else {
+            process.env.MIRA_DASHBOARD_DB_PATH = originalDashboardDbPath;
+        }
         __testing.setDockerBinForTests(originalDockerBin);
         __testing.setDockerExecPidWaitTimeoutForTests();
         if (tempDir) {

@@ -21,21 +21,30 @@ function rollback(fn: () => void, label: string): void {
     }
 }
 
-function installCloseCleanup(cleanup: () => void): void {
+function installCloseCleanup(cleanup: () => void): () => void {
     closeCleanups.push(cleanup);
     if (!closeCleanupInstalled) {
         closeCleanupInstalled = true;
         server.once("close", runCloseCleanups);
     }
+    return () => removeCloseCleanup(cleanup);
 }
 
-function removeCloseCleanup(): void {
-    if (!closeCleanupInstalled) {
+function removeCloseCleanup(cleanup?: () => void): void {
+    if (cleanup) {
+        const index = closeCleanups.indexOf(cleanup);
+        if (index !== -1) {
+            closeCleanups.splice(index, 1);
+        }
+    } else {
+        closeCleanups.length = 0;
+    }
+
+    if (!closeCleanupInstalled || closeCleanups.length > 0) {
         return;
     }
     server.off("close", runCloseCleanups);
     closeCleanupInstalled = false;
-    closeCleanups.length = 0;
 }
 
 function runCloseCleanups(): void {
@@ -50,6 +59,7 @@ function runCloseCleanups(): void {
 export function handleServerListening(): void {
     let gatewayStarted = false;
     let scheduledJobSchedulerStarted = false;
+    let removeBackgroundCleanup: (() => void) | undefined;
     try {
         const token = getPersistedGatewayToken() || process.env.OPENCLAW_TOKEN;
         if (token) {
@@ -63,7 +73,7 @@ export function handleServerListening(): void {
 
         startScheduledJobScheduler();
         scheduledJobSchedulerStarted = true;
-        installCloseCleanup(() => {
+        removeBackgroundCleanup = installCloseCleanup(() => {
             if (scheduledJobSchedulerStarted) {
                 rollback(
                     stopScheduledJobScheduler,
@@ -77,7 +87,7 @@ export function handleServerListening(): void {
         afterBackgroundServicesStartedForTest?.();
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
-        removeCloseCleanup();
+        removeBackgroundCleanup?.();
         if (scheduledJobSchedulerStarted) {
             rollback(
                 stopScheduledJobScheduler,

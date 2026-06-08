@@ -340,6 +340,40 @@ function isSafeTagRegexPattern(pattern: string): boolean {
     return safeRegex(pattern);
 }
 
+function needsFullTagScan(service: ManagedServiceRow): boolean {
+    if (service.tag_match_type !== "regex" || !service.tag_match_pattern) {
+        return false;
+    }
+
+    let matcher: RegExp;
+    try {
+        matcher = new RegExp(service.tag_match_pattern);
+    } catch {
+        return false;
+    }
+    if (!isSafeTagRegexPattern(service.tag_match_pattern)) {
+        return false;
+    }
+
+    const currentTag = service.current_tag || "";
+    return [
+        "",
+        "latest",
+        "1",
+        "2",
+        "3",
+        "10",
+        "v1",
+        "1.2.1",
+        "1.2.10",
+        "2026.1",
+        `${currentTag}-1`,
+        `${currentTag}x`,
+    ]
+        .filter((tag) => tag !== currentTag)
+        .some((tag) => matcher.test(tag));
+}
+
 function compareTags(a: string, b: string): number {
     return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 }
@@ -381,22 +415,24 @@ async function lookupDockerHub(service: ManagedServiceRow) {
     const repo = normalizeDockerHubRepo(stripRegistry(service.image_repo));
     let latestTag = service.current_tag;
     if (service.tag_match_type === "regex") {
-        const tags: unknown[] = [];
-        let tagsUrl: string | null =
-            `https://hub.docker.com/v2/repositories/${repo}/tags?page_size=100`;
-        while (tagsUrl) {
-            const tagsData = await fetchJson(tagsUrl);
-            if (Array.isArray(tagsData.results)) {
-                tags.push(...tagsData.results);
+        if (needsFullTagScan(service)) {
+            const tags: unknown[] = [];
+            let tagsUrl: string | null =
+                `https://hub.docker.com/v2/repositories/${repo}/tags?page_size=100`;
+            while (tagsUrl) {
+                const tagsData = await fetchJson(tagsUrl);
+                if (Array.isArray(tagsData.results)) {
+                    tags.push(...tagsData.results);
+                }
+                const next = typeof tagsData.next === "string" ? tagsData.next : "";
+                tagsUrl = next || null;
             }
-            const next = typeof tagsData.next === "string" ? tagsData.next : "";
-            tagsUrl = next || null;
+            const candidates = tags
+                .map((item) => String(asRecord(item).name || ""))
+                .filter((tag: string) => tag && tagMatches(service, tag))
+                .sort(compareTags);
+            latestTag = candidates.at(-1) || service.current_tag;
         }
-        const candidates = tags
-            .map((item) => String(asRecord(item).name || ""))
-            .filter((tag: string) => tag && tagMatches(service, tag))
-            .sort(compareTags);
-        latestTag = candidates.at(-1) || service.current_tag;
     } else if (service.tag_match_pattern) {
         latestTag = service.tag_match_pattern;
     }
@@ -1243,6 +1279,7 @@ export const __testing = {
     listComposeFiles,
     lookupDockerHub,
     lookupGhcr,
+    needsFullTagScan,
     normalizeDockerHubRepo,
     normalizeLabels,
     caughtMessage,
