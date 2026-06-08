@@ -214,13 +214,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                         ],
                     });
                     assert.deepEqual(await refreshCacheProducer("moltbook.home"), {
-                        refreshed: [
-                            "moltbook.home",
-                            "moltbook.feed.hot",
-                            "moltbook.feed.new",
-                            "moltbook.profile",
-                            "moltbook.my-content",
-                        ],
+                        refreshed: ["moltbook.home"],
                     });
                     assert.deepEqual(await refreshCacheProducer("moltbook.profile"), {
                         refreshed: ["moltbook.profile"],
@@ -568,6 +562,9 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                 release();
             }
 
+            const homeExpected = {
+                refreshed: ["moltbook.home"],
+            };
             const fullExpected = {
                 refreshed: [
                     "moltbook.home",
@@ -578,7 +575,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                 ],
             };
             assert.deepEqual(await Promise.all([homeRefresh, fullRefresh]), [
-                fullExpected,
+                homeExpected,
                 fullExpected,
             ]);
             assert.equal(homeFetches, 2);

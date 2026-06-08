@@ -1451,7 +1451,7 @@ async function refreshCacheProducerUnlocked(key: string) {
         }
     };
 
-    if (key === "moltbook" || key === "moltbook.home") {
+    if (key === "moltbook") {
         return refreshWithFailureRecord(refreshMoltbookCache, [
             ...MOLTBOOK_CACHE_KEY_LIST,
         ]);

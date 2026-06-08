@@ -1093,6 +1093,46 @@ describe("log rotation service", { concurrency: false }, () => {
         }
     });
 
+    it("removes a newly created lock when writing the pid fails", async () => {
+        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        await mkdir(path.dirname(lockPath), { recursive: true });
+        const originalOpen = fsPromises.open.bind(fsPromises);
+        const writeError = new Error("pid write failed");
+        const openMock = mock.method(
+            fsPromises,
+            "open",
+            async (
+                target: Parameters<typeof fsPromises.open>[0],
+                flags?: Parameters<typeof fsPromises.open>[1],
+                mode?: Parameters<typeof fsPromises.open>[2]
+            ) => {
+                const handle = await originalOpen(target, flags, mode);
+                if (String(target) !== lockPath || flags !== "wx") {
+                    return handle;
+                }
+                return {
+                    close: () => handle.close(),
+                    writeFile: async () => {
+                        await handle.writeFile(`${process.pid}\n`);
+                        throw writeError;
+                    },
+                } as unknown as Awaited<ReturnType<typeof fsPromises.open>>;
+            }
+        );
+        try {
+            await assert.rejects(
+                () => __testing.acquireLogRotationLock(false),
+                writeError
+            );
+            await assert.rejects(readFile(lockPath, "utf8"), {
+                code: "ENOENT",
+            });
+        } finally {
+            openMock.mock.restore();
+            await rm(lockPath, { force: true });
+        }
+    });
+
     it("rethrows unexpected errors from stale lock reacquire", async () => {
         const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
         await mkdir(path.dirname(lockPath), { recursive: true });

@@ -817,8 +817,14 @@ async function acquireLogRotationLock(dryRun: boolean) {
     await fs.mkdir(path.dirname(LOCK_FILE), { recursive: true });
     const openLock = async () => {
         const handle = await fs.open(LOCK_FILE, "wx");
-        await handle.writeFile(`${process.pid}\n`);
-        return handle;
+        try {
+            await handle.writeFile(`${process.pid}\n`);
+            return handle;
+        } catch (error) {
+            await handle.close().catch(() => {});
+            await fs.unlink(LOCK_FILE).catch(() => {});
+            throw error;
+        }
     };
     try {
         return await openLock();
