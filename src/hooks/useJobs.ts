@@ -65,9 +65,10 @@ export function useUpdateScheduledJob() {
         }: {
             id: string;
             patch: {
+                cronExpression?: string | null;
                 enabled?: boolean;
                 intervalSeconds?: number;
-                scheduleType?: "interval" | "daily";
+                scheduleType?: "interval" | "daily" | "cron";
                 timeOfDay?: string | null;
             };
         }) =>

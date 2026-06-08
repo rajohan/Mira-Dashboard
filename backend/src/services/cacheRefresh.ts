@@ -694,6 +694,22 @@ function summarizeStatus(lines: string[]) {
     };
 }
 
+function sanitizeRemoteUrl(value: string | null): string | null {
+    if (!value) {
+        return null;
+    }
+    try {
+        const url = new URL(value);
+        url.username = "";
+        url.password = "";
+        url.search = "";
+        url.hash = "";
+        return url.toString();
+    } catch {
+        return value.replace(/\/\/[^/@\s]+@/u, "//").replace(/\?.*$/u, "");
+    }
+}
+
 export async function refreshGitCache() {
     const repos = [];
     for (const repo of gitRepos) {
@@ -723,7 +739,9 @@ export async function refreshGitCache() {
             exists: true,
             branch: branch.ok ? branch.output || null : null,
             head: head.ok ? head.output || null : null,
-            remote: remote.ok ? remote.output.split(/\s+/u)[1] || null : null,
+            remote: remote.ok
+                ? sanitizeRemoteUrl(remote.output.split(/\s+/u)[1] || null)
+                : null,
             dirty,
             statusSummary,
             statusShort: porcelain.slice(0, 25),

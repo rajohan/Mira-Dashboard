@@ -251,6 +251,7 @@ describe("Jobs page", () => {
         expect(hooks.updateJob).toHaveBeenCalledWith({
             id: "cache.weather",
             patch: {
+                cronExpression: null,
                 intervalSeconds: 7200,
                 scheduleType: "interval",
                 timeOfDay: null,
@@ -302,6 +303,7 @@ describe("Jobs page", () => {
         expect(requireSelectedJobForAction(createJob()).id).toBe("cache.weather");
 
         await saveScheduleAction({
+            cronExpressionDraft: "* * * * *",
             intervalNumber: 60,
             scheduleTypeDraft: "interval",
             selectedJob: null,
@@ -310,6 +312,7 @@ describe("Jobs page", () => {
             updateJob,
         });
         await saveScheduleAction({
+            cronExpressionDraft: "* * * * *",
             intervalNumber: 60,
             selectedJob: null,
             scheduleTypeDraft: "daily",
@@ -345,8 +348,29 @@ describe("Jobs page", () => {
         expect(hooks.updateJob).toHaveBeenCalledWith({
             id: "cache.git",
             patch: {
+                cronExpression: null,
                 scheduleType: "daily",
                 timeOfDay: "03:15",
+            },
+        });
+    });
+
+    it("updates cron schedules with 5-field expressions", async () => {
+        const user = userEvent.setup();
+        render(<Jobs />);
+
+        await user.click(screen.getByRole("button", { name: /Cron.*Cron:/u }));
+        expect(screen.getByLabelText("Cron expression")).toHaveValue("0 4 * * *");
+        await user.clear(screen.getByLabelText("Cron expression"));
+        await user.type(screen.getByLabelText("Cron expression"), "*/10 * * * *");
+        await user.click(screen.getByRole("button", { name: /Save schedule/u }));
+
+        expect(hooks.updateJob).toHaveBeenCalledWith({
+            id: "cache.cron",
+            patch: {
+                cronExpression: "*/10 * * * *",
+                scheduleType: "cron",
+                timeOfDay: null,
             },
         });
     });
@@ -378,6 +402,13 @@ describe("Jobs page", () => {
         await user.type(screen.getByLabelText("Time of day"), "25:00");
         expect(
             await screen.findByText("Time of day must use HH:mm, for example 02:40.")
+        ).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: /Cron.*Cron:/u }));
+        await user.clear(screen.getByLabelText("Cron expression"));
+        await user.type(screen.getByLabelText("Cron expression"), "bad");
+        expect(
+            await screen.findByText("Cron must use five fields, for example * * * * *.")
         ).toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: /Weather.*Every 1h/u }));

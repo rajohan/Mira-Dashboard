@@ -13,14 +13,18 @@ import { useRunScheduledJob, useScheduledJobs, useUpdateScheduledJob } from "../
 import type { ScheduledJob } from "../hooks/useJobs";
 import { formatDate } from "../utils/format";
 
-type EditableScheduleType = "interval" | "daily";
+type EditableScheduleType = "interval" | "daily" | "cron";
 type UpdateJobMutation = ReturnType<typeof useUpdateScheduledJob>;
 type RunJobMutation = ReturnType<typeof useRunScheduledJob>;
 
 const SCHEDULE_TYPE_OPTIONS = [
     { value: "interval", label: "Interval", description: "Run every N seconds" },
     { value: "daily", label: "Daily time", description: "Run once per day at HH:mm" },
+    { value: "cron", label: "Cron", description: "Run from a 5-field cron expression" },
 ] as const;
+
+const cronExpressionPattern =
+    /^\s*(?:\*|\d{1,2}(?:-\d{1,2})?)(?:\/\d{1,2})?(?:,(?:\*|\d{1,2}(?:-\d{1,2})?)(?:\/\d{1,2})?)*\s+(?:\*|\d{1,2}(?:-\d{1,2})?)(?:\/\d{1,2})?(?:,(?:\*|\d{1,2}(?:-\d{1,2})?)(?:\/\d{1,2})?)*\s+(?:\*|\d{1,2}(?:-\d{1,2})?)(?:\/\d{1,2})?(?:,(?:\*|\d{1,2}(?:-\d{1,2})?)(?:\/\d{1,2})?)*\s+(?:\*|\d{1,2}(?:-\d{1,2})?)(?:\/\d{1,2})?(?:,(?:\*|\d{1,2}(?:-\d{1,2})?)(?:\/\d{1,2})?)*\s+(?:\*|\d{1,2}(?:-\d{1,2})?)(?:\/\d{1,2})?(?:,(?:\*|\d{1,2}(?:-\d{1,2})?)(?:\/\d{1,2})?)*\s*$/u;
 
 function formatInterval(seconds: number): string {
     if (seconds % 3600 === 0) {
@@ -72,6 +76,7 @@ function actionErrorMessage(error: unknown): string {
 }
 
 export async function saveScheduleAction(options: {
+    cronExpressionDraft: string;
     intervalNumber: number;
     scheduleTypeDraft: EditableScheduleType;
     selectedJob: ScheduledJob | null;
@@ -81,6 +86,7 @@ export async function saveScheduleAction(options: {
 }) {
     const {
         intervalNumber,
+        cronExpressionDraft,
         scheduleTypeDraft,
         selectedJob,
         setActionError,
@@ -97,8 +103,14 @@ export async function saveScheduleAction(options: {
     const patch = {
         scheduleType: scheduleTypeDraft,
         ...(scheduleTypeDraft === "interval"
-            ? { intervalSeconds: intervalNumber, timeOfDay: null }
-            : { timeOfDay: timeOfDayDraft }),
+            ? {
+                  cronExpression: null,
+                  intervalSeconds: intervalNumber,
+                  timeOfDay: null,
+              }
+            : scheduleTypeDraft === "daily"
+              ? { cronExpression: null, timeOfDay: timeOfDayDraft }
+              : { cronExpression: cronExpressionDraft.trim(), timeOfDay: null }),
     };
     setActionError("");
     try {
@@ -172,6 +184,7 @@ export function Jobs() {
     const [intervalDraft, setIntervalDraft] = useState("");
     const [scheduleTypeDraft, setScheduleTypeDraft] =
         useState<EditableScheduleType>("interval");
+    const [cronExpressionDraft, setCronExpressionDraft] = useState("");
     const [timeOfDayDraft, setTimeOfDayDraft] = useState("");
     const [actionError, setActionError] = useState("");
 
@@ -179,9 +192,8 @@ export function Jobs() {
         setActionError("");
         if (selectedJob) {
             setIntervalDraft(String(selectedJob.intervalSeconds));
-            setScheduleTypeDraft(
-                selectedJob.scheduleType === "daily" ? "daily" : "interval"
-            );
+            setScheduleTypeDraft(selectedJob.scheduleType);
+            setCronExpressionDraft(selectedJob.cronExpression || "* * * * *");
             setTimeOfDayDraft(selectedJob.timeOfDay || "09:00");
         }
     }, [selectedJob?.id]);
@@ -189,11 +201,17 @@ export function Jobs() {
     const intervalNumber = Number(intervalDraft);
     const intervalIsValid = Number.isSafeInteger(intervalNumber) && intervalNumber >= 60;
     const timeOfDayIsValid = /^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(timeOfDayDraft);
+    const cronExpressionIsValid = cronExpressionPattern.test(cronExpressionDraft);
     const scheduleIsValid =
-        scheduleTypeDraft === "interval" ? intervalIsValid : timeOfDayIsValid;
+        scheduleTypeDraft === "interval"
+            ? intervalIsValid
+            : scheduleTypeDraft === "daily"
+              ? timeOfDayIsValid
+              : cronExpressionIsValid;
 
     async function saveSchedule() {
         await saveScheduleAction({
+            cronExpressionDraft,
             intervalNumber,
             scheduleTypeDraft,
             selectedJob,
@@ -357,7 +375,11 @@ export function Jobs() {
                                         value={scheduleTypeDraft}
                                         onChange={(value) =>
                                             setScheduleTypeDraft(
-                                                value === "daily" ? "daily" : "interval"
+                                                value === "daily"
+                                                    ? "daily"
+                                                    : value === "cron"
+                                                      ? "cron"
+                                                      : "interval"
                                             )
                                         }
                                         options={[...SCHEDULE_TYPE_OPTIONS]}
@@ -372,6 +394,15 @@ export function Jobs() {
                                                 setTimeOfDayDraft(event.target.value)
                                             }
                                             placeholder="HH:mm"
+                                        />
+                                    ) : scheduleTypeDraft === "cron" ? (
+                                        <Input
+                                            label="Cron expression"
+                                            value={cronExpressionDraft}
+                                            onChange={(event) =>
+                                                setCronExpressionDraft(event.target.value)
+                                            }
+                                            placeholder="* * * * *"
                                         />
                                     ) : (
                                         <Input
@@ -404,6 +435,12 @@ export function Jobs() {
                                 {scheduleTypeDraft === "daily" && !timeOfDayIsValid ? (
                                     <p className="text-xs text-red-400">
                                         Time of day must use HH:mm, for example 02:40.
+                                    </p>
+                                ) : null}
+                                {scheduleTypeDraft === "cron" &&
+                                !cronExpressionIsValid ? (
+                                    <p className="text-xs text-red-400">
+                                        Cron must use five fields, for example * * * * *.
                                     </p>
                                 ) : null}
                             </div>

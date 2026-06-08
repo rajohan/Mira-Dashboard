@@ -167,14 +167,38 @@ async function waitForDone(
     throw new Error("Backup job did not finish");
 }
 
-async function waitForRefresh(key: string, refreshedKeys: string[]): Promise<void> {
+async function waitForRefresh(
+    key: string,
+    refreshedKeys: string[],
+    expectedCount = 1
+): Promise<void> {
     for (let attempt = 0; attempt < 20; attempt += 1) {
-        if (refreshedKeys.includes(key)) {
+        if (
+            refreshedKeys.filter((refreshedKey) => refreshedKey === key).length >=
+            expectedCount
+        ) {
             return;
         }
         await new Promise((resolve) => setTimeout(resolve, 10));
     }
     throw new Error(`Backup refresh did not finish for ${key}`);
+}
+
+async function waitForRefreshClear(
+    server: TestServer,
+    pathName: string,
+    jobId: string
+): Promise<void> {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+        const response = await requestJson<{
+            job: { id: string; refreshPending: boolean } | null;
+        }>(server, pathName);
+        if (response.body.job?.id === jobId && !response.body.job.refreshPending) {
+            return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(`Backup refresh pending flag did not clear for ${jobId}`);
 }
 
 describe("backup routes", () => {
@@ -343,6 +367,7 @@ describe("backup routes", () => {
         assert.equal(restarted.status, 200);
         assert.notEqual(restarted.body.job.id, started.body.job.id);
         await waitForDone(server, "/api/backups/kopia");
+        await waitForRefresh("backup.kopia.status", refreshedKeys, 2);
     });
 
     it("starts and completes WAL-G backup jobs through the configured shell", async () => {
@@ -372,6 +397,7 @@ describe("backup routes", () => {
         assert.equal(restarted.status, 200);
         assert.notEqual(restarted.body.job.id, started.body.job.id);
         await waitForDone(server, "/api/backups/walg");
+        await waitForRefresh("backup.walg.status", refreshedKeys, 2);
     });
 
     it("uses configured Docker binary for WAL-G backup jobs", async () => {
@@ -583,8 +609,11 @@ describe("backup routes", () => {
 
     it("releases backup jobs when status refresh times out", async () => {
         backupTesting.setBackupRefreshTimeoutMsForTest(5);
+        let finishRefresh: ((value: { refreshed: string[] }) => void) | undefined;
         backupTesting.setRefreshBackupCacheForTest(async () => {
-            return await new Promise<{ refreshed: string[] }>(() => {});
+            return await new Promise<{ refreshed: string[] }>((resolve) => {
+                finishRefresh = resolve;
+            });
         });
         try {
             const started = await requestJson<{
@@ -607,7 +636,7 @@ describe("backup routes", () => {
                 if (
                     done.body.job?.id === firstJobId &&
                     done.body.job.status === "done" &&
-                    done.body.job.refreshPending === false &&
+                    done.body.job.refreshPending === true &&
                     done.body.job.stderr.includes(
                         "Status refresh failed: Status refresh timed out"
                     )
@@ -616,14 +645,14 @@ describe("backup routes", () => {
                 }
                 await new Promise((resolve) => setTimeout(resolve, 10));
                 if (attempt === 29) {
-                    assert.fail("Backup refresh timeout did not release the job");
+                    assert.fail("Backup refresh timeout was not reported");
                 }
             }
 
-            backupTesting.setRefreshBackupCacheForTest(async (key) => {
-                refreshedKeys.push(key);
-                return { refreshed: [key] };
-            });
+            assert.ok(finishRefresh);
+            finishRefresh({ refreshed: ["backup.kopia.status"] });
+            await waitForRefreshClear(server, "/api/backups/kopia", firstJobId);
+
             const restarted = await requestJson<{
                 ok: boolean;
                 job: { id: string; refreshPending: boolean };

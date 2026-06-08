@@ -15,7 +15,7 @@ export type ScheduledJobActionType =
     | "notification.openclaw"
     | "notification.quota"
     | "ops.logRotation";
-export type ScheduledJobScheduleType = "interval" | "daily";
+export type ScheduledJobScheduleType = "interval" | "daily" | "cron";
 export type ScheduledJobRunStatus = "running" | "success" | "failed";
 export type ScheduledJobTriggerType = "manual" | "schedule";
 
@@ -407,8 +407,142 @@ function nextDailyRunIso(timeOfDay: string, from = new Date()): string {
     return next.toISOString();
 }
 
+function parseCronNumber(value: string, min: number, max: number): number | null {
+    if (!/^\d+$/u.test(value)) {
+        return null;
+    }
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : null;
+}
+
+function parseCronField(
+    field: string,
+    min: number,
+    max: number
+): { any: boolean; values: Set<number> } | null {
+    const values = new Set<number>();
+    for (const rawPart of field.split(",")) {
+        const [rangePart, stepPart] = rawPart.split("/");
+        if (!rangePart || rawPart.split("/").length > 2) {
+            return null;
+        }
+        const step =
+            stepPart === undefined ? 1 : parseCronNumber(stepPart, 1, max - min + 1);
+        if (!step) {
+            return null;
+        }
+
+        let start: number;
+        let end: number;
+        if (rangePart === "*") {
+            start = min;
+            end = max;
+        } else if (rangePart.includes("-")) {
+            const [startText, endText] = rangePart.split("-");
+            if (!startText || !endText || rangePart.split("-").length > 2) {
+                return null;
+            }
+            const parsedStart = parseCronNumber(startText, min, max);
+            const parsedEnd = parseCronNumber(endText, min, max);
+            if (parsedStart === null || parsedEnd === null || parsedStart > parsedEnd) {
+                return null;
+            }
+            start = parsedStart;
+            end = parsedEnd;
+        } else {
+            const parsed = parseCronNumber(rangePart, min, max);
+            if (parsed === null) {
+                return null;
+            }
+            start = parsed;
+            end = parsed;
+        }
+
+        for (let value = start; value <= end; value += step) {
+            values.add(value);
+        }
+    }
+
+    return { any: values.size === max - min + 1, values };
+}
+
+function parseCronExpression(expression: string): {
+    dayOfMonth: { any: boolean; values: Set<number> };
+    dayOfWeek: { any: boolean; values: Set<number> };
+    hours: Set<number>;
+    minutes: Set<number>;
+    months: Set<number>;
+} | null {
+    const parts = expression.trim().split(/\s+/u);
+    if (parts.length !== 5) {
+        return null;
+    }
+    const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+    const minutes = parseCronField(minute, 0, 59);
+    const hours = parseCronField(hour, 0, 23);
+    const days = parseCronField(dayOfMonth, 1, 31);
+    const months = parseCronField(month, 1, 12);
+    const weekdays = parseCronField(dayOfWeek, 0, 7);
+    if (!minutes || !hours || !days || !months || !weekdays) {
+        return null;
+    }
+    if (weekdays.values.has(7)) {
+        weekdays.values.add(0);
+        weekdays.values.delete(7);
+    }
+    return {
+        dayOfMonth: days,
+        dayOfWeek: weekdays,
+        hours: hours.values,
+        minutes: minutes.values,
+        months: months.values,
+    };
+}
+
+function cronDayMatches(
+    schedule: NonNullable<ReturnType<typeof parseCronExpression>>,
+    candidate: Date
+): boolean {
+    const dayOfMonthMatches = schedule.dayOfMonth.values.has(candidate.getUTCDate());
+    const dayOfWeekMatches = schedule.dayOfWeek.values.has(candidate.getUTCDay());
+    if (schedule.dayOfMonth.any && schedule.dayOfWeek.any) {
+        return true;
+    }
+    if (schedule.dayOfMonth.any) {
+        return dayOfWeekMatches;
+    }
+    if (schedule.dayOfWeek.any) {
+        return dayOfMonthMatches;
+    }
+    return dayOfMonthMatches || dayOfWeekMatches;
+}
+
+function nextCronRunIso(expression: string, from = new Date()): string {
+    const schedule = parseCronExpression(expression);
+    if (!schedule) {
+        throw new Error("cronExpression must be a valid 5-field cron expression");
+    }
+    const candidate = new Date(from);
+    candidate.setUTCSeconds(0, 0);
+    candidate.setUTCMinutes(candidate.getUTCMinutes() + 1);
+    const maxAttempts = 366 * 24 * 60;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        if (
+            schedule.months.has(candidate.getUTCMonth() + 1) &&
+            schedule.hours.has(candidate.getUTCHours()) &&
+            schedule.minutes.has(candidate.getUTCMinutes()) &&
+            cronDayMatches(schedule, candidate)
+        ) {
+            return candidate.toISOString();
+        }
+        candidate.setUTCMinutes(candidate.getUTCMinutes() + 1);
+    }
+    throw new Error("cronExpression did not produce a run within one year");
+}
+
 function computeNextRunIso(
     job: {
+        cronExpression: string | null;
         scheduleType: ScheduledJobScheduleType;
         intervalSeconds: number;
         timeOfDay: string | null;
@@ -418,10 +552,17 @@ function computeNextRunIso(
     if (job.scheduleType === "daily" && job.timeOfDay) {
         return nextDailyRunIso(job.timeOfDay, referenceTime);
     }
+    if (job.scheduleType === "cron") {
+        if (!job.cronExpression) {
+            throw new Error("cronExpression is required for cron jobs");
+        }
+        return nextCronRunIso(job.cronExpression, referenceTime);
+    }
     return nextIntervalRunIso(job.intervalSeconds, referenceTime?.getTime());
 }
 
 function validateScheduledJobValues(job: {
+    cronExpression: string | null;
     intervalSeconds: number;
     scheduleType: ScheduledJobScheduleType;
     timeOfDay: string | null;
@@ -429,8 +570,8 @@ function validateScheduledJobValues(job: {
     if (!Number.isSafeInteger(job.intervalSeconds) || job.intervalSeconds < 60) {
         return "intervalSeconds must be an integer >= 60";
     }
-    if (!["interval", "daily"].includes(job.scheduleType)) {
-        return "scheduleType must be interval or daily";
+    if (!["interval", "daily", "cron"].includes(job.scheduleType)) {
+        return "scheduleType must be interval, daily, or cron";
     }
     if (
         job.scheduleType === "daily" &&
@@ -438,18 +579,32 @@ function validateScheduledJobValues(job: {
     ) {
         return "timeOfDay must be HH:mm for daily jobs";
     }
+    if (
+        job.scheduleType === "cron" &&
+        (!job.cronExpression || !parseCronExpression(job.cronExpression))
+    ) {
+        return "cronExpression must be a valid 5-field cron expression";
+    }
     return null;
 }
 
 export function validateScheduledJobPatch(
-    existing: Pick<ScheduledJob, "intervalSeconds" | "scheduleType" | "timeOfDay">,
+    existing: Pick<
+        ScheduledJob,
+        "cronExpression" | "intervalSeconds" | "scheduleType" | "timeOfDay"
+    >,
     patch: {
+        cronExpression?: string | null;
         intervalSeconds?: number;
         scheduleType?: ScheduledJobScheduleType;
         timeOfDay?: string | null;
     }
 ): string | null {
     return validateScheduledJobValues({
+        cronExpression:
+            patch.cronExpression === undefined
+                ? existing.cronExpression
+                : patch.cronExpression,
         intervalSeconds: patch.intervalSeconds ?? existing.intervalSeconds,
         scheduleType: patch.scheduleType ?? existing.scheduleType,
         timeOfDay: patch.timeOfDay === undefined ? existing.timeOfDay : patch.timeOfDay,
@@ -590,6 +745,7 @@ export function getScheduledJob(id: string): ScheduledJob | null {
 export function updateScheduledJob(
     id: string,
     patch: {
+        cronExpression?: string | null;
         enabled?: boolean;
         intervalSeconds?: number;
         scheduleType?: ScheduledJobScheduleType;
@@ -606,8 +762,13 @@ export function updateScheduledJob(
     const scheduleType = patch.scheduleType ?? existing.scheduleType;
     const timeOfDay =
         patch.timeOfDay === undefined ? existing.timeOfDay : patch.timeOfDay;
+    const cronExpression =
+        patch.cronExpression === undefined
+            ? existing.cronExpression
+            : patch.cronExpression;
 
     const validationError = validateScheduledJobValues({
+        cronExpression,
         intervalSeconds,
         scheduleType,
         timeOfDay,
@@ -620,22 +781,29 @@ export function updateScheduledJob(
     const scheduleChanged =
         scheduleType !== existing.scheduleType ||
         intervalSeconds !== existing.intervalSeconds ||
-        timeOfDay !== existing.timeOfDay;
+        timeOfDay !== existing.timeOfDay ||
+        cronExpression !== existing.cronExpression;
     const nextRunAt = enabled
         ? existing.nextRunAt == null || scheduleChanged
-            ? computeNextRunIso({ scheduleType, intervalSeconds, timeOfDay })
+            ? computeNextRunIso({
+                  cronExpression,
+                  intervalSeconds,
+                  scheduleType,
+                  timeOfDay,
+              })
             : existing.nextRunAt
         : null;
     db.prepare(
         `UPDATE scheduled_jobs
          SET enabled = ?, schedule_type = ?, interval_seconds = ?, time_of_day = ?,
-             next_run_at = ?, updated_at = ?
+             cron_expression = ?, next_run_at = ?, updated_at = ?
          WHERE id = ?`
     ).run(
         enabled ? 1 : 0,
         scheduleType,
         intervalSeconds,
         timeOfDay,
+        cronExpression,
         nextRunAt,
         timestamp,
         id
@@ -858,6 +1026,7 @@ export function stopScheduledJobScheduler(): void {
 export const __testing = {
     defaultJobs,
     computeDefaultNextRunIso,
+    nextCronRunIso,
     seedDefaultScheduledJobs,
     getDefaultActionTargetForTests: getDefaultActionTarget,
     isScheduledJobRaceError,

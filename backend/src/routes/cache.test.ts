@@ -279,6 +279,15 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
             try {
                 await assert.rejects(() => refreshCacheKey("missing.key"), {
                     message: "Cache key not found after refresh: missing.key",
+                    statusCode: 404,
+                });
+                const missingRouteRefresh = await fetch(
+                    `${server.baseUrl}/api/cache/missing.key/refresh`,
+                    { method: "POST" }
+                );
+                assert.equal(missingRouteRefresh.status, 404);
+                assert.deepEqual(await missingRouteRefresh.json(), {
+                    error: "Cache key not found after refresh: missing.key",
                 });
             } finally {
                 __testing.setCacheRefreshCommandForTests("missing.key", undefined);
@@ -376,6 +385,15 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         try {
             await assert.rejects(() => refreshCacheKey("custom.empty"), {
                 message: "Cache key not found after refresh: custom.empty",
+                statusCode: 404,
+            });
+            const routeRefresh = await fetch(
+                `${server.baseUrl}/api/cache/custom.empty/refresh`,
+                { method: "POST" }
+            );
+            assert.equal(routeRefresh.status, 404);
+            assert.deepEqual(await routeRefresh.json(), {
+                error: "Cache key not found after refresh: custom.empty",
             });
         } finally {
             __testing.resetCacheRefreshForTests();
@@ -389,6 +407,15 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         try {
             await assert.rejects(() => refreshCacheKey("custom.numeric"), {
                 message: "Invalid refreshed cache key for custom.numeric: 123",
+                statusCode: 404,
+            });
+            const routeRefresh = await fetch(
+                `${server.baseUrl}/api/cache/custom.numeric/refresh`,
+                { method: "POST" }
+            );
+            assert.equal(routeRefresh.status, 404);
+            assert.deepEqual(await routeRefresh.json(), {
+                error: "Invalid refreshed cache key for custom.numeric: 123",
             });
         } finally {
             __testing.resetCacheRefreshForTests();
@@ -402,6 +429,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         try {
             await assert.rejects(() => refreshCacheKey("custom.undefined"), {
                 message: "Invalid refreshed cache key for custom.undefined: undefined",
+                statusCode: 404,
             });
         } finally {
             __testing.resetCacheRefreshForTests();
@@ -415,6 +443,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         try {
             await assert.rejects(() => refreshCacheKey("custom.blank"), {
                 message: 'Invalid refreshed cache key for custom.blank: "  "',
+                statusCode: 404,
             });
         } finally {
             __testing.resetCacheRefreshForTests();
@@ -486,6 +515,15 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         try {
             await assert.rejects(() => refreshCacheKey("moltbook"), {
                 message: "Cache key not found after refresh: partial.two",
+                statusCode: 404,
+            });
+            const routeRefresh = await fetch(
+                `${server.baseUrl}/api/cache/moltbook/refresh`,
+                { method: "POST" }
+            );
+            assert.equal(routeRefresh.status, 404);
+            assert.deepEqual(await routeRefresh.json(), {
+                error: "Cache key not found after refresh: partial.two",
             });
         } finally {
             __testing.resetCacheRefreshForTests();

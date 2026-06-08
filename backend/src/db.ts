@@ -351,12 +351,6 @@ export async function ensureTaskAutomationColumn(
 }
 
 export function ensureCacheEntriesUpdatedAtNullable(targetDb: MigrationDatabase): void {
-    const columns = targetDb.prepare("PRAGMA table_info(cache_entries)").all();
-    const updatedAt = columns.find((column) => column.name === "updated_at");
-    if (!updatedAt || Number(updatedAt.notnull || 0) === 0) {
-        return;
-    }
-
     let lastError: unknown;
     for (const delay of [0, 10, 25, 50]) {
         if (delay > 0) {
@@ -364,6 +358,12 @@ export function ensureCacheEntriesUpdatedAtNullable(targetDb: MigrationDatabase)
         }
 
         try {
+            const columns = targetDb.prepare("PRAGMA table_info(cache_entries)").all();
+            const updatedAt = columns.find((column) => column.name === "updated_at");
+            if (!updatedAt || Number(updatedAt.notnull || 0) === 0) {
+                return;
+            }
+
             targetDb.exec("BEGIN IMMEDIATE");
             targetDb.exec(`
                 ALTER TABLE cache_entries RENAME TO cache_entries_old;
@@ -411,38 +411,6 @@ export function ensureCacheEntriesUpdatedAtNullable(targetDb: MigrationDatabase)
 }
 
 export function ensureDockerUpdateEventsSetNull(targetDb: MigrationDatabase): void {
-    const columns = targetDb.prepare("PRAGMA table_info(docker_update_events)").all();
-    const managedServiceId = columns.find(
-        (column) => column.name === "managed_service_id"
-    );
-    const appSlug = columns.find((column) => column.name === "app_slug");
-    const serviceName = columns.find((column) => column.name === "service_name");
-    const foreignKeys = targetDb
-        .prepare("PRAGMA foreign_key_list(docker_update_events)")
-        .all();
-    const serviceForeignKey = foreignKeys.find(
-        (foreignKey) =>
-            foreignKey.from === "managed_service_id" &&
-            foreignKey.table === "docker_managed_services"
-    );
-    if (
-        managedServiceId &&
-        Number(managedServiceId.notnull || 0) === 0 &&
-        String(serviceForeignKey?.on_delete || "").toUpperCase() === "SET NULL" &&
-        appSlug &&
-        serviceName
-    ) {
-        return;
-    }
-
-    const oldManagedServiceId = managedServiceId
-        ? "docker_update_events_old.managed_service_id"
-        : "NULL";
-    const oldAppSlug = appSlug ? "NULLIF(docker_update_events_old.app_slug, '')" : "NULL";
-    const oldServiceName = serviceName
-        ? "NULLIF(docker_update_events_old.service_name, '')"
-        : "NULL";
-
     let lastError: unknown;
     for (const delay of [0, 10, 25, 50]) {
         if (delay > 0) {
@@ -450,6 +418,42 @@ export function ensureDockerUpdateEventsSetNull(targetDb: MigrationDatabase): vo
         }
 
         try {
+            const columns = targetDb
+                .prepare("PRAGMA table_info(docker_update_events)")
+                .all();
+            const managedServiceId = columns.find(
+                (column) => column.name === "managed_service_id"
+            );
+            const appSlug = columns.find((column) => column.name === "app_slug");
+            const serviceName = columns.find((column) => column.name === "service_name");
+            const foreignKeys = targetDb
+                .prepare("PRAGMA foreign_key_list(docker_update_events)")
+                .all();
+            const serviceForeignKey = foreignKeys.find(
+                (foreignKey) =>
+                    foreignKey.from === "managed_service_id" &&
+                    foreignKey.table === "docker_managed_services"
+            );
+            if (
+                managedServiceId &&
+                Number(managedServiceId.notnull || 0) === 0 &&
+                String(serviceForeignKey?.on_delete || "").toUpperCase() === "SET NULL" &&
+                appSlug &&
+                serviceName
+            ) {
+                return;
+            }
+
+            const oldManagedServiceId = managedServiceId
+                ? "docker_update_events_old.managed_service_id"
+                : "NULL";
+            const oldAppSlug = appSlug
+                ? "NULLIF(docker_update_events_old.app_slug, '')"
+                : "NULL";
+            const oldServiceName = serviceName
+                ? "NULLIF(docker_update_events_old.service_name, '')"
+                : "NULL";
+
             targetDb.exec("BEGIN IMMEDIATE");
             targetDb.exec(`
                 ALTER TABLE docker_update_events RENAME TO docker_update_events_old;

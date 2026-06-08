@@ -77,6 +77,21 @@ async function writeExecutable(filePath: string, script: string) {
     await chmod(filePath, 0o755);
 }
 
+async function waitFor(
+    predicate: () => boolean,
+    timeoutMs = 2_000,
+    intervalMs = 10
+): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() <= deadline) {
+        if (predicate()) {
+            return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    throw new Error("Timed out waiting for cache refresh test condition");
+}
+
 describe("backend cache refresh producers", { concurrency: false }, () => {
     let tempDir: string;
     let dbDir: string;
@@ -415,9 +430,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
 
             const hot = refreshCacheProducer("moltbook.feed.hot");
             const profile = refreshCacheProducer("moltbook.profile");
-            while (releases.length < 2) {
-                await new Promise((resolve) => setTimeout(resolve, 0));
-            }
+            await waitFor(() => releases.length >= 2);
             for (const release of releases) {
                 release();
             }
@@ -479,10 +492,9 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
             }) as typeof fetch;
 
             const fullRefresh = refreshCacheProducer("moltbook");
-            while (!releaseHome) {
-                await new Promise((resolve) => setTimeout(resolve, 0));
-            }
+            await waitFor(() => Boolean(releaseHome));
             const subkeyRefresh = refreshCacheProducer("moltbook.feed.hot");
+            assert.ok(releaseHome);
             releaseHome();
 
             const expected = {
@@ -551,17 +563,13 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
             }) as typeof fetch;
 
             const homeRefresh = refreshCacheProducer("moltbook.home");
-            while (releases.length === 0) {
-                await new Promise((resolve) => setTimeout(resolve, 0));
-            }
+            await waitFor(() => releases.length > 0);
             const fullRefresh = refreshCacheProducer("moltbook");
             for (const release of releases) {
                 release();
             }
 
-            while (releases.length < 2) {
-                await new Promise((resolve) => setTimeout(resolve, 0));
-            }
+            await waitFor(() => releases.length >= 2);
             releases[1]?.();
 
             assert.deepEqual(await Promise.all([homeRefresh, fullRefresh]), [
@@ -630,17 +638,13 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
             }) as typeof fetch;
 
             const hotRefresh = refreshCacheProducer("moltbook.feed.hot");
-            while (hotReleases.length === 0) {
-                await new Promise((resolve) => setTimeout(resolve, 0));
-            }
+            await waitFor(() => hotReleases.length > 0);
             const fullRefresh = refreshCacheProducer("moltbook");
             for (const release of hotReleases) {
                 release();
             }
 
-            while (hotReleases.length < 2) {
-                await new Promise((resolve) => setTimeout(resolve, 0));
-            }
+            await waitFor(() => hotReleases.length >= 2);
             hotReleases[1]?.();
 
             assert.deepEqual(await Promise.all([hotRefresh, fullRefresh]), [
@@ -699,9 +703,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
             }) as typeof fetch;
 
             const fullRefresh = refreshCacheProducer("moltbook");
-            while (!releaseHome) {
-                await new Promise((resolve) => setTimeout(resolve, 0));
-            }
+            await waitFor(() => Boolean(releaseHome));
 
             try {
                 await assert.rejects(
@@ -709,6 +711,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                     /Unsupported Moltbook cache key/u
                 );
             } finally {
+                assert.ok(releaseHome);
                 releaseHome();
             }
             await fullRefresh;
@@ -728,7 +731,7 @@ if (repo.includes("/opt/docker")) process.exit(1);
 if (command === "rev-parse --is-inside-work-tree") process.stdout.write("true\n");
 else if (command === "branch --show-current") process.stdout.write(repo.includes(".openclaw") ? "main\n" : "\n");
 else if (command === "rev-parse HEAD") process.stdout.write("abc123\n");
-else if (command === "remote -v") process.stdout.write("origin\tgit@github.com:rajohan/repo.git (fetch)\n");
+else if (command === "remote -v") process.stdout.write(repo.includes(".openclaw") ? "origin\thttps://user:pass@example.com/repo.git?token=secret (fetch)\n" : "origin\tgit@github.com:rajohan/repo.git (fetch)\n");
 else if (command === "status --short") {
   if (repo.includes(".openclaw")) process.stdout.write(" M a.ts\nD  b.ts\n?? c.ts\nR  d.ts -> e.ts\nUU conflict.ts\n");
   else process.exit(2);
@@ -745,6 +748,7 @@ else if (command === "status --short") {
             repos: Array<{
                 key: string;
                 dirty: boolean;
+                remote?: string | null;
                 statusSummary?: { total: number };
                 statusError?: string;
             }>;
@@ -762,6 +766,10 @@ else if (command === "status --short") {
         assert.equal(
             data.repos.find((repo) => repo.key === "openclaw")?.statusSummary?.total,
             5
+        );
+        assert.equal(
+            data.repos.find((repo) => repo.key === "openclaw")?.remote,
+            "https://example.com/repo.git"
         );
     });
 

@@ -287,7 +287,7 @@ interface DockerStackActionRequest {
 
 function isSafeDockerArgument(value: string): boolean {
     const trimmed = value.trim();
-    return /^(?!-)[A-Za-z0-9._-]+$/u.test(trimmed);
+    return /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(trimmed);
 }
 
 function validateDockerStackActionRequest(

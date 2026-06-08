@@ -437,9 +437,9 @@ async function gzipFile(filePath: string, approvedRoots: string[]): Promise<stri
         await fs.utimes(gzPath, source.stat.atime, source.stat.mtime);
         await destination.close();
         destination = null;
+        await unlinkVerified(filePath, approvedRoots);
         await source.handle.close();
         closed = true;
-        await unlinkVerified(filePath, approvedRoots);
         return gzPath;
     } catch (error) {
         await destination?.close().catch(() => {});
@@ -575,7 +575,11 @@ async function listArchives(
             const safe = await assertSafePath(archivePath, approvedRoots);
             if (!safe) continue;
             const stat = await fs.stat(archivePath);
-            archives.push({ path: archivePath, mtimeMs: stat.mtimeMs, compress: true });
+            archives.push({
+                path: archivePath,
+                mtimeMs: stat.mtimeMs,
+                compress: policy.compress !== false,
+            });
         }
     }
     return [...new Map(archives.map((archive) => [archive.path, archive])).values()].sort(

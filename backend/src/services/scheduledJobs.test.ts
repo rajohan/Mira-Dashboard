@@ -173,6 +173,33 @@ test("computes next daily run for today or tomorrow", () => {
         () => __testing.nextIntervalRunIso(Number.MAX_SAFE_INTEGER),
         /outside JS Date bounds/u
     );
+    assert.equal(
+        __testing.nextCronRunIso("* * * * *", new Date("2026-06-05T09:00:30Z")),
+        "2026-06-05T09:01:00.000Z"
+    );
+    assert.equal(
+        __testing.nextCronRunIso("*/15 9-10 * * 1,5", new Date("2026-06-05T09:14:00Z")),
+        "2026-06-05T09:15:00.000Z"
+    );
+    assert.equal(
+        __testing.nextCronRunIso("0 8 1 * 1", new Date("2026-06-02T00:00:00Z")),
+        "2026-06-08T08:00:00.000Z"
+    );
+    assert.equal(
+        __testing.nextCronRunIso("0 8 1 * *", new Date("2026-06-02T00:00:00Z")),
+        "2026-07-01T08:00:00.000Z"
+    );
+    assert.throws(() => __testing.nextCronRunIso("* * * *"), /valid 5-field/u);
+    assert.throws(() => __testing.nextCronRunIso("61 * * * *"), /valid 5-field/u);
+    assert.throws(() => __testing.nextCronRunIso("x * * * *"), /valid 5-field/u);
+    assert.throws(() => __testing.nextCronRunIso("*/2/3 * * * *"), /valid 5-field/u);
+    assert.throws(() => __testing.nextCronRunIso("*/0 * * * *"), /valid 5-field/u);
+    assert.throws(() => __testing.nextCronRunIso("1-2-3 * * * *"), /valid 5-field/u);
+    assert.throws(() => __testing.nextCronRunIso("10-1 * * * *"), /valid 5-field/u);
+    assert.throws(
+        () => __testing.nextCronRunIso("0 0 31 2 *", new Date("2026-01-01T00:00:00Z")),
+        /within one year/u
+    );
     assert.ok(
         new Date(
             __testing.computeDefaultNextRunIso({
@@ -197,6 +224,20 @@ test("computes next daily run for today or tomorrow", () => {
                 scheduleType: "daily",
                 intervalSeconds: 60,
                 timeOfDay: "nope",
+                cronExpression: null,
+            })
+        ).getTime() <= Date.now()
+    );
+    assert.ok(
+        new Date(
+            __testing.computeDefaultNextRunIso({
+                id: "test.cron",
+                name: "Test cron",
+                description: "Test cron",
+                cacheKey: "system.host",
+                scheduleType: "cron",
+                intervalSeconds: 60,
+                timeOfDay: null,
                 cronExpression: null,
             })
         ).getTime() <= Date.now()
@@ -239,8 +280,22 @@ test("updates enable state, interval schedules, and daily schedules", () => {
         /HH:mm/u
     );
     assert.throws(
-        () => updateScheduledJob("cache.weather", { scheduleType: "cron" as never }),
-        /scheduleType must be interval or daily/u
+        () => updateScheduledJob("cache.weather", { scheduleType: "cron" }),
+        /cronExpression/u
+    );
+    const cronWithExpression = updateScheduledJob("cache.weather", {
+        cronExpression: "*/30 * * * *",
+        scheduleType: "cron",
+    });
+    assert.equal(cronWithExpression?.cronExpression, "*/30 * * * *");
+    assert.ok(cronWithExpression?.nextRunAt);
+    assert.throws(
+        () =>
+            updateScheduledJob("cache.weather", {
+                cronExpression: "bad",
+                scheduleType: "cron",
+            }),
+        /cronExpression/u
     );
     assert.equal(updateScheduledJob("missing", { enabled: true }), null);
 });
@@ -679,6 +734,20 @@ test("covers scheduled job mapping and unsupported-action edge cases", async () 
     assert.equal(unsupported.status, "failed");
     assert.match(unsupported.message ?? "", /Unsupported scheduled job action/u);
     assert.equal(__testing.requireRecordedRun(unsupported).id, unsupported.id);
+
+    const cronNextRunAt = "2026-06-09T03:00:00.000Z";
+    db.prepare(
+        `INSERT INTO scheduled_jobs (
+            id, name, description, enabled, schedule_type, interval_seconds,
+            cron_expression, action_type, action_target, settings_json,
+            next_run_at, created_at, updated_at
+        ) VALUES (
+            'custom.cron', 'Cron', 'Cron action', 1, 'cron', 60,
+            '* * * * *', 'cache.refresh', 'cache.weather', '{}', ?, ?, ?
+        )`
+    ).run(cronNextRunAt, new Date().toISOString(), new Date().toISOString());
+    __testing.updateNextRunFromLatestJob("custom.cron");
+    assert.notEqual(getScheduledJob("custom.cron")?.nextRunAt, cronNextRunAt);
 
     assert.throws(
         () => updateScheduledJob("cache.weather", { scheduleType: "bogus" as never }),

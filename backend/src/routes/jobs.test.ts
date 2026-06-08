@@ -173,12 +173,28 @@ test("returns validation and missing job errors", async () => {
             method: "PATCH",
             body: { patch: { scheduleType: "daily" } },
         });
-        const cronPatch = await requestJson<{ error: string }>(
+        const cronPatch = await requestJson<{
+            job: {
+                cronExpression: string | null;
+                nextRunAt: string | null;
+                scheduleType: string;
+            };
+        }>(server, "/api/jobs/cache.weather", {
+            method: "PATCH",
+            body: {
+                patch: {
+                    cronExpression: "*/20 * * * *",
+                    scheduleType: "cron",
+                    timeOfDay: null,
+                },
+            },
+        });
+        const badCronPatch = await requestJson<{ error: string }>(
             server,
             "/api/jobs/cache.weather",
             {
                 method: "PATCH",
-                body: { patch: { scheduleType: "cron", timeOfDay: null } },
+                body: { patch: { cronExpression: "nope", scheduleType: "cron" } },
             }
         );
         const badIntervalPatch = await requestJson<{ error: string }>(
@@ -232,6 +248,7 @@ test("returns validation and missing job errors", async () => {
         const invalidPatchFields = await Promise.all(
             [
                 { enabled: "true" },
+                { cronExpression: 42 },
                 { intervalSeconds: "3600" },
                 { scheduleType: "unknown" },
                 { timeOfDay: 123 },
@@ -252,8 +269,15 @@ test("returns validation and missing job errors", async () => {
         assert.equal(partialDailyPatch.status, 200);
         assert.equal(partialDailyPatch.body.job.scheduleType, "daily");
         assert.equal(partialDailyPatch.body.job.timeOfDay, "02:40");
-        assert.equal(cronPatch.status, 400);
-        assert.equal(cronPatch.body.error, "invalid patch field: scheduleType");
+        assert.equal(cronPatch.status, 200);
+        assert.equal(cronPatch.body.job.scheduleType, "cron");
+        assert.equal(cronPatch.body.job.cronExpression, "*/20 * * * *");
+        assert.ok(cronPatch.body.job.nextRunAt);
+        assert.equal(badCronPatch.status, 400);
+        assert.equal(
+            badCronPatch.body.error,
+            "cronExpression must be a valid 5-field cron expression"
+        );
         assert.equal(badIntervalPatch.status, 400);
         assert.equal(
             badIntervalPatch.body.error,
@@ -279,6 +303,7 @@ test("returns validation and missing job errors", async () => {
             invalidPatchFields.map((response) => [response.status, response.body.error]),
             [
                 [400, "invalid patch field: enabled"],
+                [400, "invalid patch field: cronExpression"],
                 [400, "invalid patch field: intervalSeconds"],
                 [400, "invalid patch field: scheduleType"],
                 [400, "invalid patch field: timeOfDay"],

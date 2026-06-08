@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -348,34 +349,7 @@ function needsFullTagScan(service: ManagedServiceRow): boolean {
     if (service.tag_match_type !== "regex" || !service.tag_match_pattern) {
         return false;
     }
-
-    let matcher: RegExp;
-    try {
-        matcher = new RegExp(service.tag_match_pattern);
-    } catch {
-        return false;
-    }
-    if (!isSafeTagRegexPattern(service.tag_match_pattern)) {
-        return false;
-    }
-
-    const currentTag = service.current_tag || "";
-    return [
-        "",
-        "latest",
-        "1",
-        "2",
-        "3",
-        "10",
-        "v1",
-        "1.2.1",
-        "1.2.10",
-        "2026.1",
-        `${currentTag}-1`,
-        `${currentTag}x`,
-    ]
-        .filter((tag) => tag !== currentTag)
-        .some((tag) => matcher.test(tag));
+    return isSafeTagRegexPattern(service.tag_match_pattern);
 }
 
 function compareTags(a: string, b: string): number {
@@ -680,8 +654,13 @@ async function applyComposeUpdateUnlocked(
     const doc = YAML.parse(raw) as JsonRecord;
     setNestedValue(doc, composeImageField, targetImageRef);
     let composeStarted = false;
+    const tempPath = path.join(
+        path.dirname(composePath),
+        `${path.basename(composePath)}.tmp-${randomUUID()}`
+    );
     try {
-        fs.writeFileSync(composePath, YAML.stringify(doc));
+        fs.writeFileSync(tempPath, YAML.stringify(doc));
+        fs.renameSync(tempPath, composePath);
         const command = getComposeCommand(composePath, service.service_name);
         composeStarted = true;
         const { stdout, stderr } = await execFileAsync(command.file, command.args, {
@@ -692,6 +671,11 @@ async function applyComposeUpdateUnlocked(
         });
         return { stdout: String(stdout), stderr: String(stderr) };
     } catch (error) {
+        try {
+            fs.unlinkSync(tempPath);
+        } catch {
+            // The temp file may have already been atomically moved into place.
+        }
         let restored = false;
         try {
             fs.writeFileSync(composePath, raw);

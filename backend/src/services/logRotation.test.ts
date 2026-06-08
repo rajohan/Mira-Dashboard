@@ -3,7 +3,6 @@ import { execFile } from "node:child_process";
 import { constants, type PathLike } from "node:fs";
 import fsPromises from "node:fs/promises";
 import {
-    chmod,
     mkdir,
     mkdtemp,
     open,
@@ -383,13 +382,33 @@ describe("log rotation service", { concurrency: false }, () => {
         await mkdir(gzipDeniedRoot);
         const gzipDeniedSource = path.join(gzipDeniedRoot, "source.log");
         await writeFile(gzipDeniedSource, "source", "utf8");
-        await chmod(gzipDeniedRoot, 0o555);
+        const originalOpen = fsPromises.open.bind(fsPromises);
+        const openMock = mock.method(
+            fsPromises,
+            "open",
+            (
+                target: Parameters<typeof fsPromises.open>[0],
+                flags?: Parameters<typeof fsPromises.open>[1],
+                mode?: Parameters<typeof fsPromises.open>[2]
+            ) => {
+                if (String(target) === `${gzipDeniedSource}.gz`) {
+                    throw Object.assign(new Error("permission denied"), {
+                        code: "EACCES",
+                    });
+                }
+                return originalOpen(target, flags, mode);
+            }
+        );
         try {
             await assert.rejects(
                 () => __testing.gzipFile(gzipDeniedSource, [tempDir]),
                 /EACCES|permission denied/u
             );
             await assert.rejects(() => fsPromises.access(`${gzipDeniedSource}.gz`));
+        } finally {
+            openMock.mock.restore();
+        }
+        try {
             const unlinkMock = mock.method(fsPromises, "unlink", async () => {
                 throw new Error("unlink crashed");
             });
@@ -402,7 +421,7 @@ describe("log rotation service", { concurrency: false }, () => {
                 unlinkMock.mock.restore();
             }
         } finally {
-            await chmod(gzipDeniedRoot, 0o755);
+            await rm(`${gzipDeniedSource}.gz`, { force: true });
         }
         mock.method(fsPromises, "realpath", async () => {
             throw new Error("realpath crashed");
@@ -1046,17 +1065,28 @@ describe("log rotation service", { concurrency: false }, () => {
         const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
         await mkdir(path.dirname(lockPath), { recursive: true });
         await writeFile(lockPath, "not-a-pid\n", "utf8");
+        const locks: Array<Awaited<ReturnType<typeof __testing.acquireLogRotationLock>>> =
+            [];
 
-        const locks = await Promise.all([
-            __testing.acquireLogRotationLock(false),
-            __testing.acquireLogRotationLock(false),
-        ]);
+        try {
+            locks.push(
+                ...(await Promise.all([
+                    __testing.acquireLogRotationLock(false),
+                    __testing.acquireLogRotationLock(false),
+                ]))
+            );
 
-        const acquired = locks.filter((handle) => handle !== null);
-        assert.equal(acquired.length, 1);
-        assert.equal(locks.filter((handle) => handle === null).length, 1);
-        await acquired[0]?.close();
-        await rm(lockPath, { force: true });
+            const acquired = locks.filter((handle) => handle !== null);
+            assert.equal(acquired.length, 1);
+            assert.equal(locks.filter((handle) => handle === null).length, 1);
+        } finally {
+            await Promise.all(
+                locks.map((handle) =>
+                    handle ? handle.close().catch(() => {}) : Promise.resolve()
+                )
+            );
+            await rm(lockPath, { force: true }).catch(() => {});
+        }
     });
 
     it("returns null when stale lock reacquire loses the final create race", async () => {

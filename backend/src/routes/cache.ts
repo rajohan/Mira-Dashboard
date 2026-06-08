@@ -21,6 +21,12 @@ let cacheRefreshRunner = refreshCacheProducer;
 const cacheRefreshCommandOverrides = new Map<string, string[] | undefined>();
 const execFileAsync = promisify(execFile);
 
+function httpStatusError(statusCode: number, message: string): HttpStatusError {
+    const error = new Error(message) as HttpStatusError;
+    error.statusCode = statusCode;
+    return error;
+}
+
 export const __testing = {
     getCacheRefreshCommand(key: string): string[] | undefined {
         return cacheRefreshCommandOverrides.get(key);
@@ -98,13 +104,14 @@ export async function refreshCacheKey(key: string) {
         );
     }
     if (result.refreshed.length === 0) {
-        throw new Error(`Cache key not found after refresh: ${key}`);
+        throw httpStatusError(404, `Cache key not found after refresh: ${key}`);
     }
     const invalidRefreshedIndex = result.refreshed.findIndex(
         (entry) => typeof entry !== "string" || entry.trim().length === 0
     );
     if (invalidRefreshedIndex !== -1) {
-        throw new Error(
+        throw httpStatusError(
+            404,
             `Invalid refreshed cache key for ${key}: ${JSON.stringify(result.refreshed[invalidRefreshedIndex])}`
         );
     }
@@ -118,7 +125,10 @@ export async function refreshCacheKey(key: string) {
         (_refreshKey, index) => refreshedRows[index] === null
     );
     if (missingKeys.length > 0) {
-        throw new Error(`Cache key not found after refresh: ${missingKeys.join(", ")}`);
+        throw httpStatusError(
+            404,
+            `Cache key not found after refresh: ${missingKeys.join(", ")}`
+        );
     }
     const rows = refreshedRows as CacheEntryRow[];
     const mapped = rows.map(mapCacheRowForResponse);

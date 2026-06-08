@@ -1968,6 +1968,16 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(invalidStackService.status, 400);
         assert.equal(invalidStackService.body.error, "Invalid stack action");
 
+        for (const service of [".api", "_api"]) {
+            const invalidLeadingCharacter = await requestJson<{ error: string }>(
+                server,
+                "/api/docker/stack/action",
+                { method: "POST", body: { action: "restart", service } }
+            );
+            assert.equal(invalidLeadingCharacter.status, 400);
+            assert.equal(invalidLeadingCharacter.body.error, "Invalid stack action");
+        }
+
         const invalidWhitespaceStackService = await requestJson<{ error: string }>(
             server,
             "/api/docker/stack/action",
@@ -2418,7 +2428,12 @@ describe("docker routes", { concurrency: false }, () => {
         await seedDockerUpdaterState(tempDir);
         const previousFetch = globalThis.fetch;
         globalThis.fetch = (async (input: string | URL | Request) => {
-            const url = typeof input === "string" ? input : input.toString();
+            const url =
+                input instanceof Request
+                    ? input.url
+                    : input instanceof URL
+                      ? input.toString()
+                      : input;
             return {
                 ok: true,
                 headers: new Headers(),
@@ -2467,26 +2482,44 @@ describe("docker routes", { concurrency: false }, () => {
         }
 
         await seedDockerUpdaterState(tempDir);
-        await withEnvValue("MIRA_FAKE_DOCKER_COMPOSE_FAIL", "1", async () => {
-            const manualFailure = await requestJson<{
-                success: boolean;
-                result: Record<string, unknown>;
-                service: { lastStatus: string | null };
-                stderr: string;
-            }>(server, "/api/docker/updater/services/1/update", {
-                method: "POST",
-                body: {},
-            });
-            assert.equal(manualFailure.status, 200);
-            assert.equal(manualFailure.body.success, true);
-            assert.equal(manualFailure.body.service.lastStatus, "current");
-            assert.deepEqual(manualFailure.body.result, {
-                serviceId: 1,
-                summary: { updated: 0, failed: 0 },
-                updated: [],
-                failed: [],
-            });
-            assert.equal(manualFailure.body.stderr, "");
+        await withDockerUpdaterFetch(async () => {
+            await withEnvValue(
+                "MIRA_DOCKER_UPDATER_SKIP_REGISTRY",
+                undefined,
+                async () => {
+                    await withEnvValue("MIRA_FAKE_DOCKER_COMPOSE_FAIL", "1", async () => {
+                        const manualFailure = await requestJson<{
+                            error: string;
+                            success: boolean;
+                            result: Record<string, unknown>;
+                            service: { lastStatus: string | null };
+                            stderr: string;
+                            steps: Array<{ ok: boolean; step: string; stderr: string }>;
+                        }>(server, "/api/docker/updater/services/1/update", {
+                            method: "POST",
+                            body: {},
+                        });
+                        assert.equal(manualFailure.status, 500);
+                        assert.equal(manualFailure.body.success, false);
+                        assert.equal(
+                            manualFailure.body.service.lastStatus,
+                            "manual_update_failed"
+                        );
+                        assert.deepEqual(manualFailure.body.result, {});
+                        assert.match(manualFailure.body.error, /compose failed/u);
+                        assert.match(manualFailure.body.stderr, /compose failed/u);
+                        assert.equal(
+                            manualFailure.body.steps.some(
+                                (step) =>
+                                    !step.ok &&
+                                    step.step.startsWith("manual-update:") &&
+                                    /compose failed/u.test(step.stderr)
+                            ),
+                            true
+                        );
+                    });
+                }
+            );
         });
     });
 

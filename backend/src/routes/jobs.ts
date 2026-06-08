@@ -38,8 +38,9 @@ function asyncRoute(handler: RequestHandler): RequestHandler {
     });
 }
 
-const scheduleTypes = new Set<ScheduledJobScheduleType>(["interval", "daily"]);
+const scheduleTypes = new Set<ScheduledJobScheduleType>(["interval", "daily", "cron"]);
 const allowedPatchFields = new Set([
+    "cronExpression",
     "enabled",
     "intervalSeconds",
     "scheduleType",
@@ -54,6 +55,13 @@ function invalidPatchField(patch: Record<string, unknown>): string | null {
     }
     if (patch.enabled !== undefined && typeof patch.enabled !== "boolean") {
         return "enabled";
+    }
+    if (
+        patch.cronExpression !== undefined &&
+        patch.cronExpression !== null &&
+        typeof patch.cronExpression !== "string"
+    ) {
+        return "cronExpression";
     }
     if (
         patch.intervalSeconds !== undefined &&
@@ -121,6 +129,11 @@ export default function jobsRoutes(app: express.Application): void {
                 return;
             }
             const semanticError = validateScheduledJobPatch(existingJob, {
+                cronExpression:
+                    typeof patch.cronExpression === "string" ||
+                    patch.cronExpression === null
+                        ? patch.cronExpression
+                        : undefined,
                 intervalSeconds:
                     typeof patch.intervalSeconds === "number"
                         ? patch.intervalSeconds
@@ -138,6 +151,10 @@ export default function jobsRoutes(app: express.Application): void {
 
             const enabled =
                 typeof patch.enabled === "boolean" ? patch.enabled : undefined;
+            const cronExpression =
+                typeof patch.cronExpression === "string" || patch.cronExpression === null
+                    ? patch.cronExpression
+                    : undefined;
             const intervalSeconds =
                 typeof patch.intervalSeconds === "number"
                     ? patch.intervalSeconds
@@ -153,6 +170,7 @@ export default function jobsRoutes(app: express.Application): void {
             let job;
             try {
                 job = updateScheduledJob(String(req.params.id), {
+                    cronExpression,
                     enabled,
                     intervalSeconds,
                     scheduleType,

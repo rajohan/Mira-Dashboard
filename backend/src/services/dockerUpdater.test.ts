@@ -1620,7 +1620,7 @@ setTimeout(() => process.exit(0), 30);
                 tag_match_type: "regex",
                 tag_match_pattern: "^1$",
             }),
-            false
+            true
         );
         assert.equal(
             updater.__testing.needsFullTagScan({

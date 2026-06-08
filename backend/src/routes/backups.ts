@@ -221,7 +221,13 @@ async function startBackupJob(type: BackupJob["type"], command: string) {
                 cacheKey,
                 backupRefreshTimeoutMs
             );
-            void refresh.timed
+            void refresh.timed.catch((error: unknown) => {
+                const refreshMessage = errorMessage(error, "Unknown error");
+                job.stderr = trimOutput(
+                    `${job.stderr}\nStatus refresh failed: ${refreshMessage}`.trim()
+                );
+            });
+            void refresh.refresh
                 .catch((error: unknown) => {
                     const refreshMessage = errorMessage(error, "Unknown error");
                     job.stderr = trimOutput(
@@ -231,7 +237,6 @@ async function startBackupJob(type: BackupJob["type"], command: string) {
                 .finally(() => {
                     job.refreshPending = false;
                 });
-            void refresh.refresh.catch(() => {});
             return;
         }
         job.status = "done";
