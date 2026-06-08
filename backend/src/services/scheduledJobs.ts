@@ -15,7 +15,7 @@ export type ScheduledJobActionType =
     | "notification.openclaw"
     | "notification.quota"
     | "ops.logRotation";
-export type ScheduledJobScheduleType = "interval" | "daily" | "cron";
+export type ScheduledJobScheduleType = "interval" | "daily";
 export type ScheduledJobRunStatus = "running" | "success" | "failed";
 export type ScheduledJobTriggerType = "manual" | "schedule";
 
@@ -396,17 +396,14 @@ function validateScheduledJobValues(job: {
     if (!Number.isSafeInteger(job.intervalSeconds) || job.intervalSeconds < 60) {
         return "intervalSeconds must be an integer >= 60";
     }
-    if (!["interval", "daily", "cron"].includes(job.scheduleType)) {
-        return "scheduleType must be interval, daily, or cron";
+    if (!["interval", "daily"].includes(job.scheduleType)) {
+        return "scheduleType must be interval or daily";
     }
     if (
         job.scheduleType === "daily" &&
         (!job.timeOfDay || !isValidTimeOfDay(job.timeOfDay))
     ) {
         return "timeOfDay must be HH:mm for daily jobs";
-    }
-    if (job.scheduleType === "cron") {
-        return "cron schedule is not implemented yet";
     }
     return null;
 }

@@ -214,7 +214,13 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                         ],
                     });
                     assert.deepEqual(await refreshCacheProducer("moltbook.home"), {
-                        refreshed: ["moltbook.home"],
+                        refreshed: [
+                            "moltbook.home",
+                            "moltbook.feed.hot",
+                            "moltbook.feed.new",
+                            "moltbook.profile",
+                            "moltbook.my-content",
+                        ],
                     });
                     assert.deepEqual(await refreshCacheProducer("moltbook.profile"), {
                         refreshed: ["moltbook.profile"],
@@ -498,6 +504,79 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                 expected,
                 expected,
             ]);
+        });
+    });
+
+    it("reuses an in-flight Moltbook home refresh for full requests", async () => {
+        await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
+            let homeFetches = 0;
+            let releaseHome: (() => void) | undefined;
+            globalThis.fetch = (async (input: string | URL | Request) => {
+                const url = input instanceof Request ? input.url : String(input);
+                if (url.includes("/home")) {
+                    homeFetches += 1;
+                    await new Promise<void>((resolve) => {
+                        releaseHome = resolve;
+                    });
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({ agent: { name: "mira_2026" } }),
+                    } as Response;
+                }
+                if (url.includes("/feed?sort=hot")) {
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({ posts: [{ id: "hot" }] }),
+                    } as Response;
+                }
+                if (url.includes("/feed?sort=new")) {
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({ posts: [{ id: "new" }] }),
+                    } as Response;
+                }
+                if (url.includes("/agents/profile")) {
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({
+                            agent: { name: "mira_2026" },
+                            recentPosts: [],
+                            recentComments: [],
+                        }),
+                    } as Response;
+                }
+                throw new Error(`Unexpected Moltbook URL: ${url}`);
+            }) as typeof fetch;
+
+            const homeRefresh = refreshCacheProducer("moltbook.home");
+            while (!releaseHome) {
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+            const fullRefresh = refreshCacheProducer("moltbook");
+            releaseHome();
+
+            const expected = {
+                refreshed: [
+                    "moltbook.home",
+                    "moltbook.feed.hot",
+                    "moltbook.feed.new",
+                    "moltbook.profile",
+                    "moltbook.my-content",
+                ],
+            };
+            assert.deepEqual(await Promise.all([homeRefresh, fullRefresh]), [
+                expected,
+                expected,
+            ]);
+            assert.equal(homeFetches, 1);
         });
     });
 
@@ -1048,6 +1127,46 @@ if (args.includes("capture-pane")) {
                 fs.readFile(configPath, "utf8")
             ),
             /trust_level/u
+        );
+
+        const codexHomeUntrusted = path.join(tempDir, "codex-home-untrusted");
+        await import("node:fs/promises").then((fs) => fs.mkdir(codexHomeUntrusted));
+        const untrustedConfigPath = path.join(codexHomeUntrusted, "config.toml");
+        await writeFile(
+            untrustedConfigPath,
+            [
+                "[profile]",
+                'model = "codex"',
+                '[projects."/home/ubuntu/.openclaw"]',
+                'trust_level = "untrusted"',
+                "extra = true",
+                '[projects."/tmp/unmanaged"]',
+                'trust_level = "untrusted"',
+                '[projects."/home/ubuntu/projects"]',
+                "extra = true",
+                "",
+            ].join("\n"),
+            "utf8"
+        );
+        await __testing.ensureCodexTrustConfig(codexHomeUntrusted);
+        const normalizedTrustConfig = await import("node:fs/promises").then((fs) =>
+            fs.readFile(untrustedConfigPath, "utf8")
+        );
+        assert.match(
+            normalizedTrustConfig,
+            /\[projects\."\/home\/ubuntu\/\.openclaw"\]\ntrust_level = "trusted"\nextra = true/u
+        );
+        assert.match(
+            normalizedTrustConfig,
+            /\[projects\."\/home\/ubuntu\/projects"\]\ntrust_level = "trusted"\nextra = true/u
+        );
+        assert.match(
+            normalizedTrustConfig,
+            /\[projects\."\/tmp\/unmanaged"\]\ntrust_level = "untrusted"/u
+        );
+        assert.match(
+            normalizedTrustConfig,
+            /\[projects\."\/home\/ubuntu\/projects\/mira-dashboard"\]\ntrust_level = "trusted"/u
         );
 
         const codexHomeNoNewline = path.join(tempDir, "codex-home-no-newline");

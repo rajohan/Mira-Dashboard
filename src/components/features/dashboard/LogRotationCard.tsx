@@ -19,15 +19,23 @@ export function LogRotationCard() {
     const realRun = useRunLogRotationNow();
     const lastAction = realRun.data || dryRun.data;
     const lastRun = status.data?.lastRun;
+    const rawIntervalSeconds = logRotationJob?.intervalSeconds;
+    const intervalSeconds = Number(rawIntervalSeconds);
+    const intervalDisplay =
+        rawIntervalSeconds !== null &&
+        rawIntervalSeconds !== undefined &&
+        Number.isFinite(intervalSeconds)
+            ? `${Math.round(intervalSeconds / 60)} min interval`
+            : "—";
     const scheduleDisplay =
         logRotationJob?.scheduleType === "daily" && logRotationJob.timeOfDay
             ? `${logRotationJob.timeOfDay} daily`
             : logRotationJob?.scheduleType === "interval"
-              ? `${Math.round(logRotationJob.intervalSeconds / 60)} min interval`
+              ? intervalDisplay
               : logRotationJob?.cronExpression || "—";
-    const keep = logRotationJob?.settings.keep;
-    const maxSizeMb = logRotationJob?.settings.maxSizeMb;
-    const daily = logRotationJob?.settings.daily;
+    const keep = logRotationJob?.settings?.keep;
+    const maxSizeMb = logRotationJob?.settings?.maxSizeMb;
+    const daily = logRotationJob?.settings?.daily;
     const retentionDisplay = typeof keep === "number" ? `${keep} archives` : "—";
     const thresholdDisplay =
         typeof maxSizeMb === "number"

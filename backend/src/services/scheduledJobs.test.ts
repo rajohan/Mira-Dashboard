@@ -162,8 +162,8 @@ test("updates enable state, interval schedules, and daily schedules", () => {
         /HH:mm/u
     );
     assert.throws(
-        () => updateScheduledJob("cache.weather", { scheduleType: "cron" }),
-        /not implemented/u
+        () => updateScheduledJob("cache.weather", { scheduleType: "cron" as never }),
+        /scheduleType must be interval or daily/u
     );
     assert.equal(updateScheduledJob("missing", { enabled: true }), null);
 });

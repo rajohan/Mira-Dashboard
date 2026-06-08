@@ -18,7 +18,7 @@ export interface ScheduledJob {
     name: string;
     description: string;
     enabled: boolean;
-    scheduleType: "interval" | "daily" | "cron";
+    scheduleType: "interval" | "daily";
     intervalSeconds: number;
     timeOfDay: string | null;
     cronExpression: string | null;
@@ -67,7 +67,7 @@ export function useUpdateScheduledJob() {
             patch: {
                 enabled?: boolean;
                 intervalSeconds?: number;
-                scheduleType?: "interval" | "daily" | "cron";
+                scheduleType?: "interval" | "daily";
                 timeOfDay?: string | null;
             };
         }) =>

@@ -38,7 +38,7 @@ function asyncRoute(handler: RequestHandler): RequestHandler {
     });
 }
 
-const scheduleTypes = new Set<ScheduledJobScheduleType>(["interval", "daily", "cron"]);
+const scheduleTypes = new Set<ScheduledJobScheduleType>(["interval", "daily"]);
 const allowedPatchFields = new Set([
     "enabled",
     "intervalSeconds",

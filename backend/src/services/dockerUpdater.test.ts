@@ -90,6 +90,7 @@ describe("docker updater service", { concurrency: false }, () => {
       mira.updater.enabled: "true"
       mira.updater.autoUpdate: "true"
       mira.updater.tagPattern: "^1\\.2\\.[0-9]+$"
+      mira.updater.tagPatternIsRegex: "true"
     container_name: demo-web
   worker:
     image: ghcr.io/owner/app:stable@sha256:old
@@ -436,14 +437,9 @@ process.stdout.write("updated\n");
         await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
             const updater = await import(`./dockerUpdater.js?bad-compose=${Date.now()}`);
             const result = await updater.registerDockerUpdaterServices();
-            assert.equal(result.ok, false);
-            assert.equal(result.step, "register-services");
+            assert.equal(result.ok, true);
+            assert.equal(result.step, "register");
             assert.match(result.stderr, /bad/u);
-            const run = await updater.runDockerUpdaterService();
-            assert.deepEqual(
-                (run as StepResult[]).map((step) => step.step),
-                ["register-services"]
-            );
         });
 
         const web = db
@@ -451,7 +447,8 @@ process.stdout.write("updated\n");
                 "SELECT current_tag, tag_match_pattern FROM docker_managed_services WHERE service_name = 'web'"
             )
             .get() as { current_tag: string; tag_match_pattern: string } | undefined;
-        assert.equal(web, undefined);
+        assert.equal(web?.current_tag, "latest");
+        assert.equal(web?.tag_match_pattern, "latest");
         assert.equal(
             (
                 db
@@ -470,7 +467,7 @@ process.stdout.write("updated\n");
                     )
                     .get() as { count: number }
             ).count,
-            1
+            0
         );
     });
 
@@ -907,6 +904,7 @@ setTimeout(() => process.exit(0), 30);
     labels:
       mira.updater.enabled: "true"
       mira.updater.tagPattern: "^[0-9]+$"
+      mira.updater.tagPatternIsRegex: "true"
   external:
     image: lscr.io/linuxserver/swag:latest
     labels:
@@ -1091,6 +1089,7 @@ setTimeout(() => process.exit(0), 30);
     image: nginx:1
     labels:
       mira.updater.tagPattern: "^[0-9]+$"
+      mira.updater.tagPatternIsRegex: "true"
   broken:
     image: busybox:1
 `,
@@ -1187,6 +1186,7 @@ setTimeout(() => process.exit(0), 30);
     image: nginx:1
     labels:
       mira.updater.tagPattern: "^[0-9]+$"
+      mira.updater.tagPatternIsRegex: "true"
 `,
             "utf8"
         );
@@ -2033,6 +2033,27 @@ setTimeout(() => process.exit(0), 30);
                 tag_match_pattern: String.raw`^\d$`,
             }),
             { latestTag: "2", latestDigest: null }
+        );
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input.toString();
+            return {
+                ok: true,
+                headers: new Headers(),
+                json: async () =>
+                    url.includes("/tags?page_size=")
+                        ? { results: [{ name: "stable" }] }
+                        : { images: [], digest: null },
+            } as Response;
+        }) as typeof fetch;
+        assert.deepEqual(
+            await updater.__testing.lookupDockerHub({
+                ...baseService,
+                current_tag: "1",
+                current_digest: null,
+                tag_match_type: "regex",
+                tag_match_pattern: String.raw`^\d$`,
+            }),
+            { latestTag: "1", latestDigest: null }
         );
         assert.deepEqual(
             await updater.__testing.lookupLatest({

@@ -13,7 +13,7 @@ import { useRunScheduledJob, useScheduledJobs, useUpdateScheduledJob } from "../
 import type { ScheduledJob } from "../hooks/useJobs";
 import { formatDate } from "../utils/format";
 
-type EditableScheduleType = "interval" | "daily" | "cron";
+type EditableScheduleType = "interval" | "daily";
 type UpdateJobMutation = ReturnType<typeof useUpdateScheduledJob>;
 type RunJobMutation = ReturnType<typeof useRunScheduledJob>;
 
@@ -48,9 +48,6 @@ function sortJobs(jobs: ScheduledJob[]): ScheduledJob[] {
 function formatSchedule(job: ScheduledJob): string {
     if (job.scheduleType === "daily" && job.timeOfDay) {
         return `Daily at ${job.timeOfDay}`;
-    }
-    if (job.scheduleType === "cron") {
-        return job.cronExpression ? `Cron: ${job.cronExpression}` : "Cron schedule";
     }
     return `Every ${formatInterval(job.intervalSeconds)}`;
 }
@@ -89,10 +86,6 @@ export async function saveScheduleAction(options: {
         job = requireSelectedJobForAction(selectedJob);
     } catch (error) {
         setActionError(actionErrorMessage(error));
-        return;
-    }
-    if (scheduleTypeDraft === "cron") {
-        setActionError("Cron schedules are read-only in the dashboard.");
         return;
     }
     const patch = {
@@ -175,15 +168,12 @@ export function Jobs() {
         useState<EditableScheduleType>("interval");
     const [timeOfDayDraft, setTimeOfDayDraft] = useState("");
     const [actionError, setActionError] = useState("");
-    const isCronSchedule = selectedJob?.scheduleType === "cron";
 
     useEffect(() => {
         setActionError("");
         if (selectedJob) {
             setIntervalDraft(String(selectedJob.intervalSeconds));
-            setScheduleTypeDraft(
-                selectedJob.scheduleType === "cron" ? "cron" : selectedJob.scheduleType
-            );
+            setScheduleTypeDraft(selectedJob.scheduleType);
             setTimeOfDayDraft(selectedJob.timeOfDay || "09:00");
         }
     }, [selectedJob?.id]);
@@ -192,11 +182,7 @@ export function Jobs() {
     const intervalIsValid = Number.isSafeInteger(intervalNumber) && intervalNumber >= 60;
     const timeOfDayIsValid = /^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(timeOfDayDraft);
     const scheduleIsValid =
-        scheduleTypeDraft === "cron"
-            ? false
-            : scheduleTypeDraft === "interval"
-              ? intervalIsValid
-              : timeOfDayIsValid;
+        scheduleTypeDraft === "interval" ? intervalIsValid : timeOfDayIsValid;
 
     async function saveSchedule() {
         await saveScheduleAction({
@@ -356,67 +342,51 @@ export function Jobs() {
                                     }}
                                     label="Enabled"
                                     description="Disabled jobs can still be run manually."
-                                    disabled={updateJob.isPending || isCronSchedule}
+                                    disabled={updateJob.isPending}
                                 />
-                                {isCronSchedule ? (
-                                    <div className="border-primary-700 bg-primary-950/60 rounded-lg border p-3">
-                                        <div className="text-primary-400 text-xs font-semibold tracking-wide uppercase">
-                                            Cron schedule
-                                        </div>
-                                        <div className="text-primary-100 mt-1 font-mono text-sm">
-                                            {selectedJob.cronExpression ||
-                                                "Configured by backend"}
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[180px_1fr_auto]">
-                                        <Select
-                                            value={scheduleTypeDraft}
-                                            onChange={(value) =>
-                                                setScheduleTypeDraft(
-                                                    value === "daily"
-                                                        ? "daily"
-                                                        : "interval"
-                                                )
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[180px_1fr_auto]">
+                                    <Select
+                                        value={scheduleTypeDraft}
+                                        onChange={(value) =>
+                                            setScheduleTypeDraft(
+                                                value === "daily" ? "daily" : "interval"
+                                            )
+                                        }
+                                        options={[...SCHEDULE_TYPE_OPTIONS]}
+                                        ariaLabel="Schedule type"
+                                        width="w-full"
+                                    />
+                                    {scheduleTypeDraft === "daily" ? (
+                                        <Input
+                                            label="Time of day"
+                                            value={timeOfDayDraft}
+                                            onChange={(event) =>
+                                                setTimeOfDayDraft(event.target.value)
                                             }
-                                            options={[...SCHEDULE_TYPE_OPTIONS]}
-                                            ariaLabel="Schedule type"
-                                            width="w-full"
+                                            placeholder="HH:mm"
                                         />
-                                        {scheduleTypeDraft === "daily" ? (
-                                            <Input
-                                                label="Time of day"
-                                                value={timeOfDayDraft}
-                                                onChange={(event) =>
-                                                    setTimeOfDayDraft(event.target.value)
-                                                }
-                                                placeholder="HH:mm"
-                                            />
-                                        ) : (
-                                            <Input
-                                                label="Interval seconds"
-                                                value={intervalDraft}
-                                                onChange={(event) =>
-                                                    setIntervalDraft(event.target.value)
-                                                }
-                                                inputMode="numeric"
-                                            />
-                                        )}
-                                        <Button
-                                            className="self-end"
-                                            variant="secondary"
-                                            disabled={
-                                                !scheduleIsValid || updateJob.isPending
+                                    ) : (
+                                        <Input
+                                            label="Interval seconds"
+                                            value={intervalDraft}
+                                            onChange={(event) =>
+                                                setIntervalDraft(event.target.value)
                                             }
-                                            onClick={() => {
-                                                void saveSchedule();
-                                            }}
-                                        >
-                                            <Save className="h-4 w-4" />
-                                            Save schedule
-                                        </Button>
-                                    </div>
-                                )}
+                                            inputMode="numeric"
+                                        />
+                                    )}
+                                    <Button
+                                        className="self-end"
+                                        variant="secondary"
+                                        disabled={!scheduleIsValid || updateJob.isPending}
+                                        onClick={() => {
+                                            void saveSchedule();
+                                        }}
+                                    >
+                                        <Save className="h-4 w-4" />
+                                        Save schedule
+                                    </Button>
+                                </div>
                                 {scheduleTypeDraft === "interval" && !intervalIsValid ? (
                                     <p className="text-xs text-red-400">
                                         Interval must be an integer of at least 60
@@ -426,11 +396,6 @@ export function Jobs() {
                                 {scheduleTypeDraft === "daily" && !timeOfDayIsValid ? (
                                     <p className="text-xs text-red-400">
                                         Time of day must use HH:mm, for example 02:40.
-                                    </p>
-                                ) : null}
-                                {isCronSchedule ? (
-                                    <p className="text-primary-400 text-xs">
-                                        Cron schedules are read-only in the dashboard.
                                     </p>
                                 ) : null}
                             </div>

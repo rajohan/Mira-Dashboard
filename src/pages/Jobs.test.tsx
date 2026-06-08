@@ -283,8 +283,8 @@ describe("Jobs page", () => {
         });
         await saveScheduleAction({
             intervalNumber: 60,
-            scheduleTypeDraft: "cron",
-            selectedJob: createJob({ scheduleType: "cron" }),
+            selectedJob: null,
+            scheduleTypeDraft: "daily",
             setActionError,
             timeOfDayDraft: "09:00",
             updateJob,
@@ -299,9 +299,6 @@ describe("Jobs page", () => {
 
         expect(setActionError).toHaveBeenCalledTimes(4);
         expect(setActionError).toHaveBeenCalledWith("No scheduled job selected.");
-        expect(setActionError).toHaveBeenCalledWith(
-            "Cron schedules are read-only in the dashboard."
-        );
         expect(hooks.updateJob).not.toHaveBeenCalled();
         expect(hooks.runJob).not.toHaveBeenCalled();
     });
@@ -333,45 +330,6 @@ describe("Jobs page", () => {
         await user.click(screen.getByRole("menuitem", { name: /Interval/u }));
 
         expect(screen.getByLabelText("Interval seconds")).toBeInTheDocument();
-    });
-
-    it("shows cron schedules without allowing schedule edits", async () => {
-        hooks.updateJob.mockClear();
-        mockJobs([
-            createJob({
-                cronExpression: "15 4 * * *",
-                id: "cache.cron",
-                name: "Cron",
-                scheduleType: "cron",
-            }),
-        ]);
-        render(<Jobs />);
-
-        expect(screen.getByText("Cron: 15 4 * * *")).toBeInTheDocument();
-        expect(
-            screen.getByText("Cron schedules are read-only in the dashboard.")
-        ).toBeInTheDocument();
-        expect(
-            screen.queryByRole("button", { name: /Save schedule/u })
-        ).not.toBeInTheDocument();
-        expect(screen.queryByLabelText("Interval seconds")).not.toBeInTheDocument();
-        expect(hooks.updateJob).not.toHaveBeenCalled();
-    });
-
-    it("shows cron schedules without an expression", () => {
-        mockJobs([
-            createJob({
-                cronExpression: null,
-                id: "cache.cron",
-                name: "Cron",
-                scheduleType: "cron",
-            }),
-        ]);
-
-        render(<Jobs />);
-
-        expect(screen.getAllByText("Cron schedule")).toHaveLength(2);
-        expect(screen.getByText("Configured by backend")).toBeInTheDocument();
     });
 
     it("shows schedule validation messages", async () => {

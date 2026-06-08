@@ -723,6 +723,19 @@ describe("server bootstrap", () => {
         assert.deepEqual(closes.at(-1), { code: 4401, reason: "Unauthorized" });
     });
 
+    it("runs every installed server close cleanup", () => {
+        const calls: string[] = [];
+        serverStartTesting.removeCloseCleanup();
+        try {
+            serverStartTesting.installCloseCleanup(() => calls.push("first"));
+            serverStartTesting.installCloseCleanup(() => calls.push("second"));
+            server.emit("close");
+            assert.deepEqual(calls, ["first", "second"]);
+        } finally {
+            serverStartTesting.removeCloseCleanup();
+        }
+    });
+
     it("starts runtime services from the entrypoint helpers", async () => {
         const originalInit = gateway.init;
         const originalListen = server.listen;

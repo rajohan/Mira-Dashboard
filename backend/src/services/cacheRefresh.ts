@@ -1175,16 +1175,22 @@ async function updateCodexTrustConfig(codexHome: string) {
                 throw error;
             }
         }
+        let next = existing;
         const additions = CODEX_TRUSTED_DIRS.flatMap((dir) => {
             const header = `[projects.${JSON.stringify(dir)}]`;
-            return existing.includes(header)
-                ? []
-                : [`${header}\ntrust_level = "trusted"\n`];
+            const normalizedConfig = ensureCodexTrustedSection(next, header);
+            if (normalizedConfig === null) {
+                return [`${header}\ntrust_level = "trusted"\n`];
+            }
+            next = normalizedConfig;
+            return [];
         });
         if (additions.length > 0) {
-            const prefix = existing && !existing.endsWith("\n") ? "\n" : "";
-            const separator = existing ? "\n" : "";
-            const next = `${existing}${prefix}${separator}${additions.join("\n")}`;
+            const prefix = next && !next.endsWith("\n") ? "\n" : "";
+            const separator = next ? "\n" : "";
+            next = `${next}${prefix}${separator}${additions.join("\n")}`;
+        }
+        if (next !== existing) {
             const tempPath = `${configPath}.${process.pid}.tmp`;
             await writeFile(tempPath, next, { mode: 0o600 });
             await rename(tempPath, configPath);
@@ -1195,6 +1201,30 @@ async function updateCodexTrustConfig(codexHome: string) {
             await rm(lockPath, { force: true });
         }
     }
+}
+
+function ensureCodexTrustedSection(config: string, header: string) {
+    const lines = config.split("\n");
+    const headerIndex = lines.findIndex((line) => line.trim() === header);
+    if (headerIndex === -1) {
+        return null;
+    }
+    const nextHeaderIndex = lines.findIndex(
+        (line, index) => index > headerIndex && /^\s*\[.*\]\s*$/u.test(line)
+    );
+    const sectionEndIndex = nextHeaderIndex === -1 ? lines.length : nextHeaderIndex;
+    const trustLevelIndex = lines.findIndex(
+        (line, index) =>
+            index > headerIndex &&
+            index < sectionEndIndex &&
+            /^\s*trust_level\s*=/u.test(line)
+    );
+    if (trustLevelIndex === -1) {
+        lines.splice(headerIndex + 1, 0, 'trust_level = "trusted"');
+    } else if (lines[trustLevelIndex] !== 'trust_level = "trusted"') {
+        lines[trustLevelIndex] = 'trust_level = "trusted"';
+    }
+    return lines.join("\n");
 }
 
 function stripAnsi(value: string) {
@@ -1362,7 +1392,7 @@ function redactOpenAiQuotaAccount(openai: Awaited<ReturnType<typeof checkOpenAiQ
 const inFlightCacheRefreshes = new Map<string, Promise<{ refreshed: string[] }>>();
 
 function cacheRefreshScopeKey(key: string): string {
-    return key === "moltbook" ? "moltbook" : key;
+    return key === "moltbook" || key === "moltbook.home" ? "moltbook" : key;
 }
 
 function isSupportedCacheProducerKey(key: string): boolean {
@@ -1402,7 +1432,7 @@ async function refreshCacheProducerUnlocked(key: string) {
         }
     };
 
-    if (key === "moltbook") {
+    if (key === "moltbook" || key === "moltbook.home") {
         return refreshWithFailureRecord(refreshMoltbookCache, [
             ...MOLTBOOK_CACHE_KEY_LIST,
         ]);

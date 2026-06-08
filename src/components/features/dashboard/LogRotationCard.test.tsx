@@ -184,6 +184,32 @@ describe("LogRotationCard", () => {
         expect(screen.getAllByText("—")).toHaveLength(3);
     });
 
+    it("falls back for invalid interval schedule values and null settings", () => {
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: null,
+                    id: "ops.log-rotation",
+                    intervalSeconds: null,
+                    scheduleType: "interval",
+                    settings: null,
+                    timeOfDay: null,
+                },
+            ],
+        });
+        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
+        hooks.useRunLogRotationDryRun.mockReturnValue({
+            isPending: false,
+            mutate: vi.fn(),
+        });
+        hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+
+        render(<LogRotationCard />);
+
+        expect(screen.queryByText(/NaN min interval/u)).not.toBeInTheDocument();
+        expect(screen.getAllByText("—")).toHaveLength(4);
+    });
+
     it("renders an empty schedule fallback when the job is absent", () => {
         hooks.useScheduledJobs.mockReturnValue({ data: [] });
         hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });

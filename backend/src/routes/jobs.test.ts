@@ -230,7 +230,7 @@ test("returns validation and missing job errors", async () => {
         assert.equal(partialDailyPatch.body.job.scheduleType, "daily");
         assert.equal(partialDailyPatch.body.job.timeOfDay, "02:40");
         assert.equal(cronPatch.status, 400);
-        assert.equal(cronPatch.body.error, "cron schedule is not implemented yet");
+        assert.equal(cronPatch.body.error, "invalid patch field: scheduleType");
         assert.equal(badIntervalPatch.status, 400);
         assert.equal(
             badIntervalPatch.body.error,

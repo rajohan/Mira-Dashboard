@@ -682,6 +682,10 @@ function servicesFromCompose(composePath: string) {
                         ?.trim()
                         .toLowerCase();
                     const tagPattern = labels.get("mira.updater.tagPattern") || null;
+                    const tagPatternIsRegex = booleanLabel(
+                        labels.get("mira.updater.tagPatternIsRegex"),
+                        false
+                    );
                     const currentTag = image.tag ?? (image.digest ? null : "latest");
                     return {
                         appSlug,
@@ -699,7 +703,7 @@ function servicesFromCompose(composePath: string) {
                             configuredPinMode === "digest" || configuredPinMode === "tag"
                                 ? configuredPinMode
                                 : image.pinMode,
-                        tagMatchType: tagPattern ? "regex" : "exact",
+                        tagMatchType: tagPattern && tagPatternIsRegex ? "regex" : "exact",
                         tagMatchPattern: tagPattern ?? currentTag,
                         enabled: labels.has("mira.updater.enabled")
                             ? booleanLabel(labels.get("mira.updater.enabled"), true)
@@ -763,20 +767,6 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
     }
     const discoveries = composeFiles.map(servicesFromCompose);
     const failedDiscoveries = discoveries.filter((discovery) => !discovery.ok);
-    if (failedDiscoveries.length > 0) {
-        return {
-            ok: false,
-            step: "register-services",
-            stdout: "",
-            stderr: JSON.stringify({
-                registered: 0,
-                failed: failedDiscoveries.map((discovery) => ({
-                    appSlug: discovery.appSlug,
-                    error: discovery.error,
-                })),
-            }),
-        };
-    }
     const successfulDiscoveries = discoveries.filter((discovery) => discovery.ok);
     const services = successfulDiscoveries.flatMap((discovery) => discovery.services);
     const timestamp = nowIso();
@@ -871,7 +861,15 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
                 registeredServices: services.length,
             },
         }),
-        stderr: "",
+        stderr:
+            failedDiscoveries.length > 0
+                ? JSON.stringify({
+                      failed: failedDiscoveries.map((discovery) => ({
+                          appSlug: discovery.appSlug,
+                          error: discovery.error,
+                      })),
+                  })
+                : "",
     };
 }
 
