@@ -515,9 +515,12 @@ function computeDefaultNextRunIso(
 }
 
 function shouldSeedAsDue(job: DefaultScheduledJob): boolean {
+    const actionType = job.actionType ?? "cache.refresh";
     return (
-        job.actionType === "notification.openclaw" ||
-        job.actionType === "notification.quota"
+        actionType === "cache.refresh" ||
+        actionType === "cache.refreshMany" ||
+        actionType === "notification.openclaw" ||
+        actionType === "notification.quota"
     );
 }
 

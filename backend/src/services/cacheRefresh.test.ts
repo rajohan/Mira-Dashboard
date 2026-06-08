@@ -507,16 +507,16 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         });
     });
 
-    it("reuses an in-flight Moltbook home refresh for full requests", async () => {
+    it("does not share in-flight scope between Moltbook home and full requests", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             let homeFetches = 0;
-            let releaseHome: (() => void) | undefined;
+            const releases: Array<() => void> = [];
             globalThis.fetch = (async (input: string | URL | Request) => {
                 const url = input instanceof Request ? input.url : String(input);
                 if (url.includes("/home")) {
                     homeFetches += 1;
                     await new Promise<void>((resolve) => {
-                        releaseHome = resolve;
+                        releases.push(resolve);
                     });
                     return {
                         ok: true,
@@ -557,13 +557,18 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
             }) as typeof fetch;
 
             const homeRefresh = refreshCacheProducer("moltbook.home");
-            while (!releaseHome) {
+            while (releases.length === 0) {
                 await new Promise((resolve) => setTimeout(resolve, 0));
             }
             const fullRefresh = refreshCacheProducer("moltbook");
-            releaseHome();
+            while (releases.length < 2) {
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+            for (const release of releases) {
+                release();
+            }
 
-            const expected = {
+            const fullExpected = {
                 refreshed: [
                     "moltbook.home",
                     "moltbook.feed.hot",
@@ -573,23 +578,31 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                 ],
             };
             assert.deepEqual(await Promise.all([homeRefresh, fullRefresh]), [
-                expected,
-                expected,
+                fullExpected,
+                fullExpected,
             ]);
-            assert.equal(homeFetches, 1);
+            assert.equal(homeFetches, 2);
         });
     });
 
-    it("reuses an in-flight Moltbook subkey refresh for full requests", async () => {
+    it("does not reuse an in-flight Moltbook subkey refresh for full requests", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             let hotFetches = 0;
-            let releaseHot: (() => void) | undefined;
+            const hotReleases: Array<() => void> = [];
             globalThis.fetch = (async (input: string | URL | Request) => {
                 const url = input instanceof Request ? input.url : String(input);
+                if (url.includes("/home")) {
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({ agent: { name: "mira_2026" } }),
+                    } as Response;
+                }
                 if (url.includes("/feed?sort=hot")) {
                     hotFetches += 1;
                     await new Promise<void>((resolve) => {
-                        releaseHot = resolve;
+                        hotReleases.push(resolve);
                     });
                     return {
                         ok: true,
@@ -598,22 +611,55 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                         json: async () => ({ posts: [{ id: "hot" }] }),
                     } as Response;
                 }
+                if (url.includes("/feed?sort=new")) {
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({ posts: [{ id: "new" }] }),
+                    } as Response;
+                }
+                if (url.includes("/agents/profile")) {
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({
+                            agent: { name: "mira_2026" },
+                            recentPosts: [],
+                            recentComments: [],
+                        }),
+                    } as Response;
+                }
                 throw new Error(`Unexpected Moltbook URL: ${url}`);
             }) as typeof fetch;
 
             const hotRefresh = refreshCacheProducer("moltbook.feed.hot");
-            while (!releaseHot) {
+            while (hotReleases.length === 0) {
                 await new Promise((resolve) => setTimeout(resolve, 0));
             }
             const fullRefresh = refreshCacheProducer("moltbook");
-            releaseHot();
+            while (hotReleases.length < 2) {
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+            for (const release of hotReleases) {
+                release();
+            }
 
-            const expected = { refreshed: ["moltbook.feed.hot"] };
+            const fullExpected = {
+                refreshed: [
+                    "moltbook.home",
+                    "moltbook.feed.hot",
+                    "moltbook.feed.new",
+                    "moltbook.profile",
+                    "moltbook.my-content",
+                ],
+            };
             assert.deepEqual(await Promise.all([hotRefresh, fullRefresh]), [
-                expected,
-                expected,
+                { refreshed: ["moltbook.feed.hot"] },
+                fullExpected,
             ]);
-            assert.equal(hotFetches, 1);
+            assert.equal(hotFetches, 2);
         });
     });
 

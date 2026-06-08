@@ -1411,7 +1411,7 @@ function redactOpenAiQuotaAccount(openai: Awaited<ReturnType<typeof checkOpenAiQ
 const inFlightCacheRefreshes = new Map<string, Promise<{ refreshed: string[] }>>();
 
 function cacheRefreshScopeKey(key: string): string {
-    return key === "moltbook" || key === "moltbook.home" ? "moltbook" : key;
+    return key === "moltbook" ? "moltbook" : key;
 }
 
 function isSupportedCacheProducerKey(key: string): boolean {
@@ -1497,9 +1497,7 @@ export async function refreshCacheProducer(key: string) {
     const existing = isSupportedCacheProducerKey(key)
         ? [...inFlightCacheRefreshes.entries()].find(
               ([inFlightKey]) =>
-                  inFlightKey === scopeKey ||
-                  inFlightKey.startsWith(`${scopeKey}.`) ||
-                  scopeKey.startsWith(`${inFlightKey}.`)
+                  inFlightKey === scopeKey || scopeKey.startsWith(`${inFlightKey}.`)
           )?.[1]
         : undefined;
     if (existing !== undefined) {

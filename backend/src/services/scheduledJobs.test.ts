@@ -61,7 +61,12 @@ test("creates built-in jobs with interval and precise daily schedules", () => {
         __testing.defaultJobs.some((defaultJob) => defaultJob.id === item.id)
     )) {
         assert.ok(job.nextRunAt);
-        if (job.id === "notification.openclaw" || job.id === "notification.quotas") {
+        const shouldRunOnceImmediately =
+            job.actionType === "cache.refresh" ||
+            job.actionType === "cache.refreshMany" ||
+            job.id === "notification.openclaw" ||
+            job.id === "notification.quotas";
+        if (shouldRunOnceImmediately) {
             assert.ok(
                 new Date(job.nextRunAt).getTime() <= Date.now(),
                 `${job.id} should run once immediately after initial seeding`
