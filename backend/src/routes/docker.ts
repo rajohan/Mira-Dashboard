@@ -908,7 +908,6 @@ function firstFailedStepCode(steps: DockerUpdaterStepResult[]): string | undefin
     return steps.find((step) => !step.ok && step.code)?.code;
 }
 
-/** Performs run updater command. */
 /** Performs run docker updater now. */
 export async function runDockerUpdaterNow() {
     const steps = await runDockerUpdaterServiceForRoutes();

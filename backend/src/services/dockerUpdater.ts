@@ -418,7 +418,7 @@ async function lookupDockerHub(service: ManagedServiceRow) {
 async function lookupGhcr(service: ManagedServiceRow) {
     const repo = stripRegistry(service.image_repo);
     let tag = service.current_tag;
-    if (service.tag_match_pattern) {
+    if (service.tag_match_type === "regex" && service.tag_match_pattern) {
         const tags: string[] = [];
         let tagsUrl: string | null = `https://ghcr.io/v2/${repo}/tags/list`;
         while (tagsUrl) {

@@ -2,19 +2,23 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, it, mock } from "node:test";
+import { after, afterEach, before, beforeEach, describe, it, mock } from "node:test";
 
-import { db } from "../db.js";
 import { withEnv } from "../testUtils/env.js";
-import {
-    __testing,
-    refreshCacheProducer,
-    refreshMoltbookCache,
-    writeCacheFailure,
-    writeCacheSuccess,
-} from "./cacheRefresh.js";
 
 const originalFetch = globalThis.fetch;
+const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
+
+let db: Awaited<typeof import("../db.js")>["db"];
+let __testing: Awaited<typeof import("./cacheRefresh.js")>["__testing"];
+let refreshCacheProducer: Awaited<
+    typeof import("./cacheRefresh.js")
+>["refreshCacheProducer"];
+let refreshMoltbookCache: Awaited<
+    typeof import("./cacheRefresh.js")
+>["refreshMoltbookCache"];
+let writeCacheFailure: Awaited<typeof import("./cacheRefresh.js")>["writeCacheFailure"];
+let writeCacheSuccess: Awaited<typeof import("./cacheRefresh.js")>["writeCacheSuccess"];
 
 function cacheRow(key: string) {
     const row = db
@@ -75,7 +79,21 @@ async function writeExecutable(filePath: string, script: string) {
 
 describe("backend cache refresh producers", { concurrency: false }, () => {
     let tempDir: string;
+    let dbDir: string;
     let originalPath: string | undefined;
+
+    before(async () => {
+        dbDir = await mkdtemp(path.join(os.tmpdir(), "mira-cache-refresh-db-"));
+        process.env.MIRA_DASHBOARD_DB_PATH = path.join(dbDir, "test.db");
+        ({ db } = await import("../db.js"));
+        ({
+            __testing,
+            refreshCacheProducer,
+            refreshMoltbookCache,
+            writeCacheFailure,
+            writeCacheSuccess,
+        } = await import("./cacheRefresh.js"));
+    });
 
     beforeEach(async () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-cache-refresh-"));
@@ -92,6 +110,16 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         }
         await rm(tempDir, { recursive: true, force: true });
         db.exec("DELETE FROM cache_entries;");
+    });
+
+    after(async () => {
+        db.close();
+        if (originalDbPath === undefined) {
+            delete process.env.MIRA_DASHBOARD_DB_PATH;
+        } else {
+            process.env.MIRA_DASHBOARD_DB_PATH = originalDbPath;
+        }
+        await rm(dbDir, { recursive: true, force: true });
     });
 
     it("records cache refresh failures with incrementing failure counts", () => {

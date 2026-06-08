@@ -11,7 +11,7 @@ import {
 let isStarting = false;
 let afterBackgroundServicesStartedForTest: (() => void) | undefined;
 
-/** Starts Gateway and notification monitors after the HTTP server is listening. */
+/** Starts Gateway and the scheduled job scheduler after the HTTP server is listening. */
 export function handleServerListening(): void {
     let gatewayStarted = false;
     let scheduledJobSchedulerStarted = false;

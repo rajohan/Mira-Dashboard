@@ -1961,6 +1961,45 @@ setTimeout(() => process.exit(0), 30);
             { tags: ["1"] }
         );
 
+        const exactGhcrUrls: string[] = [];
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input.toString();
+            exactGhcrUrls.push(url);
+            return {
+                ok: true,
+                headers: new Headers({ "docker-content-digest": "sha256:exact" }),
+                json: async () => ({}),
+            } as Response;
+        }) as typeof fetch;
+        assert.deepEqual(
+            await updater.__testing.lookupGhcr({
+                ...baseService,
+                image_repo: "ghcr.io/owner/app",
+                tag_match_type: "exact",
+                tag_match_pattern: "stable",
+            }),
+            { latestTag: "1", latestDigest: "sha256:exact" }
+        );
+        assert.deepEqual(exactGhcrUrls, ["https://ghcr.io/v2/owner/app/manifests/1"]);
+
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input.toString();
+            return {
+                ok: true,
+                headers: new Headers({ "docker-content-digest": "sha256:regex-empty" }),
+                json: async () => (url.endsWith("/tags/list") ? { tags: "bad" } : {}),
+            } as Response;
+        }) as typeof fetch;
+        assert.deepEqual(
+            await updater.__testing.lookupGhcr({
+                ...baseService,
+                image_repo: "ghcr.io/owner/app",
+                tag_match_type: "regex",
+                tag_match_pattern: String.raw`^\d$`,
+            }),
+            { latestTag: "1", latestDigest: "sha256:regex-empty" }
+        );
+
         globalThis.fetch = (async () =>
             ({
                 ok: true,
