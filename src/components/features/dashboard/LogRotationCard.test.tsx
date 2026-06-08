@@ -130,4 +130,71 @@ describe("LogRotationCard", () => {
         expect(screen.getByRole("button", { name: "Run dry-run now" })).toBeDisabled();
         expect(screen.getByText("Last real run output")).toBeInTheDocument();
     });
+
+    it("renders interval schedule values from the scheduled job", () => {
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: null,
+                    id: "ops.log-rotation",
+                    intervalSeconds: 1_800,
+                    scheduleType: "interval",
+                    settings: { daily: false, keep: 5, maxSizeMb: 25 },
+                    timeOfDay: null,
+                },
+            ],
+        });
+        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
+        hooks.useRunLogRotationDryRun.mockReturnValue({
+            isPending: false,
+            mutate: vi.fn(),
+        });
+        hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+
+        render(<LogRotationCard />);
+
+        expect(screen.getByText("30 min interval")).toBeInTheDocument();
+        expect(screen.getByText("5 archives")).toBeInTheDocument();
+        expect(screen.getByText("25 MB")).toBeInTheDocument();
+    });
+
+    it("renders cron schedule and missing setting fallbacks", () => {
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: "0 4 * * *",
+                    id: "ops.log-rotation",
+                    intervalSeconds: null,
+                    scheduleType: "cron",
+                    settings: {},
+                    timeOfDay: null,
+                },
+            ],
+        });
+        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
+        hooks.useRunLogRotationDryRun.mockReturnValue({
+            isPending: false,
+            mutate: vi.fn(),
+        });
+        hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+
+        render(<LogRotationCard />);
+
+        expect(screen.getByText("0 4 * * *")).toBeInTheDocument();
+        expect(screen.getAllByText("—")).toHaveLength(3);
+    });
+
+    it("renders an empty schedule fallback when the job is absent", () => {
+        hooks.useScheduledJobs.mockReturnValue({ data: [] });
+        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
+        hooks.useRunLogRotationDryRun.mockReturnValue({
+            isPending: false,
+            mutate: vi.fn(),
+        });
+        hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+
+        render(<LogRotationCard />);
+
+        expect(screen.getAllByText("—")).toHaveLength(4);
+    });
 });
