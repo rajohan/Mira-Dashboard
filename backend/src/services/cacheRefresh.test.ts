@@ -1094,7 +1094,8 @@ if (args.includes("capture-pane")) {
                                 subscription: {
                                     character_count: 25,
                                     character_limit: 100,
-                                    next_character_count_reset_unix_ms: "1893456000000",
+                                    next_character_count_reset_unix_ms: "   ",
+                                    next_character_count_reset_unix: "1893456000",
                                 },
                             };
                         }
@@ -1121,6 +1122,20 @@ if (args.includes("capture-pane")) {
                         assert.equal(synthetic.weeklyTokenLimit.nextRegenPercent, null);
                         assert.equal(synthetic.weeklyTokenLimit.percentRemaining, null);
                         assert.equal(synthetic.rollingFiveHourLimit.percentUsed, null);
+                    }
+                );
+
+                await withFetch(
+                    () => ({
+                        subscription: {
+                            character_count: 25,
+                            character_limit: 100,
+                            next_character_count_reset_unix_ms: "1893456000000",
+                        },
+                    }),
+                    async () => {
+                        const elevenLabsQuota = await __testing.checkElevenLabsQuota();
+                        assert.equal(elevenLabsQuota.resetAt, "2030-01-01T00:00:00.000Z");
                     }
                 );
             }

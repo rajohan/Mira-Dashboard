@@ -905,7 +905,7 @@ function manualUpdaterFailureStatus(code: string): number {
 }
 
 function firstFailedStepCode(steps: DockerUpdaterStepResult[]): string | undefined {
-    return steps.find((step) => !step.ok && step.code)?.code;
+    return steps.find((step) => !step.ok)?.code;
 }
 
 /** Performs run docker updater now. */

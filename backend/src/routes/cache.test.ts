@@ -408,6 +408,19 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         }
     });
 
+    it("rejects blank refreshed keys before cache lookup", async () => {
+        __testing.setCacheRefreshRunnerForTests(async () => {
+            return { refreshed: ["  "] };
+        });
+        try {
+            await assert.rejects(() => refreshCacheKey("custom.blank"), {
+                message: 'Invalid refreshed cache key for custom.blank: "  "',
+            });
+        } finally {
+            __testing.resetCacheRefreshForTests();
+        }
+    });
+
     it("uses aggregate refresh results when the producer returns multiple keys", async () => {
         __testing.setCacheRefreshRunnerForTests(async () => {
             for (const key of ["moltbook.home", "moltbook.feed.hot"]) {

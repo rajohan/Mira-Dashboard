@@ -163,7 +163,7 @@ function globToRegex(pattern: string): RegExp {
 }
 
 function segmentRegex(segment: string): RegExp {
-    return new RegExp(`^${segment.split("*").map(escapeRegExp).join(".*")}$`);
+    return new RegExp(`^${segment.split("*").map(escapeRegExp).join("[^/]*")}$`);
 }
 
 function isMissingPathError(error: unknown): boolean {

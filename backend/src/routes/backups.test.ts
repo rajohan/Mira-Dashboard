@@ -232,8 +232,42 @@ describe("backup routes", () => {
                     refreshPending: true,
                 });
                 const job = await backupTesting.startBackupJob(type, "true");
-                assert.notEqual(job.id, `old-${type}`);
-                assert.equal(job.status, "running");
+                assert.equal(job.id, `old-${type}`);
+                assert.equal(job.refreshPending, true);
+            }
+        } finally {
+            backupTesting.setSpawnBackupProcessForTest();
+            backupTesting.clearJobsForTest();
+        }
+    });
+
+    it("clears completed active job ids before starting replacements", async () => {
+        backupTesting.clearJobsForTest();
+        backupTesting.setSpawnBackupProcessForTest(() => {
+            const child = createFakeBackupChild();
+            queueMicrotask(() => {
+                child.emit("spawn");
+            });
+            return child as never;
+        });
+        try {
+            for (const type of ["kopia", "walg"] as const) {
+                backupTesting.clearJobsForTest();
+
+                backupTesting.setActiveJobForTest(type, {
+                    id: `done-${type}`,
+                    type,
+                    status: "done",
+                    code: 0,
+                    stdout: "",
+                    stderr: "",
+                    startedAt: 1,
+                    endedAt: 2,
+                    refreshPending: false,
+                });
+                const replacement = await backupTesting.startBackupJob(type, "true");
+                assert.notEqual(replacement.id, `done-${type}`);
+                assert.equal(replacement.status, "running");
             }
         } finally {
             backupTesting.setSpawnBackupProcessForTest();

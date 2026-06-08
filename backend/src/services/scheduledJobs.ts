@@ -485,7 +485,6 @@ function reconcileStaleRunningRuns(): void {
     if (staleRunningRunsReconciled) {
         return;
     }
-    staleRunningRunsReconciled = true;
     db.prepare(
         `UPDATE scheduled_job_runs
          SET status = 'failed',
@@ -493,6 +492,7 @@ function reconcileStaleRunningRuns(): void {
              message = COALESCE(message, 'Job was abandoned after backend restart')
          WHERE status = 'running'`
     ).run(nowIso());
+    staleRunningRunsReconciled = true;
 }
 
 function getDefaultActionTarget(job: DefaultScheduledJob): string {
@@ -524,38 +524,45 @@ function shouldSeedAsDue(job: DefaultScheduledJob): boolean {
 /** Seeds built-in scheduled jobs in SQLite. */
 export function seedDefaultScheduledJobs(): void {
     reconcileStaleRunningRuns();
-    const deleteJob = db.prepare(`DELETE FROM scheduled_jobs WHERE id = ?`);
-    for (const id of obsoleteDefaultJobIds) {
-        deleteJob.run(id);
-    }
+    db.exec("BEGIN IMMEDIATE");
+    try {
+        const deleteJob = db.prepare(`DELETE FROM scheduled_jobs WHERE id = ?`);
+        for (const id of obsoleteDefaultJobIds) {
+            deleteJob.run(id);
+        }
 
-    const insert = db.prepare(`
-        INSERT OR IGNORE INTO scheduled_jobs (
-            id, name, description, enabled, schedule_type, interval_seconds,
-            time_of_day, cron_expression, action_type, action_target,
-            settings_json, next_run_at, created_at, updated_at
-        ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const timestamp = nowIso();
-    const referenceTime = new Date(timestamp);
-    for (const job of defaultJobs) {
-        insert.run(
-            job.id,
-            job.name,
-            job.description,
-            job.scheduleType,
-            job.intervalSeconds,
-            job.timeOfDay,
-            job.cronExpression,
-            job.actionType ?? "cache.refresh",
-            getDefaultActionTarget(job),
-            JSON.stringify(job.settings ?? {}),
-            shouldSeedAsDue(job)
-                ? timestamp
-                : computeDefaultNextRunIso(job, referenceTime),
-            timestamp,
-            timestamp
-        );
+        const insert = db.prepare(`
+            INSERT OR IGNORE INTO scheduled_jobs (
+                id, name, description, enabled, schedule_type, interval_seconds,
+                time_of_day, cron_expression, action_type, action_target,
+                settings_json, next_run_at, created_at, updated_at
+            ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        const timestamp = nowIso();
+        const referenceTime = new Date(timestamp);
+        for (const job of defaultJobs) {
+            insert.run(
+                job.id,
+                job.name,
+                job.description,
+                job.scheduleType,
+                job.intervalSeconds,
+                job.timeOfDay,
+                job.cronExpression,
+                job.actionType ?? "cache.refresh",
+                getDefaultActionTarget(job),
+                JSON.stringify(job.settings ?? {}),
+                shouldSeedAsDue(job)
+                    ? timestamp
+                    : computeDefaultNextRunIso(job, referenceTime),
+                timestamp,
+                timestamp
+            );
+        }
+        db.exec("COMMIT");
+    } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
     }
 }
 

@@ -101,14 +101,16 @@ export async function refreshCacheKey(key: string) {
         throw new Error(`Cache key not found after refresh: ${key}`);
     }
     const invalidRefreshedIndex = result.refreshed.findIndex(
-        (entry) => typeof entry !== "string"
+        (entry) => typeof entry !== "string" || entry.trim().length === 0
     );
     if (invalidRefreshedIndex !== -1) {
         throw new Error(
             `Invalid refreshed cache key for ${key}: ${JSON.stringify(result.refreshed[invalidRefreshedIndex])}`
         );
     }
-    const refreshedKeys = [...new Set(result.refreshed as string[])];
+    const refreshedKeys = [
+        ...new Set((result.refreshed as string[]).map((entry) => entry.trim())),
+    ];
     const refreshedRows = await Promise.all(
         refreshedKeys.map((refreshKey) => getCacheEntry(refreshKey))
     );

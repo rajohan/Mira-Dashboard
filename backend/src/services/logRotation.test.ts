@@ -89,6 +89,12 @@ describe("log rotation service", { concurrency: false }, () => {
                 .test(path.join(tempDir, "a.log"))
         );
         assert.equal(
+            __testing
+                .globToRegex(path.join(tempDir, "*.log"))
+                .test(path.join(tempDir, "nested", "a.log")),
+            false
+        );
+        assert.equal(
             __testing.mergePolicy({ keep: 1 }, { name: "g", paths: ["x"], keep: 2 }).keep,
             2
         );

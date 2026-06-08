@@ -98,16 +98,50 @@ test("lists jobs with latest runs from one batched lookup", () => {
         return originalPrepare(sql);
     });
 
-    const weather = listScheduledJobs().find((job) => job.id === "cache.weather");
+    try {
+        const weather = listScheduledJobs().find((job) => job.id === "cache.weather");
 
-    assert.equal(weather?.lastRun?.message, "newer");
-    assert.equal(latestLookupCount, 0);
-    prepareMock.mock.restore();
+        assert.equal(weather?.lastRun?.message, "newer");
+        assert.equal(latestLookupCount, 0);
+    } finally {
+        prepareMock.mock.restore();
+    }
 });
 
 test("lists no jobs when the scheduled job table is empty", () => {
     db.exec("DELETE FROM scheduled_job_runs; DELETE FROM scheduled_jobs;");
     assert.deepEqual(listScheduledJobs(), []);
+});
+
+test("rolls back default scheduled job seeding failures", () => {
+    db.exec("DELETE FROM scheduled_job_runs; DELETE FROM scheduled_jobs;");
+    const originalPrepare = db.prepare.bind(db);
+    const prepareMock = test.mock.method(db, "prepare", (sql: string) => {
+        const statement = originalPrepare(sql);
+        if (sql.includes("INSERT OR IGNORE INTO scheduled_jobs")) {
+            const originalRun = statement.run.bind(statement);
+            let runs = 0;
+            test.mock.method(
+                statement,
+                "run",
+                (...args: Parameters<typeof statement.run>) => {
+                    runs += 1;
+                    if (runs === 2) {
+                        throw new Error("seed insert failed");
+                    }
+                    return originalRun(...args);
+                }
+            );
+        }
+        return statement;
+    });
+
+    try {
+        assert.throws(() => __testing.seedDefaultScheduledJobs(), /seed insert failed/u);
+        assert.equal(listScheduledJobs().length, 0);
+    } finally {
+        prepareMock.mock.restore();
+    }
 });
 
 test("computes next daily run for today or tomorrow", () => {
@@ -691,21 +725,22 @@ test("rejects duplicate manual runs and starts the scheduler tick", async () => 
     console.error = (...args: unknown[]) => {
         loggedErrors.push(args);
     };
+    let prepareMock: ReturnType<typeof test.mock.method> | null = null;
     try {
         startScheduledJobScheduler();
         startScheduledJobScheduler();
-        const prepareMock = test.mock.method(db, "prepare", () => {
+        prepareMock = test.mock.method(db, "prepare", () => {
             throw new Error("runDueJobs unavailable");
         });
         tick?.();
         tick?.();
         await new Promise((resolve) => setTimeout(resolve, 35));
-        prepareMock.mock.restore();
         stopScheduledJobScheduler();
         assert.equal(intervalMs > 0, true);
         assert.equal(cleared, true);
         assert.equal(loggedErrors[0]?.[0], "[scheduledJobs] runDueJobs failed");
     } finally {
+        prepareMock?.mock.restore();
         stopScheduledJobScheduler();
         globalThis.setInterval = originalSetInterval;
         globalThis.clearInterval = originalClearInterval;

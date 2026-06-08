@@ -817,6 +817,19 @@ describe("docker routes", { concurrency: false }, () => {
             ]),
             "CONFLICT"
         );
+        assert.equal(
+            __testing.firstFailedStepCode([
+                { step: "first", ok: false, stdout: "", stderr: "apply failed" },
+                {
+                    step: "second",
+                    ok: false,
+                    code: "CONFLICT",
+                    stdout: "",
+                    stderr: "No update available",
+                },
+            ]),
+            undefined
+        );
         assert.equal(__testing.resolveManualUpdateServiceId("12", { serviceId: 3 }), 12);
         assert.equal(__testing.resolveManualUpdateServiceId("", { serviceId: 3 }), 3);
         assert.equal(__testing.resolveManualUpdateServiceId("0", { serviceId: 3 }), null);

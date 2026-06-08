@@ -15,12 +15,12 @@ import { after, before, describe, it } from "node:test";
 
 import express from "express";
 
-import { db } from "../db.js";
-
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
 }
+
+let db: (typeof import("../db.js"))["db"];
 
 async function startServer(configPath: string): Promise<TestServer> {
     process.env.MIRA_LOG_ROTATION_CONFIG = configPath;
@@ -94,10 +94,13 @@ describe("ops routes", () => {
     let archiveNewPath: string;
     let archiveOldPath: string;
     let logPath: string;
+    const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
     const originalConfig = process.env.MIRA_LOG_ROTATION_CONFIG;
 
     before(async () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-ops-route-"));
+        process.env.MIRA_DASHBOARD_DB_PATH = path.join(tempDir, "ops.sqlite");
+        ({ db } = await import("../db.js"));
         const dataDir = path.join(tempDir, "data");
         await mkdir(dataDir, { recursive: true });
         logPath = path.join(dataDir, "app.log");
@@ -149,7 +152,15 @@ describe("ops routes", () => {
             } else {
                 process.env.MIRA_LOG_ROTATION_CONFIG = originalConfig;
             }
-            db.exec("DELETE FROM cache_entries WHERE key = 'log_rotation.state';");
+            if (db) {
+                db.exec("DELETE FROM cache_entries WHERE key = 'log_rotation.state';");
+                db.close();
+            }
+            if (originalDbPath === undefined) {
+                delete process.env.MIRA_DASHBOARD_DB_PATH;
+            } else {
+                process.env.MIRA_DASHBOARD_DB_PATH = originalDbPath;
+            }
             if (tempDir) await rm(tempDir, { recursive: true, force: true });
         }
     });

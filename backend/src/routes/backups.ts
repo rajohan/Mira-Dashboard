@@ -161,14 +161,11 @@ async function startBackupJob(type: BackupJob["type"], command: string) {
     if (existingJob?.status === "running") {
         return existingJob;
     }
+    if (existingJob?.refreshPending) {
+        return existingJob;
+    }
     if (existingJob) {
-        backupJobs.delete(existingJob.id);
-        if (type === "kopia" && activeKopiaJobId === existingJob.id) {
-            activeKopiaJobId = null;
-        }
-        if (type === "walg" && activeWalgJobId === existingJob.id) {
-            activeWalgJobId = null;
-        }
+        clearActiveBackupJob(type, existingJob.id);
     }
 
     const jobId = randomUUID();

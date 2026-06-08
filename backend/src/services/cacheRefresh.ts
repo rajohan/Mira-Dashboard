@@ -1056,19 +1056,24 @@ async function checkElevenLabsQuota() {
     const subscription = asRecord(data.subscription);
     const used = toNumber(subscription.character_count);
     const total = toNumber(subscription.character_limit);
-    const resetMsCandidate = Number(subscription.next_character_count_reset_unix_ms);
-    const resetSecCandidate = Number(subscription.next_character_count_reset_unix);
+    const resetMsCandidate = toNullableNumber(
+        subscription.next_character_count_reset_unix_ms
+    );
+    const resetSecCandidate = toNullableNumber(
+        subscription.next_character_count_reset_unix
+    );
     return {
         used,
         total,
         remaining: Math.max(total - used, 0),
         tier: subscription.tier || "unknown",
         percentUsed: total > 0 ? Math.round((used / total) * 100) : null,
-        resetAt: Number.isFinite(resetMsCandidate)
-            ? new Date(resetMsCandidate).toISOString()
-            : Number.isFinite(resetSecCandidate)
-              ? new Date(resetSecCandidate * 1000).toISOString()
-              : null,
+        resetAt:
+            resetMsCandidate !== null && resetMsCandidate > 0
+                ? new Date(resetMsCandidate).toISOString()
+                : resetSecCandidate !== null && resetSecCandidate > 0
+                  ? new Date(resetSecCandidate * 1000).toISOString()
+                  : null,
     };
 }
 
