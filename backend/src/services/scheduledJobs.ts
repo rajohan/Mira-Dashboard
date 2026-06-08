@@ -455,6 +455,11 @@ function computeDefaultNextRunIso(job: DefaultScheduledJob): string {
     }
 }
 
+function shouldSeedDefaultJobDue(job: DefaultScheduledJob): boolean {
+    const actionType = job.actionType ?? "cache.refresh";
+    return actionType === "cache.refresh" || actionType.startsWith("notification.");
+}
+
 /** Seeds built-in scheduled jobs in SQLite. */
 export function seedDefaultScheduledJobs(): void {
     reconcileStaleRunningRuns();
@@ -483,7 +488,7 @@ export function seedDefaultScheduledJobs(): void {
             job.actionType ?? "cache.refresh",
             getDefaultActionTarget(job),
             JSON.stringify(job.settings ?? {}),
-            timestamp,
+            shouldSeedDefaultJobDue(job) ? timestamp : computeDefaultNextRunIso(job),
             timestamp,
             timestamp
         );

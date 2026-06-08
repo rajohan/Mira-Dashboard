@@ -1326,7 +1326,7 @@ async function refreshQuotasCache() {
         openrouter,
         elevenlabs,
         synthetic,
-        openai,
+        openai: redactOpenAiQuotaAccount(openai),
         checkedAt,
         cacheAgeMs: 0,
     };
@@ -1350,7 +1350,22 @@ async function refreshQuotasCache() {
     return { refreshed: ["quotas.summary"] };
 }
 
-export async function refreshCacheProducer(key: string) {
+function redactOpenAiQuotaAccount(openai: Awaited<ReturnType<typeof checkOpenAiQuota>>) {
+    if (!openai || typeof openai !== "object" || !("account" in openai)) {
+        return openai;
+    }
+    const { account, ...redacted } = openai;
+    void account;
+    return redacted;
+}
+
+const inFlightCacheRefreshes = new Map<string, Promise<{ refreshed: string[] }>>();
+
+function cacheRefreshScopeKey(key: string): string {
+    return key === "moltbook" || MOLTBOOK_CACHE_KEYS.has(key) ? "moltbook" : key;
+}
+
+async function refreshCacheProducerUnlocked(key: string) {
     const refreshWithFailureRecord = async (
         refresh: () => Promise<{ refreshed: string[] }>,
         failureKeys: string[] = [key]
@@ -1411,6 +1426,23 @@ export async function refreshCacheProducer(key: string) {
             statusCode: 400,
         }
     );
+}
+
+export async function refreshCacheProducer(key: string) {
+    const scopeKey = cacheRefreshScopeKey(key);
+    const existing = inFlightCacheRefreshes.get(scopeKey);
+    if (existing) {
+        return existing;
+    }
+    const refresh = refreshCacheProducerUnlocked(key);
+    inFlightCacheRefreshes.set(scopeKey, refresh);
+    try {
+        return await refresh;
+    } finally {
+        if (inFlightCacheRefreshes.get(scopeKey) === refresh) {
+            inFlightCacheRefreshes.delete(scopeKey);
+        }
+    }
 }
 
 export const __testing = {

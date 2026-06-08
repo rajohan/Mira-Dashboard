@@ -2314,5 +2314,6 @@ process.exit(0);
         assert.equal(result.ok, false);
         assert.match(result.stderr, /disk full/u);
         assert.equal(await readFile(composePath, "utf8"), originalCompose);
+        assert.equal(writeCount, 2);
     });
 });

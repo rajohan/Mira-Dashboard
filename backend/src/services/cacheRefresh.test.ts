@@ -315,6 +315,44 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         assert.equal(fallback.metadata.fallbackUsed, true);
     });
 
+    it("deduplicates concurrent refreshes for the same cache scope", async () => {
+        let fetches = 0;
+        let releaseFetch: (() => void) | undefined;
+        const fetchGate = new Promise<void>((resolve) => {
+            releaseFetch = resolve;
+        });
+        globalThis.fetch = (async () => {
+            fetches += 1;
+            await fetchGate;
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    current_condition: [
+                        {
+                            temp_C: "4",
+                            FeelsLikeC: "1",
+                            humidity: "80",
+                            windspeedKmph: "12",
+                            weatherDesc: [{ value: "Cloudy" }],
+                        },
+                    ],
+                    weather: [],
+                }),
+            } as Response;
+        }) as typeof fetch;
+
+        const first = refreshCacheProducer("weather.spydeberg");
+        const second = refreshCacheProducer("weather.spydeberg");
+        releaseFetch?.();
+
+        assert.deepEqual(await Promise.all([first, second]), [
+            { refreshed: ["weather.spydeberg"] },
+            { refreshed: ["weather.spydeberg"] },
+        ]);
+        assert.equal(fetches, 1);
+    });
+
     it("refreshes git workspace status with dirty, clean, and missing repos", async () => {
         const binDir = path.join(tempDir, "bin");
         await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
@@ -533,6 +571,12 @@ if (args.includes("capture-pane")) {
             (cacheRow("quotas.summary").data as { openai: { percentUsed: number } })
                 .openai.percentUsed,
             50
+        );
+        assert.equal(
+            "account" in
+                (cacheRow("quotas.summary").data as { openai: Record<string, unknown> })
+                    .openai,
+            false
         );
     });
 

@@ -597,9 +597,11 @@ async function applyComposeUpdateUnlocked(
     const raw = fs.readFileSync(composePath, "utf8");
     const doc = YAML.parse(raw) as JsonRecord;
     setNestedValue(doc, composeImageField, targetImageRef);
+    let composeStarted = false;
     try {
         fs.writeFileSync(composePath, YAML.stringify(doc));
         const command = getComposeCommand(composePath, service.service_name);
+        composeStarted = true;
         const { stdout, stderr } = await execFileAsync(command.file, command.args, {
             cwd: path.dirname(composePath),
             env: process.env,
@@ -618,7 +620,7 @@ async function applyComposeUpdateUnlocked(
                 rollbackError,
             });
         }
-        if (restored) {
+        if (restored && composeStarted) {
             try {
                 const command = getComposeCommand(composePath, service.service_name);
                 await execFileAsync(command.file, command.args, {
