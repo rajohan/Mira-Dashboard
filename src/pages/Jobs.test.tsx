@@ -147,6 +147,26 @@ describe("Jobs page", () => {
         expect(hooks.runJob).toHaveBeenCalledWith({ id: "cache.git" });
     });
 
+    it("shows fallback text for incomplete schedules", () => {
+        mockJobs([
+            createJob({
+                id: "cache.cron.unknown",
+                name: "Cron Unknown",
+                scheduleType: "cron",
+            }),
+            createJob({
+                id: "cache.interval.invalid",
+                intervalSeconds: Number.NaN,
+                name: "Interval Invalid",
+            }),
+        ]);
+
+        render(<Jobs />);
+
+        expect(screen.getByText("Cron: unknown")).toBeInTheDocument();
+        expect(screen.getByText("Schedule unavailable")).toBeInTheDocument();
+    });
+
     it("renders disabled, failed, running, and unscheduled job states", async () => {
         const user = userEvent.setup();
         mockJobs([
