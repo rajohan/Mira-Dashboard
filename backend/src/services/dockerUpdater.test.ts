@@ -1069,7 +1069,7 @@ setTimeout(() => process.exit(0), 30);
             )) as StepResult[];
             assert.equal(manualSteps.at(-1)?.step, "manual-update:external/swag");
             assert.equal(manualSteps.at(-1)?.ok, false);
-            assert.equal(manualSteps.at(-1)?.code, "UNSUPPORTED_REGISTRY");
+            assert.equal(manualSteps.at(-1)?.code, "NOT_FOUND");
         });
     });
 

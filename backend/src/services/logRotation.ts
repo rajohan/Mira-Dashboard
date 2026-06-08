@@ -170,7 +170,7 @@ function isMissingPathError(error: unknown): boolean {
     return (
         error instanceof Error &&
         "code" in error &&
-        ["ENOENT", "EACCES", "ENOTDIR"].includes(String(error.code))
+        ["ENOENT", "ENOTDIR"].includes(String(error.code))
     );
 }
 

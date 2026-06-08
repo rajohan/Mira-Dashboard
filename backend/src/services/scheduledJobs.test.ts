@@ -62,18 +62,8 @@ test("creates built-in jobs with interval and precise daily schedules", () => {
     )) {
         assert.ok(job.nextRunAt);
         const nextRunTime = new Date(job.nextRunAt).getTime();
-        if (
-            job.actionType === "cache.refresh" ||
-            job.actionType.startsWith("notification.")
-        ) {
-            assert.ok(nextRunTime <= Date.now(), `${job.id} should be due immediately`);
-            assert.ok(
-                nextRunTime >= beforeList - 1_000,
-                `${job.id} should be newly seeded`
-            );
-        } else {
-            assert.ok(nextRunTime > Date.now(), `${job.id} should follow its schedule`);
-        }
+        assert.ok(nextRunTime > Date.now(), `${job.id} should follow its schedule`);
+        assert.ok(nextRunTime >= beforeList, `${job.id} should not be backdated`);
     }
     updateScheduledJob("cache.weather", { enabled: true, intervalSeconds: 7200 });
     const rescheduled = getScheduledJob("cache.weather")?.nextRunAt;
@@ -102,6 +92,10 @@ test("computes next daily run for today or tomorrow", () => {
         expectedNextDay.toISOString()
     );
     assert.throws(() => __testing.nextDailyRunIso("25:00"), /HH:mm/u);
+    assert.throws(
+        () => __testing.nextIntervalRunIso(Number.MAX_SAFE_INTEGER),
+        /outside JS Date bounds/u
+    );
     assert.ok(
         new Date(
             __testing.computeDefaultNextRunIso({

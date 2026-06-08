@@ -1080,22 +1080,12 @@ export async function runDockerUpdaterService(
             .get(serviceId) as ManagedServiceRow | undefined;
         const poll = service ? await pollDockerUpdaterRegistries(service.id) : undefined;
         if (!service) {
-            if (requestedService?.last_status === "unsupported_registry") {
-                return [
-                    register,
-                    {
-                        step: `manual-update:${serviceLabel(requestedService)}`,
-                        ok: false,
-                        code: "UNSUPPORTED_REGISTRY",
-                        stdout: "",
-                        stderr: `Unsupported image registry: ${imageRegistry(requestedService.image_repo)}`,
-                    },
-                ];
-            }
             return [
                 register,
                 {
-                    step: "manual-update",
+                    step: requestedService
+                        ? `manual-update:${serviceLabel(requestedService)}`
+                        : "manual-update",
                     ok: false,
                     code: "NOT_FOUND",
                     stdout: "",

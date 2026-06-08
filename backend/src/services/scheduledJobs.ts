@@ -335,7 +335,14 @@ function isValidTimeOfDay(value: string): boolean {
 }
 
 function nextIntervalRunIso(intervalSeconds: number, from = Date.now()): string {
-    return new Date(from + intervalSeconds * 1000).toISOString();
+    const targetMs = from + intervalSeconds * 1000;
+    const maxDateMs = 8.64e15;
+    if (!Number.isFinite(targetMs) || Math.abs(targetMs) > maxDateMs) {
+        throw new RangeError(
+            "intervalSeconds produces a next run outside JS Date bounds"
+        );
+    }
+    return new Date(targetMs).toISOString();
 }
 
 function nextDailyRunIso(timeOfDay: string, from = new Date()): string {
@@ -351,15 +358,18 @@ function nextDailyRunIso(timeOfDay: string, from = new Date()): string {
     return next.toISOString();
 }
 
-function computeNextRunIso(job: {
-    scheduleType: ScheduledJobScheduleType;
-    intervalSeconds: number;
-    timeOfDay: string | null;
-}): string {
+function computeNextRunIso(
+    job: {
+        scheduleType: ScheduledJobScheduleType;
+        intervalSeconds: number;
+        timeOfDay: string | null;
+    },
+    referenceTime?: Date
+): string {
     if (job.scheduleType === "daily" && job.timeOfDay) {
-        return nextDailyRunIso(job.timeOfDay);
+        return nextDailyRunIso(job.timeOfDay, referenceTime);
     }
-    return nextIntervalRunIso(job.intervalSeconds);
+    return nextIntervalRunIso(job.intervalSeconds, referenceTime?.getTime());
 }
 
 function validateScheduledJobValues(job: {
@@ -447,17 +457,15 @@ function getDefaultActionTarget(job: DefaultScheduledJob): string {
     return target;
 }
 
-function computeDefaultNextRunIso(job: DefaultScheduledJob): string {
+function computeDefaultNextRunIso(
+    job: DefaultScheduledJob,
+    referenceTime = new Date()
+): string {
     try {
-        return computeNextRunIso(job);
+        return computeNextRunIso(job, referenceTime);
     } catch {
         return nowIso();
     }
-}
-
-function shouldSeedDefaultJobDue(job: DefaultScheduledJob): boolean {
-    const actionType = job.actionType ?? "cache.refresh";
-    return actionType === "cache.refresh" || actionType.startsWith("notification.");
 }
 
 /** Seeds built-in scheduled jobs in SQLite. */
@@ -476,6 +484,7 @@ export function seedDefaultScheduledJobs(): void {
         ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const timestamp = nowIso();
+    const referenceTime = new Date(timestamp);
     for (const job of defaultJobs) {
         insert.run(
             job.id,
@@ -488,7 +497,7 @@ export function seedDefaultScheduledJobs(): void {
             job.actionType ?? "cache.refresh",
             getDefaultActionTarget(job),
             JSON.stringify(job.settings ?? {}),
-            shouldSeedDefaultJobDue(job) ? timestamp : computeDefaultNextRunIso(job),
+            computeDefaultNextRunIso(job, referenceTime),
             timestamp,
             timestamp
         );

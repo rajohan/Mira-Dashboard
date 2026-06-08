@@ -353,6 +353,59 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         assert.equal(fetches, 1);
     });
 
+    it("does not deduplicate concurrent Moltbook subkey refreshes", async () => {
+        await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
+            let hotFetches = 0;
+            let profileFetches = 0;
+            const releases: Array<() => void> = [];
+            globalThis.fetch = (async (input: string | URL | Request) => {
+                const url = input instanceof Request ? input.url : String(input);
+                await new Promise<void>((resolve) => {
+                    releases.push(resolve);
+                });
+                if (url.includes("/feed?sort=hot")) {
+                    hotFetches += 1;
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({ posts: [{ id: "hot" }] }),
+                    } as Response;
+                }
+                if (url.includes("/agents/profile")) {
+                    profileFetches += 1;
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({
+                            agent: { name: "mira_2026" },
+                            recentPosts: [],
+                            recentComments: [],
+                        }),
+                    } as Response;
+                }
+                throw new Error(`Unexpected Moltbook URL: ${url}`);
+            }) as typeof fetch;
+
+            const hot = refreshCacheProducer("moltbook.feed.hot");
+            const profile = refreshCacheProducer("moltbook.profile");
+            while (releases.length < 2) {
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+            for (const release of releases) {
+                release();
+            }
+
+            assert.deepEqual(await Promise.all([hot, profile]), [
+                { refreshed: ["moltbook.feed.hot"] },
+                { refreshed: ["moltbook.profile"] },
+            ]);
+            assert.equal(hotFetches, 1);
+            assert.equal(profileFetches, 1);
+        });
+    });
+
     it("refreshes git workspace status with dirty, clean, and missing repos", async () => {
         const binDir = path.join(tempDir, "bin");
         await import("node:fs/promises").then((fs) => fs.mkdir(binDir));

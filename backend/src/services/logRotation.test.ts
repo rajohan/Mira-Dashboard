@@ -237,6 +237,14 @@ describe("log rotation service", { concurrency: false }, () => {
             path.join(globChild, "app.log"),
         ]);
         mock.method(fsPromises, "readdir", async () => {
+            throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+        });
+        await assert.rejects(
+            () => __testing.resolveGlob(path.join(tempDir, "*.log")),
+            /permission denied/u
+        );
+        mock.restoreAll();
+        mock.method(fsPromises, "readdir", async () => {
             throw new Error("readdir crashed");
         });
         await assert.rejects(
