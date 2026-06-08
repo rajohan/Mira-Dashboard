@@ -62,8 +62,14 @@ test("creates built-in jobs with interval and precise daily schedules", () => {
     )) {
         assert.ok(job.nextRunAt);
         const nextRunTime = new Date(job.nextRunAt).getTime();
-        assert.ok(nextRunTime > beforeList, `${job.id} should not be due immediately`);
+        assert.ok(nextRunTime <= Date.now(), `${job.id} should be due immediately`);
+        assert.ok(nextRunTime >= beforeList - 1_000, `${job.id} should be newly seeded`);
     }
+    updateScheduledJob("cache.weather", { enabled: true, intervalSeconds: 7200 });
+    const rescheduled = getScheduledJob("cache.weather")?.nextRunAt;
+    assert.ok(rescheduled);
+    __testing.seedDefaultScheduledJobs();
+    assert.equal(getScheduledJob("cache.weather")?.nextRunAt, rescheduled);
 });
 
 test("computes next daily run for today or tomorrow", () => {
@@ -163,6 +169,11 @@ test("runs jobs and records success or failure", async () => {
         actionType: job.actionType,
         actionTarget: job.actionTarget,
     }));
+    const nonDueNextRun = "2999-01-01T00:00:00.000Z";
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+        nonDueNextRun,
+        "cache.weather"
+    );
     const nextRunBeforeManualSuccess = getScheduledJob("cache.weather")?.nextRunAt;
     const success = await runScheduledJob("cache.weather");
     assert.equal(success.status, "success");

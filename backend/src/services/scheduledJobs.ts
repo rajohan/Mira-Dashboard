@@ -483,7 +483,7 @@ export function seedDefaultScheduledJobs(): void {
             job.actionType ?? "cache.refresh",
             getDefaultActionTarget(job),
             JSON.stringify(job.settings ?? {}),
-            computeDefaultNextRunIso(job),
+            timestamp,
             timestamp,
             timestamp
         );
