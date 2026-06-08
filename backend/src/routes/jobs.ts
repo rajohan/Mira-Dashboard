@@ -17,7 +17,13 @@ interface HttpStatusError extends Error {
 function httpStatusCode(error: unknown): number {
     if (typeof error === "object" && error !== null) {
         const statusCode = (error as HttpStatusError).statusCode;
-        if (typeof statusCode === "number") {
+        if (
+            typeof statusCode === "number" &&
+            Number.isFinite(statusCode) &&
+            Number.isInteger(statusCode) &&
+            statusCode >= 100 &&
+            statusCode <= 599
+        ) {
             return statusCode;
         }
     }

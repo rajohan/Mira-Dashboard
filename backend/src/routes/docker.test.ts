@@ -797,13 +797,8 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(__testing.parseDockerSizeToBytes("1.5 MB"), 1_572_864);
         assert.equal(__testing.parseDockerSizeToBytes("1XB"), 0);
         assert.equal(__testing.trimOutput("x".repeat(120_000)).length, 100_000);
-        assert.equal(
-            __testing.manualUpdaterFailureCode("service not found"),
-            "NOT_FOUND"
-        );
-        assert.equal(__testing.manualUpdaterFailureCode("service disabled"), "DISABLED");
-        assert.equal(__testing.manualUpdaterFailureCode("boom"), "APPLY_FAILED");
-        assert.equal(__testing.manualUpdaterFailureCode("boom", "CONFLICT"), "CONFLICT");
+        assert.equal(__testing.manualUpdaterFailureCode(), "APPLY_FAILED");
+        assert.equal(__testing.manualUpdaterFailureCode("CONFLICT"), "CONFLICT");
         assert.equal(__testing.manualUpdaterFailureStatus("NOT_FOUND"), 404);
         assert.equal(__testing.manualUpdaterFailureStatus("DISABLED"), 400);
         assert.equal(__testing.manualUpdaterFailureStatus("CONFLICT"), 409);
@@ -1949,6 +1944,14 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(invalidStackService.status, 400);
         assert.equal(invalidStackService.body.error, "Invalid stack action");
 
+        const invalidWhitespaceStackService = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/stack/action",
+            { method: "POST", body: { action: "restart", service: "bad name" } }
+        );
+        assert.equal(invalidWhitespaceStackService.status, 400);
+        assert.equal(invalidWhitespaceStackService.body.error, "Invalid stack action");
+
         const missingStackPayload = await requestJson<{ error: string }>(
             server,
             "/api/docker/stack/action",
@@ -2279,7 +2282,7 @@ describe("docker routes", { concurrency: false }, () => {
             END;
         `);
         try {
-            const fallback = await requestJson<{
+            const refreshedAfterSuccess = await requestJson<{
                 success: boolean;
                 service: {
                     id: number;
@@ -2290,11 +2293,11 @@ describe("docker routes", { concurrency: false }, () => {
                 method: "POST",
                 body: {},
             });
-            assert.equal(fallback.status, 200);
-            assert.equal(fallback.body.success, true);
-            assert.equal(fallback.body.service.id, 1);
-            assert.equal(fallback.body.service.currentTag, "1.0.0");
-            assert.equal(fallback.body.service.lastStatus, "current");
+            assert.equal(refreshedAfterSuccess.status, 200);
+            assert.equal(refreshedAfterSuccess.body.success, true);
+            assert.equal(refreshedAfterSuccess.body.service.id, 1);
+            assert.equal(refreshedAfterSuccess.body.service.currentTag, "1.0.0");
+            assert.equal(refreshedAfterSuccess.body.service.lastStatus, "current");
         } finally {
             db.exec("DROP TRIGGER IF EXISTS delete_updated_manual_service_after_event");
         }
@@ -2317,7 +2320,7 @@ describe("docker routes", { concurrency: false }, () => {
             const fallbackFailure = await requestJson<{
                 error: string;
                 success: boolean;
-                service: { id: number };
+                service: null;
                 stderr: string;
             }>(server, "/api/docker/updater/services/1/update", {
                 method: "POST",
@@ -2326,7 +2329,7 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(fallbackFailure.status, 409);
             assert.equal(fallbackFailure.body.success, false);
             assert.equal(fallbackFailure.body.error, "No update available");
-            assert.equal(fallbackFailure.body.service.id, 1);
+            assert.equal(fallbackFailure.body.service, null);
             assert.equal(fallbackFailure.body.stderr, "No update available");
         } finally {
             __testing.setDockerUpdaterServiceRunnerForTests();

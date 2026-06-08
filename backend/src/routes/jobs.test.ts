@@ -369,12 +369,16 @@ test("maps manual run failures", async () => {
 
 test("covers jobs route status fallback helper", () => {
     assert.equal(jobsRouteTesting.httpStatusCode({ statusCode: 409 }), 409);
+    assert.equal(jobsRouteTesting.httpStatusCode({ statusCode: Number.NaN }), 500);
+    assert.equal(jobsRouteTesting.httpStatusCode({ statusCode: 99 }), 500);
+    assert.equal(jobsRouteTesting.httpStatusCode({ statusCode: 600 }), 500);
     assert.equal(jobsRouteTesting.httpStatusCode(new Error("plain")), 500);
 });
 
 test("maps manual duplicate run status codes", async () => {
     const server = await startServer();
     let finishExecution!: () => void;
+    let first: Promise<Response> | null = null;
     const started = new Promise<void>((resolve) => {
         __testing.setActionExecutorForTests(async () => {
             resolve();
@@ -385,7 +389,7 @@ test("maps manual duplicate run status codes", async () => {
         });
     });
     try {
-        const first = fetch(`${server.baseUrl}/api/jobs/cache.weather/run`, {
+        first = fetch(`${server.baseUrl}/api/jobs/cache.weather/run`, {
             method: "POST",
         });
         await started;
@@ -402,6 +406,7 @@ test("maps manual duplicate run status codes", async () => {
         if (typeof finishExecution === "function") {
             finishExecution();
         }
+        await first?.catch(() => {});
         await server.close();
     }
 });

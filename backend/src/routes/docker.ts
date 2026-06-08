@@ -287,7 +287,7 @@ interface DockerStackActionRequest {
 
 function isSafeDockerArgument(value: string): boolean {
     const trimmed = value.trim();
-    return trimmed.length > 0 && !trimmed.startsWith("-");
+    return /^(?!-)[A-Za-z0-9._-]+$/u.test(trimmed);
 }
 
 function validateDockerStackActionRequest(
@@ -853,7 +853,7 @@ async function runManualUpdaterForService(
         const stepCode = firstFailedStepCode(steps);
         return {
             success: false,
-            code: manualUpdaterFailureCode(stderr, stepCode),
+            code: manualUpdaterFailureCode(stepCode),
             output: {},
             stderr,
             steps,
@@ -881,15 +881,9 @@ async function runManualUpdaterForService(
     };
 }
 
-function manualUpdaterFailureCode(stderr: string, stepCode?: string): string {
+function manualUpdaterFailureCode(stepCode?: string): string {
     if (stepCode) {
         return stepCode;
-    }
-    if (stderr.includes("not found")) {
-        return "NOT_FOUND";
-    }
-    if (stderr.includes("disabled")) {
-        return "DISABLED";
     }
     return "APPLY_FAILED";
 }
@@ -1340,14 +1334,13 @@ export default function dockerRoutes(app: express.Application): void {
             }
 
             const result = await runManualUpdaterForService(service);
-            const updatedService =
-                (await getDockerUpdaterServiceById(service.id)) ?? service;
+            const updatedService = await getDockerUpdaterServiceById(service.id);
             res.status(
                 result.success ? 200 : manualUpdaterFailureStatus(result.code)
             ).json({
                 success: result.success,
                 error: result.success ? undefined : result.stderr,
-                service: updatedService,
+                service: updatedService ?? null,
                 result: result.output,
                 stderr: result.stderr,
                 steps: result.steps,
