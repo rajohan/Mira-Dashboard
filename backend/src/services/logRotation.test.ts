@@ -19,6 +19,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 import { db } from "../db.js";
+import { withEnv } from "../testUtils/env.js";
 import {
     __testing,
     runElevatedLogRotationService,
@@ -491,10 +492,19 @@ describe("log rotation service", { concurrency: false }, () => {
                 result: { ok: true },
                 stderr: "helper warning",
             });
-            assert.deepEqual(await runElevatedLogRotationService({ dryRun: true }), {
-                result: { ok: true },
-                stderr: "helper warning",
+            const dryRunConfig = await writeConfig(tempDir, {
+                version: 1,
+                approvedRoots: [tempDir],
+                groups: [],
             });
+            await withEnv({ MIRA_LOG_ROTATION_CONFIG: dryRunConfig }, async () => {
+                const dryRun = await runElevatedLogRotationService({ dryRun: true });
+                assert.equal(dryRun.stderr, "");
+                assert.equal(dryRun.result.ok, true);
+                assert.equal(dryRun.result.dryRun, true);
+                assert.deepEqual(dryRun.result.groups, []);
+            });
+            assert.equal(commands.length, 1);
             __testing.setElevatedLogRotationExecFileRunner(async () => ({
                 stderr: "helper warning",
                 stdout: "not json",
@@ -610,7 +620,6 @@ describe("log rotation service", { concurrency: false }, () => {
             ]);
             assert.match(commands[0]?.args[5] ?? "", /services\/logRotation\.js/u);
             assert.equal(commands[0]?.args.includes("--dry-run"), false);
-            assert.equal(commands[1]?.args.includes("--dry-run"), true);
             assert.equal(commands[0]?.env.PATH, process.env.PATH);
             assert.equal(commands[0]?.env.MIRA_GITHUB_TOKEN, undefined);
         } finally {
@@ -623,6 +632,7 @@ describe("log rotation service", { concurrency: false }, () => {
         await writeFile(logPath, "", "utf8");
         const configPath = await writeConfig(tempDir, {
             version: 1,
+            approvedRoots: [tempDir],
             groups: [
                 {
                     name: "cli",
@@ -653,18 +663,31 @@ describe("log rotation service", { concurrency: false }, () => {
 
         const originalArgv = process.argv;
         const originalConfig = process.env.MIRA_LOG_ROTATION_CONFIG;
+        const originalExitCode = process.exitCode;
         const writeMock = mock.method(process.stdout, "write", () => true);
         try {
             process.env.MIRA_LOG_ROTATION_CONFIG = configPath;
             process.argv = [process.execPath, "log-rotation-test", "--dry-run", "--json"];
+            process.exitCode = undefined;
             const { runLogRotationCli } = await import(
                 `${pathToFileURL(modulePath).href}?cli=${Date.now()}`
             );
             assert.equal(writeMock.mock.callCount(), 0);
             await runLogRotationCli();
             assert.equal(writeMock.mock.callCount(), 1);
+            assert.equal(process.exitCode, undefined);
+
+            const unsafeConfigPath = await writeConfig(tempDir, {
+                version: 1,
+                groups: [{ name: "unsafe", paths: [logPath] }],
+            });
+            process.env.MIRA_LOG_ROTATION_CONFIG = unsafeConfigPath;
+            process.exitCode = undefined;
+            await runLogRotationCli();
+            assert.equal(process.exitCode, 1);
         } finally {
             process.argv = originalArgv;
+            process.exitCode = originalExitCode;
             if (originalConfig === undefined) {
                 delete process.env.MIRA_LOG_ROTATION_CONFIG;
             } else {
@@ -1002,10 +1025,14 @@ describe("log rotation service", { concurrency: false }, () => {
         await mkdir(path.dirname(lockPath), { recursive: true });
         await writeFile(lockPath, "not-a-pid\n", "utf8");
 
-        const summary = await runLogRotationService({ dryRun: false, config });
+        try {
+            const summary = await runLogRotationService({ dryRun: false, config });
 
-        assert.equal(summary.ok, true);
-        assert.doesNotMatch(JSON.stringify(summary.errors), /already running/u);
+            assert.equal(summary.ok, true);
+            assert.doesNotMatch(JSON.stringify(summary.errors), /already running/u);
+        } finally {
+            await rm(lockPath, { force: true });
+        }
     });
 
     it("allows only one concurrent caller to reclaim a stale lock", async () => {

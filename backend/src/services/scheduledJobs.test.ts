@@ -61,6 +61,13 @@ test("creates built-in jobs with interval and precise daily schedules", () => {
         __testing.defaultJobs.some((defaultJob) => defaultJob.id === item.id)
     )) {
         assert.ok(job.nextRunAt);
+        if (job.id === "notification.openclaw" || job.id === "notification.quotas") {
+            assert.ok(
+                new Date(job.nextRunAt).getTime() <= Date.now(),
+                `${job.id} should run once immediately after initial seeding`
+            );
+            continue;
+        }
         const nextRunTime = new Date(job.nextRunAt).getTime();
         assert.ok(nextRunTime > Date.now(), `${job.id} should follow its schedule`);
         assert.ok(nextRunTime >= beforeList, `${job.id} should not be backdated`);
@@ -72,10 +79,41 @@ test("creates built-in jobs with interval and precise daily schedules", () => {
     assert.equal(getScheduledJob("cache.weather")?.nextRunAt, rescheduled);
 });
 
+test("lists jobs with latest runs from one batched lookup", () => {
+    const older = "2026-06-05T00:00:00.000Z";
+    const newer = "2026-06-05T01:00:00.000Z";
+    db.prepare(
+        `INSERT INTO scheduled_job_runs (
+            job_id, status, trigger_type, started_at, finished_at, message, output_json
+        ) VALUES
+            ('cache.weather', 'success', 'manual', ?, ?, 'older', '{}'),
+            ('cache.weather', 'failed', 'manual', ?, ?, 'newer', '{}')`
+    ).run(older, older, newer, newer);
+    const originalPrepare = db.prepare.bind(db);
+    let latestLookupCount = 0;
+    const prepareMock = test.mock.method(db, "prepare", (sql: string) => {
+        if (sql.includes("FROM scheduled_job_runs WHERE job_id = ?")) {
+            latestLookupCount += 1;
+        }
+        return originalPrepare(sql);
+    });
+
+    const weather = listScheduledJobs().find((job) => job.id === "cache.weather");
+
+    assert.equal(weather?.lastRun?.message, "newer");
+    assert.equal(latestLookupCount, 0);
+    prepareMock.mock.restore();
+});
+
+test("lists no jobs when the scheduled job table is empty", () => {
+    db.exec("DELETE FROM scheduled_job_runs; DELETE FROM scheduled_jobs;");
+    assert.deepEqual(listScheduledJobs(), []);
+});
+
 test("computes next daily run for today or tomorrow", () => {
     const beforeDailyTime = new Date("2026-06-05T00:00:00.000Z");
     const expectedSameDay = new Date(beforeDailyTime);
-    expectedSameDay.setHours(2, 40, 0, 0);
+    expectedSameDay.setUTCHours(2, 40, 0, 0);
     assert.equal(
         __testing.nextDailyRunIso("02:40", beforeDailyTime),
         expectedSameDay.toISOString()
@@ -83,9 +121,9 @@ test("computes next daily run for today or tomorrow", () => {
 
     const afterDailyTime = new Date("2026-06-05T03:00:00.000Z");
     const expectedNextDay = new Date(afterDailyTime);
-    expectedNextDay.setHours(2, 40, 0, 0);
+    expectedNextDay.setUTCHours(2, 40, 0, 0);
     if (expectedNextDay.getTime() <= afterDailyTime.getTime()) {
-        expectedNextDay.setDate(expectedNextDay.getDate() + 1);
+        expectedNextDay.setUTCDate(expectedNextDay.getUTCDate() + 1);
     }
     assert.equal(
         __testing.nextDailyRunIso("02:40", afterDailyTime),

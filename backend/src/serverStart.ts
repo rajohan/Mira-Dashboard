@@ -42,7 +42,7 @@ function runCloseCleanups(): void {
     closeCleanupInstalled = false;
     const cleanups = closeCleanups.splice(0);
     for (const cleanup of cleanups) {
-        cleanup();
+        rollback(cleanup, "[Backend] Failed to run server close cleanup:");
     }
 }
 

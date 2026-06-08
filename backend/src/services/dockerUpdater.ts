@@ -417,7 +417,10 @@ async function lookupDockerHub(service: ManagedServiceRow) {
 
 async function lookupGhcr(service: ManagedServiceRow) {
     const repo = stripRegistry(service.image_repo);
-    let tag = service.current_tag;
+    let tag =
+        service.tag_match_type === "exact" && service.tag_match_pattern
+            ? service.tag_match_pattern
+            : service.current_tag;
     if (service.tag_match_type === "regex" && service.tag_match_pattern) {
         const tags: string[] = [];
         let tagsUrl: string | null = `https://ghcr.io/v2/${repo}/tags/list`;
@@ -767,6 +770,20 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
     }
     const discoveries = composeFiles.map(servicesFromCompose);
     const failedDiscoveries = discoveries.filter((discovery) => !discovery.ok);
+    if (failedDiscoveries.length > 0) {
+        return {
+            ok: false,
+            step: "register-services",
+            stdout: "",
+            stderr: JSON.stringify({
+                registered: 0,
+                failed: failedDiscoveries.map((discovery) => ({
+                    appSlug: discovery.appSlug,
+                    error: discovery.error,
+                })),
+            }),
+        };
+    }
     const successfulDiscoveries = discoveries.filter((discovery) => discovery.ok);
     const services = successfulDiscoveries.flatMap((discovery) => discovery.services);
     const timestamp = nowIso();
@@ -861,15 +878,7 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
                 registeredServices: services.length,
             },
         }),
-        stderr:
-            failedDiscoveries.length > 0
-                ? JSON.stringify({
-                      failed: failedDiscoveries.map((discovery) => ({
-                          appSlug: discovery.appSlug,
-                          error: discovery.error,
-                      })),
-                  })
-                : "",
+        stderr: "",
     };
 }
 

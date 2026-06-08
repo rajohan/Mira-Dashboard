@@ -85,6 +85,12 @@ describe("Jobs page", () => {
         mockJobs([
             createJob(),
             createJob({
+                cronExpression: "0 4 * * *",
+                id: "cache.cron",
+                name: "Cron",
+                scheduleType: "cron",
+            }),
+            createJob({
                 id: "cache.git",
                 name: "Git",
                 timeOfDay: "02:40",
@@ -131,9 +137,11 @@ describe("Jobs page", () => {
         render(<Jobs />);
 
         expect(screen.getByText("Weather")).toBeInTheDocument();
+        expect(screen.getByText("Cron: 0 4 * * *")).toBeInTheDocument();
         expect(screen.getByText("Every 1h")).toBeInTheDocument();
         expect(screen.getByText("Daily at 02:40")).toBeInTheDocument();
 
+        await user.click(screen.getByRole("button", { name: /Git.*Daily/u }));
         await user.click(screen.getByRole("button", { name: /Run now/u }));
 
         expect(hooks.runJob).toHaveBeenCalledWith({ id: "cache.git" });
@@ -307,6 +315,7 @@ describe("Jobs page", () => {
         const user = userEvent.setup();
         render(<Jobs />);
 
+        await user.click(screen.getByRole("button", { name: /Git.*Daily/u }));
         await user.click(screen.getByRole("button", { name: /Schedule type/u }));
         await user.click(screen.getByRole("menuitem", { name: /Daily time/u }));
         await user.clear(screen.getByLabelText("Time of day"));

@@ -1036,17 +1036,19 @@ if (args.includes("capture-pane")) {
                 "?? untracked.ts",
                 "R  old.ts -> new.ts",
                 "UU conflict.ts",
+                "AA both-added.ts",
+                "DD both-deleted.ts",
                 " M dir/README_DELETED.md",
                 "",
             ]),
             {
                 staged: 2,
                 modified: 2,
-                deleted: 1,
+                deleted: 2,
                 untracked: 1,
                 renamed: 1,
-                conflicted: 1,
-                total: 8,
+                conflicted: 3,
+                total: 10,
             }
         );
     });
@@ -1103,10 +1105,14 @@ if (args.includes("capture-pane")) {
                         const elevenLabsQuota = await __testing.checkElevenLabsQuota();
                         assert.equal(elevenLabsQuota.resetAt, "2030-01-01T00:00:00.000Z");
                         const synthetic = (await __testing.checkSyntheticQuota()) as {
-                            weeklyTokenLimit: { nextRegenPercent: number | null };
+                            weeklyTokenLimit: {
+                                nextRegenPercent: number | null;
+                                percentRemaining: number | null;
+                            };
                             rollingFiveHourLimit: { percentUsed: number | null };
                         };
                         assert.equal(synthetic.weeklyTokenLimit.nextRegenPercent, null);
+                        assert.equal(synthetic.weeklyTokenLimit.percentRemaining, null);
                         assert.equal(synthetic.rollingFiveHourLimit.percentUsed, null);
                     }
                 );

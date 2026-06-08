@@ -325,7 +325,31 @@ function latestRunForJob(jobId: string): ScheduledJobRun | null {
     return mapRun(row);
 }
 
-function mapJob(row: ScheduledJobRow): ScheduledJob {
+function latestRunsForJobs(jobIds: string[]): Map<string, ScheduledJobRun> {
+    if (jobIds.length === 0) {
+        return new Map();
+    }
+    const placeholders = jobIds.map(() => "?").join(", ");
+    const rows = db
+        .prepare(
+            `SELECT runs.*
+             FROM scheduled_job_runs runs
+             WHERE runs.job_id IN (${placeholders})
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM scheduled_job_runs newer
+                   WHERE newer.job_id = runs.job_id
+                     AND (
+                         newer.started_at > runs.started_at
+                         OR (newer.started_at = runs.started_at AND newer.id > runs.id)
+                     )
+               )`
+        )
+        .all(...jobIds) as unknown as ScheduledJobRunRow[];
+    return new Map(rows.map((row) => [row.job_id, requireRecordedRun(mapRun(row))]));
+}
+
+function mapJob(row: ScheduledJobRow, latestRun = latestRunForJob(row.id)): ScheduledJob {
     return {
         id: row.id,
         name: row.name,
@@ -341,7 +365,7 @@ function mapJob(row: ScheduledJobRow): ScheduledJob {
         nextRunAt: row.next_run_at,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
-        lastRun: latestRunForJob(row.id),
+        lastRun: latestRun,
         isRunning: runningJobs.has(row.id),
     };
 }
@@ -366,10 +390,19 @@ function nextDailyRunIso(timeOfDay: string, from = new Date()): string {
         throw new Error("timeOfDay must be HH:mm");
     }
     const [hourText, minuteText] = timeOfDay.split(":");
-    const next = new Date(from);
-    next.setHours(Number(hourText), Number(minuteText), 0, 0);
+    const next = new Date(
+        Date.UTC(
+            from.getUTCFullYear(),
+            from.getUTCMonth(),
+            from.getUTCDate(),
+            Number(hourText),
+            Number(minuteText),
+            0,
+            0
+        )
+    );
     if (next.getTime() <= from.getTime()) {
-        next.setDate(next.getDate() + 1);
+        next.setUTCDate(next.getUTCDate() + 1);
     }
     return next.toISOString();
 }
@@ -481,6 +514,13 @@ function computeDefaultNextRunIso(
     }
 }
 
+function shouldSeedAsDue(job: DefaultScheduledJob): boolean {
+    return (
+        job.actionType === "notification.openclaw" ||
+        job.actionType === "notification.quota"
+    );
+}
+
 /** Seeds built-in scheduled jobs in SQLite. */
 export function seedDefaultScheduledJobs(): void {
     reconcileStaleRunningRuns();
@@ -510,7 +550,9 @@ export function seedDefaultScheduledJobs(): void {
             job.actionType ?? "cache.refresh",
             getDefaultActionTarget(job),
             JSON.stringify(job.settings ?? {}),
-            computeDefaultNextRunIso(job, referenceTime),
+            shouldSeedAsDue(job)
+                ? timestamp
+                : computeDefaultNextRunIso(job, referenceTime),
             timestamp,
             timestamp
         );
@@ -522,7 +564,8 @@ export function listScheduledJobs(): ScheduledJob[] {
     const rows = db
         .prepare(`SELECT * FROM scheduled_jobs ORDER BY name ASC`)
         .all() as unknown as ScheduledJobRow[];
-    return rows.map(mapJob);
+    const latestRuns = latestRunsForJobs(rows.map((row) => row.id));
+    return rows.map((row) => mapJob(row, latestRuns.get(row.id) ?? null));
 }
 
 /** Returns a scheduled job by ID. */

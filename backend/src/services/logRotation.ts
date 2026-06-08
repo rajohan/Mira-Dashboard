@@ -1131,6 +1131,15 @@ export async function runLogRotationService(
 export async function runElevatedLogRotationService(options: {
     dryRun: boolean;
 }): Promise<ElevatedLogRotationResult> {
+    if (options.dryRun) {
+        return {
+            result: (await runLogRotationService({ dryRun: true })) as unknown as Record<
+                string,
+                unknown
+            >,
+            stderr: "",
+        };
+    }
     const modulePath = fileURLToPath(
         new URL("../services/logRotation.js", import.meta.url)
     );
@@ -1148,9 +1157,6 @@ export async function runElevatedLogRotationService(options: {
         "--",
         "--json",
     ];
-    if (options.dryRun) {
-        args.push("--dry-run");
-    }
     let stderr: string;
     let stdout: string;
     try {
@@ -1276,6 +1282,9 @@ export async function runLogRotationCli(): Promise<void> {
         });
         if (process.argv.includes("--json")) {
             process.stdout.write(`${JSON.stringify(summary)}\n`);
+        }
+        if (!summary.ok) {
+            process.exitCode = 1;
         }
     } catch (error) {
         console.error(caughtMessage(error));

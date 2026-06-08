@@ -437,8 +437,8 @@ process.stdout.write("updated\n");
         await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
             const updater = await import(`./dockerUpdater.js?bad-compose=${Date.now()}`);
             const result = await updater.registerDockerUpdaterServices();
-            assert.equal(result.ok, true);
-            assert.equal(result.step, "register");
+            assert.equal(result.ok, false);
+            assert.equal(result.step, "register-services");
             assert.match(result.stderr, /bad/u);
         });
 
@@ -447,8 +447,7 @@ process.stdout.write("updated\n");
                 "SELECT current_tag, tag_match_pattern FROM docker_managed_services WHERE service_name = 'web'"
             )
             .get() as { current_tag: string; tag_match_pattern: string } | undefined;
-        assert.equal(web?.current_tag, "latest");
-        assert.equal(web?.tag_match_pattern, "latest");
+        assert.equal(web, undefined);
         assert.equal(
             (
                 db
@@ -467,7 +466,7 @@ process.stdout.write("updated\n");
                     )
                     .get() as { count: number }
             ).count,
-            0
+            1
         );
     });
 
@@ -1978,9 +1977,11 @@ setTimeout(() => process.exit(0), 30);
                 tag_match_type: "exact",
                 tag_match_pattern: "stable",
             }),
-            { latestTag: "1", latestDigest: "sha256:exact" }
+            { latestTag: "stable", latestDigest: "sha256:exact" }
         );
-        assert.deepEqual(exactGhcrUrls, ["https://ghcr.io/v2/owner/app/manifests/1"]);
+        assert.deepEqual(exactGhcrUrls, [
+            "https://ghcr.io/v2/owner/app/manifests/stable",
+        ]);
 
         globalThis.fetch = (async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();

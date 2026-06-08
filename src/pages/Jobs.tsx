@@ -49,7 +49,13 @@ function formatSchedule(job: ScheduledJob): string {
     if (job.scheduleType === "daily" && job.timeOfDay) {
         return `Daily at ${job.timeOfDay}`;
     }
-    return `Every ${formatInterval(job.intervalSeconds)}`;
+    if (job.scheduleType === "cron") {
+        return `Cron: ${job.cronExpression || "unknown"}`;
+    }
+    if (job.scheduleType === "interval" && Number.isFinite(job.intervalSeconds)) {
+        return `Every ${formatInterval(job.intervalSeconds)}`;
+    }
+    return "Schedule unavailable";
 }
 
 export function requireSelectedJobForAction(
@@ -173,7 +179,9 @@ export function Jobs() {
         setActionError("");
         if (selectedJob) {
             setIntervalDraft(String(selectedJob.intervalSeconds));
-            setScheduleTypeDraft(selectedJob.scheduleType);
+            setScheduleTypeDraft(
+                selectedJob.scheduleType === "daily" ? "daily" : "interval"
+            );
             setTimeOfDayDraft(selectedJob.timeOfDay || "09:00");
         }
     }, [selectedJob?.id]);

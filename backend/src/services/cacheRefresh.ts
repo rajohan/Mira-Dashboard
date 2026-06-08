@@ -103,6 +103,11 @@ function toNumber(value: unknown, fallback = 0): number {
     return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function toNullableNumber(value: unknown): number | null {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
 function toCurrencyNumber(value: unknown): number | null {
     if (typeof value === "number") {
         return Number.isFinite(value) ? value : null;
@@ -674,7 +679,10 @@ function summarizeStatus(lines: string[]) {
         renamed: chars.filter(({ index, workTree }) => index === "R" || workTree === "R")
             .length,
         conflicted: chars.filter(
-            ({ index, workTree }) => index === "U" || workTree === "U"
+            ({ index, workTree }) =>
+                unmergedStatuses.has(`${index}${workTree}`) ||
+                index === "U" ||
+                workTree === "U"
         ).length,
         total: lines.length,
     };
@@ -1101,7 +1109,7 @@ async function checkSyntheticQuota() {
                     : null,
         },
         weeklyTokenLimit: {
-            percentRemaining: toNumber(weeklyTokenLimit.percentRemaining, 100),
+            percentRemaining: toNullableNumber(weeklyTokenLimit.percentRemaining),
             nextRegenAt: weeklyTokenLimit.nextRegenAt || null,
             maxCredits: weeklyTokenLimit.maxCredits || null,
             remainingCredits: weeklyTokenLimit.remainingCredits || null,
