@@ -9,6 +9,7 @@ import { refreshCacheProducer } from "../services/cacheRefresh.js";
 const MAX_OUTPUT_CHARS = 100_000;
 let spawnBackupProcess = spawn;
 let refreshBackupCache = refreshCacheProducer;
+let backupRefreshTimeoutMs = 30_000;
 
 function getBackupShell(): string {
     return nonEmptyEnvFallback("MIRA_BACKUP_SHELL", "bash");
@@ -216,18 +217,21 @@ async function startBackupJob(type: BackupJob["type"], command: string) {
             job.status = "done";
             job.code = code;
             job.endedAt = Date.now();
-            const refresh = refreshBackupCacheWithTimeout(cacheKey);
-            void refresh.timed.catch((error: unknown) => {
-                const refreshMessage = errorMessage(error, "Unknown error");
-                job.stderr = trimOutput(
-                    `${job.stderr}\nStatus refresh failed: ${refreshMessage}`.trim()
-                );
-            });
-            void refresh.refresh
+            const refresh = refreshBackupCacheWithTimeout(
+                cacheKey,
+                backupRefreshTimeoutMs
+            );
+            void refresh.timed
+                .catch((error: unknown) => {
+                    const refreshMessage = errorMessage(error, "Unknown error");
+                    job.stderr = trimOutput(
+                        `${job.stderr}\nStatus refresh failed: ${refreshMessage}`.trim()
+                    );
+                })
                 .finally(() => {
                     job.refreshPending = false;
-                })
-                .catch(() => {});
+                });
+            void refresh.refresh.catch(() => {});
             return;
         }
         job.status = "done";
@@ -290,6 +294,9 @@ export const __testing = {
     },
     setRefreshBackupCacheForTest(nextRefresh?: typeof refreshCacheProducer): void {
         refreshBackupCache = nextRefresh ?? refreshCacheProducer;
+    },
+    setBackupRefreshTimeoutMsForTest(nextTimeoutMs = 30_000): void {
+        backupRefreshTimeoutMs = nextTimeoutMs;
     },
 };
 

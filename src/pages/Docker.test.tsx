@@ -493,6 +493,15 @@ describe("Docker page", () => {
         await user.click(screen.getAllByRole("button", { name: "Update now" }).at(-1)!);
         expect(await screen.findByText(/updated=1 failed=1/)).toBeInTheDocument();
 
+        docker.manualUpdate.mockResolvedValueOnce({
+            success: true,
+            result: { summary: {} },
+            stderr: "",
+        });
+        await user.click(screen.getByRole("button", { name: "Update now" }));
+        await user.click(screen.getAllByRole("button", { name: "Update now" }).at(-1)!);
+        expect(await screen.findByText(/updated=0 failed=0/)).toBeInTheDocument();
+
         await user.click(screen.getByRole("button", { name: "Prune images" }));
         expect(docker.prune).toHaveBeenCalledWith("images");
 

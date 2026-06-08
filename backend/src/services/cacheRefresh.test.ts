@@ -501,7 +501,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         });
     });
 
-    it("reuses an in-flight Moltbook home refresh for full requests", async () => {
+    it("starts a full Moltbook refresh when only home is in flight", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             let homeFetches = 0;
             const releases: Array<() => void> = [];
@@ -559,18 +559,28 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                 release();
             }
 
-            const homeExpected = {
-                refreshed: ["moltbook.home"],
-            };
+            while (releases.length < 2) {
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+            releases[1]?.();
+
             assert.deepEqual(await Promise.all([homeRefresh, fullRefresh]), [
-                homeExpected,
-                homeExpected,
+                { refreshed: ["moltbook.home"] },
+                {
+                    refreshed: [
+                        "moltbook.home",
+                        "moltbook.feed.hot",
+                        "moltbook.feed.new",
+                        "moltbook.profile",
+                        "moltbook.my-content",
+                    ],
+                },
             ]);
-            assert.equal(homeFetches, 1);
+            assert.equal(homeFetches, 2);
         });
     });
 
-    it("reuses an in-flight Moltbook subkey refresh for full requests", async () => {
+    it("starts a full Moltbook refresh when only a subkey is in flight", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             let hotFetches = 0;
             const hotReleases: Array<() => void> = [];
@@ -628,11 +638,24 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                 release();
             }
 
+            while (hotReleases.length < 2) {
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+            hotReleases[1]?.();
+
             assert.deepEqual(await Promise.all([hotRefresh, fullRefresh]), [
                 { refreshed: ["moltbook.feed.hot"] },
-                { refreshed: ["moltbook.feed.hot"] },
+                {
+                    refreshed: [
+                        "moltbook.home",
+                        "moltbook.feed.hot",
+                        "moltbook.feed.new",
+                        "moltbook.profile",
+                        "moltbook.my-content",
+                    ],
+                },
             ]);
-            assert.equal(hotFetches, 1);
+            assert.equal(hotFetches, 2);
         });
     });
 

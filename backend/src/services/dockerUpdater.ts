@@ -328,7 +328,11 @@ function tagMatches(service: ManagedServiceRow, tag: string): boolean {
         if (!isSafeTagRegexPattern(service.tag_match_pattern)) {
             return tag === service.current_tag;
         }
-        return new RegExp(service.tag_match_pattern).test(tag);
+        try {
+            return new RegExp(service.tag_match_pattern).test(tag);
+        } catch {
+            return tag === service.current_tag;
+        }
     }
     return tag === service.tag_match_pattern;
 }

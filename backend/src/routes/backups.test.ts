@@ -194,12 +194,14 @@ describe("backup routes", () => {
 
     beforeEach(() => {
         backupTesting.clearJobsForTest();
+        backupTesting.setBackupRefreshTimeoutMsForTest();
         refreshedKeys.length = 0;
     });
 
     after(async () => {
         backupTesting.clearJobsForTest();
         backupTesting.setRefreshBackupCacheForTest();
+        backupTesting.setBackupRefreshTimeoutMsForTest();
         await server.close();
         if (originalBackupShell === undefined) {
             delete process.env.MIRA_BACKUP_SHELL;
@@ -572,6 +574,65 @@ describe("backup routes", () => {
             }
             assert.fail("Backup refresh failure was not recorded");
         } finally {
+            backupTesting.setRefreshBackupCacheForTest(async (key) => {
+                refreshedKeys.push(key);
+                return { refreshed: [key] };
+            });
+        }
+    });
+
+    it("releases backup jobs when status refresh times out", async () => {
+        backupTesting.setBackupRefreshTimeoutMsForTest(5);
+        backupTesting.setRefreshBackupCacheForTest(async () => {
+            return await new Promise<{ refreshed: string[] }>(() => {});
+        });
+        try {
+            const started = await requestJson<{
+                ok: boolean;
+                job: { id: string; refreshPending: boolean; type: string };
+            }>(server, "/api/backups/kopia/run", { method: "POST" });
+            assert.equal(started.status, 200);
+            assert.equal(started.body.ok, true);
+            const firstJobId = started.body.job.id;
+
+            for (let attempt = 0; attempt < 30; attempt += 1) {
+                const done = await requestJson<{
+                    job: {
+                        id: string;
+                        refreshPending: boolean;
+                        status: string;
+                        stderr: string;
+                    } | null;
+                }>(server, "/api/backups/kopia");
+                if (
+                    done.body.job?.id === firstJobId &&
+                    done.body.job.status === "done" &&
+                    done.body.job.refreshPending === false &&
+                    done.body.job.stderr.includes(
+                        "Status refresh failed: Status refresh timed out"
+                    )
+                ) {
+                    break;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 10));
+                if (attempt === 29) {
+                    assert.fail("Backup refresh timeout did not release the job");
+                }
+            }
+
+            backupTesting.setRefreshBackupCacheForTest(async (key) => {
+                refreshedKeys.push(key);
+                return { refreshed: [key] };
+            });
+            const restarted = await requestJson<{
+                ok: boolean;
+                job: { id: string; refreshPending: boolean };
+            }>(server, "/api/backups/kopia/run", { method: "POST" });
+            assert.equal(restarted.status, 200);
+            assert.equal(restarted.body.ok, true);
+            assert.notEqual(restarted.body.job.id, firstJobId);
+        } finally {
+            backupTesting.setBackupRefreshTimeoutMsForTest();
             backupTesting.setRefreshBackupCacheForTest(async (key) => {
                 refreshedKeys.push(key);
                 return { refreshed: [key] };

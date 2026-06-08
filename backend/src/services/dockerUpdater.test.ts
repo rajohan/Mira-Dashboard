@@ -1565,6 +1565,18 @@ setTimeout(() => process.exit(0), 30);
         );
         assert.equal(
             updater.__testing.tagMatches(
+                {
+                    ...baseService,
+                    current_tag: "1",
+                    tag_match_type: "regex",
+                    tag_match_pattern: "[z-a]",
+                },
+                "1"
+            ),
+            true
+        );
+        assert.equal(
+            updater.__testing.tagMatches(
                 { ...baseService, tag_match_type: "exact", tag_match_pattern: "stable" },
                 "stable"
             ),
