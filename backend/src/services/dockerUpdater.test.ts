@@ -1608,11 +1608,10 @@ setTimeout(() => process.exit(0), 30);
             }
         );
         const metadataTarget = path.join(tempDir, "metadata-helper.yaml");
-        await writeFile(metadataTarget, "services: {}\n", "utf8");
         const chownCalls: Array<[string, number, number]> = [];
-        const statMock = mock.method(
+        const fstatMock = mock.method(
             fs,
-            "statSync",
+            "fstatSync",
             () =>
                 ({
                     mode: 0o100644,
@@ -1622,22 +1621,24 @@ setTimeout(() => process.exit(0), 30);
         );
         const chownMock = mock.method(
             fs,
-            "chownSync",
-            (targetPath: string, uid: number, gid: number) => {
-                chownCalls.push([targetPath, uid, gid]);
+            "fchownSync",
+            (fd: number, uid: number, gid: number) => {
+                assert.equal(typeof fd, "number");
+                chownCalls.push([metadataTarget, uid, gid]);
             }
         );
         try {
-            updater.__testing.applyFileMetadata(metadataTarget, {
+            updater.__testing.writeFileWithMetadata(metadataTarget, "services: {}\n", {
                 mode: 0o100600,
                 uid: 2000,
                 gid: 2000,
             } as fs.Stats);
         } finally {
-            statMock.mock.restore();
+            fstatMock.mock.restore();
             chownMock.mock.restore();
         }
         assert.deepEqual(chownCalls, [[metadataTarget, 2000, 2000]]);
+        assert.equal(await readFile(metadataTarget, "utf8"), "services: {}\n");
         assert.equal(
             updater.__testing.isSafeTagRegexPattern(String.raw`^1\.2\.[0-9]+$`),
             true

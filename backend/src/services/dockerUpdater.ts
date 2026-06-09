@@ -543,14 +543,26 @@ function setNestedValue(target: JsonRecord, dottedPath: string, value: string) {
     current[parts.at(-1) as string] = value;
 }
 
-function applyFileMetadata(
+function writeFileWithMetadata(
     targetPath: string,
+    content: string,
     stats: Pick<fs.Stats, "mode" | "uid" | "gid">
 ) {
-    fs.chmodSync(targetPath, stats.mode);
-    const currentStats = fs.statSync(targetPath);
-    if (currentStats.uid !== stats.uid || currentStats.gid !== stats.gid) {
-        fs.chownSync(targetPath, stats.uid, stats.gid);
+    const mode = stats.mode & 0o7777;
+    const fd = fs.openSync(
+        targetPath,
+        fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
+        mode
+    );
+    try {
+        fs.writeFileSync(fd, content, "utf8");
+        fs.fchmodSync(fd, mode);
+        const currentStats = fs.fstatSync(fd);
+        if (currentStats.uid !== stats.uid || currentStats.gid !== stats.gid) {
+            fs.fchownSync(fd, stats.uid, stats.gid);
+        }
+    } finally {
+        fs.closeSync(fd);
     }
 }
 
@@ -686,9 +698,12 @@ async function applyComposeUpdateUnlocked(
         path.dirname(composePath),
         `${path.basename(composePath)}.tmp-${randomUUID()}`
     );
+    const rollbackTempPath = path.join(
+        path.dirname(composePath),
+        `${path.basename(composePath)}.rollback-${randomUUID()}`
+    );
     try {
-        fs.writeFileSync(tempPath, YAML.stringify(doc));
-        applyFileMetadata(tempPath, originalStats);
+        writeFileWithMetadata(tempPath, YAML.stringify(doc), originalStats);
         fs.renameSync(tempPath, composePath);
         const command = getComposeCommand(composePath, service.service_name);
         composeStarted = true;
@@ -705,10 +720,15 @@ async function applyComposeUpdateUnlocked(
         } catch {
             // The temp file may have already been atomically moved into place.
         }
+        try {
+            fs.unlinkSync(rollbackTempPath);
+        } catch {
+            // The rollback temp file may not exist yet.
+        }
         let restored = false;
         try {
-            fs.writeFileSync(composePath, raw);
-            applyFileMetadata(composePath, originalStats);
+            writeFileWithMetadata(rollbackTempPath, raw, originalStats);
+            fs.renameSync(rollbackTempPath, composePath);
             restored = true;
         } catch (rollbackError) {
             console.error("[DockerUpdater] Failed to restore compose file", {
@@ -1283,7 +1303,6 @@ export async function runDockerUpdaterService(
 
 export const __testing = {
     applyServiceUpdate,
-    applyFileMetadata,
     buildTargetImageRef,
     fetchJson,
     getDockerAppsRoot,
@@ -1307,4 +1326,5 @@ export const __testing = {
     servicesFromCompose,
     stripRegistry,
     tagMatches,
+    writeFileWithMetadata,
 };
