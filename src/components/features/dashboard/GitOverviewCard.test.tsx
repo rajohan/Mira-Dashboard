@@ -159,4 +159,33 @@ describe("GitOverviewCard", () => {
         expect(screen.getByText("Clean")).toBeInTheDocument();
         expect(container).toHaveTextContent("feature-branch · no changes");
     });
+
+    it("treats missing repo status summaries as no changes", () => {
+        hooks.useCacheEntry.mockReturnValue({
+            data: {
+                data: {
+                    repos: [
+                        {
+                            key: "workspace",
+                            name: "Mira Workspace",
+                            branch: null,
+                            remote: null,
+                            dirty: true,
+                        },
+                    ],
+                    dirtyRepos: ["workspace"],
+                    dirtyCount: 1,
+                    missingRepos: [],
+                    checkedAt: "2026-06-10T00:00:00.000Z",
+                },
+            },
+            isError: false,
+            isLoading: false,
+        });
+
+        const { container } = render(<GitOverviewCard />);
+
+        expect(screen.getByText("Mira Workspace")).toBeInTheDocument();
+        expect(container).toHaveTextContent("unknown branch · no changes");
+    });
 });

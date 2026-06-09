@@ -5,6 +5,15 @@ import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 
 const DEFAULT_BRANCH = "main";
+const EMPTY_STATUS_SUMMARY = {
+    staged: 0,
+    modified: 0,
+    deleted: 0,
+    untracked: 0,
+    renamed: 0,
+    conflicted: 0,
+    total: 0,
+};
 
 /** Represents git repo summary. */
 interface GitRepoSummary {
@@ -13,7 +22,7 @@ interface GitRepoSummary {
     branch: string | null;
     remote: string | null;
     dirty: boolean;
-    statusSummary: {
+    statusSummary?: {
         staged: number;
         modified: number;
         deleted: number;
@@ -41,7 +50,10 @@ export function GitOverviewCard() {
     );
 
     const git = data?.data;
-    const repos = git?.repos || [];
+    const repos = (git?.repos || []).map((repo) => ({
+        ...repo,
+        statusSummary: repo.statusSummary || EMPTY_STATUS_SUMMARY,
+    }));
     const dirtyRepos = repos.filter((repo) => repo.dirty);
     const offMainRepos = repos.filter(
         (repo) => repo.branch && repo.branch !== DEFAULT_BRANCH
