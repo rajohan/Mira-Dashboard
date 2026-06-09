@@ -517,9 +517,10 @@ test("runs default scheduled log rotation through the elevated helper", async ()
     });
     assert.equal(commands[0]?.file, "sudo");
     assert.deepEqual(commands[0]?.args.slice(0, 3), ["-n", "-E", process.execPath]);
-    assert.equal(commands[0]?.args[3], "--input-type=module");
-    assert.equal(commands[0]?.args[4], "--eval");
-    assert.match(commands[0]?.args[5] ?? "", /services\/logRotation\.js/u);
+    assert.deepEqual(commands[0]?.args.slice(3, 5), ["--import", "tsx"]);
+    const evalIndex = commands[0]?.args.indexOf("--eval") ?? -1;
+    assert.equal(commands[0]?.args[evalIndex - 1], "--input-type=module");
+    assert.match(commands[0]?.args[evalIndex + 1] ?? "", /services\/logRotation\.ts/u);
     assert.equal(commands[0]?.args.includes("--dry-run"), false);
 });
 

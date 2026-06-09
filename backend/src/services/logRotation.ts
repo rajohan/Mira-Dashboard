@@ -1161,23 +1161,8 @@ export async function runElevatedLogRotationService(options: {
             stderr: "",
         };
     }
-    const modulePath = fileURLToPath(
-        new URL("../services/logRotation.js", import.meta.url)
-    );
-    const importLogRotationCli = [
-        `import { runLogRotationCli } from ${JSON.stringify(pathToFileURL(modulePath).href)};`,
-        "await runLogRotationCli();",
-    ].join("\n");
-    const args = [
-        "-n",
-        "-E",
-        process.execPath,
-        "--input-type=module",
-        "--eval",
-        importLogRotationCli,
-        "--",
-        "--json",
-    ];
+    const modulePath = fileURLToPath(import.meta.url);
+    const args = buildElevatedLogRotationCliArgs(modulePath);
     let stderr: string;
     let stdout: string;
     try {
@@ -1238,6 +1223,25 @@ export async function runElevatedLogRotationService(options: {
     }
 }
 
+function buildElevatedLogRotationCliArgs(modulePath: string): string[] {
+    const importLogRotationCli = [
+        `import { runLogRotationCli } from ${JSON.stringify(pathToFileURL(modulePath).href)};`,
+        "await runLogRotationCli();",
+    ].join("\n");
+    const loaderArgs = modulePath.endsWith(".ts") ? ["--import", "tsx"] : [];
+    return [
+        "-n",
+        "-E",
+        process.execPath,
+        ...loaderArgs,
+        "--input-type=module",
+        "--eval",
+        importLogRotationCli,
+        "--",
+        "--json",
+    ];
+}
+
 function elevatedLogRotationEnvironment(): NodeJS.ProcessEnv {
     const allowed = [
         "PATH",
@@ -1271,6 +1275,7 @@ export const __testing = {
     gzipFile,
     globToRegex,
     hasRotatedInCadence,
+    buildElevatedLogRotationCliArgs,
     elevatedLogRotationEnvironment,
     listArchives,
     mergePolicy,

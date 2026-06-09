@@ -638,16 +638,25 @@ describe("log rotation service", { concurrency: false }, () => {
                 "-E",
                 process.execPath,
             ]);
-            assert.deepEqual(commands[0]?.args.slice(3, 7), [
-                "--input-type=module",
-                "--eval",
-                commands[0]?.args[5] ?? "",
-                "--",
-            ]);
-            assert.match(commands[0]?.args[5] ?? "", /services\/logRotation\.js/u);
+            assert.deepEqual(commands[0]?.args.slice(3, 5), ["--import", "tsx"]);
+            const evalIndex = commands[0]?.args.indexOf("--eval") ?? -1;
+            assert.equal(commands[0]?.args[evalIndex - 1], "--input-type=module");
+            assert.equal(commands[0]?.args[evalIndex + 2], "--");
+            assert.match(
+                commands[0]?.args[evalIndex + 1] ?? "",
+                /services\/logRotation\.ts/u
+            );
             assert.equal(commands[0]?.args.includes("--dry-run"), false);
             assert.equal(commands[0]?.env.PATH, process.env.PATH);
             assert.equal(commands[0]?.env.MIRA_GITHUB_TOKEN, undefined);
+
+            const builtArgs = __testing.buildElevatedLogRotationCliArgs(
+                path.join(tempDir, "dist/services/logRotation.js")
+            );
+            const builtEvalIndex = builtArgs.indexOf("--eval");
+            assert.equal(builtArgs.includes("tsx"), false);
+            assert.equal(builtArgs[builtEvalIndex - 1], "--input-type=module");
+            assert.match(builtArgs[builtEvalIndex + 1] ?? "", /logRotation\.js/u);
         } finally {
             __testing.resetElevatedLogRotationExecFileRunner();
         }

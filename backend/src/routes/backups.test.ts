@@ -155,16 +155,23 @@ async function waitForDone(
     server: TestServer,
     pathName: string
 ): Promise<{ status: string; code: number; stdout: string; stderr: string }> {
+    let lastJob: { status: string; code: number; stdout: string; stderr: string } | null =
+        null;
     for (let attempt = 0; attempt < 20; attempt += 1) {
         const response = await requestJson<{
             job: { status: string; code: number; stdout: string; stderr: string } | null;
         }>(server, pathName);
+        lastJob = response.body.job;
         if (response.body.job?.status === "done") {
             return response.body.job;
         }
         await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    throw new Error("Backup job did not finish");
+    throw new Error(
+        `Backup job did not finish after 20 attempts. Last job: ${JSON.stringify(
+            lastJob
+        )}`
+    );
 }
 
 async function waitForRefresh(
@@ -636,16 +643,17 @@ describe("backup routes", () => {
                 if (
                     done.body.job?.id === firstJobId &&
                     done.body.job.status === "done" &&
-                    done.body.job.refreshPending === true &&
-                    done.body.job.stderr.includes(
-                        "Status refresh failed: Status refresh timed out"
-                    )
+                    done.body.job.refreshPending === true
                 ) {
+                    assert.equal(
+                        done.body.job.stderr.includes("Status refresh failed"),
+                        false
+                    );
                     break;
                 }
                 await new Promise((resolve) => setTimeout(resolve, 10));
                 if (attempt === 29) {
-                    assert.fail("Backup refresh timeout was not reported");
+                    assert.fail("Backup refresh timeout did not leave refresh pending");
                 }
             }
 
