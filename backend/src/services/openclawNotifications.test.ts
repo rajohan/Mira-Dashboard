@@ -73,6 +73,10 @@ describe("OpenClaw update notifications", () => {
 
     beforeEach(() => {
         db.exec("BEGIN TRANSACTION");
+        db.exec(`
+            DELETE FROM notifications WHERE source = 'openclaw';
+            DELETE FROM openclaw_alert_state;
+        `);
         process.env.FAKE_OPENCLAW_UPDATE_AVAILABLE = "true";
         process.env.FAKE_OPENCLAW_LATEST = "v2026.5.99";
         delete process.env.FAKE_OPENCLAW_MISSING_VERSION;

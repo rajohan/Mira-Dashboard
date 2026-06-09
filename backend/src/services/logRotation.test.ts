@@ -1693,6 +1693,36 @@ describe("log rotation service", { concurrency: false }, () => {
         );
     });
 
+    it("applies top-level exclude paths to every group", async () => {
+        const root = path.join(tempDir, "global-excludes");
+        await mkdir(root);
+        const keptLog = path.join(root, "kept.log");
+        const excludedLog = path.join(root, "excluded.log");
+        await writeFile(keptLog, "x".repeat(64), "utf8");
+        await writeFile(excludedLog, "x".repeat(64), "utf8");
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            excludePaths: [excludedLog],
+            groups: [
+                {
+                    name: "global-exclude",
+                    paths: [path.join(root, "*.log")],
+                    maxSizeMb: 0.00001,
+                    strategy: "copytruncate",
+                    compress: false,
+                },
+            ],
+        });
+
+        const summary = await runLogRotationService({ dryRun: false, config });
+
+        assert.equal(summary.ok, true);
+        assert.equal(summary.rotatedFiles, 1);
+        assert.equal(await readFile(keptLog, "utf8"), "");
+        assert.equal(await readFile(excludedLog, "utf8"), "x".repeat(64));
+    });
+
     it("reads malformed log rotation state with safe defaults", () => {
         seedState({ version: 2, files: [], lastRun: "bad" });
         assert.deepEqual(__testing.readLogRotationState(), { version: 1, files: {} });

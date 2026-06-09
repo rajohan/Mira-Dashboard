@@ -1435,7 +1435,7 @@ export default function dockerRoutes(app: express.Application): void {
 
     app.post(
         "/api/docker/stack/action",
-        express.json(),
+        express.json({ strict: false }),
         asyncRoute(async (req, res) => {
             const payload = validateDockerStackActionRequest(req.body);
             if (!payload) {

@@ -934,6 +934,11 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
         const discoveredAppSlugs = new Set(
             discoveries.map((discovery) => discovery.appSlug)
         );
+        for (const appSlug of new Set(failedDiscoveries.map((item) => item.appSlug))) {
+            db.prepare("DELETE FROM docker_managed_services WHERE app_slug = ?").run(
+                appSlug
+            );
+        }
         for (const row of db
             .prepare("SELECT DISTINCT app_slug FROM docker_managed_services")
             .all() as Array<{ app_slug: string }>) {
@@ -1004,6 +1009,7 @@ export async function pollDockerUpdaterRegistries(
                   .all(serviceId) as unknown as ManagedServiceRow[]);
     const checked: string[] = [];
     const updates: string[] = [];
+    const newUpdates: string[] = [];
     const skipped: Array<{ service: string; reason: string }> = [];
     const failures: Array<{ service: string; error: string }> = [];
     for (const service of services) {
@@ -1028,6 +1034,10 @@ export async function pollDockerUpdaterRegistries(
                 latest_digest: latest.latestDigest ?? null,
             };
             const updateAvailable = hasUpdate(updatedService);
+            const updateChanged =
+                service.last_status !== "update_available" ||
+                service.latest_tag !== updatedService.latest_tag ||
+                service.latest_digest !== updatedService.latest_digest;
             db.prepare(
                 `UPDATE docker_managed_services
                  SET latest_tag = ?, latest_digest = ?, last_checked_at = ?, last_status = ?
@@ -1042,11 +1052,14 @@ export async function pollDockerUpdaterRegistries(
             checked.push(serviceLabel(service));
             if (updateAvailable) {
                 updates.push(serviceLabel(service));
-                insertEventBestEffort(
-                    updatedService,
-                    "update_available",
-                    "Docker update available"
-                );
+                if (updateChanged) {
+                    newUpdates.push(serviceLabel(service));
+                    insertEventBestEffort(
+                        updatedService,
+                        "update_available",
+                        "Docker update available"
+                    );
+                }
             }
         } catch (error) {
             failures.push({
@@ -1061,10 +1074,10 @@ export async function pollDockerUpdaterRegistries(
             ).run(timestamp, service.id);
         }
     }
-    if (updates.length > 0) {
+    if (newUpdates.length > 0) {
         createNotificationBestEffort(
             "Docker updates available",
-            updates.join(", "),
+            newUpdates.join(", "),
             "docker:updater:updates-available"
         );
     }

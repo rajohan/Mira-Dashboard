@@ -466,7 +466,11 @@ function normalizeMoltbookFeed(value: unknown, sort: "hot" | "new") {
 
 export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
     const requestedKeys = targetKey ? [targetKey] : MOLTBOOK_CACHE_KEY_LIST;
-    const writes = [];
+    const writes: Array<{
+        key: MoltbookCacheKey;
+        data: unknown;
+        metadata: Record<string, unknown>;
+    }> = [];
 
     if (requestedKeys.includes("moltbook.home")) {
         writes.push({
@@ -521,15 +525,23 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
         }
     }
 
-    for (const item of writes) {
-        writeCacheSuccess({
-            key: item.key,
-            data: item.data,
-            source: "moltbook-api",
-            ttl: 30,
-            ttlUnit: "minutes",
-            metadata: item.metadata,
-        });
+    db.exec("SAVEPOINT moltbook_cache_write");
+    try {
+        for (const item of writes) {
+            writeCacheSuccess({
+                key: item.key,
+                data: item.data,
+                source: "moltbook-api",
+                ttl: 30,
+                ttlUnit: "minutes",
+                metadata: item.metadata,
+            });
+        }
+        db.exec("RELEASE SAVEPOINT moltbook_cache_write");
+    } catch (error) {
+        db.exec("ROLLBACK TO SAVEPOINT moltbook_cache_write");
+        db.exec("RELEASE SAVEPOINT moltbook_cache_write");
+        throw error;
     }
     return { refreshed: writes.map((item) => item.key) };
 }

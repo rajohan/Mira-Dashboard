@@ -31,6 +31,7 @@
             "daily": true,
             "maxSizeMb": 10,
             "keep": 3,
+            "archiveRetentionScope": "basename",
             "strategy": "copytruncate",
             "archivePaths": [
                 "/opt/docker/data/*/log/*.log.[0-9]*",

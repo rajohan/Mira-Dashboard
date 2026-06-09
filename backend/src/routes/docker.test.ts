@@ -2014,6 +2014,14 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(missingStackPayload.status, 400);
         assert.equal(missingStackPayload.body.error, "Invalid stack action");
 
+        const primitiveStackPayload = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/stack/action",
+            { method: "POST", rawBody: "null" }
+        );
+        assert.equal(primitiveStackPayload.status, 400);
+        assert.equal(primitiveStackPayload.body.error, "Invalid stack action");
+
         const deleteImage = await requestJson<{ success: boolean }>(
             server,
             "/api/docker/images/sha256:image123",
@@ -2264,13 +2272,6 @@ describe("docker routes", { concurrency: false }, () => {
                 is_read: 0,
                 metadata_json: "{}",
                 title: "Docker service updated",
-                type: "info",
-            },
-            {
-                dedupe_key: "docker:updater:updates-available",
-                is_read: 0,
-                metadata_json: "{}",
-                title: "Docker updates available",
                 type: "info",
             },
         ]);

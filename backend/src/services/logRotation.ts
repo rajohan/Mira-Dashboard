@@ -1068,6 +1068,10 @@ export async function runLogRotationService(
         const seenFiles = new Set<string>();
         for (const group of groups) {
             const policy = mergePolicy(config.defaults || {}, group);
+            policy.excludePaths = [
+                ...(config.excludePaths || []),
+                ...(policy.excludePaths || []),
+            ];
             const effectiveApprovedRoots =
                 policy.approvedRoots ?? config.approvedRoots ?? DEFAULT_APPROVED_ROOTS;
             const groupSummary = summarizeGroup(group.name as string);
@@ -1104,7 +1108,7 @@ export async function runLogRotationService(
                     }
                 }
                 const excluded = new Set<string>();
-                for (const pattern of policy.excludePaths || []) {
+                for (const pattern of policy.excludePaths) {
                     for (const file of await resolveGlob(pattern, {
                         missingOk: policy.missingOk,
                     })) {

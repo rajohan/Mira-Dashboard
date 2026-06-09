@@ -299,6 +299,66 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         assert.equal(concreteRow.metadata.producer, "refreshCacheProducer");
     });
 
+    it("rolls back full Moltbook cache writes when one cache row fails", async () => {
+        db.exec(`
+            CREATE TEMP TRIGGER fail_moltbook_feed_new
+            BEFORE INSERT ON cache_entries
+            WHEN NEW.key = 'moltbook.feed.new'
+            BEGIN
+                SELECT RAISE(FAIL, 'moltbook write failed');
+            END;
+        `);
+        try {
+            await withEnv({ MOLTBOOK_API_KEY: "token" }, async () => {
+                await withFetch(
+                    (url) => {
+                        if (url.includes("/home")) {
+                            return {
+                                unread_messages: 1,
+                                latest_moltbook_announcement: {},
+                            };
+                        }
+                        if (url.includes("/posts?sort=")) {
+                            return { posts: [{ id: "post" }] };
+                        }
+                        return {
+                            agent: { name: "mira_2026" },
+                            recentPosts: [],
+                            recentComments: [],
+                        };
+                    },
+                    async () => {
+                        await assert.rejects(
+                            () => refreshMoltbookCache(),
+                            /moltbook write failed/u
+                        );
+                    }
+                );
+            });
+        } finally {
+            db.exec("DROP TRIGGER IF EXISTS fail_moltbook_feed_new");
+        }
+
+        for (const key of [
+            "moltbook.home",
+            "moltbook.feed.hot",
+            "moltbook.feed.new",
+            "moltbook.profile",
+            "moltbook.my-content",
+        ]) {
+            assert.equal(
+                (
+                    db
+                        .prepare(
+                            "SELECT COUNT(*) AS count FROM cache_entries WHERE key = ?"
+                        )
+                        .get(key) as { count: number }
+                ).count,
+                0
+            );
+        }
+    });
+
     it("refreshes weather through wttr and falls back to Open-Meteo", async () => {
         await withFetch(
             (url) => {

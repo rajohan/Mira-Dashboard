@@ -443,7 +443,7 @@ process.stdout.write("updated\n");
         });
     });
 
-    it("fails registration after malformed compose files without pruning existing rows", async () => {
+    it("fails registration after malformed compose files and prunes failed app rows", async () => {
         const appsRoot = path.join(tempDir, "apps");
         const goodDir = path.join(appsRoot, "good");
         const badDir = path.join(appsRoot, "bad");
@@ -507,7 +507,7 @@ process.stdout.write("updated\n");
                     )
                     .get() as { count: number }
             ).count,
-            1
+            0
         );
         assert.equal(
             (
@@ -1497,6 +1497,65 @@ setTimeout(() => process.exit(0), 30);
             `);
             consoleErrorMock.mock.restore();
         }
+    });
+
+    it("only records update notifications when an available update changes", async () => {
+        const appsRoot = path.join(tempDir, "apps");
+        const appDir = path.join(appsRoot, "update-transition");
+        await mkdir(appDir, { recursive: true });
+        await writeFile(
+            path.join(appDir, "compose.yaml"),
+            `services:
+  target:
+    image: nginx:1
+    labels:
+      mira.updater.tagPattern: "^[0-9]+$"
+      mira.updater.tagPatternIsRegex: "true"
+`,
+            "utf8"
+        );
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input.toString();
+            return {
+                ok: true,
+                headers: new Headers(),
+                json: async () =>
+                    url.endsWith("/tags/2")
+                        ? { images: [{ architecture: "amd64", digest: "sha256:new" }] }
+                        : { results: [{ name: "1" }, { name: "2" }] },
+            } as Response;
+        }) as typeof fetch;
+
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
+            const updater = await import(`./dockerUpdater.js?transition=${Date.now()}`);
+            await updater.registerDockerUpdaterServices();
+
+            const firstPoll = await updater.pollDockerUpdaterRegistries();
+            const secondPoll = await updater.pollDockerUpdaterRegistries();
+
+            assert.equal(firstPoll.ok, true);
+            assert.equal(secondPoll.ok, true);
+            assert.equal(
+                (
+                    dbHandle
+                        .prepare(
+                            "SELECT COUNT(*) AS count FROM docker_update_events WHERE event_type = 'update_available'"
+                        )
+                        .get() as { count: number }
+                ).count,
+                1
+            );
+            assert.equal(
+                (
+                    dbHandle
+                        .prepare(
+                            "SELECT COUNT(*) AS count FROM notifications WHERE dedupe_key = 'docker:updater:updates-available'"
+                        )
+                        .get() as { count: number }
+                ).count,
+                1
+            );
+        });
     });
 
     it("covers updater helper fallback branches directly", async () => {
