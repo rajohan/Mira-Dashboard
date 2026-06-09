@@ -413,7 +413,6 @@ async function gzipFile(filePath: string, approvedRoots: string[]): Promise<stri
     const source = await openVerifiedFile(filePath, approvedRoots, constants.O_RDONLY);
     const gzPath = `${filePath}.gz`;
     let destination: fs.FileHandle | null = null;
-    let closed = false;
     try {
         await assertSafeNewFileParent(gzPath, approvedRoots);
         destination = await createNoFollowFile(gzPath, source.stat.mode & 0o777, {
@@ -439,13 +438,10 @@ async function gzipFile(filePath: string, approvedRoots: string[]): Promise<stri
         destination = null;
         await unlinkVerified(filePath, approvedRoots);
         await source.handle.close();
-        closed = true;
         return gzPath;
     } catch (error) {
         await destination?.close().catch(() => {});
-        if (!closed) {
-            await source.handle.close().catch(() => {});
-        }
+        await source.handle.close().catch(() => {});
         if (
             !(
                 error instanceof Error &&

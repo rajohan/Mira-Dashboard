@@ -386,6 +386,17 @@ describe("Jobs page", () => {
         expect(screen.getByLabelText("Interval seconds")).toBeInTheDocument();
     });
 
+    it("switches interval jobs to cron schedules", async () => {
+        const user = userEvent.setup();
+        render(<Jobs />);
+
+        await user.click(screen.getByRole("button", { name: /Weather.*Every 1h/u }));
+        await user.click(screen.getByRole("button", { name: /Schedule type/u }));
+        await user.click(screen.getByRole("menuitem", { name: /^Cron/u }));
+
+        expect(screen.getByLabelText("Cron expression")).toHaveValue("* * * * *");
+    });
+
     it("shows schedule validation messages", async () => {
         const user = userEvent.setup();
         render(<Jobs />);

@@ -525,7 +525,7 @@ function nextCronRunIso(expression: string, from = new Date()): string {
     const candidate = new Date(from);
     candidate.setUTCSeconds(0, 0);
     candidate.setUTCMinutes(candidate.getUTCMinutes() + 1);
-    const maxAttempts = 366 * 24 * 60;
+    const maxAttempts = 5 * 366 * 24 * 60;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         if (
             schedule.months.has(candidate.getUTCMonth() + 1) &&
@@ -537,7 +537,7 @@ function nextCronRunIso(expression: string, from = new Date()): string {
         }
         candidate.setUTCMinutes(candidate.getUTCMinutes() + 1);
     }
-    throw new Error("cronExpression did not produce a run within one year");
+    throw new Error("cronExpression did not produce a run within five years");
 }
 
 function computeNextRunIso(
@@ -579,13 +579,34 @@ function validateScheduledJobValues(job: {
     ) {
         return "timeOfDay must be HH:mm for daily jobs";
     }
-    if (
-        job.scheduleType === "cron" &&
-        (!job.cronExpression || !parseCronExpression(job.cronExpression))
-    ) {
-        return "cronExpression must be a valid 5-field cron expression";
+    if (job.scheduleType === "cron") {
+        if (!job.cronExpression || !parseCronExpression(job.cronExpression)) {
+            return "cronExpression must be a valid 5-field cron expression";
+        }
+        try {
+            nextCronRunIso(job.cronExpression);
+        } catch {
+            return "cronExpression must be a valid 5-field cron expression";
+        }
     }
     return null;
+}
+
+function rescheduleCompletedRun(
+    jobId: string,
+    triggerType: ScheduledJobTriggerType
+): void {
+    if (!shouldRescheduleCompletedRun(jobId, triggerType)) {
+        return;
+    }
+    try {
+        updateNextRunFromLatestJob(jobId);
+    } catch (error) {
+        console.error("[scheduledJobs] failed to update next run", {
+            error: errorMessage(error, "Failed to update next run"),
+            jobId,
+        });
+    }
 }
 
 export function validateScheduledJobPatch(
@@ -922,14 +943,10 @@ export async function runScheduledJob(
     try {
         const output = await executeScheduledJob(job);
         finishRun(runId, "success", "Job completed", output);
-        if (shouldRescheduleCompletedRun(job.id, triggerType)) {
-            updateNextRunFromLatestJob(job.id);
-        }
+        rescheduleCompletedRun(job.id, triggerType);
     } catch (error) {
         finishRun(runId, "failed", errorMessage(error, "Job failed"), {});
-        if (shouldRescheduleCompletedRun(job.id, triggerType)) {
-            updateNextRunFromLatestJob(job.id);
-        }
+        rescheduleCompletedRun(job.id, triggerType);
     } finally {
         runningJobs.delete(job.id);
     }

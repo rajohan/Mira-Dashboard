@@ -189,6 +189,10 @@ test("computes next daily run for today or tomorrow", () => {
         __testing.nextCronRunIso("0 8 1 * *", new Date("2026-06-02T00:00:00Z")),
         "2026-07-01T08:00:00.000Z"
     );
+    assert.equal(
+        __testing.nextCronRunIso("0 0 29 2 *", new Date("2025-03-01T00:00:00Z")),
+        "2028-02-29T00:00:00.000Z"
+    );
     assert.throws(() => __testing.nextCronRunIso("* * * *"), /valid 5-field/u);
     assert.throws(() => __testing.nextCronRunIso("61 * * * *"), /valid 5-field/u);
     assert.throws(() => __testing.nextCronRunIso("x * * * *"), /valid 5-field/u);
@@ -198,7 +202,7 @@ test("computes next daily run for today or tomorrow", () => {
     assert.throws(() => __testing.nextCronRunIso("10-1 * * * *"), /valid 5-field/u);
     assert.throws(
         () => __testing.nextCronRunIso("0 0 31 2 *", new Date("2026-01-01T00:00:00Z")),
-        /within one year/u
+        /within five years/u
     );
     assert.ok(
         new Date(
@@ -292,6 +296,14 @@ test("updates enable state, interval schedules, and daily schedules", () => {
     assert.throws(
         () =>
             updateScheduledJob("cache.weather", {
+                cronExpression: "0 0 31 2 *",
+                scheduleType: "cron",
+            }),
+        /cronExpression/u
+    );
+    assert.throws(
+        () =>
+            updateScheduledJob("cache.weather", {
                 cronExpression: "bad",
                 scheduleType: "cron",
             }),
@@ -341,6 +353,32 @@ test("runs jobs and records success or failure", async () => {
     const patchedJob = getScheduledJob("cache.weather");
     assert.equal(patchedJob?.enabled, false);
     assert.equal(patchedJob?.nextRunAt, null);
+
+    updateScheduledJob("cache.weather", { enabled: true, intervalSeconds: 7200 });
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+        "2026-06-06T00:00:00.000Z",
+        "cache.weather"
+    );
+    const loggedErrors: unknown[][] = [];
+    const originalConsoleError = console.error;
+    console.error = (...args: unknown[]) => {
+        loggedErrors.push(args);
+    };
+    try {
+        __testing.setActionExecutorForTests(async () => {
+            db.prepare(
+                `UPDATE scheduled_jobs
+                 SET enabled = 1, schedule_type = 'cron', cron_expression = ?, next_run_at = ?
+                 WHERE id = ?`
+            ).run("0 0 31 2 *", "2026-06-06T00:00:00.000Z", "cache.weather");
+            return { updated: true };
+        });
+        const rescheduleFailure = await runScheduledJob("cache.weather", "schedule");
+        assert.equal(rescheduleFailure.status, "success");
+        assert.match(String(loggedErrors[0]?.[0] ?? ""), /failed to update next run/u);
+    } finally {
+        console.error = originalConsoleError;
+    }
 
     db.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run("cache.weather");
     __testing.updateNextRunFromLatestJob("cache.weather");

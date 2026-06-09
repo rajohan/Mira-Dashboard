@@ -83,11 +83,17 @@ async function waitFor(
     intervalMs = 10
 ): Promise<void> {
     const deadline = Date.now() + timeoutMs;
-    while (Date.now() <= deadline) {
+    while (true) {
         if (predicate()) {
             return;
         }
+        if (Date.now() > deadline) {
+            break;
+        }
         await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    if (predicate()) {
+        return;
     }
     throw new Error("Timed out waiting for cache refresh test condition");
 }
