@@ -537,7 +537,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         });
     });
 
-    it("reuses an in-flight home refresh for full Moltbook requests", async () => {
+    it("runs full Moltbook refresh after an in-flight home refresh", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             let homeFetches = 0;
             const releases: Array<() => void> = [];
@@ -545,9 +545,11 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                 const url = input instanceof Request ? input.url : String(input);
                 if (url.includes("/home")) {
                     homeFetches += 1;
-                    await new Promise<void>((resolve) => {
-                        releases.push(resolve);
-                    });
+                    if (homeFetches === 1) {
+                        await new Promise<void>((resolve) => {
+                            releases.push(resolve);
+                        });
+                    }
                     return {
                         ok: true,
                         status: 200,
@@ -595,13 +597,21 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
 
             assert.deepEqual(await Promise.all([homeRefresh, fullRefresh]), [
                 { refreshed: ["moltbook.home"] },
-                { refreshed: ["moltbook.home"] },
+                {
+                    refreshed: [
+                        "moltbook.home",
+                        "moltbook.feed.hot",
+                        "moltbook.feed.new",
+                        "moltbook.profile",
+                        "moltbook.my-content",
+                    ],
+                },
             ]);
-            assert.equal(homeFetches, 1);
+            assert.equal(homeFetches, 2);
         });
     });
 
-    it("reuses an in-flight subkey refresh for full Moltbook requests", async () => {
+    it("runs full Moltbook refresh after an in-flight subkey refresh", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             let hotFetches = 0;
             const hotReleases: Array<() => void> = [];
@@ -617,9 +627,11 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                 }
                 if (url.includes("/feed?sort=hot")) {
                     hotFetches += 1;
-                    await new Promise<void>((resolve) => {
-                        hotReleases.push(resolve);
-                    });
+                    if (hotFetches === 1) {
+                        await new Promise<void>((resolve) => {
+                            hotReleases.push(resolve);
+                        });
+                    }
                     return {
                         ok: true,
                         status: 200,
@@ -659,9 +671,17 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
 
             assert.deepEqual(await Promise.all([hotRefresh, fullRefresh]), [
                 { refreshed: ["moltbook.feed.hot"] },
-                { refreshed: ["moltbook.feed.hot"] },
+                {
+                    refreshed: [
+                        "moltbook.home",
+                        "moltbook.feed.hot",
+                        "moltbook.feed.new",
+                        "moltbook.profile",
+                        "moltbook.my-content",
+                    ],
+                },
             ]);
-            assert.equal(hotFetches, 1);
+            assert.equal(hotFetches, 2);
         });
     });
 

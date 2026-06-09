@@ -1027,9 +1027,10 @@ setTimeout(() => process.exit(0), 30);
             await updater.registerDockerUpdaterServices();
             const service = dbHandle
                 .prepare(
-                    "SELECT id FROM docker_managed_services WHERE service_name = 'web'"
+                    "SELECT id, current_digest FROM docker_managed_services WHERE service_name = 'web'"
                 )
-                .get() as { id: number };
+                .get() as { current_digest: string | null; id: number };
+            assert.equal(service.current_digest, "sha256:new");
             let deleted = false;
             globalThis.fetch = (async () => {
                 if (!deleted) {

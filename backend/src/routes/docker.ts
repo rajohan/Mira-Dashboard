@@ -409,9 +409,11 @@ function hasUpdaterCandidate(service: DockerUpdaterServiceRow): boolean {
     }
 
     return Boolean(
-        service.current_tag &&
-        service.latest_tag &&
-        service.current_tag !== service.latest_tag
+        (service.current_tag &&
+            service.latest_tag &&
+            service.current_tag !== service.latest_tag) ||
+        (service.latest_digest &&
+            (!service.current_digest || service.current_digest !== service.latest_digest))
     );
 }
 

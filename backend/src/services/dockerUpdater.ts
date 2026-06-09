@@ -874,7 +874,12 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
             compose_image_ref = excluded.compose_image_ref,
             compose_image_field = excluded.compose_image_field,
             current_tag = excluded.current_tag,
-            current_digest = excluded.current_digest,
+            current_digest = CASE
+                WHEN excluded.current_digest IS NOT NULL THEN excluded.current_digest
+                WHEN docker_managed_services.current_tag = excluded.current_tag
+                    THEN docker_managed_services.current_digest
+                ELSE NULL
+            END,
             policy = excluded.policy,
             pin_mode = excluded.pin_mode,
             tag_match_type = excluded.tag_match_type,

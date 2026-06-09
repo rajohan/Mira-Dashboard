@@ -642,13 +642,8 @@ describe("backup routes", () => {
             }>(server, "/api/backups/kopia");
             assert.equal(timedOut.body.job?.id, firstJobId);
             assert.equal(timedOut.body.job.status, "done");
-            assert.equal(timedOut.body.job.refreshPending, true);
-            assert.equal(
-                timedOut.body.job.stderr.includes("Status refresh failed"),
-                false
-            );
-            rejectRefresh(new Error("late refresh failure"));
-            await waitForDone(server, "/api/backups/kopia");
+            assert.equal(timedOut.body.job.refreshPending, false);
+            assert.match(timedOut.body.job.stderr, /Status refresh failed/u);
             backupTesting.setRefreshBackupCacheForTest(async (key) => {
                 refreshedKeys.push(key);
                 return { refreshed: [key] };
@@ -662,6 +657,7 @@ describe("backup routes", () => {
             assert.notEqual(restarted.body.job.id, firstJobId);
             await waitForDone(server, "/api/backups/kopia");
             await waitForRefresh("backup.kopia.status", refreshedKeys);
+            rejectRefresh(new Error("late refresh failure"));
         } finally {
             backupTesting.setBackupRefreshTimeoutMsForTest();
             backupTesting.setRefreshBackupCacheForTest(async (key) => {

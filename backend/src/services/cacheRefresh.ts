@@ -1516,18 +1516,25 @@ async function refreshCacheProducerUnlocked(key: string) {
 
 export async function refreshCacheProducer(key: string) {
     const scopeKey = cacheRefreshScopeKey(key);
-    const existing = isSupportedCacheProducerKey(key)
-        ? [...inFlightCacheRefreshes.entries()].find(
-              ([inFlightKey]) =>
-                  inFlightKey === scopeKey ||
-                  inFlightKey.startsWith(`${scopeKey}.`) ||
-                  scopeKey.startsWith(`${inFlightKey}.`)
-          )?.[1]
-        : undefined;
+    const inFlightEntries = isSupportedCacheProducerKey(key)
+        ? [...inFlightCacheRefreshes.entries()]
+        : [];
+    const existing = inFlightEntries.find(
+        ([inFlightKey]) =>
+            inFlightKey === scopeKey || scopeKey.startsWith(`${inFlightKey}.`)
+    )?.[1];
     if (existing !== undefined) {
         return existing;
     }
-    const refresh = refreshCacheProducerUnlocked(key);
+    const childRefreshes = inFlightEntries
+        .filter(([inFlightKey]) => inFlightKey.startsWith(`${scopeKey}.`))
+        .map(([, refresh]) => refresh);
+    const refresh =
+        childRefreshes.length > 0
+            ? Promise.allSettled(childRefreshes).then(() =>
+                  refreshCacheProducerUnlocked(key)
+              )
+            : refreshCacheProducerUnlocked(key);
     inFlightCacheRefreshes.set(scopeKey, refresh);
     try {
         return await refresh;
