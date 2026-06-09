@@ -249,6 +249,7 @@ const obsoleteDefaultJobIds = [
 const runningJobs = new Set<string>();
 let scheduler: NodeJS.Timeout | null = null;
 let schedulerTickRunning = false;
+let schedulerTickPromise: Promise<void> | null = null;
 let actionExecutor: ((job: ScheduledJob) => Promise<Record<string, unknown>>) | undefined;
 let staleRunningRunsReconciled = false;
 let cacheRefreshRunner: CacheRefreshRunner = refreshCacheProducer;
@@ -1029,25 +1030,29 @@ export function startScheduledJobScheduler(): void {
             return;
         }
         schedulerTickRunning = true;
-        runDueJobs()
+        schedulerTickPromise = runDueJobs()
             .catch((error) => {
                 console.error("[scheduledJobs] runDueJobs failed", error);
             })
             .finally(() => {
                 schedulerTickRunning = false;
+                schedulerTickPromise = null;
             });
     }, schedulerTickMs);
     scheduler.unref();
 }
 
 /** Stops the backend-native scheduled job loop. */
-export function stopScheduledJobScheduler(): void {
-    if (!scheduler) {
+export async function stopScheduledJobScheduler(): Promise<void> {
+    if (scheduler) {
+        clearInterval(scheduler);
+        scheduler = null;
+    }
+    if (!schedulerTickPromise) {
+        schedulerTickRunning = false;
         return;
     }
-    clearInterval(scheduler);
-    scheduler = null;
-    schedulerTickRunning = false;
+    await schedulerTickPromise;
 }
 
 export const __testing = {

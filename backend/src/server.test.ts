@@ -776,7 +776,7 @@ describe("server bootstrap", () => {
             server.emit("close");
             assert.equal(shutdownCalled, true);
             shutdownCalled = false;
-            stopScheduledJobScheduler();
+            await stopScheduledJobScheduler();
             gateway.init = () => {
                 throw new Error("gateway failed");
             };
@@ -807,7 +807,7 @@ describe("server bootstrap", () => {
             assert.throws(() => handleServerListening(), /scheduler failed/u);
             assert.equal(closeCalled, true);
             assert.equal(shutdownCalled, true);
-            stopScheduledJobScheduler();
+            await stopScheduledJobScheduler();
             globalThis.setInterval = originalSetInterval;
             closeCalled = false;
             shutdownCalled = false;
@@ -818,7 +818,7 @@ describe("server bootstrap", () => {
             assert.equal(closeCalled, true);
             assert.equal(shutdownCalled, true);
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
-            stopScheduledJobScheduler();
+            await stopScheduledJobScheduler();
             gateway.shutdown = () => {
                 throw new Error("shutdown cleanup failed");
             };
@@ -845,7 +845,7 @@ describe("server bootstrap", () => {
                 true
             );
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
-            stopScheduledJobScheduler();
+            await stopScheduledJobScheduler();
             gateway.shutdown = originalShutdown;
             server.close = originalClose;
             gateway.init = (token: string) => {
@@ -961,7 +961,7 @@ describe("server bootstrap", () => {
             gateway.shutdown = originalShutdown;
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
             serverStartTesting.removeCloseCleanup();
-            stopScheduledJobScheduler();
+            await stopScheduledJobScheduler();
             if (originalListeningDescriptor) {
                 Object.defineProperty(server, "listening", originalListeningDescriptor);
             } else {

@@ -30,6 +30,7 @@ test.afterEach(() => {
 test("creates built-in jobs with interval and precise daily schedules", () => {
     const beforeList = Date.now();
     const jobs = listScheduledJobs();
+    const afterList = Date.now();
     const dockerUpdater = jobs.find((job) => job.id === "docker.updater");
     const moltbook = jobs.find((job) => job.id === "cache.moltbook");
     const oldMoltbookHome = jobs.find((job) => job.id === "cache.moltbook-home");
@@ -68,13 +69,13 @@ test("creates built-in jobs with interval and precise daily schedules", () => {
             job.id === "notification.quotas";
         if (shouldRunOnceImmediately) {
             assert.ok(
-                new Date(job.nextRunAt).getTime() <= Date.now(),
+                new Date(job.nextRunAt).getTime() <= afterList,
                 `${job.id} should run once immediately after initial seeding`
             );
             continue;
         }
         const nextRunTime = new Date(job.nextRunAt).getTime();
-        assert.ok(nextRunTime > Date.now(), `${job.id} should follow its schedule`);
+        assert.ok(nextRunTime > beforeList, `${job.id} should follow its schedule`);
         assert.ok(nextRunTime >= beforeList, `${job.id} should not be backdated`);
     }
     updateScheduledJob("cache.weather", { enabled: true, intervalSeconds: 7200 });
@@ -858,15 +859,51 @@ test("rejects duplicate manual runs and starts the scheduler tick", async () => 
         tick?.();
         tick?.();
         await new Promise((resolve) => setTimeout(resolve, 35));
-        stopScheduledJobScheduler();
+        await stopScheduledJobScheduler();
         assert.equal(intervalMs > 0, true);
         assert.equal(cleared, true);
         assert.equal(loggedErrors[0]?.[0], "[scheduledJobs] runDueJobs failed");
     } finally {
         prepareMock?.mock.restore();
-        stopScheduledJobScheduler();
+        await stopScheduledJobScheduler();
         globalThis.setInterval = originalSetInterval;
         globalThis.clearInterval = originalClearInterval;
         console.error = originalConsoleError;
+    }
+});
+
+test("waits for an active scheduler tick before stopping", async () => {
+    const originalSetInterval = globalThis.setInterval;
+    const originalClearInterval = globalThis.clearInterval;
+    let tick: (() => void) | undefined;
+    let releaseTick: (() => void) | undefined;
+    let stopSettled = false;
+    const tickGate = new Promise<void>((resolve) => {
+        releaseTick = resolve;
+    });
+    __testing.setActionExecutorForTests(async () => {
+        await tickGate;
+        return {};
+    });
+    globalThis.setInterval = ((callback: () => void) => {
+        tick = callback;
+        return { unref: () => {} } as unknown as NodeJS.Timeout;
+    }) as typeof setInterval;
+    globalThis.clearInterval = (() => {}) as typeof clearInterval;
+    try {
+        startScheduledJobScheduler();
+        tick?.();
+        const stopped = stopScheduledJobScheduler().then(() => {
+            stopSettled = true;
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(stopSettled, false);
+        releaseTick?.();
+        await stopped;
+        assert.equal(stopSettled, true);
+    } finally {
+        await stopScheduledJobScheduler();
+        globalThis.setInterval = originalSetInterval;
+        globalThis.clearInterval = originalClearInterval;
     }
 });

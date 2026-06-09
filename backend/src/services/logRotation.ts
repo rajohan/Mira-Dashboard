@@ -37,6 +37,7 @@ type ExecFileRunner = (
 
 let elevatedLogRotationExecFileRunner: ExecFileRunner = execFileAsync as ExecFileRunner;
 let gzipPipeline = pipeline;
+let writeLogRotationCacheSuccess = writeCacheSuccess;
 
 function caughtMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -1243,14 +1244,21 @@ export async function runLogRotationService(
                 errors: summary.errors,
                 groups: summary.groups,
             };
-            writeCacheSuccess({
-                key: STATE_CACHE_KEY,
-                data: state,
-                source: "backend",
-                ttl: 90 * 24,
-                ttlUnit: "hours",
-                metadata: { workflow: "Log Rotation - Foundation" },
-            });
+            try {
+                writeLogRotationCacheSuccess({
+                    key: STATE_CACHE_KEY,
+                    data: state,
+                    source: "backend",
+                    ttl: 90 * 24,
+                    ttlUnit: "hours",
+                    metadata: { workflow: "Log Rotation - Foundation" },
+                });
+            } catch (error) {
+                summary.ok = false;
+                summary.errors.push({
+                    message: `Failed to persist log rotation state: ${caughtMessage(error)}`,
+                });
+            }
         }
     } finally {
         await releaseLogRotationLock(lock);
@@ -1406,8 +1414,14 @@ export const __testing = {
     resetGzipPipeline() {
         gzipPipeline = pipeline;
     },
+    resetWriteCacheSuccessForTests() {
+        writeLogRotationCacheSuccess = writeCacheSuccess;
+    },
     setGzipPipelineForTests(runner: typeof pipeline) {
         gzipPipeline = runner;
+    },
+    setWriteCacheSuccessForTests(runner: typeof writeCacheSuccess) {
+        writeLogRotationCacheSuccess = runner;
     },
     resetLogRotationLockFileForTests() {
         logRotationLockFile = DEFAULT_LOCK_FILE;

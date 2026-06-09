@@ -907,6 +907,37 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.match(state.files[rotate]?.lastArchive ?? "", /app\.log\./u);
     });
 
+    it("returns a completed summary when state persistence fails", async () => {
+        const root = path.join(tempDir, "persist-failure");
+        await mkdir(root);
+        const logFile = path.join(root, "app.log");
+        await writeFile(logFile, "large enough", "utf8");
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [
+                {
+                    name: "persist-failure",
+                    paths: [logFile],
+                    compress: false,
+                    maxSizeMb: 0.000001,
+                },
+            ],
+        });
+        __testing.setWriteCacheSuccessForTests(() => {
+            throw new Error("cache unavailable");
+        });
+        try {
+            const summary = await runLogRotationService({ dryRun: false, config });
+
+            assert.equal(summary.ok, false);
+            assert.equal(summary.rotatedFiles, 1);
+            assert.match(JSON.stringify(summary.errors), /cache unavailable/u);
+        } finally {
+            __testing.resetWriteCacheSuccessForTests();
+        }
+    });
+
     it("restores renamed logs when replacement creation fails", async () => {
         const root = path.join(tempDir, "rename-restore");
         await mkdir(root);

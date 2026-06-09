@@ -34,6 +34,7 @@ interface BackupJob {
     startedAt: number;
     endedAt: number | null;
     refreshPending?: boolean;
+    refreshPendingPromise?: Promise<unknown>;
     process?: ChildProcess;
 }
 
@@ -239,6 +240,7 @@ async function startBackupJob(type: BackupJob["type"], command: string) {
                     `${job.stderr}\nStatus refresh failed: ${errorMessage(error, "Unknown error")}`.trim()
                 );
             });
+            job.refreshPendingPromise = refresh.timed;
             void refresh.refresh
                 .catch((error: unknown) => {
                     if (refresh.cancelled) return;
@@ -247,9 +249,15 @@ async function startBackupJob(type: BackupJob["type"], command: string) {
                         `${job.stderr}\nStatus refresh failed: ${refreshMessage}`.trim()
                     );
                 })
+                .catch(() => {});
+            void refresh.timed
                 .finally(() => {
-                    job.refreshPending = false;
-                });
+                    if (job.refreshPendingPromise === refresh.timed) {
+                        job.refreshPending = false;
+                        job.refreshPendingPromise = undefined;
+                    }
+                })
+                .catch(() => {});
             return;
         }
         job.status = "done";

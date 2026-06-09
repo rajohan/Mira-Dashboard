@@ -801,7 +801,7 @@ describe("docker routes", { concurrency: false }, () => {
                 current_tag: "",
                 latest_tag: "1.0.1",
             } as never),
-            false
+            true
         );
         assert.deepEqual(__testing.extractTrailingJson('noise\n{"ok":true}'), {
             ok: true,

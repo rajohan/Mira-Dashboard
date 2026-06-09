@@ -723,7 +723,16 @@ export async function refreshGitCache() {
     const repos = [];
     for (const repo of gitRepos) {
         const inside = await safeGit(repo.path, ["rev-parse", "--is-inside-work-tree"]);
-        if (!inside.ok || inside.output.trim() !== "true") {
+        if (!inside.ok) {
+            repos.push({
+                ...repo,
+                exists: null,
+                dirty: true,
+                error: inside.output,
+            });
+            continue;
+        }
+        if (inside.output.trim() !== "true") {
             repos.push({
                 ...repo,
                 exists: false,

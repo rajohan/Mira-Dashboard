@@ -749,8 +749,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
 const args = process.argv.slice(2);
 const repo = args[1];
 const command = args.slice(2).join(" ");
-if (repo.includes("/opt/docker")) process.exit(1);
-if (command === "rev-parse --is-inside-work-tree") process.stdout.write("true\n");
+if (command === "rev-parse --is-inside-work-tree") process.stdout.write(repo.includes("/opt/docker") ? "false\n" : "true\n");
 else if (command === "branch --show-current") process.stdout.write(repo.includes(".openclaw") ? "main\n" : "\n");
 else if (command === "rev-parse HEAD") process.stdout.write("abc123\n");
 else if (command === "remote -v") process.stdout.write(repo.includes(".openclaw") ? "origin\thttps://user:pass@example.com/repo.git?token=secret (fetch)\n" : "origin\tghp_secret@github.com:rajohan/repo.git?token=secret (fetch)\n");
@@ -770,6 +769,8 @@ else if (command === "status --short") {
             repos: Array<{
                 key: string;
                 dirty: boolean;
+                error?: string;
+                exists?: boolean | null;
                 remote?: string | null;
                 statusSummary?: { total: number };
                 statusError?: string;
@@ -796,6 +797,11 @@ else if (command === "status --short") {
         assert.equal(
             data.repos.find((repo) => repo.key === "mira-dashboard")?.remote,
             "github.com:rajohan/repo.git"
+        );
+        assert.equal(data.repos.find((repo) => repo.key === "docker")?.exists, false);
+        assert.equal(
+            data.repos.find((repo) => repo.key === "docker")?.error,
+            "Not a git repository"
         );
     });
 
@@ -825,6 +831,9 @@ else if (command === "status --short") process.stdout.write("");
             repos: Array<{
                 key: string;
                 branch?: string | null;
+                dirty?: boolean;
+                error?: string;
+                exists?: boolean;
                 head?: string | null;
                 remote?: string | null;
             }>;
@@ -837,6 +846,10 @@ else if (command === "status --short") process.stdout.write("");
         assert.equal(dashboard?.branch, null);
         assert.equal(dashboard?.head, null);
         assert.equal(dashboard?.remote, null);
+        const docker = data.repos.find((repo) => repo.key === "docker");
+        assert.equal(docker?.dirty, true);
+        assert.equal(docker?.exists, null);
+        assert.match(docker?.error ?? "", /git -C .* rev-parse --is-inside-work-tree/u);
     });
 
     it("refreshes system, backup, quota, and producer-dispatch caches", async () => {
@@ -1365,8 +1378,7 @@ if (args.includes("capture-pane")) {
         setTimeout(() => {
             timerFired = true;
         }, 0);
-        await __testing.sleep(25);
-        assert.equal(timerFired, true);
+        await waitFor(() => timerFired);
         await rm(asyncLockPath, { force: true });
         const asyncLock = await pendingLock;
         await asyncLock.close();

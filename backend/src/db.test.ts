@@ -236,6 +236,17 @@ test("classifies duplicate-column migration errors", async () => {
     const { cleanup, result } = await importWithTempDb("migrationHelpers");
     try {
         assert.equal(
+            result.__testing.validateTaskChildTableName("task_events"),
+            "task_events"
+        );
+        assert.throws(
+            () =>
+                result.__testing.validateTaskChildTableName(
+                    "task_events; DROP TABLE tasks"
+                ),
+            /Unsupported task child table/u
+        );
+        assert.equal(
             result.__testing.isDuplicateColumnError(
                 new Error("duplicate column name: schedule_type")
             ),

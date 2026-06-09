@@ -844,20 +844,6 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
     }
     const discoveries = composeFiles.map(servicesFromCompose);
     const failedDiscoveries = discoveries.filter((discovery) => !discovery.ok);
-    if (failedDiscoveries.length > 0) {
-        return {
-            ok: false,
-            step: "register-services",
-            stdout: "",
-            stderr: JSON.stringify({
-                registered: 0,
-                failed: failedDiscoveries.map((discovery) => ({
-                    appSlug: discovery.appSlug,
-                    error: discovery.error,
-                })),
-            }),
-        };
-    }
     const successfulDiscoveries = discoveries.filter((discovery) => discovery.ok);
     const services = successfulDiscoveries.flatMap((discovery) => discovery.services);
     const timestamp = nowIso();
@@ -947,17 +933,22 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
         db.exec("ROLLBACK");
         throw error;
     }
+    const failed = failedDiscoveries.map((discovery) => ({
+        appSlug: discovery.appSlug,
+        error: discovery.error,
+    }));
     return {
-        step: "register",
-        ok: true,
+        step: "register-services",
+        ok: failed.length === 0,
         stdout: JSON.stringify({
-            ok: true,
+            ok: failed.length === 0,
             summary: {
                 composeFiles: composeFiles.length,
+                failedComposeFiles: failed.length,
                 registeredServices: services.length,
             },
         }),
-        stderr: "",
+        stderr: failed.length > 0 ? JSON.stringify({ failed }) : "",
     };
 }
 

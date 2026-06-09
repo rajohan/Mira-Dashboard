@@ -223,7 +223,7 @@ process.stdout.write("updated\n");
                 );
                 assert.deepEqual(
                     steps.map((step) => step.step),
-                    ["register", "poll", "auto-update:demo/web"]
+                    ["register-services", "poll", "auto-update:demo/web"]
                 );
             }
         );
@@ -330,7 +330,7 @@ process.stdout.write("updated\n");
                         step.ok,
                     ]),
                     [
-                        ["register", true],
+                        ["register-services", true],
                         ["poll", false],
                     ]
                 );
@@ -491,8 +491,11 @@ process.stdout.write("updated\n");
             .prepare(
                 "SELECT current_tag, tag_match_pattern FROM docker_managed_services WHERE service_name = 'web'"
             )
-            .get() as { current_tag: string; tag_match_pattern: string } | undefined;
-        assert.equal(web, undefined);
+            .get() as
+            | { current_tag: string | null; tag_match_pattern: string }
+            | undefined;
+        assert.equal(web?.current_tag, "latest");
+        assert.equal(web?.tag_match_pattern, "latest");
         assert.equal(
             (
                 dbHandle
@@ -511,7 +514,7 @@ process.stdout.write("updated\n");
                     )
                     .get() as { count: number }
             ).count,
-            1
+            0
         );
     });
 
@@ -1302,7 +1305,11 @@ setTimeout(() => process.exit(0), 30);
             )) as StepResult[];
             assert.deepEqual(
                 steps.map((step) => step.step),
-                ["register", "poll", "manual-update-skipped:manual-current/target"]
+                [
+                    "register-services",
+                    "poll",
+                    "manual-update-skipped:manual-current/target",
+                ]
             );
             const row = dbHandle
                 .prepare(
@@ -1387,7 +1394,7 @@ setTimeout(() => process.exit(0), 30);
             assert.deepEqual(
                 steps.map((step) => [step.step, step.ok, step.code]),
                 [
-                    ["register", true, undefined],
+                    ["register-services", true, undefined],
                     ["poll", true, undefined],
                     [
                         "manual-update:manual-disabled-after-poll/target",

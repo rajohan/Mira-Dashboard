@@ -24,23 +24,33 @@ const TASK_AUTOMATION_COLUMN_SQL =
     "ALTER TABLE tasks ADD COLUMN automation_json TEXT NOT NULL DEFAULT '{}'";
 
 const TASK_CHILD_TABLES = ["task_events", "task_updates", "task_dependencies"] as const;
+const TASK_CHILD_TABLE_SET = new Set<string>(TASK_CHILD_TABLES);
+
+function validateTaskChildTableName(tableName: string): string {
+    if (!TASK_CHILD_TABLE_SET.has(tableName)) {
+        throw new Error(`Unsupported task child table: ${tableName}`);
+    }
+    return tableName;
+}
 
 function sqliteTableExists(targetDb: MigrationDatabase, tableName: string): boolean {
+    const validatedTableName = validateTaskChildTableName(tableName);
     return (
         targetDb
             .prepare(
-                `SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${tableName}'`
+                `SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${validatedTableName}'`
             )
             .all().length > 0
     );
 }
 
 function deleteTaskOrphans(targetDb: MigrationDatabase, tableName: string): void {
-    if (!sqliteTableExists(targetDb, tableName)) {
+    const validatedTableName = validateTaskChildTableName(tableName);
+    if (!sqliteTableExists(targetDb, validatedTableName)) {
         return;
     }
     targetDb.exec(`
-        DELETE FROM ${tableName}
+        DELETE FROM ${validatedTableName}
         WHERE task_id NOT IN (SELECT id FROM tasks)
     `);
 }
@@ -219,11 +229,11 @@ CREATE TABLE IF NOT EXISTS deployment_jobs (
 
 CREATE INDEX IF NOT EXISTS idx_deployment_jobs_updated_at ON deployment_jobs(updated_at DESC);
 
-CREATE TABLE IF NOT EXISTS deployment_lock (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    job_id TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
+    CREATE TABLE IF NOT EXISTS deployment_lock (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      job_id TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
 
 CREATE TABLE IF NOT EXISTS scheduled_jobs (
     id TEXT PRIMARY KEY,
@@ -566,4 +576,5 @@ export const __testing = {
     ensureDockerUpdateEventsSetNull,
     ensureCacheEntriesUpdatedAtNullable,
     isDuplicateColumnError,
+    validateTaskChildTableName,
 };
