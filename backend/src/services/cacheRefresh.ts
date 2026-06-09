@@ -535,13 +535,14 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
 }
 
 function openMeteoCodeToDescription(code: unknown): string {
-    if (code === 0) return "Clear";
-    if ([1, 2, 3].includes(Number(code))) return "Partly cloudy";
-    if ([45, 48].includes(Number(code))) return "Fog";
-    if ([51, 53, 55, 56, 57].includes(Number(code))) return "Drizzle";
-    if ([61, 63, 65, 66, 67, 80, 81, 82].includes(Number(code))) return "Rain";
-    if ([71, 73, 75, 77, 85, 86].includes(Number(code))) return "Snow";
-    if ([95, 96, 99].includes(Number(code))) return "Thunderstorm";
+    const numericCode = Number(code);
+    if (numericCode === 0) return "Clear";
+    if ([1, 2, 3].includes(numericCode)) return "Partly cloudy";
+    if ([45, 48].includes(numericCode)) return "Fog";
+    if ([51, 53, 55, 56, 57].includes(numericCode)) return "Drizzle";
+    if ([61, 63, 65, 66, 67, 80, 81, 82].includes(numericCode)) return "Rain";
+    if ([71, 73, 75, 77, 85, 86].includes(numericCode)) return "Snow";
+    if ([95, 96, 99].includes(numericCode)) return "Thunderstorm";
     return "Unknown";
 }
 

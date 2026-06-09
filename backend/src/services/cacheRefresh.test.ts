@@ -1036,6 +1036,7 @@ if (args.includes("capture-pane")) {
         assert.equal(__testing.openMeteoCodeToDescription(63), "Rain");
         assert.equal(__testing.openMeteoCodeToDescription(77), "Snow");
         assert.equal(__testing.openMeteoCodeToDescription(999), "Unknown");
+        assert.equal(__testing.openMeteoCodeToDescription("0"), "Clear");
         assert.equal(__testing.cleanPanelText(""), null);
         assert.equal(__testing.cleanPanelText("╭ Account ╯"), "Account");
         assert.equal(__testing.cleanPanelText("╭╯"), null);

@@ -670,70 +670,78 @@ describe("docker routes", { concurrency: false }, () => {
     });
 
     after(async () => {
-        await server?.close();
         const { __testing } = await import("./docker.js");
-        await Promise.all(
-            [...__testing.dockerExecJobs.values()]
-                .map((job) => job.process)
-                .filter(Boolean)
-                .map((child) => child as ChildProcess)
-                .map((child) => stopChildProcess(child))
-        );
-        __testing.dockerExecJobs.clear();
-        if (originalPath === undefined) {
-            delete process.env.PATH;
-        } else {
-            process.env.PATH = originalPath;
-        }
-        for (const key of fakeEnvKeys) {
-            const originalValue = originalFakeEnv.get(key);
-            if (originalValue === undefined) {
-                delete process.env[key];
+        let closeError: unknown;
+        try {
+            await server?.close();
+        } catch (error) {
+            closeError = error;
+        } finally {
+            await Promise.all(
+                [...__testing.dockerExecJobs.values()]
+                    .map((job) => job.process)
+                    .filter(Boolean)
+                    .map((child) => child as ChildProcess)
+                    .map((child) => stopChildProcess(child))
+            );
+            __testing.dockerExecJobs.clear();
+            if (originalPath === undefined) {
+                delete process.env.PATH;
             } else {
-                process.env[key] = originalValue;
+                process.env.PATH = originalPath;
+            }
+            for (const key of fakeEnvKeys) {
+                const originalValue = originalFakeEnv.get(key);
+                if (originalValue === undefined) {
+                    delete process.env[key];
+                } else {
+                    process.env[key] = originalValue;
+                }
+            }
+            if (originalDockerRoot === undefined) {
+                delete process.env.MIRA_DOCKER_ROOT;
+            } else {
+                process.env.MIRA_DOCKER_ROOT = originalDockerRoot;
+            }
+            if (originalDockerAppsRoot === undefined) {
+                delete process.env.MIRA_DOCKER_APPS_ROOT;
+            } else {
+                process.env.MIRA_DOCKER_APPS_ROOT = originalDockerAppsRoot;
+            }
+            if (originalDockerBin === undefined) {
+                delete process.env.MIRA_DOCKER_BIN;
+            } else {
+                process.env.MIRA_DOCKER_BIN = originalDockerBin;
+            }
+            if (originalComposeWrapper === undefined) {
+                delete process.env.MIRA_DOCKER_COMPOSE_WRAPPER;
+            } else {
+                process.env.MIRA_DOCKER_COMPOSE_WRAPPER = originalComposeWrapper;
+            }
+            if (originalUpdaterSkipRegistry === undefined) {
+                delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
+            } else {
+                process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY =
+                    originalUpdaterSkipRegistry;
+            }
+            if (db) {
+                db.exec(
+                    "DELETE FROM docker_update_events; DELETE FROM docker_managed_services; DELETE FROM notifications WHERE source IN ('docker', 'docker-updater');"
+                );
+                db.close();
+            }
+            if (originalDashboardDbPath === undefined) {
+                delete process.env.MIRA_DASHBOARD_DB_PATH;
+            } else {
+                process.env.MIRA_DASHBOARD_DB_PATH = originalDashboardDbPath;
+            }
+            __testing.setDockerBinForTests(originalDockerBin);
+            __testing.setDockerExecPidWaitTimeoutForTests();
+            if (tempDir) {
+                await rm(tempDir, { recursive: true, force: true });
             }
         }
-        if (originalDockerRoot === undefined) {
-            delete process.env.MIRA_DOCKER_ROOT;
-        } else {
-            process.env.MIRA_DOCKER_ROOT = originalDockerRoot;
-        }
-        if (originalDockerAppsRoot === undefined) {
-            delete process.env.MIRA_DOCKER_APPS_ROOT;
-        } else {
-            process.env.MIRA_DOCKER_APPS_ROOT = originalDockerAppsRoot;
-        }
-        if (originalDockerBin === undefined) {
-            delete process.env.MIRA_DOCKER_BIN;
-        } else {
-            process.env.MIRA_DOCKER_BIN = originalDockerBin;
-        }
-        if (originalComposeWrapper === undefined) {
-            delete process.env.MIRA_DOCKER_COMPOSE_WRAPPER;
-        } else {
-            process.env.MIRA_DOCKER_COMPOSE_WRAPPER = originalComposeWrapper;
-        }
-        if (originalUpdaterSkipRegistry === undefined) {
-            delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
-        } else {
-            process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY = originalUpdaterSkipRegistry;
-        }
-        if (db) {
-            db.exec(
-                "DELETE FROM docker_update_events; DELETE FROM docker_managed_services; DELETE FROM notifications WHERE source IN ('docker', 'docker-updater');"
-            );
-            db.close();
-        }
-        if (originalDashboardDbPath === undefined) {
-            delete process.env.MIRA_DASHBOARD_DB_PATH;
-        } else {
-            process.env.MIRA_DASHBOARD_DB_PATH = originalDashboardDbPath;
-        }
-        __testing.setDockerBinForTests(originalDockerBin);
-        __testing.setDockerExecPidWaitTimeoutForTests();
-        if (tempDir) {
-            await rm(tempDir, { recursive: true, force: true });
-        }
+        if (closeError) throw closeError;
     });
 
     it("covers docker parser helper edge cases", async () => {
