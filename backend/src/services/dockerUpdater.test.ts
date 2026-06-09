@@ -1252,7 +1252,7 @@ setTimeout(() => process.exit(0), 30);
             composePath,
             `services:
   target:
-    image: nginx:1
+    image: nginx:1@sha256:same-tag
     labels:
       mira.updater.tagPattern: "^[0-9]+$"
       mira.updater.tagPatternIsRegex: "true"
@@ -1289,8 +1289,9 @@ setTimeout(() => process.exit(0), 30);
             dbHandle
                 .prepare(
                     `UPDATE docker_managed_services
-                 SET latest_tag = '2', latest_digest = 'sha256:stale',
-                     last_status = 'update_available'
+                     SET current_digest = 'sha256:same-tag',
+                         latest_tag = '2', latest_digest = 'sha256:stale',
+                         last_status = 'update_available'
                  WHERE id = ?`
                 )
                 .run(service.id);
@@ -1319,7 +1320,10 @@ setTimeout(() => process.exit(0), 30);
             assert.equal(row.last_status, "current");
         });
 
-        assert.match(await readFile(composePath, "utf8"), /image: nginx:1/u);
+        assert.match(
+            await readFile(composePath, "utf8"),
+            /image: nginx:1@sha256:same-tag/u
+        );
     });
 
     it("reports a disabled manual service after a successful fresh poll", async () => {
@@ -1714,6 +1718,16 @@ setTimeout(() => process.exit(0), 30);
                 latest_tag: "1",
                 current_digest: "sha256:old",
                 latest_digest: "sha256:new",
+            }),
+            true
+        );
+        assert.equal(
+            updater.__testing.hasUpdate({
+                ...baseService,
+                current_tag: "1",
+                latest_tag: "1",
+                current_digest: "sha256:old",
+                latest_digest: null,
             }),
             false
         );

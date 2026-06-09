@@ -15,20 +15,24 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, it, mock } from "node:test";
+import { after, afterEach, beforeEach, describe, it, mock } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
-import { db } from "../db.js";
 import { withEnv } from "../testUtils/env.js";
-import {
-    __testing,
-    runElevatedLogRotationService,
-    runLogRotationService,
-} from "./logRotation.js";
 
 const execFileAsync = promisify(execFile);
 const modulePath = fileURLToPath(new URL("logRotation.ts", import.meta.url));
+const suiteDbDir = await mkdtemp(path.join(os.tmpdir(), "mira-log-rotation-db-"));
+const suiteDbPath = path.join(suiteDbDir, "log-rotation.sqlite");
+const { db } = await withEnv(
+    { MIRA_DASHBOARD_DB_PATH: suiteDbPath },
+    () => import("../db.js")
+);
+const { __testing, runElevatedLogRotationService, runLogRotationService } = await withEnv(
+    { MIRA_DASHBOARD_DB_PATH: suiteDbPath },
+    () => import("./logRotation.js")
+);
 
 async function writeConfig(root: string, config: unknown) {
     const configPath = path.join(root, `log-rotation-${Math.random()}.json`);
@@ -51,16 +55,29 @@ function seedState(data: unknown) {
     );
 }
 
+function testLockPath(tempDir: string) {
+    return path.join(tempDir, "data", "log-rotation.lock");
+}
+
+after(async () => {
+    db.close();
+    await rm(suiteDbDir, { recursive: true, force: true });
+});
+
 describe("log rotation service", { concurrency: false }, () => {
     let tempDir: string;
 
     beforeEach(async () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-log-rotation-"));
+        __testing.setLogRotationLockFileForTests(
+            path.join(tempDir, "data", "log-rotation.lock")
+        );
         db.exec("DELETE FROM cache_entries;");
     });
 
     afterEach(async () => {
         mock.restoreAll();
+        __testing.resetLogRotationLockFileForTests();
         db.exec("DELETE FROM cache_entries;");
         await rm(tempDir, { recursive: true, force: true });
     });
@@ -1061,7 +1078,7 @@ describe("log rotation service", { concurrency: false }, () => {
             approvedRoots: [root],
             groups: [{ name: "locked", paths: [file], maxSizeMb: 0 }],
         });
-        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        const lockPath = testLockPath(tempDir);
         await mkdir(path.dirname(lockPath), { recursive: true });
         await writeFile(lockPath, `${process.pid}\n`, "utf8");
         try {
@@ -1088,7 +1105,7 @@ describe("log rotation service", { concurrency: false }, () => {
             approvedRoots: [root],
             groups: [{ name: "stale-lock", paths: [file], maxSizeMb: 0 }],
         });
-        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        const lockPath = testLockPath(tempDir);
         await mkdir(path.dirname(lockPath), { recursive: true });
         await writeFile(lockPath, "not-a-pid\n", "utf8");
 
@@ -1103,7 +1120,7 @@ describe("log rotation service", { concurrency: false }, () => {
     });
 
     it("allows only one concurrent caller to reclaim a stale lock", async () => {
-        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        const lockPath = testLockPath(tempDir);
         await mkdir(path.dirname(lockPath), { recursive: true });
         await writeFile(lockPath, "not-a-pid\n", "utf8");
         const locks: Array<Awaited<ReturnType<typeof __testing.acquireLogRotationLock>>> =
@@ -1131,7 +1148,7 @@ describe("log rotation service", { concurrency: false }, () => {
     });
 
     it("returns null when stale lock reacquire loses the final create race", async () => {
-        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        const lockPath = testLockPath(tempDir);
         await mkdir(path.dirname(lockPath), { recursive: true });
         await writeFile(lockPath, "not-a-pid\n", "utf8");
         const originalOpen = fsPromises.open.bind(fsPromises);
@@ -1166,7 +1183,7 @@ describe("log rotation service", { concurrency: false }, () => {
     });
 
     it("removes a newly created lock when writing the pid fails", async () => {
-        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        const lockPath = testLockPath(tempDir);
         await mkdir(path.dirname(lockPath), { recursive: true });
         const originalOpen = fsPromises.open.bind(fsPromises);
         const writeError = new Error("pid write failed");
@@ -1206,7 +1223,7 @@ describe("log rotation service", { concurrency: false }, () => {
     });
 
     it("rethrows unexpected errors from stale lock reacquire", async () => {
-        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        const lockPath = testLockPath(tempDir);
         await mkdir(path.dirname(lockPath), { recursive: true });
         await writeFile(lockPath, "not-a-pid\n", "utf8");
         const originalOpen = fsPromises.open.bind(fsPromises);
@@ -1244,7 +1261,7 @@ describe("log rotation service", { concurrency: false }, () => {
     });
 
     it("rethrows unexpected stale lock reclaim setup errors", async () => {
-        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        const lockPath = testLockPath(tempDir);
         await mkdir(path.dirname(lockPath), { recursive: true });
         await writeFile(lockPath, "not-a-pid\n", "utf8");
         const originalMkdir = fsPromises.mkdir.bind(fsPromises);
@@ -1277,7 +1294,7 @@ describe("log rotation service", { concurrency: false }, () => {
     });
 
     it("handles stale lock unlink races and errors", async () => {
-        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        const lockPath = testLockPath(tempDir);
         await mkdir(path.dirname(lockPath), { recursive: true });
         await writeFile(lockPath, "not-a-pid\n", "utf8");
         const originalUnlink = fsPromises.unlink.bind(fsPromises);
@@ -1318,7 +1335,7 @@ describe("log rotation service", { concurrency: false }, () => {
     });
 
     it("treats inaccessible lock PIDs as running", async () => {
-        const lockPath = path.resolve(process.cwd(), "data/log-rotation.lock");
+        const lockPath = testLockPath(tempDir);
         await mkdir(path.dirname(lockPath), { recursive: true });
         await writeFile(lockPath, "123\n", "utf8");
         const killMock = mock.method(process, "kill", () => {

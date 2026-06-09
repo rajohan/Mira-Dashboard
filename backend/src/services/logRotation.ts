@@ -20,8 +20,8 @@ const DEFAULT_APPROVED_ROOTS = ["/opt/docker/data"];
 const ROTATED_SUFFIX_RE = /\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z(?:\.gz)?$/u;
 const ARCHIVE_FAMILY_SUFFIX_RE =
     /(?:\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z|\.\d+)(?:\.gz)?$/u;
-const LOCK_FILE = path.resolve(process.cwd(), "data/log-rotation.lock");
-const LOCK_RECLAIM_DIR = `${LOCK_FILE}.reclaim`;
+const DEFAULT_LOCK_FILE = path.resolve(process.cwd(), "data/log-rotation.lock");
+let logRotationLockFile = DEFAULT_LOCK_FILE;
 
 type ExecFileRunner = (
     file: string,
@@ -866,15 +866,16 @@ export interface ElevatedLogRotationResult {
 
 async function acquireLogRotationLock(dryRun: boolean) {
     if (dryRun) return null;
-    await fs.mkdir(path.dirname(LOCK_FILE), { recursive: true });
+    const lockFile = logRotationLockFile;
+    await fs.mkdir(path.dirname(lockFile), { recursive: true });
     const openLock = async () => {
-        const handle = await fs.open(LOCK_FILE, "wx");
+        const handle = await fs.open(lockFile, "wx");
         try {
             await handle.writeFile(`${process.pid}\n`);
             return handle;
         } catch (error) {
             await handle.close().catch(() => {});
-            await fs.unlink(LOCK_FILE).catch(() => {});
+            await fs.unlink(lockFile).catch(() => {});
             throw error;
         }
     };
@@ -886,15 +887,19 @@ async function acquireLogRotationLock(dryRun: boolean) {
             "code" in error &&
             (error as NodeJS.ErrnoException).code === "EEXIST"
         ) {
-            return reclaimStaleLogRotationLock(openLock);
+            return reclaimStaleLogRotationLock(lockFile, openLock);
         }
         throw error;
     }
 }
 
-async function reclaimStaleLogRotationLock(openLock: () => Promise<fs.FileHandle>) {
+async function reclaimStaleLogRotationLock(
+    lockFile: string,
+    openLock: () => Promise<fs.FileHandle>
+) {
+    const reclaimDir = `${lockFile}.reclaim`;
     try {
-        await fs.mkdir(LOCK_RECLAIM_DIR);
+        await fs.mkdir(reclaimDir);
     } catch (error) {
         if (
             error instanceof Error &&
@@ -906,12 +911,12 @@ async function reclaimStaleLogRotationLock(openLock: () => Promise<fs.FileHandle
         throw error;
     }
     try {
-        const rawPid = await fs.readFile(LOCK_FILE, "utf8").catch(() => "");
+        const rawPid = await fs.readFile(lockFile, "utf8").catch(() => "");
         const pid = Number.parseInt(rawPid.trim(), 10);
         if (Number.isFinite(pid) && isProcessRunning(pid)) {
             return null;
         }
-        await fs.unlink(LOCK_FILE).catch((error: unknown) => {
+        await fs.unlink(lockFile).catch((error: unknown) => {
             if (
                 !(
                     error instanceof Error &&
@@ -935,7 +940,7 @@ async function reclaimStaleLogRotationLock(openLock: () => Promise<fs.FileHandle
             throw error;
         }
     } finally {
-        await fs.rmdir(LOCK_RECLAIM_DIR).catch(() => {});
+        await fs.rmdir(reclaimDir).catch(() => {});
     }
 }
 
@@ -954,8 +959,9 @@ function isProcessRunning(pid: number): boolean {
 
 async function releaseLogRotationLock(handle: fs.FileHandle | null) {
     if (!handle) return;
+    const lockFile = logRotationLockFile;
     await handle.close();
-    await fs.unlink(LOCK_FILE).catch(() => {});
+    await fs.unlink(lockFile).catch(() => {});
 }
 
 export async function runLogRotationService(
@@ -1346,6 +1352,12 @@ export const __testing = {
     },
     setGzipPipelineForTests(runner: typeof pipeline) {
         gzipPipeline = runner;
+    },
+    resetLogRotationLockFileForTests() {
+        logRotationLockFile = DEFAULT_LOCK_FILE;
+    },
+    setLogRotationLockFileForTests(lockFile: string) {
+        logRotationLockFile = lockFile;
     },
 };
 

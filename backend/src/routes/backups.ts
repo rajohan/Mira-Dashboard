@@ -235,7 +235,6 @@ async function startBackupJob(type: BackupJob["type"], command: string) {
             void refresh.timed.catch((error: unknown) => {
                 if (!refresh.isTimeoutError(error)) return;
                 refresh.cancel();
-                job.refreshPending = false;
             });
             void refresh.refresh
                 .catch((error: unknown) => {

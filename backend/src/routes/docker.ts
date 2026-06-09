@@ -702,6 +702,28 @@ async function getVolumes(): Promise<DockerVolumeSummary[]> {
     }));
 }
 
+function mapDockerUpdaterRow(row: DockerUpdaterServiceRow) {
+    return {
+        id: Number(row.id),
+        appSlug: row.app_slug,
+        serviceName: row.service_name,
+        composeImageRef: nullableString(row.compose_image_ref),
+        imageRepo: row.image_repo,
+        currentTag: nullableString(row.current_tag),
+        currentDigest: nullableString(row.current_digest),
+        latestTag: nullableString(row.latest_tag),
+        latestDigest: nullableString(row.latest_digest),
+        policy: row.policy,
+        pinMode: row.pin_mode,
+        enabled: row.enabled === "true",
+        lastCheckedAt: nullableString(row.last_checked_at),
+        lastUpdatedAt: nullableString(row.last_updated_at),
+        lastStatus: nullableString(row.last_status),
+        updateAvailable: hasUpdaterCandidate(row),
+        metadata: parseJsonField<Record<string, unknown>>(row.metadata) ?? {},
+    };
+}
+
 /** Returns docker updater services. */
 async function getDockerUpdaterServices() {
     const rows = db
@@ -728,25 +750,7 @@ async function getDockerUpdaterServices() {
         )
         .all() as unknown as DockerUpdaterServiceRow[];
 
-    return rows.map((row) => ({
-        id: Number(row.id),
-        appSlug: row.app_slug,
-        serviceName: row.service_name,
-        composeImageRef: nullableString(row.compose_image_ref),
-        imageRepo: row.image_repo,
-        currentTag: nullableString(row.current_tag),
-        currentDigest: nullableString(row.current_digest),
-        latestTag: nullableString(row.latest_tag),
-        latestDigest: nullableString(row.latest_digest),
-        policy: row.policy,
-        pinMode: row.pin_mode,
-        enabled: row.enabled === "true",
-        lastCheckedAt: nullableString(row.last_checked_at),
-        lastUpdatedAt: nullableString(row.last_updated_at),
-        lastStatus: nullableString(row.last_status),
-        updateAvailable: hasUpdaterCandidate(row),
-        metadata: parseJsonField<Record<string, unknown>>(row.metadata) ?? {},
-    }));
+    return rows.map(mapDockerUpdaterRow);
 }
 
 /** Returns docker updater service by ID. */
@@ -781,25 +785,7 @@ async function getDockerUpdaterServiceById(serviceId: number) {
         return null;
     }
 
-    return {
-        id: Number(row.id),
-        appSlug: row.app_slug,
-        serviceName: row.service_name,
-        composeImageRef: nullableString(row.compose_image_ref),
-        imageRepo: row.image_repo,
-        currentTag: nullableString(row.current_tag),
-        currentDigest: nullableString(row.current_digest),
-        latestTag: nullableString(row.latest_tag),
-        latestDigest: nullableString(row.latest_digest),
-        policy: row.policy,
-        pinMode: row.pin_mode,
-        enabled: row.enabled === "true",
-        lastCheckedAt: nullableString(row.last_checked_at),
-        lastUpdatedAt: nullableString(row.last_updated_at),
-        lastStatus: nullableString(row.last_status),
-        updateAvailable: hasUpdaterCandidate(row),
-        metadata: parseJsonField<Record<string, unknown>>(row.metadata) ?? {},
-    };
+    return mapDockerUpdaterRow(row);
 }
 
 /** Performs run manual updater for service. */

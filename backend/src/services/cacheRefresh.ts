@@ -535,7 +535,10 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
 }
 
 function openMeteoCodeToDescription(code: unknown): string {
+    if (code === null || code === undefined) return "Unknown";
+    if (typeof code === "string" && code.trim() === "") return "Unknown";
     const numericCode = Number(code);
+    if (!Number.isFinite(numericCode)) return "Unknown";
     if (numericCode === 0) return "Clear";
     if ([1, 2, 3].includes(numericCode)) return "Partly cloudy";
     if ([45, 48].includes(numericCode)) return "Fog";
@@ -1516,7 +1519,9 @@ export async function refreshCacheProducer(key: string) {
     const existing = isSupportedCacheProducerKey(key)
         ? [...inFlightCacheRefreshes.entries()].find(
               ([inFlightKey]) =>
-                  inFlightKey === scopeKey || scopeKey.startsWith(`${inFlightKey}.`)
+                  inFlightKey === scopeKey ||
+                  inFlightKey.startsWith(`${scopeKey}.`) ||
+                  scopeKey.startsWith(`${inFlightKey}.`)
           )?.[1]
         : undefined;
     if (existing !== undefined) {

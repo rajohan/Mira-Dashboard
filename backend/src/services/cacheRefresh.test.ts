@@ -537,7 +537,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         });
     });
 
-    it("starts a full Moltbook refresh when only home is in flight", async () => {
+    it("reuses an in-flight home refresh for full Moltbook requests", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             let homeFetches = 0;
             const releases: Array<() => void> = [];
@@ -593,26 +593,15 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                 release();
             }
 
-            await waitFor(() => releases.length >= 2);
-            releases[1]?.();
-
             assert.deepEqual(await Promise.all([homeRefresh, fullRefresh]), [
                 { refreshed: ["moltbook.home"] },
-                {
-                    refreshed: [
-                        "moltbook.home",
-                        "moltbook.feed.hot",
-                        "moltbook.feed.new",
-                        "moltbook.profile",
-                        "moltbook.my-content",
-                    ],
-                },
+                { refreshed: ["moltbook.home"] },
             ]);
-            assert.equal(homeFetches, 2);
+            assert.equal(homeFetches, 1);
         });
     });
 
-    it("starts a full Moltbook refresh when only a subkey is in flight", async () => {
+    it("reuses an in-flight subkey refresh for full Moltbook requests", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             let hotFetches = 0;
             const hotReleases: Array<() => void> = [];
@@ -668,22 +657,11 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                 release();
             }
 
-            await waitFor(() => hotReleases.length >= 2);
-            hotReleases[1]?.();
-
             assert.deepEqual(await Promise.all([hotRefresh, fullRefresh]), [
                 { refreshed: ["moltbook.feed.hot"] },
-                {
-                    refreshed: [
-                        "moltbook.home",
-                        "moltbook.feed.hot",
-                        "moltbook.feed.new",
-                        "moltbook.profile",
-                        "moltbook.my-content",
-                    ],
-                },
+                { refreshed: ["moltbook.feed.hot"] },
             ]);
-            assert.equal(hotFetches, 2);
+            assert.equal(hotFetches, 1);
         });
     });
 
@@ -1037,6 +1015,10 @@ if (args.includes("capture-pane")) {
         assert.equal(__testing.openMeteoCodeToDescription(77), "Snow");
         assert.equal(__testing.openMeteoCodeToDescription(999), "Unknown");
         assert.equal(__testing.openMeteoCodeToDescription("0"), "Clear");
+        assert.equal(__testing.openMeteoCodeToDescription(null), "Unknown");
+        assert.equal(__testing.openMeteoCodeToDescription(""), "Unknown");
+        assert.equal(__testing.openMeteoCodeToDescription("   "), "Unknown");
+        assert.equal(__testing.openMeteoCodeToDescription("nope"), "Unknown");
         assert.equal(__testing.cleanPanelText(""), null);
         assert.equal(__testing.cleanPanelText("╭ Account ╯"), "Account");
         assert.equal(__testing.cleanPanelText("╭╯"), null);
