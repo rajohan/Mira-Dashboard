@@ -13,6 +13,7 @@ import { nonEmptyEnvFallback } from "../lib/values.js";
 const COMPOSE_FILENAME = "compose.yaml";
 const execFileAsync = promisify(execFile);
 const SUPPORTED_REGISTRIES = new Set(["docker.io", "ghcr.io"]);
+const MAX_REGISTRY_TAG_PAGES = 50;
 const composeUpdateLocks = new Map<string, Promise<void>>();
 
 function getDockerBin(): string {
@@ -397,7 +398,14 @@ async function lookupDockerHub(service: ManagedServiceRow) {
             const tags: unknown[] = [];
             let tagsUrl: string | null =
                 `https://hub.docker.com/v2/repositories/${repo}/tags?page_size=100`;
+            let tagPageCount = 0;
             while (tagsUrl) {
+                tagPageCount += 1;
+                if (tagPageCount > MAX_REGISTRY_TAG_PAGES) {
+                    throw new Error(
+                        `Docker Hub tag pagination exceeded ${MAX_REGISTRY_TAG_PAGES} pages for ${repo}`
+                    );
+                }
                 const tagsData = await fetchJson(tagsUrl);
                 if (Array.isArray(tagsData.results)) {
                     tags.push(...tagsData.results);
@@ -435,10 +443,17 @@ async function lookupGhcr(service: ManagedServiceRow) {
         service.tag_match_type === "exact" && service.tag_match_pattern
             ? service.tag_match_pattern
             : service.current_tag;
-    if (service.tag_match_type === "regex" && service.tag_match_pattern) {
+    if (needsFullTagScan(service)) {
         const tags: string[] = [];
         let tagsUrl: string | null = `https://ghcr.io/v2/${repo}/tags/list`;
+        let tagPageCount = 0;
         while (tagsUrl) {
+            tagPageCount += 1;
+            if (tagPageCount > MAX_REGISTRY_TAG_PAGES) {
+                throw new Error(
+                    `GHCR tag pagination exceeded ${MAX_REGISTRY_TAG_PAGES} pages for ${repo}`
+                );
+            }
             const { body, headers } = await fetchRegistryJsonWithHeaders(tagsUrl);
             tags.push(
                 ...(Array.isArray(body.tags)

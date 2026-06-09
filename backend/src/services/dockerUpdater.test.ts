@@ -1940,6 +1940,27 @@ setTimeout(() => process.exit(0), 30);
 
         globalThis.fetch = (async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();
+            return {
+                ok: true,
+                headers: new Headers(),
+                json: async () => ({
+                    results: [{ name: "1" }],
+                    next: url,
+                }),
+            } as Response;
+        }) as typeof fetch;
+        await assert.rejects(
+            () =>
+                updater.__testing.lookupDockerHub({
+                    ...baseService,
+                    tag_match_type: "regex",
+                    tag_match_pattern: String.raw`^\d$`,
+                }),
+            /Docker Hub tag pagination exceeded 50 pages/u
+        );
+
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input.toString();
             if (url.includes("/tags?page_size=100")) {
                 return {
                     ok: true,
@@ -2127,6 +2148,52 @@ setTimeout(() => process.exit(0), 30);
                 latestTag: "2.0.0",
                 latestDigest: "sha256:ghcr-2",
             }
+        );
+
+        const unsafeRegexGhcrFetchUrls: string[] = [];
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input.toString();
+            unsafeRegexGhcrFetchUrls.push(url);
+            return {
+                ok: true,
+                headers: new Headers({ "docker-content-digest": "sha256:ghcr-1" }),
+                json: async () => ({}),
+            } as Response;
+        }) as typeof fetch;
+        assert.deepEqual(
+            await updater.__testing.lookupGhcr({
+                ...baseService,
+                image_repo: "ghcr.io/owner/app",
+                current_tag: "1.0.0",
+                tag_match_type: "regex",
+                tag_match_pattern: "(a+)+$",
+            }),
+            {
+                latestTag: "1.0.0",
+                latestDigest: "sha256:ghcr-1",
+            }
+        );
+        assert.deepEqual(unsafeRegexGhcrFetchUrls, [
+            "https://ghcr.io/v2/owner/app/manifests/1.0.0",
+        ]);
+
+        globalThis.fetch = (async () =>
+            ({
+                ok: true,
+                headers: new Headers({
+                    link: '<https://ghcr.io/v2/owner/app/tags/list>; rel="next"',
+                }),
+                json: async () => ({ tags: ["1"] }),
+            }) as Response) as typeof fetch;
+        await assert.rejects(
+            () =>
+                updater.__testing.lookupGhcr({
+                    ...baseService,
+                    image_repo: "ghcr.io/owner/app",
+                    tag_match_type: "regex",
+                    tag_match_pattern: String.raw`^\d$`,
+                }),
+            /GHCR tag pagination exceeded 50 pages/u
         );
 
         const authFetchUrls: string[] = [];
