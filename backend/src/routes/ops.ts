@@ -101,7 +101,7 @@ export default function opsRoutes(app: express.Application): void {
         asyncRoute(async (_req, res) => {
             const { result, stderr } = await runLogRotation({ dryRun: true });
             res.json({
-                success: Boolean(result?.ok),
+                success: result?.ok === true,
                 result,
                 stderr,
             });
@@ -114,7 +114,7 @@ export default function opsRoutes(app: express.Application): void {
         asyncRoute(async (_req, res) => {
             const { result, stderr } = await runLogRotation({ dryRun: false });
             res.json({
-                success: Boolean(result?.ok),
+                success: result?.ok === true,
                 result,
                 stderr,
             });

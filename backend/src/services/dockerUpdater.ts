@@ -1199,7 +1199,7 @@ export async function runDockerUpdaterService(
             ];
         }
         const poll = await pollDockerUpdaterRegistries(service.id);
-        if (!register.ok || !poll?.ok) {
+        if (!poll?.ok) {
             return [register, poll].filter(
                 (step): step is DockerUpdaterStepResult => step !== undefined
             );

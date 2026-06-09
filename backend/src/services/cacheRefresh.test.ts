@@ -753,7 +753,7 @@ if (repo.includes("/opt/docker")) process.exit(1);
 if (command === "rev-parse --is-inside-work-tree") process.stdout.write("true\n");
 else if (command === "branch --show-current") process.stdout.write(repo.includes(".openclaw") ? "main\n" : "\n");
 else if (command === "rev-parse HEAD") process.stdout.write("abc123\n");
-else if (command === "remote -v") process.stdout.write(repo.includes(".openclaw") ? "origin\thttps://user:pass@example.com/repo.git?token=secret (fetch)\n" : "origin\tgit@github.com:rajohan/repo.git (fetch)\n");
+else if (command === "remote -v") process.stdout.write(repo.includes(".openclaw") ? "origin\thttps://user:pass@example.com/repo.git?token=secret (fetch)\n" : "origin\tghp_secret@github.com:rajohan/repo.git?token=secret (fetch)\n");
 else if (command === "status --short") {
   if (repo.includes(".openclaw")) process.stdout.write(" M a.ts\nD  b.ts\n?? c.ts\nR  d.ts -> e.ts\nUU conflict.ts\n");
   else process.exit(2);
@@ -792,6 +792,10 @@ else if (command === "status --short") {
         assert.equal(
             data.repos.find((repo) => repo.key === "openclaw")?.remote,
             "https://example.com/repo.git"
+        );
+        assert.equal(
+            data.repos.find((repo) => repo.key === "mira-dashboard")?.remote,
+            "github.com:rajohan/repo.git"
         );
     });
 
@@ -1039,6 +1043,11 @@ if (args.includes("capture-pane")) {
         assert.equal(__testing.openMeteoCodeToDescription(""), "Unknown");
         assert.equal(__testing.openMeteoCodeToDescription("   "), "Unknown");
         assert.equal(__testing.openMeteoCodeToDescription("nope"), "Unknown");
+        assert.equal(
+            __testing.sanitizeRemoteUrl("https://example.com/repo.git?token=secret"),
+            "https://example.com/repo.git"
+        );
+        assert.equal(__testing.sanitizeRemoteUrl("not a url?token=secret"), "not a url");
         assert.equal(__testing.cleanPanelText(""), null);
         assert.equal(__testing.cleanPanelText("╭ Account ╯"), "Account");
         assert.equal(__testing.cleanPanelText("╭╯"), null);

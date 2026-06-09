@@ -147,6 +147,46 @@ describe("log rotation service", { concurrency: false }, () => {
             __testing.caughtMessage(new Error("typed failure")),
             "typed failure"
         );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
+                        approvedRoots: tempDir,
+                        groups: [{ name: "invalid", paths: ["*.log"] }],
+                    }),
+                }),
+            /approvedRoots/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
+                        groups: [{ name: "invalid", paths: ["*.log", 1] }],
+                    }),
+                }),
+            /paths/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
+                        groups: [
+                            {
+                                name: "invalid",
+                                paths: ["*.log"],
+                                archiveRetentionScope: "global",
+                            },
+                        ],
+                    }),
+                }),
+            /archiveRetentionScope/u
+        );
         assert.equal(
             __testing.hasRotatedInCadence({ lastRotatedAt: "not-a-date" }, "daily"),
             false
@@ -1144,6 +1184,52 @@ describe("log rotation service", { concurrency: false }, () => {
                 )
             );
             await rm(lockPath, { force: true }).catch(() => {});
+        }
+    });
+
+    it("recovers a stale reclaim directory while reclaiming stale locks", async () => {
+        const lockPath = testLockPath(tempDir);
+        const reclaimPath = `${lockPath}.reclaim`;
+        await mkdir(path.dirname(lockPath), { recursive: true });
+        await writeFile(lockPath, "not-a-pid\n", "utf8");
+        await mkdir(reclaimPath);
+        const staleTime = new Date(Date.now() - 10 * 60 * 1000);
+        await utimes(reclaimPath, staleTime, staleTime);
+
+        const lock = await __testing.acquireLogRotationLock(false);
+        try {
+            assert.ok(lock);
+        } finally {
+            await lock?.close().catch(() => {});
+            await rm(lockPath, { force: true }).catch(() => {});
+            await rm(reclaimPath, { force: true, recursive: true }).catch(() => {});
+        }
+    });
+
+    it("treats missing reclaim directories as already removable", async () => {
+        assert.equal(
+            await __testing.removeStaleReclaimDir(path.join(tempDir, "missing.reclaim")),
+            true
+        );
+    });
+
+    it("rethrows unexpected reclaim directory stat failures", async () => {
+        const reclaimPath = path.join(tempDir, "denied.reclaim");
+        const statError = Object.assign(new Error("stat denied"), { code: "EACCES" });
+        const originalStat = fsPromises.stat.bind(fsPromises);
+        const statMock = mock.method(fsPromises, "stat", (target: PathLike) => {
+            if (String(target) === reclaimPath) {
+                throw statError;
+            }
+            return originalStat(target);
+        });
+        try {
+            await assert.rejects(
+                () => __testing.removeStaleReclaimDir(reclaimPath),
+                /stat denied/u
+            );
+        } finally {
+            statMock.mock.restore();
         }
     });
 

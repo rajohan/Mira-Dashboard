@@ -12,7 +12,6 @@ fs.mkdirSync(dataDir, { recursive: true });
 /** Defines db. */
 export const db = new DatabaseSync(miraDbPath);
 db.exec("PRAGMA busy_timeout = 5000");
-db.exec("PRAGMA foreign_keys = ON");
 
 interface MigrationDatabase {
     exec(sql: string): unknown;
@@ -23,6 +22,34 @@ interface MigrationDatabase {
 
 const TASK_AUTOMATION_COLUMN_SQL =
     "ALTER TABLE tasks ADD COLUMN automation_json TEXT NOT NULL DEFAULT '{}'";
+
+const TASK_CHILD_TABLES = ["task_events", "task_updates", "task_dependencies"] as const;
+
+function sqliteTableExists(targetDb: MigrationDatabase, tableName: string): boolean {
+    return (
+        targetDb
+            .prepare(
+                `SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${tableName}'`
+            )
+            .all().length > 0
+    );
+}
+
+function deleteTaskOrphans(targetDb: MigrationDatabase, tableName: string): void {
+    if (!sqliteTableExists(targetDb, tableName)) {
+        return;
+    }
+    targetDb.exec(`
+        DELETE FROM ${tableName}
+        WHERE task_id NOT IN (SELECT id FROM tasks)
+    `);
+}
+
+export function cleanupTaskForeignKeyOrphans(targetDb: MigrationDatabase): void {
+    for (const tableName of TASK_CHILD_TABLES) {
+        deleteTaskOrphans(targetDb, tableName);
+    }
+}
 
 function taskAutomationColumnExists(targetDb: MigrationDatabase): boolean {
     const taskColumns = targetDb.prepare("PRAGMA table_info(tasks)").all();
@@ -281,6 +308,9 @@ CREATE INDEX IF NOT EXISTS idx_docker_update_events_created_at
     ON docker_update_events(created_at DESC);
 `);
 
+cleanupTaskForeignKeyOrphans(db);
+db.exec("PRAGMA foreign_keys = ON");
+
 for (const sql of [
     "ALTER TABLE scheduled_jobs ADD COLUMN schedule_type TEXT NOT NULL DEFAULT 'interval'",
     "ALTER TABLE scheduled_jobs ADD COLUMN time_of_day TEXT",
@@ -532,6 +562,7 @@ await ensureTaskAutomationColumn(db);
 
 export const __testing = {
     assertDuplicateColumnError,
+    cleanupTaskForeignKeyOrphans,
     ensureDockerUpdateEventsSetNull,
     ensureCacheEntriesUpdatedAtNullable,
     isDuplicateColumnError,

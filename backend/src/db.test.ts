@@ -120,6 +120,118 @@ test("uses configured db path when provided", async () => {
     }
 });
 
+test("removes legacy task child orphans before enabling foreign keys", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-db-task-orphans-"));
+    const configuredPath = path.join(tempDir, "configured.db");
+    process.env.MIRA_DASHBOARD_DB_PATH = configuredPath;
+    const legacyDb = new DatabaseSync(configuredPath);
+    let legacyDbClosed = false;
+    let result: Awaited<typeof import("./db.js")> | undefined;
+
+    try {
+        legacyDb.exec("PRAGMA foreign_keys = OFF");
+        legacyDb.exec(`
+            CREATE TABLE tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'todo',
+                priority TEXT NOT NULL DEFAULT 'medium',
+                labels_json TEXT NOT NULL DEFAULT '[]',
+                automation_json TEXT NOT NULL DEFAULT '{}',
+                assignee TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE task_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(task_id) REFERENCES tasks(id)
+            );
+            CREATE TABLE task_updates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER NOT NULL,
+                author TEXT NOT NULL,
+                message_md TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(task_id) REFERENCES tasks(id)
+            );
+            CREATE TABLE task_dependencies (
+                task_id INTEGER NOT NULL,
+                depends_on_task_id INTEGER NOT NULL
+            );
+            INSERT INTO tasks (id, title, created_at, updated_at)
+            VALUES (1, 'kept', '2026-06-09T00:00:00.000Z', '2026-06-09T00:00:00.000Z');
+            INSERT INTO task_events (task_id, event_type, created_at)
+            VALUES (1, 'kept', '2026-06-09T00:00:00.000Z'),
+                   (404, 'orphan', '2026-06-09T00:00:00.000Z');
+            INSERT INTO task_updates (task_id, author, message_md, created_at)
+            VALUES (1, 'mira', 'kept', '2026-06-09T00:00:00.000Z'),
+                   (404, 'mira', 'orphan', '2026-06-09T00:00:00.000Z');
+            INSERT INTO task_dependencies (task_id, depends_on_task_id)
+            VALUES (1, 2), (404, 1);
+        `);
+        legacyDb.close();
+        legacyDbClosed = true;
+
+        const imported = await import(`./db.js?taskOrphans=${randomUUID()}`);
+        result = imported;
+
+        assert.equal(
+            (
+                imported.db.prepare("PRAGMA foreign_keys").get() as {
+                    foreign_keys: number;
+                }
+            ).foreign_keys,
+            1
+        );
+        assert.equal(
+            (
+                imported.db
+                    .prepare("SELECT COUNT(*) AS count FROM task_events")
+                    .get() as {
+                    count: number;
+                }
+            ).count,
+            1
+        );
+        assert.equal(
+            (
+                imported.db
+                    .prepare("SELECT COUNT(*) AS count FROM task_updates")
+                    .get() as {
+                    count: number;
+                }
+            ).count,
+            1
+        );
+        assert.equal(
+            (
+                imported.db
+                    .prepare("SELECT COUNT(*) AS count FROM task_dependencies")
+                    .get() as {
+                    count: number;
+                }
+            ).count,
+            1
+        );
+    } finally {
+        await cleanupTempDb(originalDbPath, tempDir, [
+            () => {
+                if (!legacyDbClosed) {
+                    legacyDb.close();
+                }
+            },
+            () => (result?.db as { close(): void } | undefined)?.close(),
+        ]);
+    }
+});
+
 test("classifies duplicate-column migration errors", async () => {
     const { cleanup, result } = await importWithTempDb("migrationHelpers");
     try {

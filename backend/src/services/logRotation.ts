@@ -21,6 +21,7 @@ const ROTATED_SUFFIX_RE = /\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z(?:\.gz)
 const ARCHIVE_FAMILY_SUFFIX_RE =
     /(?:\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z|\.\d+)(?:\.gz)?$/u;
 const DEFAULT_LOCK_FILE = path.resolve(process.cwd(), "data/log-rotation.lock");
+const RECLAIM_DIR_STALE_MS = 5 * 60 * 1000;
 let logRotationLockFile = DEFAULT_LOCK_FILE;
 
 type ExecFileRunner = (
@@ -131,10 +132,28 @@ function validateConfig(config: LogRotationConfig): void {
     if (!Array.isArray(config.groups)) {
         throw new TypeError("Config groups must be an array");
     }
+    validateOptionalStringArray(config.approvedRoots, "approvedRoots");
+    validateArchiveRetentionScope(
+        config.defaults?.archiveRetentionScope,
+        "defaults.archiveRetentionScope"
+    );
     for (const group of config.groups) {
-        if (!group.name || typeof group.name !== "string") {
+        if (typeof group.name !== "string" || group.name.trim() === "") {
             throw new Error("Every group needs a string name");
         }
+        validateOptionalStringArray(
+            group.approvedRoots,
+            `Group ${group.name} approvedRoots`
+        );
+        validateOptionalStringArray(group.paths, `Group ${group.name} paths`);
+        validateOptionalStringArray(
+            group.archivePaths,
+            `Group ${group.name} archivePaths`
+        );
+        validateArchiveRetentionScope(
+            group.archiveRetentionScope,
+            `Group ${group.name} archiveRetentionScope`
+        );
         const hasPaths = Array.isArray(group.paths) && group.paths.length > 0;
         const hasArchivePaths =
             Array.isArray(group.archivePaths) && group.archivePaths.length > 0;
@@ -153,6 +172,23 @@ function validateConfig(config: LogRotationConfig): void {
         ) {
             throw new Error(`Group ${group.name} has unsupported strategy`);
         }
+    }
+}
+
+function validateOptionalStringArray(value: unknown, fieldName: string): void {
+    if (value === undefined) return;
+    if (
+        !Array.isArray(value) ||
+        value.some((entry) => typeof entry !== "string" || entry.trim() === "")
+    ) {
+        throw new TypeError(`${fieldName} must be an array of non-empty strings`);
+    }
+}
+
+function validateArchiveRetentionScope(value: unknown, fieldName: string): void {
+    if (value === undefined) return;
+    if (value !== "directory" && value !== "basename" && value !== "parent") {
+        throw new TypeError(`${fieldName} must be directory, basename, or parent`);
     }
 }
 
@@ -906,9 +942,13 @@ async function reclaimStaleLogRotationLock(
             "code" in error &&
             (error as NodeJS.ErrnoException).code === "EEXIST"
         ) {
-            return null;
+            if (!(await removeStaleReclaimDir(reclaimDir))) {
+                return null;
+            }
+            await fs.mkdir(reclaimDir);
+        } else {
+            throw error;
         }
-        throw error;
     }
     try {
         const rawPid = await fs.readFile(lockFile, "utf8").catch(() => "");
@@ -942,6 +982,21 @@ async function reclaimStaleLogRotationLock(
     } finally {
         await fs.rmdir(reclaimDir).catch(() => {});
     }
+}
+
+async function removeStaleReclaimDir(reclaimDir: string): Promise<boolean> {
+    let stat: Awaited<ReturnType<typeof fs.stat>>;
+    try {
+        stat = await fs.stat(reclaimDir);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return true;
+        }
+        throw error;
+    }
+    if (Date.now() - stat.mtimeMs < RECLAIM_DIR_STALE_MS) return false;
+    await fs.rm(reclaimDir, { force: true, recursive: true });
+    return true;
 }
 
 function isProcessRunning(pid: number): boolean {
@@ -1335,6 +1390,7 @@ export const __testing = {
     mergePolicy,
     openVerifiedLogFile,
     readLogRotationState,
+    removeStaleReclaimDir,
     releaseLogRotationLock,
     rotateCopyTruncate,
     resolveGlob,

@@ -18,6 +18,7 @@ import express from "express";
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
+    opsTesting: Awaited<typeof import("./ops.js")>["__testing"];
 }
 
 let db: (typeof import("../db.js"))["db"];
@@ -65,6 +66,7 @@ async function startServer(configPath: string): Promise<TestServer> {
             new Promise((resolve, reject) =>
                 server.close((error) => (error ? reject(error) : resolve()))
             ),
+        opsTesting: __testing,
     };
 }
 
@@ -295,6 +297,40 @@ describe("ops routes", () => {
         assert.equal(statusBefore.status, 200);
         assert.equal(statusAfter.status, 200);
         assert.deepEqual(statusAfter.body, statusBefore.body);
+    });
+
+    it("requires explicit true log rotation results for route success", async () => {
+        server.opsTesting.setElevatedLogRotationRunner(async () => ({
+            result: { ok: "false" },
+            stderr: "",
+        }));
+        try {
+            const dryRun = await requestJson<{
+                success: boolean;
+                result: { ok: string };
+            }>(server, "/api/ops/log-rotation/dry-run", { method: "POST" });
+            const run = await requestJson<{
+                success: boolean;
+                result: { ok: number };
+            }>(server, "/api/ops/log-rotation/run", { method: "POST" });
+
+            assert.equal(dryRun.status, 200);
+            assert.equal(dryRun.body.success, false);
+            assert.equal(run.status, 200);
+            assert.equal(run.body.success, false);
+        } finally {
+            server.opsTesting.setElevatedLogRotationRunner(async (options) => {
+                const logRotation = await import(
+                    `../services/logRotation.js?reset=${Date.now()}`
+                );
+                return {
+                    result: (await logRotation.runLogRotationService({
+                        dryRun: options.dryRun,
+                    })) as unknown as Record<string, unknown>,
+                    stderr: "",
+                };
+            });
+        }
     });
 
     it("runs real log rotation through the elevated helper", async () => {

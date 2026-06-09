@@ -16,6 +16,7 @@ interface SeedCacheEntryOptions {
 
 export function seedCacheEntry(options: SeedCacheEntryOptions): void {
     const updatedAt = options.updatedAt ?? "2026-05-11T00:00:00.000Z";
+    // undefined is stored as database null for no-data payloads; null is serialized as JSON "null".
     const dataJson =
         typeof options.data === "string"
             ? options.data

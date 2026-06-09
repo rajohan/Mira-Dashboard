@@ -710,7 +710,12 @@ function sanitizeRemoteUrl(value: string | null): string | null {
         url.hash = "";
         return url.toString();
     } catch {
-        return value.replace(/\/\/[^/@\s]+@/u, "//").replace(/\?.*$/u, "");
+        const withoutQuery = value.replace(/\?.*$/u, "");
+        const scpStyleMatch = withoutQuery.match(/^([^@\s]+)@([^:\s]+:.+)$/u);
+        if (scpStyleMatch) {
+            return scpStyleMatch[2];
+        }
+        return withoutQuery.replace(/\/\/[^/@\s]+@/u, "//");
     }
 }
 
@@ -1568,6 +1573,7 @@ export const __testing = {
     normalizeMoltbookHome,
     openMeteoCodeToDescription,
     parseOpenAiQuotaOutput,
+    sanitizeRemoteUrl,
     summarizeKopiaSnapshot,
     summarizeStatus,
     summarizeWalgBackup,
