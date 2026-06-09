@@ -165,10 +165,63 @@ describe("log rotation service", { concurrency: false }, () => {
                     dryRun: true,
                     config: await writeConfig(tempDir, {
                         version: 1,
+                        defaults: { approvedRoots: tempDir },
+                        groups: [{ name: "invalid", paths: ["*.log"] }],
+                    }),
+                }),
+            /defaults\.approvedRoots/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
+                        defaults: { excludePaths: "*.tmp" },
+                        groups: [{ name: "invalid", paths: ["*.log"] }],
+                    }),
+                }),
+            /defaults\.excludePaths/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
+                        excludePaths: "*.tmp",
+                        groups: [{ name: "invalid", paths: ["*.log"] }],
+                    }),
+                }),
+            /excludePaths/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
                         groups: [{ name: "invalid", paths: ["*.log", 1] }],
                     }),
                 }),
             /paths/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
+                        groups: [
+                            {
+                                name: "invalid",
+                                paths: ["*.log"],
+                                excludePaths: "*.tmp",
+                            },
+                        ],
+                    }),
+                }),
+            /Group invalid excludePaths/u
         );
         await assert.rejects(
             async () =>

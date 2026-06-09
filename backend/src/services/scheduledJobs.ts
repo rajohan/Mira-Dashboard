@@ -285,6 +285,35 @@ function logRotationFailureMessage(value: unknown): string {
         if (typeof stderr === "string" && stderr.trim()) {
             return stderr.trim();
         }
+        const result = (value as { result?: unknown }).result;
+        if (result && typeof result === "object" && !Array.isArray(result)) {
+            const summary = (result as { summary?: unknown }).summary;
+            if (typeof summary === "string" && summary.trim()) {
+                return summary.trim();
+            }
+            const message = (result as { message?: unknown }).message;
+            if (typeof message === "string" && message.trim()) {
+                return message.trim();
+            }
+            const error = (result as { error?: unknown }).error;
+            if (typeof error === "string" && error.trim()) {
+                return error.trim();
+            }
+            const errors = (result as { errors?: unknown }).errors;
+            if (Array.isArray(errors)) {
+                const firstMessage = errors.find(
+                    (entry): entry is { message: string } =>
+                        Boolean(entry) &&
+                        typeof entry === "object" &&
+                        typeof (entry as { message?: unknown }).message === "string" &&
+                        Boolean((entry as { message: string }).message.trim())
+                )?.message;
+                if (firstMessage) {
+                    return firstMessage.trim();
+                }
+            }
+            return JSON.stringify(result);
+        }
     }
     return "Log rotation failed";
 }

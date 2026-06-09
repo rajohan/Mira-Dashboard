@@ -119,6 +119,51 @@ test("lists no jobs when the scheduled job table is empty", () => {
     assert.deepEqual(listScheduledJobs(), []);
 });
 
+test("summarizes structured log rotation failures", () => {
+    assert.equal(
+        __testing.logRotationFailureMessage({
+            stderr: " stderr failure ",
+            result: { summary: "summary failure" },
+        }),
+        "stderr failure"
+    );
+    assert.equal(
+        __testing.logRotationFailureMessage({
+            stderr: "",
+            result: { summary: " summary failure " },
+        }),
+        "summary failure"
+    );
+    assert.equal(
+        __testing.logRotationFailureMessage({
+            result: { message: "message failure" },
+        }),
+        "message failure"
+    );
+    assert.equal(
+        __testing.logRotationFailureMessage({
+            result: { error: "error failure" },
+        }),
+        "error failure"
+    );
+    assert.equal(
+        __testing.logRotationFailureMessage({
+            result: { errors: [{ message: "" }, { message: "first real error" }] },
+        }),
+        "first real error"
+    );
+    assert.equal(
+        __testing.logRotationFailureMessage({
+            result: { ok: false, checkedFiles: 2 },
+        }),
+        JSON.stringify({ ok: false, checkedFiles: 2 })
+    );
+    assert.equal(
+        __testing.logRotationFailureMessage({ stderr: "" }),
+        "Log rotation failed"
+    );
+});
+
 test("rolls back default scheduled job seeding failures", () => {
     db.exec("DELETE FROM scheduled_job_runs; DELETE FROM scheduled_jobs;");
     const originalPrepare = db.prepare.bind(db);

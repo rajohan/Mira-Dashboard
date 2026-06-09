@@ -95,6 +95,7 @@ type RotationResult = { archivePath: string; compressed: boolean; warning?: stri
 interface LogRotationConfig {
     version: number;
     approvedRoots?: string[];
+    excludePaths?: string[];
     defaults?: LogRotationPolicy;
     groups: LogRotationPolicy[];
 }
@@ -134,6 +135,9 @@ function validateConfig(config: LogRotationConfig): void {
         throw new TypeError("Config groups must be an array");
     }
     validateOptionalStringArray(config.approvedRoots, "approvedRoots");
+    validateOptionalStringArray(config.defaults?.approvedRoots, "defaults.approvedRoots");
+    validateOptionalStringArray(config.defaults?.excludePaths, "defaults.excludePaths");
+    validateOptionalStringArray(config.excludePaths, "excludePaths");
     validateArchiveRetentionScope(
         config.defaults?.archiveRetentionScope,
         "defaults.archiveRetentionScope"
@@ -147,6 +151,10 @@ function validateConfig(config: LogRotationConfig): void {
             `Group ${group.name} approvedRoots`
         );
         validateOptionalStringArray(group.paths, `Group ${group.name} paths`);
+        validateOptionalStringArray(
+            group.excludePaths,
+            `Group ${group.name} excludePaths`
+        );
         validateOptionalStringArray(
             group.archivePaths,
             `Group ${group.name} archivePaths`
