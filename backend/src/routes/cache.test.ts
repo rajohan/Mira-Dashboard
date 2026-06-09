@@ -407,13 +407,13 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         try {
             await assert.rejects(() => refreshCacheKey("custom.numeric"), {
                 message: "Invalid refreshed cache key for custom.numeric: 123",
-                statusCode: 404,
+                statusCode: 500,
             });
             const routeRefresh = await fetch(
                 `${server.baseUrl}/api/cache/custom.numeric/refresh`,
                 { method: "POST" }
             );
-            assert.equal(routeRefresh.status, 404);
+            assert.equal(routeRefresh.status, 500);
             assert.deepEqual(await routeRefresh.json(), {
                 error: "Invalid refreshed cache key for custom.numeric: 123",
             });
@@ -429,7 +429,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         try {
             await assert.rejects(() => refreshCacheKey("custom.undefined"), {
                 message: "Invalid refreshed cache key for custom.undefined: undefined",
-                statusCode: 404,
+                statusCode: 500,
             });
         } finally {
             __testing.resetCacheRefreshForTests();
@@ -443,7 +443,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         try {
             await assert.rejects(() => refreshCacheKey("custom.blank"), {
                 message: 'Invalid refreshed cache key for custom.blank: "  "',
-                statusCode: 404,
+                statusCode: 500,
             });
         } finally {
             __testing.resetCacheRefreshForTests();

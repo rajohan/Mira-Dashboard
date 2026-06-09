@@ -3,12 +3,15 @@ import fs from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, it, mock } from "node:test";
+import { after, afterEach, before, beforeEach, describe, it, mock } from "node:test";
 
-import { db } from "../db.js";
 import { withEnv } from "../testUtils/env.js";
 
 const originalFetch = globalThis.fetch;
+const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
+let dbDir: string;
+let dbHandle: (typeof import("../db.js"))["db"];
+
 type StepResult = {
     code?: string;
     ok: boolean;
@@ -27,7 +30,7 @@ async function writeExecutable(filePath: string, script: string) {
 }
 
 function serviceRows() {
-    return db
+    return dbHandle
         .prepare("SELECT * FROM docker_managed_services ORDER BY app_slug, service_name")
         .all() as Array<{
         id: number;
@@ -51,10 +54,26 @@ describe("docker updater service", { concurrency: false }, () => {
     let tempDir: string;
     let originalPath: string | undefined;
 
+    before(async () => {
+        dbDir = await mkdtemp(path.join(os.tmpdir(), "mira-docker-updater-db-"));
+        process.env.MIRA_DASHBOARD_DB_PATH = path.join(dbDir, "test.db");
+        ({ db: dbHandle } = await import("../db.js"));
+    });
+
+    after(async () => {
+        dbHandle.close();
+        if (originalDbPath === undefined) {
+            delete process.env.MIRA_DASHBOARD_DB_PATH;
+        } else {
+            process.env.MIRA_DASHBOARD_DB_PATH = originalDbPath;
+        }
+        await rm(dbDir, { recursive: true, force: true });
+    });
+
     beforeEach(async () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-docker-updater-"));
         originalPath = process.env.PATH;
-        db.exec(
+        dbHandle.exec(
             "DELETE FROM docker_update_events; DELETE FROM docker_managed_services; DELETE FROM notifications;"
         );
     });
@@ -67,7 +86,7 @@ describe("docker updater service", { concurrency: false }, () => {
         } else {
             process.env.PATH = originalPath;
         }
-        db.exec(
+        dbHandle.exec(
             "DELETE FROM docker_update_events; DELETE FROM docker_managed_services; DELETE FROM notifications;"
         );
         await rm(tempDir, { recursive: true, force: true });
@@ -169,8 +188,9 @@ process.stdout.write("updated\n");
                 const { runDockerUpdaterService } = await import(
                     `./dockerUpdater.js?auto=${Date.now()}`
                 );
-                db.prepare(
-                    `INSERT INTO docker_managed_services (
+                dbHandle
+                    .prepare(
+                        `INSERT INTO docker_managed_services (
                         app_slug, service_name, compose_path, image_repo,
                         compose_image_ref, compose_image_field, current_tag,
                         current_digest, policy, pin_mode, tag_match_type,
@@ -180,9 +200,11 @@ process.stdout.write("updated\n");
                         'services.removed.image', '1', NULL, 'notify', 'tag',
                         'exact', '1', 1, '{}'
                     )`
-                ).run(composePath);
-                db.prepare(
-                    `INSERT INTO docker_managed_services (
+                    )
+                    .run(composePath);
+                dbHandle
+                    .prepare(
+                        `INSERT INTO docker_managed_services (
                         app_slug, service_name, compose_path, image_repo,
                         compose_image_ref, compose_image_field, current_tag,
                         current_digest, policy, pin_mode, tag_match_type,
@@ -192,7 +214,8 @@ process.stdout.write("updated\n");
                         'services.old.image', '1', NULL, 'notify', 'tag',
                         'exact', '1', 1, '{}'
                     )`
-                ).run(composePath);
+                    )
+                    .run(composePath);
                 const steps = (await runDockerUpdaterService()) as StepResult[];
                 assert.equal(
                     steps.every((step) => step.ok),
@@ -234,7 +257,7 @@ process.stdout.write("updated\n");
         );
         assert.match(await readFile(composePath, "utf8"), /nginx:1\.2\.1/u);
         assert.match(await readFile(dockerCalls, "utf8"), /compose -f .* up -d web/u);
-        const notificationCount = db
+        const notificationCount = dbHandle
             .prepare("SELECT COUNT(*) AS count FROM notifications")
             .get() as { count: number };
         assert.equal(notificationCount.count, 2);
@@ -289,7 +312,7 @@ process.stdout.write("updated\n");
                 const firstRun = await runDockerUpdaterService();
                 assert.equal(firstRun[1]?.ok, false);
                 assert.match(firstRun[1]?.stderr ?? "", /bad-registry/u);
-                const badRegistry = db
+                const badRegistry = dbHandle
                     .prepare(
                         "SELECT * FROM docker_managed_services WHERE service_name = 'bad-registry'"
                     )
@@ -312,12 +335,14 @@ process.stdout.write("updated\n");
                     ]
                 );
 
-                db.prepare(
-                    `UPDATE docker_managed_services
+                dbHandle
+                    .prepare(
+                        `UPDATE docker_managed_services
                      SET latest_tag = '4', compose_image_field = NULL
                      WHERE service_name = 'missing-field'`
-                ).run();
-                const service = db
+                    )
+                    .run();
+                const service = dbHandle
                     .prepare(
                         "SELECT * FROM docker_managed_services WHERE service_name = 'missing-field'"
                     )
@@ -330,7 +355,7 @@ process.stdout.write("updated\n");
                 const missing = await runDockerUpdaterService(99_999);
                 assert.equal(missing.at(-1)?.stderr, "Docker updater service not found");
 
-                const disabledService = db
+                const disabledService = dbHandle
                     .prepare(
                         "SELECT id FROM docker_managed_services WHERE service_name = 'disabled'"
                     )
@@ -427,8 +452,9 @@ process.stdout.write("updated\n");
             "utf8"
         );
         await writeFile(path.join(badDir, "compose.yaml"), "services:\n  [", "utf8");
-        db.prepare(
-            `INSERT INTO docker_managed_services (
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
                 app_slug, service_name, compose_path, image_repo, compose_image_ref,
                 compose_image_field, current_tag, current_digest, policy, pin_mode,
                 tag_match_type, tag_match_pattern, enabled, metadata_json
@@ -437,9 +463,11 @@ process.stdout.write("updated\n");
                 'services.kept.image', '1', NULL, 'notify', 'tag',
                 'exact', '1', 1, '{}'
             )`
-        ).run(path.join(badDir, "compose.yaml"));
-        db.prepare(
-            `INSERT INTO docker_managed_services (
+            )
+            .run(path.join(badDir, "compose.yaml"));
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
                 app_slug, service_name, compose_path, image_repo, compose_image_ref,
                 compose_image_field, current_tag, current_digest, policy, pin_mode,
                 tag_match_type, tag_match_pattern, enabled, metadata_json
@@ -448,7 +476,8 @@ process.stdout.write("updated\n");
                 'services.old.image', '1', NULL, 'notify', 'tag',
                 'exact', '1', 1, '{}'
             )`
-        ).run(path.join(appsRoot, "removed", "compose.yaml"));
+            )
+            .run(path.join(appsRoot, "removed", "compose.yaml"));
 
         await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
             const updater = await import(`./dockerUpdater.js?bad-compose=${Date.now()}`);
@@ -458,7 +487,7 @@ process.stdout.write("updated\n");
             assert.match(result.stderr, /bad/u);
         });
 
-        const web = db
+        const web = dbHandle
             .prepare(
                 "SELECT current_tag, tag_match_pattern FROM docker_managed_services WHERE service_name = 'web'"
             )
@@ -466,7 +495,7 @@ process.stdout.write("updated\n");
         assert.equal(web, undefined);
         assert.equal(
             (
-                db
+                dbHandle
                     .prepare(
                         "SELECT COUNT(*) AS count FROM docker_managed_services WHERE app_slug = 'bad'"
                     )
@@ -476,7 +505,7 @@ process.stdout.write("updated\n");
         );
         assert.equal(
             (
-                db
+                dbHandle
                     .prepare(
                         "SELECT COUNT(*) AS count FROM docker_managed_services WHERE app_slug = 'removed'"
                     )
@@ -522,8 +551,9 @@ process.stdout.write("updated\n");
             tag_match_pattern: null,
             enabled: 1,
         };
-        db.prepare(
-            `INSERT INTO docker_managed_services (
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
                 id, app_slug, service_name, compose_path, image_repo,
                 compose_image_ref, compose_image_field, current_tag, current_digest,
                 latest_tag, latest_digest, policy, pin_mode, tag_match_type,
@@ -534,13 +564,14 @@ process.stdout.write("updated\n");
                 @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
                 @tag_match_pattern, @enabled, '{}'
             )`
-        ).run(service);
+            )
+            .run(service);
 
         const result = await updater.__testing.applyServiceUpdate(service, "manual");
 
         assert.equal(result.ok, true);
         assert.match(await readFile(composePath, "utf8"), /repo\/app:2@sha256:new/u);
-        const row = db
+        const row = dbHandle
             .prepare(
                 `SELECT current_tag, current_digest, tag_match_pattern
                  FROM docker_managed_services WHERE id = ?`
@@ -618,8 +649,9 @@ process.stdout.write("updated\n");
             tag_match_pattern: "1",
             enabled: 1,
         };
-        db.prepare(
-            `INSERT INTO docker_managed_services (
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
                 id, app_slug, service_name, compose_path, image_repo,
                 compose_image_ref, compose_image_field, current_tag, current_digest,
                 latest_tag, latest_digest, policy, pin_mode, tag_match_type,
@@ -630,7 +662,8 @@ process.stdout.write("updated\n");
                 @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
                 @tag_match_pattern, @enabled, '{}'
             )`
-        ).run(service);
+            )
+            .run(service);
 
         assert.deepEqual(await updater.__testing.applyServiceUpdate(service, "manual"), {
             step: "manual-update:current/web",
@@ -661,8 +694,9 @@ process.stdout.write("updated\n");
             tag_match_pattern: "2",
             enabled: 0,
         };
-        db.prepare(
-            `INSERT INTO docker_managed_services (
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
                 id, app_slug, service_name, compose_path, image_repo,
                 compose_image_ref, compose_image_field, current_tag, current_digest,
                 latest_tag, latest_digest, policy, pin_mode, tag_match_type,
@@ -673,7 +707,8 @@ process.stdout.write("updated\n");
                 @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
                 @tag_match_pattern, @enabled, '{}'
             )`
-        ).run(service);
+            )
+            .run(service);
 
         const result = await updater.__testing.applyServiceUpdate(
             { ...service, enabled: 1 },
@@ -763,8 +798,9 @@ setTimeout(() => process.exit(0), 30);
             compose_image_ref: "repo/worker:1",
             compose_image_field: "services.worker.image",
         };
-        db.prepare(
-            `INSERT INTO docker_managed_services (
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
                 id, app_slug, service_name, compose_path, image_repo,
                 compose_image_ref, compose_image_field, current_tag, current_digest,
                 latest_tag, latest_digest, policy, pin_mode, tag_match_type,
@@ -775,9 +811,11 @@ setTimeout(() => process.exit(0), 30);
                 @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
                 @tag_match_pattern, @enabled, '{}'
             )`
-        ).run(baseService);
-        db.prepare(
-            `INSERT INTO docker_managed_services (
+            )
+            .run(baseService);
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
                 id, app_slug, service_name, compose_path, image_repo,
                 compose_image_ref, compose_image_field, current_tag, current_digest,
                 latest_tag, latest_digest, policy, pin_mode, tag_match_type,
@@ -788,13 +826,16 @@ setTimeout(() => process.exit(0), 30);
                 @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
                 @tag_match_pattern, @enabled, '{}'
             )`
-        ).run(workerService);
+            )
+            .run(workerService);
 
         await withEnv({ SEEN_COMPOSE_IMAGES: seenPath }, async () => {
             const first = updater.__testing.applyServiceUpdate(baseService, "manual");
-            db.prepare(
-                "UPDATE docker_managed_services SET latest_tag = '3' WHERE id = ?"
-            ).run(workerService.id);
+            dbHandle
+                .prepare(
+                    "UPDATE docker_managed_services SET latest_tag = '3' WHERE id = ?"
+                )
+                .run(workerService.id);
             const second = updater.__testing.applyServiceUpdate(workerService, "manual");
             const results = await Promise.all([first, second]);
 
@@ -816,8 +857,9 @@ setTimeout(() => process.exit(0), 30);
     it("removes stale services after an empty successful compose scan", async () => {
         const appsRoot = path.join(tempDir, "empty-apps");
         await mkdir(appsRoot);
-        db.prepare(
-            `INSERT INTO docker_managed_services (
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
                 app_slug, service_name, compose_path, image_repo, compose_image_ref,
                 compose_image_field, current_tag, current_digest, policy, pin_mode,
                 tag_match_type, tag_match_pattern, enabled, metadata_json,
@@ -827,7 +869,8 @@ setTimeout(() => process.exit(0), 30);
                 'nginx:1', 'services.web.image', '1', NULL, 'notify', 'tag',
                 'exact', '1', 1, '{}', '2026-06-06T00:00:00.000Z', 'registered'
             )`
-        ).run();
+            )
+            .run();
 
         await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
             const updater = await import(`./dockerUpdater.js?empty-root=${Date.now()}`);
@@ -839,8 +882,9 @@ setTimeout(() => process.exit(0), 30);
     });
 
     it("preserves registered services when the compose apps root is unavailable", async () => {
-        db.prepare(
-            `INSERT INTO docker_managed_services (
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
                 app_slug, service_name, compose_path, image_repo, compose_image_ref,
                 compose_image_field, current_tag, current_digest, policy, pin_mode,
                 tag_match_type, tag_match_pattern, enabled, metadata_json,
@@ -850,7 +894,8 @@ setTimeout(() => process.exit(0), 30);
                 'nginx:1', 'services.web.image', '1', NULL, 'notify', 'tag',
                 'exact', '1', 1, '{}', '2026-06-06T00:00:00.000Z', 'registered'
             )`
-        ).run();
+            )
+            .run();
 
         await withEnv(
             { MIRA_DOCKER_APPS_ROOT: path.join(tempDir, "missing-apps") },
@@ -872,8 +917,9 @@ setTimeout(() => process.exit(0), 30);
     it("preserves registered services when compose discovery throws", async () => {
         const appsRoot = path.join(tempDir, "unreadable-apps");
         await mkdir(appsRoot);
-        db.prepare(
-            `INSERT INTO docker_managed_services (
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
                 app_slug, service_name, compose_path, image_repo, compose_image_ref,
                 compose_image_field, current_tag, current_digest, policy, pin_mode,
                 tag_match_type, tag_match_pattern, enabled, metadata_json,
@@ -883,7 +929,8 @@ setTimeout(() => process.exit(0), 30);
                 'nginx:1', 'services.web.image', '1', NULL, 'notify', 'tag',
                 'exact', '1', 1, '{}', '2026-06-06T00:00:00.000Z', 'registered'
             )`
-        ).run();
+            )
+            .run();
 
         await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
             const updater = await import(
@@ -954,7 +1001,7 @@ setTimeout(() => process.exit(0), 30);
             async () => {
                 const updater = await import(`./dockerUpdater.js?manual=${Date.now()}`);
                 await updater.registerDockerUpdaterServices();
-                const service = db
+                const service = dbHandle
                     .prepare(
                         "SELECT id FROM docker_managed_services WHERE service_name = 'web'"
                     )
@@ -965,7 +1012,7 @@ setTimeout(() => process.exit(0), 30);
         );
 
         assert.match(await readFile(composePath, "utf8"), /image: nginx:3/u);
-        const updatedService = db
+        const updatedService = dbHandle
             .prepare(
                 "SELECT current_tag, current_digest FROM docker_managed_services WHERE service_name = 'web'"
             )
@@ -978,7 +1025,7 @@ setTimeout(() => process.exit(0), 30);
                 `./dockerUpdater.js?manual-fallback=${Date.now()}`
             );
             await updater.registerDockerUpdaterServices();
-            const service = db
+            const service = dbHandle
                 .prepare(
                     "SELECT id FROM docker_managed_services WHERE service_name = 'web'"
                 )
@@ -987,12 +1034,14 @@ setTimeout(() => process.exit(0), 30);
             globalThis.fetch = (async () => {
                 if (!deleted) {
                     deleted = true;
-                    db.prepare(
-                        "DELETE FROM docker_update_events WHERE managed_service_id = ?"
-                    ).run(service.id);
-                    db.prepare("DELETE FROM docker_managed_services WHERE id = ?").run(
-                        service.id
-                    );
+                    dbHandle
+                        .prepare(
+                            "DELETE FROM docker_update_events WHERE managed_service_id = ?"
+                        )
+                        .run(service.id);
+                    dbHandle
+                        .prepare("DELETE FROM docker_managed_services WHERE id = ?")
+                        .run(service.id);
                 }
                 return {
                     ok: true,
@@ -1007,7 +1056,7 @@ setTimeout(() => process.exit(0), 30);
             );
 
             await updater.registerDockerUpdaterServices();
-            const toggledService = db
+            const toggledService = dbHandle
                 .prepare(
                     "SELECT id FROM docker_managed_services WHERE service_name = 'web'"
                 )
@@ -1016,9 +1065,11 @@ setTimeout(() => process.exit(0), 30);
             globalThis.fetch = (async () => {
                 if (!toggled) {
                     toggled = true;
-                    db.prepare(
-                        "UPDATE docker_managed_services SET enabled = 0 WHERE id = ?"
-                    ).run(toggledService.id);
+                    dbHandle
+                        .prepare(
+                            "UPDATE docker_managed_services SET enabled = 0 WHERE id = ?"
+                        )
+                        .run(toggledService.id);
                 }
                 return {
                     ok: true,
@@ -1039,8 +1090,9 @@ setTimeout(() => process.exit(0), 30);
 
     it("records unsupported registries during polling", async () => {
         const updater = await import(`./dockerUpdater.js?unsupported=${Date.now()}`);
-        db.prepare(
-            `INSERT INTO docker_managed_services (
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
                 id, app_slug, service_name, compose_path, image_repo,
                 compose_image_ref, compose_image_field, current_tag, current_digest,
                 latest_tag, latest_digest, policy, pin_mode, tag_match_type,
@@ -1050,7 +1102,8 @@ setTimeout(() => process.exit(0), 30);
                 'lscr.io/linuxserver/swag:latest', 'services.swag.image', 'latest', NULL,
                 NULL, NULL, 'notify', 'tag', 'exact', 'latest', 1, '{}'
             )`
-        ).run();
+            )
+            .run();
 
         const result = await updater.pollDockerUpdaterRegistries(720);
         assert.equal(result.ok, true);
@@ -1075,7 +1128,7 @@ setTimeout(() => process.exit(0), 30);
             ],
             updates: [],
         });
-        const row = db
+        const row = dbHandle
             .prepare("SELECT last_status FROM docker_managed_services WHERE id = 720")
             .get() as { last_status: string };
         assert.equal(row.last_status, "unsupported_registry");
@@ -1139,7 +1192,7 @@ setTimeout(() => process.exit(0), 30);
         await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
             const updater = await import(`./dockerUpdater.js?manual-scope=${Date.now()}`);
             await updater.registerDockerUpdaterServices();
-            const service = db
+            const service = dbHandle
                 .prepare(
                     "SELECT id FROM docker_managed_services WHERE service_name = 'target'"
                 )
@@ -1174,7 +1227,7 @@ setTimeout(() => process.exit(0), 30);
                 `./dockerUpdater.js?unsupported-compose=${Date.now()}`
             );
             await updater.registerDockerUpdaterServices();
-            const service = db
+            const service = dbHandle
                 .prepare(
                     "SELECT id FROM docker_managed_services WHERE service_name = 'swag'"
                 )
@@ -1228,17 +1281,19 @@ setTimeout(() => process.exit(0), 30);
                 `./dockerUpdater.js?manual-current=${Date.now()}`
             );
             await updater.registerDockerUpdaterServices();
-            const service = db
+            const service = dbHandle
                 .prepare(
                     "SELECT id FROM docker_managed_services WHERE service_name = 'target'"
                 )
                 .get() as { id: number };
-            db.prepare(
-                `UPDATE docker_managed_services
+            dbHandle
+                .prepare(
+                    `UPDATE docker_managed_services
                  SET latest_tag = '2', latest_digest = 'sha256:stale',
                      last_status = 'update_available'
                  WHERE id = ?`
-            ).run(service.id);
+                )
+                .run(service.id);
 
             const steps = (await updater.runDockerUpdaterService(
                 service.id
@@ -1247,7 +1302,7 @@ setTimeout(() => process.exit(0), 30);
                 steps.map((step) => step.step),
                 ["register", "poll", "manual-update-skipped:manual-current/target"]
             );
-            const row = db
+            const row = dbHandle
                 .prepare(
                     `SELECT last_status, latest_tag, latest_digest, current_tag
                      FROM docker_managed_services WHERE id = ?`
@@ -1295,7 +1350,7 @@ setTimeout(() => process.exit(0), 30);
                 `./dockerUpdater.js?manual-disabled-after-poll=${Date.now()}`
             );
             await updater.registerDockerUpdaterServices();
-            const service = db
+            const service = dbHandle
                 .prepare(
                     "SELECT id FROM docker_managed_services WHERE service_name = 'target'"
                 )
@@ -1305,9 +1360,11 @@ setTimeout(() => process.exit(0), 30);
                 const url = typeof input === "string" ? input : input.toString();
                 if (!disabled) {
                     disabled = true;
-                    db.prepare(
-                        "UPDATE docker_managed_services SET enabled = 0 WHERE id = ?"
-                    ).run(service.id);
+                    dbHandle
+                        .prepare(
+                            "UPDATE docker_managed_services SET enabled = 0 WHERE id = ?"
+                        )
+                        .run(service.id);
                 }
                 return {
                     ok: true,
@@ -1378,8 +1435,9 @@ setTimeout(() => process.exit(0), 30);
         }) as typeof fetch;
 
         const consoleErrorMock = mock.method(console, "error", () => {});
-        db.prepare(
-            `INSERT INTO docker_managed_services (
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
                 app_slug, service_name, compose_path, image_repo,
                 compose_image_ref, compose_image_field, current_tag, current_digest,
                 latest_tag, latest_digest, policy, pin_mode, tag_match_type,
@@ -1389,8 +1447,9 @@ setTimeout(() => process.exit(0), 30);
                 'services.target.image', '1', 'sha256:old', NULL, NULL, 'notify',
                 'tag', 'regex', '^[0-9]+$', 1, '{}'
             )`
-        ).run(composePath);
-        db.exec(`
+            )
+            .run(composePath);
+        dbHandle.exec(`
             CREATE TEMP TRIGGER docker_update_events_fail
             BEFORE INSERT ON docker_update_events
             BEGIN
@@ -1408,7 +1467,7 @@ setTimeout(() => process.exit(0), 30);
             );
             const poll = await updater.pollDockerUpdaterRegistries();
             assert.equal(poll.ok, true);
-            const service = db
+            const service = dbHandle
                 .prepare(
                     "SELECT * FROM docker_managed_services WHERE service_name = 'target'"
                 )
@@ -1417,7 +1476,7 @@ setTimeout(() => process.exit(0), 30);
             assert.equal(apply.ok, true);
             assert.equal(consoleErrorMock.mock.callCount(), 4);
         } finally {
-            db.exec(`
+            dbHandle.exec(`
                 DROP TRIGGER IF EXISTS docker_update_events_fail;
                 DROP TRIGGER IF EXISTS notifications_fail;
             `);
@@ -2433,8 +2492,9 @@ setTimeout(() => process.exit(0), 30);
             { latestTag: null, latestDigest: "sha256:current" }
         );
 
-        db.prepare(
-            `INSERT INTO docker_managed_services (
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
                 app_slug, service_name, compose_path, image_repo,
                 compose_image_ref, compose_image_field, current_tag, current_digest,
                 policy, pin_mode, tag_match_type, tag_match_pattern, enabled,
@@ -2444,12 +2504,13 @@ setTimeout(() => process.exit(0), 30);
                 'repo/app', 'services.nulls.image', NULL, NULL, 'notify', 'tag',
                 'exact', NULL, 1, '{}'
             )`
-        ).run();
+            )
+            .run();
         await withEnv({ MIRA_DOCKER_UPDATER_SKIP_REGISTRY: "1" }, async () => {
             const result = await updater.pollDockerUpdaterRegistries();
             assert.equal(result.ok, true);
         });
-        const nullFallback = db
+        const nullFallback = dbHandle
             .prepare(
                 "SELECT latest_tag, latest_digest FROM docker_managed_services WHERE service_name = 'nulls'"
             )
@@ -2471,9 +2532,9 @@ setTimeout(() => process.exit(0), 30);
             const updater = await import(
                 `./dockerUpdater.js?register-rollback=${Date.now()}`
             );
-            const originalExec = db.exec.bind(db);
+            const originalExec = dbHandle.exec.bind(dbHandle);
             const calls: string[] = [];
-            const execMock = mock.method(db, "exec", (sql: string) => {
+            const execMock = mock.method(dbHandle, "exec", (sql: string) => {
                 calls.push(sql);
                 if (sql === "COMMIT") {
                     throw new Error("commit failed");
@@ -2534,8 +2595,9 @@ setTimeout(() => process.exit(0), 30);
             tag_match_pattern: null,
             enabled: 1,
         };
-        db.prepare(
-            `INSERT INTO docker_managed_services (
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
                 id, app_slug, service_name, compose_path, image_repo,
                 compose_image_ref, compose_image_field, current_tag, current_digest,
                 latest_tag, latest_digest, policy, pin_mode, tag_match_type,
@@ -2546,7 +2608,8 @@ setTimeout(() => process.exit(0), 30);
                 @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
                 @tag_match_pattern, @enabled, '{}'
             )`
-        ).run(service);
+            )
+            .run(service);
         const originalWriteFileSync = fs.writeFileSync.bind(fs);
         let writeCount = 0;
         mock.method(
@@ -2608,8 +2671,9 @@ process.exit(0);
             tag_match_pattern: null,
             enabled: 1,
         };
-        db.prepare(
-            `INSERT INTO docker_managed_services (
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
                 id, app_slug, service_name, compose_path, image_repo,
                 compose_image_ref, compose_image_field, current_tag, current_digest,
                 latest_tag, latest_digest, policy, pin_mode, tag_match_type,
@@ -2620,7 +2684,8 @@ process.exit(0);
                 @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
                 @tag_match_pattern, @enabled, '{}'
             )`
-        ).run(service);
+            )
+            .run(service);
 
         const result = await updater.__testing.applyServiceUpdate(service, "manual");
 
@@ -2657,8 +2722,9 @@ process.exit(0);
             tag_match_pattern: null,
             enabled: 1,
         };
-        db.prepare(
-            `INSERT INTO docker_managed_services (
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
                 id, app_slug, service_name, compose_path, image_repo,
                 compose_image_ref, compose_image_field, current_tag, current_digest,
                 latest_tag, latest_digest, policy, pin_mode, tag_match_type,
@@ -2669,7 +2735,8 @@ process.exit(0);
                 @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
                 @tag_match_pattern, @enabled, '{}'
             )`
-        ).run(service);
+            )
+            .run(service);
         const originalWriteFileSync = fs.writeFileSync.bind(fs);
         let writeCount = 0;
         mock.method(

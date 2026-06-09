@@ -58,7 +58,10 @@ describe("job hooks", () => {
         expect(fetchMock).toHaveBeenNthCalledWith(
             1,
             "/api/jobs/custom%2Fjob",
-            expect.objectContaining({ method: "PATCH" })
+            expect.objectContaining({
+                body: JSON.stringify({ patch: { enabled: false } }),
+                method: "PATCH",
+            })
         );
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: jobKeys.list() });
     });

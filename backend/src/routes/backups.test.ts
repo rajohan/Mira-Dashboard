@@ -615,37 +615,48 @@ describe("backup routes", () => {
             assert.equal(started.body.ok, true);
             const firstJobId = started.body.job.id;
 
+            for (let attempt = 0; attempt < 30 && !finishRefresh; attempt += 1) {
+                await new Promise((resolve) => setTimeout(resolve, 10));
+            }
             await new Promise((resolve) =>
                 setTimeout(resolve, backupRefreshTimeoutMs + 20)
             );
 
+            assert.ok(finishRefresh);
+            const timedOut = await requestJson<{
+                job: {
+                    id: string;
+                    refreshPending: boolean;
+                    status: string;
+                    stderr: string;
+                } | null;
+            }>(server, "/api/backups/kopia");
+            assert.equal(timedOut.body.job?.id, firstJobId);
+            assert.equal(timedOut.body.job.status, "done");
+            assert.equal(timedOut.body.job.refreshPending, true);
+            assert.equal(
+                timedOut.body.job.stderr.includes("Status refresh failed"),
+                false
+            );
+            finishRefresh({ refreshed: ["backup.kopia.status"] });
             for (let attempt = 0; attempt < 30; attempt += 1) {
                 const done = await requestJson<{
                     job: {
                         id: string;
                         refreshPending: boolean;
-                        status: string;
-                        stderr: string;
                     } | null;
                 }>(server, "/api/backups/kopia");
                 if (
                     done.body.job?.id === firstJobId &&
-                    done.body.job.status === "done" &&
                     done.body.job.refreshPending === false
                 ) {
-                    assert.equal(
-                        done.body.job.stderr.includes("Status refresh failed"),
-                        false
-                    );
                     break;
                 }
                 await new Promise((resolve) => setTimeout(resolve, 10));
                 if (attempt === 29) {
-                    assert.fail("Backup refresh timeout did not clear refresh pending");
+                    assert.fail("Backup refresh promise did not clear refresh pending");
                 }
             }
-
-            assert.ok(finishRefresh);
             const restarted = await requestJson<{
                 ok: boolean;
                 job: { id: string; refreshPending: boolean };
@@ -653,7 +664,6 @@ describe("backup routes", () => {
             assert.equal(restarted.status, 200);
             assert.equal(restarted.body.ok, true);
             assert.notEqual(restarted.body.job.id, firstJobId);
-            finishRefresh({ refreshed: ["backup.kopia.status"] });
             await new Promise((resolve) => setTimeout(resolve, 0));
         } finally {
             backupTesting.setBackupRefreshTimeoutMsForTest();

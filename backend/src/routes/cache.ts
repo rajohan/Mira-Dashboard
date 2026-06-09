@@ -110,9 +110,10 @@ export async function refreshCacheKey(key: string) {
         (entry) => typeof entry !== "string" || entry.trim().length === 0
     );
     if (invalidRefreshedIndex !== -1) {
+        const invalidRefreshedValue = result.refreshed[invalidRefreshedIndex];
         throw httpStatusError(
-            404,
-            `Invalid refreshed cache key for ${key}: ${JSON.stringify(result.refreshed[invalidRefreshedIndex])}`
+            500,
+            `Invalid refreshed cache key for ${key}: ${JSON.stringify(invalidRefreshedValue)}`
         );
     }
     const refreshedKeys = [

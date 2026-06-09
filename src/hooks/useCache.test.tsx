@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
 import {
@@ -11,6 +11,11 @@ import {
 } from "./useCache";
 
 describe("cache hooks", () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
+
     it("fetches heartbeat and encoded cache entries", async () => {
         const fetchMock = vi
             .fn()

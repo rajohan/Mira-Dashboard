@@ -326,6 +326,9 @@ async function openVerifiedFile(
         if (!stat.isFile()) {
             throw new Error(`Refusing non-file path: ${filePath}`);
         }
+        if (stat.nlink > 1) {
+            throw new Error(`Refusing multi-linked file: ${filePath}`);
+        }
         const realFilePath = await fs.realpath(filePath);
         const resolvedRoots = await Promise.all(
             approvedRoots.map(async (root) => {
@@ -363,6 +366,9 @@ async function assertFileIdentity(
     const currentStat = await fs.stat(filePath);
     if (expected.dev !== currentStat.dev || expected.ino !== currentStat.ino) {
         throw new Error(`Unsafe path changed before rotation: ${filePath}`);
+    }
+    if (currentStat.nlink > 1) {
+        throw new Error(`Refusing multi-linked file: ${filePath}`);
     }
 }
 
@@ -465,6 +471,7 @@ function archiveBasePath(filePath: string, now: Date): string {
 }
 
 async function rotateCopyTruncate(
+    filePath: string,
     file: VerifiedLogFile,
     archivePath: string,
     compress: boolean,
@@ -483,6 +490,7 @@ async function rotateCopyTruncate(
         );
         await fs.utimes(archivePath, file.stat.atime, file.stat.mtime);
         await destination.close();
+        await assertFileIdentity(filePath, file.stat, approvedRoots);
         await file.handle.truncate(0);
         committed = true;
         return compress ? gzipFile(archivePath, approvedRoots) : archivePath;
@@ -1076,6 +1084,7 @@ export async function runLogRotationService(
                                               effectiveApprovedRoots
                                           )
                                         : await rotateCopyTruncate(
+                                              filePath,
                                               verified,
                                               archivePath,
                                               policy.compress !== false,

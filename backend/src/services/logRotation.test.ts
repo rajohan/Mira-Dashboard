@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { constants, type PathLike } from "node:fs";
 import fsPromises from "node:fs/promises";
 import {
+    link,
     mkdir,
     mkdtemp,
     open,
@@ -260,6 +261,24 @@ describe("log rotation service", { concurrency: false }, () => {
                     [tempDir]
                 ),
             /Unsafe path outside approved roots/u
+        );
+        const linkedFile = path.join(tempDir, "linked.log");
+        const linkedAlias = path.join(tempDir, "linked-alias.log");
+        await writeFile(linkedFile, "linked", "utf8");
+        await link(linkedFile, linkedAlias);
+        await assert.rejects(
+            () => __testing.openVerifiedLogFile(linkedFile, [tempDir]),
+            /Refusing multi-linked file/u
+        );
+        const linkedStat = await fsPromises.stat(linkedFile);
+        await assert.rejects(
+            () =>
+                __testing.assertFileIdentity(
+                    linkedFile,
+                    { dev: linkedStat.dev, ino: linkedStat.ino },
+                    [tempDir]
+                ),
+            /Refusing multi-linked file/u
         );
         await rm(outsideRoot, { recursive: true, force: true });
         const globRoot = path.join(tempDir, "glob");
@@ -1647,6 +1666,7 @@ describe("log rotation service", { concurrency: false }, () => {
             await assert.rejects(
                 () =>
                     __testing.rotateCopyTruncate(
+                        logPath,
                         {
                             handle: {
                                 fd: source.fd,
