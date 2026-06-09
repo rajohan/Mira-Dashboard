@@ -240,6 +240,79 @@ describe("log rotation service", { concurrency: false }, () => {
                 }),
             /archiveRetentionScope/u
         );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
+                        defaults: { archiveOnly: true },
+                        groups: [{ name: "invalid", paths: ["*.log"] }],
+                    }),
+                }),
+            /defaults\.archiveOnly/u
+        );
+        await runLogRotationService({
+            dryRun: true,
+            config: await writeConfig(tempDir, {
+                version: 1,
+                defaults: {
+                    archiveOnly: true,
+                    archivePaths: [path.join(tempDir, "*.log.1")],
+                },
+                groups: [{ name: "valid-default-archive-only", paths: ["*.log"] }],
+            }),
+        });
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
+                        defaults: {
+                            archiveOnly: true,
+                            archivePaths: [path.join(tempDir, "*.log.1")],
+                        },
+                        groups: [
+                            {
+                                name: "invalid-default-archive-only-override",
+                                archivePaths: [],
+                                paths: ["*.log"],
+                            },
+                        ],
+                    }),
+                }),
+            /defaults\.archiveOnly/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
+                        defaults: { paths: ["*.log"] },
+                        groups: [
+                            {
+                                name: "invalid-default-paths-override",
+                                paths: [],
+                            },
+                        ],
+                    }),
+                }),
+            /Group invalid-default-paths-override needs at least one path/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
+                        defaults: { strategy: "move" },
+                        groups: [{ name: "invalid", paths: ["*.log"] }],
+                    }),
+                }),
+            /defaults\.strategy/u
+        );
         assert.equal(
             __testing.hasRotatedInCadence({ lastRotatedAt: "not-a-date" }, "daily"),
             false
@@ -1570,7 +1643,7 @@ describe("log rotation service", { concurrency: false }, () => {
             );
             assert.deepEqual(
                 archives.map((entry) => entry.path),
-                [centralArchive]
+                []
             );
             const parentScopedArchives = await __testing.listArchives(
                 file,
@@ -1584,6 +1657,38 @@ describe("log rotation service", { concurrency: false }, () => {
         } finally {
             realpathMock.mock.restore();
         }
+    });
+
+    it("keeps basename archive retention scoped to each log directory", async () => {
+        const firstRoot = path.join(tempDir, "basename-retention-a");
+        const secondRoot = path.join(tempDir, "basename-retention-b");
+        await mkdir(firstRoot);
+        await mkdir(secondRoot);
+        const firstLog = path.join(firstRoot, "app.log");
+        const secondLog = path.join(secondRoot, "app.log");
+        const firstArchive = path.join(firstRoot, "app.log.1");
+        const secondArchive = path.join(secondRoot, "app.log.1");
+        await writeFile(firstLog, "first", "utf8");
+        await writeFile(secondLog, "second", "utf8");
+        await writeFile(firstArchive, "first archive", "utf8");
+        await writeFile(secondArchive, "second archive", "utf8");
+
+        const archives = await __testing.listArchives(
+            firstLog,
+            {
+                archivePaths: [
+                    path.join(firstRoot, "app.log.*"),
+                    path.join(secondRoot, "app.log.*"),
+                ],
+                archiveRetentionScope: "basename",
+            },
+            [firstRoot, secondRoot]
+        );
+
+        assert.deepEqual(
+            archives.map((archive) => archive.path),
+            [firstArchive]
+        );
     });
 
     it("applies archive-only retention scopes and records group/file errors", async () => {
@@ -1782,19 +1887,25 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(summary.rotatedFiles, 1);
     });
 
-    it("forwards dashboard DB path to elevated log rotation", () => {
+    it("forwards runtime environment to elevated log rotation", () => {
         const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
+        const originalTimezone = process.env.TZ;
         process.env.MIRA_DASHBOARD_DB_PATH = path.join(tempDir, "dashboard.sqlite");
+        process.env.TZ = "Europe/Oslo";
         try {
-            assert.equal(
-                __testing.elevatedLogRotationEnvironment().MIRA_DASHBOARD_DB_PATH,
-                process.env.MIRA_DASHBOARD_DB_PATH
-            );
+            const env = __testing.elevatedLogRotationEnvironment();
+            assert.equal(env.MIRA_DASHBOARD_DB_PATH, process.env.MIRA_DASHBOARD_DB_PATH);
+            assert.equal(env.TZ, "Europe/Oslo");
         } finally {
             if (originalDbPath === undefined) {
                 delete process.env.MIRA_DASHBOARD_DB_PATH;
             } else {
                 process.env.MIRA_DASHBOARD_DB_PATH = originalDbPath;
+            }
+            if (originalTimezone === undefined) {
+                delete process.env.TZ;
+            } else {
+                process.env.TZ = originalTimezone;
             }
         }
     });

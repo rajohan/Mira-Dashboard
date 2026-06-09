@@ -136,12 +136,29 @@ function validateConfig(config: LogRotationConfig): void {
     }
     validateOptionalStringArray(config.approvedRoots, "approvedRoots");
     validateOptionalStringArray(config.defaults?.approvedRoots, "defaults.approvedRoots");
+    validateOptionalStringArray(config.defaults?.paths, "defaults.paths");
     validateOptionalStringArray(config.defaults?.excludePaths, "defaults.excludePaths");
+    validateOptionalStringArray(config.defaults?.archivePaths, "defaults.archivePaths");
     validateOptionalStringArray(config.excludePaths, "excludePaths");
     validateArchiveRetentionScope(
         config.defaults?.archiveRetentionScope,
         "defaults.archiveRetentionScope"
     );
+    if (config.defaults?.archiveOnly === true) {
+        const hasArchivePaths =
+            Array.isArray(config.defaults.archivePaths) &&
+            config.defaults.archivePaths.length > 0;
+        if (!hasArchivePaths) {
+            throw new Error("defaults.archiveOnly requires defaults.archivePaths");
+        }
+    }
+    if (
+        config.defaults?.strategy !== undefined &&
+        config.defaults.strategy !== "copytruncate" &&
+        config.defaults.strategy !== "rename"
+    ) {
+        throw new Error("defaults.strategy has unsupported strategy");
+    }
     for (const group of config.groups) {
         if (typeof group.name !== "string" || group.name.trim() === "") {
             throw new Error("Every group needs a string name");
@@ -180,6 +197,13 @@ function validateConfig(config: LogRotationConfig): void {
             group.strategy !== "rename"
         ) {
             throw new Error(`Group ${group.name} has unsupported strategy`);
+        }
+        const effectivePolicy = mergePolicy(config.defaults ?? {}, group);
+        const effectiveHasArchivePaths =
+            Array.isArray(effectivePolicy.archivePaths) &&
+            effectivePolicy.archivePaths.length > 0;
+        if (effectivePolicy.archiveOnly === true && !effectiveHasArchivePaths) {
+            throw new Error("defaults.archiveOnly requires archivePaths");
         }
     }
 }
@@ -620,7 +644,10 @@ function archiveMatchesRetentionScope(
 ): boolean {
     if (policy.archiveRetentionScope === "basename") {
         const archiveBase = archiveFamilyBasename(archivePath);
-        return archiveBase === path.basename(filePath);
+        return (
+            archiveBase === path.basename(filePath) &&
+            path.dirname(archivePath) === path.dirname(filePath)
+        );
     }
     if (policy.archiveRetentionScope === "parent") {
         return (
@@ -1377,6 +1404,7 @@ function elevatedLogRotationEnvironment(): NodeJS.ProcessEnv {
         "HOME",
         "LANG",
         "NODE_ENV",
+        "TZ",
         "MIRA_DASHBOARD_DB_PATH",
         "MIRA_LOG_ROTATION_CONFIG",
     ];

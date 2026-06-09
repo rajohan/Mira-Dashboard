@@ -727,11 +727,40 @@ describe("server bootstrap", () => {
         const calls: string[] = [];
         serverStartTesting.removeCloseCleanup();
         try {
-            serverStartTesting.installCloseCleanup(() => calls.push("first"));
-            serverStartTesting.installCloseCleanup(() => calls.push("second"));
+            serverStartTesting.installCloseCleanup(() => {
+                calls.push("first");
+            });
+            serverStartTesting.installCloseCleanup(() => {
+                calls.push("second");
+            });
             server.emit("close");
             assert.deepEqual(calls, ["first", "second"]);
         } finally {
+            serverStartTesting.removeCloseCleanup();
+        }
+    });
+
+    it("logs async server close cleanup failures", async () => {
+        const errors: unknown[][] = [];
+        const originalConsoleError = console.error;
+        console.error = (...args: unknown[]) => {
+            errors.push(args);
+        };
+        serverStartTesting.removeCloseCleanup();
+        try {
+            serverStartTesting.installCloseCleanup(async () => {
+                throw new Error("async cleanup failed");
+            });
+            server.emit("close");
+            await new Promise((resolve) => setImmediate(resolve));
+            assert.equal(
+                errors.some((entry) =>
+                    String(entry[0]).includes("Failed to run server close cleanup")
+                ),
+                true
+            );
+        } finally {
+            console.error = originalConsoleError;
             serverStartTesting.removeCloseCleanup();
         }
     });
@@ -774,9 +803,10 @@ describe("server bootstrap", () => {
             handleServerListening();
             assert.equal(initializedToken, "test-token");
             server.emit("close");
+            await stopScheduledJobScheduler();
+            await new Promise((resolve) => setImmediate(resolve));
             assert.equal(shutdownCalled, true);
             shutdownCalled = false;
-            await stopScheduledJobScheduler();
             gateway.init = () => {
                 throw new Error("gateway failed");
             };
@@ -787,6 +817,20 @@ describe("server bootstrap", () => {
             assert.throws(() => handleServerListening(), /gateway failed/u);
             assert.equal(closeCalled, true);
             assert.match(String(errors.at(-1)?.[0]), /Failed to start background/u);
+            server.close = ((callback?: (error?: Error) => void) => {
+                closeCalled = true;
+                callback?.(new Error("close failed"));
+                return server;
+            }) as unknown as typeof server.close;
+            assert.throws(() => handleServerListening(), /gateway failed/u);
+            await new Promise((resolve) => setImmediate(resolve));
+            assert.equal(closeCalled, true);
+            assert.equal(
+                errors.some((entry) =>
+                    String(entry[0]).includes("Failed to close server:")
+                ),
+                true
+            );
             server.close = originalClose;
             closeCalled = false;
             gateway.init = (token: string) => {
@@ -832,6 +876,7 @@ describe("server bootstrap", () => {
                 () => handleServerListening(),
                 /post scheduler cleanup failed/u
             );
+            await new Promise((resolve) => setImmediate(resolve));
             assert.equal(
                 errors.some((entry) =>
                     String(entry[0]).includes("Failed to stop gateway")

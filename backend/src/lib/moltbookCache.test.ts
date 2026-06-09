@@ -125,6 +125,7 @@ describe("Moltbook cache helpers", () => {
         assert.equal(home.consecutiveFailures, 0);
         assert.deepEqual(home.meta, {});
 
+        // Intentionally create invalid metadata to test defensive row parsing.
         db.prepare(
             "UPDATE cache_entries SET consecutive_failures = ?, metadata_json = ? WHERE key = ?"
         ).run("", "", "moltbook.home");

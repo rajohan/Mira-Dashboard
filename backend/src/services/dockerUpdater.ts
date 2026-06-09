@@ -613,32 +613,44 @@ function createNotification(
     title: string,
     description: string,
     dedupeKey: string,
-    type: "info" | "error" = "info"
+    type: "info" | "error" = "info",
+    metadata: JsonRecord = {}
 ) {
     const timestamp = nowIso();
     db.prepare(
         `INSERT INTO notifications (
             title, description, type, source, dedupe_key, metadata_json,
             is_read, created_at, updated_at, occurred_at
-         ) VALUES (?, ?, ?, 'docker-updater', ?, '{}', 0, ?, ?, ?)
+         ) VALUES (?, ?, ?, 'docker-updater', ?, ?, 0, ?, ?, ?)
          ON CONFLICT(dedupe_key) DO UPDATE SET
             title = excluded.title,
             description = excluded.description,
             type = excluded.type,
+            metadata_json = excluded.metadata_json,
             is_read = 0,
             updated_at = excluded.updated_at,
             occurred_at = excluded.occurred_at`
-    ).run(title, description, type, dedupeKey, timestamp, timestamp, timestamp);
+    ).run(
+        title,
+        description,
+        type,
+        dedupeKey,
+        JSON.stringify(metadata),
+        timestamp,
+        timestamp,
+        timestamp
+    );
 }
 
 function createNotificationBestEffort(
     title: string,
     description: string,
     dedupeKey: string,
-    type: "info" | "error" = "info"
+    type: "info" | "error" = "info",
+    metadata: JsonRecord = {}
 ) {
     try {
-        createNotification(title, description, dedupeKey, type);
+        createNotification(title, description, dedupeKey, type, metadata);
     } catch (error) {
         console.error("[DockerUpdater] Failed to persist notification", {
             dedupeKey,
@@ -1177,11 +1189,18 @@ async function applyServiceUpdate(
                     targetComposeImageRef: target,
                 }
             );
+            const [os = "linux", architecture = null] =
+                servicePlatform(lockedService).split("/");
             createNotificationBestEffort(
                 `Docker ${eventPrefix} update failed`,
                 `${serviceLabel(lockedService)}: ${message}`,
                 `docker:updater:${eventPrefix}-failed:${lockedService.id}:${nowIso().slice(0, 10)}`,
-                "error"
+                "error",
+                {
+                    architecture,
+                    digest: lockedService.latest_digest,
+                    os,
+                }
             );
             return {
                 step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,

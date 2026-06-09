@@ -9,19 +9,20 @@ import {
 } from "./services/scheduledJobs.js";
 
 let isStarting = false;
-let afterBackgroundServicesStartedForTest: (() => void) | undefined;
-const closeCleanups: Array<() => void> = [];
+let afterBackgroundServicesStartedForTest: (() => void | Promise<void>) | undefined;
+const closeCleanups: Array<() => void | Promise<void>> = [];
 let closeCleanupInstalled = false;
 
-function rollback(fn: () => void, label: string): void {
+async function rollback(fn: () => void | Promise<void>, label: string): Promise<unknown> {
     try {
-        fn();
+        return await fn();
     } catch (cleanupError) {
         console.error(label, cleanupError);
+        return cleanupError;
     }
 }
 
-function installCloseCleanup(cleanup: () => void): () => void {
+function installCloseCleanup(cleanup: () => void | Promise<void>): () => void {
     closeCleanups.push(cleanup);
     if (!closeCleanupInstalled) {
         closeCleanupInstalled = true;
@@ -30,7 +31,7 @@ function installCloseCleanup(cleanup: () => void): () => void {
     return () => removeCloseCleanup(cleanup);
 }
 
-function removeCloseCleanup(cleanup?: () => void): void {
+function removeCloseCleanup(cleanup?: () => void | Promise<void>): void {
     if (cleanup) {
         const index = closeCleanups.indexOf(cleanup);
         if (index !== -1) {
@@ -51,8 +52,20 @@ function runCloseCleanups(): void {
     closeCleanupInstalled = false;
     const cleanups = closeCleanups.splice(0);
     for (const cleanup of cleanups) {
-        rollback(cleanup, "[Backend] Failed to run server close cleanup:");
+        void rollback(cleanup, "[Backend] Failed to run server close cleanup:");
     }
+}
+
+function closeServerForRollback(): Promise<void> {
+    return new Promise((resolve, reject) => {
+        server.close((error) => {
+            if (error) {
+                reject(error);
+            } else {
+                resolve();
+            }
+        });
+    });
 }
 
 /** Starts Gateway and the scheduled job scheduler after the HTTP server is listening. */
@@ -73,15 +86,18 @@ export function handleServerListening(): void {
 
         startScheduledJobScheduler();
         scheduledJobSchedulerStarted = true;
-        removeBackgroundCleanup = installCloseCleanup(() => {
+        removeBackgroundCleanup = installCloseCleanup(async () => {
             if (scheduledJobSchedulerStarted) {
-                rollback(
+                await rollback(
                     stopScheduledJobScheduler,
                     "[Backend] Failed to stop scheduled job scheduler:"
                 );
             }
             if (gatewayStarted) {
-                rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
+                await rollback(
+                    () => gateway.shutdown(),
+                    "[Backend] Failed to stop gateway:"
+                );
             }
         });
         afterBackgroundServicesStartedForTest?.();
@@ -89,15 +105,15 @@ export function handleServerListening(): void {
         console.error("[Backend] Failed to start background services:", error);
         removeBackgroundCleanup?.();
         if (scheduledJobSchedulerStarted) {
-            rollback(
+            void rollback(
                 stopScheduledJobScheduler,
                 "[Backend] Failed to stop scheduled job scheduler:"
             );
         }
         if (gatewayStarted) {
-            rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
+            void rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
         }
-        rollback(() => server.close(), "[Backend] Failed to close server:");
+        void rollback(closeServerForRollback, "[Backend] Failed to close server:");
         throw error;
     }
 }
@@ -118,7 +134,7 @@ export function startBackendServer(port = resolveListenPort()): void {
         isStarting = false;
         console.error("[Backend] Failed to start server:", error);
         process.exitCode = 1;
-        server.close();
+        void rollback(closeServerForRollback, "[Backend] Failed to close server:");
     };
     server.once("listening", onListening);
     server.once("error", onError);
@@ -151,7 +167,7 @@ if (shouldStartOnImport()) {
 }
 
 function setAfterBackgroundServicesStartedForTest(
-    callback: (() => void) | undefined
+    callback: (() => void | Promise<void>) | undefined
 ): void {
     afterBackgroundServicesStartedForTest = callback;
 }

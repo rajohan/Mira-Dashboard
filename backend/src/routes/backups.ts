@@ -236,6 +236,10 @@ async function startBackupJob(type: BackupJob["type"], command: string) {
             void refresh.timed.catch((error: unknown) => {
                 if (!refresh.isTimeoutError(error)) return;
                 refresh.cancel();
+                if (job.refreshPendingPromise === refresh.refresh) {
+                    job.refreshPending = false;
+                    job.refreshPendingPromise = undefined;
+                }
                 job.stderr = trimOutput(
                     `${job.stderr}\nStatus refresh failed: ${errorMessage(error, "Unknown error")}`.trim()
                 );

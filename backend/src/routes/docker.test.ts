@@ -34,6 +34,24 @@ function dockerNotifications() {
     return rows.map((row) => ({ ...row }));
 }
 
+function dockerNotificationRows() {
+    return db
+        .prepare(
+            `SELECT id, title, type, dedupe_key, metadata_json, is_read
+             FROM notifications
+             WHERE source IN ('docker', 'docker-updater')
+             ORDER BY dedupe_key`
+        )
+        .all() as Array<{
+        dedupe_key: string;
+        id: number;
+        is_read: number;
+        metadata_json: string;
+        title: string;
+        type: string;
+    }>;
+}
+
 const originalPath = process.env.PATH;
 const originalDockerRoot = process.env.MIRA_DOCKER_ROOT;
 const originalDockerAppsRoot = process.env.MIRA_DOCKER_APPS_ROOT;
@@ -422,10 +440,12 @@ process.stdout.write("compose " + process.argv.slice(2).join(" ") + "\n");
 
 async function startServer(updaterCwd: string): Promise<TestServer> {
     const { default: dockerRoutes, __testing } = await import("./docker.js");
+    const { default: notificationsRoutes } = await import("./notifications.js");
     void updaterCwd;
     __testing.setDockerExecPidWaitTimeoutForTests(100);
     const app = express();
     dockerRoutes(app);
+    notificationsRoutes(app);
     const server = http.createServer(app);
 
     await new Promise<void>((resolve, reject) => {
@@ -783,7 +803,7 @@ describe("docker routes", { concurrency: false }, () => {
                 current_digest: "sha256:a",
                 latest_digest: "sha256:b",
             } as never),
-            false
+            true
         );
         assert.equal(
             __testing.hasUpdaterCandidate({
@@ -2142,7 +2162,7 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(services.status, 200);
         assert.equal(services.body.summary.total, 3);
         assert.equal(services.body.summary.enabled, 2);
-        assert.equal(services.body.summary.updateAvailable, 2);
+        assert.equal(services.body.summary.updateAvailable, 3);
         assert.equal(services.body.summary.failed, 2);
         assert.deepEqual(services.body.services[0]?.metadata, { owner: "mira" });
         assert.deepEqual(services.body.services[2]?.metadata, {});
@@ -2293,6 +2313,35 @@ describe("docker routes", { concurrency: false }, () => {
             );
             assert.equal(failedAutoStep?.ok, false);
             assert.match(failedAutoStep?.stderr ?? "", /compose failed/u);
+            const failedNotification = dockerNotificationRows().find((notification) =>
+                notification.dedupe_key.includes(":auto-failed:")
+            );
+            assert.ok(failedNotification);
+            assert.equal(failedNotification.is_read, 0);
+            const failureMetadata = JSON.parse(failedNotification.metadata_json) as {
+                architecture?: string;
+                digest?: string;
+                os?: string;
+            };
+            assert.deepEqual(
+                {
+                    architecture: failureMetadata.architecture,
+                    digest: failureMetadata.digest,
+                    os: failureMetadata.os,
+                },
+                {
+                    architecture: process.arch === "arm64" ? "arm64" : "amd64",
+                    digest: "sha256:new",
+                    os: "linux",
+                }
+            );
+            const markedRead = await requestJson<{ ok: boolean }>(
+                server,
+                `/api/notifications/${failedNotification.id}/read`,
+                { method: "POST" }
+            );
+            assert.equal(markedRead.status, 200);
+            assert.equal(markedRead.body.ok, true);
             const failedAgain = await withDockerUpdaterFetch(() =>
                 withEnvValue("MIRA_DOCKER_UPDATER_SKIP_REGISTRY", undefined, () =>
                     requestJson<{ success: boolean }>(server, "/api/docker/updater/run", {
@@ -2303,6 +2352,11 @@ describe("docker routes", { concurrency: false }, () => {
             );
             assert.equal(failedAgain.status, 200);
             assert.equal(failedAgain.body.success, false);
+            const reopenedNotification = dockerNotificationRows().find(
+                (notification) => notification.id === failedNotification.id
+            );
+            assert.ok(reopenedNotification);
+            assert.equal(reopenedNotification.is_read, 0);
         });
     });
 

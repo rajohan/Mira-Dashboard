@@ -1079,21 +1079,24 @@ export function startScheduledJobScheduler(): void {
         return;
     }
     seedDefaultScheduledJobs();
-    scheduler = setInterval(() => {
-        if (schedulerTickRunning) {
-            return;
-        }
-        schedulerTickRunning = true;
-        schedulerTickPromise = runDueJobs()
-            .catch((error) => {
-                console.error("[scheduledJobs] runDueJobs failed", error);
-            })
-            .finally(() => {
-                schedulerTickRunning = false;
-                schedulerTickPromise = null;
-            });
-    }, schedulerTickMs);
+    startSchedulerTick();
+    scheduler = setInterval(startSchedulerTick, schedulerTickMs);
     scheduler.unref();
+}
+
+function startSchedulerTick(): void {
+    if (schedulerTickRunning) {
+        return;
+    }
+    schedulerTickRunning = true;
+    schedulerTickPromise = runDueJobs()
+        .catch((error) => {
+            console.error("[scheduledJobs] runDueJobs failed", error);
+        })
+        .finally(() => {
+            schedulerTickRunning = false;
+            schedulerTickPromise = null;
+        });
 }
 
 /** Stops the backend-native scheduled job loop. */

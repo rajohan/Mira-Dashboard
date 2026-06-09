@@ -603,7 +603,7 @@ describe("backup routes", () => {
         }
     });
 
-    it("keeps backup jobs pending until a timed-out status refresh settles", async () => {
+    it("releases backup jobs when status refresh times out", async () => {
         const backupRefreshTimeoutMs = 5;
         backupTesting.setBackupRefreshTimeoutMsForTest(backupRefreshTimeoutMs);
         let finishRefresh: ((value: { refreshed: string[] }) => void) | undefined;
@@ -642,23 +642,12 @@ describe("backup routes", () => {
             }>(server, "/api/backups/kopia");
             assert.equal(timedOut.body.job?.id, firstJobId);
             assert.equal(timedOut.body.job.status, "done");
-            assert.equal(timedOut.body.job.refreshPending, true);
+            assert.equal(timedOut.body.job.refreshPending, false);
             assert.match(timedOut.body.job.stderr, /Status refresh failed/u);
             backupTesting.setRefreshBackupCacheForTest(async (key) => {
                 refreshedKeys.push(key);
                 return { refreshed: [key] };
             });
-            const blockedRestart = await requestJson<{
-                ok: boolean;
-                job: { id: string; refreshPending: boolean };
-            }>(server, "/api/backups/kopia/run", { method: "POST" });
-            assert.equal(blockedRestart.status, 200);
-            assert.equal(blockedRestart.body.ok, true);
-            assert.equal(blockedRestart.body.job.id, firstJobId);
-            assert.equal(blockedRestart.body.job.refreshPending, true);
-            rejectRefresh(new Error("cancelled refresh rejected"));
-            await waitForDone(server, "/api/backups/kopia");
-
             const restarted = await requestJson<{
                 ok: boolean;
                 job: { id: string; refreshPending: boolean };
@@ -666,6 +655,7 @@ describe("backup routes", () => {
             assert.equal(restarted.status, 200);
             assert.equal(restarted.body.ok, true);
             assert.notEqual(restarted.body.job.id, firstJobId);
+            rejectRefresh(new Error("cancelled refresh rejected"));
             await waitForDone(server, "/api/backups/kopia");
             await waitForRefresh("backup.kopia.status", refreshedKeys);
         } finally {
