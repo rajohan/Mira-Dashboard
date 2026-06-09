@@ -44,12 +44,12 @@ function getComposeCommand(composePath: string, serviceName: string) {
     ) {
         return {
             file: wrapper,
-            args: ["-f", composePath, "up", "-d", serviceName],
+            args: ["-f", composePath, "up", "-d", "--pull", "always", serviceName],
         };
     }
     return {
         file: getDockerBin(),
-        args: ["compose", "-f", composePath, "up", "-d", serviceName],
+        args: ["compose", "-f", composePath, "up", "-d", "--pull", "always", serviceName],
     };
 }
 
@@ -543,6 +543,17 @@ function setNestedValue(target: JsonRecord, dottedPath: string, value: string) {
     current[parts.at(-1) as string] = value;
 }
 
+function applyFileMetadata(
+    targetPath: string,
+    stats: Pick<fs.Stats, "mode" | "uid" | "gid">
+) {
+    fs.chmodSync(targetPath, stats.mode);
+    const currentStats = fs.statSync(targetPath);
+    if (currentStats.uid !== stats.uid || currentStats.gid !== stats.gid) {
+        fs.chownSync(targetPath, stats.uid, stats.gid);
+    }
+}
+
 function insertEvent(
     service: ManagedServiceRow,
     eventType: string,
@@ -667,6 +678,7 @@ async function applyComposeUpdateUnlocked(
     const composeImageField = service.compose_image_field;
     const composePath = service.compose_path;
     const raw = fs.readFileSync(composePath, "utf8");
+    const originalStats = fs.statSync(composePath);
     const doc = YAML.parse(raw) as JsonRecord;
     setNestedValue(doc, composeImageField, targetImageRef);
     let composeStarted = false;
@@ -676,6 +688,7 @@ async function applyComposeUpdateUnlocked(
     );
     try {
         fs.writeFileSync(tempPath, YAML.stringify(doc));
+        applyFileMetadata(tempPath, originalStats);
         fs.renameSync(tempPath, composePath);
         const command = getComposeCommand(composePath, service.service_name);
         composeStarted = true;
@@ -695,6 +708,7 @@ async function applyComposeUpdateUnlocked(
         let restored = false;
         try {
             fs.writeFileSync(composePath, raw);
+            applyFileMetadata(composePath, originalStats);
             restored = true;
         } catch (rollbackError) {
             console.error("[DockerUpdater] Failed to restore compose file", {
@@ -1269,6 +1283,7 @@ export async function runDockerUpdaterService(
 
 export const __testing = {
     applyServiceUpdate,
+    applyFileMetadata,
     buildTargetImageRef,
     fetchJson,
     getDockerAppsRoot,

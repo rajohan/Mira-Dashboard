@@ -285,6 +285,31 @@ function logRotationFailureMessage(value: unknown): string {
         if (typeof stderr === "string" && stderr.trim()) {
             return stderr.trim();
         }
+        const topLevelSummary = (value as { summary?: unknown }).summary;
+        if (typeof topLevelSummary === "string" && topLevelSummary.trim()) {
+            return topLevelSummary.trim();
+        }
+        const topLevelMessage = (value as { message?: unknown }).message;
+        if (typeof topLevelMessage === "string" && topLevelMessage.trim()) {
+            return topLevelMessage.trim();
+        }
+        const topLevelError = (value as { error?: unknown }).error;
+        if (typeof topLevelError === "string" && topLevelError.trim()) {
+            return topLevelError.trim();
+        }
+        const topLevelErrors = (value as { errors?: unknown }).errors;
+        if (Array.isArray(topLevelErrors)) {
+            const firstTopLevelMessage = topLevelErrors.find(
+                (entry): entry is { message: string } =>
+                    Boolean(entry) &&
+                    typeof entry === "object" &&
+                    typeof (entry as { message?: unknown }).message === "string" &&
+                    Boolean((entry as { message: string }).message.trim())
+            )?.message;
+            if (firstTopLevelMessage) {
+                return firstTopLevelMessage.trim();
+            }
+        }
         const result = (value as { result?: unknown }).result;
         if (result && typeof result === "object" && !Array.isArray(result)) {
             const summary = (result as { summary?: unknown }).summary;

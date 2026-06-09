@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, afterEach, before, beforeEach, describe, it, mock } from "node:test";
@@ -256,7 +256,10 @@ process.stdout.write("updated\n");
             fetchUrls.some((url) => url.includes("ghcr.io/v2/owner/app/manifests/stable"))
         );
         assert.match(await readFile(composePath, "utf8"), /nginx:1\.2\.1/u);
-        assert.match(await readFile(dockerCalls, "utf8"), /compose -f .* up -d web/u);
+        assert.match(
+            await readFile(dockerCalls, "utf8"),
+            /compose -f .* up -d --pull always web/u
+        );
         const notificationCount = dbHandle
             .prepare("SELECT COUNT(*) AS count FROM notifications")
             .get() as { count: number };
@@ -1549,7 +1552,15 @@ setTimeout(() => process.exit(0), 30);
                     updater.__testing.getComposeCommand("/srv/app/compose.yaml", "web"),
                     {
                         file: "/tmp/mira-compose-wrapper",
-                        args: ["-f", "/srv/app/compose.yaml", "up", "-d", "web"],
+                        args: [
+                            "-f",
+                            "/srv/app/compose.yaml",
+                            "up",
+                            "-d",
+                            "--pull",
+                            "always",
+                            "web",
+                        ],
                     }
                 );
             }
@@ -1588,12 +1599,45 @@ setTimeout(() => process.exit(0), 30);
                             "/srv/app/compose.yaml",
                             "up",
                             "-d",
+                            "--pull",
+                            "always",
                             "web",
                         ],
                     }
                 );
             }
         );
+        const metadataTarget = path.join(tempDir, "metadata-helper.yaml");
+        await writeFile(metadataTarget, "services: {}\n", "utf8");
+        const chownCalls: Array<[string, number, number]> = [];
+        const statMock = mock.method(
+            fs,
+            "statSync",
+            () =>
+                ({
+                    mode: 0o100644,
+                    uid: 1000,
+                    gid: 1000,
+                }) as fs.Stats
+        );
+        const chownMock = mock.method(
+            fs,
+            "chownSync",
+            (targetPath: string, uid: number, gid: number) => {
+                chownCalls.push([targetPath, uid, gid]);
+            }
+        );
+        try {
+            updater.__testing.applyFileMetadata(metadataTarget, {
+                mode: 0o100600,
+                uid: 2000,
+                gid: 2000,
+            } as fs.Stats);
+        } finally {
+            statMock.mock.restore();
+            chownMock.mock.restore();
+        }
+        assert.deepEqual(chownCalls, [[metadataTarget, 2000, 2000]]);
         assert.equal(
             updater.__testing.isSafeTagRegexPattern(String.raw`^1\.2\.[0-9]+$`),
             true
@@ -2723,6 +2767,73 @@ process.exit(0);
         assert.match(result.stderr, /compose failed/u);
         assert.equal(await readFile(composePath, "utf8"), originalCompose);
         assert.equal(await readFile(callLogPath, "utf8"), "compose\ncompose\n");
+    });
+
+    it("preserves compose file permissions when rewriting services", async () => {
+        const appDir = path.join(tempDir, "metadata-preserve");
+        const binDir = path.join(tempDir, "bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        const composePath = path.join(appDir, "compose.yaml");
+        const callLogPath = path.join(tempDir, "metadata-compose-calls.log");
+        await writeFile(composePath, "services:\n  web:\n    image: nginx:1\n", "utf8");
+        await chmod(composePath, 0o600);
+        const originalStats = await stat(composePath);
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            String.raw`#!/usr/bin/env node
+const fs = require("node:fs");
+fs.appendFileSync(${JSON.stringify(callLogPath)}, process.argv.slice(2).join(" ") + "\n");
+process.exit(0);
+`
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(
+            `./dockerUpdater.js?metadata-preserve=${Date.now()}`
+        );
+        const service = {
+            id: 1,
+            app_slug: "metadata-preserve",
+            service_name: "web",
+            compose_path: composePath,
+            image_repo: "nginx",
+            compose_image_ref: "nginx:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+            )
+            .run(service);
+
+        const result = await updater.__testing.applyServiceUpdate(service, "manual");
+
+        assert.equal(result.ok, true);
+        assert.match(await readFile(composePath, "utf8"), /nginx:2/u);
+        assert.match(await readFile(callLogPath, "utf8"), /up -d --pull always web/u);
+        const updatedStats = await stat(composePath);
+        assert.equal(updatedStats.mode & 0o777, originalStats.mode & 0o777);
+        assert.equal(updatedStats.uid, originalStats.uid);
+        assert.equal(updatedStats.gid, originalStats.gid);
     });
 
     it("restores the compose file when writing the updated file fails", async () => {

@@ -130,6 +130,34 @@ test("summarizes structured log rotation failures", () => {
     assert.equal(
         __testing.logRotationFailureMessage({
             stderr: "",
+            summary: "top summary failure",
+            result: { summary: " summary failure " },
+        }),
+        "top summary failure"
+    );
+    assert.equal(
+        __testing.logRotationFailureMessage({
+            message: "top message failure",
+            result: { summary: " summary failure " },
+        }),
+        "top message failure"
+    );
+    assert.equal(
+        __testing.logRotationFailureMessage({
+            error: "top error failure",
+            result: { summary: " summary failure " },
+        }),
+        "top error failure"
+    );
+    assert.equal(
+        __testing.logRotationFailureMessage({
+            errors: [{ message: "" }, { message: "top first real error" }],
+            result: { summary: " summary failure " },
+        }),
+        "top first real error"
+    );
+    assert.equal(
+        __testing.logRotationFailureMessage({
             result: { summary: " summary failure " },
         }),
         "summary failure"
