@@ -556,16 +556,16 @@ async function fetchSpydebergWeather() {
             source: "wttr.in",
             data: {
                 location: SPYDEBERG.name,
-                temperatureC: current.temp_C ? Number(current.temp_C) : null,
-                feelsLikeC: current.FeelsLikeC ? Number(current.FeelsLikeC) : null,
-                humidityPercent: current.humidity ? Number(current.humidity) : null,
-                windKph: current.windspeedKmph ? Number(current.windspeedKmph) : null,
+                temperatureC: toNullableNumber(current.temp_C),
+                feelsLikeC: toNullableNumber(current.FeelsLikeC),
+                humidityPercent: toNullableNumber(current.humidity),
+                windKph: toNullableNumber(current.windspeedKmph),
                 description:
                     asRecord(
                         Array.isArray(current.weatherDesc) ? current.weatherDesc[0] : null
                     ).value || "Unknown",
-                minTempC: today.mintempC ? Number(today.mintempC) : null,
-                maxTempC: today.maxtempC ? Number(today.maxtempC) : null,
+                minTempC: toNullableNumber(today.mintempC),
+                maxTempC: toNullableNumber(today.maxtempC),
                 forecast: (Array.isArray(data.weather) ? data.weather : [])
                     .slice(0, 3)
                     .map((dayValue) => {
@@ -575,8 +575,8 @@ async function fetchSpydebergWeather() {
                         );
                         return {
                             date: day.date,
-                            minTempC: day.mintempC ? Number(day.mintempC) : null,
-                            maxTempC: day.maxtempC ? Number(day.maxtempC) : null,
+                            minTempC: toNullableNumber(day.mintempC),
+                            maxTempC: toNullableNumber(day.maxtempC),
                             description:
                                 asRecord(
                                     Array.isArray(hourly.weatherDesc)

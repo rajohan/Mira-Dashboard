@@ -306,18 +306,18 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                 return {
                     current_condition: [
                         {
-                            temp_C: "4",
-                            FeelsLikeC: "1",
-                            humidity: "80",
-                            windspeedKmph: "12",
+                            temp_C: "0",
+                            FeelsLikeC: "0",
+                            humidity: "0",
+                            windspeedKmph: "0",
                             weatherDesc: [{ value: "Cloudy" }],
                         },
                     ],
                     weather: [
                         {
                             date: "2026-06-06",
-                            mintempC: "2",
-                            maxtempC: "8",
+                            mintempC: "0",
+                            maxtempC: "0",
                             hourly: [{ weatherDesc: [{ value: "Rain" }] }],
                         },
                     ],
@@ -327,7 +327,25 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                 await refreshCacheProducer("weather.spydeberg");
             }
         );
-        assert.equal(cacheRow("weather.spydeberg").source, "wttr.in");
+        const wttr = cacheRow("weather.spydeberg");
+        assert.equal(wttr.source, "wttr.in");
+        const weatherData = wttr.data as {
+            feelsLikeC: number | null;
+            forecast: Array<{ maxTempC: number | null; minTempC: number | null }>;
+            humidityPercent: number | null;
+            maxTempC: number | null;
+            minTempC: number | null;
+            temperatureC: number | null;
+            windKph: number | null;
+        };
+        assert.equal(weatherData.temperatureC, 0);
+        assert.equal(weatherData.feelsLikeC, 0);
+        assert.equal(weatherData.humidityPercent, 0);
+        assert.equal(weatherData.windKph, 0);
+        assert.equal(weatherData.minTempC, 0);
+        assert.equal(weatherData.maxTempC, 0);
+        assert.equal(weatherData.forecast[0]?.minTempC, 0);
+        assert.equal(weatherData.forecast[0]?.maxTempC, 0);
 
         await withFetch(
             (url) => {

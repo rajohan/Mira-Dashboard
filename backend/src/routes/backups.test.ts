@@ -463,10 +463,12 @@ describe("backup routes", () => {
         const brokenTempDir = await mkdtemp(
             path.join(os.tmpdir(), "mira-backup-broken-")
         );
-        const brokenServer = await startServerWithBackupShell(
-            path.join(brokenTempDir, "missing-shell")
-        );
+        let brokenServer: TestServer | undefined;
+        await server.close();
         try {
+            brokenServer = await startServerWithBackupShell(
+                path.join(brokenTempDir, "missing-shell")
+            );
             const started = await requestJson<{ error: string }>(
                 brokenServer,
                 "/api/backups/kopia/run",
@@ -483,9 +485,13 @@ describe("backup routes", () => {
             assert.equal(current.body.job, null);
         } finally {
             try {
-                await brokenServer.close();
+                await brokenServer?.close();
             } finally {
-                await rm(brokenTempDir, { recursive: true, force: true });
+                try {
+                    await rm(brokenTempDir, { recursive: true, force: true });
+                } finally {
+                    server = await startServer(tempDir);
+                }
             }
         }
     });

@@ -579,7 +579,7 @@ async function seedDockerUpdaterState(tempDir: string): Promise<void> {
         "app",
         composePath,
         "repo/app",
-        "repo/app:1.0.0",
+        "repo/app:1.0.0@sha256:old",
         "services.app.image",
         "1.0.0",
         "sha256:old",
@@ -2371,7 +2371,7 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(fallbackFailure.body.error, "No update available");
             assert.deepEqual(fallbackFailure.body.service, {
                 appSlug: "media",
-                composeImageRef: "repo/app:1.0.0",
+                composeImageRef: "repo/app:1.0.0@sha256:old",
                 currentDigest: "sha256:old",
                 currentTag: "1.0.0",
                 enabled: true,

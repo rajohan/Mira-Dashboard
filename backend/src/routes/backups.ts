@@ -58,14 +58,12 @@ function trimOutput(text: string): string {
 function refreshBackupCacheWithTimeout(key: string, timeoutMs = 30_000) {
     let timeout: NodeJS.Timeout | null = null;
     let cancelled = false;
+    const timeoutError = new Error("Status refresh timed out");
     const refresh = refreshBackupCache(key);
     const timed = Promise.race([
         refresh,
         new Promise((_, reject) => {
-            timeout = setTimeout(
-                () => reject(new Error("Status refresh timed out")),
-                timeoutMs
-            );
+            timeout = setTimeout(() => reject(timeoutError), timeoutMs);
             timeout.unref();
         }),
     ]).finally(() => {
@@ -79,6 +77,9 @@ function refreshBackupCacheWithTimeout(key: string, timeoutMs = 30_000) {
         },
         get cancelled() {
             return cancelled;
+        },
+        isTimeoutError(error: unknown): boolean {
+            return error === timeoutError;
         },
         refresh,
         timed,
@@ -231,7 +232,8 @@ async function startBackupJob(type: BackupJob["type"], command: string) {
                 cacheKey,
                 backupRefreshTimeoutMs
             );
-            void refresh.timed.catch(() => {
+            void refresh.timed.catch((error: unknown) => {
+                if (!refresh.isTimeoutError(error)) return;
                 refresh.cancel();
                 job.refreshPending = false;
             });
