@@ -18,6 +18,8 @@ const BUNDLED_CONFIG_PATH = fileURLToPath(
 );
 const DEFAULT_APPROVED_ROOTS = ["/opt/docker/data"];
 const ROTATED_SUFFIX_RE = /\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z(?:\.gz)?$/u;
+const ARCHIVE_FAMILY_SUFFIX_RE =
+    /(?:\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z|\.\d+)(?:\.gz)?$/u;
 const LOCK_FILE = path.resolve(process.cwd(), "data/log-rotation.lock");
 const LOCK_RECLAIM_DIR = `${LOCK_FILE}.reclaim`;
 
@@ -86,6 +88,7 @@ interface VerifiedLogFile {
 }
 
 type RetentionArchive = { path: string; mtimeMs: number; compress: boolean };
+type RotationResult = { archivePath: string; compressed: boolean; warning?: string };
 
 interface LogRotationConfig {
     version: number;
@@ -465,6 +468,28 @@ async function gzipFile(filePath: string, approvedRoots: string[]): Promise<stri
     }
 }
 
+async function compressRotatedArchive(
+    archivePath: string,
+    compress: boolean,
+    approvedRoots: string[]
+): Promise<RotationResult> {
+    if (!compress) {
+        return { archivePath, compressed: false };
+    }
+    try {
+        return {
+            archivePath: await gzipFile(archivePath, approvedRoots),
+            compressed: true,
+        };
+    } catch (error) {
+        return {
+            archivePath,
+            compressed: false,
+            warning: `Compression failed for ${archivePath}: ${caughtMessage(error)}`,
+        };
+    }
+}
+
 function archiveBasePath(filePath: string, now: Date): string {
     const stamp = now.toISOString().replaceAll(":", "-");
     return `${filePath}.${stamp}`;
@@ -476,7 +501,7 @@ async function rotateCopyTruncate(
     archivePath: string,
     compress: boolean,
     approvedRoots: string[]
-): Promise<string> {
+): Promise<RotationResult> {
     await assertSafeNewFileParent(archivePath, approvedRoots);
     const destination = await createNoFollowFile(archivePath, file.stat.mode & 0o777, {
         uid: file.stat.uid,
@@ -493,7 +518,7 @@ async function rotateCopyTruncate(
         await assertFileIdentity(filePath, file.stat, approvedRoots);
         await file.handle.truncate(0);
         committed = true;
-        return compress ? gzipFile(archivePath, approvedRoots) : archivePath;
+        return compressRotatedArchive(archivePath, compress, approvedRoots);
     } catch (error) {
         if (!committed) {
             await fs.unlink(archivePath).catch((unlinkError: unknown) => {
@@ -517,7 +542,7 @@ async function rotateRename(
     archivePath: string,
     compress: boolean,
     approvedRoots: string[]
-): Promise<string> {
+): Promise<RotationResult> {
     await assertFileIdentity(filePath, file.stat, approvedRoots);
     await fs.rename(filePath, archivePath);
     try {
@@ -530,7 +555,11 @@ async function rotateRename(
         await fs.rename(archivePath, filePath).catch(() => {});
         throw error;
     }
-    return compress ? gzipFile(archivePath, approvedRoots) : archivePath;
+    return compressRotatedArchive(archivePath, compress, approvedRoots);
+}
+
+function archiveFamilyBasename(archivePath: string): string {
+    return path.basename(archivePath).replace(ARCHIVE_FAMILY_SUFFIX_RE, "");
 }
 
 function managedArchiveRegexFor(filePath: string): RegExp {
@@ -545,7 +574,7 @@ function archiveMatchesRetentionScope(
     policy: LogRotationPolicy
 ): boolean {
     if (policy.archiveRetentionScope === "basename") {
-        const archiveBase = path.basename(archivePath).replace(ROTATED_SUFFIX_RE, "");
+        const archiveBase = archiveFamilyBasename(archivePath);
         return archiveBase === path.basename(filePath);
     }
     if (policy.archiveRetentionScope === "parent") {
@@ -655,7 +684,7 @@ async function applyRetention(
 
 function archiveRetentionKey(archivePath: string, policy: LogRotationPolicy): string {
     if (policy.archiveRetentionScope === "basename") {
-        const basename = path.basename(archivePath).replace(ROTATED_SUFFIX_RE, "");
+        const basename = archiveFamilyBasename(archivePath);
         return path.join(path.dirname(archivePath), basename);
     }
     if (policy.archiveRetentionScope === "parent") {
@@ -1063,18 +1092,22 @@ export async function runLogRotationService(
                             continue;
                         }
                         const archivePath = archiveBasePath(filePath, now);
-                        let finalArchive: string;
+                        let rotation: RotationResult;
                         if (options.dryRun) {
-                            finalArchive = policy.compress
-                                ? `${archivePath}.gz`
-                                : archivePath;
+                            const compressed = policy.compress !== false;
+                            rotation = {
+                                archivePath: compressed
+                                    ? `${archivePath}.gz`
+                                    : archivePath,
+                                compressed,
+                            };
                         } else {
                             const verified = await openVerifiedLogFile(
                                 filePath,
                                 effectiveApprovedRoots
                             );
                             try {
-                                finalArchive =
+                                rotation =
                                     policy.strategy === "rename"
                                         ? await rotateRename(
                                               filePath,
@@ -1096,14 +1129,20 @@ export async function runLogRotationService(
                             state.files[filePath] = {
                                 lastRotatedAt: now.toISOString(),
                                 lastSizeBytes: stat.size,
-                                lastArchive: finalArchive,
+                                lastArchive: rotation.archivePath,
                             };
                         }
                         groupSummary.rotatedFiles += 1;
                         summary.rotatedFiles += 1;
-                        if (policy.compress !== false) {
+                        if (rotation.compressed) {
                             groupSummary.compressedFiles += 1;
                             summary.compressedFiles += 1;
+                        }
+                        if (rotation.warning) {
+                            summary.warnings.push({
+                                filePath,
+                                message: rotation.warning,
+                            });
                         }
                         const retained = await retention();
                         groupSummary.deletedArchives += retained.deleted.length;

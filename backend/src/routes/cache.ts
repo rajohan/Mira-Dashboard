@@ -27,6 +27,14 @@ function httpStatusError(statusCode: number, message: string): HttpStatusError {
     return error;
 }
 
+function httpStatusCode(error: unknown): number | undefined {
+    if (error && typeof error === "object") {
+        const statusCode = (error as { statusCode?: unknown }).statusCode;
+        return typeof statusCode === "number" ? statusCode : undefined;
+    }
+    return undefined;
+}
+
 export const __testing = {
     getCacheRefreshCommand(key: string): string[] | undefined {
         return cacheRefreshCommandOverrides.get(key);
@@ -163,7 +171,7 @@ export default function cacheRoutes(app: express.Application): void {
                     : { ok: true, entry: result }
             );
         } catch (error) {
-            res.status((error as HttpStatusError).statusCode || 500).json({
+            res.status(httpStatusCode(error) || 500).json({
                 error: errorMessage(error, "Cache refresh failed"),
             });
         }

@@ -249,6 +249,18 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         assert.deepEqual(await refresh.json(), {
             error: "No backend refresh producer configured for cache key: not.configured",
         });
+
+        __testing.setCacheRefreshRunnerForTests(async () => {
+            throw "primitive refresh failure";
+        });
+        const primitiveFailure = await fetch(
+            `${server.baseUrl}/api/cache/quotas.summary/refresh`,
+            { method: "POST" }
+        );
+        assert.equal(primitiveFailure.status, 500);
+        assert.deepEqual(await primitiveFailure.json(), {
+            error: "Cache refresh failed",
+        });
     });
 
     it("refreshes configured cache keys and reports missing refreshed rows", async () => {

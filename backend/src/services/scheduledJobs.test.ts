@@ -497,6 +497,16 @@ test("runs combined Moltbook and backend-owned jobs through scheduler actions", 
     });
     const failedNestedLogRotation = await runScheduledJob("ops.log-rotation");
     assert.equal(failedNestedLogRotation.status, "failed");
+
+    __testing.setActionRunnersForTests({
+        logRotation: async () => ({
+            result: { ok: false },
+            stderr: "logrotate helper denied",
+        }),
+    });
+    const failedLogRotationWithStderr = await runScheduledJob("ops.log-rotation");
+    assert.equal(failedLogRotationWithStderr.status, "failed");
+    assert.equal(failedLogRotationWithStderr.message, "logrotate helper denied");
 });
 
 test("runs default scheduled log rotation through the elevated helper", async () => {

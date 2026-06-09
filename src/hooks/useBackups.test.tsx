@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
 import {
@@ -13,6 +13,11 @@ import {
 import { cacheKeys } from "./useCache";
 
 describe("backup hooks", () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
+
     it("fetches kopia backup state", async () => {
         const fetchMock = vi.fn().mockResolvedValueOnce({
             ok: true,

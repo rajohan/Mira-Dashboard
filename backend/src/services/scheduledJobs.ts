@@ -278,6 +278,16 @@ function isLogRotationFailure(value: unknown): boolean {
     );
 }
 
+function logRotationFailureMessage(value: unknown): string {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+        const stderr = (value as { stderr?: unknown }).stderr;
+        if (typeof stderr === "string" && stderr.trim()) {
+            return stderr.trim();
+        }
+    }
+    return "Log rotation failed";
+}
+
 function nowIso(): string {
     return new Date().toISOString();
 }
@@ -907,7 +917,7 @@ async function executeScheduledJob(job: ScheduledJob): Promise<Record<string, un
         const dryRun = job.settings.dryRun === true;
         const logRotation = await logRotationRunner({ dryRun });
         if (isLogRotationFailure(logRotation)) {
-            throw new Error("Log rotation failed");
+            throw new Error(logRotationFailureMessage(logRotation));
         }
         return { logRotation };
     }
@@ -1062,6 +1072,7 @@ export const __testing = {
     resetStaleRunningRunReconciliationForTests(): void {
         staleRunningRunsReconciled = false;
     },
+    logRotationFailureMessage,
     setActionRunnersForTests(runners?: {
         cacheRefresh?: CacheRefreshRunner;
         dockerUpdater?: DockerUpdaterRunner;

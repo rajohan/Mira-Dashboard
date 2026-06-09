@@ -511,8 +511,7 @@ function hasUpdate(service: ManagedServiceRow): boolean {
     }
     return Boolean(
         service.latest_tag &&
-        service.current_tag &&
-        service.latest_tag !== service.current_tag
+        (!service.current_tag || service.latest_tag !== service.current_tag)
     );
 }
 

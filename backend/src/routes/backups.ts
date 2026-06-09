@@ -57,6 +57,7 @@ function trimOutput(text: string): string {
 /** Refreshes backup status cache with a bounded best-effort timeout. */
 function refreshBackupCacheWithTimeout(key: string, timeoutMs = 30_000) {
     let timeout: NodeJS.Timeout | null = null;
+    let cancelled = false;
     const refresh = refreshBackupCache(key);
     const timed = Promise.race([
         refresh,
@@ -72,7 +73,16 @@ function refreshBackupCacheWithTimeout(key: string, timeoutMs = 30_000) {
             clearTimeout(timeout);
         }
     });
-    return { refresh, timed };
+    return {
+        cancel(): void {
+            cancelled = true;
+        },
+        get cancelled() {
+            return cancelled;
+        },
+        refresh,
+        timed,
+    };
 }
 
 /** Returns current job. */
@@ -221,9 +231,13 @@ async function startBackupJob(type: BackupJob["type"], command: string) {
                 cacheKey,
                 backupRefreshTimeoutMs
             );
-            void refresh.timed.catch(() => {});
+            void refresh.timed.catch(() => {
+                refresh.cancel();
+                job.refreshPending = false;
+            });
             void refresh.refresh
                 .catch((error: unknown) => {
+                    if (refresh.cancelled) return;
                     const refreshMessage = errorMessage(error, "Unknown error");
                     job.stderr = trimOutput(
                         `${job.stderr}\nStatus refresh failed: ${refreshMessage}`.trim()

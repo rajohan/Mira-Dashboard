@@ -112,6 +112,19 @@ describe("log rotation service", { concurrency: false }, () => {
             }),
             path.join(tempDir, ".hidden")
         );
+        assert.equal(
+            __testing.archiveRetentionKey(path.join(tempDir, "app.log.1.gz"), {
+                archiveRetentionScope: "basename",
+            }),
+            path.join(tempDir, "app.log")
+        );
+        assert.equal(
+            __testing.archiveRetentionKey(
+                path.join(tempDir, "app.log.2026-06-09T01-02-03.004Z.gz"),
+                { archiveRetentionScope: "basename" }
+            ),
+            path.join(tempDir, "app.log")
+        );
         assert.equal(__testing.caughtMessage("plain failure"), "plain failure");
         assert.equal(
             __testing.caughtMessage(new Error("typed failure")),
@@ -1646,6 +1659,45 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(await readFile(copyGzip, "utf8"), "");
         assert.equal(summary.rotatedFiles, 2);
         assert.equal(summary.compressedFiles, 1);
+    });
+
+    it("keeps committed rotated archives when compression fails", async () => {
+        const root = path.join(tempDir, "compression-warning");
+        await mkdir(root);
+        const logFile = path.join(root, "app.log");
+        await writeFile(logFile, "compress me", "utf8");
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [
+                {
+                    name: "copy-gzip",
+                    paths: [logFile],
+                    strategy: "copytruncate",
+                    compress: true,
+                    maxSizeMb: 0.000001,
+                },
+            ],
+        });
+        __testing.setGzipPipelineForTests(async () => {
+            throw new Error("gzip unavailable");
+        });
+        try {
+            const summary = await runLogRotationService({ dryRun: false, config });
+
+            assert.equal(summary.ok, true);
+            assert.equal(summary.rotatedFiles, 1);
+            assert.equal(summary.compressedFiles, 0);
+            assert.equal(await readFile(logFile, "utf8"), "");
+            assert.match(JSON.stringify(summary.warnings), /gzip unavailable/u);
+
+            const rootEntries = await fsPromises.readdir(root);
+            const archives = rootEntries.filter((name) => name.startsWith("app.log."));
+            assert.equal(archives.length, 1);
+            assert.equal(archives[0].endsWith(".gz"), false);
+        } finally {
+            __testing.resetGzipPipeline();
+        }
     });
 
     it("removes incomplete copytruncate archives and reports cleanup failures", async () => {

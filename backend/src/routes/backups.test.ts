@@ -601,9 +601,11 @@ describe("backup routes", () => {
         const backupRefreshTimeoutMs = 5;
         backupTesting.setBackupRefreshTimeoutMsForTest(backupRefreshTimeoutMs);
         let finishRefresh: ((value: { refreshed: string[] }) => void) | undefined;
+        let rejectRefresh: ((error: Error) => void) | undefined;
         backupTesting.setRefreshBackupCacheForTest(async () => {
-            return await new Promise<{ refreshed: string[] }>((resolve) => {
+            return await new Promise<{ refreshed: string[] }>((resolve, reject) => {
                 finishRefresh = resolve;
+                rejectRefresh = reject;
             });
         });
         try {
@@ -623,6 +625,7 @@ describe("backup routes", () => {
             );
 
             assert.ok(finishRefresh);
+            assert.ok(rejectRefresh);
             const timedOut = await requestJson<{
                 job: {
                     id: string;
@@ -633,30 +636,13 @@ describe("backup routes", () => {
             }>(server, "/api/backups/kopia");
             assert.equal(timedOut.body.job?.id, firstJobId);
             assert.equal(timedOut.body.job.status, "done");
-            assert.equal(timedOut.body.job.refreshPending, true);
+            assert.equal(timedOut.body.job.refreshPending, false);
             assert.equal(
                 timedOut.body.job.stderr.includes("Status refresh failed"),
                 false
             );
-            finishRefresh({ refreshed: ["backup.kopia.status"] });
-            for (let attempt = 0; attempt < 30; attempt += 1) {
-                const done = await requestJson<{
-                    job: {
-                        id: string;
-                        refreshPending: boolean;
-                    } | null;
-                }>(server, "/api/backups/kopia");
-                if (
-                    done.body.job?.id === firstJobId &&
-                    done.body.job.refreshPending === false
-                ) {
-                    break;
-                }
-                await new Promise((resolve) => setTimeout(resolve, 10));
-                if (attempt === 29) {
-                    assert.fail("Backup refresh promise did not clear refresh pending");
-                }
-            }
+            rejectRefresh(new Error("late refresh failure"));
+            await new Promise((resolve) => setTimeout(resolve, 0));
             const restarted = await requestJson<{
                 ok: boolean;
                 job: { id: string; refreshPending: boolean };

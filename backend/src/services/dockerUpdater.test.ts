@@ -1702,6 +1702,14 @@ setTimeout(() => process.exit(0), 30);
         assert.equal(
             updater.__testing.hasUpdate({
                 ...baseService,
+                current_tag: null,
+                latest_tag: "2",
+            }),
+            true
+        );
+        assert.equal(
+            updater.__testing.hasUpdate({
+                ...baseService,
                 current_tag: "1",
                 latest_tag: "1",
                 current_digest: "sha256:old",
