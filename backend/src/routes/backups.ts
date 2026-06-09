@@ -240,21 +240,17 @@ async function startBackupJob(type: BackupJob["type"], command: string) {
                     `${job.stderr}\nStatus refresh failed: ${errorMessage(error, "Unknown error")}`.trim()
                 );
             });
-            job.refreshPendingPromise = refresh.timed;
-            void refresh.refresh.catch((error: unknown) => {
-                if (refresh.cancelled) return;
-                const refreshMessage = errorMessage(error, "Unknown error");
-                job.stderr = trimOutput(
-                    `${job.stderr}\nStatus refresh failed: ${refreshMessage}`.trim()
-                );
-            });
-            void refresh.timed
-                .then(
-                    () => {},
-                    () => {}
-                )
+            job.refreshPendingPromise = refresh.refresh;
+            void refresh.refresh
+                .catch((error: unknown) => {
+                    if (refresh.cancelled) return;
+                    const refreshMessage = errorMessage(error, "Unknown error");
+                    job.stderr = trimOutput(
+                        `${job.stderr}\nStatus refresh failed: ${refreshMessage}`.trim()
+                    );
+                })
                 .finally(() => {
-                    if (job.refreshPendingPromise === refresh.timed) {
+                    if (job.refreshPendingPromise === refresh.refresh) {
                         job.refreshPending = false;
                         job.refreshPendingPromise = undefined;
                     }

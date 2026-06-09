@@ -29,27 +29,6 @@ interface SqliteCacheEntryRow {
     metadata_json: string;
 }
 
-/** Parses table. */
-export function parseTable<T extends object>(output: string): T[] {
-    const trimmed = output.trim();
-    if (!trimmed) {
-        return [];
-    }
-
-    const lines = trimmed.split("\n").filter(Boolean);
-    if (lines.length < 2) {
-        return [];
-    }
-
-    const headers = lines[0].split("\t");
-    return lines.slice(1).map((line) => {
-        const cells = line.split("\t");
-        return Object.fromEntries(
-            headers.map((header, index) => [header, cells[index] ?? ""])
-        ) as T;
-    });
-}
-
 /** Parses JSON field. */
 export function parseJsonField<T>(value: string): T | null {
     if (!value) {

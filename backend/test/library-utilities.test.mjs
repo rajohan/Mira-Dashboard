@@ -4,18 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { parseJsonField, parseTable } from "../dist/lib/cacheStore.js";
+import { parseJsonField } from "../dist/lib/cacheStore.js";
 import { loadOrCreateDeviceIdentity } from "../dist/lib/openclawGatewayClient.js";
-
-test("cacheStore parseTable handles empty, complete, and sparse tabular output", () => {
-    assert.deepEqual(parseTable(""), []);
-    assert.deepEqual(parseTable("only-one-line"), []);
-
-    assert.deepEqual(parseTable("name\tstatus\nalpha\tfresh\nbeta\t"), [
-        { name: "alpha", status: "fresh" },
-        { name: "beta", status: "" },
-    ]);
-});
 
 test("cacheStore parseJsonField returns parsed values or null for invalid fields", () => {
     const nullValue = JSON.parse("null");
