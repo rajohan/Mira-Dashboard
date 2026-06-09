@@ -151,6 +151,7 @@ test("migrates cache updated_at to nullable while preserving rows", async () => 
     let result: Awaited<typeof import("./db.js")> | undefined;
     const testDb = new DatabaseSync(":memory:");
     try {
+        testDb.exec("PRAGMA foreign_keys = ON");
         result = await import(`./db.js?cacheNullable=${randomUUID()}`);
         testDb.exec(`
             CREATE TABLE cache_entries (
@@ -269,6 +270,7 @@ test("nulls orphaned docker updater event service ids during migration", async (
     const { cleanup, result } = await importWithTempDb("dockerEventsOrphan");
     const testDb = new DatabaseSync(":memory:");
     try {
+        testDb.exec("PRAGMA foreign_keys = ON");
         testDb.exec(`
             CREATE TABLE docker_managed_services (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -324,6 +326,7 @@ test("adds nullable service ids to legacy docker updater events", async () => {
     const { cleanup, result } = await importWithTempDb("dockerEventsLegacy");
     const testDb = new DatabaseSync(":memory:");
     try {
+        testDb.exec("PRAGMA foreign_keys = ON");
         testDb.exec(`
             CREATE TABLE docker_managed_services (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

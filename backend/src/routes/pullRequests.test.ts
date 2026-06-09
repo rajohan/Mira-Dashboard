@@ -93,6 +93,7 @@ function withDeploymentDb<T>(tempDir: string, action: (db: DatabaseSync) => T): 
     );
     try {
         deploymentDb.exec("PRAGMA busy_timeout = 1000");
+        deploymentDb.exec("PRAGMA foreign_keys = ON");
         return action(deploymentDb);
     } finally {
         deploymentDb.close();
