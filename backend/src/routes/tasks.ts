@@ -617,12 +617,19 @@ export default function tasksRoutes(
             return;
         }
 
-        db.prepare("DELETE FROM task_updates WHERE task_id = ?").run(id);
-        db.prepare("DELETE FROM task_events WHERE task_id = ?").run(id);
-        db.prepare(
-            "DELETE FROM task_dependencies WHERE task_id = ? OR depends_on_task_id = ?"
-        ).run(id, id);
-        db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+        db.exec("BEGIN");
+        try {
+            db.prepare("DELETE FROM task_updates WHERE task_id = ?").run(id);
+            db.prepare("DELETE FROM task_events WHERE task_id = ?").run(id);
+            db.prepare(
+                "DELETE FROM task_dependencies WHERE task_id = ? OR depends_on_task_id = ?"
+            ).run(id, id);
+            db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+            db.exec("COMMIT");
+        } catch (error) {
+            db.exec("ROLLBACK");
+            throw error;
+        }
         if (existing.assignee === TASK_ASSIGNEES.mira.id) {
             void notifyMira("deleted", existing);
         }

@@ -595,6 +595,11 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
         db.exec("RELEASE SAVEPOINT moltbook_cache_write");
         throw error;
     }
+    if (firstFailure !== undefined) {
+        throw new Error("Moltbook refresh had sub-request failures", {
+            cause: firstFailure,
+        });
+    }
     return { refreshed: writes.map((item) => item.key) };
 }
 
@@ -1221,8 +1226,7 @@ async function checkSyntheticQuota() {
     const rollingFiveHourRemaining = toNumber(rollingFiveHourLimit.remaining);
     const weeklyMaxCredits = toCurrencyNumber(weeklyTokenLimit.maxCredits);
     const weeklyNextRegenCredits = toCurrencyNumber(weeklyTokenLimit.nextRegenCredits);
-    const weeklyPercentRemaining =
-        toNullableNumber(weeklyTokenLimit.percentRemaining) ?? 100;
+    const weeklyPercentRemaining = toNullableNumber(weeklyTokenLimit.percentRemaining);
     return {
         subscription: {
             limit: subscriptionLimit,

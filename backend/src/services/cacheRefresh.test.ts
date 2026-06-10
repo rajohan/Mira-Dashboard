@@ -357,14 +357,10 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                     };
                 },
                 async () => {
-                    assert.deepEqual(await refreshMoltbookCache(), {
-                        refreshed: [
-                            "moltbook.home",
-                            "moltbook.feed.hot",
-                            "moltbook.profile",
-                            "moltbook.my-content",
-                        ],
-                    });
+                    await assert.rejects(
+                        () => refreshMoltbookCache(),
+                        /Moltbook refresh had sub-request failures/u
+                    );
                 }
             );
         });
@@ -1492,12 +1488,12 @@ if (args.includes("capture-pane")) {
                         const synthetic = (await __testing.checkSyntheticQuota()) as {
                             weeklyTokenLimit: {
                                 nextRegenPercent: number | null;
-                                percentRemaining: number;
+                                percentRemaining: number | null;
                             };
                             rollingFiveHourLimit: { percentUsed: number | null };
                         };
                         assert.equal(synthetic.weeklyTokenLimit.nextRegenPercent, null);
-                        assert.equal(synthetic.weeklyTokenLimit.percentRemaining, 100);
+                        assert.equal(synthetic.weeklyTokenLimit.percentRemaining, null);
                         assert.equal(synthetic.rollingFiveHourLimit.percentUsed, null);
                     }
                 );

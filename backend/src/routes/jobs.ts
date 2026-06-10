@@ -11,6 +11,8 @@ import {
     validateScheduledJobPatch,
 } from "../services/scheduledJobs.js";
 
+const JOBS_JSON_LIMIT = "2097152b";
+
 interface HttpStatusError extends Error {
     statusCode?: number;
 }
@@ -109,7 +111,7 @@ export default function jobsRoutes(app: express.Application): void {
 
     app.patch(
         "/api/jobs/:id",
-        express.json({ strict: false }),
+        express.json({ limit: JOBS_JSON_LIMIT, strict: false }),
         asyncRoute(async (req, res) => {
             const patch = req.body?.patch;
             if (!patch || typeof patch !== "object" || Array.isArray(patch)) {

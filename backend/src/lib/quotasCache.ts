@@ -48,7 +48,7 @@ export interface SyntheticQuota {
         percentUsed: number | null;
     };
     weeklyTokenLimit: {
-        percentRemaining: number;
+        percentRemaining: number | null;
         nextRegenAt: string | null;
         maxCredits?: string | null;
         remainingCredits?: string | null;

@@ -22,6 +22,9 @@ function formatSyntheticWeeklyRemaining(
     if (weeklyTokenLimit.remainingCredits) {
         return `${weeklyTokenLimit.remainingCredits} left`;
     }
+    if (weeklyTokenLimit.percentRemaining === null) {
+        return "unknown";
+    }
 
     return `${weeklyTokenLimit.percentRemaining}% left`;
 }
@@ -40,12 +43,17 @@ function getProviderPercent(
     }
 
     if (provider === "synthetic") {
-        return hasQuotaStatus(quotas.synthetic)
-            ? null
-            : Math.max(
-                  quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0,
-                  100 - quotas.synthetic.weeklyTokenLimit.percentRemaining
-              );
+        if (hasQuotaStatus(quotas.synthetic)) {
+            return null;
+        }
+        const weeklyPercentUsed =
+            quotas.synthetic.weeklyTokenLimit.percentRemaining === null
+                ? null
+                : 100 - quotas.synthetic.weeklyTokenLimit.percentRemaining;
+        return Math.max(
+            quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0,
+            weeklyPercentUsed ?? 0
+        );
     }
 
     return hasQuotaStatus(quotas.openai) ? null : quotas.openai.percentUsed;

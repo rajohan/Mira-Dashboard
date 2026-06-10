@@ -669,14 +669,17 @@ describe("server bootstrap", () => {
     });
 
     it("lets job patches use the route-specific JSON parser", async () => {
+        const largePayload = "x".repeat(150_000);
         const response = await fetch(`${getBaseUrl()}/api/jobs/cache.weather`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: "null",
+            body: JSON.stringify({ patch: { padding: largePayload } }),
         });
 
         assert.equal(response.status, 400);
-        assert.deepEqual(await response.json(), { error: "patch must be an object" });
+        assert.deepEqual(await response.json(), {
+            error: "invalid patch field: padding",
+        });
     });
 
     it("covers non-loopback auth and startup handler branches", () => {

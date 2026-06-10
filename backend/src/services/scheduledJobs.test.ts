@@ -330,6 +330,24 @@ test("computes next daily run for today or tomorrow", () => {
     );
 });
 
+test("rejects persisted daily jobs without timeOfDay", () => {
+    const timestamp = "2026-06-09T03:00:00.000Z";
+    db.prepare(
+        `INSERT INTO scheduled_jobs (
+            id, name, description, enabled, schedule_type, interval_seconds,
+            time_of_day, action_type, action_target, settings_json, next_run_at, created_at, updated_at
+        ) VALUES (
+            'custom.bad-daily', 'Bad daily', 'Bad daily', 1, 'daily', 60,
+            NULL, 'cache.refresh', 'system.host', '{}', ?, ?, ?
+        )`
+    ).run(timestamp, timestamp, timestamp);
+
+    assert.throws(
+        () => __testing.updateNextRunFromLatestJob("custom.bad-daily"),
+        /timeOfDay is required for daily jobs/u
+    );
+});
+
 test("updates enable state, interval schedules, and daily schedules", () => {
     const original = getScheduledJob("cache.weather");
     const disabled = updateScheduledJob("cache.weather", {
@@ -511,9 +529,11 @@ test("runs combined Moltbook and backend-owned jobs through scheduler actions", 
         }),
         openClawNotification: async () => {
             refreshedKeys.push("notification.openclaw");
+            return true;
         },
         quotaNotification: async () => {
             refreshedKeys.push("notification.quotas");
+            return true;
         },
     });
 
@@ -573,6 +593,13 @@ test("runs combined Moltbook and backend-owned jobs through scheduler actions", 
     assert.equal(failedOpenClaw.status, "failed");
     assert.equal(failedQuotas.status, "failed");
     assert.equal(failedLogRotation.status, "failed");
+
+    __testing.setActionRunnersForTests({
+        cacheRefresh: async (key) => ({ key }),
+        openClawNotification: async () => undefined as unknown as boolean,
+    });
+    const missingOpenClawResult = await runScheduledJob("notification.openclaw");
+    assert.equal(missingOpenClawResult.status, "failed");
 
     __testing.setActionRunnersForTests({
         logRotation: async () => ({ result: { ok: false }, stderr: "" }),

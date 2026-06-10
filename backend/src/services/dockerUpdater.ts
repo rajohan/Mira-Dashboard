@@ -840,6 +840,25 @@ function servicesFromCompose(composePath: string) {
                         false
                     );
                     const currentTag = image.tag ?? (image.digest ? null : "latest");
+                    let tagMatchType: "exact" | "regex" = "exact";
+                    let tagMatchPattern = tagPattern ?? currentTag;
+                    if (tagPattern && tagPatternIsRegex) {
+                        try {
+                            new RegExp(tagPattern);
+                            tagMatchType = "regex";
+                        } catch (error) {
+                            console.warn(
+                                "[DockerUpdater] Ignoring invalid tag pattern regex",
+                                {
+                                    appSlug,
+                                    serviceName,
+                                    tagPattern,
+                                    error: caughtMessage(error),
+                                }
+                            );
+                            tagMatchPattern = currentTag;
+                        }
+                    }
                     return {
                         appSlug,
                         serviceName,
@@ -856,8 +875,8 @@ function servicesFromCompose(composePath: string) {
                             configuredPinMode === "digest" || configuredPinMode === "tag"
                                 ? configuredPinMode
                                 : image.pinMode,
-                        tagMatchType: tagPattern && tagPatternIsRegex ? "regex" : "exact",
-                        tagMatchPattern: tagPattern ?? currentTag,
+                        tagMatchType,
+                        tagMatchPattern,
                         enabled: labels.has("mira.updater.enabled")
                             ? booleanLabel(labels.get("mira.updater.enabled"), true)
                             : true,
@@ -951,8 +970,10 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
             last_checked_at = docker_managed_services.last_checked_at,
             last_status = docker_managed_services.last_status`
     );
-    db.exec("BEGIN");
+    let txnStarted = false;
     try {
+        db.exec("BEGIN");
+        txnStarted = true;
         for (const appSlug of new Set(
             successfulDiscoveries.map((item) => item.appSlug)
         )) {
@@ -1013,15 +1034,23 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
             );
         }
         db.exec("COMMIT");
+        txnStarted = false;
     } catch (error) {
-        db.exec("ROLLBACK");
+        let failureMessage = caughtMessage(error);
+        if (txnStarted) {
+            try {
+                db.exec("ROLLBACK");
+            } catch (rollbackError) {
+                failureMessage = `${failureMessage}; rollback failed: ${caughtMessage(rollbackError)}`;
+            }
+        }
         return {
             ok: false,
             step: "register-services",
             stdout: "",
             stderr: JSON.stringify({
                 registered: 0,
-                failed: [{ appSlug: "*", error: caughtMessage(error) }],
+                failed: [{ appSlug: "*", error: failureMessage }],
             }),
         };
     }

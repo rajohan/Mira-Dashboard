@@ -111,7 +111,7 @@ type CacheRefreshRunner = (key: string) => Promise<unknown>;
 type DockerUpdaterStep = { step: string; ok: boolean; stderr?: string };
 type DockerUpdaterRunner = () => Promise<DockerUpdaterStep[]>;
 type LogRotationRunner = (options: { dryRun: boolean }) => Promise<unknown>;
-type NotificationRunner = () => Promise<boolean | void>;
+type NotificationRunner = () => Promise<boolean>;
 
 const defaultJobs: ReadonlyArray<DefaultScheduledJob> = [
     {
@@ -614,7 +614,10 @@ function computeNextRunIso(
     },
     referenceTime?: Date
 ): string {
-    if (job.scheduleType === "daily" && job.timeOfDay) {
+    if (job.scheduleType === "daily") {
+        if (!job.timeOfDay) {
+            throw new Error("timeOfDay is required for daily jobs");
+        }
         return nextDailyRunIso(job.timeOfDay, referenceTime);
     }
     if (job.scheduleType === "cron") {
@@ -956,14 +959,14 @@ async function executeScheduledJob(job: ScheduledJob): Promise<Record<string, un
     }
     if (job.actionType === "notification.openclaw") {
         await cacheRefreshRunner("system.host");
-        if ((await openClawNotificationRunner()) === false) {
+        if ((await openClawNotificationRunner()) !== true) {
             throw new Error("OpenClaw notification check failed");
         }
         return { checked: true };
     }
     if (job.actionType === "notification.quota") {
         await cacheRefreshRunner("quotas.summary");
-        if ((await quotaNotificationRunner()) === false) {
+        if ((await quotaNotificationRunner()) !== true) {
             throw new Error("Quota notification check failed");
         }
         return { checked: true };

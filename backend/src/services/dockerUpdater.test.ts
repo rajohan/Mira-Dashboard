@@ -408,6 +408,11 @@ process.stdout.write("updated\n");
     platform: linux/amd64
     labels:
       mira.updater.autoUpdate: "yes"
+  invalidRegex:
+    image: repo/invalid:stable
+    labels:
+      mira.updater.tagPattern: "["
+      mira.updater.tagPatternIsRegex: "true"
 `,
             "utf8"
         );
@@ -431,6 +436,8 @@ process.stdout.write("updated\n");
                 assert.equal(services.services[0].currentTag, "latest");
                 assert.equal(services.services[1].pinMode, "digest");
                 assert.equal(services.services[1].metadata.platform, "linux/amd64");
+                assert.equal(services.services[2].tagMatchType, "exact");
+                assert.equal(services.services[2].tagMatchPattern, "stable");
                 const steps = await updater.runDockerUpdaterService(123);
                 assert.equal(steps.length, 2);
                 assert.equal(steps.at(-1)?.stderr, "Docker updater service not found");
@@ -2814,6 +2821,40 @@ setTimeout(() => process.exit(0), 30);
                 );
             } finally {
                 execMock.mock.restore();
+            }
+
+            const beginMock = mock.method(dbHandle, "exec", (sql: string) => {
+                if (sql === "BEGIN") {
+                    throw new Error("begin failed");
+                }
+                return originalExec(sql);
+            });
+            try {
+                const result = await updater.registerDockerUpdaterServices();
+                assert.equal(result.ok, false);
+                assert.equal(result.step, "register-services");
+                assert.match(result.stderr, /begin failed/u);
+            } finally {
+                beginMock.mock.restore();
+            }
+
+            const rollbackMock = mock.method(dbHandle, "exec", (sql: string) => {
+                if (sql === "COMMIT") {
+                    throw new Error("commit failed");
+                }
+                if (sql === "ROLLBACK") {
+                    throw new Error("rollback failed");
+                }
+                return originalExec(sql);
+            });
+            try {
+                const result = await updater.registerDockerUpdaterServices();
+                assert.equal(result.ok, false);
+                assert.equal(result.step, "register-services");
+                assert.match(result.stderr, /commit failed/u);
+                assert.match(result.stderr, /rollback failed/u);
+            } finally {
+                rollbackMock.mock.restore();
             }
         });
     });

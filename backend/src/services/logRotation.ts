@@ -224,8 +224,11 @@ function validatePolicyTypes(policy: LogRotationPolicy | undefined, label: strin
         "keepDays",
         "archiveMinAgeMinutes",
     ] as const) {
-        if (policy[field] !== undefined && typeof policy[field] !== "number") {
-            throw new TypeError(`${label}.${field} must be a number`);
+        if (
+            policy[field] !== undefined &&
+            (typeof policy[field] !== "number" || policy[field] < 0)
+        ) {
+            throw new TypeError(`${label}.${field} must be a non-negative number`);
         }
     }
 }
@@ -759,7 +762,7 @@ async function compressArchiveIfNeeded(
     archive: RetentionArchive,
     dryRun: boolean,
     approvedRoots: string[]
-) {
+): Promise<{ archive: RetentionArchive; compressed: boolean; warning?: string }> {
     if (!archive.compress || archive.path.endsWith(".gz")) {
         return { archive, compressed: false };
     }
@@ -767,10 +770,18 @@ async function compressArchiveIfNeeded(
     if (dryRun) {
         return { archive: { ...archive, path: gzPath }, compressed: true };
     }
-    return {
-        archive: { ...archive, path: await gzipFile(archive.path, approvedRoots) },
-        compressed: true,
-    };
+    try {
+        return {
+            archive: { ...archive, path: await gzipFile(archive.path, approvedRoots) },
+            compressed: true,
+        };
+    } catch (error) {
+        return {
+            archive,
+            compressed: false,
+            warning: `Compression failed for ${archive.path}: ${caughtMessage(error)}`,
+        };
+    }
 }
 
 function retentionDeleteSet(archives: RetentionArchive[], policy: LogRotationPolicy) {
@@ -805,6 +816,7 @@ async function applyRetention(
     const deleteSet = retentionDeleteSet(listedArchives, policy);
     const archives: RetentionArchive[] = [];
     const compressed: string[] = [];
+    const warnings: string[] = [];
     for (const archive of listedArchives) {
         if (deleteSet.has(archive.path)) {
             archives.push(archive);
@@ -813,6 +825,7 @@ async function applyRetention(
         const result = await compressArchiveIfNeeded(archive, dryRun, approvedRoots);
         archives.push(result.archive);
         if (result.compressed) compressed.push(result.archive.path);
+        if (result.warning) warnings.push(result.warning);
     }
     archives.sort((a, b) => b.mtimeMs - a.mtimeMs);
     const deleted: string[] = [];
@@ -820,7 +833,7 @@ async function applyRetention(
         deleted.push(archive.path);
         if (!dryRun) await unlinkVerified(archive.path, approvedRoots);
     }
-    return { deleted, compressed };
+    return { deleted, compressed, warnings };
 }
 
 function archiveRetentionKey(archivePath: string, policy: LogRotationPolicy): string {
@@ -876,6 +889,7 @@ async function applyArchiveOnlyRetention(
     const archivesByScope = new Map<string, RetentionArchive[]>();
     const compressed: string[] = [];
     const deleted: string[] = [];
+    const warnings: string[] = [];
     let checked = 0;
 
     for (const archive of await listArchiveOnlyArchives(policy, approvedRoots)) {
@@ -893,6 +907,7 @@ async function applyArchiveOnlyRetention(
             if (deleteSet.has(archive.path)) continue;
             const result = await compressArchiveIfNeeded(archive, dryRun, approvedRoots);
             if (result.compressed) compressed.push(result.archive.path);
+            if (result.warning) warnings.push(result.warning);
         }
         for (const archive of deleteSet.values()) {
             deleted.push(archive.path);
@@ -900,7 +915,7 @@ async function applyArchiveOnlyRetention(
         }
     }
 
-    return { checked, compressed, deleted };
+    return { checked, compressed, deleted, warnings };
 }
 
 function hasRotatedInCadence(
@@ -981,6 +996,19 @@ function summarizeGroup(name: string) {
         deletedArchives: 0,
         skippedFiles: 0,
     };
+}
+
+function appendRetentionWarnings(
+    summary: LogRotationSummary,
+    warnings: string[],
+    context: { filePath?: string; group?: string }
+): void {
+    for (const warning of warnings) {
+        summary.warnings.push({
+            ...context,
+            message: warning,
+        });
+    }
 }
 
 export interface LogRotationSummary {
@@ -1192,6 +1220,9 @@ export async function runLogRotationService(
                     summary.deletedArchives += retained.deleted.length;
                     groupSummary.compressedFiles += retained.compressed.length;
                     summary.compressedFiles += retained.compressed.length;
+                    appendRetentionWarnings(summary, retained.warnings, {
+                        group: group.name,
+                    });
                 } catch (error) {
                     summary.ok = false;
                     summary.errors.push({
@@ -1252,6 +1283,9 @@ export async function runLogRotationService(
                             summary.deletedArchives += retained.deleted.length;
                             groupSummary.compressedFiles += retained.compressed.length;
                             summary.compressedFiles += retained.compressed.length;
+                            appendRetentionWarnings(summary, retained.warnings, {
+                                filePath,
+                            });
                             groupSummary.skippedFiles += 1;
                             summary.skippedFiles += 1;
                             continue;
@@ -1267,6 +1301,9 @@ export async function runLogRotationService(
                             summary.deletedArchives += retained.deleted.length;
                             groupSummary.compressedFiles += retained.compressed.length;
                             summary.compressedFiles += retained.compressed.length;
+                            appendRetentionWarnings(summary, retained.warnings, {
+                                filePath,
+                            });
                             groupSummary.skippedFiles += 1;
                             summary.skippedFiles += 1;
                             continue;
@@ -1336,6 +1373,9 @@ export async function runLogRotationService(
                         summary.deletedArchives += retained.deleted.length;
                         groupSummary.compressedFiles += retained.compressed.length;
                         summary.compressedFiles += retained.compressed.length;
+                        appendRetentionWarnings(summary, retained.warnings, {
+                            filePath,
+                        });
                     } catch (error) {
                         summary.ok = false;
                         summary.errors.push({

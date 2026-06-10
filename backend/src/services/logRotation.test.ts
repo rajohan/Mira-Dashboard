@@ -286,7 +286,24 @@ describe("log rotation service", { concurrency: false }, () => {
                         ],
                     }),
                 }),
-            /Group invalid\.maxSizeMb must be a number/u
+            /Group invalid\.maxSizeMb must be a non-negative number/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
+                        groups: [
+                            {
+                                name: "negative",
+                                paths: ["*.log"],
+                                keepDays: -1,
+                            },
+                        ],
+                    }),
+                }),
+            /Group negative\.keepDays must be a non-negative number/u
         );
         await assert.rejects(
             async () =>
@@ -1297,6 +1314,40 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.ok(await fsPromises.stat(`${archive}.gz`));
     });
 
+    it("records warnings when retained archive compression fails", async () => {
+        const root = path.join(tempDir, "retention-compression-warning");
+        await mkdir(root);
+        const logFile = path.join(root, "app.log");
+        const archive = path.join(root, "app.log.2026-06-06T00-00-00.000Z");
+        await writeFile(logFile, "active", "utf8");
+        await writeFile(archive, "retained", "utf8");
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [
+                {
+                    name: "retention",
+                    paths: [logFile],
+                    compress: true,
+                    keep: 1,
+                    maxSizeMb: 100,
+                },
+            ],
+        });
+        __testing.setGzipPipelineForTests(async () => {
+            throw new Error("retention gzip unavailable");
+        });
+        try {
+            const summary = await runLogRotationService({ dryRun: false, config });
+
+            assert.equal(summary.ok, true);
+            assert.equal(summary.compressedFiles, 0);
+            assert.match(JSON.stringify(summary.warnings), /retention gzip unavailable/u);
+        } finally {
+            __testing.resetGzipPipeline();
+        }
+    });
+
     it("keeps the newest rotation even when the source log has an old mtime", async () => {
         const root = path.join(tempDir, "old-source-retention");
         await mkdir(root);
@@ -1378,6 +1429,42 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(summary.compressedFiles, 1);
         await assert.rejects(() => fsPromises.stat(archive), /ENOENT/u);
         assert.ok(await fsPromises.stat(`${archive}.gz`));
+    });
+
+    it("records warnings when archive-only compression fails", async () => {
+        const root = path.join(tempDir, "archive-only-compression-warning");
+        await mkdir(root);
+        const archive = path.join(root, "app.log.2026-06-06T00-00-00.000Z");
+        await writeFile(archive, "retained", "utf8");
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [
+                {
+                    name: "archive-only",
+                    archiveOnly: true,
+                    archivePaths: [path.join(root, "app.log.*")],
+                    compress: true,
+                    keep: 1,
+                    paths: [path.join(root, "unused.log")],
+                },
+            ],
+        });
+        __testing.setGzipPipelineForTests(async () => {
+            throw new Error("archive-only gzip unavailable");
+        });
+        try {
+            const summary = await runLogRotationService({ dryRun: false, config });
+
+            assert.equal(summary.ok, true);
+            assert.equal(summary.compressedFiles, 0);
+            assert.match(
+                JSON.stringify(summary.warnings),
+                /archive-only gzip unavailable/u
+            );
+        } finally {
+            __testing.resetGzipPipeline();
+        }
     });
 
     it("returns a failed summary when non-dry-run rotation is already locked", async () => {

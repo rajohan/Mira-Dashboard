@@ -307,7 +307,9 @@ test("skips missing task child tables during orphan cleanup", async () => {
     };
 
     try {
-        assert.doesNotThrow(() => result.__testing.cleanupTaskForeignKeyOrphans(targetDb));
+        assert.doesNotThrow(() =>
+            result.__testing.cleanupTaskForeignKeyOrphans(targetDb)
+        );
     } finally {
         await cleanup();
     }

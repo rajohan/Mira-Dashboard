@@ -297,7 +297,7 @@ describe("quota notifications", () => {
                     percentUsed: null,
                 },
                 weeklyTokenLimit: {
-                    percentRemaining: 100,
+                    percentRemaining: null,
                     nextRegenAt: null,
                 },
             },

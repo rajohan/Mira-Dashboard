@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import http from "node:http";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 
 import express from "express";
 
@@ -590,42 +590,112 @@ describe("tasks routes", () => {
         assert.deepEqual(assigned.body.assignees, [
             { login: TASK_ASSIGNEES.raymond.id, name: TASK_ASSIGNEES.raymond.id },
         ]);
-        db.prepare(
-            "INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES (?, ?)"
-        ).run(created.body.number, created.body.number);
 
-        const deleted = await requestJson<{ ok: true }>(
-            server,
-            `/api/tasks/${created.body.number}`,
-            { method: "DELETE" }
-        );
+        let companionTask: FrontendTask | undefined;
+        try {
+            const companion = await requestJson<FrontendTask>(server, "/api/tasks", {
+                method: "POST",
+                body: {
+                    title: `${titlePrefix}companion`,
+                    assignee: TASK_ASSIGNEES.raymond.id,
+                },
+            });
+            assert.equal(companion.status, 201);
+            companionTask = companion.body;
+            db.prepare(
+                "INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES (?, ?)"
+            ).run(created.body.number, companionTask.number);
+            db.prepare(
+                "INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES (?, ?)"
+            ).run(companionTask.number, created.body.number);
 
-        assert.equal(deleted.status, 200);
-        assert.deepEqual(deleted.body, { ok: true });
-        assert.equal(
-            (
-                db
-                    .prepare(
-                        "SELECT COUNT(*) AS count FROM task_dependencies WHERE task_id = ? OR depends_on_task_id = ?"
-                    )
-                    .get(created.body.number, created.body.number) as { count: number }
-            ).count,
-            0
-        );
+            const deleted = await requestJson<{ ok: true }>(
+                server,
+                `/api/tasks/${created.body.number}`,
+                { method: "DELETE" }
+            );
 
-        const missingFetch = await requestJson<{ error: string }>(
-            server,
-            `/api/tasks/${created.body.number}`
-        );
-        assert.equal(missingFetch.status, 404);
-        assert.equal(missingFetch.body.error, "Task not found");
+            assert.equal(deleted.status, 200);
+            assert.deepEqual(deleted.body, { ok: true });
+            assert.equal(
+                (
+                    db
+                        .prepare(
+                            "SELECT COUNT(*) AS count FROM task_dependencies WHERE task_id = ? OR depends_on_task_id = ?"
+                        )
+                        .get(created.body.number, created.body.number) as {
+                        count: number;
+                    }
+                ).count,
+                0
+            );
 
-        const missing = await requestJson<{ error: string }>(
-            server,
-            `/api/tasks/${created.body.number}`,
-            { method: "DELETE" }
-        );
-        assert.equal(missing.status, 404);
+            const missingFetch = await requestJson<{ error: string }>(
+                server,
+                `/api/tasks/${created.body.number}`
+            );
+            assert.equal(missingFetch.status, 404);
+            assert.equal(missingFetch.body.error, "Task not found");
+
+            const missing = await requestJson<{ error: string }>(
+                server,
+                `/api/tasks/${created.body.number}`,
+                { method: "DELETE" }
+            );
+            assert.equal(missing.status, 404);
+        } finally {
+            if (companionTask) {
+                db.prepare(
+                    "DELETE FROM task_dependencies WHERE task_id = ? OR depends_on_task_id = ?"
+                ).run(companionTask.number, companionTask.number);
+                db.prepare("DELETE FROM task_updates WHERE task_id = ?").run(
+                    companionTask.number
+                );
+                db.prepare("DELETE FROM task_events WHERE task_id = ?").run(
+                    companionTask.number
+                );
+                db.prepare("DELETE FROM tasks WHERE id = ?").run(companionTask.number);
+            }
+        }
+    });
+
+    it("rolls back task deletion when a child cleanup fails", async () => {
+        const created = await requestJson<FrontendTask>(server, "/api/tasks", {
+            method: "POST",
+            body: {
+                title: "rollback delete task",
+                assignee: TASK_ASSIGNEES.raymond.id,
+            },
+        });
+        assert.equal(created.status, 201);
+        const originalPrepare = db.prepare.bind(db);
+        const prepareMock = mock.method(db, "prepare", (sql: string) => {
+            if (sql === "DELETE FROM task_events WHERE task_id = ?") {
+                return {
+                    run: () => {
+                        throw new Error("task event cleanup failed");
+                    },
+                };
+            }
+            return originalPrepare(sql);
+        });
+        try {
+            const response = await fetch(
+                `${server.baseUrl}/api/tasks/${created.body.number}`,
+                { method: "DELETE" }
+            );
+            assert.equal(response.status, 500);
+        } finally {
+            prepareMock.mock.restore();
+        }
+
+        const row = db
+            .prepare("SELECT id FROM tasks WHERE id = ?")
+            .get(created.body.number);
+        assert.ok(row);
+        db.prepare("DELETE FROM task_updates WHERE task_id = ?").run(created.body.number);
+        db.prepare("DELETE FROM task_events WHERE task_id = ?").run(created.body.number);
+        db.prepare("DELETE FROM tasks WHERE id = ?").run(created.body.number);
     });
 
     it("validates missing task mutations and notifies Mira assignments without failing", async () => {

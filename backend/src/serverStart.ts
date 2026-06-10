@@ -138,8 +138,14 @@ export async function handleServerListening(): Promise<void> {
                 gatewayStarted = false;
             }
         }
-        await rollback(closeServerForRollback, "[Backend] Failed to close server:");
-        removeBackgroundCleanup?.();
+        let serverClosed = false;
+        await rollback(async () => {
+            await closeServerForRollback();
+            serverClosed = true;
+        }, "[Backend] Failed to close server:");
+        if (serverClosed) {
+            removeBackgroundCleanup?.();
+        }
         throw error;
     }
 }
