@@ -21,7 +21,6 @@ const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
 
 async function startServer(): Promise<TestServer> {
     const app = express();
-    app.use(express.json());
     jobsRoutes(app);
     const server = http.createServer(app);
 
@@ -259,9 +258,16 @@ test("returns validation and missing job errors", async () => {
                 })
             )
         );
+        const primitiveBody = await requestJson<{ error: string }>(
+            server,
+            "/api/jobs/cache.weather",
+            { method: "PATCH", body: null }
+        );
 
         assert.equal(missingJob.status, 404);
         assert.equal(invalidPatch.status, 400);
+        assert.equal(primitiveBody.status, 400);
+        assert.equal(primitiveBody.body.error, "patch must be an object");
         assert.equal(missingRun.status, 404);
         assert.equal(missingPatch.status, 404);
         assert.equal(partialIntervalPatch.status, 200);

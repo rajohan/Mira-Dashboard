@@ -109,7 +109,7 @@ export default function jobsRoutes(app: express.Application): void {
 
     app.patch(
         "/api/jobs/:id",
-        express.json(),
+        express.json({ strict: false }),
         asyncRoute(async (req, res) => {
             const patch = req.body?.patch;
             if (!patch || typeof patch !== "object" || Array.isArray(patch)) {

@@ -33,7 +33,7 @@ function installCloseCleanup(cleanup: () => void | Promise<void>): () => void {
 
 function removeCloseCleanup(cleanup?: () => void | Promise<void>): void {
     if (cleanup) {
-        const index = closeCleanups.indexOf(cleanup);
+        const index = closeCleanups.lastIndexOf(cleanup);
         if (index !== -1) {
             closeCleanups.splice(index, 1);
         }
@@ -69,7 +69,7 @@ function closeServerForRollback(): Promise<void> {
 }
 
 /** Starts Gateway and the scheduled job scheduler after the HTTP server is listening. */
-export function handleServerListening(): void {
+export async function handleServerListening(): Promise<void> {
     let gatewayStarted = false;
     let scheduledJobSchedulerStarted = false;
     let removeBackgroundCleanup: (() => void) | undefined;
@@ -100,20 +100,20 @@ export function handleServerListening(): void {
                 );
             }
         });
-        afterBackgroundServicesStartedForTest?.();
+        await afterBackgroundServicesStartedForTest?.();
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
         removeBackgroundCleanup?.();
         if (scheduledJobSchedulerStarted) {
-            void rollback(
+            await rollback(
                 stopScheduledJobScheduler,
                 "[Backend] Failed to stop scheduled job scheduler:"
             );
         }
         if (gatewayStarted) {
-            void rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
+            await rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
         }
-        void rollback(closeServerForRollback, "[Backend] Failed to close server:");
+        await rollback(closeServerForRollback, "[Backend] Failed to close server:");
         throw error;
     }
 }
@@ -139,7 +139,9 @@ export function startBackendServer(port = resolveListenPort()): void {
     server.once("listening", onListening);
     server.once("error", onError);
     try {
-        server.listen(port, handleServerListening);
+        server.listen(port, () => {
+            void handleServerListening().catch(() => {});
+        });
     } catch (error) {
         server.removeListener("listening", onListening);
         server.removeListener("error", onError);

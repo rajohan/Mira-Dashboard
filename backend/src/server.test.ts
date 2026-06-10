@@ -665,6 +665,17 @@ describe("server bootstrap", () => {
         }
     });
 
+    it("lets job patches use the route-specific JSON parser", async () => {
+        const response = await fetch(`${getBaseUrl()}/api/jobs/cache.weather`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: "null",
+        });
+
+        assert.equal(response.status, 400);
+        assert.deepEqual(await response.json(), { error: "patch must be an object" });
+    });
+
     it("covers non-loopback auth and startup handler branches", () => {
         const responses: Array<{ status?: number; body?: unknown }> = [];
         const response = {
@@ -740,6 +751,23 @@ describe("server bootstrap", () => {
         }
     });
 
+    it("removes the most recently installed matching server close cleanup", () => {
+        const calls: string[] = [];
+        const cleanup = () => {
+            calls.push("cleanup");
+        };
+        serverStartTesting.removeCloseCleanup();
+        try {
+            serverStartTesting.installCloseCleanup(cleanup);
+            const removeLatest = serverStartTesting.installCloseCleanup(cleanup);
+            removeLatest();
+            server.emit("close");
+            assert.deepEqual(calls, ["cleanup"]);
+        } finally {
+            serverStartTesting.removeCloseCleanup();
+        }
+    });
+
     it("logs async server close cleanup failures", async () => {
         const errors: unknown[][] = [];
         const originalConsoleError = console.error;
@@ -800,7 +828,7 @@ describe("server bootstrap", () => {
         };
         try {
             process.env.OPENCLAW_TOKEN = "test-token";
-            handleServerListening();
+            await handleServerListening();
             assert.equal(initializedToken, "test-token");
             server.emit("close");
             await stopScheduledJobScheduler();
@@ -810,11 +838,12 @@ describe("server bootstrap", () => {
             gateway.init = () => {
                 throw new Error("gateway failed");
             };
-            server.close = (() => {
+            server.close = ((callback?: (error?: Error) => void) => {
                 closeCalled = true;
+                callback?.();
                 return server;
-            }) as typeof server.close;
-            assert.throws(() => handleServerListening(), /gateway failed/u);
+            }) as unknown as typeof server.close;
+            await assert.rejects(() => handleServerListening(), /gateway failed/u);
             assert.equal(closeCalled, true);
             assert.match(String(errors.at(-1)?.[0]), /Failed to start background/u);
             server.close = ((callback?: (error?: Error) => void) => {
@@ -822,7 +851,7 @@ describe("server bootstrap", () => {
                 callback?.(new Error("close failed"));
                 return server;
             }) as unknown as typeof server.close;
-            assert.throws(() => handleServerListening(), /gateway failed/u);
+            await assert.rejects(() => handleServerListening(), /gateway failed/u);
             await new Promise((resolve) => setImmediate(resolve));
             assert.equal(closeCalled, true);
             assert.equal(
@@ -844,11 +873,12 @@ describe("server bootstrap", () => {
                 }
                 return originalSetInterval(...args);
             }) as typeof setInterval;
-            server.close = (() => {
+            server.close = ((callback?: (error?: Error) => void) => {
                 closeCalled = true;
+                callback?.();
                 return server;
-            }) as typeof server.close;
-            assert.throws(() => handleServerListening(), /scheduler failed/u);
+            }) as unknown as typeof server.close;
+            await assert.rejects(() => handleServerListening(), /scheduler failed/u);
             assert.equal(closeCalled, true);
             assert.equal(shutdownCalled, true);
             await stopScheduledJobScheduler();
@@ -858,7 +888,7 @@ describe("server bootstrap", () => {
             serverStartTesting.setAfterBackgroundServicesStartedForTest(() => {
                 throw new Error("post scheduler failed");
             });
-            assert.throws(() => handleServerListening(), /post scheduler failed/u);
+            await assert.rejects(() => handleServerListening(), /post scheduler failed/u);
             assert.equal(closeCalled, true);
             assert.equal(shutdownCalled, true);
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
@@ -872,7 +902,7 @@ describe("server bootstrap", () => {
             serverStartTesting.setAfterBackgroundServicesStartedForTest(() => {
                 throw new Error("post scheduler cleanup failed");
             });
-            assert.throws(
+            await assert.rejects(
                 () => handleServerListening(),
                 /post scheduler cleanup failed/u
             );
@@ -898,7 +928,7 @@ describe("server bootstrap", () => {
             };
             delete process.env.OPENCLAW_TOKEN;
             initializedToken = undefined;
-            handleServerListening();
+            await handleServerListening();
             assert.equal(initializedToken, undefined);
             assert.match(String(warnings.at(-1)?.[0]), /No gateway token/u);
 

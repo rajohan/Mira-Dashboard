@@ -443,7 +443,7 @@ process.stdout.write("updated\n");
         });
     });
 
-    it("fails registration after malformed compose files and removes failed app rows", async () => {
+    it("reports malformed compose files without removing failed app rows", async () => {
         const appsRoot = path.join(tempDir, "apps");
         const goodDir = path.join(appsRoot, "good");
         const badDir = path.join(appsRoot, "bad");
@@ -485,7 +485,7 @@ process.stdout.write("updated\n");
         await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
             const updater = await import(`./dockerUpdater.js?bad-compose=${Date.now()}`);
             const result = await updater.registerDockerUpdaterServices();
-            assert.equal(result.ok, false);
+            assert.equal(result.ok, true);
             assert.equal(result.step, "register-services");
             assert.match(result.stderr, /bad/u);
         });
@@ -507,7 +507,7 @@ process.stdout.write("updated\n");
                     )
                     .get() as { count: number }
             ).count,
-            0
+            1
         );
         assert.equal(
             (
@@ -957,7 +957,7 @@ setTimeout(() => process.exit(0), 30);
         });
     });
 
-    it("removes stale registered services when their compose file cannot be parsed", async () => {
+    it("preserves stale registered services when their compose file cannot be parsed", async () => {
         const appsRoot = path.join(tempDir, "apps");
         const appDir = path.join(appsRoot, "broken-app");
         const okAppDir = path.join(appsRoot, "ok-app");
@@ -992,9 +992,12 @@ setTimeout(() => process.exit(0), 30);
             const updater = await import(`./dockerUpdater.js?broken-app=${Date.now()}`);
             const result = await updater.registerDockerUpdaterServices();
 
-            assert.equal(result.ok, false);
-            assert.equal(serviceRows().length, 1);
-            assert.equal(serviceRows()[0]?.app_slug, "ok-app");
+            assert.equal(result.ok, true);
+            assert.match(result.stderr, /broken-app/u);
+            assert.deepEqual(
+                serviceRows().map((row) => row.app_slug),
+                ["broken-app", "ok-app"]
+            );
         });
     });
 

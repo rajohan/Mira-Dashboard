@@ -975,6 +975,7 @@ test("waits for an active scheduler tick before stopping", async () => {
         await stopped;
         assert.equal(stopSettled, true);
     } finally {
+        releaseTick?.();
         await stopScheduledJobScheduler();
         globalThis.setInterval = originalSetInterval;
         globalThis.clearInterval = originalClearInterval;

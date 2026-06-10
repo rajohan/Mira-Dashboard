@@ -956,10 +956,16 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
         const discoveredAppSlugs = new Set(
             successfulDiscoveries.map((discovery) => discovery.appSlug)
         );
+        const failedAppSlugs = new Set(
+            failedDiscoveries.map((discovery) => discovery.appSlug)
+        );
         for (const row of db
             .prepare("SELECT DISTINCT app_slug FROM docker_managed_services")
             .all() as Array<{ app_slug: string }>) {
-            if (!discoveredAppSlugs.has(row.app_slug)) {
+            if (
+                !discoveredAppSlugs.has(row.app_slug) &&
+                !failedAppSlugs.has(row.app_slug)
+            ) {
                 db.prepare("DELETE FROM docker_managed_services WHERE app_slug = ?").run(
                     row.app_slug
                 );
@@ -995,9 +1001,9 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
     }));
     return {
         step: "register-services",
-        ok: failed.length === 0,
+        ok: true,
         stdout: JSON.stringify({
-            ok: failed.length === 0,
+            ok: true,
             summary: {
                 composeFiles: composeFiles.length,
                 failedComposeFiles: failed.length,

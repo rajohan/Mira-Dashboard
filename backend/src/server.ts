@@ -77,6 +77,10 @@ app.use((request, response, next) => {
         next();
         return;
     }
+    if (request.method === "PATCH" && request.path.startsWith("/api/jobs/")) {
+        next();
+        return;
+    }
 
     globalJsonParser(request, response, next);
 });
