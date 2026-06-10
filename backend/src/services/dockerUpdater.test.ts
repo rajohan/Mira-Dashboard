@@ -2685,7 +2685,7 @@ setTimeout(() => process.exit(0), 30);
         }) as typeof fetch;
         assert.deepEqual(await updater.__testing.lookupGhcr(baseService), {
             latestTag: "1",
-            latestDigest: "sha256:new",
+            latestDigest: null,
         });
         assert.ok(
             acceptHeaders.some((header) =>

@@ -266,6 +266,83 @@ test("classifies duplicate-column migration errors", async () => {
     }
 });
 
+test("retries transient task orphan cleanup locks", async () => {
+    const { cleanup, result } = await importWithTempDb("taskOrphanRetry");
+    let attempts = 0;
+    const targetDb = {
+        prepare: () => ({
+            all: () => [{ name: "task_events" }],
+        }),
+        exec: (sql: string) => {
+            if (sql.includes("DELETE FROM task_events")) {
+                attempts += 1;
+                if (attempts < 2) {
+                    const error = new Error("database is locked") as Error & {
+                        code: string;
+                    };
+                    error.code = "SQLITE_BUSY";
+                    throw error;
+                }
+            }
+        },
+    };
+
+    try {
+        result.__testing.cleanupTaskForeignKeyOrphans(targetDb);
+        assert.equal(attempts, 2);
+    } finally {
+        await cleanup();
+    }
+});
+
+test("rethrows non-transient task orphan cleanup errors", async () => {
+    const { cleanup, result } = await importWithTempDb("taskOrphanNonTransient");
+    const targetDb = {
+        prepare: () => ({
+            all: () => [{ name: "task_events" }],
+        }),
+        exec: () => {
+            throw new Error("delete failed");
+        },
+    };
+
+    try {
+        assert.throws(
+            () => result.__testing.cleanupTaskForeignKeyOrphans(targetDb),
+            /delete failed/u
+        );
+    } finally {
+        await cleanup();
+    }
+});
+
+test("rethrows exhausted transient task orphan cleanup locks", async () => {
+    const { cleanup, result } = await importWithTempDb("taskOrphanRetryExhausted");
+    let attempts = 0;
+    const targetDb = {
+        prepare: () => ({
+            all: () => [{ name: "task_events" }],
+        }),
+        exec: () => {
+            attempts += 1;
+            const error = new Error(`database is locked ${attempts}`) as Error & {
+                code: string;
+            };
+            error.code = "SQLITE_LOCKED";
+            throw error;
+        },
+    };
+
+    try {
+        assert.throws(
+            () => result.__testing.cleanupTaskForeignKeyOrphans(targetDb),
+            /database is locked 4/u
+        );
+    } finally {
+        await cleanup();
+    }
+});
+
 test("migrates cache updated_at to nullable while preserving rows", async () => {
     const { DatabaseSync } = await import("node:sqlite");
     const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;

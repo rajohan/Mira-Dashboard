@@ -269,7 +269,7 @@ describe("log rotation service", { concurrency: false }, () => {
                         groups: [{ name: "invalid", paths: ["*.log"] }],
                     }),
                 }),
-            /defaults\.archiveOnly/u
+            /Archive-only group invalid/u
         );
         await runLogRotationService({
             dryRun: true,
@@ -301,7 +301,7 @@ describe("log rotation service", { concurrency: false }, () => {
                         ],
                     }),
                 }),
-            /defaults\.archiveOnly/u
+            /Archive-only group invalid-default-archive-only-override/u
         );
         await assert.rejects(
             async () =>
@@ -1174,7 +1174,7 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(dryRun.skippedFiles, 1);
         assert.equal(dryRun.rotatedFiles, 1);
         assert.equal(dryRun.compressedFiles, 0);
-        assert.equal(dryRun.deletedArchives, 2);
+        assert.equal(dryRun.deletedArchives, 3);
         assert.equal(await readFile(daily, "utf8"), "small");
 
         seedState({

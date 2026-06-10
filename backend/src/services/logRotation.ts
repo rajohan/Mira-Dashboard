@@ -144,14 +144,6 @@ function validateConfig(config: LogRotationConfig): void {
         config.defaults?.archiveRetentionScope,
         "defaults.archiveRetentionScope"
     );
-    if (config.defaults?.archiveOnly === true) {
-        const hasArchivePaths =
-            Array.isArray(config.defaults.archivePaths) &&
-            config.defaults.archivePaths.length > 0;
-        if (!hasArchivePaths) {
-            throw new Error("defaults.archiveOnly requires defaults.archivePaths");
-        }
-    }
     if (
         config.defaults?.strategy !== undefined &&
         config.defaults.strategy !== "copytruncate" &&
@@ -180,32 +172,26 @@ function validateConfig(config: LogRotationConfig): void {
             group.archiveRetentionScope,
             `Group ${group.name} archiveRetentionScope`
         );
-        const hasPaths = Array.isArray(group.paths) && group.paths.length > 0;
+        const effectivePolicy = mergePolicy(config.defaults ?? {}, group);
+        const hasPaths =
+            Array.isArray(effectivePolicy.paths) && effectivePolicy.paths.length > 0;
         const hasArchivePaths =
-            Array.isArray(group.archivePaths) && group.archivePaths.length > 0;
-        if (group.archiveOnly === true && !hasArchivePaths) {
+            Array.isArray(effectivePolicy.archivePaths) &&
+            effectivePolicy.archivePaths.length > 0;
+        if (effectivePolicy.archiveOnly === true && !hasArchivePaths) {
             throw new Error(
                 `Archive-only group ${group.name} needs at least one archivePaths pattern`
             );
         }
-        if (group.archiveOnly !== true && !hasPaths) {
+        if (effectivePolicy.archiveOnly !== true && !hasPaths) {
             throw new Error(`Group ${group.name} needs at least one path pattern`);
         }
         if (
-            group.strategy !== undefined &&
-            group.strategy !== "copytruncate" &&
-            group.strategy !== "rename"
+            effectivePolicy.strategy !== undefined &&
+            effectivePolicy.strategy !== "copytruncate" &&
+            effectivePolicy.strategy !== "rename"
         ) {
             throw new Error(`Group ${group.name} has unsupported strategy`);
-        }
-        const effectivePolicy = mergePolicy(config.defaults ?? {}, group);
-        const effectiveHasArchivePaths =
-            Array.isArray(effectivePolicy.archivePaths) &&
-            effectivePolicy.archivePaths.length > 0;
-        if (effectivePolicy.archiveOnly === true && !effectiveHasArchivePaths) {
-            throw new Error(
-                `defaults.archiveOnly requires archivePaths for group ${group.name}`
-            );
         }
     }
 }
@@ -500,6 +486,7 @@ async function createNoFollowFile(
         return handle;
     } catch (error) {
         await handle.close();
+        await fs.unlink(filePath).catch(() => {});
         throw error;
     }
 }
@@ -679,11 +666,12 @@ function archiveMatchesRetentionScope(
 async function listArchives(
     filePath: string,
     policy: LogRotationPolicy,
-    approvedRoots: string[]
+    approvedRoots: string[],
+    simulatedArchives: RetentionArchive[] = []
 ) {
     const dir = path.dirname(filePath);
     const managedRegex = managedArchiveRegexFor(filePath);
-    const archives: RetentionArchive[] = [];
+    const archives: RetentionArchive[] = [...simulatedArchives];
     for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
         if (!entry.isFile() || !managedRegex.test(entry.name)) continue;
         const fullPath = path.join(dir, entry.name);
@@ -748,9 +736,15 @@ async function applyRetention(
     filePath: string,
     policy: LogRotationPolicy,
     approvedRoots: string[],
-    dryRun: boolean
+    dryRun: boolean,
+    simulatedArchives: RetentionArchive[] = []
 ) {
-    const listedArchives = await listArchives(filePath, policy, approvedRoots);
+    const listedArchives = await listArchives(
+        filePath,
+        policy,
+        approvedRoots,
+        simulatedArchives
+    );
     const deleteSet = retentionDeleteSet(listedArchives, policy);
     const archives: RetentionArchive[] = [];
     const compressed: string[] = [];
@@ -1178,12 +1172,15 @@ export async function runLogRotationService(
                         );
                         if (!safe) continue;
                         const stat = await fs.stat(filePath);
-                        const retention = async () =>
+                        const retention = async (
+                            simulatedArchives: RetentionArchive[] = []
+                        ) =>
                             applyRetention(
                                 filePath,
                                 policy,
                                 effectiveApprovedRoots,
-                                options.dryRun
+                                options.dryRun,
+                                simulatedArchives
                             );
                         if (policy.skipEmpty && stat.size === 0) {
                             const retained = await retention();
@@ -1263,7 +1260,17 @@ export async function runLogRotationService(
                                 message: rotation.warning,
                             });
                         }
-                        const retained = await retention();
+                        const simulatedArchives =
+                            options.dryRun && rotation.archivePath
+                                ? [
+                                      {
+                                          path: rotation.archivePath,
+                                          mtimeMs: now.getTime(),
+                                          compress: false,
+                                      },
+                                  ]
+                                : [];
+                        const retained = await retention(simulatedArchives);
                         groupSummary.deletedArchives += retained.deleted.length;
                         summary.deletedArchives += retained.deleted.length;
                         groupSummary.compressedFiles += retained.compressed.length;

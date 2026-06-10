@@ -58,15 +58,13 @@ function trimOutput(text: string): string {
 /** Refreshes backup status cache with a bounded best-effort timeout. */
 function refreshBackupCacheWithTimeout(key: string, timeoutMs = 30_000) {
     let timeout: NodeJS.Timeout | null = null;
-    const controller = new AbortController();
     let cancelled = false;
     const timeoutError = new Error("Status refresh timed out");
-    const refresh = refreshBackupCache(key, controller.signal);
+    const refresh = refreshBackupCache(key);
     const timed = Promise.race([
         refresh,
         new Promise((_, reject) => {
             timeout = setTimeout(() => {
-                controller.abort(timeoutError);
                 reject(timeoutError);
             }, timeoutMs);
             timeout.unref();
@@ -79,7 +77,6 @@ function refreshBackupCacheWithTimeout(key: string, timeoutMs = 30_000) {
     return {
         cancel(): void {
             cancelled = true;
-            controller.abort(timeoutError);
         },
         get cancelled() {
             return cancelled;
@@ -87,9 +84,7 @@ function refreshBackupCacheWithTimeout(key: string, timeoutMs = 30_000) {
         isTimeoutError(error: unknown): boolean {
             return (
                 error === timeoutError ||
-                (error instanceof Error &&
-                    (error.name === "AbortError" ||
-                        error.message === timeoutError.message))
+                (error instanceof Error && error.message === timeoutError.message)
             );
         },
         refresh,
@@ -246,10 +241,6 @@ async function startBackupJob(type: BackupJob["type"], command: string) {
             void refresh.timed.catch((error: unknown) => {
                 if (!refresh.isTimeoutError(error)) return;
                 refresh.cancel();
-                if (job.refreshPendingPromise === refresh.refresh) {
-                    job.refreshPending = false;
-                    job.refreshPendingPromise = undefined;
-                }
                 job.stderr = trimOutput(
                     `${job.stderr}\nStatus refresh failed: ${errorMessage(error, "Unknown error")}`.trim()
                 );

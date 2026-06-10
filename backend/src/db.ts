@@ -49,15 +49,21 @@ function deleteTaskOrphans(targetDb: MigrationDatabase, tableName: string): void
     if (!sqliteTableExists(targetDb, validatedTableName)) {
         return;
     }
-    targetDb.exec(`
+    execWithTransientLockRetry(
+        targetDb,
+        `
         DELETE FROM ${validatedTableName}
         WHERE task_id NOT IN (SELECT id FROM tasks)
-    `);
+    `
+    );
     if (validatedTableName === "task_dependencies") {
-        targetDb.exec(`
+        execWithTransientLockRetry(
+            targetDb,
+            `
             DELETE FROM ${validatedTableName}
             WHERE depends_on_task_id NOT IN (SELECT id FROM tasks)
-        `);
+        `
+        );
     }
 }
 
@@ -100,6 +106,25 @@ async function sleep(milliseconds: number): Promise<void> {
 
 function sleepSync(milliseconds: number): void {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function execWithTransientLockRetry(targetDb: MigrationDatabase, sql: string): void {
+    let lastError: unknown;
+    for (const delay of [0, 10, 25, 50]) {
+        if (delay > 0) {
+            sleepSync(delay);
+        }
+        try {
+            targetDb.exec(sql);
+            return;
+        } catch (error) {
+            lastError = error;
+            if (!isTransientSqliteLock(error)) {
+                throw error;
+            }
+        }
+    }
+    throw lastError;
 }
 
 db.exec(`

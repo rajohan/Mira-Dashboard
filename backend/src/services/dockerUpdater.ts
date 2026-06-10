@@ -431,7 +431,7 @@ async function lookupDockerHub(service: ManagedServiceRow) {
         const image = (Array.isArray(tagData.images) ? tagData.images : []).find(
             (candidate) => imageMatchesPlatform(asRecord(candidate), platform)
         );
-        const digest = asRecord(image).digest ?? tagData.digest ?? latestDigest;
+        const digest = asRecord(image).digest ?? tagData.digest;
         latestDigest = typeof digest === "string" ? digest : null;
     }
     return { latestTag, latestDigest };
@@ -480,7 +480,7 @@ async function lookupGhcr(service: ManagedServiceRow) {
         latestTag: tag,
         latestDigest:
             headers.get("docker-content-digest") ||
-            (typeof body.digest === "string" ? body.digest : service.latest_digest),
+            (typeof body.digest === "string" ? body.digest : null),
     };
 }
 

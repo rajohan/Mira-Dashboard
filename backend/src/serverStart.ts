@@ -97,8 +97,8 @@ export async function handleServerListening(): Promise<void> {
             );
         }
 
-        startScheduledJobScheduler();
         scheduledJobSchedulerStarted = true;
+        startScheduledJobScheduler();
         removeBackgroundCleanup = installCloseCleanup(async () => {
             if (scheduledJobSchedulerStarted) {
                 await rollback(

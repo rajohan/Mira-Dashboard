@@ -919,6 +919,7 @@ describe("docker routes", { concurrency: false }, () => {
                 {
                     step: "manual-update",
                     ok: false,
+                    code: "NOT_FOUND",
                     stdout: "",
                     stderr: "Docker updater service not found",
                 },
@@ -953,6 +954,7 @@ describe("docker routes", { concurrency: false }, () => {
                     {
                         step: "manual-update",
                         ok: false,
+                        code: "DISABLED",
                         stdout: "",
                         stderr: "Docker updater service is disabled",
                     },

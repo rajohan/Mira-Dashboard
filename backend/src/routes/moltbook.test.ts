@@ -132,19 +132,22 @@ describe("moltbook routes", () => {
     });
 
     after(async () => {
-        if (server) {
-            await server.close();
-        }
-        clearCacheEntries?.();
-        db?.close();
-        if (originalDbPath === undefined) {
-            delete process.env.MIRA_DASHBOARD_DB_PATH;
-        } else {
-            process.env.MIRA_DASHBOARD_DB_PATH = originalDbPath;
-        }
-        if (tempDir) {
-            const { rm } = await import("node:fs/promises");
-            await rm(tempDir, { recursive: true, force: true });
+        try {
+            if (server) {
+                await server.close();
+            }
+            clearCacheEntries?.();
+        } finally {
+            db?.close();
+            if (originalDbPath === undefined) {
+                delete process.env.MIRA_DASHBOARD_DB_PATH;
+            } else {
+                process.env.MIRA_DASHBOARD_DB_PATH = originalDbPath;
+            }
+            if (tempDir) {
+                const { rm } = await import("node:fs/promises");
+                await rm(tempDir, { recursive: true, force: true });
+            }
         }
     });
 

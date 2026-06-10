@@ -1604,7 +1604,9 @@ export async function refreshCacheProducer(key: string, signal?: AbortSignal) {
             }),
         ]);
     } finally {
-        inFlightCacheRefreshes.delete(scopeKey);
+        if (inFlightCacheRefreshes.get(scopeKey) === refresh) {
+            inFlightCacheRefreshes.delete(scopeKey);
+        }
     }
 }
 
