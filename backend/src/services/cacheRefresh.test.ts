@@ -98,6 +98,14 @@ async function waitFor(
     throw new Error("Timed out waiting for cache refresh test condition");
 }
 
+function createDeferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((nextResolve) => {
+        resolve = nextResolve;
+    });
+    return { promise, resolve };
+}
+
 describe("backend cache refresh producers", { concurrency: false }, () => {
     let tempDir: string;
     let dbDir: string;
@@ -273,6 +281,122 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
             () => refreshCacheProducer("moltbook.unknown"),
             /Unsupported Moltbook cache key/u
         );
+    });
+
+    it("starts independent Moltbook upstream fetches concurrently", async () => {
+        const home = createDeferred<unknown>();
+        const hotFeed = createDeferred<unknown>();
+        const newFeed = createDeferred<unknown>();
+        const profile = createDeferred<unknown>();
+        const calls: string[] = [];
+
+        await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
+            await withFetch(
+                (url) => {
+                    calls.push(url);
+                    if (url.endsWith("/home")) return home.promise;
+                    if (url.includes("sort=hot")) return hotFeed.promise;
+                    if (url.includes("sort=new")) return newFeed.promise;
+                    if (url.endsWith("/agents/profile?name=mira_2026")) {
+                        return profile.promise;
+                    }
+                    throw new Error(`Unexpected Moltbook URL: ${url}`);
+                },
+                async () => {
+                    const refresh = refreshMoltbookCache();
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+
+                    let assertionError: unknown;
+                    try {
+                        assert.equal(calls.length, 4);
+                        assert.ok(calls.some((url) => url.endsWith("/home")));
+                        assert.ok(calls.some((url) => url.includes("sort=hot")));
+                        assert.ok(calls.some((url) => url.includes("sort=new")));
+                        assert.ok(
+                            calls.some((url) =>
+                                url.endsWith("/agents/profile?name=mira_2026")
+                            )
+                        );
+                    } catch (error) {
+                        assertionError = error;
+                    } finally {
+                        home.resolve({ latest_moltbook_announcement: {} });
+                        hotFeed.resolve({ posts: [{ id: "hot" }] });
+                        newFeed.resolve({ posts: [{ id: "new" }] });
+                        profile.resolve({
+                            agent: { name: "mira_2026" },
+                            recentPosts: [],
+                            recentComments: [],
+                        });
+                        await refresh;
+                    }
+
+                    if (assertionError) throw assertionError;
+                }
+            );
+        });
+    });
+
+    it("keeps successful Moltbook writes when one upstream call fails", async () => {
+        await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
+            await withFetch(
+                (url) => {
+                    if (url.endsWith("/home")) {
+                        return { latest_moltbook_announcement: {} };
+                    }
+                    if (url.includes("sort=hot")) {
+                        return { posts: [{ id: "hot" }] };
+                    }
+                    if (url.includes("sort=new")) {
+                        return { httpStatus: 502 };
+                    }
+                    return {
+                        agent: { name: "mira_2026" },
+                        recentPosts: [{ id: "mine" }],
+                        recentComments: [],
+                    };
+                },
+                async () => {
+                    assert.deepEqual(await refreshMoltbookCache(), {
+                        refreshed: [
+                            "moltbook.home",
+                            "moltbook.feed.hot",
+                            "moltbook.profile",
+                            "moltbook.my-content",
+                        ],
+                    });
+                }
+            );
+        });
+
+        assert.equal(cacheRow("moltbook.home").status, "fresh");
+        assert.equal(cacheRow("moltbook.feed.hot").status, "fresh");
+        assert.equal(cacheRow("moltbook.profile").status, "fresh");
+        assert.equal(cacheRow("moltbook.my-content").status, "fresh");
+        assert.equal(
+            (
+                db
+                    .prepare(
+                        "SELECT COUNT(*) AS count FROM cache_entries WHERE key = 'moltbook.feed.new'"
+                    )
+                    .get() as { count: number }
+            ).count,
+            0
+        );
+    });
+
+    it("wraps non-Error Moltbook upstream failures", async () => {
+        await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
+            await withFetch(
+                () => Promise.reject("offline"),
+                async () => {
+                    await assert.rejects(
+                        () => refreshMoltbookCache("moltbook.home"),
+                        /Moltbook refresh failed/u
+                    );
+                }
+            );
+        });
     });
 
     it("records grouped Moltbook refresh failures without poisoning concrete cache keys", async () => {

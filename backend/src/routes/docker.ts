@@ -735,7 +735,7 @@ function mapDockerUpdaterRow(row: DockerUpdaterServiceRow) {
         lastUpdatedAt: nullableString(row.last_updated_at),
         lastStatus: nullableString(row.last_status),
         updateAvailable: hasUpdaterCandidate(row),
-        metadata: parseJsonField<Record<string, unknown>>(row.metadata) ?? {},
+        metadata: objectFallback(parseJsonField<Record<string, unknown>>(row.metadata)),
     };
 }
 

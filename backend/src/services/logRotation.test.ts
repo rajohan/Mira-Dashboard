@@ -962,7 +962,12 @@ describe("log rotation service", { concurrency: false }, () => {
                 "--json",
             ],
             {
-                env: { ...process.env, MIRA_LOG_ROTATION_CONFIG: configPath },
+                env: {
+                    ...process.env,
+                    MIRA_DASHBOARD_DB_PATH: suiteDbPath,
+                    MIRA_LOG_ROTATION_CONFIG: configPath,
+                    MIRA_SUITE_DB_PATH: suiteDbPath,
+                },
             }
         );
 
@@ -1018,7 +1023,9 @@ describe("log rotation service", { concurrency: false }, () => {
                     {
                         env: {
                             ...process.env,
+                            MIRA_DASHBOARD_DB_PATH: suiteDbPath,
                             MIRA_LOG_ROTATION_CONFIG: badConfigPath,
+                            MIRA_SUITE_DB_PATH: suiteDbPath,
                         },
                     }
                 ),

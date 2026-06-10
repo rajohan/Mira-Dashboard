@@ -382,7 +382,7 @@ if (args[0] === "exec" && args[1] === "postgres" && args[2] === "psql") {
     const rows = [
       "1\tmedia\tapp\trepo/app:1.0.0\trepo/app\t1.0.0\tsha256:old\t1.0.1\tsha256:new\tauto\tdigest\ttrue\t2026-05-11\t\t\t{\"owner\":\"mira\"}",
       "2\tmedia\tdisabled\trepo/disabled:1\trepo/disabled\t1\t\t2\t\tnotify\ttag\tfalse\t\t\t\t{}",
-      "3\tmedia\tcurrent\trepo/current:1\trepo/current\t1\t\t1\t\tnotify\ttag\ttrue\t\t\t\tnot-json"
+      "3\tmedia\tcurrent\trepo/current:1\trepo/current\t1\t\t1\t\tnotify\ttag\ttrue\t\t\t\t[]"
     ];
     const whereMatch = sql.match(/WHERE id = (\d+)/);
     if (whereMatch) {
@@ -662,7 +662,7 @@ async function seedDockerUpdaterState(tempDir: string): Promise<void> {
         "tag",
         "1",
         1,
-        "not-json",
+        "[]",
         null
     );
     db.prepare(

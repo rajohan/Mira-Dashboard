@@ -471,6 +471,16 @@ function normalizeMoltbookFeed(value: unknown, sort: "hot" | "new") {
     };
 }
 
+type MoltbookFetchTask =
+    | { kind: "home"; promise: Promise<unknown> }
+    | {
+          kind: "feed";
+          key: MoltbookCacheKey;
+          sort: "hot" | "new";
+          promise: Promise<unknown>;
+      }
+    | { kind: "profile"; promise: Promise<unknown> };
+
 export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
     const requestedKeys = targetKey ? [targetKey] : MOLTBOOK_CACHE_KEY_LIST;
     const writes: Array<{
@@ -478,29 +488,20 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
         data: unknown;
         metadata: Record<string, unknown>;
     }> = [];
+    const tasks: MoltbookFetchTask[] = [];
 
     if (requestedKeys.includes("moltbook.home")) {
-        writes.push({
-            key: "moltbook.home",
-            data: normalizeMoltbookHome(await fetchMoltbookJson("/home")),
-            metadata: { workflow: "Cache Foundation - Moltbook", kind: "home" },
-        });
+        tasks.push({ kind: "home", promise: fetchMoltbookJson("/home") });
     }
 
     for (const sort of ["hot", "new"] as const) {
         const key = `moltbook.feed.${sort}` as MoltbookCacheKey;
         if (!requestedKeys.includes(key)) continue;
-        writes.push({
+        tasks.push({
+            kind: "feed",
             key,
-            data: normalizeMoltbookFeed(
-                await fetchMoltbookJson(`/feed?sort=${sort}&limit=25`),
-                sort
-            ),
-            metadata: {
-                workflow: "Cache Foundation - Moltbook",
-                kind: "feed",
-                sort,
-            },
+            sort,
+            promise: fetchMoltbookJson(`/feed?sort=${sort}&limit=25`),
         });
     }
 
@@ -508,13 +509,50 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
         requestedKeys.includes("moltbook.profile") ||
         requestedKeys.includes("moltbook.my-content")
     ) {
-        const profile = asRecord(
-            await fetchMoltbookJson("/agents/profile?name=mira_2026")
-        );
+        tasks.push({
+            kind: "profile",
+            promise: fetchMoltbookJson("/agents/profile?name=mira_2026"),
+        });
+    }
+
+    const results = await Promise.allSettled(
+        tasks.map(async (task) => ({ task, value: await task.promise }))
+    );
+    let firstFailure: unknown;
+    for (const result of results) {
+        if (result.status === "rejected") {
+            firstFailure ??= result.reason;
+            continue;
+        }
+        const { task, value } = result.value;
+
+        if (task.kind === "home") {
+            writes.push({
+                key: "moltbook.home",
+                data: normalizeMoltbookHome(value),
+                metadata: { workflow: "Cache Foundation - Moltbook", kind: "home" },
+            });
+            continue;
+        }
+
+        if (task.kind === "feed") {
+            writes.push({
+                key: task.key,
+                data: normalizeMoltbookFeed(value, task.sort),
+                metadata: {
+                    workflow: "Cache Foundation - Moltbook",
+                    kind: "feed",
+                    sort: task.sort,
+                },
+            });
+            continue;
+        }
+
+        const profile = asRecord(value);
         if (requestedKeys.includes("moltbook.profile")) {
             writes.push({
                 key: "moltbook.profile",
-                data: { agent: profile?.agent ?? null },
+                data: { agent: profile.agent ?? null },
                 metadata: { workflow: "Cache Foundation - Moltbook", kind: "profile" },
             });
         }
@@ -530,6 +568,13 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
                 metadata: { workflow: "Cache Foundation - Moltbook", kind: "my-content" },
             });
         }
+    }
+
+    if (writes.length === 0 && firstFailure !== undefined) {
+        if (firstFailure instanceof Error) {
+            throw firstFailure;
+        }
+        throw new Error("Moltbook refresh failed", { cause: firstFailure });
     }
 
     db.exec("SAVEPOINT moltbook_cache_write");
