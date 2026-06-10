@@ -512,9 +512,7 @@ function hasUpdate(service: ManagedServiceRow): boolean {
     return Boolean(
         (service.latest_tag &&
             (!service.current_tag || service.latest_tag !== service.current_tag)) ||
-        (service.latest_digest &&
-            service.current_digest &&
-            service.latest_digest !== service.current_digest)
+        (service.latest_digest && service.latest_digest !== service.current_digest)
     );
 }
 
@@ -573,25 +571,6 @@ function writeFileWithMetadata(
                 // Preserve the original write failure.
             }
         }
-    }
-}
-
-function overwriteFileWithMetadata(
-    targetPath: string,
-    content: string,
-    stats: Pick<fs.Stats, "mode" | "uid" | "gid">
-) {
-    const mode = stats.mode & 0o7777;
-    const fd = fs.openSync(targetPath, fs.constants.O_WRONLY | fs.constants.O_TRUNC);
-    try {
-        fs.writeFileSync(fd, content, "utf8");
-        fs.fchmodSync(fd, mode);
-        const currentStats = fs.fstatSync(fd);
-        if (currentStats.uid !== stats.uid || currentStats.gid !== stats.gid) {
-            fs.fchownSync(fd, stats.uid, stats.gid);
-        }
-    } finally {
-        fs.closeSync(fd);
     }
 }
 
@@ -771,9 +750,6 @@ async function applyComposeUpdateUnlocked(
         try {
             if (fs.existsSync(rollbackTempPath)) {
                 fs.renameSync(rollbackTempPath, composePath);
-                restored = true;
-            } else {
-                overwriteFileWithMetadata(composePath, raw, originalStats);
                 restored = true;
             }
         } catch (rollbackError) {
@@ -978,18 +954,12 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
             }
         }
         const discoveredAppSlugs = new Set(
-            discoveries.map((discovery) => discovery.appSlug)
-        );
-        const failedAppSlugs = new Set(
-            failedDiscoveries.map((discovery) => discovery.appSlug)
+            successfulDiscoveries.map((discovery) => discovery.appSlug)
         );
         for (const row of db
             .prepare("SELECT DISTINCT app_slug FROM docker_managed_services")
             .all() as Array<{ app_slug: string }>) {
-            if (
-                !discoveredAppSlugs.has(row.app_slug) &&
-                !failedAppSlugs.has(row.app_slug)
-            ) {
+            if (!discoveredAppSlugs.has(row.app_slug)) {
                 db.prepare("DELETE FROM docker_managed_services WHERE app_slug = ?").run(
                     row.app_slug
                 );
@@ -1383,7 +1353,6 @@ export const __testing = {
     needsFullTagScan,
     normalizeDockerHubRepo,
     normalizeLabels,
-    overwriteFileWithMetadata,
     caughtMessage,
     fetchRegistryJson,
     isSafeTagRegexPattern,

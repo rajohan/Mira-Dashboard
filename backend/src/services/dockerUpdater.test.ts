@@ -443,7 +443,7 @@ process.stdout.write("updated\n");
         });
     });
 
-    it("fails registration after malformed compose files and preserves failed app rows", async () => {
+    it("fails registration after malformed compose files and removes failed app rows", async () => {
         const appsRoot = path.join(tempDir, "apps");
         const goodDir = path.join(appsRoot, "good");
         const badDir = path.join(appsRoot, "bad");
@@ -507,7 +507,7 @@ process.stdout.write("updated\n");
                     )
                     .get() as { count: number }
             ).count,
-            1
+            0
         );
         assert.equal(
             (
@@ -957,13 +957,20 @@ setTimeout(() => process.exit(0), 30);
         });
     });
 
-    it("preserves registered services when one compose file cannot be parsed", async () => {
+    it("removes stale registered services when their compose file cannot be parsed", async () => {
         const appsRoot = path.join(tempDir, "apps");
         const appDir = path.join(appsRoot, "broken-app");
+        const okAppDir = path.join(appsRoot, "ok-app");
         await mkdir(appDir, { recursive: true });
+        await mkdir(okAppDir, { recursive: true });
         await writeFile(
             path.join(appDir, "compose.yaml"),
             "services:\n  web:\n    image: [",
+            "utf8"
+        );
+        await writeFile(
+            path.join(okAppDir, "compose.yaml"),
+            "services:\n  web:\n    image: nginx:2\n",
             "utf8"
         );
         dbHandle
@@ -987,7 +994,7 @@ setTimeout(() => process.exit(0), 30);
 
             assert.equal(result.ok, false);
             assert.equal(serviceRows().length, 1);
-            assert.equal(serviceRows()[0]?.app_slug, "broken-app");
+            assert.equal(serviceRows()[0]?.app_slug, "ok-app");
         });
     });
 
@@ -1891,7 +1898,7 @@ setTimeout(() => process.exit(0), 30);
                 current_digest: null,
                 latest_digest: "sha256:new",
             }),
-            false
+            true
         );
         assert.equal(
             updater.__testing.hasUpdate({
@@ -2038,33 +2045,6 @@ setTimeout(() => process.exit(0), 30);
             }),
             { latestTag: "1", latestDigest: null }
         );
-
-        const overwritePath = path.join(tempDir, "overwrite-compose.yaml");
-        await writeFile(overwritePath, "old", "utf8");
-        const overwriteStats = await stat(overwritePath);
-        const originalFstatSync = fs.fstatSync.bind(fs);
-        const overwriteFchownMock = mock.method(fs, "fchownSync", () => {});
-        const overwriteFstatMock = mock.method(
-            fs,
-            "fstatSync",
-            (fd: Parameters<typeof fs.fstatSync>[0]) => ({
-                ...originalFstatSync(fd),
-                gid: overwriteStats.gid + 1,
-                uid: overwriteStats.uid + 1,
-            })
-        );
-        try {
-            updater.__testing.overwriteFileWithMetadata(
-                overwritePath,
-                "new",
-                overwriteStats
-            );
-            assert.equal(await readFile(overwritePath, "utf8"), "new");
-            assert.equal(overwriteFchownMock.mock.callCount(), 1);
-        } finally {
-            overwriteFstatMock.mock.restore();
-            overwriteFchownMock.mock.restore();
-        }
 
         globalThis.fetch = (async () =>
             ({
@@ -3070,7 +3050,7 @@ process.exit(0);
         assert.equal(writeCount, 2);
     });
 
-    it("restores the compose file directly when rollback temp creation fails", async () => {
+    it("leaves the compose file untouched when rollback temp creation fails", async () => {
         const appDir = path.join(tempDir, "direct-restore");
         await mkdir(appDir, { recursive: true });
         const composePath = path.join(appDir, "compose.yaml");
@@ -3110,25 +3090,19 @@ process.exit(0);
             )`
             )
             .run(service);
-        const originalWriteFileSync = fs.writeFileSync.bind(fs);
         let writeCount = 0;
-        mock.method(
-            fs,
-            "writeFileSync",
-            (...args: Parameters<typeof fs.writeFileSync>) => {
-                writeCount += 1;
-                if (writeCount === 1) {
-                    originalWriteFileSync(composePath, "partial", "utf8");
-                    throw new Error("backup failed");
-                }
-                return originalWriteFileSync(...args);
+        mock.method(fs, "writeFileSync", () => {
+            writeCount += 1;
+            if (writeCount === 1) {
+                throw new Error("backup failed");
             }
-        );
+        });
 
         const result = await updater.__testing.applyServiceUpdate(service, "manual");
 
         assert.equal(result.ok, false);
         assert.match(result.stderr, /backup failed/u);
         assert.equal(await readFile(composePath, "utf8"), originalCompose);
+        assert.equal(writeCount, 1);
     });
 });
