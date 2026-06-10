@@ -57,8 +57,30 @@ function removeCloseCleanup(cleanup?: () => void | Promise<void>): void {
     closeCleanupInstalled = false;
 }
 
+function detachCloseCleanupListener(): void {
+    if (!closeCleanupInstalled) {
+        return;
+    }
+    server.off("close", onServerClose);
+    closeCleanupInstalled = false;
+}
+
+async function runManualCloseCleanups(): Promise<void> {
+    if (closeCleanupPromise) {
+        await closeCleanupPromise;
+        return;
+    }
+    detachCloseCleanupListener();
+    closeCleanupPromise = runCloseCleanups();
+    try {
+        await closeCleanupPromise;
+    } finally {
+        closeCleanupPromise = undefined;
+    }
+}
+
 async function waitForCloseCleanups(): Promise<void> {
-    await (closeCleanupPromise ?? runCloseCleanups());
+    await runManualCloseCleanups();
 }
 
 async function runCloseCleanups(): Promise<void> {
@@ -70,6 +92,7 @@ async function runCloseCleanups(): Promise<void> {
 }
 
 async function closeServerForRollback(): Promise<void> {
+    detachCloseCleanupListener();
     await new Promise<void>((resolve, reject) => {
         server.close((error) => {
             if (error) {
@@ -79,8 +102,7 @@ async function closeServerForRollback(): Promise<void> {
             }
         });
     });
-    await (closeCleanupPromise ?? runCloseCleanups());
-    closeCleanupPromise = undefined;
+    await runManualCloseCleanups();
 }
 
 /** Starts Gateway and the scheduled job scheduler after the HTTP server is listening. */

@@ -1714,6 +1714,28 @@ async function waitForRefreshWithSignal<T>(
     ]);
 }
 
+async function waitForExistingRefresh(
+    requestedKey: string,
+    scopeKey: string,
+    refresh: Promise<{ refreshed: string[] }>,
+    signal: AbortSignal | undefined
+): Promise<{ refreshed: string[] }> {
+    try {
+        return await waitForRefreshWithSignal(refresh, signal);
+    } catch (error) {
+        const failedKeys = getMoltbookFailureKeys(error);
+        if (
+            failedKeys &&
+            MOLTBOOK_CACHE_KEYS.has(scopeKey) &&
+            failedKeys.length > 0 &&
+            !failedKeys.includes(scopeKey as MoltbookCacheKey)
+        ) {
+            return { refreshed: [requestedKey] };
+        }
+        throw error;
+    }
+}
+
 export async function refreshCacheProducer(key: string, signal?: AbortSignal) {
     if (signal?.aborted) {
         throw abortError();
@@ -1727,7 +1749,7 @@ export async function refreshCacheProducer(key: string, signal?: AbortSignal) {
             inFlightKey === scopeKey || scopeKey.startsWith(`${inFlightKey}.`)
     )?.[1];
     if (existing !== undefined) {
-        return await waitForRefreshWithSignal(existing, signal);
+        return await waitForExistingRefresh(key, scopeKey, existing, signal);
     }
     const childRefreshes = inFlightEntries
         .filter(([inFlightKey]) => inFlightKey.startsWith(`${scopeKey}.`))

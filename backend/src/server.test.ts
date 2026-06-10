@@ -755,6 +755,9 @@ describe("server bootstrap", () => {
             assert.deepEqual(calls, ["first", "second"]);
             await serverStartTesting.waitForCloseCleanups();
             assert.deepEqual(calls, ["first", "second"]);
+            server.emit("close");
+            await new Promise((resolve) => setImmediate(resolve));
+            assert.deepEqual(calls, ["first", "second"]);
         } finally {
             serverStartTesting.removeCloseCleanup();
         }

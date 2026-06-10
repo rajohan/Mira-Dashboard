@@ -1047,7 +1047,6 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
             );
         }
         db.exec("COMMIT");
-        txnStarted = false;
     } catch (error) {
         let failureMessage = caughtMessage(error);
         if (txnStarted) {

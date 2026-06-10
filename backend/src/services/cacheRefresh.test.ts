@@ -752,6 +752,137 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         });
     });
 
+    it("resolves reused Moltbook subkey refreshes when unrelated full refresh keys fail", async () => {
+        await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
+            let releaseHome: (() => void) | undefined;
+            globalThis.fetch = (async (input: string | URL | Request) => {
+                const url = input instanceof Request ? input.url : String(input);
+                if (url.includes("/home")) {
+                    await new Promise<void>((resolve) => {
+                        releaseHome = resolve;
+                    });
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({ latest_moltbook_announcement: {} }),
+                    } as Response;
+                }
+                if (url.includes("/feed?sort=hot")) {
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({ posts: [{ id: "hot" }] }),
+                    } as Response;
+                }
+                if (url.includes("/feed?sort=new")) {
+                    return {
+                        ok: false,
+                        status: 502,
+                        headers: new Headers(),
+                        json: async () => ({}),
+                    } as Response;
+                }
+                if (url.includes("/agents/profile")) {
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({
+                            agent: { name: "mira_2026" },
+                            recentPosts: [],
+                            recentComments: [],
+                        }),
+                    } as Response;
+                }
+                throw new Error(`Unexpected Moltbook URL: ${url}`);
+            }) as typeof fetch;
+
+            const fullRefresh = refreshCacheProducer("moltbook");
+            await waitFor(() => Boolean(releaseHome));
+            const hotRefresh = refreshCacheProducer("moltbook.feed.hot");
+            assert.ok(releaseHome);
+            releaseHome();
+
+            await assert.rejects(
+                () => fullRefresh,
+                /Moltbook refresh had sub-request failures/u
+            );
+            assert.deepEqual(await hotRefresh, {
+                refreshed: ["moltbook.feed.hot"],
+            });
+            assert.equal(cacheRow("moltbook.feed.hot").status, "fresh");
+            assert.equal(cacheRow("moltbook.feed.new").status, "error");
+        });
+    });
+
+    it("rejects reused Moltbook subkey refreshes when that subkey fails", async () => {
+        await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
+            let releaseHome: (() => void) | undefined;
+            globalThis.fetch = (async (input: string | URL | Request) => {
+                const url = input instanceof Request ? input.url : String(input);
+                if (url.includes("/home")) {
+                    await new Promise<void>((resolve) => {
+                        releaseHome = resolve;
+                    });
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({ latest_moltbook_announcement: {} }),
+                    } as Response;
+                }
+                if (url.includes("/feed?sort=hot")) {
+                    return {
+                        ok: false,
+                        status: 502,
+                        headers: new Headers(),
+                        json: async () => ({}),
+                    } as Response;
+                }
+                if (url.includes("/feed?sort=new")) {
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({ posts: [{ id: "new" }] }),
+                    } as Response;
+                }
+                if (url.includes("/agents/profile")) {
+                    return {
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({
+                            agent: { name: "mira_2026" },
+                            recentPosts: [],
+                            recentComments: [],
+                        }),
+                    } as Response;
+                }
+                throw new Error(`Unexpected Moltbook URL: ${url}`);
+            }) as typeof fetch;
+
+            const fullRefresh = refreshCacheProducer("moltbook");
+            await waitFor(() => Boolean(releaseHome));
+            const hotRefresh = refreshCacheProducer("moltbook.feed.hot");
+            assert.ok(releaseHome);
+            releaseHome();
+
+            await assert.rejects(
+                () => fullRefresh,
+                /Moltbook refresh had sub-request failures/u
+            );
+            await assert.rejects(
+                () => hotRefresh,
+                /Moltbook refresh had sub-request failures/u
+            );
+            assert.equal(cacheRow("moltbook.feed.hot").status, "error");
+            assert.equal(cacheRow("moltbook.feed.new").status, "fresh");
+        });
+    });
+
     it("runs full Moltbook refresh after an in-flight home refresh", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             let homeFetches = 0;
