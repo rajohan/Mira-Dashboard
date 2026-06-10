@@ -2402,8 +2402,72 @@ if (process.argv.includes("kopia")) {
             /Cache refresh aborted/u
         );
 
+        let abortChecks = 0;
+        let resolveRaceFetch: (() => void) | undefined;
+        globalThis.fetch = (async () => {
+            return await new Promise<Response>((resolve) => {
+                resolveRaceFetch = () =>
+                    resolve({
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({
+                            current_condition: [
+                                {
+                                    temp_C: "0",
+                                    FeelsLikeC: "0",
+                                    humidity: "0",
+                                    windspeedKmph: "0",
+                                    weatherDesc: [{ value: "Cloudy" }],
+                                },
+                            ],
+                            weather: [],
+                        }),
+                    } as Response);
+            });
+        }) as typeof fetch;
+        const racingAbortSignal = {
+            get aborted() {
+                abortChecks += 1;
+                return abortChecks > 1;
+            },
+            addEventListener() {
+                throw new Error("abort listener should not be registered");
+            },
+        } as unknown as AbortSignal;
+        const racedRefresh = refreshCacheProducer("weather.spydeberg", racingAbortSignal);
+        await assert.rejects(() => racedRefresh, /Cache refresh aborted/u);
+        assert.ok(resolveRaceFetch);
+        const reusedRefresh = refreshCacheProducer("weather.spydeberg");
+        resolveRaceFetch();
+        await reusedRefresh;
+
         const inFlightAbort = new AbortController();
-        globalThis.fetch = (async () => new Promise(() => {})) as typeof fetch;
+        let fetchCalls = 0;
+        let resolveFetch: (() => void) | undefined;
+        globalThis.fetch = (async () => {
+            fetchCalls += 1;
+            return await new Promise<Response>((resolve) => {
+                resolveFetch = () =>
+                    resolve({
+                        ok: true,
+                        status: 200,
+                        headers: new Headers(),
+                        json: async () => ({
+                            current_condition: [
+                                {
+                                    temp_C: "0",
+                                    FeelsLikeC: "0",
+                                    humidity: "0",
+                                    windspeedKmph: "0",
+                                    weatherDesc: [{ value: "Cloudy" }],
+                                },
+                            ],
+                            weather: [],
+                        }),
+                    } as Response);
+            });
+        }) as typeof fetch;
         try {
             const refresh = refreshCacheProducer(
                 "weather.spydeberg",
@@ -2411,6 +2475,12 @@ if (process.argv.includes("kopia")) {
             );
             inFlightAbort.abort();
             await assert.rejects(() => refresh, /Cache refresh aborted/u);
+            const secondRefresh = refreshCacheProducer("weather.spydeberg");
+            assert.equal(fetchCalls, 1);
+            assert.ok(resolveFetch);
+            resolveFetch();
+            await secondRefresh;
+            assert.equal(fetchCalls, 1);
         } finally {
             globalThis.fetch = originalFetch;
         }

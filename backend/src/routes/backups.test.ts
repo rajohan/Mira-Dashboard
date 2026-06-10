@@ -257,9 +257,10 @@ describe("backup routes", () => {
                     endedAt: 2,
                     refreshPending: true,
                 });
-                const job = await backupTesting.startBackupJob(type, "true");
-                assert.equal(job.id, `old-${type}`);
-                assert.equal(job.refreshPending, true);
+                await assert.rejects(
+                    () => backupTesting.startBackupJob(type, "true"),
+                    /Backup status refresh is still running/u
+                );
             }
         } finally {
             backupTesting.setSpawnBackupProcessForTest();
@@ -604,7 +605,7 @@ describe("backup routes", () => {
     });
 
     it("releases backup jobs when status refresh times out", async () => {
-        const backupRefreshTimeoutMs = 5;
+        const backupRefreshTimeoutMs = 100;
         backupTesting.setBackupRefreshTimeoutMsForTest(backupRefreshTimeoutMs);
         let finishRefresh: ((value: { refreshed: string[] }) => void) | undefined;
         let rejectRefresh: ((error: Error) => void) | undefined;
@@ -626,12 +627,21 @@ describe("backup routes", () => {
             for (let attempt = 0; attempt < 30 && !finishRefresh; attempt += 1) {
                 await new Promise((resolve) => setTimeout(resolve, 10));
             }
-            await new Promise((resolve) =>
-                setTimeout(resolve, backupRefreshTimeoutMs + 20)
-            );
 
             assert.ok(finishRefresh);
             assert.ok(rejectRefresh);
+            const blocked = await requestJson<{
+                error: string;
+                job: { id: string; refreshPending: boolean };
+            }>(server, "/api/backups/kopia/run", { method: "POST" });
+            assert.equal(blocked.status, 409);
+            assert.match(blocked.body.error, /status refresh is still running/u);
+            assert.equal(blocked.body.job.id, firstJobId);
+            assert.equal(blocked.body.job.refreshPending, true);
+
+            await new Promise((resolve) =>
+                setTimeout(resolve, backupRefreshTimeoutMs + 20)
+            );
             const timedOut = await requestJson<{
                 job: {
                     id: string;
@@ -665,6 +675,30 @@ describe("backup routes", () => {
                 return { refreshed: [key] };
             });
         }
+    });
+
+    it("rejects WAL-G reruns while status refresh is pending", async () => {
+        backupTesting.setActiveJobForTest("walg", {
+            id: "pending-walg",
+            type: "walg",
+            status: "done",
+            code: 0,
+            stdout: "",
+            stderr: "",
+            startedAt: 1,
+            endedAt: 2,
+            refreshPending: true,
+        });
+
+        const blocked = await requestJson<{
+            error: string;
+            job: { id: string; refreshPending: boolean };
+        }>(server, "/api/backups/walg/run", { method: "POST" });
+
+        assert.equal(blocked.status, 409);
+        assert.match(blocked.body.error, /status refresh is still running/u);
+        assert.equal(blocked.body.job.id, "pending-walg");
+        assert.equal(blocked.body.job.refreshPending, true);
     });
 
     it("covers backup helper edge cases directly", async () => {

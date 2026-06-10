@@ -38,6 +38,13 @@ interface BackupJob {
     process?: ChildProcess;
 }
 
+class BackupRefreshPendingError extends Error {
+    constructor(readonly job: BackupJob) {
+        super("Backup status refresh is still running");
+        this.name = "BackupRefreshPendingError";
+    }
+}
+
 /** Represents the backup job API response. */
 interface BackupJobResponse {
     job: ReturnType<typeof mapJob>;
@@ -183,7 +190,7 @@ async function startBackupJob(type: BackupJob["type"], command: string) {
         return existingJob;
     }
     if (existingJob?.refreshPending) {
-        return existingJob;
+        throw new BackupRefreshPendingError(existingJob);
     }
     if (existingJob) {
         clearActiveBackupJob(type, existingJob.id);
@@ -348,8 +355,19 @@ export default function backupRoutes(
         "/api/backups/kopia/run",
         asyncRoute(
             async (_req, res) => {
-                const job = await startKopiaBackupJob();
-                res.json({ ok: true, job: mapJob(job) });
+                try {
+                    const job = await startKopiaBackupJob();
+                    res.json({ ok: true, job: mapJob(job) });
+                } catch (error) {
+                    if (error instanceof BackupRefreshPendingError) {
+                        res.status(409).json({
+                            error: error.message,
+                            job: mapJob(error.job),
+                        });
+                        return;
+                    }
+                    throw error;
+                }
             },
             { fallback: "Failed to start Kopia backup" }
         )
@@ -363,8 +381,19 @@ export default function backupRoutes(
         "/api/backups/walg/run",
         asyncRoute(
             async (_req, res) => {
-                const job = await startWalgBackupJob();
-                res.json({ ok: true, job: mapJob(job) });
+                try {
+                    const job = await startWalgBackupJob();
+                    res.json({ ok: true, job: mapJob(job) });
+                } catch (error) {
+                    if (error instanceof BackupRefreshPendingError) {
+                        res.status(409).json({
+                            error: error.message,
+                            job: mapJob(error.job),
+                        });
+                        return;
+                    }
+                    throw error;
+                }
             },
             { fallback: "Failed to start WAL-G backup" }
         )

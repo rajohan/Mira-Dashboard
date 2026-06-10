@@ -1591,23 +1591,28 @@ export async function refreshCacheProducer(key: string, signal?: AbortSignal) {
               )
             : refreshCacheProducerUnlocked(key);
     inFlightCacheRefreshes.set(scopeKey, refresh);
-    try {
-        if (!signal) {
-            return await refresh;
-        }
-        return await Promise.race([
-            refresh,
-            new Promise<never>((_resolve, reject) => {
-                signal.addEventListener("abort", () => reject(abortError()), {
-                    once: true,
-                });
-            }),
-        ]);
-    } finally {
-        if (inFlightCacheRefreshes.get(scopeKey) === refresh) {
-            inFlightCacheRefreshes.delete(scopeKey);
-        }
+    void refresh
+        .finally(() => {
+            if (inFlightCacheRefreshes.get(scopeKey) === refresh) {
+                inFlightCacheRefreshes.delete(scopeKey);
+            }
+        })
+        .catch(() => {});
+    if (!signal) {
+        return await refresh;
     }
+    return await Promise.race([
+        refresh,
+        new Promise<never>((_resolve, reject) => {
+            if (signal.aborted) {
+                reject(abortError());
+                return;
+            }
+            signal.addEventListener("abort", () => reject(abortError()), {
+                once: true,
+            });
+        }),
+    ]);
 }
 
 export const __testing = {
