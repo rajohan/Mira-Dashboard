@@ -231,9 +231,8 @@ function escapeRegExp(value: string): string {
     return value.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
 }
 
-function globToRegex(pattern: string): RegExp {
-    const normalized = pattern.split(path.sep).join("/");
-    const source = normalized
+function globPatternSource(pattern: string): string {
+    return pattern
         .split(/(\*|\[0-9\])/u)
         .map((part) => {
             if (part === "*") {
@@ -245,11 +244,15 @@ function globToRegex(pattern: string): RegExp {
             return escapeRegExp(part);
         })
         .join("");
-    return new RegExp(`^${source}$`);
+}
+
+function globToRegex(pattern: string): RegExp {
+    const normalized = pattern.split(path.sep).join("/");
+    return new RegExp(`^${globPatternSource(normalized)}$`);
 }
 
 function segmentRegex(segment: string): RegExp {
-    return new RegExp(`^${segment.split("*").map(escapeRegExp).join("[^/]*")}$`);
+    return new RegExp(`^${globPatternSource(segment)}$`);
 }
 
 function isMissingPathError(error: unknown): boolean {

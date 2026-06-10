@@ -1919,7 +1919,7 @@ setTimeout(() => process.exit(0), 30);
                 current_digest: null,
                 latest_digest: "sha256:new",
             }),
-            true
+            false
         );
         assert.equal(
             updater.__testing.hasUpdate({

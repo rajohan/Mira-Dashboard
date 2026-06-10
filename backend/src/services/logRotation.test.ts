@@ -123,6 +123,14 @@ describe("log rotation service", { concurrency: false }, () => {
                 .test(path.join(tempDir, "a.log.[0-9]2.gz")),
             false
         );
+        const numericArchiveDir = path.join(tempDir, "numeric-archives");
+        await mkdir(numericArchiveDir, { recursive: true });
+        await writeFile(path.join(numericArchiveDir, "app.log.1"), "rotated", "utf8");
+        await writeFile(path.join(numericArchiveDir, "app.log.[0-9]"), "literal", "utf8");
+        assert.deepEqual(
+            await __testing.resolveGlob(path.join(numericArchiveDir, "*.log.[0-9]*")),
+            [path.join(numericArchiveDir, "app.log.1")]
+        );
         assert.equal(
             __testing.mergePolicy({ keep: 1 }, { name: "g", paths: ["x"], keep: 2 }).keep,
             2
