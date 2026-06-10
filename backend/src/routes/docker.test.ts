@@ -823,7 +823,7 @@ describe("docker routes", { concurrency: false }, () => {
                 current_digest: "sha256:a",
                 latest_digest: "sha256:b",
             } as never),
-            false
+            true
         );
         assert.equal(
             __testing.hasUpdaterCandidate({
@@ -2184,7 +2184,7 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(services.status, 200);
         assert.equal(services.body.summary.total, 3);
         assert.equal(services.body.summary.enabled, 2);
-        assert.equal(services.body.summary.updateAvailable, 2);
+        assert.equal(services.body.summary.updateAvailable, 3);
         assert.equal(services.body.summary.failed, 2);
         assert.deepEqual(services.body.services[0]?.metadata, { owner: "mira" });
         assert.deepEqual(services.body.services[2]?.metadata, {});
