@@ -1492,12 +1492,12 @@ if (args.includes("capture-pane")) {
                         const synthetic = (await __testing.checkSyntheticQuota()) as {
                             weeklyTokenLimit: {
                                 nextRegenPercent: number | null;
-                                percentRemaining: number | null;
+                                percentRemaining: number;
                             };
                             rollingFiveHourLimit: { percentUsed: number | null };
                         };
                         assert.equal(synthetic.weeklyTokenLimit.nextRegenPercent, null);
-                        assert.equal(synthetic.weeklyTokenLimit.percentRemaining, null);
+                        assert.equal(synthetic.weeklyTokenLimit.percentRemaining, 100);
                         assert.equal(synthetic.rollingFiveHourLimit.percentUsed, null);
                     }
                 );

@@ -1,5 +1,3 @@
-import "dotenv/config";
-
 import { pathToFileURL } from "node:url";
 
 import { getPersistedGatewayToken } from "./auth.js";
@@ -192,10 +190,6 @@ export function shouldStartOnImport(
     directEntrypoint = isDirectEntrypoint()
 ): boolean {
     return startOnImport === "1" || directEntrypoint;
-}
-
-if (shouldStartOnImport()) {
-    startBackendServer();
 }
 
 function setAfterBackgroundServicesStartedForTest(

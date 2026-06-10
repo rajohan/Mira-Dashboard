@@ -590,6 +590,9 @@ describe("tasks routes", () => {
         assert.deepEqual(assigned.body.assignees, [
             { login: TASK_ASSIGNEES.raymond.id, name: TASK_ASSIGNEES.raymond.id },
         ]);
+        db.prepare(
+            "INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES (?, ?)"
+        ).run(created.body.number, created.body.number);
 
         const deleted = await requestJson<{ ok: true }>(
             server,
@@ -599,6 +602,16 @@ describe("tasks routes", () => {
 
         assert.equal(deleted.status, 200);
         assert.deepEqual(deleted.body, { ok: true });
+        assert.equal(
+            (
+                db
+                    .prepare(
+                        "SELECT COUNT(*) AS count FROM task_dependencies WHERE task_id = ? OR depends_on_task_id = ?"
+                    )
+                    .get(created.body.number, created.body.number) as { count: number }
+            ).count,
+            0
+        );
 
         const missingFetch = await requestJson<{ error: string }>(
             server,

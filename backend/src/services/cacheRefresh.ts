@@ -1221,6 +1221,8 @@ async function checkSyntheticQuota() {
     const rollingFiveHourRemaining = toNumber(rollingFiveHourLimit.remaining);
     const weeklyMaxCredits = toCurrencyNumber(weeklyTokenLimit.maxCredits);
     const weeklyNextRegenCredits = toCurrencyNumber(weeklyTokenLimit.nextRegenCredits);
+    const weeklyPercentRemaining =
+        toNullableNumber(weeklyTokenLimit.percentRemaining) ?? 100;
     return {
         subscription: {
             limit: subscriptionLimit,
@@ -1243,7 +1245,7 @@ async function checkSyntheticQuota() {
                     : null,
         },
         weeklyTokenLimit: {
-            percentRemaining: toNullableNumber(weeklyTokenLimit.percentRemaining),
+            percentRemaining: weeklyPercentRemaining,
             nextRegenAt: weeklyTokenLimit.nextRegenAt || null,
             maxCredits: weeklyTokenLimit.maxCredits || null,
             remainingCredits: weeklyTokenLimit.remainingCredits || null,

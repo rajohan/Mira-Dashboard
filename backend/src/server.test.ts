@@ -1046,7 +1046,7 @@ describe("server bootstrap", () => {
             listenedPort = undefined;
             server.address = (() => null) as typeof server.address;
             await import(`./serverStart.js?entry=${Date.now()}`);
-            assert.equal(listenedPort, 0);
+            assert.equal(listenedPort, undefined);
         } finally {
             if (originalToken === undefined) {
                 delete process.env.OPENCLAW_TOKEN;
@@ -1078,10 +1078,59 @@ describe("server bootstrap", () => {
         }
     });
 
-    it("runs the startup module as a direct entrypoint", async () => {
-        const serverStartEntrypoint = fileURLToPath(
-            new URL("serverStart.ts", import.meta.url)
-        );
+    it("does not start the server as a serverStart import side effect", async () => {
+        const originalStartOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT;
+        const originalListen = server.listen;
+        let listenedPort: number | undefined;
+        server.listen = ((port: number) => {
+            listenedPort = port;
+            return server;
+        }) as typeof server.listen;
+        try {
+            process.env.MIRA_DASHBOARD_START_ON_IMPORT = "1";
+            await import(`./serverStart.js?noStart=${Date.now()}`);
+            assert.equal(listenedPort, undefined);
+        } finally {
+            server.listen = originalListen;
+            if (originalStartOnImport === undefined) {
+                delete process.env.MIRA_DASHBOARD_START_ON_IMPORT;
+            } else {
+                process.env.MIRA_DASHBOARD_START_ON_IMPORT = originalStartOnImport;
+            }
+        }
+    });
+
+    it("starts only from the executable entrypoint", async () => {
+        const originalStartOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT;
+        const originalListen = server.listen;
+        const originalAddress = server.address;
+        let listenedPort: number | undefined;
+        server.listen = ((port: number) => {
+            listenedPort = port;
+            return server;
+        }) as typeof server.listen;
+        server.address = (() => null) as typeof server.address;
+        try {
+            delete process.env.MIRA_DASHBOARD_START_ON_IMPORT;
+            await import(`./main.js?noStart=${Date.now()}`);
+            assert.equal(listenedPort, undefined);
+
+            process.env.MIRA_DASHBOARD_START_ON_IMPORT = "1";
+            await import(`./main.js?start=${Date.now()}`);
+            assert.equal(listenedPort, 0);
+        } finally {
+            server.listen = originalListen;
+            server.address = originalAddress;
+            if (originalStartOnImport === undefined) {
+                delete process.env.MIRA_DASHBOARD_START_ON_IMPORT;
+            } else {
+                process.env.MIRA_DASHBOARD_START_ON_IMPORT = originalStartOnImport;
+            }
+        }
+    });
+
+    it("runs the startup entrypoint directly", async () => {
+        const serverStartEntrypoint = fileURLToPath(new URL("main.ts", import.meta.url));
         const entrypointCwd = await mkdtemp(path.join(os.tmpdir(), "mira-server-cwd-"));
         const { child } = await startEntrypointChild(
             serverStartEntrypoint,
@@ -1111,9 +1160,7 @@ describe("server bootstrap", () => {
     });
 
     it("loads dotenv before route imports bind the dashboard database", async () => {
-        const serverStartEntrypoint = fileURLToPath(
-            new URL("serverStart.ts", import.meta.url)
-        );
+        const serverStartEntrypoint = fileURLToPath(new URL("main.ts", import.meta.url));
         const entrypointCwd = await mkdtemp(path.join(os.tmpdir(), "mira-server-env-"));
         const configuredDbPath = path.join(entrypointCwd, "env-db", "dashboard.db");
         const childEnv = { ...process.env };

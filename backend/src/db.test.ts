@@ -295,6 +295,24 @@ test("retries transient task orphan cleanup locks", async () => {
     }
 });
 
+test("skips missing task child tables during orphan cleanup", async () => {
+    const { cleanup, result } = await importWithTempDb("missingTaskChildTable");
+    const targetDb = {
+        prepare: () => ({
+            all: () => [],
+        }),
+        exec: () => {
+            throw new Error("delete should not run for missing child tables");
+        },
+    };
+
+    try {
+        assert.doesNotThrow(() => result.__testing.cleanupTaskForeignKeyOrphans(targetDb));
+    } finally {
+        await cleanup();
+    }
+});
+
 test("rethrows non-transient task orphan cleanup errors", async () => {
     const { cleanup, result } = await importWithTempDb("taskOrphanNonTransient");
     const targetDb = {

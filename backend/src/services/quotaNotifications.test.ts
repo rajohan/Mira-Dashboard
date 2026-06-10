@@ -284,6 +284,33 @@ describe("quota notifications", () => {
         );
     });
 
+    it("does not treat missing synthetic weekly data as exhausted", async () => {
+        process.env.FAKE_QUOTAS_JSON = JSON.stringify({
+            openrouter: { status: "not_configured" },
+            elevenlabs: { status: "not_configured" },
+            synthetic: {
+                rollingFiveHourLimit: {
+                    remaining: 100,
+                    max: 100,
+                    limited: false,
+                    nextTickAt: null,
+                    percentUsed: null,
+                },
+                weeklyTokenLimit: {
+                    percentRemaining: 100,
+                    nextRegenAt: null,
+                },
+            },
+            openai: { status: "not_configured" },
+            checkedAt: 1_800_000_000_000,
+            cacheAgeMs: 0,
+        });
+        seedQuotasCache();
+
+        assert.equal(await runQuotaNotificationCheck(), true);
+        assert.deepEqual(quotaNotifications(), []);
+    });
+
     it("covers quota helper fallback branches directly", () => {
         const quotas = {
             openrouter: { status: "not_configured" },

@@ -8,7 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import test, { after, before } from "node:test";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
-const serverEntry = path.join(repoRoot, "dist/serverStart.js");
+const serverEntry = path.join(repoRoot, "dist/main.js");
 const port = 3301;
 const baseUrl = `http://127.0.0.1:${port}`;
 

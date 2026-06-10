@@ -619,6 +619,9 @@ export default function tasksRoutes(
 
         db.prepare("DELETE FROM task_updates WHERE task_id = ?").run(id);
         db.prepare("DELETE FROM task_events WHERE task_id = ?").run(id);
+        db.prepare(
+            "DELETE FROM task_dependencies WHERE task_id = ? OR depends_on_task_id = ?"
+        ).run(id, id);
         db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
         if (existing.assignee === TASK_ASSIGNEES.mira.id) {
             void notifyMira("deleted", existing);

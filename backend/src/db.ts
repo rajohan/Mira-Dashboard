@@ -135,6 +135,14 @@ CREATE TABLE IF NOT EXISTS task_updates (
     FOREIGN KEY(task_id) REFERENCES tasks(id)
 );
 
+CREATE TABLE IF NOT EXISTS task_dependencies (
+    task_id INTEGER NOT NULL,
+    depends_on_task_id INTEGER NOT NULL,
+    PRIMARY KEY(task_id, depends_on_task_id),
+    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY(depends_on_task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS notifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
