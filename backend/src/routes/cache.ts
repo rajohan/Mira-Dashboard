@@ -44,7 +44,7 @@ export const __testing = {
         cacheRefreshCommandOverrides.clear();
     },
     setCacheRefreshCommandForTests(key: string, command: string[] | undefined): void {
-        if (command) {
+        if (command && command.length > 0) {
             cacheRefreshCommandOverrides.set(key, command);
             cacheRefreshRunner = async (refreshKey: string) => {
                 const override = cacheRefreshCommandOverrides.get(refreshKey);

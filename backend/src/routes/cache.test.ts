@@ -312,6 +312,9 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
             assert.equal(routeRefresh.status, 200);
             assert.equal(((await routeRefresh.json()) as { ok: boolean }).ok, true);
 
+            __testing.setCacheRefreshCommandForTests("quotas.summary", []);
+            assert.equal(__testing.getCacheRefreshCommand("quotas.summary"), undefined);
+
             __testing.setCacheRefreshCommandForTests("quotas.summary", [
                 "/bin/sh",
                 "-c",

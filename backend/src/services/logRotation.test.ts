@@ -265,6 +265,35 @@ describe("log rotation service", { concurrency: false }, () => {
                     dryRun: true,
                     config: await writeConfig(tempDir, {
                         version: 1,
+                        defaults: { enabled: "false" },
+                        groups: [{ name: "invalid", paths: ["*.log"] }],
+                    }),
+                }),
+            /defaults\.enabled must be a boolean/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
+                        groups: [
+                            {
+                                name: "invalid",
+                                paths: ["*.log"],
+                                maxSizeMb: "1",
+                            },
+                        ],
+                    }),
+                }),
+            /Group invalid\.maxSizeMb must be a number/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
                         defaults: { archiveOnly: true },
                         groups: [{ name: "invalid", paths: ["*.log"] }],
                     }),
@@ -1643,6 +1672,34 @@ describe("log rotation service", { concurrency: false }, () => {
             );
         } finally {
             unlinkMock.mock.restore();
+            await rm(lockPath, { force: true });
+        }
+    });
+
+    it("rethrows unexpected stale lock read errors", async () => {
+        const lockPath = testLockPath(tempDir);
+        await mkdir(path.dirname(lockPath), { recursive: true });
+        await writeFile(lockPath, "not-a-pid\n", "utf8");
+        const originalReadFile = fsPromises.readFile.bind(fsPromises);
+        const readFileMock = mock.method(
+            fsPromises,
+            "readFile",
+            async (...args: Parameters<typeof fsPromises.readFile>) => {
+                if (String(args[0]) === lockPath) {
+                    const error = new Error("lock read denied") as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    throw error;
+                }
+                return originalReadFile(...args);
+            }
+        );
+        try {
+            await assert.rejects(
+                () => __testing.acquireLogRotationLock(false),
+                /lock read denied/u
+            );
+        } finally {
+            readFileMock.mock.restore();
             await rm(lockPath, { force: true });
         }
     });

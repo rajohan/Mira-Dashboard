@@ -520,7 +520,7 @@ function parseCronField(
                 return null;
             }
             start = parsed;
-            end = parsed;
+            end = stepPart === undefined ? parsed : max;
         }
 
         for (let value = start; value <= end; value += step) {

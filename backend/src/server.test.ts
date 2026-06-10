@@ -737,7 +737,7 @@ describe("server bootstrap", () => {
         assert.deepEqual(closes.at(-1), { code: 4401, reason: "Unauthorized" });
     });
 
-    it("runs every installed server close cleanup", () => {
+    it("runs every installed server close cleanup", async () => {
         const calls: string[] = [];
         serverStartTesting.removeCloseCleanup();
         try {
@@ -748,6 +748,9 @@ describe("server bootstrap", () => {
                 calls.push("second");
             });
             server.emit("close");
+            await serverStartTesting.waitForCloseCleanups();
+            assert.deepEqual(calls, ["first", "second"]);
+            await serverStartTesting.waitForCloseCleanups();
             assert.deepEqual(calls, ["first", "second"]);
         } finally {
             serverStartTesting.removeCloseCleanup();

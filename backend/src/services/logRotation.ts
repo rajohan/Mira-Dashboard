@@ -139,6 +139,7 @@ function validateConfig(config: LogRotationConfig): void {
     validateOptionalStringArray(config.defaults?.paths, "defaults.paths");
     validateOptionalStringArray(config.defaults?.excludePaths, "defaults.excludePaths");
     validateOptionalStringArray(config.defaults?.archivePaths, "defaults.archivePaths");
+    validatePolicyTypes(config.defaults, "defaults");
     validateOptionalStringArray(config.excludePaths, "excludePaths");
     validateArchiveRetentionScope(
         config.defaults?.archiveRetentionScope,
@@ -172,6 +173,7 @@ function validateConfig(config: LogRotationConfig): void {
             group.archiveRetentionScope,
             `Group ${group.name} archiveRetentionScope`
         );
+        validatePolicyTypes(group, `Group ${group.name}`);
         const effectivePolicy = mergePolicy(config.defaults ?? {}, group);
         const hasPaths =
             Array.isArray(effectivePolicy.paths) && effectivePolicy.paths.length > 0;
@@ -192,6 +194,33 @@ function validateConfig(config: LogRotationConfig): void {
             effectivePolicy.strategy !== "rename"
         ) {
             throw new Error(`Group ${group.name} has unsupported strategy`);
+        }
+    }
+}
+
+function validatePolicyTypes(policy: LogRotationPolicy | undefined, label: string): void {
+    if (policy === undefined) return;
+    for (const field of [
+        "enabled",
+        "archiveOnly",
+        "daily",
+        "weekly",
+        "compress",
+        "skipEmpty",
+        "missingOk",
+    ] as const) {
+        if (policy[field] !== undefined && typeof policy[field] !== "boolean") {
+            throw new TypeError(`${label}.${field} must be a boolean`);
+        }
+    }
+    for (const field of [
+        "maxSizeMb",
+        "keep",
+        "keepDays",
+        "archiveMinAgeMinutes",
+    ] as const) {
+        if (policy[field] !== undefined && typeof policy[field] !== "number") {
+            throw new TypeError(`${label}.${field} must be a number`);
         }
     }
 }
@@ -999,7 +1028,14 @@ async function reclaimStaleLogRotationLock(
         }
     }
     try {
-        const rawPid = await fs.readFile(lockFile, "utf8").catch(() => "");
+        let rawPid = "";
+        try {
+            rawPid = await fs.readFile(lockFile, "utf8");
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                throw error;
+            }
+        }
         const pid = Number.parseInt(rawPid.trim(), 10);
         if (Number.isFinite(pid) && isProcessRunning(pid)) {
             return null;
@@ -1076,7 +1112,7 @@ export async function runLogRotationService(
     );
     validateConfig(config);
     const groups = config.groups
-        .filter((group) => group.enabled !== false)
+        .filter((group) => group.enabled ?? config.defaults?.enabled ?? true)
         .filter((group) => !options.group || group.name === options.group);
     const summary: LogRotationSummary = {
         ok: true,

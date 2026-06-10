@@ -256,6 +256,14 @@ test("computes next daily run for today or tomorrow", () => {
         "2026-06-05T09:15:00.000Z"
     );
     assert.equal(
+        __testing.nextCronRunIso("5/10 * * * *", new Date("2026-06-05T09:04:00Z")),
+        "2026-06-05T09:05:00.000Z"
+    );
+    assert.equal(
+        __testing.nextCronRunIso("5/10 * * * *", new Date("2026-06-05T09:05:00Z")),
+        "2026-06-05T09:15:00.000Z"
+    );
+    assert.equal(
         __testing.nextCronRunIso("0 8 1 * 1", new Date("2026-06-02T00:00:00Z")),
         "2026-06-08T08:00:00.000Z"
     );

@@ -123,11 +123,69 @@ describe("cache hooks", () => {
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["moltbook"] });
     });
 
+    it("invalidates successful cache refreshes when another refresh fails", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ ok: true, entry: { key: "system.host" } }),
+            })
+            .mockResolvedValueOnce({
+                ok: false,
+                status: 500,
+                json: async () => ({ error: "cache failed" }),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+        const queryClient = createTestQueryClient();
+        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+        const { result } = renderHook(() => useRefreshCacheEntry(), {
+            wrapper: createQueryWrapper(queryClient),
+        });
+
+        await act(async () => {
+            await expect(
+                result.current.mutateAsync("system.host,moltbook.home")
+            ).rejects.toThrow("cache failed");
+        });
+
+        expect(invalidateSpy).toHaveBeenCalledWith({
+            queryKey: cacheKeys.entry("system.host"),
+        });
+        expect(invalidateSpy).not.toHaveBeenCalledWith({
+            queryKey: cacheKeys.entry("moltbook.home"),
+        });
+    });
+
+    it("reports failed cache refreshes without invalidating when none succeed", async () => {
+        const fetchMock = vi.fn().mockRejectedValue("network unavailable");
+        vi.stubGlobal("fetch", fetchMock);
+        const queryClient = createTestQueryClient();
+        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+        const { result } = renderHook(() => useRefreshCacheEntry(), {
+            wrapper: createQueryWrapper(queryClient),
+        });
+
+        await act(async () => {
+            await expect(result.current.mutateAsync("system.host")).rejects.toThrow(
+                "network unavailable"
+            );
+        });
+
+        expect(invalidateSpy).not.toHaveBeenCalled();
+    });
+
     it("invalidates related Moltbook queries for the aggregate producer key", async () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
             status: 200,
-            json: async () => ({ ok: true, entries: [{ key: "moltbook.home" }] }),
+            json: async () => ({
+                ok: true,
+                entry: {},
+                entries: [{ key: "moltbook.home" }],
+            }),
         });
         vi.stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();

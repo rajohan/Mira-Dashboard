@@ -1566,6 +1566,28 @@ function abortError(): Error {
     return Object.assign(new Error("Cache refresh aborted"), { name: "AbortError" });
 }
 
+async function waitForRefreshWithSignal<T>(
+    refresh: Promise<T>,
+    signal: AbortSignal | undefined
+): Promise<T> {
+    if (!signal) {
+        return await refresh;
+    }
+    if (signal.aborted) {
+        throw abortError();
+    }
+    return await Promise.race([
+        refresh,
+        new Promise<never>((_resolve, reject) => {
+            const onAbort = () => reject(abortError());
+            signal.addEventListener("abort", onAbort, { once: true });
+            void refresh
+                .finally(() => signal.removeEventListener("abort", onAbort))
+                .catch(() => {});
+        }),
+    ]);
+}
+
 export async function refreshCacheProducer(key: string, signal?: AbortSignal) {
     if (signal?.aborted) {
         throw abortError();
@@ -1579,7 +1601,7 @@ export async function refreshCacheProducer(key: string, signal?: AbortSignal) {
             inFlightKey === scopeKey || scopeKey.startsWith(`${inFlightKey}.`)
     )?.[1];
     if (existing !== undefined) {
-        return existing;
+        return await waitForRefreshWithSignal(existing, signal);
     }
     const childRefreshes = inFlightEntries
         .filter(([inFlightKey]) => inFlightKey.startsWith(`${scopeKey}.`))
@@ -1598,21 +1620,7 @@ export async function refreshCacheProducer(key: string, signal?: AbortSignal) {
             }
         })
         .catch(() => {});
-    if (!signal) {
-        return await refresh;
-    }
-    return await Promise.race([
-        refresh,
-        new Promise<never>((_resolve, reject) => {
-            if (signal.aborted) {
-                reject(abortError());
-                return;
-            }
-            signal.addEventListener("abort", () => reject(abortError()), {
-                once: true,
-            });
-        }),
-    ]);
+    return await waitForRefreshWithSignal(refresh, signal);
 }
 
 export const __testing = {

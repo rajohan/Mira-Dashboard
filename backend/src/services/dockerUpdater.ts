@@ -534,13 +534,32 @@ function setNestedValue(target: JsonRecord, dottedPath: string, value: string) {
         rawParts[0] === "services" && rawParts.at(-1) === "image" && rawParts.length > 3
             ? ["services", rawParts.slice(1, -1).join("."), "image"]
             : rawParts;
+    const unsafeKeys = new Set(["__proto__", "constructor", "prototype"]);
+    for (const part of parts) {
+        if (unsafeKeys.has(part)) {
+            throw new Error(`Unsafe compose image field segment: ${part}`);
+        }
+    }
     let current = target;
     for (const part of parts.slice(0, -1)) {
-        current[part] =
-            current[part] && typeof current[part] === "object" ? current[part] : {};
-        current = current[part] as JsonRecord;
+        if (!Object.hasOwn(current, part)) {
+            throw new Error(`Compose image field path does not exist: ${dottedPath}`);
+        }
+        const next = current[part];
+        if (
+            !next ||
+            typeof next !== "object" ||
+            Object.getPrototypeOf(next) !== Object.prototype
+        ) {
+            throw new Error(`Compose image field path is not an object: ${dottedPath}`);
+        }
+        current = next as JsonRecord;
     }
-    current[parts.at(-1) as string] = value;
+    const lastPart = parts.at(-1) as string;
+    if (!Object.hasOwn(current, lastPart)) {
+        throw new Error(`Compose image field path does not exist: ${dottedPath}`);
+    }
+    current[lastPart] = value;
 }
 
 function writeFileWithMetadata(
@@ -902,20 +921,6 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
     const discoveries = composeFiles.map(servicesFromCompose);
     const failedDiscoveries = discoveries.filter((discovery) => !discovery.ok);
     const successfulDiscoveries = discoveries.filter((discovery) => discovery.ok);
-    if (failedDiscoveries.length > 0) {
-        return {
-            ok: false,
-            step: "register-services",
-            stdout: "",
-            stderr: JSON.stringify({
-                registered: 0,
-                failed: failedDiscoveries.map((discovery) => ({
-                    appSlug: discovery.appSlug,
-                    error: discovery.error,
-                })),
-            }),
-        };
-    }
     const services = successfulDiscoveries.flatMap((discovery) => discovery.services);
     const timestamp = nowIso();
     const upsert = db.prepare(
@@ -1012,16 +1017,24 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
     }
     return {
         step: "register-services",
-        ok: true,
+        ok: failedDiscoveries.length === 0,
         stdout: JSON.stringify({
-            ok: true,
+            ok: failedDiscoveries.length === 0,
             summary: {
                 composeFiles: composeFiles.length,
-                failedComposeFiles: 0,
+                failedComposeFiles: failedDiscoveries.length,
                 registeredServices: services.length,
             },
         }),
-        stderr: "",
+        stderr:
+            failedDiscoveries.length === 0
+                ? ""
+                : JSON.stringify({
+                      failed: failedDiscoveries.map((discovery) => ({
+                          appSlug: discovery.appSlug,
+                          error: discovery.error,
+                      })),
+                  }),
     };
 }
 
@@ -1160,6 +1173,8 @@ async function applyServiceUpdate(
             };
         }
         try {
+            // Compose writes tag-only refs for non-digest pins, then pulls so
+            // digest drift still refreshes mutable tags without storing @digest.
             const result = await applyComposeUpdateUnlocked(lockedService, target);
             db.prepare(
                 `UPDATE docker_managed_services
@@ -1340,9 +1355,6 @@ export async function runDockerUpdaterService(
         return [register, poll, await applyServiceUpdate(refreshedService, "manual")];
     }
     const poll = await pollDockerUpdaterRegistries();
-    if (!poll.ok) {
-        return [register, poll];
-    }
     const autoServices = db
         .prepare(
             "SELECT * FROM docker_managed_services WHERE enabled = 1 AND policy = 'auto'"

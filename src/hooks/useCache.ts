@@ -51,6 +51,10 @@ function refreshedEntryKeys(result: { results: CacheRefreshResponse[] }) {
     ];
 }
 
+function cacheRefreshErrorMessage(reason: unknown): string {
+    return reason instanceof Error ? reason.message : String(reason);
+}
+
 /** Defines cache keys. */
 export const cacheKeys = {
     all: ["cache"] as const,
@@ -83,6 +87,26 @@ export function useCacheEntry<T>(key: string, refreshInterval: number | false = 
 export function useRefreshCacheEntry() {
     const queryClient = useQueryClient();
 
+    async function invalidateRefreshed(result: {
+        keys: string[];
+        results: CacheRefreshResponse[];
+    }) {
+        const invalidationKeys = [
+            ...new Set([...result.keys, ...refreshedEntryKeys(result)]),
+        ];
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
+            ...invalidationKeys.map((key) =>
+                queryClient.invalidateQueries({ queryKey: cacheKeys.entry(key) })
+            ),
+            ...(invalidationKeys.some(
+                (key) => key === "moltbook" || key.startsWith("moltbook.")
+            )
+                ? [queryClient.invalidateQueries({ queryKey: ["moltbook"] })]
+                : []),
+        ]);
+    }
+
     return useMutation({
         mutationFn: async (keysToken: string) => {
             const keys = keysToken
@@ -90,7 +114,7 @@ export function useRefreshCacheEntry() {
                 .map((key) => key.trim())
                 .filter(Boolean);
 
-            const results = await Promise.all(
+            const settledResults = await Promise.allSettled(
                 keys.map((key) =>
                     apiPostRequired<CacheRefreshResponse>(
                         `/cache/${encodeURIComponent(key)}/refresh`
@@ -98,23 +122,28 @@ export function useRefreshCacheEntry() {
                 )
             );
 
-            return { keys, results };
+            const successfulKeys = keys.filter(
+                (_key, index) => settledResults[index]?.status === "fulfilled"
+            );
+            const results = settledResults.flatMap((result) =>
+                result.status === "fulfilled" ? [result.value] : []
+            );
+            const failures = settledResults.filter(
+                (result): result is PromiseRejectedResult => result.status === "rejected"
+            );
+            const result = { keys: successfulKeys, results };
+            if (failures.length > 0) {
+                if (successfulKeys.length > 0) {
+                    await invalidateRefreshed(result);
+                }
+                throw new Error(
+                    failures
+                        .map((failure) => cacheRefreshErrorMessage(failure.reason))
+                        .join("; ")
+                );
+            }
+            return result;
         },
-        onSuccess: async (_result) => {
-            const invalidationKeys = [
-                ...new Set([..._result.keys, ...refreshedEntryKeys(_result)]),
-            ];
-            await Promise.all([
-                queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
-                ...invalidationKeys.map((key) =>
-                    queryClient.invalidateQueries({ queryKey: cacheKeys.entry(key) })
-                ),
-                ...(invalidationKeys.some(
-                    (key) => key === "moltbook" || key.startsWith("moltbook.")
-                )
-                    ? [queryClient.invalidateQueries({ queryKey: ["moltbook"] })]
-                    : []),
-            ]);
-        },
+        onSuccess: invalidateRefreshed,
     });
 }

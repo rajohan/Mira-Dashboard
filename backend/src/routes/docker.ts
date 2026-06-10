@@ -399,7 +399,12 @@ function parseJsonField<T>(value: string | undefined): T | null {
     }
 }
 
-/** Returns whether updater candIDate is present. */
+/** Returns whether an updater candidate is present.
+ *
+ * Tag-pinned compose services still treat digest-only drift as actionable: compose
+ * applies tag-only refs with `--pull always`, so mutable tags need an updater run
+ * even when the stored tag text is unchanged.
+ */
 function hasUpdaterCandidate(service: DockerUpdaterServiceRow): boolean {
     if (service.pin_mode === "digest") {
         return Boolean(

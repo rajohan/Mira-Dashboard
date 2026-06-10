@@ -461,7 +461,7 @@ process.stdout.write("updated\n");
         });
     });
 
-    it("fails registration for malformed compose files without reconciling rows", async () => {
+    it("reports malformed compose files while registering successful discoveries", async () => {
         const appsRoot = path.join(tempDir, "apps");
         const goodDir = path.join(appsRoot, "good");
         const badDir = path.join(appsRoot, "bad");
@@ -515,7 +515,8 @@ process.stdout.write("updated\n");
             .get() as
             | { current_tag: string | null; tag_match_pattern: string }
             | undefined;
-        assert.equal(web, undefined);
+        assert.equal(web?.current_tag, "latest");
+        assert.equal(web?.tag_match_pattern, "latest");
         assert.equal(
             (
                 dbHandle
@@ -534,7 +535,7 @@ process.stdout.write("updated\n");
                     )
                     .get() as { count: number }
             ).count,
-            1
+            0
         );
     });
 
@@ -1013,7 +1014,7 @@ setTimeout(() => process.exit(0), 30);
             assert.match(result.stderr, /broken-app/u);
             assert.deepEqual(
                 serviceRows().map((row) => row.app_slug),
-                ["broken-app"]
+                ["broken-app", "ok-app"]
             );
         });
     });
@@ -2009,20 +2010,50 @@ setTimeout(() => process.exit(0), 30);
             ok: true,
             services: [],
         });
-        const nestedTarget = { services: { app: "bad" } };
-        updater.__testing.setNestedValue(
-            nestedTarget,
-            "services.app.image",
-            "repo/app:2"
-        );
-        assert.deepEqual(nestedTarget, { services: { app: { image: "repo/app:2" } } });
+        const nestedTarget = { services: { app: { image: "repo/app:1" } } };
         updater.__testing.setNestedValue(
             nestedTarget,
             "services.app.image",
             "repo/app:3"
         );
         assert.deepEqual(nestedTarget, { services: { app: { image: "repo/app:3" } } });
-        const dottedTarget = { services: {} };
+        assert.throws(
+            () =>
+                updater.__testing.setNestedValue(
+                    { services: {} },
+                    "services.app.image",
+                    "repo/app:2"
+                ),
+            /Compose image field path does not exist/u
+        );
+        assert.throws(
+            () =>
+                updater.__testing.setNestedValue(
+                    { services: { app: "bad" } },
+                    "services.app.image",
+                    "repo/app:2"
+                ),
+            /Compose image field path is not an object/u
+        );
+        assert.throws(
+            () =>
+                updater.__testing.setNestedValue(
+                    { services: { app: { image: "repo/app:1" } } },
+                    "services.__proto__.image",
+                    "repo/app:2"
+                ),
+            /Unsafe compose image field segment/u
+        );
+        assert.throws(
+            () =>
+                updater.__testing.setNestedValue(
+                    { services: { app: {} } },
+                    "services.app.image",
+                    "repo/app:2"
+                ),
+            /Compose image field path does not exist/u
+        );
+        const dottedTarget = { services: { "api.worker": { image: "repo/dotted:0" } } };
         updater.__testing.setNestedValue(
             dottedTarget,
             "services.api.worker.image",

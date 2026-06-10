@@ -13,8 +13,10 @@ describe("cacheStore utilities", () => {
     });
 
     it("keeps legacy docker-bin test hooks as no-op compatibility helpers", () => {
-        assert.equal(__testing.getDockerBinForTests(), undefined);
+        const before = __testing.getDockerBinForTests();
+        assert.equal(before, undefined);
         assert.equal(__testing.setDockerBinForTests("/bin/docker"), undefined);
+        assert.equal(__testing.getDockerBinForTests(), before);
     });
 
     it("maps nullable SQLite cache payloads to legacy empty fields", async () => {

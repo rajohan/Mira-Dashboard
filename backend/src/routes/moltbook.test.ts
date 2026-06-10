@@ -207,6 +207,7 @@ describe("moltbook routes", () => {
         const cases = [
             ["moltbook.home", "/api/moltbook/home", "moltbook.home"],
             ["moltbook.feed.hot", "/api/moltbook/feed", "moltbook.feed.hot"],
+            ["moltbook.feed.new", "/api/moltbook/feed?sort=new", "moltbook.feed.new"],
             ["moltbook.profile", "/api/moltbook/profile", "moltbook.profile"],
             ["moltbook.my-content", "/api/moltbook/my-posts", "moltbook.my-content"],
         ] as const;

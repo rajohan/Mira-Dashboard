@@ -57,14 +57,16 @@ function removeCloseCleanup(cleanup?: () => void | Promise<void>): void {
     closeCleanupInstalled = false;
 }
 
+async function waitForCloseCleanups(): Promise<void> {
+    await (closeCleanupPromise ?? runCloseCleanups());
+}
+
 async function runCloseCleanups(): Promise<void> {
     closeCleanupInstalled = false;
     const cleanups = closeCleanups.splice(0);
-    await Promise.all(
-        cleanups.map((cleanup) =>
-            rollback(cleanup, "[Backend] Failed to run server close cleanup:")
-        )
-    );
+    for (const cleanup of cleanups) {
+        await rollback(cleanup, "[Backend] Failed to run server close cleanup:");
+    }
 }
 
 async function closeServerForRollback(): Promise<void> {
@@ -116,7 +118,6 @@ export async function handleServerListening(): Promise<void> {
         await afterBackgroundServicesStartedForTest?.();
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
-        removeBackgroundCleanup?.();
         if (scheduledJobSchedulerStarted) {
             await rollback(
                 stopScheduledJobScheduler,
@@ -127,6 +128,7 @@ export async function handleServerListening(): Promise<void> {
             await rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
         }
         await rollback(closeServerForRollback, "[Backend] Failed to close server:");
+        removeBackgroundCleanup?.();
         throw error;
     }
 }
@@ -193,4 +195,5 @@ export const __testing = Object.freeze({
     installCloseCleanup,
     removeCloseCleanup,
     setAfterBackgroundServicesStartedForTest,
+    waitForCloseCleanups,
 });

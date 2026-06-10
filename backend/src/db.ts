@@ -44,29 +44,6 @@ function sqliteTableExists(targetDb: MigrationDatabase, tableName: string): bool
     );
 }
 
-function deleteTaskOrphans(targetDb: MigrationDatabase, tableName: string): void {
-    const validatedTableName = validateTaskChildTableName(tableName);
-    if (!sqliteTableExists(targetDb, validatedTableName)) {
-        return;
-    }
-    execWithTransientLockRetry(
-        targetDb,
-        `
-        DELETE FROM ${validatedTableName}
-        WHERE task_id NOT IN (SELECT id FROM tasks)
-    `
-    );
-    if (validatedTableName === "task_dependencies") {
-        execWithTransientLockRetry(
-            targetDb,
-            `
-            DELETE FROM ${validatedTableName}
-            WHERE depends_on_task_id NOT IN (SELECT id FROM tasks)
-        `
-        );
-    }
-}
-
 export function cleanupTaskForeignKeyOrphans(targetDb: MigrationDatabase): void {
     for (const tableName of TASK_CHILD_TABLES) {
         deleteTaskOrphans(targetDb, tableName);
@@ -108,15 +85,14 @@ function sleepSync(milliseconds: number): void {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 }
 
-function execWithTransientLockRetry(targetDb: MigrationDatabase, sql: string): void {
+function execBlockWithTransientLockRetry<T>(operation: () => T): T {
     let lastError: unknown;
     for (const delay of [0, 10, 25, 50]) {
         if (delay > 0) {
             sleepSync(delay);
         }
         try {
-            targetDb.exec(sql);
-            return;
+            return operation();
         } catch (error) {
             lastError = error;
             if (!isTransientSqliteLock(error)) {
@@ -419,6 +395,25 @@ export async function ensureTaskAutomationColumn(
     }
 
     throw lastError;
+}
+
+function deleteTaskOrphans(targetDb: MigrationDatabase, tableName: string): void {
+    const validatedTableName = validateTaskChildTableName(tableName);
+    execBlockWithTransientLockRetry(() => {
+        if (!sqliteTableExists(targetDb, validatedTableName)) {
+            return;
+        }
+        targetDb.exec(`
+            DELETE FROM ${validatedTableName}
+            WHERE task_id NOT IN (SELECT id FROM tasks)
+        `);
+        if (validatedTableName === "task_dependencies") {
+            targetDb.exec(`
+                DELETE FROM ${validatedTableName}
+                WHERE depends_on_task_id NOT IN (SELECT id FROM tasks)
+            `);
+        }
+    });
 }
 
 export function ensureCacheEntriesUpdatedAtNullable(targetDb: MigrationDatabase): void {
