@@ -922,8 +922,10 @@ const args = process.argv.slice(2).join(" ");
 if (args === "status --json") {
   process.stdout.write(JSON.stringify({ runtimeVersion: "2026.5.1", update: { registry: { latestVersion: "2026.5.2" } }, gateway: { ok: true } }));
 } else if (args === "doctor") {
+  if (process.env.FAIL_OPENCLAW_AUX === "1") throw new Error("doctor failed");
   process.stdout.write("- OK: fine\n- WARNING: Gateway clients warning\n");
 } else if (args === "security audit --json") {
+  if (process.env.FAIL_OPENCLAW_AUX === "1") throw new Error("security failed");
   process.stdout.write(JSON.stringify({ ok: true, warnings: [] }));
 }
 `
@@ -1047,6 +1049,31 @@ if (args.includes("capture-pane")) {
                     .openai,
             false
         );
+
+        await withEnv(
+            {
+                FAIL_OPENCLAW_AUX: "1",
+                OPENCLAW_BIN: path.join(binDir, "openclaw"),
+            },
+            async () => {
+                assert.deepEqual(await refreshCacheProducer("system.host"), {
+                    refreshed: ["system.host"],
+                });
+            }
+        );
+
+        const systemHost = cacheRow("system.host").data as {
+            doctorError: string | null;
+            doctorWarnings: string[];
+            security: unknown;
+            securityError: string | null;
+            version: { current: string };
+        };
+        assert.equal(systemHost.version.current, "2026.5.1");
+        assert.match(systemHost.doctorError ?? "", /doctor failed/u);
+        assert.deepEqual(systemHost.doctorWarnings, []);
+        assert.equal(systemHost.security, null);
+        assert.match(systemHost.securityError ?? "", /security failed/u);
     });
 
     it("reports quota providers as missing or errored when credentials and calls fail", async () => {
@@ -2365,6 +2392,33 @@ if (process.argv.includes("kopia")) {
         assert.equal(row.status, "error");
         assert.match(row.error_message ?? "", /Request timeout/u);
         assert.equal(row.consecutive_failures, 1);
+    });
+
+    it("handles aborted cache producer signals", async () => {
+        const preAborted = new AbortController();
+        preAborted.abort();
+        await assert.rejects(
+            () => refreshCacheProducer("weather.spydeberg", preAborted.signal),
+            /Cache refresh aborted/u
+        );
+
+        const inFlightAbort = new AbortController();
+        globalThis.fetch = (async () => new Promise(() => {})) as typeof fetch;
+        try {
+            const refresh = refreshCacheProducer(
+                "weather.spydeberg",
+                inFlightAbort.signal
+            );
+            inFlightAbort.abort();
+            await assert.rejects(() => refresh, /Cache refresh aborted/u);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+
+        await assert.rejects(
+            () => refreshCacheProducer("unsupported.cache", new AbortController().signal),
+            /No backend refresh producer configured/u
+        );
     });
 
     it("covers additional producer fallback branches", async () => {

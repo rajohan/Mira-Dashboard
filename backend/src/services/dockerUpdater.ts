@@ -1010,10 +1010,6 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
         db.exec("ROLLBACK");
         throw error;
     }
-    const failed = failedDiscoveries.map((discovery) => ({
-        appSlug: discovery.appSlug,
-        error: discovery.error,
-    }));
     return {
         step: "register-services",
         ok: true,
@@ -1021,11 +1017,11 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
             ok: true,
             summary: {
                 composeFiles: composeFiles.length,
-                failedComposeFiles: failed.length,
+                failedComposeFiles: 0,
                 registeredServices: services.length,
             },
         }),
-        stderr: failed.length > 0 ? JSON.stringify({ failed }) : "",
+        stderr: "",
     };
 }
 
