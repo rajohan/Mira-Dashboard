@@ -174,7 +174,7 @@ test("removes legacy task child orphans before enabling foreign keys", async () 
             VALUES (1, 'mira', 'kept', '2026-06-09T00:00:00.000Z'),
                    (404, 'mira', 'orphan', '2026-06-09T00:00:00.000Z');
             INSERT INTO task_dependencies (task_id, depends_on_task_id)
-            VALUES (1, 2), (404, 1);
+            VALUES (1, 1), (1, 2), (404, 1);
         `);
         legacyDb.close();
         legacyDbClosed = true;

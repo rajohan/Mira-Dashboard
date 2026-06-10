@@ -204,8 +204,12 @@ describe("quota notifications", () => {
                 runQuotaNotificationCheck(),
                 runQuotaNotificationCheck(),
             ]);
-            assert.equal(concurrentResults.includes(false), true);
-            assert.equal(errors.length > 0, true);
+            assert.equal(
+                concurrentResults.filter((result) => result === false).length,
+                1
+            );
+            assert.equal(concurrentResults.filter((result) => result === true).length, 1);
+            assert.equal(errors.length, 1);
             assert.equal(errors[0]?.[0], "[QuotaNotifications] check failed");
 
             process.env.FAKE_QUOTAS_JSON = JSON.stringify({

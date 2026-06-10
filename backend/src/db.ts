@@ -53,6 +53,12 @@ function deleteTaskOrphans(targetDb: MigrationDatabase, tableName: string): void
         DELETE FROM ${validatedTableName}
         WHERE task_id NOT IN (SELECT id FROM tasks)
     `);
+    if (validatedTableName === "task_dependencies") {
+        targetDb.exec(`
+            DELETE FROM ${validatedTableName}
+            WHERE depends_on_task_id NOT IN (SELECT id FROM tasks)
+        `);
+    }
 }
 
 export function cleanupTaskForeignKeyOrphans(targetDb: MigrationDatabase): void {

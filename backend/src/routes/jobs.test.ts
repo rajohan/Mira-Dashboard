@@ -78,13 +78,25 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    db.close();
+    if (db) {
+        try {
+            db.close();
+        } catch {
+            // Preserve any setup failure reported by node:test.
+        }
+    }
     if (originalDbPath === undefined) {
         delete process.env.MIRA_DASHBOARD_DB_PATH;
     } else {
         process.env.MIRA_DASHBOARD_DB_PATH = originalDbPath;
     }
-    await rm(tempDir, { recursive: true, force: true });
+    if (tempDir) {
+        try {
+            await rm(tempDir, { recursive: true, force: true });
+        } catch {
+            // Preserve any setup failure reported by node:test.
+        }
+    }
 });
 
 test.beforeEach(() => {

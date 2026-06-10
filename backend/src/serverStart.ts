@@ -12,6 +12,14 @@ let isStarting = false;
 let afterBackgroundServicesStartedForTest: (() => void | Promise<void>) | undefined;
 const closeCleanups: Array<() => void | Promise<void>> = [];
 let closeCleanupInstalled = false;
+let closeCleanupPromise: Promise<void> | undefined;
+
+function onServerClose(): void {
+    closeCleanupPromise = runCloseCleanups();
+    void closeCleanupPromise.finally(() => {
+        closeCleanupPromise = undefined;
+    });
+}
 
 async function rollback(fn: () => void | Promise<void>, label: string): Promise<unknown> {
     try {
@@ -26,7 +34,7 @@ function installCloseCleanup(cleanup: () => void | Promise<void>): () => void {
     closeCleanups.push(cleanup);
     if (!closeCleanupInstalled) {
         closeCleanupInstalled = true;
-        server.once("close", runCloseCleanups);
+        server.once("close", onServerClose);
     }
     return () => removeCloseCleanup(cleanup);
 }
@@ -40,24 +48,27 @@ function removeCloseCleanup(cleanup?: () => void | Promise<void>): void {
     } else {
         closeCleanups.length = 0;
     }
+    closeCleanupPromise = undefined;
 
     if (!closeCleanupInstalled || closeCleanups.length > 0) {
         return;
     }
-    server.off("close", runCloseCleanups);
+    server.off("close", onServerClose);
     closeCleanupInstalled = false;
 }
 
-function runCloseCleanups(): void {
+async function runCloseCleanups(): Promise<void> {
     closeCleanupInstalled = false;
     const cleanups = closeCleanups.splice(0);
-    for (const cleanup of cleanups) {
-        void rollback(cleanup, "[Backend] Failed to run server close cleanup:");
-    }
+    await Promise.all(
+        cleanups.map((cleanup) =>
+            rollback(cleanup, "[Backend] Failed to run server close cleanup:")
+        )
+    );
 }
 
-function closeServerForRollback(): Promise<void> {
-    return new Promise((resolve, reject) => {
+async function closeServerForRollback(): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
         server.close((error) => {
             if (error) {
                 reject(error);
@@ -66,6 +77,8 @@ function closeServerForRollback(): Promise<void> {
             }
         });
     });
+    await (closeCleanupPromise ?? runCloseCleanups());
+    closeCleanupPromise = undefined;
 }
 
 /** Starts Gateway and the scheduled job scheduler after the HTTP server is listening. */

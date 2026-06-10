@@ -1,15 +1,23 @@
 import assert from "node:assert/strict";
 import http from "node:http";
+import path from "node:path";
 import { after, before, beforeEach, describe, it } from "node:test";
 
 import express from "express";
-
-import { clearCacheEntries, seedCacheEntry } from "../testUtils/cacheEntries.js";
 
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
 }
+
+type CacheEntriesTestUtils = typeof import("../testUtils/cacheEntries.js");
+type DbModule = typeof import("../db.js");
+
+let clearCacheEntries: CacheEntriesTestUtils["clearCacheEntries"];
+let seedCacheEntry: CacheEntriesTestUtils["seedCacheEntry"];
+let db: DbModule["db"] | undefined;
+let tempDir: string | undefined;
+const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
 
 function seedMoltbookRouteCache(): void {
     seedCacheEntry({
@@ -108,6 +116,13 @@ describe("moltbook routes", () => {
     let server: TestServer;
 
     before(async () => {
+        const { mkdtemp } = await import("node:fs/promises");
+        const os = await import("node:os");
+        tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-moltbook-route-"));
+        process.env.MIRA_DASHBOARD_DB_PATH = path.join(tempDir, "moltbook.sqlite");
+        ({ db } = await import("../db.js"));
+        ({ clearCacheEntries, seedCacheEntry } =
+            await import("../testUtils/cacheEntries.js"));
         server = await startServer();
     });
 
@@ -120,7 +135,17 @@ describe("moltbook routes", () => {
         if (server) {
             await server.close();
         }
-        clearCacheEntries();
+        clearCacheEntries?.();
+        db?.close();
+        if (originalDbPath === undefined) {
+            delete process.env.MIRA_DASHBOARD_DB_PATH;
+        } else {
+            process.env.MIRA_DASHBOARD_DB_PATH = originalDbPath;
+        }
+        if (tempDir) {
+            const { rm } = await import("node:fs/promises");
+            await rm(tempDir, { recursive: true, force: true });
+        }
     });
 
     it("returns cached Moltbook home metadata", async () => {

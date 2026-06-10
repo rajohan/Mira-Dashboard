@@ -461,7 +461,7 @@ process.stdout.write("updated\n");
         });
     });
 
-    it("reports malformed compose files without removing failed app rows", async () => {
+    it("fails registration for malformed compose files without reconciling rows", async () => {
         const appsRoot = path.join(tempDir, "apps");
         const goodDir = path.join(appsRoot, "good");
         const badDir = path.join(appsRoot, "bad");
@@ -503,7 +503,7 @@ process.stdout.write("updated\n");
         await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
             const updater = await import(`./dockerUpdater.js?bad-compose=${Date.now()}`);
             const result = await updater.registerDockerUpdaterServices();
-            assert.equal(result.ok, true);
+            assert.equal(result.ok, false);
             assert.equal(result.step, "register-services");
             assert.match(result.stderr, /bad/u);
         });
@@ -515,8 +515,7 @@ process.stdout.write("updated\n");
             .get() as
             | { current_tag: string | null; tag_match_pattern: string }
             | undefined;
-        assert.equal(web?.current_tag, "latest");
-        assert.equal(web?.tag_match_pattern, "latest");
+        assert.equal(web, undefined);
         assert.equal(
             (
                 dbHandle
@@ -535,7 +534,7 @@ process.stdout.write("updated\n");
                     )
                     .get() as { count: number }
             ).count,
-            0
+            1
         );
     });
 
@@ -975,7 +974,7 @@ setTimeout(() => process.exit(0), 30);
         });
     });
 
-    it("preserves stale registered services when their compose file cannot be parsed", async () => {
+    it("fails registration when a compose file cannot be parsed", async () => {
         const appsRoot = path.join(tempDir, "apps");
         const appDir = path.join(appsRoot, "broken-app");
         const okAppDir = path.join(appsRoot, "ok-app");
@@ -1010,11 +1009,11 @@ setTimeout(() => process.exit(0), 30);
             const updater = await import(`./dockerUpdater.js?broken-app=${Date.now()}`);
             const result = await updater.registerDockerUpdaterServices();
 
-            assert.equal(result.ok, true);
+            assert.equal(result.ok, false);
             assert.match(result.stderr, /broken-app/u);
             assert.deepEqual(
                 serviceRows().map((row) => row.app_slug),
-                ["broken-app", "ok-app"]
+                ["broken-app"]
             );
         });
     });
@@ -1919,7 +1918,7 @@ setTimeout(() => process.exit(0), 30);
                 current_digest: null,
                 latest_digest: "sha256:new",
             }),
-            false
+            true
         );
         assert.equal(
             updater.__testing.hasUpdate({

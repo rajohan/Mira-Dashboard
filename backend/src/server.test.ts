@@ -14,7 +14,10 @@ import { WebSocket } from "ws";
 
 import { db, ensureTaskAutomationColumn } from "./db.js";
 import gateway from "./gateway.js";
-import { stopScheduledJobScheduler } from "./services/scheduledJobs.js";
+import {
+    __testing as scheduledJobsTesting,
+    stopScheduledJobScheduler,
+} from "./services/scheduledJobs.js";
 
 let originalPort: string | undefined;
 let originalTrustProxy: string | undefined;
@@ -826,6 +829,9 @@ describe("server bootstrap", () => {
         gateway.shutdown = () => {
             shutdownCalled = true;
         };
+        scheduledJobsTesting.setActionExecutorForTests(async (job) => ({
+            actionTarget: job.actionTarget,
+        }));
         try {
             process.env.OPENCLAW_TOKEN = "test-token";
             await handleServerListening();
@@ -947,20 +953,23 @@ describe("server bootstrap", () => {
             assert.equal(listenedPort, 41_001);
             server.emit("listening");
             const originalExitCode = process.exitCode;
-            process.exitCode = undefined;
-            serverStartTesting.setAfterBackgroundServicesStartedForTest(() => {
-                throw new Error("background startup failed");
-            });
-            server.close = ((callback?: (error?: Error) => void) => {
-                callback?.();
-                return server;
-            }) as unknown as typeof server.close;
-            server.address = (() => null) as typeof server.address;
-            startBackendServer(41_001);
-            server.emit("listening");
-            await new Promise((resolve) => setImmediate(resolve));
-            assert.equal(process.exitCode, 1);
-            process.exitCode = originalExitCode;
+            try {
+                process.exitCode = undefined;
+                serverStartTesting.setAfterBackgroundServicesStartedForTest(() => {
+                    throw new Error("background startup failed");
+                });
+                server.close = ((callback?: (error?: Error) => void) => {
+                    callback?.();
+                    return server;
+                }) as unknown as typeof server.close;
+                server.address = (() => null) as typeof server.address;
+                startBackendServer(41_001);
+                server.emit("listening");
+                await new Promise((resolve) => setImmediate(resolve));
+                assert.equal(process.exitCode, 1);
+            } finally {
+                process.exitCode = originalExitCode;
+            }
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
             await stopScheduledJobScheduler();
             server.close = originalClose;
@@ -1052,6 +1061,7 @@ describe("server bootstrap", () => {
             server.close = originalClose;
             globalThis.setInterval = originalSetInterval;
             gateway.shutdown = originalShutdown;
+            scheduledJobsTesting.setActionExecutorForTests(undefined);
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
             serverStartTesting.removeCloseCleanup();
             await stopScheduledJobScheduler();

@@ -820,22 +820,35 @@ export async function refreshGitCache() {
 async function refreshSystemCache() {
     const openclawBin = getOpenclawBin();
     const checkedAt = nowIso();
-    const [statusOutput, doctorOutput, securityOutput] = await Promise.all([
-        runCommand(openclawBin, ["status", "--json"]),
+    const statusOutput = await runCommand(openclawBin, ["status", "--json"]);
+    const [doctorResult, securityResult] = await Promise.allSettled([
         runCommand(openclawBin, ["doctor"]),
         runCommand(openclawBin, ["security", "audit", "--json"]),
     ]);
     const status = JSON.parse(statusOutput) as JsonRecord;
-    const security = JSON.parse(securityOutput) as JsonRecord;
-    const doctorWarnings = doctorOutput
-        .split("\n")
-        .map((line) =>
-            line
-                .replaceAll(new RegExp(String.raw`\u001B\[[0-9;?]*[ -/]*[@-~]`, "gu"), "")
-                .trim()
-        )
-        .filter((line) => line.startsWith("- WARNING:"))
-        .map((line) => line.replace(/^- WARNING:\s*/u, "").trim());
+    const doctorError =
+        doctorResult.status === "rejected" ? errorMessage(doctorResult.reason) : null;
+    const securityError =
+        securityResult.status === "rejected" ? errorMessage(securityResult.reason) : null;
+    const security =
+        securityResult.status === "fulfilled"
+            ? (JSON.parse(securityResult.value) as JsonRecord)
+            : null;
+    const doctorWarnings =
+        doctorResult.status === "fulfilled"
+            ? doctorResult.value
+                  .split("\n")
+                  .map((line) =>
+                      line
+                          .replaceAll(
+                              new RegExp(String.raw`\u001B\[[0-9;?]*[ -/]*[@-~]`, "gu"),
+                              ""
+                          )
+                          .trim()
+                  )
+                  .filter((line) => line.startsWith("- WARNING:"))
+                  .map((line) => line.replace(/^- WARNING:\s*/u, "").trim())
+            : [];
     const currentVersion = String(status.runtimeVersion || "unknown");
     const update = asRecord(status.update);
     const registry = asRecord(update.registry);
@@ -858,8 +871,10 @@ async function refreshSystemCache() {
         tasks: status.tasks ?? null,
         taskAudit: status.taskAudit ?? null,
         doctorWarnings,
+        doctorError,
         doctorWarningCount: doctorWarnings.length,
         security,
+        securityError,
         checkedAt,
     };
     writeCacheSuccess({
@@ -1547,7 +1562,14 @@ async function refreshCacheProducerUnlocked(key: string) {
     );
 }
 
-export async function refreshCacheProducer(key: string) {
+function abortError(): Error {
+    return Object.assign(new Error("Cache refresh aborted"), { name: "AbortError" });
+}
+
+export async function refreshCacheProducer(key: string, signal?: AbortSignal) {
+    if (signal?.aborted) {
+        throw abortError();
+    }
     const scopeKey = cacheRefreshScopeKey(key);
     const inFlightEntries = isSupportedCacheProducerKey(key)
         ? [...inFlightCacheRefreshes.entries()]
@@ -1570,7 +1592,17 @@ export async function refreshCacheProducer(key: string) {
             : refreshCacheProducerUnlocked(key);
     inFlightCacheRefreshes.set(scopeKey, refresh);
     try {
-        return await refresh;
+        if (!signal) {
+            return await refresh;
+        }
+        return await Promise.race([
+            refresh,
+            new Promise<never>((_resolve, reject) => {
+                signal.addEventListener("abort", () => reject(abortError()), {
+                    once: true,
+                });
+            }),
+        ]);
     } finally {
         inFlightCacheRefreshes.delete(scopeKey);
     }

@@ -264,7 +264,7 @@ function isMissingPathError(error: unknown): boolean {
 }
 
 function hasGlobMeta(pattern: string): boolean {
-    return pattern.includes("*");
+    return /\*|\[0-9\]/u.test(pattern);
 }
 
 async function resolveGlob(
@@ -276,7 +276,7 @@ async function resolveGlob(
     let candidates: string[] = [path.sep];
 
     for (const [index, segment] of segments.entries()) {
-        const hasWildcard = segment.includes("*");
+        const hasWildcard = hasGlobMeta(segment);
         const isLastSegment = index === segments.length - 1;
         const regex = hasWildcard ? segmentRegex(segment) : null;
         const nextCandidates: string[] = [];

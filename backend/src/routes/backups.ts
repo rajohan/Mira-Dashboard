@@ -58,13 +58,17 @@ function trimOutput(text: string): string {
 /** Refreshes backup status cache with a bounded best-effort timeout. */
 function refreshBackupCacheWithTimeout(key: string, timeoutMs = 30_000) {
     let timeout: NodeJS.Timeout | null = null;
+    const controller = new AbortController();
     let cancelled = false;
     const timeoutError = new Error("Status refresh timed out");
-    const refresh = refreshBackupCache(key);
+    const refresh = refreshBackupCache(key, controller.signal);
     const timed = Promise.race([
         refresh,
         new Promise((_, reject) => {
-            timeout = setTimeout(() => reject(timeoutError), timeoutMs);
+            timeout = setTimeout(() => {
+                controller.abort(timeoutError);
+                reject(timeoutError);
+            }, timeoutMs);
             timeout.unref();
         }),
     ]).finally(() => {
@@ -75,12 +79,18 @@ function refreshBackupCacheWithTimeout(key: string, timeoutMs = 30_000) {
     return {
         cancel(): void {
             cancelled = true;
+            controller.abort(timeoutError);
         },
         get cancelled() {
             return cancelled;
         },
         isTimeoutError(error: unknown): boolean {
-            return error === timeoutError;
+            return (
+                error === timeoutError ||
+                (error instanceof Error &&
+                    (error.name === "AbortError" ||
+                        error.message === timeoutError.message))
+            );
         },
         refresh,
         timed,
