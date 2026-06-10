@@ -341,8 +341,26 @@ process.stdout.write("updated\n");
                 dbHandle
                     .prepare(
                         `UPDATE docker_managed_services
-                     SET latest_tag = '4', compose_image_field = NULL
-                     WHERE service_name = 'missing-field'`
+                         SET latest_tag = '4',
+                             latest_digest = NULL,
+                             last_status = 'update_available'
+                         WHERE service_name = 'missing-field'`
+                    )
+                    .run();
+                const fullPollFailure = (await runDockerUpdaterService()) as StepResult[];
+                assert.deepEqual(
+                    fullPollFailure.map((step) => [step.step, step.ok]),
+                    [
+                        ["register-services", true],
+                        ["poll", false],
+                    ]
+                );
+
+                dbHandle
+                    .prepare(
+                        `UPDATE docker_managed_services
+	                     SET latest_tag = '4', compose_image_field = NULL
+	                     WHERE service_name = 'missing-field'`
                     )
                     .run();
                 const service = dbHandle

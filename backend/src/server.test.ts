@@ -946,6 +946,25 @@ describe("server bootstrap", () => {
             startBackendServer(41_001);
             assert.equal(listenedPort, 41_001);
             server.emit("listening");
+            const originalExitCode = process.exitCode;
+            process.exitCode = undefined;
+            serverStartTesting.setAfterBackgroundServicesStartedForTest(() => {
+                throw new Error("background startup failed");
+            });
+            server.close = ((callback?: (error?: Error) => void) => {
+                callback?.();
+                return server;
+            }) as unknown as typeof server.close;
+            server.address = (() => null) as typeof server.address;
+            startBackendServer(41_001);
+            server.emit("listening");
+            await new Promise((resolve) => setImmediate(resolve));
+            assert.equal(process.exitCode, 1);
+            process.exitCode = originalExitCode;
+            serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
+            await stopScheduledJobScheduler();
+            server.close = originalClose;
+            server.address = (() => null) as typeof server.address;
             let pendingStartListenCalls = 0;
             server.listen = ((port: number) => {
                 listenedPort = port;
@@ -957,7 +976,6 @@ describe("server bootstrap", () => {
             startBackendServer(41_004);
             assert.equal(pendingStartListenCalls, 1);
             assert.equal(listenedPort, 41_003);
-            const originalExitCode = process.exitCode;
             (server.listeners("error").at(-1) as ((error: Error) => void) | undefined)?.(
                 new Error("listen failed")
             );

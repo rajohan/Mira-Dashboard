@@ -1329,6 +1329,9 @@ export async function runDockerUpdaterService(
         return [register, poll, await applyServiceUpdate(refreshedService, "manual")];
     }
     const poll = await pollDockerUpdaterRegistries();
+    if (!poll.ok) {
+        return [register, poll];
+    }
     const autoServices = db
         .prepare(
             "SELECT * FROM docker_managed_services WHERE enabled = 1 AND policy = 'auto'"

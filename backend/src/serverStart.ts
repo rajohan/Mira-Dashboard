@@ -140,7 +140,9 @@ export function startBackendServer(port = resolveListenPort()): void {
     server.once("error", onError);
     try {
         server.listen(port, () => {
-            void handleServerListening().catch(() => {});
+            void handleServerListening().catch(() => {
+                process.exitCode = 1;
+            });
         });
     } catch (error) {
         server.removeListener("listening", onListening);

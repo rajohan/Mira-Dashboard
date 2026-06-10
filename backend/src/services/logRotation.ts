@@ -233,7 +233,19 @@ function escapeRegExp(value: string): string {
 
 function globToRegex(pattern: string): RegExp {
     const normalized = pattern.split(path.sep).join("/");
-    return new RegExp(`^${normalized.split("*").map(escapeRegExp).join("[^/]*")}$`);
+    const source = normalized
+        .split(/(\*|\[0-9\])/u)
+        .map((part) => {
+            if (part === "*") {
+                return "[^/]*";
+            }
+            if (part === "[0-9]") {
+                return "[0-9]";
+            }
+            return escapeRegExp(part);
+        })
+        .join("");
+    return new RegExp(`^${source}$`);
 }
 
 function segmentRegex(segment: string): RegExp {
