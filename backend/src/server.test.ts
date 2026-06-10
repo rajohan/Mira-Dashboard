@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import type http from "node:http";
 import { createRequire } from "node:module";
 import net from "node:net";
@@ -1104,6 +1104,40 @@ describe("server bootstrap", () => {
         );
         try {
             await assertChildStillRunning(child, 0);
+        } finally {
+            await stopChild(child);
+            await rm(entrypointCwd, { recursive: true, force: true });
+        }
+    });
+
+    it("loads dotenv before route imports bind the dashboard database", async () => {
+        const serverStartEntrypoint = fileURLToPath(
+            new URL("serverStart.ts", import.meta.url)
+        );
+        const entrypointCwd = await mkdtemp(path.join(os.tmpdir(), "mira-server-env-"));
+        const configuredDbPath = path.join(entrypointCwd, "env-db", "dashboard.db");
+        const childEnv = { ...process.env };
+        delete childEnv.MIRA_DASHBOARD_DB_PATH;
+        delete childEnv.NODE_V8_COVERAGE;
+        await writeFile(
+            path.join(entrypointCwd, ".env"),
+            `MIRA_DASHBOARD_DB_PATH=${configuredDbPath}\n`,
+            "utf8"
+        );
+        const { child } = await startEntrypointChild(
+            serverStartEntrypoint,
+            {
+                ...childEnv,
+                NODE_V8_COVERAGE: path.join(os.tmpdir(), "mira-server-dotenv-coverage"),
+                OPENCLAW_TOKEN: "test-token",
+                OPENCLAW_HOME: openclawHome,
+                MIRA_DASHBOARD_OPENCLAW_HOME: openclawHome,
+            },
+            entrypointCwd
+        );
+        try {
+            await assertChildStillRunning(child, 0);
+            await stat(configuredDbPath);
         } finally {
             await stopChild(child);
             await rm(entrypointCwd, { recursive: true, force: true });

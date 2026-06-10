@@ -114,6 +114,7 @@ describe("BackupOverviewCard", () => {
         expect(screen.getByText("base_0001")).toBeInTheDocument();
         expect(screen.getByText("0000000100000000000000AA")).toBeInTheDocument();
         expect(screen.getByText("7")).toBeInTheDocument();
+        expect(screen.getByText(/Excludes Postgres data/u)).toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: /Run Postgres backup/u }));
         expect(hooks.runWalgBackup).toHaveBeenCalledTimes(1);

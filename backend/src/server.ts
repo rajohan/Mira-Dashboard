@@ -1,6 +1,7 @@
+import "dotenv/config";
+
 import { execSync } from "node:child_process";
 
-import dotenv from "dotenv";
 import express from "express";
 import rateLimit from "express-rate-limit";
 import http from "http";
@@ -36,8 +37,6 @@ import sttRoutes from "./routes/stt.js";
 import tasksRoutes from "./routes/tasks.js";
 import terminalRoutes from "./routes/terminal.js";
 import ttsRoutes from "./routes/tts.js";
-
-dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

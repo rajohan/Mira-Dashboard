@@ -1,3 +1,5 @@
+import "dotenv/config";
+
 import { pathToFileURL } from "node:url";
 
 import { getPersistedGatewayToken } from "./auth.js";

@@ -2804,10 +2804,10 @@ setTimeout(() => process.exit(0), 30);
                 return originalExec(sql);
             });
             try {
-                await assert.rejects(
-                    () => updater.registerDockerUpdaterServices(),
-                    /commit failed/u
-                );
+                const result = await updater.registerDockerUpdaterServices();
+                assert.equal(result.ok, false);
+                assert.equal(result.step, "register-services");
+                assert.match(result.stderr, /commit failed/u);
                 assert.deepEqual(
                     calls.filter((sql) => sql === "ROLLBACK"),
                     ["ROLLBACK"]

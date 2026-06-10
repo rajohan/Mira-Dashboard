@@ -1015,7 +1015,15 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
         db.exec("COMMIT");
     } catch (error) {
         db.exec("ROLLBACK");
-        throw error;
+        return {
+            ok: false,
+            step: "register-services",
+            stdout: "",
+            stderr: JSON.stringify({
+                registered: 0,
+                failed: [{ appSlug: "*", error: caughtMessage(error) }],
+            }),
+        };
     }
     return {
         step: "register-services",
