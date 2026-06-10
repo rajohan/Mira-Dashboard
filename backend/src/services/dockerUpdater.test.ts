@@ -413,6 +413,11 @@ process.stdout.write("updated\n");
     labels:
       mira.updater.tagPattern: "["
       mira.updater.tagPatternIsRegex: "true"
+  unsafeRegex:
+    image: repo/unsafe:stable
+    labels:
+      mira.updater.tagPattern: "(a+)+$"
+      mira.updater.tagPatternIsRegex: "true"
 `,
             "utf8"
         );
@@ -438,6 +443,8 @@ process.stdout.write("updated\n");
                 assert.equal(services.services[1].metadata.platform, "linux/amd64");
                 assert.equal(services.services[2].tagMatchType, "exact");
                 assert.equal(services.services[2].tagMatchPattern, "stable");
+                assert.equal(services.services[3].tagMatchType, "exact");
+                assert.equal(services.services[3].tagMatchPattern, "stable");
                 const steps = await updater.runDockerUpdaterService(123);
                 assert.equal(steps.length, 2);
                 assert.equal(steps.at(-1)?.stderr, "Docker updater service not found");

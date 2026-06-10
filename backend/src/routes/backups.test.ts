@@ -470,8 +470,8 @@ describe("backup routes", () => {
             path.join(os.tmpdir(), "mira-backup-broken-")
         );
         let brokenServer: TestServer | undefined;
-        await server.close();
         try {
+            await server.close();
             brokenServer = await startServerWithBackupShell(
                 path.join(brokenTempDir, "missing-shell")
             );

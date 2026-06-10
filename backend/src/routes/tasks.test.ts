@@ -685,17 +685,21 @@ describe("tasks routes", () => {
                 { method: "DELETE" }
             );
             assert.equal(response.status, 500);
+
+            const row = db
+                .prepare("SELECT id FROM tasks WHERE id = ?")
+                .get(created.body.number);
+            assert.ok(row);
         } finally {
             prepareMock.mock.restore();
+            db.prepare("DELETE FROM task_updates WHERE task_id = ?").run(
+                created.body.number
+            );
+            db.prepare("DELETE FROM task_events WHERE task_id = ?").run(
+                created.body.number
+            );
+            db.prepare("DELETE FROM tasks WHERE id = ?").run(created.body.number);
         }
-
-        const row = db
-            .prepare("SELECT id FROM tasks WHERE id = ?")
-            .get(created.body.number);
-        assert.ok(row);
-        db.prepare("DELETE FROM task_updates WHERE task_id = ?").run(created.body.number);
-        db.prepare("DELETE FROM task_events WHERE task_id = ?").run(created.body.number);
-        db.prepare("DELETE FROM tasks WHERE id = ?").run(created.body.number);
     });
 
     it("validates missing task mutations and notifies Mira assignments without failing", async () => {

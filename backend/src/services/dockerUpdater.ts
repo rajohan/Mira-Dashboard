@@ -845,7 +845,20 @@ function servicesFromCompose(composePath: string) {
                     if (tagPattern && tagPatternIsRegex) {
                         try {
                             new RegExp(tagPattern);
-                            tagMatchType = "regex";
+                            if (isSafeTagRegexPattern(tagPattern)) {
+                                tagMatchType = "regex";
+                            } else {
+                                console.warn(
+                                    "[DockerUpdater] Ignoring unsafe tag pattern regex",
+                                    {
+                                        appSlug,
+                                        serviceName,
+                                        tagPattern,
+                                        error: "pattern failed safety checks",
+                                    }
+                                );
+                                tagMatchPattern = currentTag;
+                            }
                         } catch (error) {
                             console.warn(
                                 "[DockerUpdater] Ignoring invalid tag pattern regex",

@@ -162,6 +162,7 @@ function insertNotification(
             title = excluded.title,
             description = excluded.description,
             metadata_json = excluded.metadata_json,
+            is_read = 0,
             updated_at = excluded.updated_at,
             occurred_at = excluded.occurred_at`
     ).run(

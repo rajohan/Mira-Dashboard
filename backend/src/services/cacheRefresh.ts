@@ -481,6 +481,35 @@ type MoltbookFetchTask =
       }
     | { kind: "profile"; promise: Promise<unknown> };
 
+function createMoltbookRefreshError(
+    message: string,
+    options: { cause: unknown; failedKeys: MoltbookCacheKey[] }
+): Error & { failedKeys: MoltbookCacheKey[] } {
+    return Object.assign(new Error(message, { cause: options.cause }), {
+        failedKeys: options.failedKeys,
+    });
+}
+
+function failedKeysForMoltbookTask(
+    task: MoltbookFetchTask,
+    requestedKeys: readonly MoltbookCacheKey[]
+): MoltbookCacheKey[] {
+    if (task.kind === "home") {
+        return ["moltbook.home"];
+    }
+    if (task.kind === "feed") {
+        return [task.key];
+    }
+    return ["moltbook.profile", "moltbook.my-content"].filter((key) =>
+        requestedKeys.includes(key as MoltbookCacheKey)
+    ) as MoltbookCacheKey[];
+}
+
+function getMoltbookFailureKeys(error: unknown): MoltbookCacheKey[] | undefined {
+    const failedKeys = asRecord(error).failedKeys;
+    return Array.isArray(failedKeys) ? (failedKeys as MoltbookCacheKey[]) : undefined;
+}
+
 export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
     const requestedKeys = targetKey ? [targetKey] : MOLTBOOK_CACHE_KEY_LIST;
     const writes: Array<{
@@ -489,6 +518,7 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
         metadata: Record<string, unknown>;
     }> = [];
     const tasks: MoltbookFetchTask[] = [];
+    const failedKeys = new Set<MoltbookCacheKey>();
 
     if (requestedKeys.includes("moltbook.home")) {
         tasks.push({ kind: "home", promise: fetchMoltbookJson("/home") });
@@ -516,12 +546,28 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
     }
 
     const results = await Promise.allSettled(
-        tasks.map(async (task) => ({ task, value: await task.promise }))
+        tasks.map(async (task) => {
+            try {
+                return { task, value: await task.promise };
+            } catch (error) {
+                throw { task, error };
+            }
+        })
     );
     let firstFailure: unknown;
     for (const result of results) {
         if (result.status === "rejected") {
-            firstFailure ??= result.reason;
+            const failed = result.reason as {
+                error: unknown;
+                task: MoltbookFetchTask;
+            };
+            firstFailure ??= failed.error;
+            for (const failedKey of failedKeysForMoltbookTask(
+                failed.task,
+                requestedKeys
+            )) {
+                failedKeys.add(failedKey);
+            }
             continue;
         }
         const { task, value } = result.value;
@@ -574,7 +620,10 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
         if (firstFailure instanceof Error) {
             throw firstFailure;
         }
-        throw new Error("Moltbook refresh failed", { cause: firstFailure });
+        throw createMoltbookRefreshError("Moltbook refresh failed", {
+            cause: firstFailure,
+            failedKeys: [...failedKeys],
+        });
     }
 
     db.exec("SAVEPOINT moltbook_cache_write");
@@ -596,8 +645,9 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
         throw error;
     }
     if (firstFailure !== undefined) {
-        throw new Error("Moltbook refresh had sub-request failures", {
+        throw createMoltbookRefreshError("Moltbook refresh had sub-request failures", {
             cause: firstFailure,
+            failedKeys: [...failedKeys],
         });
     }
     return { refreshed: writes.map((item) => item.key) };
@@ -1581,9 +1631,26 @@ async function refreshCacheProducerUnlocked(key: string) {
     };
 
     if (key === "moltbook") {
-        return refreshWithFailureRecord(refreshMoltbookCache, [
-            ...MOLTBOOK_CACHE_KEY_LIST,
-        ]);
+        try {
+            return await refreshMoltbookCache();
+        } catch (error) {
+            const failureKeys = getMoltbookFailureKeys(error) ?? [
+                ...MOLTBOOK_CACHE_KEY_LIST,
+            ];
+            for (const failureKey of failureKeys) {
+                writeCacheFailure({
+                    key: failureKey,
+                    source: "backend",
+                    ttl: 15,
+                    ttlUnit: "minutes",
+                    error,
+                    metadata: {
+                        producer: "refreshCacheProducer",
+                    },
+                });
+            }
+            throw error;
+        }
     }
     if (MOLTBOOK_CACHE_KEYS.has(key)) {
         return refreshWithFailureRecord(() =>

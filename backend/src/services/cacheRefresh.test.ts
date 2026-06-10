@@ -381,6 +381,41 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         );
     });
 
+    it("records only failed Moltbook subkeys after a partial grouped refresh", async () => {
+        await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
+            await withFetch(
+                (url) => {
+                    if (url.endsWith("/home")) {
+                        return { latest_moltbook_announcement: {} };
+                    }
+                    if (url.includes("sort=hot")) {
+                        return { posts: [{ id: "hot" }] };
+                    }
+                    if (url.includes("sort=new")) {
+                        return { httpStatus: 502 };
+                    }
+                    return {
+                        agent: { name: "mira_2026" },
+                        recentPosts: [{ id: "mine" }],
+                        recentComments: [],
+                    };
+                },
+                async () => {
+                    await assert.rejects(
+                        () => refreshCacheProducer("moltbook"),
+                        /Moltbook refresh had sub-request failures/u
+                    );
+                }
+            );
+        });
+
+        assert.equal(cacheRow("moltbook.home").status, "fresh");
+        assert.equal(cacheRow("moltbook.feed.hot").status, "fresh");
+        assert.equal(cacheRow("moltbook.feed.new").status, "error");
+        assert.equal(cacheRow("moltbook.profile").status, "fresh");
+        assert.equal(cacheRow("moltbook.my-content").status, "fresh");
+    });
+
     it("wraps non-Error Moltbook upstream failures", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             await withFetch(

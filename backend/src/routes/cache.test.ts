@@ -129,17 +129,20 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
     });
 
     afterEach(async () => {
-        if (server) {
-            await server.close();
+        try {
+            if (server) {
+                await server.close();
+            }
+        } finally {
+            __testing.setCacheRefreshCwdForTests(undefined);
+            __testing.resetCacheRefreshForTests();
+            clearOwnedCacheRows();
+            if (tempDir) {
+                await rm(tempDir, { recursive: true, force: true });
+            }
+            server = undefined as unknown as TestServer;
+            tempDir = "";
         }
-        __testing.setCacheRefreshCwdForTests(undefined);
-        __testing.resetCacheRefreshForTests();
-        clearOwnedCacheRows();
-        if (tempDir) {
-            await rm(tempDir, { recursive: true, force: true });
-        }
-        server = undefined as unknown as TestServer;
-        tempDir = "";
     });
 
     it("keeps scalar cache payloads when they are not JSON", () => {
