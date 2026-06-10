@@ -803,7 +803,7 @@ describe("docker routes", { concurrency: false }, () => {
                 current_digest: null,
                 latest_digest: "sha256:b",
             } as never),
-            false
+            true
         );
         assert.equal(
             __testing.hasUpdaterCandidate({
