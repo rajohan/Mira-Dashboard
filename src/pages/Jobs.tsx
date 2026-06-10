@@ -56,8 +56,13 @@ function formatSchedule(job: ScheduledJob): string {
     if (job.scheduleType === "cron") {
         return `Cron: ${job.cronExpression || "unknown"}`;
     }
-    if (job.scheduleType === "interval" && Number.isFinite(job.intervalSeconds)) {
-        return `Every ${formatInterval(job.intervalSeconds)}`;
+    const intervalSeconds = job.intervalSeconds;
+    if (
+        job.scheduleType === "interval" &&
+        typeof intervalSeconds === "number" &&
+        Number.isFinite(intervalSeconds)
+    ) {
+        return `Every ${formatInterval(intervalSeconds)}`;
     }
     return "Schedule unavailable";
 }

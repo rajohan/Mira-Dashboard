@@ -926,6 +926,10 @@ if (args === "status --json") {
   process.stdout.write("- OK: fine\n- WARNING: Gateway clients warning\n");
 } else if (args === "security audit --json") {
   if (process.env.FAIL_OPENCLAW_AUX === "1") throw new Error("security failed");
+  if (process.env.MALFORMED_OPENCLAW_SECURITY === "1") {
+    process.stdout.write("{");
+    process.exit(0);
+  }
   process.stdout.write(JSON.stringify({ ok: true, warnings: [] }));
 }
 `
@@ -1074,6 +1078,32 @@ if (args.includes("capture-pane")) {
         assert.deepEqual(systemHost.doctorWarnings, []);
         assert.equal(systemHost.security, null);
         assert.match(systemHost.securityError ?? "", /security failed/u);
+
+        const warnMock = mock.method(console, "warn", () => {});
+        try {
+            await withEnv(
+                {
+                    MALFORMED_OPENCLAW_SECURITY: "1",
+                    OPENCLAW_BIN: path.join(binDir, "openclaw"),
+                },
+                async () => {
+                    assert.deepEqual(await refreshCacheProducer("system.host"), {
+                        refreshed: ["system.host"],
+                    });
+                }
+            );
+        } finally {
+            warnMock.mock.restore();
+        }
+
+        const malformedSystemHost = cacheRow("system.host").data as {
+            security: unknown;
+            securityError: string | null;
+            version: { current: string };
+        };
+        assert.equal(malformedSystemHost.version.current, "2026.5.1");
+        assert.equal(malformedSystemHost.security, null);
+        assert.match(malformedSystemHost.securityError ?? "", /JSON/u);
     });
 
     it("reports quota providers as missing or errored when credentials and calls fail", async () => {

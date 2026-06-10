@@ -19,7 +19,7 @@ export interface ScheduledJob {
     description: string;
     enabled: boolean;
     scheduleType: "interval" | "daily" | "cron";
-    intervalSeconds: number;
+    intervalSeconds: number | null;
     timeOfDay: string | null;
     cronExpression: string | null;
     actionType:

@@ -2,7 +2,7 @@ import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 
-import express, { type RequestHandler } from "express";
+import express, { type ErrorRequestHandler, type RequestHandler } from "express";
 
 import { db } from "../db.js";
 import { asyncRoute as baseAsyncRoute } from "../lib/errors.js";
@@ -46,6 +46,15 @@ const SAFE_ENV_VALUE_KEYS = new Set([
     "PATH",
     "TZ",
 ]);
+
+const invalidStackActionJsonHandler: ErrorRequestHandler = (error, _req, res, next) => {
+    const status = Number((error as { status?: unknown }).status);
+    if (error instanceof SyntaxError && status === 400) {
+        res.status(400).json({ error: "Invalid stack action" });
+        return;
+    }
+    next(error);
+};
 
 function redactEnvValue(value: unknown): string {
     const envValue = String(value);
@@ -1217,6 +1226,7 @@ function resolveManualUpdateServiceId(
 
 export const __testing = {
     asyncRoute,
+    invalidStackActionJsonHandler,
     trimOutput,
     parseJsonLines,
     parseJsonField,
@@ -1442,6 +1452,7 @@ export default function dockerRoutes(app: express.Application): void {
     app.post(
         "/api/docker/stack/action",
         express.json({ strict: false }),
+        invalidStackActionJsonHandler,
         asyncRoute(async (req, res) => {
             const payload = validateDockerStackActionRequest(req.body);
             if (!payload) {

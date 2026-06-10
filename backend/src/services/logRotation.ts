@@ -180,6 +180,11 @@ function validateConfig(config: LogRotationConfig): void {
         const hasArchivePaths =
             Array.isArray(effectivePolicy.archivePaths) &&
             effectivePolicy.archivePaths.length > 0;
+        if (effectivePolicy.daily === true && effectivePolicy.weekly === true) {
+            throw new Error(
+                `Group ${group.name} cannot set both daily and weekly rotation`
+            );
+        }
         if (effectivePolicy.archiveOnly === true && !hasArchivePaths) {
             throw new Error(
                 `Archive-only group ${group.name} needs at least one archivePaths pattern`
@@ -692,6 +697,20 @@ function archiveMatchesRetentionScope(
     return path.dirname(archivePath) === path.dirname(filePath);
 }
 
+function isGzipArchivePath(filePath: string): boolean {
+    return filePath.endsWith(".gz");
+}
+
+async function isSameResolvedPath(
+    firstPath: string,
+    secondPath: string
+): Promise<boolean> {
+    if (path.resolve(firstPath) === path.resolve(secondPath)) {
+        return true;
+    }
+    return (await fs.realpath(firstPath)) === (await fs.realpath(secondPath));
+}
+
 async function listArchives(
     filePath: string,
     policy: LogRotationPolicy,
@@ -705,7 +724,11 @@ async function listArchives(
         if (!entry.isFile() || !managedRegex.test(entry.name)) continue;
         const fullPath = path.join(dir, entry.name);
         const stat = await fs.stat(fullPath);
-        archives.push({ path: fullPath, mtimeMs: stat.mtimeMs, compress: false });
+        archives.push({
+            path: fullPath,
+            mtimeMs: stat.mtimeMs,
+            compress: policy.compress !== false && !isGzipArchivePath(fullPath),
+        });
     }
     for (const pattern of policy.archivePaths ?? []) {
         for (const archivePath of await resolveGlob(pattern, {
@@ -714,6 +737,7 @@ async function listArchives(
             if (!archiveMatchesRetentionScope(filePath, archivePath, policy)) continue;
             const safe = await assertSafePath(archivePath, approvedRoots);
             if (!safe) continue;
+            if (await isSameResolvedPath(archivePath, filePath)) continue;
             const stat = await fs.stat(archivePath);
             archives.push({
                 path: archivePath,
@@ -722,9 +746,13 @@ async function listArchives(
             });
         }
     }
-    return [...new Map(archives.map((archive) => [archive.path, archive])).values()].sort(
-        (a, b) => b.mtimeMs - a.mtimeMs
-    );
+    const uniqueArchives = new Map<string, RetentionArchive>();
+    for (const archive of archives) {
+        if (!uniqueArchives.has(archive.path)) {
+            uniqueArchives.set(archive.path, archive);
+        }
+    }
+    return [...uniqueArchives.values()].sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
 async function compressArchiveIfNeeded(
@@ -1296,16 +1324,13 @@ export async function runLogRotationService(
                                 message: rotation.warning,
                             });
                         }
-                        const simulatedArchives =
-                            options.dryRun && rotation.archivePath
-                                ? [
-                                      {
-                                          path: rotation.archivePath,
-                                          mtimeMs: now.getTime(),
-                                          compress: false,
-                                      },
-                                  ]
-                                : [];
+                        const simulatedArchives = [
+                            {
+                                path: rotation.archivePath,
+                                mtimeMs: now.getTime(),
+                                compress: false,
+                            },
+                        ];
                         const retained = await retention(simulatedArchives);
                         groupSummary.deletedArchives += retained.deleted.length;
                         summary.deletedArchives += retained.deleted.length;

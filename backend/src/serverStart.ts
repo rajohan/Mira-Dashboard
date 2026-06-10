@@ -119,13 +119,24 @@ export async function handleServerListening(): Promise<void> {
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
         if (scheduledJobSchedulerStarted) {
-            await rollback(
-                stopScheduledJobScheduler,
-                "[Backend] Failed to stop scheduled job scheduler:"
-            );
+            let stopped = false;
+            await rollback(async () => {
+                await stopScheduledJobScheduler();
+                stopped = true;
+            }, "[Backend] Failed to stop scheduled job scheduler:");
+            if (stopped) {
+                scheduledJobSchedulerStarted = false;
+            }
         }
         if (gatewayStarted) {
-            await rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
+            let stopped = false;
+            await rollback(async () => {
+                await gateway.shutdown();
+                stopped = true;
+            }, "[Backend] Failed to stop gateway:");
+            if (stopped) {
+                gatewayStarted = false;
+            }
         }
         await rollback(closeServerForRollback, "[Backend] Failed to close server:");
         removeBackgroundCleanup?.();

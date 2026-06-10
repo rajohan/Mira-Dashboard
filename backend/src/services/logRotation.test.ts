@@ -740,6 +740,15 @@ describe("log rotation service", { concurrency: false }, () => {
                 { version: 1, groups: [{ name: "bad", paths: ["x"], strategy: "move" }] },
                 /unsupported strategy/u,
             ],
+            [
+                {
+                    version: 1,
+                    groups: [
+                        { name: "cadence", paths: ["x"], daily: true, weekly: true },
+                    ],
+                },
+                /cannot set both daily and weekly rotation/u,
+            ],
         ];
         for (const [config, message] of invalidCases) {
             const configPath = await writeConfig(tempDir, config);
@@ -1250,7 +1259,7 @@ describe("log rotation service", { concurrency: false }, () => {
         await assert.rejects(() => fsPromises.stat(`${archive}.gz`), /ENOENT/u);
     });
 
-    it("retains managed per-file archives without compressing them", async () => {
+    it("compresses retained managed per-file archives", async () => {
         const root = path.join(tempDir, "retention-managed");
         await mkdir(root);
         const logFile = path.join(root, "app.log");
@@ -1276,9 +1285,9 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(summary.ok, true);
         assert.equal(summary.skippedFiles, 1);
         assert.equal(summary.deletedArchives, 0);
-        assert.equal(summary.compressedFiles, 0);
-        assert.equal(await readFile(archive, "utf8"), "retained");
-        await assert.rejects(() => fsPromises.stat(`${archive}.gz`), /ENOENT/u);
+        assert.equal(summary.compressedFiles, 1);
+        await assert.rejects(() => fsPromises.stat(archive), /ENOENT/u);
+        assert.ok(await fsPromises.stat(`${archive}.gz`));
     });
 
     it("keeps the newest rotation even when the source log has an old mtime", async () => {
@@ -1814,6 +1823,20 @@ describe("log rotation service", { concurrency: false }, () => {
 
         assert.deepEqual(
             archives.map((archive) => archive.path),
+            [firstArchive]
+        );
+
+        const activeOverlap = await __testing.listArchives(
+            firstLog,
+            {
+                archivePaths: [firstLog, firstArchive],
+                archiveRetentionScope: "basename",
+            },
+            [firstRoot]
+        );
+
+        assert.deepEqual(
+            activeOverlap.map((archive) => archive.path),
             [firstArchive]
         );
     });

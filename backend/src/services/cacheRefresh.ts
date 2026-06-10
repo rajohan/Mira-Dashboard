@@ -828,12 +828,20 @@ async function refreshSystemCache() {
     const status = JSON.parse(statusOutput) as JsonRecord;
     const doctorError =
         doctorResult.status === "rejected" ? errorMessage(doctorResult.reason) : null;
-    const securityError =
+    let securityError =
         securityResult.status === "rejected" ? errorMessage(securityResult.reason) : null;
-    const security =
-        securityResult.status === "fulfilled"
-            ? (JSON.parse(securityResult.value) as JsonRecord)
-            : null;
+    let security: JsonRecord | null = null;
+    if (securityResult.status === "fulfilled") {
+        try {
+            security = JSON.parse(securityResult.value) as JsonRecord;
+        } catch (error) {
+            securityError = errorMessage(error);
+            console.warn(
+                "[CacheRefresh] Failed to parse OpenClaw security audit JSON:",
+                error
+            );
+        }
+    }
     const doctorWarnings =
         doctorResult.status === "fulfilled"
             ? doctorResult.value

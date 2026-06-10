@@ -164,6 +164,38 @@ function clearActiveBackupJob(type: BackupJob["type"], jobId: string): void {
     }
 }
 
+function startBackupStatusRefresh(job: BackupJob, type: BackupJob["type"]): void {
+    const cacheKey = type === "kopia" ? "backup.kopia.status" : "backup.walg.status";
+    job.refreshPending = true;
+    const refresh = refreshBackupCacheWithTimeout(cacheKey, backupRefreshTimeoutMs);
+    void refresh.timed.catch((error: unknown) => {
+        if (!refresh.isTimeoutError(error)) return;
+        refresh.cancel();
+        if (job.refreshPendingPromise === refresh.refresh) {
+            job.refreshPending = false;
+            job.refreshPendingPromise = undefined;
+        }
+        job.stderr = trimOutput(
+            `${job.stderr}\nStatus refresh failed: ${errorMessage(error, "Unknown error")}`.trim()
+        );
+    });
+    job.refreshPendingPromise = refresh.refresh;
+    void refresh.refresh
+        .catch((error: unknown) => {
+            if (refresh.cancelled) return;
+            const refreshMessage = errorMessage(error, "Unknown error");
+            job.stderr = trimOutput(
+                `${job.stderr}\nStatus refresh failed: ${refreshMessage}`.trim()
+            );
+        })
+        .finally(() => {
+            if (job.refreshPendingPromise === refresh.refresh) {
+                job.refreshPending = false;
+                job.refreshPendingPromise = undefined;
+            }
+        });
+}
+
 function waitForChildSpawn(child: ChildProcess): Promise<void> {
     return new Promise((resolve, reject) => {
         const onSpawn = () => {
@@ -238,47 +270,16 @@ async function startBackupJob(type: BackupJob["type"], command: string) {
 
     child.on("close", (code, signal) => {
         if (!signal && code === 0) {
-            const cacheKey =
-                type === "kopia" ? "backup.kopia.status" : "backup.walg.status";
-            job.refreshPending = true;
             job.status = "done";
             job.code = code;
             job.endedAt = Date.now();
-            const refresh = refreshBackupCacheWithTimeout(
-                cacheKey,
-                backupRefreshTimeoutMs
-            );
-            void refresh.timed.catch((error: unknown) => {
-                if (!refresh.isTimeoutError(error)) return;
-                refresh.cancel();
-                if (job.refreshPendingPromise === refresh.refresh) {
-                    job.refreshPending = false;
-                    job.refreshPendingPromise = undefined;
-                }
-                job.stderr = trimOutput(
-                    `${job.stderr}\nStatus refresh failed: ${errorMessage(error, "Unknown error")}`.trim()
-                );
-            });
-            job.refreshPendingPromise = refresh.refresh;
-            void refresh.refresh
-                .catch((error: unknown) => {
-                    if (refresh.cancelled) return;
-                    const refreshMessage = errorMessage(error, "Unknown error");
-                    job.stderr = trimOutput(
-                        `${job.stderr}\nStatus refresh failed: ${refreshMessage}`.trim()
-                    );
-                })
-                .finally(() => {
-                    if (job.refreshPendingPromise === refresh.refresh) {
-                        job.refreshPending = false;
-                        job.refreshPendingPromise = undefined;
-                    }
-                });
+            startBackupStatusRefresh(job, type);
             return;
         }
         job.status = "done";
         job.code = signal ? 130 : code;
         job.endedAt = Date.now();
+        startBackupStatusRefresh(job, type);
     });
     child.on("error", (error) => {
         job.status = "done";

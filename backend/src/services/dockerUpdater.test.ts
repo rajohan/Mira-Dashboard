@@ -525,7 +525,7 @@ process.stdout.write("updated\n");
                     )
                     .get() as { count: number }
             ).count,
-            1
+            0
         );
         assert.equal(
             (
@@ -1014,7 +1014,7 @@ setTimeout(() => process.exit(0), 30);
             assert.match(result.stderr, /broken-app/u);
             assert.deepEqual(
                 serviceRows().map((row) => row.app_slug),
-                ["broken-app", "ok-app"]
+                ["ok-app"]
             );
         });
     });

@@ -12,6 +12,9 @@ import { withEnv } from "../testUtils/env.js";
 import backupRoutes from "./backups.js";
 import { __testing as backupTesting } from "./backups.js";
 
+const BACKUP_POLL_DEADLINE_MS = 5_000;
+const BACKUP_POLL_INTERVAL_MS = 100;
+
 type FakeBackupListener = (...args: unknown[]) => void;
 
 function createFakeBackupChild() {
@@ -157,7 +160,8 @@ async function waitForDone(
 ): Promise<{ status: string; code: number; stdout: string; stderr: string }> {
     let lastJob: { status: string; code: number; stdout: string; stderr: string } | null =
         null;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    const deadline = Date.now() + BACKUP_POLL_DEADLINE_MS;
+    while (Date.now() < deadline) {
         const response = await requestJson<{
             job: { status: string; code: number; stdout: string; stderr: string } | null;
         }>(server, pathName);
@@ -165,12 +169,10 @@ async function waitForDone(
         if (response.body.job?.status === "done") {
             return response.body.job;
         }
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await new Promise((resolve) => setTimeout(resolve, BACKUP_POLL_INTERVAL_MS));
     }
     throw new Error(
-        `Backup job did not finish after 20 attempts. Last job: ${JSON.stringify(
-            lastJob
-        )}`
+        `Backup job did not finish before ${BACKUP_POLL_DEADLINE_MS}ms deadline. Last job: ${JSON.stringify(lastJob)}`
     );
 }
 
@@ -179,16 +181,18 @@ async function waitForRefresh(
     refreshedKeys: string[],
     expectedCount = 1
 ): Promise<void> {
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-        if (
-            refreshedKeys.filter((refreshedKey) => refreshedKey === key).length >=
-            expectedCount
-        ) {
+    const deadline = Date.now() + BACKUP_POLL_DEADLINE_MS;
+    let lastCount = 0;
+    while (Date.now() < deadline) {
+        lastCount = refreshedKeys.filter((refreshedKey) => refreshedKey === key).length;
+        if (lastCount >= expectedCount) {
             return;
         }
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await new Promise((resolve) => setTimeout(resolve, BACKUP_POLL_INTERVAL_MS));
     }
-    throw new Error(`Backup refresh did not finish for ${key}`);
+    throw new Error(
+        `Backup refresh did not finish for ${key}; saw ${lastCount}/${expectedCount} before ${BACKUP_POLL_DEADLINE_MS}ms deadline`
+    );
 }
 
 describe("backup routes", () => {
@@ -455,6 +459,7 @@ describe("backup routes", () => {
             const done = await waitForDone(server, "/api/backups/kopia");
             assert.equal(done.status, "done");
             assert.equal(done.code, 130);
+            await waitForRefresh("backup.kopia.status", refreshedKeys);
         } finally {
             delete process.env.FAKE_BACKUP_SIGNAL;
         }

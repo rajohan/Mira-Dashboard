@@ -767,6 +767,18 @@ describe("docker routes", { concurrency: false }, () => {
     it("covers docker parser helper edge cases", async () => {
         const { __testing } = await import(`./docker.js?helpers=${randomUUID()}`);
 
+        const routeError = new Error("not a JSON parser error");
+        let forwardedError: unknown;
+        __testing.invalidStackActionJsonHandler(
+            routeError,
+            {} as never,
+            {} as never,
+            (error: unknown) => {
+                forwardedError = error;
+            }
+        );
+        assert.equal(forwardedError, routeError);
+
         assert.deepEqual(__testing.parseJsonLines(' {"a":1}\n\n'), [{ a: 1 }]);
         assert.equal(__testing.parseJsonField(), null);
         assert.equal(__testing.parseJsonField("not-json"), null);
@@ -2063,6 +2075,14 @@ describe("docker routes", { concurrency: false }, () => {
         );
         assert.equal(primitiveStackPayload.status, 400);
         assert.equal(primitiveStackPayload.body.error, "Invalid stack action");
+
+        const malformedStackPayload = await requestJson<{ error: string }>(
+            server,
+            "/api/docker/stack/action",
+            { method: "POST", rawBody: "{" }
+        );
+        assert.equal(malformedStackPayload.status, 400);
+        assert.equal(malformedStackPayload.body.error, "Invalid stack action");
 
         const deleteImage = await requestJson<{ success: boolean }>(
             server,
