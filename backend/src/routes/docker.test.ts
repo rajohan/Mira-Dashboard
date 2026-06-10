@@ -2397,22 +2397,29 @@ describe("docker routes", { concurrency: false }, () => {
             END;
         `);
         try {
-            const refreshedAfterSuccess = await requestJson<{
-                success: boolean;
-                service: {
-                    id: number;
-                    currentTag: string | null;
-                    lastStatus: string | null;
-                };
-            }>(server, "/api/docker/updater/services/1/update", {
-                method: "POST",
-                body: {},
-            });
+            const refreshedAfterSuccess = await withDockerUpdaterFetch(() =>
+                withEnvValue("MIRA_DOCKER_UPDATER_SKIP_REGISTRY", undefined, () =>
+                    requestJson<{
+                        success: boolean;
+                        service: {
+                            id: number;
+                            currentTag: string | null;
+                            lastStatus: string | null;
+                        };
+                    }>(server, "/api/docker/updater/services/1/update", {
+                        method: "POST",
+                        body: {},
+                    })
+                )
+            );
             assert.equal(refreshedAfterSuccess.status, 200);
             assert.equal(refreshedAfterSuccess.body.success, true);
             assert.equal(refreshedAfterSuccess.body.service.id, 1);
             assert.equal(refreshedAfterSuccess.body.service.currentTag, "1.0.0");
-            assert.equal(refreshedAfterSuccess.body.service.lastStatus, "current");
+            assert.equal(
+                refreshedAfterSuccess.body.service.lastStatus,
+                "update_available"
+            );
         } finally {
             db.exec("DROP TRIGGER IF EXISTS delete_updated_manual_service_after_event");
         }

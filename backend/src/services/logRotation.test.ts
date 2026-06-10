@@ -1233,6 +1233,57 @@ describe("log rotation service", { concurrency: false }, () => {
         await assert.rejects(() => fsPromises.stat(`${archive}.gz`), /ENOENT/u);
     });
 
+    it("keeps the newest rotation even when the source log has an old mtime", async () => {
+        const root = path.join(tempDir, "old-source-retention");
+        await mkdir(root);
+        const logFile = path.join(root, "app.log");
+        const existingArchive = path.join(root, "app.log.2026-01-01T00-00-00.000Z");
+        await writeFile(logFile, "rotate old source", "utf8");
+        await writeFile(existingArchive, "existing archive", "utf8");
+        await utimes(
+            logFile,
+            new Date("2020-01-01T00:00:00.000Z"),
+            new Date("2020-01-01T00:00:00.000Z")
+        );
+        await utimes(
+            existingArchive,
+            new Date("2026-01-01T00:00:00.000Z"),
+            new Date("2026-01-01T00:00:00.000Z")
+        );
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [
+                {
+                    name: "copytruncate",
+                    paths: [logFile],
+                    archivePaths: [path.join(root, "app.log.*")],
+                    compress: false,
+                    keep: 1,
+                    maxSizeMb: 0.000001,
+                    strategy: "copytruncate",
+                },
+            ],
+        });
+
+        const summary = await runLogRotationService({ dryRun: false, config });
+
+        assert.equal(summary.ok, true);
+        assert.equal(summary.rotatedFiles, 1);
+        assert.equal(summary.deletedArchives, 1);
+        await assert.rejects(() => fsPromises.stat(existingArchive), /ENOENT/u);
+        const state = JSON.parse(
+            (
+                db
+                    .prepare(
+                        "SELECT data_json FROM cache_entries WHERE key = 'log_rotation.state'"
+                    )
+                    .get() as { data_json: string }
+            ).data_json
+        ) as { files: Record<string, { lastArchive: string }> };
+        assert.ok(await fsPromises.stat(state.files[logFile]?.lastArchive ?? ""));
+    });
+
     it("compresses retained per-file archivePaths", async () => {
         const root = path.join(tempDir, "retention-archive-paths");
         await mkdir(root);

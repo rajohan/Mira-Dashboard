@@ -513,7 +513,8 @@ function hasUpdate(service: ManagedServiceRow): boolean {
         (service.latest_tag &&
             (!service.current_tag || service.latest_tag !== service.current_tag)) ||
         (service.latest_digest &&
-            (!service.current_digest || service.latest_digest !== service.current_digest))
+            service.current_digest &&
+            service.latest_digest !== service.current_digest)
     );
 }
 
@@ -554,6 +555,34 @@ function writeFileWithMetadata(
         fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
         mode
     );
+    let committed = false;
+    try {
+        fs.writeFileSync(fd, content, "utf8");
+        fs.fchmodSync(fd, mode);
+        const currentStats = fs.fstatSync(fd);
+        if (currentStats.uid !== stats.uid || currentStats.gid !== stats.gid) {
+            fs.fchownSync(fd, stats.uid, stats.gid);
+        }
+        committed = true;
+    } finally {
+        fs.closeSync(fd);
+        if (!committed) {
+            try {
+                fs.unlinkSync(targetPath);
+            } catch {
+                // Preserve the original write failure.
+            }
+        }
+    }
+}
+
+function overwriteFileWithMetadata(
+    targetPath: string,
+    content: string,
+    stats: Pick<fs.Stats, "mode" | "uid" | "gid">
+) {
+    const mode = stats.mode & 0o7777;
+    const fd = fs.openSync(targetPath, fs.constants.O_WRONLY | fs.constants.O_TRUNC);
     try {
         fs.writeFileSync(fd, content, "utf8");
         fs.fchmodSync(fd, mode);
@@ -715,6 +744,7 @@ async function applyComposeUpdateUnlocked(
         `${path.basename(composePath)}.rollback-${randomUUID()}`
     );
     try {
+        writeFileWithMetadata(rollbackTempPath, raw, originalStats);
         writeFileWithMetadata(tempPath, YAML.stringify(doc), originalStats);
         fs.renameSync(tempPath, composePath);
         const command = getComposeCommand(composePath, service.service_name);
@@ -725,6 +755,11 @@ async function applyComposeUpdateUnlocked(
             maxBuffer: 10 * 1024 * 1024,
             timeout: 180_000,
         });
+        try {
+            fs.unlinkSync(rollbackTempPath);
+        } catch {
+            // The rollback file is only a best-effort safety net after success.
+        }
         return { stdout: String(stdout), stderr: String(stderr) };
     } catch (error) {
         try {
@@ -732,16 +767,15 @@ async function applyComposeUpdateUnlocked(
         } catch {
             // The temp file may have already been atomically moved into place.
         }
-        try {
-            fs.unlinkSync(rollbackTempPath);
-        } catch {
-            // The rollback temp file may not exist yet.
-        }
         let restored = false;
         try {
-            writeFileWithMetadata(rollbackTempPath, raw, originalStats);
-            fs.renameSync(rollbackTempPath, composePath);
-            restored = true;
+            if (fs.existsSync(rollbackTempPath)) {
+                fs.renameSync(rollbackTempPath, composePath);
+                restored = true;
+            } else {
+                overwriteFileWithMetadata(composePath, raw, originalStats);
+                restored = true;
+            }
         } catch (rollbackError) {
             console.error("[DockerUpdater] Failed to restore compose file", {
                 composePath,
@@ -946,15 +980,16 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
         const discoveredAppSlugs = new Set(
             discoveries.map((discovery) => discovery.appSlug)
         );
-        for (const appSlug of new Set(failedDiscoveries.map((item) => item.appSlug))) {
-            db.prepare("DELETE FROM docker_managed_services WHERE app_slug = ?").run(
-                appSlug
-            );
-        }
+        const failedAppSlugs = new Set(
+            failedDiscoveries.map((discovery) => discovery.appSlug)
+        );
         for (const row of db
             .prepare("SELECT DISTINCT app_slug FROM docker_managed_services")
             .all() as Array<{ app_slug: string }>) {
-            if (!discoveredAppSlugs.has(row.app_slug)) {
+            if (
+                !discoveredAppSlugs.has(row.app_slug) &&
+                !failedAppSlugs.has(row.app_slug)
+            ) {
                 db.prepare("DELETE FROM docker_managed_services WHERE app_slug = ?").run(
                     row.app_slug
                 );
@@ -1348,6 +1383,7 @@ export const __testing = {
     needsFullTagScan,
     normalizeDockerHubRepo,
     normalizeLabels,
+    overwriteFileWithMetadata,
     caughtMessage,
     fetchRegistryJson,
     isSafeTagRegexPattern,

@@ -203,7 +203,9 @@ function validateConfig(config: LogRotationConfig): void {
             Array.isArray(effectivePolicy.archivePaths) &&
             effectivePolicy.archivePaths.length > 0;
         if (effectivePolicy.archiveOnly === true && !effectiveHasArchivePaths) {
-            throw new Error("defaults.archiveOnly requires archivePaths");
+            throw new Error(
+                `defaults.archiveOnly requires archivePaths for group ${group.name}`
+            );
         }
     }
 }
@@ -582,7 +584,7 @@ async function rotateCopyTruncate(
             createReadStream("", { fd: file.handle.fd, autoClose: false, start: 0 }),
             createWriteStream("", { fd: destination.fd, autoClose: false, start: 0 })
         );
-        await fs.utimes(archivePath, file.stat.atime, file.stat.mtime);
+        await fs.utimes(archivePath, file.stat.atime, new Date());
         await destination.close();
         await assertFileIdentity(filePath, file.stat, approvedRoots);
         await file.handle.truncate(0);
@@ -614,6 +616,7 @@ async function rotateRename(
 ): Promise<RotationResult> {
     await assertFileIdentity(filePath, file.stat, approvedRoots);
     await fs.rename(filePath, archivePath);
+    await fs.utimes(archivePath, file.stat.atime, new Date());
     try {
         const replacement = await createNoFollowFile(filePath, file.stat.mode & 0o777, {
             uid: file.stat.uid,
