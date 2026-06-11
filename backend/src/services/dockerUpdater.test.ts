@@ -1385,6 +1385,63 @@ setTimeout(() => process.exit(0), 30);
         assert.match(await readFile(composePath, "utf8"), /image: nginx:2/u);
     });
 
+    it("continues auto updates for healthy apps after unrelated discovery failures", async () => {
+        const appsRoot = path.join(tempDir, "apps");
+        const appDir = path.join(appsRoot, "auto-scope");
+        const brokenAppDir = path.join(appsRoot, "broken-auto-scope");
+        const binDir = path.join(tempDir, "bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(brokenAppDir, { recursive: true });
+        await mkdir(binDir);
+        const composePath = path.join(appDir, "compose.yaml");
+        await writeFile(
+            composePath,
+            `services:
+  target:
+    image: nginx:1
+    labels:
+      mira.updater.autoUpdate: "true"
+      mira.updater.tagPattern: "^[0-9]+$"
+      mira.updater.tagPatternIsRegex: "true"
+`,
+            "utf8"
+        );
+        await writeFile(path.join(brokenAppDir, "compose.yaml"), "services: [", "utf8");
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            "#!/usr/bin/env node\nprocess.exit(0);\n"
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input.toString();
+            return {
+                ok: true,
+                headers: new Headers(),
+                json: async () =>
+                    url.endsWith("/tags/2")
+                        ? { images: [{ architecture: "amd64", digest: "sha256:new" }] }
+                        : { results: [{ name: "1" }, { name: "2" }] },
+            } as Response;
+        }) as typeof fetch;
+
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
+            const updater = await import(`./dockerUpdater.js?auto-scope=${Date.now()}`);
+            const steps = (await updater.runDockerUpdaterService()) as StepResult[];
+            assert.equal(steps[0]?.step, "register-services");
+            assert.equal(steps[0]?.ok, false);
+            assert.equal(steps[1]?.step, "poll");
+            assert.equal(steps[1]?.ok, true);
+            assert.equal(steps.at(-1)?.step, "auto-update:auto-scope/target");
+            assert.equal(steps.at(-1)?.ok, true);
+            assert.equal(
+                updater.__testing.shouldBlockGlobalUpdateForDiscoveryFailure(steps[0]),
+                false
+            );
+        });
+
+        assert.match(await readFile(composePath, "utf8"), /image: nginx:2/u);
+    });
+
     it("blocks a manual update when discovery cannot classify failed apps", async () => {
         const appsRoot = path.join(tempDir, "apps");
         const appDir = path.join(appsRoot, "unavailable-apps-root");

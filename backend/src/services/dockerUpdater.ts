@@ -49,6 +49,12 @@ function shouldBlockManualUpdateForDiscoveryFailure(
     return failedAppSlugs.has("*") || failedAppSlugs.has(appSlug);
 }
 
+function shouldBlockGlobalUpdateForDiscoveryFailure(
+    register: DockerUpdaterStepResult
+): boolean {
+    return !register.ok && failedDiscoveryAppSlugs(register).has("*");
+}
+
 function getDockerComposeWrapper(): string {
     const dockerRoot = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
     return nonEmptyEnvFallback(
@@ -1412,7 +1418,7 @@ export async function runDockerUpdaterService(
                   .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
                   .get(serviceId) as ManagedServiceRow | undefined);
     const register = await registerDockerUpdaterServices();
-    if (!register.ok && serviceId === undefined) {
+    if (serviceId === undefined && shouldBlockGlobalUpdateForDiscoveryFailure(register)) {
         return [register];
     }
     if (serviceId !== undefined) {
@@ -1576,6 +1582,7 @@ export const __testing = {
     parseBearerChallenge,
     parseNextLink,
     setNestedValue,
+    shouldBlockGlobalUpdateForDiscoveryFailure,
     shouldBlockManualUpdateForDiscoveryFailure,
     servicesFromCompose,
     stripRegistry,

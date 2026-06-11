@@ -691,12 +691,9 @@ describe("docker routes", { concurrency: false }, () => {
 
     after(async () => {
         const { __testing } = await import("./docker.js");
+        let childCleanupError: unknown;
         let closeError: unknown;
         try {
-            await server?.close();
-        } catch (error) {
-            closeError = error;
-        } finally {
             await Promise.all(
                 [...__testing.dockerExecJobs.values()]
                     .map((job) => job.process)
@@ -704,6 +701,14 @@ describe("docker routes", { concurrency: false }, () => {
                     .map((child) => child as ChildProcess)
                     .map((child) => stopChildProcess(child))
             );
+        } catch (error) {
+            childCleanupError = error;
+        }
+        try {
+            await server?.close();
+        } catch (error) {
+            closeError = error;
+        } finally {
             __testing.dockerExecJobs.clear();
             if (originalPath === undefined) {
                 delete process.env.PATH;
@@ -761,6 +766,7 @@ describe("docker routes", { concurrency: false }, () => {
                 await rm(tempDir, { recursive: true, force: true });
             }
         }
+        if (childCleanupError) throw childCleanupError;
         if (closeError) throw closeError;
     });
 
