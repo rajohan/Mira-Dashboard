@@ -286,6 +286,17 @@ test("returns validation and missing job errors", async () => {
         const malformedBody = (await malformedBodyResponse.json()) as {
             error: string;
         };
+        const tooLargeBodyResponse = await fetch(
+            `${server.baseUrl}/api/jobs/cache.weather`,
+            {
+                body: JSON.stringify({ patch: { notes: "x".repeat(2_100_000) } }),
+                headers: { "Content-Type": "application/json" },
+                method: "PATCH",
+            }
+        );
+        const tooLargeBody = (await tooLargeBodyResponse.json()) as {
+            error: string;
+        };
 
         assert.equal(missingJob.status, 404);
         assert.equal(invalidPatch.status, 400);
@@ -293,6 +304,8 @@ test("returns validation and missing job errors", async () => {
         assert.equal(primitiveBody.body.error, "patch must be an object");
         assert.equal(malformedBodyResponse.status, 400);
         assert.equal(malformedBody.error, "Invalid scheduled job patch");
+        assert.equal(tooLargeBodyResponse.status, 413);
+        assert.equal(tooLargeBody.error, "Scheduled job patch is too large");
         assert.equal(missingRun.status, 404);
         assert.equal(missingPatch.status, 404);
         assert.equal(partialIntervalPatch.status, 200);

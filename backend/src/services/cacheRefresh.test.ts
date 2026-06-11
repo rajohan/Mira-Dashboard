@@ -267,10 +267,17 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         );
 
         await withEnv({ MOLTBOOK_API_KEY: "   " }, async () => {
-            await assert.rejects(() => refreshMoltbookCache(), /MOLTBOOK_API_KEY/u);
+            await assert.rejects(
+                () => refreshMoltbookCache(),
+                (error: unknown) => {
+                    assert.match((error as Error).message, /Moltbook refresh failed/u);
+                    assert.match(String((error as Error).cause), /MOLTBOOK_API_KEY/u);
+                    return true;
+                }
+            );
             await assert.rejects(
                 () => refreshCacheProducer("moltbook.home"),
-                /MOLTBOOK_API_KEY/u
+                /Moltbook refresh failed/u
             );
         });
         const failureRow = cacheRow("moltbook.home");
@@ -430,6 +437,37 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         });
     });
 
+    it("preserves failed Moltbook subkeys when every upstream call fails", async () => {
+        await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
+            await withFetch(
+                () => ({ httpStatus: 502 }),
+                async () => {
+                    await assert.rejects(
+                        () => refreshCacheProducer("moltbook"),
+                        /Moltbook refresh failed/u
+                    );
+                }
+            );
+        });
+
+        assert.deepEqual(
+            (
+                db
+                    .prepare(
+                        "SELECT key, status FROM cache_entries WHERE key LIKE 'moltbook.%' ORDER BY key"
+                    )
+                    .all() as Array<{ key: string; status: string }>
+            ).map((row) => `${row.key}:${row.status}`),
+            [
+                "moltbook.feed.hot:error",
+                "moltbook.feed.new:error",
+                "moltbook.home:error",
+                "moltbook.my-content:error",
+                "moltbook.profile:error",
+            ]
+        );
+    });
+
     it("records grouped Moltbook refresh failures without poisoning concrete cache keys", async () => {
         writeCacheSuccess({
             key: "moltbook.home",
@@ -443,7 +481,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         await withEnv({ MOLTBOOK_API_KEY: undefined }, async () => {
             await assert.rejects(
                 () => refreshCacheProducer("moltbook"),
-                /MOLTBOOK_API_KEY/u
+                /Moltbook refresh failed/u
             );
         });
 
@@ -458,7 +496,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         db.exec(`
             CREATE TEMP TRIGGER fail_moltbook_feed_new
             BEFORE INSERT ON cache_entries
-            WHEN NEW.key = 'moltbook.feed.new'
+            WHEN NEW.key = 'moltbook.feed.new' AND NEW.error_code IS NULL
             BEGIN
                 SELECT RAISE(FAIL, 'moltbook write failed');
             END;
@@ -512,6 +550,64 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                 0
             );
         }
+    });
+
+    it("records all Moltbook keys when grouped writes fail without failed key metadata", async () => {
+        db.exec(`
+            CREATE TEMP TRIGGER fail_moltbook_grouped_write_new
+            BEFORE INSERT ON cache_entries
+            WHEN NEW.key = 'moltbook.feed.new' AND NEW.error_code IS NULL
+            BEGIN
+                SELECT RAISE(FAIL, 'moltbook write failed');
+            END;
+        `);
+        try {
+            await withEnv({ MOLTBOOK_API_KEY: "token" }, async () => {
+                await withFetch(
+                    (url) => {
+                        if (url.includes("/home")) {
+                            return {
+                                unread_messages: 1,
+                                latest_moltbook_announcement: {},
+                            };
+                        }
+                        if (url.includes("/feed?sort=")) {
+                            return { posts: [{ id: "post" }] };
+                        }
+                        return {
+                            agent: { name: "mira_2026" },
+                            recentPosts: [],
+                            recentComments: [],
+                        };
+                    },
+                    async () => {
+                        await assert.rejects(
+                            () => refreshCacheProducer("moltbook"),
+                            /moltbook write failed/u
+                        );
+                    }
+                );
+            });
+        } finally {
+            db.exec("DROP TRIGGER IF EXISTS fail_moltbook_grouped_write_new");
+        }
+
+        assert.deepEqual(
+            (
+                db
+                    .prepare(
+                        "SELECT key, status FROM cache_entries WHERE key LIKE 'moltbook.%' ORDER BY key"
+                    )
+                    .all() as Array<{ key: string; status: string }>
+            ).map((row) => `${row.key}:${row.status}`),
+            [
+                "moltbook.feed.hot:error",
+                "moltbook.feed.new:error",
+                "moltbook.home:error",
+                "moltbook.my-content:error",
+                "moltbook.profile:error",
+            ]
+        );
     });
 
     it("refreshes weather through wttr and falls back to Open-Meteo", async () => {
@@ -1894,6 +1990,31 @@ if (args.includes("capture-pane")) {
             const quota = await __testing.checkOpenAiQuota();
             assert.equal(quota.status, "error");
         });
+        const pathCodexBin = path.join(tempDir, "path-codex-bin");
+        await import("node:fs/promises").then((fs) => fs.mkdir(pathCodexBin));
+        await writeExecutable(path.join(pathCodexBin, "codex"), "#!/usr/bin/env node\n");
+        await writeExecutable(
+            path.join(pathCodexBin, "tmux"),
+            String.raw`#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args.includes("capture-pane")) {
+  process.stdout.write("Account: path@example.test\nModel: gpt-5.5 (high)\n5h limit: 70% left\nWeekly limit: 60% left\n");
+}
+`
+        );
+        process.env.PATH = `${pathCodexBin}${path.delimiter}${originalPath || ""}`;
+        await withEnv(
+            {
+                CODEX_BIN: "codex",
+                QUOTAS_CODEX_HOME: path.join(tempDir, "path-codex-home"),
+            },
+            async () => {
+                const quota = await __testing.checkOpenAiQuota();
+                assert.equal(quota.status, undefined);
+                assert.equal(quota.account, "path@example.test");
+                assert.equal(quota.percentUsed, 40);
+            }
+        );
         assert.deepEqual(
             __testing.parseOpenAiQuotaOutput(
                 "Account: raymond@example.test\nModel: gpt-5.5 (high)\n5h limit: 80% left (resets 12:00)\nWeekly limit: 50% left (resets Monday)\n"

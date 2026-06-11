@@ -53,10 +53,11 @@ function getProviderPercent(
             quotas.synthetic.weeklyTokenLimit.percentRemaining === null
                 ? null
                 : 100 - quotas.synthetic.weeklyTokenLimit.percentRemaining;
-        return Math.max(
-            quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0,
-            weeklyPercentUsed ?? 0
-        );
+        const rollingPercentUsed = quotas.synthetic.rollingFiveHourLimit.percentUsed;
+        if (rollingPercentUsed === null && weeklyPercentUsed === null) {
+            return null;
+        }
+        return Math.max(rollingPercentUsed ?? 0, weeklyPercentUsed ?? 0);
     }
 
     return hasQuotaStatus(quotas.openai) ? null : quotas.openai.percentUsed;

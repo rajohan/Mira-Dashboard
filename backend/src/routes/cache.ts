@@ -136,7 +136,7 @@ export async function refreshCacheKey(key: string) {
         refreshedKeys.map((refreshKey) => getCacheEntry(refreshKey))
     );
     const missingKeys = refreshedKeys.filter(
-        (_refreshKey, index) => refreshedRows[index] === null
+        (_refreshKey, index) => refreshedRows[index] == null
     );
     if (missingKeys.length > 0) {
         throw httpStatusError(

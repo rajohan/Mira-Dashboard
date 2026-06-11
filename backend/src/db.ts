@@ -368,6 +368,7 @@ CREATE INDEX IF NOT EXISTS idx_docker_update_events_created_at
 `);
 
 cleanupTaskForeignKeyOrphans(db);
+ensureTaskDependenciesSchema(db);
 db.exec("PRAGMA foreign_keys = ON");
 
 for (const sql of [
@@ -452,6 +453,86 @@ function deleteTaskOrphans(targetDb: MigrationDatabase, tableName: string): void
             `);
         }
     });
+}
+
+function ensureTaskDependenciesSchema(targetDb: MigrationDatabase): void {
+    let lastError: unknown;
+    for (const delay of [0, 10, 25, 50]) {
+        if (delay > 0) {
+            sleepSync(delay);
+        }
+
+        try {
+            if (!sqliteTableExists(targetDb, "task_dependencies")) {
+                return;
+            }
+            const columns = targetDb
+                .prepare("PRAGMA table_info(task_dependencies)")
+                .all();
+            const primaryKeyColumns = columns
+                .filter((column) => Number(column.pk || 0) > 0)
+                .sort((left, right) => Number(left.pk) - Number(right.pk))
+                .map((column) => String(column.name));
+            const foreignKeys = targetDb
+                .prepare("PRAGMA foreign_key_list(task_dependencies)")
+                .all();
+            const hasCascadeTaskId = foreignKeys.some(
+                (key) =>
+                    key.from === "task_id" &&
+                    key.table === "tasks" &&
+                    key.to === "id" &&
+                    String(key.on_delete).toUpperCase() === "CASCADE"
+            );
+            const hasCascadeDependsOnTaskId = foreignKeys.some(
+                (key) =>
+                    key.from === "depends_on_task_id" &&
+                    key.table === "tasks" &&
+                    key.to === "id" &&
+                    String(key.on_delete).toUpperCase() === "CASCADE"
+            );
+            if (
+                primaryKeyColumns.join(",") === "task_id,depends_on_task_id" &&
+                hasCascadeTaskId &&
+                hasCascadeDependsOnTaskId
+            ) {
+                return;
+            }
+
+            targetDb.exec(`
+                BEGIN;
+                ALTER TABLE task_dependencies RENAME TO task_dependencies_old;
+                CREATE TABLE task_dependencies (
+                    task_id INTEGER NOT NULL,
+                    depends_on_task_id INTEGER NOT NULL,
+                    PRIMARY KEY(task_id, depends_on_task_id),
+                    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+                    FOREIGN KEY(depends_on_task_id) REFERENCES tasks(id) ON DELETE CASCADE
+                );
+                INSERT OR IGNORE INTO task_dependencies (task_id, depends_on_task_id)
+                SELECT task_id, depends_on_task_id
+                FROM task_dependencies_old
+                WHERE task_id IN (SELECT id FROM tasks)
+                  AND depends_on_task_id IN (SELECT id FROM tasks);
+                DROP TABLE task_dependencies_old;
+                CREATE INDEX IF NOT EXISTS idx_task_dependencies_depends_on_task_id
+                    ON task_dependencies(depends_on_task_id);
+                COMMIT;
+            `);
+            return;
+        } catch (error) {
+            try {
+                targetDb.exec("ROLLBACK");
+            } catch {
+                // Preserve the migration failure that triggered rollback.
+            }
+            lastError = error;
+            if (!isTransientSqliteLock(error)) {
+                throw error;
+            }
+        }
+    }
+
+    throw lastError;
 }
 
 export function ensureCacheEntriesUpdatedAtNullable(targetDb: MigrationDatabase): void {
@@ -698,6 +779,7 @@ export const __testing = {
     assertDuplicateColumnError,
     cleanupTaskForeignKeyOrphans,
     ensureDockerUpdateEventsSetNull,
+    ensureTaskDependenciesSchema,
     ensureCacheEntriesUpdatedAtNullable,
     ensureCacheEntriesIndexes,
     execAlterTableWithDuplicateColumnRetry,

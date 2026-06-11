@@ -220,6 +220,55 @@ test("removes legacy task child orphans before enabling foreign keys", async () 
             ).count,
             1
         );
+        assert.deepEqual(
+            (
+                imported.db
+                    .prepare("PRAGMA table_info(task_dependencies)")
+                    .all() as Array<{
+                    name: string;
+                    pk: number;
+                }>
+            )
+                .filter((column) => column.pk > 0)
+                .sort((left, right) => left.pk - right.pk)
+                .map((column) => column.name),
+            ["task_id", "depends_on_task_id"]
+        );
+        const dependencyForeignKeys = imported.db
+            .prepare("PRAGMA foreign_key_list(task_dependencies)")
+            .all() as Array<{
+            from: string;
+            on_delete: string;
+            table: string;
+            to: string;
+        }>;
+        assert.ok(
+            dependencyForeignKeys.some(
+                (key) =>
+                    key.from === "task_id" &&
+                    key.table === "tasks" &&
+                    key.to === "id" &&
+                    key.on_delete === "CASCADE"
+            )
+        );
+        assert.ok(
+            dependencyForeignKeys.some(
+                (key) =>
+                    key.from === "depends_on_task_id" &&
+                    key.table === "tasks" &&
+                    key.to === "id" &&
+                    key.on_delete === "CASCADE"
+            )
+        );
+        assert.throws(
+            () =>
+                imported.db
+                    .prepare(
+                        "INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES (1, 1)"
+                    )
+                    .run(),
+            /constraint|unique/i
+        );
     } finally {
         await cleanupTempDb(originalDbPath, tempDir, [
             () => {
@@ -260,6 +309,85 @@ test("classifies duplicate-column migration errors", async () => {
         assert.throws(
             () => result.__testing.assertDuplicateColumnError(new Error("syntax error")),
             /syntax error/u
+        );
+    } finally {
+        await cleanup();
+    }
+});
+
+test("covers task dependency schema migration helper fallbacks", async () => {
+    const { cleanup, result } = await importWithTempDb("taskDependencySchemaHelpers");
+    try {
+        let missingTableExecs = 0;
+        result.__testing.ensureTaskDependenciesSchema({
+            exec: () => {
+                missingTableExecs += 1;
+            },
+            prepare: () => ({
+                all: () => [],
+            }),
+        });
+        assert.equal(missingTableExecs, 0);
+
+        let attempts = 0;
+        const retryTargetDb = {
+            exec: (sql: string) => {
+                if (sql === "ROLLBACK") {
+                    throw new Error("rollback unavailable");
+                }
+                attempts += 1;
+                const error = new Error("database is locked") as Error & {
+                    code: string;
+                };
+                error.code = "SQLITE_BUSY";
+                throw error;
+            },
+            prepare: (sql: string) => ({
+                all: () => {
+                    if (sql.includes("sqlite_master")) {
+                        return [{ name: "task_dependencies" }];
+                    }
+                    if (sql.includes("table_info")) {
+                        return [
+                            { name: "task_id", pk: 0 },
+                            { name: "depends_on_task_id", pk: 0 },
+                        ];
+                    }
+                    return [];
+                },
+            }),
+        };
+        assert.throws(
+            () => result.__testing.ensureTaskDependenciesSchema(retryTargetDb),
+            /database is locked/u
+        );
+        assert.equal(attempts, 4);
+
+        const nonTransientTargetDb = {
+            exec: (sql: string) => {
+                if (sql === "ROLLBACK") {
+                    return;
+                }
+                throw new Error("rebuild failed");
+            },
+            prepare: (sql: string) => ({
+                all: () => {
+                    if (sql.includes("sqlite_master")) {
+                        return [{ name: "task_dependencies" }];
+                    }
+                    if (sql.includes("table_info")) {
+                        return [
+                            { name: "depends_on_task_id", pk: 2 },
+                            { name: "task_id", pk: 1 },
+                        ];
+                    }
+                    return [];
+                },
+            }),
+        };
+        assert.throws(
+            () => result.__testing.ensureTaskDependenciesSchema(nonTransientTargetDb),
+            /rebuild failed/u
         );
     } finally {
         await cleanup();

@@ -352,6 +352,13 @@ describe("quota notifications", () => {
 
         assert.equal(quotaTesting.getProviderPercent("openrouter", quotas), null);
         assert.equal(quotaTesting.getProviderPercent("synthetic", quotas), 10);
+        if ("status" in quotas.synthetic) {
+            throw new Error("expected synthetic quota snapshot");
+        }
+        quotas.synthetic.weeklyTokenLimit.percentRemaining = null;
+        assert.equal(quotaTesting.getProviderPercent("synthetic", quotas), null);
+        quotas.synthetic.rollingFiveHourLimit.percentUsed = 42;
+        assert.equal(quotaTesting.getProviderPercent("synthetic", quotas), 42);
         assert.equal(quotaTesting.getNotificationPayload("openrouter", 80, quotas), null);
         const originalWarn = console.warn;
         const warnings: unknown[][] = [];
@@ -377,6 +384,7 @@ describe("quota notifications", () => {
             warnings[0]?.[0],
             "[QuotaNotifications] Missing notification payload for openrouter 80%"
         );
+        quotas.synthetic.rollingFiveHourLimit.percentUsed = null;
         assert.deepEqual(quotaTesting.getNotificationPayload("synthetic", 80, quotas), {
             title: "Synthetic.new usage high (80%)",
             description: "5h 100% left · weekly 3 left",
@@ -389,6 +397,12 @@ describe("quota notifications", () => {
         assert.deepEqual(quotaTesting.getNotificationPayload("synthetic", 80, quotas), {
             title: "Synthetic.new usage high (80%)",
             description: "5h 100% left · weekly 0 left",
+        });
+        quotas.synthetic.weeklyTokenLimit.remainingCredits = undefined;
+        quotas.synthetic.weeklyTokenLimit.percentRemaining = null;
+        assert.deepEqual(quotaTesting.getNotificationPayload("synthetic", 80, quotas), {
+            title: "Synthetic.new usage high (80%)",
+            description: "5h 100% left · weekly unknown",
         });
         assert.deepEqual(quotaTesting.getState("openrouter", 80), { is_armed: 1 });
     });

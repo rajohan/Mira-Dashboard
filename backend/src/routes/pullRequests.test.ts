@@ -47,7 +47,8 @@ async function waitForDeploymentStatus(
     tempDir: string
 ): Promise<Record<string, unknown>> {
     let lastJob = {} as Record<string, unknown>;
-    for (let attempt = 0; attempt < 120; attempt += 1) {
+    const deadline = Date.now() + 6_000;
+    while (Date.now() < deadline) {
         try {
             const job = readDeploymentJobFromDb(jobId, tempDir);
             if (job) {
@@ -66,7 +67,8 @@ async function waitForDeploymentStatus(
 }
 
 async function waitForDeploymentLockReleased(tempDir: string): Promise<void> {
-    for (let attempt = 0; attempt < 120; attempt += 1) {
+    const deadline = Date.now() + 6_000;
+    while (Date.now() < deadline) {
         try {
             if (!readDeploymentLockFromDb(tempDir)) {
                 return;

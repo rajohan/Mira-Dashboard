@@ -617,13 +617,13 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
     }
 
     if (writes.length === 0 && firstFailure !== undefined) {
-        if (firstFailure instanceof Error) {
-            throw firstFailure;
-        }
-        throw createMoltbookRefreshError("Moltbook refresh failed", {
-            cause: firstFailure,
-            failedKeys: [...failedKeys],
-        });
+        throw createMoltbookRefreshError(
+            `Moltbook refresh failed: ${errorMessage(firstFailure)}`,
+            {
+                cause: firstFailure,
+                failedKeys: [...failedKeys],
+            }
+        );
     }
 
     db.exec("SAVEPOINT moltbook_cache_write");
@@ -1491,7 +1491,14 @@ SESSION="codex_quota_$$_$(date +%s)"
 cleanup(){ tmux has-session -t "$SESSION" 2>/dev/null && tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 command -v tmux >/dev/null 2>&1 || { echo "__ERR__:tmux_not_found"; exit 0; }
-[ -x "$MIRA_QUOTA_CODEX_BIN" ] || { echo "__ERR__:codex_not_found"; exit 0; }
+if [[ "$MIRA_QUOTA_CODEX_BIN" == */* ]]; then
+  [ -x "$MIRA_QUOTA_CODEX_BIN" ] || { echo "__ERR__:codex_not_found"; exit 0; }
+else
+  command -v "$MIRA_QUOTA_CODEX_BIN" >/dev/null 2>&1 || {
+    echo "__ERR__:codex_not_found"
+    exit 0
+  }
+fi
 tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw env CODEX_HOME="$MIRA_QUOTA_CODEX_HOME" CODEX_DISABLE_UPDATE_CHECK=1 NO_UPDATE_NOTIFIER=1 "$MIRA_QUOTA_CODEX_BIN" --cd /home/ubuntu/.openclaw --no-alt-screen
 OUT=""
 for i in $(seq 1 12); do

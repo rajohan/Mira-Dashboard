@@ -777,9 +777,7 @@ async function applyComposeUpdateUnlocked(
     }
     const composeImageField = service.compose_image_field;
     const configuredComposePath = service.compose_path;
-    const composePath = fs.lstatSync(configuredComposePath).isSymbolicLink()
-        ? fs.realpathSync(configuredComposePath)
-        : configuredComposePath;
+    const composePath = fs.realpathSync(configuredComposePath);
     const raw = fs.readFileSync(composePath, "utf8");
     const originalStats = fs.statSync(composePath);
     const doc = YAML.parse(raw) as JsonRecord;

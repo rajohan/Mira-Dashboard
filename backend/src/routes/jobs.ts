@@ -15,6 +15,11 @@ const JOBS_JSON_LIMIT = "2097152b";
 
 const invalidJobsJsonHandler: ErrorRequestHandler = (error, _req, res, next) => {
     const status = Number((error as { status?: unknown }).status);
+    const type = String((error as { type?: unknown }).type ?? "");
+    if (status === 413 || type === "entity.too.large") {
+        res.status(413).json({ error: "Scheduled job patch is too large" });
+        return;
+    }
     if (error instanceof SyntaxError && status === 400) {
         res.status(400).json({ error: "Invalid scheduled job patch" });
         return;
