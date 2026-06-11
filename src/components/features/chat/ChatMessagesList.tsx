@@ -20,6 +20,7 @@ import type {
     ChatRow,
     ChatVisibilitySettings,
 } from "./chatTypes";
+import { TOOL_ROLE_VARIANTS } from "./chatTypes";
 import { chatErrorMessage } from "./chatUtils";
 
 /** Provides props for chat messages list. */
@@ -397,11 +398,7 @@ export function ChatMessagesList({
                             normalizedRole === "assistant" &&
                             row.kind === "message" &&
                             Boolean(row.message.text);
-                        const isToolResult = [
-                            "tool",
-                            "toolresult",
-                            "tool_result",
-                        ].includes(normalizedRole);
+                        const isToolResult = TOOL_ROLE_VARIANTS.includes(normalizedRole);
                         const shouldRenderPrimaryText = Boolean(
                             row.message.text && !isToolResult
                         );
