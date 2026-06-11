@@ -305,7 +305,6 @@ async function startBackupJob(type: BackupJob["type"], command: string) {
         job.status = "done";
         job.code = signal ? 130 : code;
         job.endedAt = Date.now();
-        startBackupStatusRefresh(job, type);
     });
     child.on("error", (error) => {
         job.status = "done";

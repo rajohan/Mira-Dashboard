@@ -663,7 +663,7 @@ describe("tasks routes", () => {
         const created = await requestJson<FrontendTask>(server, "/api/tasks", {
             method: "POST",
             body: {
-                title: "rollback delete task",
+                title: `${titlePrefix}rollback delete task`,
                 assignee: TASK_ASSIGNEES.raymond.id,
             },
         });

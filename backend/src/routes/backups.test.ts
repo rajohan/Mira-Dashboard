@@ -503,7 +503,7 @@ describe("backup routes", () => {
             const done = await waitForDone(server, "/api/backups/kopia");
             assert.equal(done.status, "done");
             assert.equal(done.code, 130);
-            await waitForRefresh("backup.kopia.status", refreshedKeys);
+            assert.equal(refreshedKeys.includes("backup.kopia.status"), false);
         });
     });
 

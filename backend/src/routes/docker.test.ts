@@ -919,6 +919,55 @@ describe("docker routes", { concurrency: false }, () => {
             ]),
             undefined
         );
+        db.prepare("DELETE FROM notifications WHERE source = 'docker-updater'").run();
+        __testing.createDockerUpdaterRunFailureNotifications([
+            {
+                step: "auto-update:media/app",
+                ok: false,
+                stdout: "",
+                stderr: "compose failed",
+            },
+        ]);
+        assert.deepEqual(dockerNotifications(), []);
+        __testing.createDockerUpdaterRunFailureNotifications([
+            {
+                step: "register-services",
+                ok: false,
+                stdout: "",
+                stderr: "",
+            },
+        ]);
+        const defaultMessageNotification = db
+            .prepare(
+                `SELECT description
+                 FROM notifications
+                 WHERE source = 'docker-updater'`
+            )
+            .get() as { description: string } | undefined;
+        assert.equal(
+            defaultMessageNotification?.description,
+            "register-services: Docker updater step failed"
+        );
+        db.prepare("DELETE FROM notifications WHERE source = 'docker-updater'").run();
+        const originalPrepare = db.prepare.bind(db);
+        const prepareMock = mock.method(db, "prepare", (sql: string) => {
+            if (sql.includes("INSERT INTO notifications")) {
+                throw new Error("notification insert failed");
+            }
+            return originalPrepare(sql);
+        });
+        try {
+            __testing.createDockerUpdaterRunFailureNotifications([
+                {
+                    step: "register-services",
+                    ok: false,
+                    stdout: "",
+                    stderr: "registration failed",
+                },
+            ]);
+        } finally {
+            prepareMock.mock.restore();
+        }
         assert.equal(__testing.resolveManualUpdateServiceId("12", { serviceId: 3 }), 12);
         assert.equal(__testing.resolveManualUpdateServiceId("", { serviceId: 3 }), 3);
         assert.equal(__testing.resolveManualUpdateServiceId("0", { serviceId: 3 }), null);
@@ -2418,6 +2467,63 @@ describe("docker routes", { concurrency: false }, () => {
                 type: "info",
             },
         ]);
+
+        const { __testing } = await import("./docker.js");
+        __testing.setDockerUpdaterServiceRunnerForTests(async () => [
+            {
+                step: "poll",
+                ok: false,
+                stdout: "",
+                stderr: "registry unavailable",
+            },
+        ]);
+        try {
+            db.prepare(
+                "DELETE FROM notifications WHERE source IN ('docker', 'docker-updater')"
+            ).run();
+            const routeFailure = await requestJson<{ success: boolean }>(
+                server,
+                "/api/docker/updater/run",
+                { method: "POST" }
+            );
+            assert.equal(routeFailure.status, 200);
+            assert.equal(routeFailure.body.success, false);
+            const pollFailureNotification = db
+                .prepare(
+                    `SELECT title, description, type, dedupe_key, metadata_json, is_read
+                     FROM notifications
+                     WHERE source = 'docker-updater'
+                     ORDER BY dedupe_key`
+                )
+                .get() as
+                | {
+                      dedupe_key: string;
+                      description: string;
+                      is_read: number;
+                      metadata_json: string;
+                      title: string;
+                      type: string;
+                  }
+                | undefined;
+            assert.ok(pollFailureNotification);
+            assert.equal(pollFailureNotification.title, "Docker updater failed");
+            assert.equal(
+                pollFailureNotification.description,
+                "poll: registry unavailable"
+            );
+            assert.equal(pollFailureNotification.type, "error");
+            assert.match(
+                pollFailureNotification.dedupe_key,
+                /^docker:updater:run-failed:poll:/u
+            );
+            assert.equal(pollFailureNotification.is_read, 0);
+            assert.deepEqual(JSON.parse(pollFailureNotification.metadata_json), {
+                code: null,
+                step: "poll",
+            });
+        } finally {
+            __testing.setDockerUpdaterServiceRunnerForTests();
+        }
 
         await seedDockerUpdaterState(tempDir);
         await withEnvValue("MIRA_FAKE_DOCKER_COMPOSE_FAIL", "1", async () => {

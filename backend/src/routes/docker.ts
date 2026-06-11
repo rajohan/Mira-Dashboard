@@ -906,9 +906,56 @@ function firstFailedStepCode(steps: DockerUpdaterStepResult[]): string | undefin
     return steps.find((step) => !step.ok)?.code;
 }
 
+function isUpdaterApplyStep(step: DockerUpdaterStepResult): boolean {
+    return /^(?:auto|manual)-update(?::|$)/u.test(step.step);
+}
+
+function createDockerUpdaterRunFailureNotifications(
+    steps: DockerUpdaterStepResult[]
+): void {
+    const failedSteps = steps.filter((step) => !step.ok && !isUpdaterApplyStep(step));
+    for (const step of failedSteps) {
+        const timestamp = new Date().toISOString();
+        const message = step.stderr || "Docker updater step failed";
+        try {
+            db.prepare(
+                `INSERT INTO notifications (
+                    title, description, type, source, dedupe_key, metadata_json,
+                    is_read, created_at, updated_at, occurred_at
+                 ) VALUES (?, ?, 'error', 'docker-updater', ?, ?, 0, ?, ?, ?)
+                 ON CONFLICT(dedupe_key) DO UPDATE SET
+                    title = excluded.title,
+                    description = excluded.description,
+                    type = excluded.type,
+                    metadata_json = excluded.metadata_json,
+                    is_read = 0,
+                    updated_at = excluded.updated_at,
+                    occurred_at = excluded.occurred_at`
+            ).run(
+                "Docker updater failed",
+                `${step.step}: ${message}`,
+                `docker:updater:run-failed:${step.step}:${timestamp.slice(0, 10)}`,
+                JSON.stringify({ code: step.code ?? null, step: step.step }),
+                timestamp,
+                timestamp,
+                timestamp
+            );
+        } catch (error) {
+            console.error(
+                "[DockerUpdater] Failed to persist route failure notification",
+                {
+                    error,
+                    step: step.step,
+                }
+            );
+        }
+    }
+}
+
 /** Performs run docker updater now. */
 export async function runDockerUpdaterNow() {
     const steps = await runDockerUpdaterServiceForRoutes();
+    createDockerUpdaterRunFailureNotifications(steps);
     return steps;
 }
 
@@ -1230,6 +1277,7 @@ export const __testing = {
     firstFailedStepCode,
     manualUpdaterFailureCode,
     manualUpdaterFailureStatus,
+    createDockerUpdaterRunFailureNotifications,
     dockerExecJobs,
     cleanupDockerExecJobs,
     activeDockerExecJobCount,

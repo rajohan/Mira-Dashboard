@@ -3411,11 +3411,9 @@ process.exit(0);
         assert.equal(fs.lstatSync(composeLinkPath).isSymbolicLink(), true);
         assert.match(await readFile(composeTargetPath, "utf8"), /nginx:2/u);
         assert.match(await readFile(composeLinkPath, "utf8"), /nginx:2/u);
-        assert.match(await readFile(callLogPath, "utf8"), new RegExp(composeTargetPath));
-        assert.doesNotMatch(
-            await readFile(callLogPath, "utf8"),
-            new RegExp(composeLinkPath)
-        );
+        const composeCalls = await readFile(callLogPath, "utf8");
+        assert.equal(composeCalls.includes(composeTargetPath), true);
+        assert.equal(composeCalls.includes(composeLinkPath), false);
     });
 
     it("restores the compose file when writing the updated file fails", async () => {
