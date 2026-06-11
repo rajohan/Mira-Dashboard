@@ -217,19 +217,22 @@ describe("backup routes", () => {
     });
 
     after(async () => {
-        backupTesting.clearJobsForTest();
-        backupTesting.setRefreshBackupCacheForTest();
-        backupTesting.setBackupRefreshTimeoutMsForTest();
-        if (server) {
-            await server.close();
-        }
-        if (originalBackupShell === undefined) {
-            delete process.env.MIRA_BACKUP_SHELL;
-        } else {
-            process.env.MIRA_BACKUP_SHELL = originalBackupShell;
-        }
-        if (typeof tempDir === "string" && tempDir) {
-            await rm(tempDir, { recursive: true, force: true });
+        try {
+            if (server) {
+                await server.close();
+            }
+        } finally {
+            backupTesting.clearJobsForTest();
+            backupTesting.setRefreshBackupCacheForTest();
+            backupTesting.setBackupRefreshTimeoutMsForTest();
+            if (originalBackupShell === undefined) {
+                delete process.env.MIRA_BACKUP_SHELL;
+            } else {
+                process.env.MIRA_BACKUP_SHELL = originalBackupShell;
+            }
+            if (typeof tempDir === "string" && tempDir) {
+                await rm(tempDir, { recursive: true, force: true });
+            }
         }
     });
 

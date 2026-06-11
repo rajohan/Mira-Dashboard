@@ -908,7 +908,7 @@ function servicesFromCompose(composePath: string):
           appSlug: string;
           error: string;
           ok: false;
-          services: [];
+          services: DiscoveredComposeService[];
       } {
     const appSlug = path.basename(path.dirname(composePath));
     try {
@@ -1019,12 +1019,12 @@ function servicesFromCompose(composePath: string):
                 },
             });
         }
-        if (services.length === 0 && serviceErrors.length > 0) {
+        if (serviceErrors.length > 0) {
             return {
                 appSlug,
-                error: serviceErrors[0],
+                error: serviceErrors.join("; "),
                 ok: false,
-                services: [],
+                services,
             };
         }
         return {
@@ -1344,10 +1344,48 @@ async function applyServiceUpdate(
                 stderr: "No update available",
             };
         }
+        let result: Awaited<ReturnType<typeof applyComposeUpdateUnlocked>>;
         try {
             // Compose writes tag-only refs for non-digest pins, then pulls so
             // digest drift still refreshes mutable tags without storing @digest.
-            const result = await applyComposeUpdateUnlocked(lockedService, target);
+            result = await applyComposeUpdateUnlocked(lockedService, target);
+        } catch (error) {
+            const message = caughtMessage(error);
+            db.prepare(
+                `UPDATE docker_managed_services
+                 SET last_checked_at = ?, last_status = ?
+                 WHERE id = ?`
+            ).run(nowIso(), `${eventPrefix}_update_failed`, lockedService.id);
+            insertEventBestEffort(
+                lockedService,
+                `${eventPrefix}_update_failed`,
+                message,
+                {
+                    targetComposeImageRef: target,
+                }
+            );
+            const [os = "linux", architecture = null] =
+                servicePlatform(lockedService).split("/");
+            createNotificationBestEffort(
+                `Docker ${eventPrefix} update failed`,
+                `${serviceLabel(lockedService)}: ${message}`,
+                `docker:updater:${eventPrefix}-failed:${lockedService.id}:${nowIso().slice(0, 10)}`,
+                "error",
+                {
+                    architecture,
+                    digest: lockedService.latest_digest,
+                    os,
+                }
+            );
+            return {
+                step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
+                ok: false,
+                stdout: "",
+                stderr: message,
+            };
+        }
+
+        try {
             db.prepare(
                 `UPDATE docker_managed_services
                  SET compose_image_ref = ?, current_tag = ?, current_digest = ?,
@@ -1385,15 +1423,10 @@ async function applyServiceUpdate(
             };
         } catch (error) {
             const message = caughtMessage(error);
-            db.prepare(
-                `UPDATE docker_managed_services
-                 SET last_checked_at = ?, last_status = ?
-                 WHERE id = ?`
-            ).run(nowIso(), `${eventPrefix}_update_failed`, lockedService.id);
             insertEventBestEffort(
                 lockedService,
-                `${eventPrefix}_update_failed`,
-                message,
+                `${eventPrefix}_update_reconcile_failed`,
+                `Docker service updated but failed to persist updater state: ${message}`,
                 {
                     targetComposeImageRef: target,
                 }
@@ -1401,9 +1434,9 @@ async function applyServiceUpdate(
             const [os = "linux", architecture = null] =
                 servicePlatform(lockedService).split("/");
             createNotificationBestEffort(
-                `Docker ${eventPrefix} update failed`,
-                `${serviceLabel(lockedService)}: ${message}`,
-                `docker:updater:${eventPrefix}-failed:${lockedService.id}:${nowIso().slice(0, 10)}`,
+                `Docker ${eventPrefix} update needs reconciliation`,
+                `${serviceLabel(lockedService)} updated to ${target}, but state persistence failed: ${message}`,
+                `docker:updater:${eventPrefix}-reconcile-failed:${lockedService.id}:${nowIso().slice(0, 10)}`,
                 "error",
                 {
                     architecture,
@@ -1414,8 +1447,8 @@ async function applyServiceUpdate(
             return {
                 step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
                 ok: false,
-                stdout: "",
-                stderr: message,
+                stdout: result.stdout,
+                stderr: `Docker service updated but failed to persist updater state: ${message}`,
             };
         }
     });
@@ -1556,6 +1589,7 @@ export async function runDockerUpdaterService(
         }
         return [register, poll, await applyServiceUpdate(refreshedService, "manual")];
     }
+    const blockedAppSlugs = failedDiscoveryAppSlugs(register);
     const poll = await pollDockerUpdaterRegistries();
     const autoServices = db
         .prepare(
@@ -1565,7 +1599,9 @@ export async function runDockerUpdaterService(
     const applyResults: DockerUpdaterStepResult[] = [];
     for (const service of autoServices.filter(
         (candidate) =>
-            candidate.last_status === "update_available" && hasUpdate(candidate)
+            !blockedAppSlugs.has(candidate.app_slug) &&
+            candidate.last_status === "update_available" &&
+            hasUpdate(candidate)
     )) {
         applyResults.push(await applyServiceUpdate(service, "auto"));
     }

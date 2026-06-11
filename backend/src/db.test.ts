@@ -260,6 +260,25 @@ test("removes legacy task child orphans before enabling foreign keys", async () 
                     key.on_delete === "CASCADE"
             )
         );
+        for (const tableName of ["task_events", "task_updates"]) {
+            const foreignKeys = imported.db
+                .prepare(`PRAGMA foreign_key_list(${tableName})`)
+                .all() as Array<{
+                from: string;
+                on_delete: string;
+                table: string;
+                to: string;
+            }>;
+            assert.ok(
+                foreignKeys.some(
+                    (key) =>
+                        key.from === "task_id" &&
+                        key.table === "tasks" &&
+                        key.to === "id" &&
+                        key.on_delete === "CASCADE"
+                )
+            );
+        }
         assert.throws(
             () =>
                 imported.db
@@ -269,6 +288,17 @@ test("removes legacy task child orphans before enabling foreign keys", async () 
                     .run(),
             /constraint|unique/i
         );
+        imported.db.prepare("DELETE FROM tasks WHERE id = 1").run();
+        for (const tableName of ["task_events", "task_updates", "task_dependencies"]) {
+            assert.equal(
+                (
+                    imported.db
+                        .prepare(`SELECT COUNT(*) AS count FROM ${tableName}`)
+                        .get() as { count: number }
+                ).count,
+                0
+            );
+        }
     } finally {
         await cleanupTempDb(originalDbPath, tempDir, [
             () => {
@@ -388,6 +418,48 @@ test("covers task dependency schema migration helper fallbacks", async () => {
         assert.throws(
             () => result.__testing.ensureTaskDependenciesSchema(nonTransientTargetDb),
             /rebuild failed/u
+        );
+
+        let historyAttempts = 0;
+        const retryHistoryTargetDb = {
+            exec: (sql: string) => {
+                if (sql === "ROLLBACK") {
+                    throw new Error("rollback unavailable");
+                }
+                historyAttempts += 1;
+                const error = new Error("database is locked") as Error & {
+                    code: string;
+                };
+                error.code = "SQLITE_BUSY";
+                throw error;
+            },
+            prepare: () => ({
+                all: () => [],
+            }),
+        };
+        assert.throws(
+            () => result.__testing.ensureTaskHistoryCascadeSchemas(retryHistoryTargetDb),
+            /database is locked/u
+        );
+        assert.equal(historyAttempts, 4);
+
+        const nonTransientHistoryTargetDb = {
+            exec: (sql: string) => {
+                if (sql === "ROLLBACK") {
+                    return;
+                }
+                throw new Error("history rebuild failed");
+            },
+            prepare: () => ({
+                all: () => [],
+            }),
+        };
+        assert.throws(
+            () =>
+                result.__testing.ensureTaskHistoryCascadeSchemas(
+                    nonTransientHistoryTargetDb
+                ),
+            /history rebuild failed/u
         );
     } finally {
         await cleanup();

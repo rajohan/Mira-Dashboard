@@ -482,9 +482,9 @@ process.stdout.write("updated\n");
                     "utf8"
                 );
                 const mixed = updater.__testing.servicesFromCompose(mixedCompose);
-                if (!mixed.ok) {
-                    assert.fail(mixed.error);
-                }
+                assert.equal(mixed.ok, false);
+                assert.match(mixed.error ?? "", /Invalid tag pattern regex/u);
+                assert.match(mixed.error ?? "", /image as a string/u);
                 assert.deepEqual(
                     mixed.services.map(
                         (service: { serviceName: string }) => service.serviceName
@@ -1316,6 +1316,21 @@ setTimeout(() => process.exit(0), 30);
             path.join(binDir, "docker"),
             "#!/usr/bin/env node\nprocess.exit(0);\n"
         );
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
+                app_slug, service_name, compose_path, image_repo, compose_image_ref,
+                compose_image_field, current_tag, current_digest, policy, pin_mode,
+                tag_match_type, tag_match_pattern, enabled, metadata_json,
+                latest_tag, latest_digest, last_checked_at, last_status
+            ) VALUES (
+                'broken-auto-scope', 'target', ?, 'nginx',
+                'nginx:1', 'services.target.image', '1', 'sha256:old', 'auto', 'tag',
+                'regex', '^[0-9]+$', 1, '{}', '2', 'sha256:new',
+                '2026-06-06T00:00:00.000Z', 'update_available'
+            )`
+            )
+            .run(path.join(brokenAppDir, "compose.yaml"));
         process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
         globalThis.fetch = (async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();
@@ -1461,6 +1476,12 @@ setTimeout(() => process.exit(0), 30);
             assert.equal(steps[1]?.ok, true);
             assert.equal(steps.at(-1)?.step, "auto-update:auto-scope/target");
             assert.equal(steps.at(-1)?.ok, true);
+            assert.equal(
+                steps.some(
+                    (step) => step.step === "auto-update:broken-auto-scope/target"
+                ),
+                false
+            );
             assert.equal(
                 updater.__testing.shouldBlockGlobalUpdateForDiscoveryFailure(steps[0]),
                 false
@@ -3483,6 +3504,91 @@ process.exit(0);
         assert.equal(updatedStats.mode & 0o777, originalStats.mode & 0o777);
         assert.equal(updatedStats.uid, originalStats.uid);
         assert.equal(updatedStats.gid, originalStats.gid);
+    });
+
+    it("does not mark applied compose updates as update failures when state persistence fails", async () => {
+        const appDir = path.join(tempDir, "reconcile-failure");
+        const binDir = path.join(tempDir, "bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        const composePath = path.join(appDir, "compose.yaml");
+        const callLogPath = path.join(tempDir, "reconcile-compose-calls.log");
+        await writeFile(composePath, "services:\n  web:\n    image: nginx:1\n", "utf8");
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            String.raw`#!/usr/bin/env node
+const fs = require("node:fs");
+fs.appendFileSync(${JSON.stringify(callLogPath)}, process.argv.slice(2).join(" ") + "\n");
+process.exit(0);
+`
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(`./dockerUpdater.js?reconcile-failure=${Date.now()}`);
+        const service = {
+            id: 1,
+            app_slug: "reconcile-failure",
+            service_name: "web",
+            compose_path: composePath,
+            image_repo: "nginx",
+            compose_image_ref: "nginx:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+            metadata_json: "{}",
+            last_status: "update_available",
+        };
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json, last_status
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, @metadata_json, @last_status
+            )`
+            )
+            .run(service);
+        const originalPrepare = dbHandle.prepare.bind(dbHandle);
+        const prepareMock = mock.method(dbHandle, "prepare", (sql: string) => {
+            if (sql.includes("SET compose_image_ref = ?")) {
+                throw new Error("reconcile denied");
+            }
+            return originalPrepare(sql);
+        });
+
+        let result;
+        try {
+            result = await updater.__testing.applyServiceUpdate(service, "manual");
+        } finally {
+            prepareMock.mock.restore();
+        }
+
+        assert.equal(result.ok, false);
+        assert.match(
+            result.stderr,
+            /Docker service updated but failed to persist updater state: reconcile denied/u
+        );
+        assert.match(await readFile(composePath, "utf8"), /nginx:2/u);
+        assert.match(await readFile(callLogPath, "utf8"), /up -d --pull always web/u);
+        const row = dbHandle
+            .prepare("SELECT last_status FROM docker_managed_services WHERE id = ?")
+            .get(service.id) as { last_status: string };
+        assert.equal(row.last_status, "update_available");
+        const event = dbHandle
+            .prepare("SELECT event_type FROM docker_update_events WHERE managed_service_id = ?")
+            .get(service.id) as { event_type: string };
+        assert.equal(event.event_type, "manual_update_reconcile_failed");
     });
 
     it("updates symlinked compose targets without replacing the symlink", async () => {

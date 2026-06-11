@@ -85,6 +85,17 @@ function formatPath(path: string | null | undefined) {
     return path;
 }
 
+export async function runBackupMutationIfUnlocked(
+    locked: boolean,
+    mutateAsync: () => Promise<unknown>
+): Promise<boolean> {
+    if (locked) {
+        return false;
+    }
+    await mutateAsync();
+    return true;
+}
+
 /** Renders the backup overview card UI. */
 export function BackupOverviewCard() {
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
@@ -118,13 +129,13 @@ export function BackupOverviewCard() {
 
     /** Responds to run backup events. */
     const handleRunBackup = async () => {
-        await runBackup.mutateAsync();
+        await runBackupMutationIfUnlocked(backupActionDisabled, runBackup.mutateAsync);
         setIsConfirmOpen(false);
     };
 
     /** Responds to run walg backup events. */
     const handleRunWalgBackup = async () => {
-        await runWalgBackup.mutateAsync();
+        await runBackupMutationIfUnlocked(walgActionDisabled, runWalgBackup.mutateAsync);
     };
 
     return (

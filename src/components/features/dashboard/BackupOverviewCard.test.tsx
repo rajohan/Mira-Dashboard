@@ -1,8 +1,8 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BackupOverviewCard } from "./BackupOverviewCard";
+import { BackupOverviewCard, runBackupMutationIfUnlocked } from "./BackupOverviewCard";
 
 const hooks = vi.hoisted(() => ({
     runKopiaBackup: vi.fn(),
@@ -97,6 +97,18 @@ beforeEach(() => {
 });
 
 describe("BackupOverviewCard", () => {
+    it("runs backup mutations only while unlocked", async () => {
+        await expect(
+            runBackupMutationIfUnlocked(true, hooks.runKopiaBackup)
+        ).resolves.toBe(false);
+        expect(hooks.runKopiaBackup).not.toHaveBeenCalled();
+
+        await expect(
+            runBackupMutationIfUnlocked(false, hooks.runKopiaBackup)
+        ).resolves.toBe(true);
+        expect(hooks.runKopiaBackup).toHaveBeenCalledTimes(1);
+    });
+
     it("renders Kopia and WAL-G backup status and starts backup actions", async () => {
         const user = userEvent.setup();
 
@@ -222,7 +234,39 @@ describe("BackupOverviewCard", () => {
         expect(screen.getByText("Backup status is refreshing")).toBeInTheDocument();
         for (const button of screen.getAllByRole("button", { name: "Refreshing..." })) {
             expect(button).toBeDisabled();
+            fireEvent.click(button);
         }
+        expect(hooks.runKopiaBackup).not.toHaveBeenCalled();
+        expect(hooks.runWalgBackup).not.toHaveBeenCalled();
+    });
+
+    it("does not start a Kopia backup when the confirm modal becomes locked", async () => {
+        const user = userEvent.setup();
+        const { rerender } = render(<BackupOverviewCard />);
+
+        await user.click(screen.getByRole("button", { name: /Run filesystem backup/u }));
+        expect(screen.getByText(/Start a Kopia backup now\?/u)).toBeInTheDocument();
+
+        hooks.useKopiaBackup.mockReturnValue({
+            data: {
+                job: {
+                    refreshPending: true,
+                    startedAt: Date.now() - 30_000,
+                    status: "done",
+                    stdout: "kopia complete",
+                },
+            },
+        });
+        rerender(<BackupOverviewCard />);
+
+        await user.click(screen.getByRole("button", { name: "Run backup" }));
+
+        expect(hooks.runKopiaBackup).not.toHaveBeenCalled();
+        await waitFor(() => {
+            expect(
+                screen.queryByText(/Start a Kopia backup now\?/u)
+            ).not.toBeInTheDocument();
+        });
     });
 
     it("shows starting labels while backup actions are pending", () => {

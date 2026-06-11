@@ -25,6 +25,7 @@ const TASK_AUTOMATION_COLUMN_SQL =
 
 const TASK_CHILD_TABLES = ["task_events", "task_updates", "task_dependencies"] as const;
 const TASK_CHILD_TABLE_SET = new Set<string>(TASK_CHILD_TABLES);
+const TASK_HISTORY_TABLES = ["task_events", "task_updates"] as const;
 
 function validateTaskChildTableName(tableName: string): string {
     if (!TASK_CHILD_TABLE_SET.has(tableName)) {
@@ -157,7 +158,7 @@ CREATE TABLE IF NOT EXISTS task_events (
     event_type TEXT NOT NULL,
     payload_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
-    FOREIGN KEY(task_id) REFERENCES tasks(id)
+    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS task_updates (
@@ -166,7 +167,7 @@ CREATE TABLE IF NOT EXISTS task_updates (
     author TEXT NOT NULL,
     message_md TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    FOREIGN KEY(task_id) REFERENCES tasks(id)
+    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS task_dependencies (
@@ -368,6 +369,7 @@ CREATE INDEX IF NOT EXISTS idx_docker_update_events_created_at
 `);
 
 cleanupTaskForeignKeyOrphans(db);
+ensureTaskHistoryCascadeSchemas(db);
 ensureTaskDependenciesSchema(db);
 db.exec("PRAGMA foreign_keys = ON");
 
@@ -516,6 +518,95 @@ function ensureTaskDependenciesSchema(targetDb: MigrationDatabase): void {
                 DROP TABLE task_dependencies_old;
                 CREATE INDEX IF NOT EXISTS idx_task_dependencies_depends_on_task_id
                     ON task_dependencies(depends_on_task_id);
+                COMMIT;
+            `);
+            return;
+        } catch (error) {
+            try {
+                targetDb.exec("ROLLBACK");
+            } catch {
+                // Preserve the migration failure that triggered rollback.
+            }
+            lastError = error;
+            if (!isTransientSqliteLock(error)) {
+                throw error;
+            }
+        }
+    }
+
+    throw lastError;
+}
+
+function ensureTaskHistoryCascadeSchemas(targetDb: MigrationDatabase): void {
+    for (const tableName of TASK_HISTORY_TABLES) {
+        ensureTaskHistoryCascadeSchema(targetDb, tableName);
+    }
+}
+
+function ensureTaskHistoryCascadeSchema(
+    targetDb: MigrationDatabase,
+    tableName: (typeof TASK_HISTORY_TABLES)[number]
+): void {
+    const validatedTableName = validateTaskChildTableName(tableName);
+    let lastError: unknown;
+    for (const delay of [0, 10, 25, 50]) {
+        if (delay > 0) {
+            sleepSync(delay);
+        }
+
+        try {
+            const foreignKeys = targetDb
+                .prepare(`PRAGMA foreign_key_list(${validatedTableName})`)
+                .all();
+            const hasCascadeTaskId = foreignKeys.some(
+                (key) =>
+                    key.from === "task_id" &&
+                    key.table === "tasks" &&
+                    key.to === "id" &&
+                    String(key.on_delete).toUpperCase() === "CASCADE"
+            );
+            if (hasCascadeTaskId) {
+                return;
+            }
+
+            if (validatedTableName === "task_events") {
+                targetDb.exec(`
+                    BEGIN;
+                    ALTER TABLE task_events RENAME TO task_events_old;
+                    CREATE TABLE task_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_id INTEGER NOT NULL,
+                        event_type TEXT NOT NULL,
+                        payload_json TEXT NOT NULL DEFAULT '{}',
+                        created_at TEXT NOT NULL,
+                        FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+                    );
+                    INSERT INTO task_events (id, task_id, event_type, payload_json, created_at)
+                    SELECT id, task_id, event_type, payload_json, created_at
+                    FROM task_events_old
+                    WHERE task_id IN (SELECT id FROM tasks);
+                    DROP TABLE task_events_old;
+                    COMMIT;
+                `);
+                return;
+            }
+
+            targetDb.exec(`
+                BEGIN;
+                ALTER TABLE task_updates RENAME TO task_updates_old;
+                CREATE TABLE task_updates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    author TEXT NOT NULL,
+                    message_md TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+                );
+                INSERT INTO task_updates (id, task_id, author, message_md, created_at)
+                SELECT id, task_id, author, message_md, created_at
+                FROM task_updates_old
+                WHERE task_id IN (SELECT id FROM tasks);
+                DROP TABLE task_updates_old;
                 COMMIT;
             `);
             return;
@@ -779,6 +870,7 @@ export const __testing = {
     assertDuplicateColumnError,
     cleanupTaskForeignKeyOrphans,
     ensureDockerUpdateEventsSetNull,
+    ensureTaskHistoryCascadeSchemas,
     ensureTaskDependenciesSchema,
     ensureCacheEntriesUpdatedAtNullable,
     ensureCacheEntriesIndexes,
