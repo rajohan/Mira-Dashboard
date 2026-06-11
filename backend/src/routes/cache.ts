@@ -30,7 +30,12 @@ function httpStatusError(statusCode: number, message: string): HttpStatusError {
 function httpStatusCode(error: unknown): number | undefined {
     if (error && typeof error === "object") {
         const statusCode = (error as { statusCode?: unknown }).statusCode;
-        return typeof statusCode === "number" ? statusCode : undefined;
+        return typeof statusCode === "number" &&
+            Number.isInteger(statusCode) &&
+            statusCode >= 400 &&
+            statusCode <= 599
+            ? statusCode
+            : undefined;
     }
     return undefined;
 }

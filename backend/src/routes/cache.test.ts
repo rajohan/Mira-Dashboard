@@ -266,6 +266,22 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         });
     });
 
+    it("falls back for non-error refresh status codes", async () => {
+        __testing.setCacheRefreshRunnerForTests(async () => {
+            throw Object.assign(new Error("unexpected status"), { statusCode: 200 });
+        });
+        try {
+            const routeRefresh = await fetch(
+                `${server.baseUrl}/api/cache/quotas.summary/refresh`,
+                { method: "POST" }
+            );
+            assert.equal(routeRefresh.status, 500);
+            assert.deepEqual(await routeRefresh.json(), { error: "unexpected status" });
+        } finally {
+            __testing.resetCacheRefreshForTests();
+        }
+    });
+
     it("refreshes configured cache keys and reports missing refreshed rows", async () => {
         const refreshCommand = ["/bin/sh", "-c", "exit 0"];
 

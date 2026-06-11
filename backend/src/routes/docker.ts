@@ -60,7 +60,7 @@ function redactEnvValue(value: unknown): string {
     const envValue = String(value);
     const separatorIndex = envValue.indexOf("=");
     if (separatorIndex === -1) {
-        return envValue;
+        return "***";
     }
 
     const key = envValue.slice(0, separatorIndex);

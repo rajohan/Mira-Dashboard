@@ -937,21 +937,24 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
             const homeRefresh = refreshCacheProducer("moltbook.home");
             await waitFor(() => releases.length > 0);
             const fullRefresh = refreshCacheProducer("moltbook");
+            const hotRefresh = refreshCacheProducer("moltbook.feed.hot");
             for (const release of releases) {
                 release();
             }
 
-            assert.deepEqual(await Promise.all([homeRefresh, fullRefresh]), [
+            const fullResult = {
+                refreshed: [
+                    "moltbook.home",
+                    "moltbook.feed.hot",
+                    "moltbook.feed.new",
+                    "moltbook.profile",
+                    "moltbook.my-content",
+                ],
+            };
+            assert.deepEqual(await Promise.all([homeRefresh, fullRefresh, hotRefresh]), [
                 { refreshed: ["moltbook.home"] },
-                {
-                    refreshed: [
-                        "moltbook.home",
-                        "moltbook.feed.hot",
-                        "moltbook.feed.new",
-                        "moltbook.profile",
-                        "moltbook.my-content",
-                    ],
-                },
+                fullResult,
+                fullResult,
             ]);
             assert.equal(homeFetches, 2);
         });

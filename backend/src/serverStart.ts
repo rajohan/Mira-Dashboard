@@ -105,7 +105,11 @@ async function closeServerForRollback(): Promise<void> {
     await runManualCloseCleanups();
 }
 
-/** Starts Gateway and the scheduled job scheduler after the HTTP server is listening. */
+function shouldStartScheduledJobs(nodeEnv = process.env.NODE_ENV): boolean {
+    return nodeEnv !== "development";
+}
+
+/** Starts Gateway and production background services after the HTTP server is listening. */
 export async function handleServerListening(): Promise<void> {
     let gatewayStarted = false;
     let scheduledJobSchedulerStarted = false;
@@ -121,8 +125,10 @@ export async function handleServerListening(): Promise<void> {
             );
         }
 
-        scheduledJobSchedulerStarted = true;
-        startScheduledJobScheduler();
+        if (shouldStartScheduledJobs()) {
+            scheduledJobSchedulerStarted = true;
+            startScheduledJobScheduler();
+        }
         removeBackgroundCleanup = installCloseCleanup(async () => {
             if (scheduledJobSchedulerStarted) {
                 await rollback(
@@ -231,4 +237,5 @@ export const __testing = Object.freeze({
     removeCloseCleanup,
     setAfterBackgroundServicesStartedForTest,
     waitForCloseCleanups,
+    shouldStartScheduledJobs,
 });

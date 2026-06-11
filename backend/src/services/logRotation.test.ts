@@ -311,6 +311,17 @@ describe("log rotation service", { concurrency: false }, () => {
                     dryRun: true,
                     config: await writeConfig(tempDir, {
                         version: 1,
+                        groups: [{ name: "fractional", paths: ["*.log"], keep: 1.5 }],
+                    }),
+                }),
+            /Group fractional\.keep must be a non-negative integer/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
                         defaults: { archiveOnly: true },
                         groups: [{ name: "invalid", paths: ["*.log"] }],
                     }),
@@ -814,12 +825,11 @@ describe("log rotation service", { concurrency: false }, () => {
             });
             await withEnv({ MIRA_LOG_ROTATION_CONFIG: dryRunConfig }, async () => {
                 const dryRun = await runElevatedLogRotationService({ dryRun: true });
-                assert.equal(dryRun.stderr, "");
+                assert.equal(dryRun.stderr, "helper warning");
                 assert.equal(dryRun.result.ok, true);
-                assert.equal(dryRun.result.dryRun, true);
-                assert.deepEqual(dryRun.result.groups, []);
             });
-            assert.equal(commands.length, 1);
+            assert.equal(commands.length, 2);
+            assert.equal(commands[1]?.args.includes("--dry-run"), true);
             __testing.setElevatedLogRotationExecFileRunner(async () => ({
                 stderr: "helper warning",
                 stdout: "not json",
@@ -1624,6 +1634,79 @@ describe("log rotation service", { concurrency: false }, () => {
         } finally {
             openMock.mock.restore();
             await rm(lockPath, { force: true });
+        }
+    });
+
+    it("returns null when stale reclaim directory recreation loses the race", async () => {
+        const lockPath = testLockPath(tempDir);
+        const reclaimPath = `${lockPath}.reclaim`;
+        await mkdir(path.dirname(lockPath), { recursive: true });
+        await writeFile(lockPath, "not-a-pid\n", "utf8");
+        await mkdir(reclaimPath);
+        const staleTime = new Date(Date.now() - 10 * 60 * 1000);
+        await utimes(reclaimPath, staleTime, staleTime);
+        const originalMkdir = fsPromises.mkdir.bind(fsPromises);
+        const mkdirMock = mock.method(
+            fsPromises,
+            "mkdir",
+            (
+                target: Parameters<typeof fsPromises.mkdir>[0],
+                options?: Parameters<typeof fsPromises.mkdir>[1]
+            ) => {
+                if (String(target) === reclaimPath) {
+                    const error = new Error("reclaim race") as NodeJS.ErrnoException;
+                    error.code = "EEXIST";
+                    throw error;
+                }
+                return originalMkdir(target, options);
+            }
+        );
+        try {
+            assert.equal(await __testing.acquireLogRotationLock(false), null);
+        } finally {
+            mkdirMock.mock.restore();
+            await rm(lockPath, { force: true });
+            await rm(reclaimPath, { force: true, recursive: true });
+        }
+    });
+
+    it("rethrows unexpected stale reclaim directory recreation errors", async () => {
+        const lockPath = testLockPath(tempDir);
+        const reclaimPath = `${lockPath}.reclaim`;
+        await mkdir(path.dirname(lockPath), { recursive: true });
+        await writeFile(lockPath, "not-a-pid\n", "utf8");
+        await mkdir(reclaimPath);
+        const staleTime = new Date(Date.now() - 10 * 60 * 1000);
+        await utimes(reclaimPath, staleTime, staleTime);
+        const originalMkdir = fsPromises.mkdir.bind(fsPromises);
+        let reclaimMkdirAttempts = 0;
+        const mkdirMock = mock.method(
+            fsPromises,
+            "mkdir",
+            (
+                target: Parameters<typeof fsPromises.mkdir>[0],
+                options?: Parameters<typeof fsPromises.mkdir>[1]
+            ) => {
+                if (String(target) === reclaimPath) {
+                    reclaimMkdirAttempts += 1;
+                    const error = new Error(
+                        "reclaim mkdir denied"
+                    ) as NodeJS.ErrnoException;
+                    error.code = reclaimMkdirAttempts === 1 ? "EEXIST" : "EACCES";
+                    throw error;
+                }
+                return originalMkdir(target, options);
+            }
+        );
+        try {
+            await assert.rejects(
+                () => __testing.acquireLogRotationLock(false),
+                /reclaim mkdir denied/u
+            );
+        } finally {
+            mkdirMock.mock.restore();
+            await rm(lockPath, { force: true });
+            await rm(reclaimPath, { force: true, recursive: true });
         }
     });
 

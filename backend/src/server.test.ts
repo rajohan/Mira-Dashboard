@@ -946,6 +946,30 @@ describe("server bootstrap", () => {
             await handleServerListening();
             assert.equal(initializedToken, undefined);
             assert.match(String(warnings.at(-1)?.[0]), /No gateway token/u);
+            assert.equal(
+                serverStartTesting.shouldStartScheduledJobs("development"),
+                false
+            );
+            assert.equal(serverStartTesting.shouldStartScheduledJobs("production"), true);
+            const originalNodeEnv = process.env.NODE_ENV;
+            let devModeIntervals = 0;
+            globalThis.setInterval = ((...args: Parameters<typeof setInterval>) => {
+                devModeIntervals += 1;
+                return originalSetInterval(...args);
+            }) as typeof setInterval;
+            process.env.NODE_ENV = "development";
+            try {
+                await handleServerListening();
+                assert.equal(devModeIntervals, 0);
+            } finally {
+                if (originalNodeEnv === undefined) {
+                    delete process.env.NODE_ENV;
+                } else {
+                    process.env.NODE_ENV = originalNodeEnv;
+                }
+                globalThis.setInterval = originalSetInterval;
+                await stopScheduledJobScheduler();
+            }
 
             server.listen = ((port: number, listener?: () => void) => {
                 listenedPort = port;
@@ -994,11 +1018,16 @@ describe("server bootstrap", () => {
             startBackendServer(41_004);
             assert.equal(pendingStartListenCalls, 1);
             assert.equal(listenedPort, 41_003);
-            (server.listeners("error").at(-1) as ((error: Error) => void) | undefined)?.(
-                new Error("listen failed")
-            );
-            assert.equal(process.exitCode, 1);
-            process.exitCode = originalExitCode;
+            try {
+                (
+                    server.listeners("error").at(-1) as
+                        | ((error: Error) => void)
+                        | undefined
+                )?.(new Error("listen failed"));
+                assert.equal(process.exitCode, 1);
+            } finally {
+                process.exitCode = originalExitCode;
+            }
             startBackendServer(41_004);
             assert.equal(pendingStartListenCalls, 2);
             assert.equal(listenedPort, 41_004);

@@ -10,6 +10,32 @@ const MAX_OUTPUT_CHARS = 100_000;
 let spawnBackupProcess = spawn;
 let refreshBackupCache = refreshCacheProducer;
 let backupRefreshTimeoutMs = 30_000;
+const BACKUP_ENV_ALLOWLIST = [
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "SHELL",
+    "TERM",
+    "TZ",
+] as const;
+
+function backupProcessEnv(): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = {};
+    for (const key of BACKUP_ENV_ALLOWLIST) {
+        if (process.env[key] !== undefined) {
+            env[key] = process.env[key];
+        }
+    }
+    if (process.env.NODE_ENV === "test") {
+        for (const key of ["FAKE_BACKUP_HOLD_UNTIL", "FAKE_BACKUP_SIGNAL"] as const) {
+            if (process.env[key] !== undefined) {
+                env[key] = process.env[key];
+            }
+        }
+    }
+    return env;
+}
 
 function getBackupShell(): string {
     return nonEmptyEnvFallback("MIRA_BACKUP_SHELL", "bash");
@@ -251,7 +277,7 @@ async function startBackupJob(type: BackupJob["type"], command: string) {
     try {
         child = spawnBackupProcess(getBackupShell(), ["-lc", command], {
             cwd: process.cwd(),
-            env: process.env,
+            env: backupProcessEnv(),
         });
     } catch (error) {
         clearActiveBackupJob(type, jobId);
@@ -318,6 +344,7 @@ export const __testing = {
     mapJob,
     getBackupShell,
     getDockerBin,
+    backupProcessEnv,
     shellQuote,
     clearJobsForTest(): void {
         backupJobs.clear();

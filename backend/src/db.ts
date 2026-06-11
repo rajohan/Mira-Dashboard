@@ -143,6 +143,9 @@ CREATE TABLE IF NOT EXISTS task_dependencies (
     FOREIGN KEY(depends_on_task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
 
+CREATE INDEX IF NOT EXISTS idx_task_dependencies_depends_on_task_id
+    ON task_dependencies(depends_on_task_id);
+
 CREATE TABLE IF NOT EXISTS notifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,

@@ -306,6 +306,44 @@ describe("backup routes", () => {
         }
     });
 
+    it("passes only approved environment values to backup shells", async () => {
+        let spawnedEnv: NodeJS.ProcessEnv | undefined;
+        backupTesting.clearJobsForTest();
+        backupTesting.setSpawnBackupProcessForTest(((...args: unknown[]) => {
+            spawnedEnv = (args[2] as { env?: NodeJS.ProcessEnv } | undefined)?.env;
+            const child = createFakeBackupChild();
+            queueMicrotask(() => {
+                child.emit("spawn");
+            });
+            return child as never;
+        }) as Parameters<typeof backupTesting.setSpawnBackupProcessForTest>[0]);
+        await withEnv(
+            {
+                API_KEY: "secret",
+                DATABASE_URL: "postgres://secret",
+                FAKE_BACKUP_SIGNAL: "1",
+                HOME: "/tmp/home",
+                NODE_ENV: "test",
+                PATH: "/tmp/bin",
+                TOKEN: "secret",
+            },
+            async () => {
+                try {
+                    await backupTesting.startBackupJob("kopia", "true");
+                    assert.equal(spawnedEnv?.PATH, "/tmp/bin");
+                    assert.equal(spawnedEnv?.HOME, "/tmp/home");
+                    assert.equal(spawnedEnv?.FAKE_BACKUP_SIGNAL, "1");
+                    assert.equal(spawnedEnv?.API_KEY, undefined);
+                    assert.equal(spawnedEnv?.DATABASE_URL, undefined);
+                    assert.equal(spawnedEnv?.TOKEN, undefined);
+                } finally {
+                    backupTesting.setSpawnBackupProcessForTest();
+                    backupTesting.clearJobsForTest();
+                }
+            }
+        );
+    });
+
     it("does not acknowledge backup jobs that fail to spawn", async () => {
         backupTesting.setSpawnBackupProcessForTest(() => {
             const child = createFakeBackupChild();
@@ -420,32 +458,34 @@ describe("backup routes", () => {
 
     it("returns the active job when a Kopia backup is already running", async () => {
         const releasePath = path.join(tempDir, "release-kopia");
-        await withEnv({ FAKE_BACKUP_HOLD_UNTIL: releasePath }, async () => {
-            const firstResp = await requestJson<{
-                ok: boolean;
-                job: { id: string; type: string; status: string };
-            }>(server, "/api/backups/kopia/run", { method: "POST" });
-            const secondResp = await requestJson<{
-                ok: boolean;
-                job: { id: string; type: string; status: string };
-            }>(server, "/api/backups/kopia/run", { method: "POST" });
+        await withEnv(
+            { FAKE_BACKUP_HOLD_UNTIL: releasePath, NODE_ENV: "test" },
+            async () => {
+                const firstResp = await requestJson<{
+                    ok: boolean;
+                    job: { id: string; type: string; status: string };
+                }>(server, "/api/backups/kopia/run", { method: "POST" });
+                const secondResp = await requestJson<{
+                    ok: boolean;
+                    job: { id: string; type: string; status: string };
+                }>(server, "/api/backups/kopia/run", { method: "POST" });
 
-            assert.equal(firstResp.status, 200);
-            assert.equal(firstResp.body.ok, true);
-            assert.equal(firstResp.body.job.status, "running");
-            assert.equal(secondResp.status, 200);
-            assert.equal(secondResp.body.ok, true);
-            assert.equal(secondResp.body.job.id, firstResp.body.job.id);
-            assert.equal(secondResp.body.job.status, "running");
+                assert.equal(firstResp.status, 200);
+                assert.equal(firstResp.body.ok, true);
+                assert.equal(firstResp.body.job.status, "running");
+                assert.equal(secondResp.status, 200);
+                assert.equal(secondResp.body.ok, true);
+                assert.equal(secondResp.body.job.id, firstResp.body.job.id);
+                assert.equal(secondResp.body.job.status, "running");
 
-            await writeFile(releasePath, "release", "utf8");
-            await waitForDone(server, "/api/backups/kopia");
-        });
+                await writeFile(releasePath, "release", "utf8");
+                await waitForDone(server, "/api/backups/kopia");
+            }
+        );
     });
 
     it("maps signaled backup exits to interrupted status code", async () => {
-        process.env.FAKE_BACKUP_SIGNAL = "1";
-        try {
+        await withEnv({ FAKE_BACKUP_SIGNAL: "1", NODE_ENV: "test" }, async () => {
             const started = await requestJson<{
                 ok: boolean;
                 job: { status: string; code: number | null };
@@ -460,9 +500,7 @@ describe("backup routes", () => {
             assert.equal(done.status, "done");
             assert.equal(done.code, 130);
             await waitForRefresh("backup.kopia.status", refreshedKeys);
-        } finally {
-            delete process.env.FAKE_BACKUP_SIGNAL;
-        }
+        });
     });
 
     it("does not acknowledge backup jobs when the configured shell is missing", async () => {

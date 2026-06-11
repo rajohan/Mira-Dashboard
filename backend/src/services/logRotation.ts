@@ -218,18 +218,21 @@ function validatePolicyTypes(policy: LogRotationPolicy | undefined, label: strin
             throw new TypeError(`${label}.${field} must be a boolean`);
         }
     }
-    for (const field of [
-        "maxSizeMb",
-        "keep",
-        "keepDays",
-        "archiveMinAgeMinutes",
-    ] as const) {
+    for (const field of ["maxSizeMb", "keepDays", "archiveMinAgeMinutes"] as const) {
         if (
             policy[field] !== undefined &&
             (typeof policy[field] !== "number" || policy[field] < 0)
         ) {
             throw new TypeError(`${label}.${field} must be a non-negative number`);
         }
+    }
+    if (
+        policy.keep !== undefined &&
+        (typeof policy.keep !== "number" ||
+            policy.keep < 0 ||
+            !Number.isInteger(policy.keep))
+    ) {
+        throw new TypeError(`${label}.keep must be a non-negative integer`);
     }
 }
 
@@ -1078,7 +1081,18 @@ async function reclaimStaleLogRotationLock(
             if (!(await removeStaleReclaimDir(reclaimDir))) {
                 return null;
             }
-            await fs.mkdir(reclaimDir);
+            try {
+                await fs.mkdir(reclaimDir);
+            } catch (reclaimError) {
+                if (
+                    reclaimError instanceof Error &&
+                    "code" in reclaimError &&
+                    (reclaimError as NodeJS.ErrnoException).code === "EEXIST"
+                ) {
+                    return null;
+                }
+                throw reclaimError;
+            }
         } else {
             throw error;
         }
@@ -1434,17 +1448,8 @@ export async function runLogRotationService(
 export async function runElevatedLogRotationService(options: {
     dryRun: boolean;
 }): Promise<ElevatedLogRotationResult> {
-    if (options.dryRun) {
-        return {
-            result: (await runLogRotationService({ dryRun: true })) as unknown as Record<
-                string,
-                unknown
-            >,
-            stderr: "",
-        };
-    }
     const modulePath = fileURLToPath(import.meta.url);
-    const args = buildElevatedLogRotationCliArgs(modulePath);
+    const args = buildElevatedLogRotationCliArgs(modulePath, options);
     let stderr: string;
     let stdout: string;
     try {
@@ -1505,7 +1510,10 @@ export async function runElevatedLogRotationService(options: {
     }
 }
 
-function buildElevatedLogRotationCliArgs(modulePath: string): string[] {
+function buildElevatedLogRotationCliArgs(
+    modulePath: string,
+    options: { dryRun?: boolean } = {}
+): string[] {
     const importLogRotationCli = [
         `import { runLogRotationCli } from ${JSON.stringify(pathToFileURL(modulePath).href)};`,
         "await runLogRotationCli();",
@@ -1521,6 +1529,7 @@ function buildElevatedLogRotationCliArgs(modulePath: string): string[] {
         importLogRotationCli,
         "--",
         "--json",
+        ...(options.dryRun ? ["--dry-run"] : []),
     ];
 }
 
