@@ -385,6 +385,29 @@ describe("Tasks page", () => {
         expect(screen.getByTestId("column-done")).toHaveTextContent("done (0)");
     });
 
+    it("shows and clears the empty filtered task board state", async () => {
+        const user = userEvent.setup();
+
+        render(<Tasks />);
+
+        await user.type(screen.getByPlaceholderText("Search tasks..."), "missing");
+
+        expect(
+            screen.getByText("No tasks match the current filters.")
+        ).toBeInTheDocument();
+        expect(screen.getByTestId("column-todo")).toHaveTextContent("todo (0)");
+        expect(screen.getByTestId("column-done")).toHaveTextContent("done (0)");
+
+        await user.click(screen.getByRole("button", { name: "Clear filters" }));
+
+        expect(screen.getByPlaceholderText("Search tasks...")).toHaveValue("");
+        expect(
+            screen.queryByText("No tasks match the current filters.")
+        ).not.toBeInTheDocument();
+        expect(screen.getByTestId("column-todo")).toHaveTextContent("todo (1)");
+        expect(screen.getByTestId("column-done")).toHaveTextContent("done (1)");
+    });
+
     it("filters by automation metadata and assignee name", async () => {
         const user = userEvent.setup();
         mockTaskHooks({
