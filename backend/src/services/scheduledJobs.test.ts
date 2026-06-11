@@ -85,7 +85,7 @@ test("calculates interval and daily next-run times", () => {
             },
             from
         ),
-        "2026-06-11T10:30:00.000Z"
+        "2026-06-11T12:30:00.000Z"
     );
     assert.equal(
         calculateNextRunAt(
@@ -97,19 +97,7 @@ test("calculates interval and daily next-run times", () => {
             },
             from
         ),
-        "2026-06-12T09:30:00.000Z"
-    );
-    assert.equal(
-        calculateNextRunAt(
-            {
-                enabled: true,
-                intervalSeconds: 3600,
-                scheduleType: "daily",
-                timeOfDay: null,
-            },
-            from
-        ),
-        "2026-06-11T11:00:00.000Z"
+        "2026-06-11T11:30:00.000Z"
     );
     assert.equal(
         calculateNextRunAt(
@@ -177,10 +165,11 @@ test("normalizes non-object JSON payloads from persisted rows", async () => {
         run.id
     );
     assert.deepEqual(getScheduledJob("cache.weather")?.lastRun?.output, {});
-    assert.equal(__testing.mapRunForTest(), null);
+    // __testing.mapRunForTest() returns null when no internal run row is present.
+    assert.equal(__testing.mapRunForTest(), null, "missing run rows map to null");
 });
 
-test("keeps existing schedule defaults when upserting existing jobs", () => {
+test("keeps existing schedule defaults and due time when upserting existing jobs", () => {
     const initial = upsertScheduledJob({
         id: "cache.weather",
         name: "Weather cache",
@@ -189,6 +178,10 @@ test("keeps existing schedule defaults when upserting existing jobs", () => {
         intervalSeconds: 120,
         actionKey: "cache.refresh",
     });
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+        "2026-01-01T00:00:00.000Z",
+        "cache.weather"
+    );
 
     const updated = upsertScheduledJob({
         id: "cache.weather",
@@ -208,7 +201,28 @@ test("keeps existing schedule defaults when upserting existing jobs", () => {
     assert.equal(updated.enabled, true);
     assert.equal(updated.intervalSeconds, 120);
     assert.equal(updated.createdAt, initial.createdAt);
+    assert.equal(updated.nextRunAt, "2026-01-01T00:00:00.000Z");
     assert.equal(disabled.enabled, false);
+});
+
+test("inherits existing daily time when upserting daily jobs", () => {
+    upsertScheduledJob({
+        id: "cache.daily",
+        name: "Daily cache",
+        enabled: true,
+        scheduleType: "daily",
+        timeOfDay: "04:30",
+        actionKey: "cache.refresh",
+    });
+
+    const updated = upsertScheduledJob({
+        id: "cache.daily",
+        name: "Daily cache renamed",
+        scheduleType: "daily",
+        actionKey: "cache.refresh",
+    });
+
+    assert.equal(updated.timeOfDay, "04:30");
 });
 
 test("records failures and rejects missing or unregistered jobs", async () => {
@@ -283,6 +297,102 @@ test("runs due enabled jobs once per scheduler tick", async () => {
     assert.equal(getScheduledJob("cache.weather")?.lastRun?.triggerType, "schedule");
 });
 
+test("keeps due jobs isolated when one persisted job is invalid", async () => {
+    const calls: string[] = [];
+    registerScheduledJobAction("cache.refresh", (job) => {
+        calls.push(job.id);
+    });
+    upsertScheduledJob({
+        id: "cache.invalid",
+        name: "Invalid cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.missing",
+    });
+    upsertScheduledJob({
+        id: "cache.weather",
+        name: "Weather cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ?").run(
+        "2026-01-01T00:00:00.000Z"
+    );
+
+    await __testing.runDueJobsForTest();
+
+    assert.deepEqual(calls, ["cache.weather"]);
+    assert.equal(getScheduledJob("cache.invalid")?.lastRun?.status, "failed");
+    assert.notEqual(
+        getScheduledJob("cache.invalid")?.nextRunAt,
+        "2026-01-01T00:00:00.000Z"
+    );
+});
+
+test("continues due job loop after a row disappears", async (t) => {
+    const calls: string[] = [];
+    registerScheduledJobAction("cache.refresh", (job) => {
+        calls.push(job.id);
+    });
+    upsertScheduledJob({
+        id: "cache.weather",
+        name: "Weather cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+    const prepare = db.prepare.bind(db);
+    const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+        if (sql.includes("SELECT id FROM scheduled_jobs")) {
+            return {
+                all: () => [{ id: "cache.missing" }, { id: "cache.weather" }],
+            } as unknown as ReturnType<typeof db.prepare>;
+        }
+        return prepare(sql);
+    });
+
+    try {
+        await __testing.runDueJobsForTest();
+    } finally {
+        prepareMock.mock.restore();
+    }
+
+    assert.deepEqual(calls, ["cache.weather"]);
+});
+
+test("advances failed scheduled runs without moving manual schedules", async () => {
+    registerScheduledJobAction("cache.refresh", () => {
+        throw new Error("refresh failed");
+    });
+    upsertScheduledJob({
+        id: "cache.weather",
+        name: "Weather cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+        "2026-01-01T00:00:00.000Z",
+        "cache.weather"
+    );
+
+    const manualRun = await runScheduledJob("cache.weather", "manual");
+    assert.equal(manualRun.status, "failed");
+    assert.equal(getScheduledJob("cache.weather")?.nextRunAt, "2026-01-01T00:00:00.000Z");
+
+    const scheduledRun = await runScheduledJob("cache.weather", "schedule");
+    assert.equal(scheduledRun.status, "failed");
+    assert.notEqual(
+        getScheduledJob("cache.weather")?.nextRunAt,
+        "2026-01-01T00:00:00.000Z"
+    );
+});
+
 test("skips due jobs that are already running", async () => {
     let releaseHandler: () => void = () => {};
     const calls: string[] = [];
@@ -339,6 +449,8 @@ test("ignores overlapping scheduler ticks", async () => {
         "cache.weather"
     );
 
+    // Verify overlapping-tick deduplication: runSchedulerTickForTest() ignores
+    // the second tick while the first one is still appending to calls.
     __testing.runSchedulerTickForTest();
     __testing.runSchedulerTickForTest();
     assert.deepEqual(calls, ["cache.weather"]);

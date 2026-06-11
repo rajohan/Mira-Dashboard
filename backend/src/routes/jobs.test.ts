@@ -67,6 +67,23 @@ async function requestJson<T>(
     };
 }
 
+async function requestRaw(
+    server: TestServer,
+    pathName: string,
+    options: { method: string; body: string }
+): Promise<{ status: number; body: unknown }> {
+    const response = await fetch(`${server.baseUrl}${pathName}`, {
+        method: options.method,
+        headers: { "Content-Type": "application/json" },
+        body: options.body,
+    });
+
+    return {
+        status: response.status,
+        body: (await response.json()) as unknown,
+    };
+}
+
 test.beforeEach(() => {
     db.exec("DELETE FROM scheduled_job_runs; DELETE FROM scheduled_jobs;");
     scheduledJobsTesting.clearActionHandlers();
@@ -185,6 +202,55 @@ test("returns validation and missing job errors", async () => {
         assert.equal(missingRun.status, 404);
     } finally {
         await server.close();
+    }
+});
+
+test("maps malformed patch JSON when mounted behind global parser skip", async () => {
+    const app = express();
+    const globalJsonParser = express.json({ limit: "2097152b" });
+    app.use((request, response, next) => {
+        if (request.method === "PATCH" && /^\/api\/jobs\/[^/]+$/u.test(request.path)) {
+            next();
+            return;
+        }
+        globalJsonParser(request, response, next);
+    });
+    jobsRoutes(app);
+    const server = http.createServer(app);
+
+    await new Promise<void>((resolve, reject) => {
+        const onListening = () => {
+            server.off("error", onError);
+            resolve();
+        };
+        const onError = (error: Error) => {
+            server.off("listening", onListening);
+            reject(error);
+        };
+        server.once("listening", onListening);
+        server.once("error", onError);
+        server.listen(0);
+    });
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const testServer = {
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        close: () =>
+            new Promise<void>((resolve, reject) =>
+                server.close((error) => (error ? reject(error) : resolve()))
+            ),
+    };
+
+    try {
+        const result = await requestRaw(testServer, "/api/jobs/cache.weather", {
+            method: "PATCH",
+            body: "{",
+        });
+
+        assert.equal(result.status, 400);
+        assert.deepEqual(result.body, { error: "Invalid scheduled job patch" });
+    } finally {
+        await testServer.close();
     }
 });
 

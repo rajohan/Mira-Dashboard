@@ -155,10 +155,19 @@ function assertValidSchedule(
 
 function nextDailyRun(now: Date, timeOfDay: string): Date {
     const [hour = "0", minute = "0"] = timeOfDay.split(":", 2);
-    const next = new Date(now);
-    next.setHours(Number(hour), Number(minute), 0, 0);
+    const next = new Date(
+        Date.UTC(
+            now.getUTCFullYear(),
+            now.getUTCMonth(),
+            now.getUTCDate(),
+            Number(hour),
+            Number(minute),
+            0,
+            0
+        )
+    );
     if (next.getTime() <= now.getTime()) {
-        next.setDate(next.getDate() + 1);
+        next.setUTCDate(next.getUTCDate() + 1);
     }
     return next;
 }
@@ -254,14 +263,22 @@ export function upsertScheduledJob(definition: ScheduledJobDefinition): Schedule
     const scheduleType = definition.scheduleType;
     const intervalSeconds =
         definition.intervalSeconds ?? existing?.intervalSeconds ?? 3600;
-    const timeOfDay = definition.timeOfDay ?? null;
+    const timeOfDay = definition.timeOfDay ?? existing?.timeOfDay ?? null;
     assertValidSchedule(scheduleType, intervalSeconds, timeOfDay);
 
     const timestamp = nowIso();
-    const nextRunAt = calculateNextRunAt(
-        { enabled, intervalSeconds, scheduleType, timeOfDay },
-        new Date(timestamp)
-    );
+    const scheduleChanged =
+        !existing ||
+        existing.enabled !== enabled ||
+        existing.scheduleType !== scheduleType ||
+        existing.intervalSeconds !== intervalSeconds ||
+        existing.timeOfDay !== timeOfDay;
+    const nextRunAt = scheduleChanged
+        ? calculateNextRunAt(
+              { enabled, intervalSeconds, scheduleType, timeOfDay },
+              new Date(timestamp)
+          )
+        : existing.nextRunAt;
     db.prepare(
         `INSERT INTO scheduled_jobs (
             id, name, description, enabled, schedule_type, interval_seconds,
@@ -380,6 +397,13 @@ function finishRun(
     return { ...run, status, finishedAt, message, output };
 }
 
+function advanceScheduledRun(job: ScheduledJob): void {
+    const nextRunAt = calculateNextRunAt(job);
+    db.prepare(
+        "UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE id = ?"
+    ).run(nextRunAt, nowIso(), job.id);
+}
+
 export async function runScheduledJob(
     id: string,
     triggerType: ScheduledJobTriggerType = "manual"
@@ -400,7 +424,7 @@ export async function runScheduledJob(
         throw error;
     }
     const handler = actionHandlers.get(job.actionKey);
-    if (!handler) {
+    if (!handler && triggerType === "manual") {
         throw new ScheduledJobValidationError(
             `No scheduled job action registered for ${job.actionKey}`
         );
@@ -409,15 +433,19 @@ export async function runScheduledJob(
     const run = createRun(id, triggerType);
     runningJobs.add(id);
     try {
+        if (!handler) {
+            throw new ScheduledJobValidationError(
+                `No scheduled job action registered for ${job.actionKey}`
+            );
+        }
         const output = (await handler(job)) ?? {};
-        const nextRunAt = calculateNextRunAt(job);
-        db.prepare(
-            "UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE id = ?"
-        ).run(nextRunAt, nowIso(), id);
         return finishRun(run, "success", null, output);
     } catch (error) {
         return finishRun(run, "failed", errorMessage(error, "Scheduled job failed"), {});
     } finally {
+        if (triggerType === "schedule") {
+            advanceScheduledRun(job);
+        }
         runningJobs.delete(id);
     }
 }
@@ -433,7 +461,11 @@ async function runDueJobs(): Promise<void> {
         .all(dueAt) as Array<{ id: string }>;
     for (const row of rows) {
         if (!runningJobs.has(row.id)) {
-            await runScheduledJob(row.id, "schedule");
+            try {
+                await runScheduledJob(row.id, "schedule");
+            } catch {
+                // Keep later due jobs running even if a persisted row is stale.
+            }
         }
     }
 }

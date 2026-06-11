@@ -36,6 +36,7 @@ let resolveBackendCommit: (typeof import("./server.js"))["resolveBackendCommit"]
 let resolveListenPort: (typeof import("./server.js"))["resolveListenPort"];
 let server: (typeof import("./server.js"))["server"];
 let sessionsHandler: (typeof import("./server.js"))["sessionsHandler"];
+let shouldSkipGlobalJsonParser: (typeof import("./server.js"))["shouldSkipGlobalJsonParser"];
 let handleServerListening: (typeof import("./serverStart.js"))["handleServerListening"];
 let isDirectEntrypoint: (typeof import("./serverStart.js"))["isDirectEntrypoint"];
 let serverStartTesting: (typeof import("./serverStart.js"))["__testing"];
@@ -237,6 +238,7 @@ describe("server bootstrap", () => {
                 resolveListenPort,
                 server,
                 sessionsHandler,
+                shouldSkipGlobalJsonParser,
             } = await import("./server.js"));
             ({
                 handleServerListening,
@@ -311,6 +313,35 @@ describe("server bootstrap", () => {
         assert.equal(resolveListenPort("dashboard.sock"), 3100);
         assert.equal(resolveListenPort("1234abc"), 3100);
         assert.equal(resolveListenPort("65536"), 3100);
+        assert.equal(
+            shouldSkipGlobalJsonParser({
+                method: "PATCH",
+                path: "/api/jobs/cache.weather",
+            }),
+            true
+        );
+        assert.equal(
+            shouldSkipGlobalJsonParser({
+                method: "PATCH",
+                path: "/api/jobs/cache.weather/run",
+            }),
+            false
+        );
+        assert.equal(
+            shouldSkipGlobalJsonParser({
+                method: "PUT",
+                path: "/api/config-files/settings.json",
+            }),
+            true
+        );
+        assert.equal(
+            shouldSkipGlobalJsonParser({ method: "PUT", path: "/api/files/report.md" }),
+            true
+        );
+        assert.equal(
+            shouldSkipGlobalJsonParser({ method: "POST", path: "/api/jobs" }),
+            false
+        );
         const configuredPort = process.env.PORT;
         delete process.env.PORT;
         try {
