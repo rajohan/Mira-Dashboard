@@ -124,13 +124,19 @@ test("lists, fetches, updates, and runs scheduled jobs", async () => {
 
         const update = await requestJson<{
             ok: boolean;
-            job: { enabled: boolean; scheduleType: string; timeOfDay: string };
+            job: {
+                cronExpression: string;
+                enabled: boolean;
+                scheduleType: string;
+                timeOfDay: string;
+            };
         }>(server, "/api/jobs/cache.weather", {
             method: "PATCH",
             body: {
                 patch: {
+                    cronExpression: "0 4 * * *",
                     enabled: false,
-                    scheduleType: "daily",
+                    scheduleType: "cron",
                     timeOfDay: "08:15",
                     intervalSeconds: 3600,
                 },
@@ -139,8 +145,8 @@ test("lists, fetches, updates, and runs scheduled jobs", async () => {
         assert.equal(update.status, 200);
         assert.equal(update.body.ok, true);
         assert.equal(update.body.job.enabled, false);
-        assert.equal(update.body.job.scheduleType, "daily");
-        assert.equal(update.body.job.timeOfDay, "08:15");
+        assert.equal(update.body.job.scheduleType, "cron");
+        assert.equal(update.body.job.cronExpression, "0 4 * * *");
 
         const run = await requestJson<{ ok: boolean; run: { status: string } }>(
             server,
@@ -179,6 +185,14 @@ test("returns validation and missing job errors", async () => {
             method: "PATCH",
             body: { patch: { intervalSeconds: "fast" } },
         });
+        const invalidCronExpressionType = await requestJson(
+            server,
+            "/api/jobs/cache.weather",
+            {
+                method: "PATCH",
+                body: { patch: { cronExpression: 4 } },
+            }
+        );
         const partialUpdate = await requestJson<{ ok: boolean }>(
             server,
             "/api/jobs/cache.weather",
@@ -197,6 +211,7 @@ test("returns validation and missing job errors", async () => {
         assert.equal(invalidField.status, 400);
         assert.equal(invalidSchedule.status, 400);
         assert.equal(invalidIntervalType.status, 400);
+        assert.equal(invalidCronExpressionType.status, 400);
         assert.equal(partialUpdate.status, 200);
         assert.equal(partialUpdate.body.ok, true);
         assert.equal(missingRun.status, 404);
@@ -336,4 +351,8 @@ test("covers route helper edge cases", () => {
         "scheduleType"
     );
     assert.equal(jobsRouteTesting.invalidPatchField({ timeOfDay: 815 }), "timeOfDay");
+    assert.equal(
+        jobsRouteTesting.invalidPatchField({ cronExpression: 4 }),
+        "cronExpression"
+    );
 });

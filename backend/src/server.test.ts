@@ -12,7 +12,11 @@ import { fileURLToPath } from "node:url";
 
 import { WebSocket } from "ws";
 
-import { db, ensureTaskAutomationColumn } from "./db.js";
+import {
+    db,
+    ensureScheduledJobCronExpressionColumn,
+    ensureTaskAutomationColumn,
+} from "./db.js";
 import gateway from "./gateway.js";
 import { stopOpenClawNotificationMonitor } from "./services/openclawNotifications.js";
 import { stopQuotaNotificationMonitor } from "./services/quotaNotifications.js";
@@ -323,6 +327,13 @@ describe("server bootstrap", () => {
         assert.equal(
             shouldSkipGlobalJsonParser({
                 method: "PATCH",
+                path: "/api/jobs/cache.weather/",
+            }),
+            true
+        );
+        assert.equal(
+            shouldSkipGlobalJsonParser({
+                method: "PATCH",
                 path: "/api/jobs/cache.weather/run",
             }),
             false
@@ -583,6 +594,59 @@ describe("server bootstrap", () => {
                 all: () => [{ name: "id" }],
             }),
         });
+
+        const scheduledJobMigrationSql: string[] = [];
+        await ensureScheduledJobCronExpressionColumn({
+            exec: (sql) => scheduledJobMigrationSql.push(sql),
+            prepare: () => ({
+                all: () => [{ name: "id" }],
+            }),
+        });
+        assert.deepEqual(scheduledJobMigrationSql, [
+            "ALTER TABLE scheduled_jobs ADD COLUMN cron_expression TEXT",
+        ]);
+
+        scheduledJobMigrationSql.length = 0;
+        await ensureScheduledJobCronExpressionColumn({
+            exec: (sql) => scheduledJobMigrationSql.push(sql),
+            prepare: () => ({
+                all: () => [{ name: "cron_expression" }],
+            }),
+        });
+        assert.deepEqual(scheduledJobMigrationSql, []);
+
+        await ensureScheduledJobCronExpressionColumn({
+            exec: () => {
+                throw new Error("duplicate column name: cron_expression");
+            },
+            prepare: () => ({
+                all: () => [{ name: "id" }],
+            }),
+        });
+
+        await assert.rejects(
+            ensureScheduledJobCronExpressionColumn({
+                exec: () => {
+                    throw new Error("migration failed");
+                },
+                prepare: () => ({
+                    all: () => [{ name: "id" }],
+                }),
+            }),
+            /migration failed/u
+        );
+
+        await assert.rejects(
+            ensureScheduledJobCronExpressionColumn({
+                exec: () => {},
+                prepare: () => ({
+                    all: () => {
+                        throw new Error("schema unavailable");
+                    },
+                }),
+            }),
+            /schema unavailable/u
+        );
 
         assert.equal(
             resolveBackendCommit("/missing", () => {

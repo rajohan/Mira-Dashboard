@@ -22,16 +22,29 @@ interface MigrationDatabase {
 
 const TASK_AUTOMATION_COLUMN_SQL =
     "ALTER TABLE tasks ADD COLUMN automation_json TEXT NOT NULL DEFAULT '{}'";
+const SCHEDULED_JOBS_CRON_EXPRESSION_COLUMN_SQL =
+    "ALTER TABLE scheduled_jobs ADD COLUMN cron_expression TEXT";
 
 function taskAutomationColumnExists(targetDb: MigrationDatabase): boolean {
     const taskColumns = targetDb.prepare("PRAGMA table_info(tasks)").all();
     return taskColumns.some((column) => column.name === "automation_json");
 }
 
-function isDuplicateColumnError(error: unknown): boolean {
+function columnExists(
+    targetDb: MigrationDatabase,
+    table: string,
+    columnName: string
+): boolean {
+    const columns = targetDb.prepare(`PRAGMA table_info(${table})`).all();
+    return columns.some((column) => column.name === columnName);
+}
+
+function isDuplicateColumnError(error: unknown, columnName: string): boolean {
     return (
         error instanceof Error &&
-        /duplicate column name:\s*automation_json/u.test(error.message)
+        new RegExp(String.raw`duplicate column name:\s*${columnName}`, "u").test(
+            error.message
+        )
     );
 }
 
@@ -181,6 +194,7 @@ CREATE TABLE IF NOT EXISTS scheduled_jobs (
     schedule_type TEXT NOT NULL,
     interval_seconds INTEGER NOT NULL DEFAULT 3600,
     time_of_day TEXT,
+    cron_expression TEXT,
     action_key TEXT NOT NULL,
     action_payload_json TEXT NOT NULL DEFAULT '{}',
     next_run_at TEXT,
@@ -233,7 +247,7 @@ export async function ensureTaskAutomationColumn(
             return;
         } catch (error) {
             lastError = error;
-            if (isDuplicateColumnError(error)) {
+            if (isDuplicateColumnError(error, "automation_json")) {
                 return;
             }
 
@@ -265,3 +279,28 @@ export async function ensureTaskAutomationColumn(
 }
 
 await ensureTaskAutomationColumn(db);
+
+/** Ensures older scheduled job databases have the cron expression column. */
+export async function ensureScheduledJobCronExpressionColumn(
+    targetDb: MigrationDatabase
+): Promise<void> {
+    try {
+        if (columnExists(targetDb, "scheduled_jobs", "cron_expression")) {
+            return;
+        }
+    } catch (error) {
+        if (!isTransientSqliteLock(error)) {
+            throw error;
+        }
+    }
+
+    try {
+        targetDb.exec(SCHEDULED_JOBS_CRON_EXPRESSION_COLUMN_SQL);
+    } catch (error) {
+        if (!isDuplicateColumnError(error, "cron_expression")) {
+            throw error;
+        }
+    }
+}
+
+await ensureScheduledJobCronExpressionColumn(db);

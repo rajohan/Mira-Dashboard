@@ -50,7 +50,7 @@ export function shouldSkipGlobalJsonParser(
     request: Pick<express.Request, "method" | "path">
 ): boolean {
     return (
-        (request.method === "PATCH" && /^\/api\/jobs\/[^/]+$/u.test(request.path)) ||
+        (request.method === "PATCH" && /^\/api\/jobs\/[^/]+\/?$/u.test(request.path)) ||
         (request.method === "PUT" && request.path.startsWith("/api/config-files/")) ||
         (request.method === "PUT" && request.path.startsWith("/api/files/"))
     );

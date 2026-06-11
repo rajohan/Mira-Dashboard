@@ -11,8 +11,9 @@ import {
 } from "../services/scheduledJobs.js";
 
 const JOBS_JSON_LIMIT = "2097152b";
-const scheduleTypes = new Set<ScheduledJobScheduleType>(["daily", "interval"]);
+const scheduleTypes = new Set<ScheduledJobScheduleType>(["cron", "daily", "interval"]);
 const allowedPatchFields = new Set([
+    "cronExpression",
     "enabled",
     "intervalSeconds",
     "scheduleType",
@@ -82,6 +83,13 @@ function invalidPatchField(patch: Record<string, unknown>): string | null {
         return "scheduleType";
     }
     if (
+        patch.cronExpression !== undefined &&
+        patch.cronExpression !== null &&
+        typeof patch.cronExpression !== "string"
+    ) {
+        return "cronExpression";
+    }
+    if (
         patch.timeOfDay !== undefined &&
         patch.timeOfDay !== null &&
         typeof patch.timeOfDay !== "string"
@@ -131,6 +139,11 @@ export default function jobsRoutes(app: express.Application): void {
                 const job = updateScheduledJob(String(req.params.id), {
                     enabled:
                         typeof patch.enabled === "boolean" ? patch.enabled : undefined,
+                    cronExpression:
+                        typeof patch.cronExpression === "string" ||
+                        patch.cronExpression === null
+                            ? patch.cronExpression
+                            : undefined,
                     intervalSeconds:
                         typeof patch.intervalSeconds === "number"
                             ? patch.intervalSeconds

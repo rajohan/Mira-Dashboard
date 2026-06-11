@@ -9,7 +9,7 @@ const actionHandlers = new Map<string, ScheduledJobActionHandler>();
 let scheduler: NodeJS.Timeout | null = null;
 let schedulerTickRunning = false;
 
-export type ScheduledJobScheduleType = "interval" | "daily";
+export type ScheduledJobScheduleType = "interval" | "daily" | "cron";
 export type ScheduledJobRunStatus = "running" | "success" | "failed";
 export type ScheduledJobTriggerType = "manual" | "schedule";
 export type ScheduledJobActionHandler = (
@@ -24,6 +24,7 @@ export interface ScheduledJob {
     scheduleType: ScheduledJobScheduleType;
     intervalSeconds: number;
     timeOfDay: string | null;
+    cronExpression: string | null;
     actionKey: string;
     actionPayload: Record<string, unknown>;
     nextRunAt: string | null;
@@ -52,6 +53,7 @@ export interface ScheduledJobDefinition {
     scheduleType: ScheduledJobScheduleType;
     intervalSeconds?: number;
     timeOfDay?: string | null;
+    cronExpression?: string | null;
     actionKey: string;
     actionPayload?: Record<string, unknown>;
 }
@@ -61,6 +63,7 @@ export interface ScheduledJobPatch {
     scheduleType?: ScheduledJobScheduleType;
     intervalSeconds?: number;
     timeOfDay?: string | null;
+    cronExpression?: string | null;
 }
 
 interface ScheduledJobRow {
@@ -71,6 +74,7 @@ interface ScheduledJobRow {
     schedule_type: string;
     interval_seconds: number;
     time_of_day: string | null;
+    cron_expression: string | null;
     action_key: string;
     action_payload_json: string;
     next_run_at: string | null;
@@ -134,7 +138,8 @@ function assertValidActionKey(actionKey: string): void {
 function assertValidSchedule(
     scheduleType: ScheduledJobScheduleType,
     intervalSeconds: number,
-    timeOfDay: string | null
+    timeOfDay: string | null,
+    cronExpression: string | null
 ): void {
     if (scheduleType === "interval") {
         if (
@@ -148,9 +153,113 @@ function assertValidSchedule(
         return;
     }
 
-    if (!timeOfDay || !/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(timeOfDay)) {
-        throw new ScheduledJobValidationError("Daily jobs require HH:MM timeOfDay");
+    if (scheduleType === "daily") {
+        if (!timeOfDay || !/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(timeOfDay)) {
+            throw new ScheduledJobValidationError("Daily jobs require HH:MM timeOfDay");
+        }
+        return;
     }
+
+    if (!cronExpression || !parseCronExpression(cronExpression)) {
+        throw new ScheduledJobValidationError("Cron jobs require a valid cronExpression");
+    }
+}
+
+function parseCronField(
+    field: string,
+    minimum: number,
+    maximum: number
+): Set<number> | null {
+    const values = new Set<number>();
+    for (const part of field.split(",")) {
+        if (!part) {
+            return null;
+        }
+        const stepPieces = part.split("/");
+        if (stepPieces.length > 2) {
+            return null;
+        }
+        const [rangePart = "", stepPart] = stepPieces;
+        const step = stepPart === undefined ? 1 : Number(stepPart);
+        if (!Number.isInteger(step) || step < 1) {
+            return null;
+        }
+        const rangePieces = rangePart.split("-");
+        if (rangePieces.length > 2) {
+            return null;
+        }
+        const [start, end] =
+            rangePart === "*"
+                ? [minimum, maximum]
+                : rangePart.includes("-")
+                  ? rangePieces.map(Number)
+                  : [Number(rangePart), Number(rangePart)];
+        if (
+            !Number.isInteger(start) ||
+            !Number.isInteger(end) ||
+            start < minimum ||
+            end > maximum ||
+            start > end
+        ) {
+            return null;
+        }
+        for (let value = start; value <= end; value += step) {
+            values.add(value);
+        }
+    }
+    return values;
+}
+
+function parseCronExpression(expression: string): {
+    minutes: Set<number>;
+    hours: Set<number>;
+    daysOfMonth: Set<number>;
+    months: Set<number>;
+    daysOfWeek: Set<number>;
+} | null {
+    const fields = expression.trim().split(/\s+/u);
+    if (fields.length !== 5) {
+        return null;
+    }
+    const [minute, hour, dayOfMonth, month, dayOfWeek] = fields;
+    const minutes = parseCronField(minute, 0, 59);
+    const hours = parseCronField(hour, 0, 23);
+    const daysOfMonth = parseCronField(dayOfMonth, 1, 31);
+    const months = parseCronField(month, 1, 12);
+    const daysOfWeek = parseCronField(dayOfWeek, 0, 7);
+    if (!minutes || !hours || !daysOfMonth || !months || !daysOfWeek) {
+        return null;
+    }
+    if (daysOfWeek.has(7)) {
+        daysOfWeek.add(0);
+        daysOfWeek.delete(7);
+    }
+    return { minutes, hours, daysOfMonth, months, daysOfWeek };
+}
+
+function nextCronRun(now: Date, expression: string): Date {
+    const cron = parseCronExpression(expression);
+    if (!cron) {
+        throw new ScheduledJobValidationError("Cron jobs require a valid cronExpression");
+    }
+    const next = new Date(now);
+    next.setUTCSeconds(0, 0);
+    next.setUTCMinutes(next.getUTCMinutes() + 1);
+    const maximumAttempts = 5 * 366 * 24 * 60;
+    for (let index = 0; index < maximumAttempts; index += 1) {
+        const dayOfWeek = next.getUTCDay();
+        if (
+            cron.minutes.has(next.getUTCMinutes()) &&
+            cron.hours.has(next.getUTCHours()) &&
+            cron.daysOfMonth.has(next.getUTCDate()) &&
+            cron.months.has(next.getUTCMonth() + 1) &&
+            cron.daysOfWeek.has(dayOfWeek)
+        ) {
+            return next;
+        }
+        next.setUTCMinutes(next.getUTCMinutes() + 1);
+    }
+    throw new ScheduledJobValidationError("Cron expression has no upcoming run");
 }
 
 function nextDailyRun(now: Date, timeOfDay: string): Date {
@@ -173,7 +282,11 @@ function nextDailyRun(now: Date, timeOfDay: string): Date {
 }
 
 export function calculateNextRunAt(
-    job: Pick<ScheduledJob, "enabled" | "intervalSeconds" | "scheduleType" | "timeOfDay">,
+    job: Pick<
+        ScheduledJob,
+        "enabled" | "intervalSeconds" | "scheduleType" | "timeOfDay"
+    > &
+        Pick<Partial<ScheduledJob>, "cronExpression">,
     from = new Date()
 ): string | null {
     if (!job.enabled) {
@@ -181,6 +294,9 @@ export function calculateNextRunAt(
     }
     if (job.scheduleType === "daily" && job.timeOfDay) {
         return nextDailyRun(from, job.timeOfDay).toISOString();
+    }
+    if (job.scheduleType === "cron" && job.cronExpression) {
+        return nextCronRun(from, job.cronExpression).toISOString();
     }
     return new Date(from.getTime() + job.intervalSeconds * 1000).toISOString();
 }
@@ -208,9 +324,19 @@ function latestRunsByJobId(jobIds: string[]): Map<string, ScheduledJobRun> {
     const placeholders = jobIds.map(() => "?").join(",");
     const rows = db
         .prepare(
-            `SELECT * FROM scheduled_job_runs
-             WHERE job_id IN (${placeholders})
-             ORDER BY job_id, started_at DESC, id DESC`
+            `SELECT run.*
+             FROM scheduled_job_runs run
+             WHERE run.job_id IN (${placeholders})
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM scheduled_job_runs newer
+                   WHERE newer.job_id = run.job_id
+                     AND (
+                         newer.started_at > run.started_at
+                         OR (newer.started_at = run.started_at AND newer.id > run.id)
+                     )
+               )
+             ORDER BY run.job_id, run.started_at DESC, run.id DESC`
         )
         .all(...jobIds) as unknown as ScheduledJobRunRow[];
     const runs = new Map<string, ScheduledJobRun>();
@@ -237,6 +363,7 @@ function mapJob(
         scheduleType: row.schedule_type as ScheduledJobScheduleType,
         intervalSeconds: row.interval_seconds,
         timeOfDay: row.time_of_day,
+        cronExpression: row.cron_expression,
         actionKey: row.action_key,
         actionPayload: parseJsonObject(row.action_payload_json),
         nextRunAt: row.next_run_at,
@@ -264,7 +391,8 @@ export function upsertScheduledJob(definition: ScheduledJobDefinition): Schedule
     const intervalSeconds =
         definition.intervalSeconds ?? existing?.intervalSeconds ?? 3600;
     const timeOfDay = definition.timeOfDay ?? existing?.timeOfDay ?? null;
-    assertValidSchedule(scheduleType, intervalSeconds, timeOfDay);
+    const cronExpression = definition.cronExpression ?? existing?.cronExpression ?? null;
+    assertValidSchedule(scheduleType, intervalSeconds, timeOfDay, cronExpression);
 
     const timestamp = nowIso();
     const scheduleChanged =
@@ -272,18 +400,19 @@ export function upsertScheduledJob(definition: ScheduledJobDefinition): Schedule
         existing.enabled !== enabled ||
         existing.scheduleType !== scheduleType ||
         existing.intervalSeconds !== intervalSeconds ||
-        existing.timeOfDay !== timeOfDay;
+        existing.timeOfDay !== timeOfDay ||
+        existing.cronExpression !== cronExpression;
     const nextRunAt = scheduleChanged
         ? calculateNextRunAt(
-              { enabled, intervalSeconds, scheduleType, timeOfDay },
+              { cronExpression, enabled, intervalSeconds, scheduleType, timeOfDay },
               new Date(timestamp)
           )
         : existing.nextRunAt;
     db.prepare(
         `INSERT INTO scheduled_jobs (
             id, name, description, enabled, schedule_type, interval_seconds,
-            time_of_day, action_key, action_payload_json, next_run_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            time_of_day, cron_expression, action_key, action_payload_json, next_run_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             description = excluded.description,
@@ -291,6 +420,7 @@ export function upsertScheduledJob(definition: ScheduledJobDefinition): Schedule
             schedule_type = excluded.schedule_type,
             interval_seconds = excluded.interval_seconds,
             time_of_day = excluded.time_of_day,
+            cron_expression = excluded.cron_expression,
             action_key = excluded.action_key,
             action_payload_json = excluded.action_payload_json,
             next_run_at = excluded.next_run_at,
@@ -303,6 +433,7 @@ export function upsertScheduledJob(definition: ScheduledJobDefinition): Schedule
         scheduleType,
         intervalSeconds,
         timeOfDay,
+        cronExpression,
         definition.actionKey,
         JSON.stringify(definition.actionPayload ?? {}),
         nextRunAt,
@@ -340,13 +471,30 @@ export function updateScheduledJob(
         scheduleType: patch.scheduleType ?? existing.scheduleType,
         intervalSeconds: patch.intervalSeconds ?? existing.intervalSeconds,
         timeOfDay: patch.timeOfDay === undefined ? existing.timeOfDay : patch.timeOfDay,
+        cronExpression:
+            patch.cronExpression === undefined
+                ? existing.cronExpression
+                : patch.cronExpression,
     };
-    assertValidSchedule(next.scheduleType, next.intervalSeconds, next.timeOfDay);
+    assertValidSchedule(
+        next.scheduleType,
+        next.intervalSeconds,
+        next.timeOfDay,
+        next.cronExpression
+    );
     const timestamp = nowIso();
-    const nextRunAt = calculateNextRunAt(next, new Date(timestamp));
+    const scheduleChanged =
+        existing.enabled !== next.enabled ||
+        existing.scheduleType !== next.scheduleType ||
+        existing.intervalSeconds !== next.intervalSeconds ||
+        existing.timeOfDay !== next.timeOfDay ||
+        existing.cronExpression !== next.cronExpression;
+    const nextRunAt = scheduleChanged
+        ? calculateNextRunAt(next, new Date(timestamp))
+        : existing.nextRunAt;
     db.prepare(
         `UPDATE scheduled_jobs
-         SET enabled = ?, schedule_type = ?, interval_seconds = ?, time_of_day = ?,
+         SET enabled = ?, schedule_type = ?, interval_seconds = ?, time_of_day = ?, cron_expression = ?,
              next_run_at = ?, updated_at = ?
          WHERE id = ?`
     ).run(
@@ -354,6 +502,7 @@ export function updateScheduledJob(
         next.scheduleType,
         next.intervalSeconds,
         next.timeOfDay,
+        next.cronExpression,
         nextRunAt,
         timestamp,
         id
@@ -398,10 +547,14 @@ function finishRun(
 }
 
 function advanceScheduledRun(job: ScheduledJob): void {
-    const nextRunAt = calculateNextRunAt(job);
+    const currentJob = getScheduledJob(job.id);
+    if (!currentJob) {
+        return;
+    }
+    const nextRunAt = calculateNextRunAt(currentJob);
     db.prepare(
         "UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE id = ?"
-    ).run(nextRunAt, nowIso(), job.id);
+    ).run(nextRunAt, nowIso(), currentJob.id);
 }
 
 export async function runScheduledJob(
@@ -475,9 +628,13 @@ function scheduleTick(): void {
         return;
     }
     schedulerTickRunning = true;
-    void runDueJobs().finally(() => {
-        schedulerTickRunning = false;
-    });
+    void runDueJobs()
+        .catch((error) => {
+            console.warn("[ScheduledJobs] Scheduler tick failed:", error);
+        })
+        .finally(() => {
+            schedulerTickRunning = false;
+        });
 }
 
 export function startScheduledJobScheduler(): void {
