@@ -80,8 +80,7 @@ export function messageIdentity(message: ChatHistoryMessage): string {
     const role = message.role.toLowerCase();
     const diagnosticIdentity = diagnosticMessageIdentity(message);
     const textIdentity = message.text.trim();
-    const isToolResultRole =
-        role === "tool" || role === "tool_result" || role === "toolresult";
+    const isToolResultRole = ["tool", "tool_result", "toolresult"].includes(role);
     const identity = isToolResultRole
         ? diagnosticIdentity || textIdentity
         : textIdentity || diagnosticIdentity;

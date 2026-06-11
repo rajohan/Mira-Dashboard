@@ -397,11 +397,7 @@ function extractMediaReferenceAttachments(
 /** Returns whether tool role. */
 function isToolRole(role: string): boolean {
     const normalizedRole = role.toLowerCase();
-    return (
-        normalizedRole === "tool" ||
-        normalizedRole === "toolresult" ||
-        normalizedRole === "tool_result"
-    );
+    return ["tool", "toolresult", "tool_result"].includes(normalizedRole);
 }
 
 /** Extracts tool result. */

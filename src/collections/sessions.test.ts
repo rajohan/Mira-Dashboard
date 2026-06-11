@@ -63,7 +63,7 @@ describe("sessions collection", () => {
             "agent:main:main"
         );
         expect(options.getKey({ id: "session-id" })).toBe("session-id");
-        expect(options.getKey({ key: "   " })).toBe("unknown-session");
+        expect(options.getKey({ key: " ".repeat(3) })).toBe("unknown-session");
     });
 
     it("replaces websocket sessions, filters malformed rows, and deletes stale keys", () => {
@@ -72,7 +72,7 @@ describe("sessions collection", () => {
         replaceSessionsFromWebSocket([
             { key: "keep-session", id: "ignored-id", title: "Keep" },
             { id: "new-session", title: "New" },
-            { key: "   ", title: "Malformed" },
+            { key: " ".repeat(3), title: "Malformed" },
             null,
             "bad",
         ]);

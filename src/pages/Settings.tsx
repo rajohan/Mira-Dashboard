@@ -162,7 +162,7 @@ export function Settings() {
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
-            a.download = `openclaw-backup-${new Date().toISOString().split("T")[0]}.json`;
+            a.download = `openclaw-backup-${new Date().toISOString().split("T", 1)[0]}.json`;
             a.click();
             URL.revokeObjectURL(url);
         } catch (error_) {
@@ -198,8 +198,8 @@ export function Settings() {
         try {
             const nextEvery = every % 60 === 0 ? `${every / 60}m` : `${every}s`;
             const agents = config?.agents?.list || [];
-            const opsAgent = agents.find((agent) => agent.id === "ops");
-            const patch = opsAgent
+            const hasOpsAgent = agents.some((agent) => agent.id === "ops");
+            const patch = hasOpsAgent
                 ? {
                       agents: {
                           list: agents.map((agent) =>

@@ -58,26 +58,19 @@ export function getCronStatusVariant(
     value: string
 ): "success" | "warning" | "error" | "default" {
     const normalized = value.trim().toLowerCase();
-    if (
-        normalized === "ok" ||
-        normalized === "success" ||
-        normalized === "succeeded" ||
-        normalized === "completed"
-    ) {
+    if (["ok", "success", "succeeded", "completed"].includes(normalized)) {
         return "success";
     }
 
     if (
-        normalized === "running" ||
-        normalized === "pending" ||
-        normalized === "queued" ||
-        normalized === "in_progress" ||
-        normalized === "in-progress"
+        ["running", "pending", "queued", "in_progress", "in-progress"].includes(
+            normalized
+        )
     ) {
         return "warning";
     }
 
-    if (normalized === "error" || normalized === "failed" || normalized === "failure") {
+    if (["error", "failed", "failure"].includes(normalized)) {
         return "error";
     }
 

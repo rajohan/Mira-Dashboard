@@ -2737,7 +2737,7 @@ describe("Chat", () => {
                     }
                 },
             };
-            Object.assign(this as object, recorder, {
+            return Object.assign(recorder, {
                 addEventListener: (
                     type: string,
                     listener: (event?: { data: Blob }) => void
@@ -2817,7 +2817,7 @@ describe("Chat", () => {
                     for (const listener of recorder?.listeners.stop || []) listener();
                 },
             };
-            Object.assign(this as object, recorder, {
+            return Object.assign(recorder, {
                 addEventListener: (
                     type: string,
                     listener: (event?: { data: Blob }) => void
@@ -2866,20 +2866,15 @@ describe("Chat", () => {
         const user = userEvent.setup();
         const stopTrack = vi.fn();
         let stopListener: (() => void) | null = null;
-        const MediaRecorderMock = vi.fn(function (this: {
-            addEventListener: (type: string, listener: () => void) => void;
-            mimeType: string;
-            start: () => void;
-            stop: () => void;
-        }) {
-            Object.assign(this, {
+        const MediaRecorderMock = vi.fn(function () {
+            return {
                 addEventListener: (type: string, listener: () => void) => {
                     if (type === "stop") stopListener = listener;
                 },
                 mimeType: "",
                 start: vi.fn(),
                 stop: () => stopListener?.(),
-            });
+            };
         });
         Object.assign(MediaRecorderMock, {
             isTypeSupported: vi.fn(() => false),

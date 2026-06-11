@@ -133,10 +133,10 @@ describe("runtime event formatting helpers", () => {
         expect(compactStatusText(` ${"word ".repeat(40)} `)).toHaveLength(120);
         expect(compactStatusText(" short\ntext ")).toBe("short text");
         expect(stringValue(" value ")).toBe("value");
-        expect(stringValue("   ")).toBeUndefined();
+        expect(stringValue(" ".repeat(3))).toBeUndefined();
         expect(stringValue(123)).toBeUndefined();
         expect(formatToolName("functions.web_search-query")).toBe("Web search query");
-        expect(formatToolName("   ")).toBe("");
+        expect(formatToolName(" ".repeat(3))).toBe("");
         expect(detailFromArgs("raw detail")).toBe("raw detail");
         expect(detailFromArgs({ unused: "nope" })).toBeUndefined();
         expect(detailFromArgs({ message: " hello " })).toBe("hello");

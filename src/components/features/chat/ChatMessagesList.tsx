@@ -397,10 +397,11 @@ export function ChatMessagesList({
                             normalizedRole === "assistant" &&
                             row.kind === "message" &&
                             Boolean(row.message.text);
-                        const isToolResult =
-                            normalizedRole === "tool" ||
-                            normalizedRole === "toolresult" ||
-                            normalizedRole === "tool_result";
+                        const isToolResult = [
+                            "tool",
+                            "toolresult",
+                            "tool_result",
+                        ].includes(normalizedRole);
                         const shouldRenderPrimaryText = Boolean(
                             row.message.text && !isToolResult
                         );

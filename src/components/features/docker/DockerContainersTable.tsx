@@ -33,7 +33,7 @@ function parseMemoryUsedMiB(value: string | undefined): number {
         return -1;
     }
 
-    const used = value.split("/")[0]!.trim();
+    const used = value.split("/", 1)[0]!.trim();
     const match = used.match(/^([0-9]+(?:\.[0-9]+)?)\s*([KMGTP]i?B|B)$/i);
     if (!match) {
         return -1;
