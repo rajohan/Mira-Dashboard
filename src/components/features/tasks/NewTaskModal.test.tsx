@@ -73,7 +73,7 @@ describe("NewTaskModal", () => {
             target: { value: "Minimal task" },
         });
         fireEvent.change(screen.getByPlaceholderText("Task description..."), {
-            target: { value: "   " },
+            target: { value: " ".repeat(3) },
         });
         await user.click(screen.getByRole("button", { name: /Create Task/ }));
 

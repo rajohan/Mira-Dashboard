@@ -57,11 +57,8 @@ function chunk(files) {
 
 /** Detects whether the current Vitest invocation should emit coverage. */
 function hasCoverageEnabled(args) {
-    return args.some(
-        (arg) =>
-            arg === "--coverage" ||
-            arg === "--coverage.enabled" ||
-            arg === "--coverage.enabled=true"
+    return args.some((arg) =>
+        ["--coverage", "--coverage.enabled", "--coverage.enabled=true"].includes(arg)
     );
 }
 

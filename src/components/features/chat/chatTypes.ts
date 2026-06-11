@@ -1,3 +1,10 @@
+/** Defines normalized role variants that represent tool result rows. */
+export const TOOL_ROLE_VARIANTS: readonly string[] = [
+    "tool",
+    "tool_result",
+    "toolresult",
+];
+
 /** Represents chat image block. */
 export interface ChatImageBlock {
     type: "image";
@@ -397,11 +404,7 @@ function extractMediaReferenceAttachments(
 /** Returns whether tool role. */
 function isToolRole(role: string): boolean {
     const normalizedRole = role.toLowerCase();
-    return (
-        normalizedRole === "tool" ||
-        normalizedRole === "toolresult" ||
-        normalizedRole === "tool_result"
-    );
+    return TOOL_ROLE_VARIANTS.includes(normalizedRole);
 }
 
 /** Extracts tool result. */

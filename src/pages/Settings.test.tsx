@@ -288,12 +288,12 @@ describe("Settings helpers", () => {
         expect(errorMessage(new Error("Specific failure"), "Fallback")).toBe(
             "Specific failure"
         );
-        expect(errorMessage(new Error("   "), "Fallback")).toBe("Fallback");
+        expect(errorMessage(new Error(" ".repeat(3)), "Fallback")).toBe("Fallback");
         expect(errorMessage("bad", "Fallback")).toBe("Fallback");
         expect(optionalFormValue("value")).toBe("value");
         expect(optionalFormValue("  value  ")).toBe("value");
         expect(optionalFormValue("")).toBeUndefined();
-        expect(optionalFormValue("   ")).toBeUndefined();
+        expect(optionalFormValue(" ".repeat(3))).toBeUndefined();
         expect(optionalFormValue()).toBeUndefined();
     });
 
