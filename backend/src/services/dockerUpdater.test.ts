@@ -3523,7 +3523,9 @@ process.exit(0);
 `
         );
         process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
-        const updater = await import(`./dockerUpdater.js?reconcile-failure=${Date.now()}`);
+        const updater = await import(
+            `./dockerUpdater.js?reconcile-failure=${Date.now()}`
+        );
         const service = {
             id: 1,
             app_slug: "reconcile-failure",
@@ -3586,7 +3588,9 @@ process.exit(0);
             .get(service.id) as { last_status: string };
         assert.equal(row.last_status, "update_available");
         const event = dbHandle
-            .prepare("SELECT event_type FROM docker_update_events WHERE managed_service_id = ?")
+            .prepare(
+                "SELECT event_type FROM docker_update_events WHERE managed_service_id = ?"
+            )
             .get(service.id) as { event_type: string };
         assert.equal(event.event_type, "manual_update_reconcile_failed");
     });

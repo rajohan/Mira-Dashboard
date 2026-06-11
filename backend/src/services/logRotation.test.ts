@@ -537,6 +537,27 @@ describe("log rotation service", { concurrency: false }, () => {
         );
         assert.deepEqual(closeCalls, [ownerFile, "failed-owner"]);
         mock.restoreAll();
+        const cleanupFile = path.join(tempDir, "cleanup-close-fails.log");
+        const unlinkCalls: string[] = [];
+        mock.method(fsPromises, "open", async () => ({
+            chmod: async () => {
+                throw new Error("chmod denied");
+            },
+            close: async () => {
+                closeCalls.push("close-failed");
+                throw new Error("close denied");
+            },
+        }));
+        mock.method(fsPromises, "unlink", async (filePath: PathLike) => {
+            unlinkCalls.push(String(filePath));
+        });
+        await assert.rejects(
+            () => __testing.createNoFollowFile(cleanupFile, 0o600),
+            /chmod denied/u
+        );
+        assert.deepEqual(closeCalls, [ownerFile, "failed-owner", "close-failed"]);
+        assert.deepEqual(unlinkCalls, [cleanupFile]);
+        mock.restoreAll();
         assert.equal(
             await __testing.assertSafePath(path.join(tempDir, "missing.log"), [tempDir]),
             false

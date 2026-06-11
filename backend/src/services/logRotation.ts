@@ -544,7 +544,7 @@ async function createNoFollowFile(
         }
         return handle;
     } catch (error) {
-        await handle.close();
+        await handle.close().catch(() => {});
         await fs.unlink(filePath).catch(() => {});
         throw error;
     }
