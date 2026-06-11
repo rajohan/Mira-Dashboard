@@ -586,7 +586,7 @@ describe("TaskDetailModal", () => {
             within(updateCard).getByRole("textbox", {
                 name: "Message for progress update #31",
             }),
-            "   "
+            " ".repeat(3)
         );
         await user.click(within(updateCard).getByRole("button", { name: "Save" }));
         expect(onEditUpdate).not.toHaveBeenCalled();
