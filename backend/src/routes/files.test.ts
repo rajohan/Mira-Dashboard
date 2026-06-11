@@ -332,7 +332,7 @@ describe("files routes", () => {
                 __testing.getDefaultWorkspaceRoot(),
                 path.join(os.homedir(), ".openclaw", "workspace")
             );
-            process.env.OPENCLAW_HOME = "   ";
+            process.env.OPENCLAW_HOME = " ".repeat(3);
             assert.equal(
                 __testing.getDefaultWorkspaceRoot(),
                 path.join(os.homedir(), ".openclaw", "workspace")
@@ -480,16 +480,17 @@ describe("files routes", () => {
             }
 
             const statusCalls: number[] = [];
+            const response = {
+                status(code: number) {
+                    statusCalls.push(code);
+                    return response;
+                },
+                json() {
+                    throw new Error("json should not be called");
+                },
+            };
             const handled = __testing.sendRootedParentError(
-                {
-                    status(code: number) {
-                        statusCalls.push(code);
-                        return this;
-                    },
-                    json() {
-                        throw new Error("json should not be called");
-                    },
-                } as never,
+                response as never,
                 {
                     code: "EACCES",
                     message: "unexpected parent failure",

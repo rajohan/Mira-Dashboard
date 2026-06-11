@@ -166,7 +166,7 @@ describe("auth first-user bootstrap routes", () => {
             "/api/auth/register-first-user",
             {
                 method: "POST",
-                body: { username, password, gatewayToken: "   " },
+                body: { username, password, gatewayToken: " ".repeat(3) },
             }
         );
         assert.equal(missingGatewayToken.status, 400);
@@ -784,10 +784,13 @@ describe("auth routes", () => {
         const listen = mock.method(
             http.Server.prototype,
             "listen",
+            // Prototype patches need the runtime server receiver.
+            /* eslint-disable unicorn/no-this-outside-of-class */
             function listen(this: http.Server) {
                 this.emit("error", new Error("listen failed"));
                 return this;
             }
+            /* eslint-enable unicorn/no-this-outside-of-class */
         );
         try {
             await assert.rejects(startServer(), /listen failed/u);

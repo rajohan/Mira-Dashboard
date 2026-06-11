@@ -316,7 +316,7 @@ describe("logs routes", () => {
 
         const mockedToday = new RealDate("2099-12-31T12:00:00.000Z")
             .toISOString()
-            .split("T")[0];
+            .split("T", 1)[0];
         const todayFile = `openclaw-${mockedToday}.log`;
         await rm(path.join(logsDir, todayFile), { force: true });
 
@@ -588,7 +588,7 @@ describe("logs routes", () => {
     });
 
     it("sends log history to WebSocket subscribers and tracks unsubscribe", async () => {
-        const today = new Date().toISOString().split("T")[0];
+        const today = new Date().toISOString().split("T", 1)[0];
         const todayFile = `openclaw-${today}.log`;
         await writeFile(
             path.join(logsDir, todayFile),
@@ -633,7 +633,7 @@ describe("logs routes", () => {
     });
 
     it("stops sending log history after unsubscribe", async () => {
-        const today = new Date().toISOString().split("T")[0];
+        const today = new Date().toISOString().split("T", 1)[0];
         const todayFile = `openclaw-${today}.log`;
         await writeFile(path.join(logsDir, todayFile), "one\ntwo\n", "utf8");
 
@@ -663,7 +663,7 @@ describe("logs routes", () => {
     });
 
     it("sends empty log history when today's log is missing", async () => {
-        const today = new Date().toISOString().split("T")[0];
+        const today = new Date().toISOString().split("T", 1)[0];
         const todayFile = `openclaw-${today}.log`;
         const todayPath = path.join(logsDir, todayFile);
         await rm(todayPath, { force: true });
@@ -702,7 +702,7 @@ describe("logs routes", () => {
     });
 
     it("ignores missing log files during direct polling", async () => {
-        const today = new Date().toISOString().split("T")[0];
+        const today = new Date().toISOString().split("T", 1)[0];
         const todayFile = `openclaw-${today}.log`;
         await rm(path.join(logsDir, todayFile), { force: true });
         const ws = new FakeWebSocket();
@@ -723,7 +723,7 @@ describe("logs routes", () => {
     });
 
     it("sends empty log history when history read fails", async () => {
-        const today = new Date().toISOString().split("T")[0];
+        const today = new Date().toISOString().split("T", 1)[0];
         const todayFile = `openclaw-${today}.log`;
         const todayPath = path.join(logsDir, todayFile);
         const originalOpen = fs.promises.open;
@@ -762,7 +762,7 @@ describe("logs routes", () => {
     });
 
     it("polls appended log lines for subscribers and tolerates closed sockets", async () => {
-        const today = new Date().toISOString().split("T")[0];
+        const today = new Date().toISOString().split("T", 1)[0];
         const todayFile = `openclaw-${today}.log`;
         const todayPath = path.join(logsDir, todayFile);
         await writeFile(todayPath, "initial\n", "utf8");
@@ -820,7 +820,7 @@ describe("logs routes", () => {
             errors.push(args);
         };
 
-        const today = new Date().toISOString().split("T")[0];
+        const today = new Date().toISOString().split("T", 1)[0];
         const todayPath = path.join(logsDir, `openclaw-${today}.log`);
         await rm(todayPath, { force: true });
         await symlink("openclaw-missing-target.log", todayPath);
@@ -866,7 +866,7 @@ describe("logs routes", () => {
 
     it("propagates unexpected polling errors", async () => {
         const originalRealpathSync = fs.realpathSync;
-        const today = new Date().toISOString().split("T")[0];
+        const today = new Date().toISOString().split("T", 1)[0];
         const todayPath = path.join(logsDir, `openclaw-${today}.log`);
         await rm(todayPath, { force: true });
         await symlink("openclaw-missing-target.log", todayPath);

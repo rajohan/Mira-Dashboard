@@ -10,7 +10,7 @@ describe("error helpers", () => {
 
         assert.equal(errorMessage(new Error("boom"), "fallback"), "boom");
         assert.equal(errorMessage(blankError, "fallback"), "fallback");
-        assert.equal(errorMessage(new Error("   "), "fallback"), "fallback");
+        assert.equal(errorMessage(new Error(" ".repeat(3)), "fallback"), "fallback");
         assert.equal(errorMessage("boom", "fallback"), "fallback");
     });
 
@@ -20,12 +20,12 @@ describe("error helpers", () => {
             headersSent: false,
             statusCode: 200,
             status(code: number) {
-                this.statusCode = code;
-                return this;
+                response.statusCode = code;
+                return response;
             },
             json(body: unknown) {
                 jsonCalls.push(body);
-                return this;
+                return response;
             },
         };
 
@@ -54,12 +54,12 @@ describe("error helpers", () => {
             headersSent: true,
             statusCode: 200,
             status(code: number) {
-                this.statusCode = code;
-                return this;
+                forwardedResponse.statusCode = code;
+                return forwardedResponse;
             },
             json(body: unknown) {
                 forwardedJsonCalls.push(body);
-                return this;
+                return forwardedResponse;
             },
         };
         const forwardHandler = asyncRoute(async () => {

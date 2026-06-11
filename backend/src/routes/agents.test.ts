@@ -869,7 +869,7 @@ describe("agents routes", () => {
         const invalid = await requestJson<{ error: string }>(
             server,
             `/api/agents/${agentId}/metadata`,
-            { method: "PUT", body: { currentTask: "   " } }
+            { method: "PUT", body: { currentTask: " ".repeat(3) } }
         );
         assert.equal(invalid.status, 400);
         assert.equal(invalid.body.error, "Provide currentTask");
@@ -1366,7 +1366,7 @@ describe("agents routes", () => {
                     displayLabel: "",
                     channel: "unknown",
                     status: "running",
-                    model: "   ",
+                    model: " ".repeat(3),
                     updatedAt: Date.parse("2026-05-16T16:00:00.000Z"),
                 },
                 {
@@ -3240,6 +3240,8 @@ describe("agents routes", () => {
 
         const originalPop = Array.prototype.pop;
         try {
+            // Prototype patches need the runtime array receiver.
+            /* eslint-disable unicorn/no-this-outside-of-class */
             Array.prototype.pop = function patchedPop<T>(this: T[]): T | undefined {
                 if (
                     this.length === 1 &&
@@ -3250,6 +3252,7 @@ describe("agents routes", () => {
                 }
                 return originalPop.call(this);
             };
+            /* eslint-enable unicorn/no-this-outside-of-class */
             assert.deepEqual(
                 __testing.listActivityLogFiles({
                     dir: emptySessionsDir,
@@ -3284,6 +3287,8 @@ describe("agents routes", () => {
 
         const originalSort = Array.prototype.sort;
         try {
+            // Prototype patches need the runtime array receiver.
+            /* eslint-disable unicorn/no-this-outside-of-class */
             Array.prototype.sort = function patchedSort<T>(
                 this: T[],
                 compareFn?: (a: T, b: T) => number
@@ -3300,6 +3305,7 @@ describe("agents routes", () => {
                 }
                 return originalSort.call(this, compareFn);
             };
+            /* eslint-enable unicorn/no-this-outside-of-class */
             assert.equal(await __testing.getLatestActivityFromFile("branch-agent"), null);
         } finally {
             Array.prototype.sort = originalSort;
@@ -3564,7 +3570,7 @@ describe("agents routes", () => {
             gateway.request = async () => ({
                 sessions: [
                     { key: "" },
-                    { key: "agent:x:main", model: "   " },
+                    { key: "agent:x:main", model: " ".repeat(3) },
                     {
                         key: "agent:y:main",
                         model: { primary: "codex" } as unknown as string,

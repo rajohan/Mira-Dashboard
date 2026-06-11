@@ -16,9 +16,14 @@ import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/saf
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit
 const MAX_CONFIG_WRITE_SIZE = 2 * 1024 * 1024; // 2MB write guardrail
 const CONFIG_WRITE_JSON_LIMIT = MAX_CONFIG_WRITE_SIZE * 2;
+const MISSING_PATH_ERROR_CODES = new Set(["ELOOP", "ENOENT", "ENOTDIR"]);
 
 // Allowed config files (whitelist for security)
-const ALLOWED_CONFIG_FILES = ["openclaw.json", "hooks/transforms/agentmail.ts"];
+const ALLOWED_CONFIG_FILES = new Set(["openclaw.json", "hooks/transforms/agentmail.ts"]);
+
+function isMissingPathErrorCode(code: string | undefined): boolean {
+    return code !== undefined && MISSING_PATH_ERROR_CODES.has(code);
+}
 
 /** Represents config file. */
 interface ConfigFile {
@@ -317,7 +322,7 @@ export default function configFilesRoutes(
         ) {
             const rawPath = req.originalUrl
                 .slice("/api/config-files/".length)
-                .split("?")[0];
+                .split("?", 1)[0];
             if (decodeConfigPath(rawPath) === null) {
                 res.status(400).json({ error: "Malformed config file path" });
                 return;
@@ -354,7 +359,7 @@ export default function configFilesRoutes(
                 const filePath = req.params[0];
 
                 // Check if file is in whitelist
-                if (!ALLOWED_CONFIG_FILES.includes(filePath)) {
+                if (!ALLOWED_CONFIG_FILES.has(filePath)) {
                     res.status(403).json({
                         error: "Access denied: file not in allowed list",
                     });
@@ -377,7 +382,7 @@ export default function configFilesRoutes(
                         fs.realpathSync(path.resolve(openclawRoot, filePath));
                     } catch (error) {
                         const code = (error as NodeJS.ErrnoException).code;
-                        if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
+                        if (isMissingPathErrorCode(code)) {
                             res.status(404).json({ error: "File not found" });
                             return;
                         }
@@ -400,7 +405,7 @@ export default function configFilesRoutes(
                     }
                 } catch (error) {
                     const code = (error as NodeJS.ErrnoException).code;
-                    if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
+                    if (isMissingPathErrorCode(code)) {
                         res.status(404).json({ error: "File not found" });
                         return;
                     }
@@ -414,7 +419,7 @@ export default function configFilesRoutes(
                     fd = file.fd;
                 } catch (error) {
                     const code = (error as NodeJS.ErrnoException).code;
-                    if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
+                    if (isMissingPathErrorCode(code)) {
                         res.status(404).json({ error: "File not found" });
                         return;
                     }
@@ -536,7 +541,7 @@ export default function configFilesRoutes(
                 }
 
                 // Check if file is in whitelist
-                if (!ALLOWED_CONFIG_FILES.includes(filePath)) {
+                if (!ALLOWED_CONFIG_FILES.has(filePath)) {
                     res.status(403).json({
                         error: "Access denied: file not in allowed list",
                     });
