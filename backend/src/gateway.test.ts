@@ -617,7 +617,7 @@ describe("gateway state and helper utilities", () => {
                         content: [
                             {
                                 type: "image",
-                                data: "   ",
+                                data: " ".repeat(3),
                                 source: {
                                     data: "raw-source-fallback",
                                     media_type: "image/gif",

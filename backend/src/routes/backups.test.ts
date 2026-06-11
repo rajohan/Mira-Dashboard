@@ -382,7 +382,7 @@ describe("backup routes", () => {
         );
         await withEnv(
             {
-                DB_POSTGRESDB_USER: "   ",
+                DB_POSTGRESDB_USER: " ".repeat(3),
                 DB_POSTGRESDB_PASSWORD: "\t",
                 DATABASE_USERNAME: "legacy-user",
                 DATABASE_PASSWORD: "legacy-password",

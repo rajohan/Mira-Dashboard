@@ -442,10 +442,13 @@ describe("media routes", () => {
         const listen = mock.method(
             http.Server.prototype,
             "listen",
+            // Prototype patches need the runtime server receiver.
+            /* eslint-disable unicorn/no-this-outside-of-class */
             function listen(this: http.Server) {
                 this.emit("error", new Error("listen failed"));
                 return this;
             }
+            /* eslint-enable unicorn/no-this-outside-of-class */
         );
         try {
             await assert.rejects(startServer(openclawHome), /listen failed/u);

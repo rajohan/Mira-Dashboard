@@ -155,9 +155,9 @@ describe("database routes", () => {
                 "postgresql://user%40name:p%3Aa%2Fss%23@db:6543/postgres"
             );
 
-            process.env.DATABASE_HOST = "   ";
+            process.env.DATABASE_HOST = " ".repeat(3);
             process.env.DATABASE_PORT = "  ";
-            process.env.PGBOUNCER_HOST = "   ";
+            process.env.PGBOUNCER_HOST = " ".repeat(3);
             process.env.PGBOUNCER_PORT = "  ";
             assert.equal(
                 __testing.buildPostgresUri(),

@@ -15,6 +15,13 @@ const logSubscribers = new Set<WebSocket>();
 const MIN_LOG_TAIL_BYTES = 64 * 1024;
 const LOG_BYTES_PER_REQUESTED_LINE = 1024;
 const LOG_TAIL_READ_CHUNK_BYTES = 64 * 1024;
+const LOG_NOT_FOUND_ERROR_CODES = new Set(["ENOENT", "ENOTDIR"]);
+const LOG_PATH_UNREADABLE_ERROR_CODES = new Set([
+    "ELOOP",
+    "ENOENT",
+    "ENOTDIR",
+    "ERR_INVALID_ARG_VALUE",
+]);
 
 /** Represents log file. */
 interface LogFile {
@@ -23,13 +30,21 @@ interface LogFile {
     modified: Date;
 }
 
+function isLogNotFoundErrorCode(code: string | undefined): boolean {
+    return code !== undefined && LOG_NOT_FOUND_ERROR_CODES.has(code);
+}
+
+function isLogPathUnreadableErrorCode(code: string | undefined): boolean {
+    return code !== undefined && LOG_PATH_UNREADABLE_ERROR_CODES.has(code);
+}
+
 function resolveRealLogsDir(): string {
     return fs.realpathSync(logsDir);
 }
 
 /** Returns today log file. */
 function getTodayLogFile(root = resolveRealLogsDir()): string {
-    const today = new Date().toISOString().split("T")[0];
+    const today = new Date().toISOString().split("T", 1)[0];
     return path.join(root, "openclaw-" + today + ".log");
 }
 
@@ -261,7 +276,7 @@ export const __testing = {
         return logSubscribers.size;
     },
     setLogsDirForTest(nextLogsDir: string): void {
-        this.resetLogWatcherForTest();
+        __testing.resetLogWatcherForTest();
         const resolvedLogsDir = path.resolve(nextLogsDir);
         logsDir = resolvedLogsDir;
     },
@@ -277,7 +292,7 @@ export default function logsRoutes(app: express.Application): void {
                 realRoot = resolveRealLogsDir();
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
-                if (code === "ENOENT" || code === "ENOTDIR") {
+                if (isLogNotFoundErrorCode(code)) {
                     res.json({ logs: [] });
                     return;
                 }
@@ -289,7 +304,7 @@ export default function logsRoutes(app: express.Application): void {
                 names = fs.readdirSync(realRoot);
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
-                if (code === "ENOENT" || code === "ENOTDIR") {
+                if (isLogNotFoundErrorCode(code)) {
                     res.json({ logs: [] });
                     return;
                 }
@@ -304,7 +319,7 @@ export default function logsRoutes(app: express.Application): void {
                         stat = fs.lstatSync(path.join(realRoot, f));
                     } catch (error) {
                         const code = (error as NodeJS.ErrnoException).code;
-                        if (code === "ENOENT" || code === "ENOTDIR") {
+                        if (isLogNotFoundErrorCode(code)) {
                             return [];
                         }
                         throw error;
@@ -333,7 +348,7 @@ export default function logsRoutes(app: express.Application): void {
 
         // If no file specified, use today's log
         if (!logFile) {
-            const today = new Date().toISOString().split("T")[0];
+            const today = new Date().toISOString().split("T", 1)[0];
             logFile = "openclaw-" + today + ".log";
         }
 
@@ -343,7 +358,7 @@ export default function logsRoutes(app: express.Application): void {
                 realRoot = resolveRealLogsDir();
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
-                if (code === "ENOENT" || code === "ENOTDIR") {
+                if (isLogNotFoundErrorCode(code)) {
                     res.status(404).json({ error: "Log file not found" });
                     return;
                 }
@@ -367,12 +382,7 @@ export default function logsRoutes(app: express.Application): void {
                 filePath = fs.realpathSync(candidatePath);
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
-                if (
-                    code === "ENOENT" ||
-                    code === "ENOTDIR" ||
-                    code === "ELOOP" ||
-                    code === "ERR_INVALID_ARG_VALUE"
-                ) {
+                if (isLogPathUnreadableErrorCode(code)) {
                     res.status(404).json({ error: "Log file not found" });
                     return;
                 }
@@ -393,7 +403,7 @@ export default function logsRoutes(app: express.Application): void {
                 file = await openReadNoFollowGuarded(guardedPath(filePath));
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
-                if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
+                if (isLogPathUnreadableErrorCode(code)) {
                     res.status(404).json({ error: "Log file not found" });
                     return;
                 }
