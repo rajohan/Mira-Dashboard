@@ -49,6 +49,11 @@ const SAFE_ENV_VALUE_KEYS = new Set([
 
 const invalidStackActionJsonHandler: ErrorRequestHandler = (error, _req, res, next) => {
     const status = Number((error as { status?: unknown }).status);
+    const type = String((error as { type?: unknown }).type ?? "");
+    if (status === 413 || type === "entity.too.large") {
+        res.status(413).json({ error: "Invalid stack action" });
+        return;
+    }
     if (error instanceof SyntaxError && status === 400) {
         res.status(400).json({ error: "Invalid stack action" });
         return;
@@ -834,6 +839,7 @@ async function runManualUpdaterForService(
     }
     const serviceId = service.id;
     const steps = await runDockerUpdaterServiceForRoutes(serviceId);
+    createDockerUpdaterRunFailureNotifications(steps);
     const manualStep = [...steps]
         .reverse()
         .find((step) => step.step.startsWith("manual-update"));

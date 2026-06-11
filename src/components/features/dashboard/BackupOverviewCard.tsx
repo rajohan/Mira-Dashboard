@@ -168,10 +168,16 @@ export function BackupOverviewCard() {
                             }}
                             className="w-full sm:w-auto"
                         >
-                            {isWalgRunning || isWalgRefreshPending ? (
+                            {isWalgRunning ||
+                            isWalgRefreshPending ||
+                            runWalgBackup.isPending ? (
                                 <>
                                     <Loader2 className="h-4 w-4 animate-spin" />
-                                    {isWalgRunning ? "Running..." : "Refreshing..."}
+                                    {isWalgRunning
+                                        ? "Running..."
+                                        : runWalgBackup.isPending
+                                          ? "Starting..."
+                                          : "Refreshing..."}
                                 </>
                             ) : (
                                 <>
@@ -201,10 +207,14 @@ export function BackupOverviewCard() {
                             onClick={() => setIsConfirmOpen(true)}
                             className="w-full sm:w-auto"
                         >
-                            {isRunning || isRefreshPending ? (
+                            {isRunning || isRefreshPending || runBackup.isPending ? (
                                 <>
                                     <Loader2 className="h-4 w-4 animate-spin" />
-                                    {isRunning ? "Running..." : "Refreshing..."}
+                                    {isRunning
+                                        ? "Running..."
+                                        : runBackup.isPending
+                                          ? "Starting..."
+                                          : "Refreshing..."}
                                 </>
                             ) : (
                                 <>

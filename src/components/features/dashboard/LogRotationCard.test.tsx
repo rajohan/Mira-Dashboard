@@ -240,7 +240,7 @@ describe("LogRotationCard", () => {
                 {
                     cronExpression: null,
                     id: "ops.log-rotation",
-                    intervalSeconds: null,
+                    intervalSeconds: Number.POSITIVE_INFINITY,
                     scheduleType: "interval",
                     settings: null,
                     timeOfDay: null,

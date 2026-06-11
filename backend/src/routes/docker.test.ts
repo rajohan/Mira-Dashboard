@@ -785,6 +785,27 @@ describe("docker routes", { concurrency: false }, () => {
         );
         assert.equal(forwardedError, routeError);
 
+        const stackActionErrors: Array<{ status: number; body: unknown }> = [];
+        __testing.invalidStackActionJsonHandler(
+            { status: 413, type: "entity.too.large" },
+            {} as never,
+            {
+                status(status: number) {
+                    return {
+                        json(body: unknown) {
+                            stackActionErrors.push({ body, status });
+                        },
+                    };
+                },
+            } as never,
+            (error: unknown) => {
+                forwardedError = error;
+            }
+        );
+        assert.deepEqual(stackActionErrors, [
+            { body: { error: "Invalid stack action" }, status: 413 },
+        ]);
+
         assert.deepEqual(__testing.parseJsonLines(' {"a":1}\n\n'), [{ a: 1 }]);
         assert.equal(__testing.parseJsonField(), null);
         assert.equal(__testing.parseJsonField("not-json"), null);
@@ -1078,6 +1099,7 @@ describe("docker routes", { concurrency: false }, () => {
             __testing.setDockerUpdaterServiceRunnerForTests();
         }
         try {
+            db.prepare("DELETE FROM notifications WHERE source = 'docker-updater'").run();
             __testing.setDockerUpdaterServiceRunnerForTests(async () => [
                 {
                     step: "poll",
@@ -1123,10 +1145,22 @@ describe("docker routes", { concurrency: false }, () => {
                     ],
                 }
             );
+            const unsupportedRegistryNotification = db
+                .prepare(
+                    `SELECT description
+                     FROM notifications
+                     WHERE source = 'docker-updater'`
+                )
+                .get() as { description: string } | undefined;
+            assert.equal(
+                unsupportedRegistryNotification?.description,
+                "poll: Unsupported image registry: example.com"
+            );
         } finally {
             __testing.setDockerUpdaterServiceRunnerForTests();
         }
         try {
+            db.prepare("DELETE FROM notifications WHERE source = 'docker-updater'").run();
             __testing.setDockerUpdaterServiceRunnerForTests(async () => [
                 {
                     step: "register-services",
@@ -1203,6 +1237,17 @@ describe("docker routes", { concurrency: false }, () => {
                         },
                     ],
                 }
+            );
+            const registrationNotification = db
+                .prepare(
+                    `SELECT description
+                     FROM notifications
+                     WHERE source = 'docker-updater'`
+                )
+                .get() as { description: string } | undefined;
+            assert.equal(
+                registrationNotification?.description,
+                "register-services: Unrelated compose discovery failed"
             );
         } finally {
             __testing.setDockerUpdaterServiceRunnerForTests();

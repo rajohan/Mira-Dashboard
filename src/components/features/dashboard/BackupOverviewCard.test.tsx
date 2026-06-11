@@ -225,6 +225,23 @@ describe("BackupOverviewCard", () => {
         }
     });
 
+    it("shows starting labels while backup actions are pending", () => {
+        hooks.useRunKopiaBackup.mockReturnValue({
+            isPending: true,
+            mutateAsync: hooks.runKopiaBackup,
+        });
+        hooks.useRunWalgBackup.mockReturnValue({
+            isPending: true,
+            mutateAsync: hooks.runWalgBackup,
+        });
+
+        render(<BackupOverviewCard />);
+
+        for (const button of screen.getAllByRole("button", { name: "Starting..." })) {
+            expect(button).toBeDisabled();
+        }
+    });
+
     it("renders loading and empty states", () => {
         hooks.useCacheEntry.mockImplementation((key: string) => ({
             data: key === "backup.walg.status" ? { data: {}, status: "missing" } : null,

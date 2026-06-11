@@ -120,15 +120,6 @@ interface ManagedServiceRow {
 
 type JsonRecord = Record<string, unknown>;
 
-interface ComposeService {
-    image?: unknown;
-    labels?: unknown;
-    container_name?: unknown;
-    platform?: unknown;
-}
-
-type ComposeServiceWithImage = ComposeService & { image: string };
-
 interface DiscoveredComposeService {
     appSlug: string;
     serviceName: string;
@@ -455,6 +446,15 @@ function imageMatchesPlatform(image: JsonRecord, platform: string): boolean {
     return image.variant === variant;
 }
 
+function manifestDigestForPlatform(body: JsonRecord, platform: string): string | null {
+    const manifest = (Array.isArray(body.manifests) ? body.manifests : []).find(
+        (candidate) =>
+            imageMatchesPlatform(asRecord(asRecord(candidate).platform), platform)
+    );
+    const digest = asRecord(manifest).digest;
+    return typeof digest === "string" ? digest : null;
+}
+
 async function lookupDockerHub(service: ManagedServiceRow) {
     const repo = normalizeDockerHubRepo(stripRegistry(service.image_repo));
     let latestTag = service.current_tag;
@@ -541,9 +541,11 @@ async function lookupGhcr(service: ManagedServiceRow) {
             accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json",
         }
     );
+    const manifestDigest = manifestDigestForPlatform(body, servicePlatform(service));
     return {
         latestTag: tag,
         latestDigest:
+            manifestDigest ||
             headers.get("docker-content-digest") ||
             (typeof body.digest === "string" ? body.digest : null),
     };
@@ -644,7 +646,13 @@ function writeFileWithMetadata(
         fs.fchmodSync(fd, mode);
         const currentStats = fs.fstatSync(fd);
         if (currentStats.uid !== stats.uid || currentStats.gid !== stats.gid) {
-            fs.fchownSync(fd, stats.uid, stats.gid);
+            try {
+                fs.fchownSync(fd, stats.uid, stats.gid);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "EPERM") {
+                    throw error;
+                }
+            }
         }
         committed = true;
     } finally {
@@ -914,119 +922,115 @@ function servicesFromCompose(composePath: string):
             };
         }
 
-        const invalidService = Object.entries(parsed.services).find(
-            ([, service]) =>
-                !isPlainObject(service) ||
-                ("image" in service && typeof service.image !== "string")
-        );
-        if (invalidService) {
-            const [serviceName] = invalidService;
+        const services: DiscoveredComposeService[] = [];
+        const serviceErrors: string[] = [];
+        for (const [serviceName, service] of Object.entries(parsed.services)) {
+            if (!isPlainObject(service)) {
+                serviceErrors.push(
+                    `Compose service ${serviceName} in ${composePath} must be an object`
+                );
+                continue;
+            }
+            if (!("image" in service)) {
+                continue;
+            }
+            if (typeof service.image !== "string") {
+                serviceErrors.push(
+                    `Compose service ${serviceName} in ${composePath} must define image as a string`
+                );
+                continue;
+            }
+            const imageRef = service.image;
+            const labels = normalizeLabels(service.labels);
+            const image = parseImageRef(imageRef);
+            const configuredPinMode = labels
+                .get("mira.updater.track")
+                ?.trim()
+                .toLowerCase();
+            const tagPattern = labels.get("mira.updater.tagPattern") || null;
+            const tagPatternIsRegex = booleanLabel(
+                labels.get("mira.updater.tagPatternIsRegex"),
+                false
+            );
+            const currentTag = image.tag ?? (image.digest ? null : "latest");
+            const pinMode: "digest" | "tag" =
+                configuredPinMode === "digest" || configuredPinMode === "tag"
+                    ? configuredPinMode
+                    : image.pinMode === "digest"
+                      ? "digest"
+                      : "tag";
+            let tagMatchType: "exact" | "regex" = "exact";
+            const tagMatchPattern = tagPattern ?? currentTag;
+            if (tagPattern && tagPatternIsRegex) {
+                try {
+                    new RegExp(tagPattern);
+                } catch (error) {
+                    const message = `Invalid tag pattern regex for ${appSlug}/${serviceName}: ${tagPattern} (${caughtMessage(error)})`;
+                    console.warn("[DockerUpdater] Ignoring invalid tag pattern regex", {
+                        appSlug,
+                        serviceName,
+                        tagPattern,
+                        error: caughtMessage(error),
+                    });
+                    serviceErrors.push(message);
+                    continue;
+                }
+                if (!isSafeTagRegexPattern(tagPattern)) {
+                    const message = `Unsafe tag pattern regex for ${appSlug}/${serviceName}: ${tagPattern} (pattern failed safety checks)`;
+                    console.warn("[DockerUpdater] Ignoring unsafe tag pattern regex", {
+                        appSlug,
+                        serviceName,
+                        tagPattern,
+                        error: "pattern failed safety checks",
+                    });
+                    serviceErrors.push(message);
+                    continue;
+                }
+                tagMatchType = "regex";
+            }
+            services.push({
+                appSlug,
+                serviceName,
+                composePath,
+                imageRepo: image.repo,
+                composeImageRef: imageRef,
+                composeImageField: `services.${serviceName}.image`,
+                currentTag,
+                currentDigest: image.digest,
+                policy: booleanLabel(labels.get("mira.updater.autoUpdate"), false)
+                    ? "auto"
+                    : "notify",
+                pinMode,
+                tagMatchType,
+                tagMatchPattern,
+                enabled: labels.has("mira.updater.enabled")
+                    ? booleanLabel(labels.get("mira.updater.enabled"), true)
+                    : true,
+                metadata: {
+                    discoveredBy: "dashboard-docker-updater",
+                    discoveredAt: nowIso(),
+                    containerName:
+                        typeof service.container_name === "string"
+                            ? service.container_name
+                            : null,
+                    platform:
+                        typeof service.platform === "string" ? service.platform : null,
+                    labels: Object.fromEntries(labels),
+                },
+            });
+        }
+        if (services.length === 0 && serviceErrors.length > 0) {
             return {
                 appSlug,
-                error: `Compose service ${serviceName} in ${composePath} must define image as a string`,
+                error: serviceErrors[0],
                 ok: false,
                 services: [],
             };
         }
-
         return {
             appSlug,
             ok: true,
-            services: Object.entries(parsed.services)
-                .filter(
-                    (entry): entry is [string, ComposeServiceWithImage] =>
-                        isPlainObject(entry[1]) && typeof entry[1].image === "string"
-                )
-                .map(([serviceName, service]) => {
-                    const imageRef = service.image;
-                    const labels = normalizeLabels(service.labels);
-                    const image = parseImageRef(imageRef);
-                    const configuredPinMode = labels
-                        .get("mira.updater.track")
-                        ?.trim()
-                        .toLowerCase();
-                    const tagPattern = labels.get("mira.updater.tagPattern") || null;
-                    const tagPatternIsRegex = booleanLabel(
-                        labels.get("mira.updater.tagPatternIsRegex"),
-                        false
-                    );
-                    const currentTag = image.tag ?? (image.digest ? null : "latest");
-                    const pinMode: "digest" | "tag" =
-                        configuredPinMode === "digest" || configuredPinMode === "tag"
-                            ? configuredPinMode
-                            : image.pinMode === "digest"
-                              ? "digest"
-                              : "tag";
-                    let tagMatchType: "exact" | "regex" = "exact";
-                    const tagMatchPattern = tagPattern ?? currentTag;
-                    if (tagPattern && tagPatternIsRegex) {
-                        try {
-                            new RegExp(tagPattern);
-                        } catch (error) {
-                            console.warn(
-                                "[DockerUpdater] Ignoring invalid tag pattern regex",
-                                {
-                                    appSlug,
-                                    serviceName,
-                                    tagPattern,
-                                    error: caughtMessage(error),
-                                }
-                            );
-                            throw new Error(
-                                `Invalid tag pattern regex for ${appSlug}/${serviceName}: ${tagPattern} (${caughtMessage(error)})`,
-                                { cause: error }
-                            );
-                        }
-                        if (!isSafeTagRegexPattern(tagPattern)) {
-                            const message = "pattern failed safety checks";
-                            console.warn(
-                                "[DockerUpdater] Ignoring unsafe tag pattern regex",
-                                {
-                                    appSlug,
-                                    serviceName,
-                                    tagPattern,
-                                    error: message,
-                                }
-                            );
-                            throw new Error(
-                                `Unsafe tag pattern regex for ${appSlug}/${serviceName}: ${tagPattern} (${message})`
-                            );
-                        }
-                        tagMatchType = "regex";
-                    }
-                    return {
-                        appSlug,
-                        serviceName,
-                        composePath,
-                        imageRepo: image.repo,
-                        composeImageRef: imageRef,
-                        composeImageField: `services.${serviceName}.image`,
-                        currentTag,
-                        currentDigest: image.digest,
-                        policy: booleanLabel(labels.get("mira.updater.autoUpdate"), false)
-                            ? "auto"
-                            : "notify",
-                        pinMode,
-                        tagMatchType,
-                        tagMatchPattern,
-                        enabled: labels.has("mira.updater.enabled")
-                            ? booleanLabel(labels.get("mira.updater.enabled"), true)
-                            : true,
-                        metadata: {
-                            discoveredBy: "dashboard-docker-updater",
-                            discoveredAt: nowIso(),
-                            containerName:
-                                typeof service.container_name === "string"
-                                    ? service.container_name
-                                    : null,
-                            platform:
-                                typeof service.platform === "string"
-                                    ? service.platform
-                                    : null,
-                            labels: Object.fromEntries(labels),
-                        },
-                    };
-                }),
+            services,
         };
     } catch (error) {
         console.error("[DockerUpdater] Failed to discover compose services", {
@@ -1132,15 +1136,13 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
         const failedAppSlugs = new Set(
             failedDiscoveries.map((discovery) => discovery.appSlug)
         );
-        for (const appSlug of failedAppSlugs) {
-            db.prepare("DELETE FROM docker_managed_services WHERE app_slug = ?").run(
-                appSlug
-            );
-        }
         for (const row of db
             .prepare("SELECT DISTINCT app_slug FROM docker_managed_services")
             .all() as Array<{ app_slug: string }>) {
-            if (!discoveredAppSlugs.has(row.app_slug)) {
+            if (
+                !discoveredAppSlugs.has(row.app_slug) &&
+                !failedAppSlugs.has(row.app_slug)
+            ) {
                 db.prepare("DELETE FROM docker_managed_services WHERE app_slug = ?").run(
                     row.app_slug
                 );

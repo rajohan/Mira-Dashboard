@@ -463,6 +463,34 @@ process.stdout.write("updated\n");
                     updater.__testing.servicesFromCompose(invalidRegexCompose);
                 assert.equal(invalidRegex.ok, false);
                 assert.match(invalidRegex.error ?? "", /Invalid tag pattern regex/u);
+                const mixedCompose = path.join(tempDir, "mixed-invalid.yaml");
+                await writeFile(
+                    mixedCompose,
+                    `services:
+  valid:
+    image: repo/valid:1
+  invalidRegex:
+    image: repo/invalid:stable
+    labels:
+      mira.updater.tagPattern: "["
+      mira.updater.tagPatternIsRegex: "true"
+  invalidImage:
+    image:
+      nested: value
+  scalarService: disabled
+`,
+                    "utf8"
+                );
+                const mixed = updater.__testing.servicesFromCompose(mixedCompose);
+                if (!mixed.ok) {
+                    assert.fail(mixed.error);
+                }
+                assert.deepEqual(
+                    mixed.services.map(
+                        (service: { serviceName: string }) => service.serviceName
+                    ),
+                    ["valid"]
+                );
                 const unsafeRegexCompose = path.join(tempDir, "unsafe-regex.yaml");
                 await writeFile(
                     unsafeRegexCompose,
@@ -573,7 +601,7 @@ process.stdout.write("updated\n");
                     )
                     .get() as { count: number }
             ).count,
-            0
+            1
         );
         assert.equal(
             (
@@ -1062,7 +1090,7 @@ setTimeout(() => process.exit(0), 30);
             assert.match(result.stderr, /broken-app/u);
             assert.deepEqual(
                 serviceRows().map((row) => row.app_slug),
-                ["ok-app"]
+                ["broken-app", "ok-app"]
             );
         });
     });
@@ -1489,7 +1517,7 @@ setTimeout(() => process.exit(0), 30);
         });
     });
 
-    it("keeps discovery failure conflicts when registration deletes the selected service", async () => {
+    it("keeps discovery failure conflicts when registration loses the selected service", async () => {
         const appsRoot = path.join(tempDir, "apps");
         const appDir = path.join(appsRoot, "failed-selected");
         await mkdir(appDir, { recursive: true });
@@ -1514,17 +1542,38 @@ setTimeout(() => process.exit(0), 30);
             const updater = await import(
                 `./dockerUpdater.js?failed-selected=${Date.now()}`
             );
-            const steps = (await updater.runDockerUpdaterService(762)) as StepResult[];
-
-            assert.equal(steps[0]?.step, "register-services");
-            assert.equal(steps[0]?.ok, false);
-            assert.equal(steps.at(-1)?.step, "manual-update:failed-selected/target");
-            assert.equal(steps.at(-1)?.ok, false);
-            assert.equal(steps.at(-1)?.code, "CONFLICT");
-            assert.equal(
-                steps.at(-1)?.stderr,
-                "Docker updater discovery failed for the selected service"
-            );
+            const originalPrepare = dbHandle.prepare.bind(dbHandle);
+            let selectedServiceLookups = 0;
+            const prepareMock = mock.method(dbHandle, "prepare", (sql: string) => {
+                const statement = originalPrepare(sql);
+                if (
+                    sql === "SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1"
+                ) {
+                    selectedServiceLookups += 1;
+                    if (selectedServiceLookups === 2) {
+                        return {
+                            get: () => {},
+                        } as unknown as ReturnType<typeof dbHandle.prepare>;
+                    }
+                }
+                return statement;
+            });
+            try {
+                const steps = (await updater.runDockerUpdaterService(
+                    762
+                )) as StepResult[];
+                assert.equal(steps[0]?.step, "register-services");
+                assert.equal(steps[0]?.ok, false);
+                assert.equal(steps.at(-1)?.step, "manual-update:failed-selected/target");
+                assert.equal(steps.at(-1)?.ok, false);
+                assert.equal(steps.at(-1)?.code, "CONFLICT");
+                assert.equal(
+                    steps.at(-1)?.stderr,
+                    "Docker updater discovery failed for the selected service"
+                );
+            } finally {
+                prepareMock.mock.restore();
+            }
         });
     });
 
@@ -2012,6 +2061,68 @@ setTimeout(() => process.exit(0), 30);
         }
         assert.deepEqual(chownCalls, [[metadataTarget, 2000, 2000]]);
         assert.equal(await readFile(metadataTarget, "utf8"), "services: {}\n");
+        const epermMetadataTarget = path.join(tempDir, "metadata-helper-eperm.yaml");
+        const epermFstatMock = mock.method(
+            fs,
+            "fstatSync",
+            () =>
+                ({
+                    mode: 0o100644,
+                    uid: 1000,
+                    gid: 1000,
+                }) as fs.Stats
+        );
+        const epermChownMock = mock.method(fs, "fchownSync", () => {
+            throw Object.assign(new Error("ownership denied"), { code: "EPERM" });
+        });
+        try {
+            updater.__testing.writeFileWithMetadata(
+                epermMetadataTarget,
+                "services: {}\n",
+                {
+                    mode: 0o100600,
+                    uid: 2000,
+                    gid: 2000,
+                } as fs.Stats
+            );
+        } finally {
+            epermFstatMock.mock.restore();
+            epermChownMock.mock.restore();
+        }
+        assert.equal(await readFile(epermMetadataTarget, "utf8"), "services: {}\n");
+        const failedChownTarget = path.join(tempDir, "metadata-helper-chown-failed.yaml");
+        const failedChownFstatMock = mock.method(
+            fs,
+            "fstatSync",
+            () =>
+                ({
+                    mode: 0o100644,
+                    uid: 1000,
+                    gid: 1000,
+                }) as fs.Stats
+        );
+        const failedChownMock = mock.method(fs, "fchownSync", () => {
+            throw Object.assign(new Error("ownership lookup failed"), { code: "EIO" });
+        });
+        try {
+            assert.throws(
+                () =>
+                    updater.__testing.writeFileWithMetadata(
+                        failedChownTarget,
+                        "services: {}\n",
+                        {
+                            mode: 0o100600,
+                            uid: 2000,
+                            gid: 2000,
+                        } as fs.Stats
+                    ),
+                /ownership lookup failed/u
+            );
+        } finally {
+            failedChownFstatMock.mock.restore();
+            failedChownMock.mock.restore();
+            await rm(failedChownTarget, { force: true });
+        }
         const failedMetadataTarget = path.join(tempDir, "metadata-helper-failed.yaml");
         const writeMock = mock.method(fs, "writeFileSync", () => {
             throw new Error("write denied");
@@ -2997,6 +3108,35 @@ setTimeout(() => process.exit(0), 30);
             acceptHeaders.some((header) =>
                 header.includes("application/vnd.docker.distribution.manifest.v2+json")
             )
+        );
+        globalThis.fetch = (async () =>
+            ({
+                ok: true,
+                headers: new Headers({ "docker-content-digest": "sha256:index" }),
+                json: async () => ({
+                    manifests: [
+                        {
+                            digest: "sha256:amd64",
+                            platform: { architecture: "amd64", os: "linux" },
+                        },
+                        {
+                            digest: "sha256:arm64v8",
+                            platform: {
+                                architecture: "arm64",
+                                os: "linux",
+                                variant: "v8",
+                            },
+                        },
+                    ],
+                }),
+            }) as Response) as typeof fetch;
+        assert.deepEqual(
+            await updater.__testing.lookupGhcr({
+                ...baseService,
+                image_repo: "ghcr.io/owner/app",
+                metadata_json: JSON.stringify({ platform: "linux/arm64" }),
+            }),
+            { latestTag: "1", latestDigest: "sha256:arm64v8" }
         );
         globalThis.fetch = (async () =>
             ({

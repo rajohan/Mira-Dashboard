@@ -11,6 +11,9 @@ import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 
 function formatIntervalSeconds(intervalSeconds: number): string {
+    if (!Number.isFinite(intervalSeconds) || intervalSeconds <= 0) {
+        return "—";
+    }
     if (intervalSeconds % 3600 === 0) {
         const hours = intervalSeconds / 3600;
         return `${hours} hr${hours === 1 ? "" : "s"} interval`;
@@ -34,9 +37,7 @@ export function LogRotationCard() {
     const rawIntervalSeconds = logRotationJob?.intervalSeconds;
     const intervalSeconds = Number(rawIntervalSeconds);
     const intervalDisplay =
-        rawIntervalSeconds !== null &&
-        rawIntervalSeconds !== undefined &&
-        Number.isFinite(intervalSeconds)
+        rawIntervalSeconds !== null && rawIntervalSeconds !== undefined
             ? formatIntervalSeconds(intervalSeconds)
             : "—";
     const scheduleDisplay =
