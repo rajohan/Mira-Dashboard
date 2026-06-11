@@ -91,6 +91,25 @@ interface DockerUpdaterServiceRow {
     metadata: string;
 }
 
+const DOCKER_UPDATER_PROJECTION = `
+    CAST(id AS TEXT) AS id,
+    app_slug,
+    service_name,
+    COALESCE(compose_image_ref, '') AS compose_image_ref,
+    image_repo,
+    COALESCE(current_tag, '') AS current_tag,
+    COALESCE(current_digest, '') AS current_digest,
+    COALESCE(latest_tag, '') AS latest_tag,
+    COALESCE(latest_digest, '') AS latest_digest,
+    policy,
+    pin_mode,
+    CASE WHEN enabled = 1 THEN 'true' ELSE 'false' END AS enabled,
+    COALESCE(last_checked_at, '') AS last_checked_at,
+    COALESCE(last_updated_at, '') AS last_updated_at,
+    COALESCE(last_status, '') AS last_status,
+    metadata_json AS metadata
+`;
+
 interface DockerUpdaterService {
     id: number;
     appSlug: string;
@@ -743,23 +762,7 @@ function mapDockerUpdaterRow(row: DockerUpdaterServiceRow) {
 async function getDockerUpdaterServices() {
     const rows = db
         .prepare(
-            `SELECT
-                CAST(id AS TEXT) AS id,
-                app_slug,
-                service_name,
-                COALESCE(compose_image_ref, '') AS compose_image_ref,
-                image_repo,
-                COALESCE(current_tag, '') AS current_tag,
-                COALESCE(current_digest, '') AS current_digest,
-                COALESCE(latest_tag, '') AS latest_tag,
-                COALESCE(latest_digest, '') AS latest_digest,
-                policy,
-                pin_mode,
-                CASE WHEN enabled = 1 THEN 'true' ELSE 'false' END AS enabled,
-                COALESCE(last_checked_at, '') AS last_checked_at,
-                COALESCE(last_updated_at, '') AS last_updated_at,
-                COALESCE(last_status, '') AS last_status,
-                metadata_json AS metadata
+            `SELECT ${DOCKER_UPDATER_PROJECTION}
              FROM docker_managed_services
              ORDER BY app_slug, service_name`
         )
@@ -772,23 +775,7 @@ async function getDockerUpdaterServices() {
 async function getDockerUpdaterServiceById(serviceId: number) {
     const rows = db
         .prepare(
-            `SELECT
-                CAST(id AS TEXT) AS id,
-                app_slug,
-                service_name,
-                COALESCE(compose_image_ref, '') AS compose_image_ref,
-                image_repo,
-                COALESCE(current_tag, '') AS current_tag,
-                COALESCE(current_digest, '') AS current_digest,
-                COALESCE(latest_tag, '') AS latest_tag,
-                COALESCE(latest_digest, '') AS latest_digest,
-                policy,
-                pin_mode,
-                CASE WHEN enabled = 1 THEN 'true' ELSE 'false' END AS enabled,
-                COALESCE(last_checked_at, '') AS last_checked_at,
-                COALESCE(last_updated_at, '') AS last_updated_at,
-                COALESCE(last_status, '') AS last_status,
-                metadata_json AS metadata
+            `SELECT ${DOCKER_UPDATER_PROJECTION}
              FROM docker_managed_services
              WHERE id = ?
              LIMIT 1`

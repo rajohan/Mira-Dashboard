@@ -91,6 +91,25 @@ interface ComposeService {
     platform?: unknown;
 }
 
+type ComposeServiceWithImage = ComposeService & { image: string };
+
+interface DiscoveredComposeService {
+    appSlug: string;
+    serviceName: string;
+    composePath: string;
+    imageRepo: string;
+    composeImageRef: string;
+    composeImageField: string;
+    currentTag: string | null;
+    currentDigest: string | null;
+    policy: "auto" | "notify";
+    pinMode: "tag" | "digest";
+    tagMatchType: "exact" | "regex";
+    tagMatchPattern: string | null;
+    enabled: boolean;
+    metadata: Record<string, unknown>;
+}
+
 interface RegistryFetchOptions {
     accept?: string;
 }
@@ -815,19 +834,64 @@ function listComposeFiles(root = getDockerAppsRoot()): string[] {
         .filter((file) => fs.existsSync(file));
 }
 
-function servicesFromCompose(composePath: string) {
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+    return (
+        value !== null &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        Object.getPrototypeOf(value) === Object.prototype
+    );
+}
+
+function servicesFromCompose(composePath: string):
+    | {
+          appSlug: string;
+          ok: true;
+          services: DiscoveredComposeService[];
+      }
+    | {
+          appSlug: string;
+          error: string;
+          ok: false;
+          services: [];
+      } {
     const appSlug = path.basename(path.dirname(composePath));
     try {
-        const parsed = YAML.parse(fs.readFileSync(composePath, "utf8")) as {
-            services?: Record<string, ComposeService>;
-        } | null;
+        const parsed = YAML.parse(fs.readFileSync(composePath, "utf8"));
+        if (!isPlainObject(parsed) || !isPlainObject(parsed.services)) {
+            return {
+                appSlug,
+                error: `Compose file ${composePath} must contain a services object`,
+                ok: false,
+                services: [],
+            };
+        }
+
+        const invalidService = Object.entries(parsed.services).find(
+            ([, service]) =>
+                !isPlainObject(service) ||
+                ("image" in service && typeof service.image !== "string")
+        );
+        if (invalidService) {
+            const [serviceName] = invalidService;
+            return {
+                appSlug,
+                error: `Compose service ${serviceName} in ${composePath} must define image as a string`,
+                ok: false,
+                services: [],
+            };
+        }
+
         return {
             appSlug,
             ok: true,
-            services: Object.entries(parsed?.services ?? {})
-                .filter(([, service]) => service?.image)
+            services: Object.entries(parsed.services)
+                .filter(
+                    (entry): entry is [string, ComposeServiceWithImage] =>
+                        isPlainObject(entry[1]) && typeof entry[1].image === "string"
+                )
                 .map(([serviceName, service]) => {
-                    const imageRef = String(service.image);
+                    const imageRef = service.image;
                     const labels = normalizeLabels(service.labels);
                     const image = parseImageRef(imageRef);
                     const configuredPinMode = labels
@@ -840,6 +904,12 @@ function servicesFromCompose(composePath: string) {
                         false
                     );
                     const currentTag = image.tag ?? (image.digest ? null : "latest");
+                    const pinMode: "digest" | "tag" =
+                        configuredPinMode === "digest" || configuredPinMode === "tag"
+                            ? configuredPinMode
+                            : image.pinMode === "digest"
+                              ? "digest"
+                              : "tag";
                     let tagMatchType: "exact" | "regex" = "exact";
                     let tagMatchPattern = tagPattern ?? currentTag;
                     if (tagPattern && tagPatternIsRegex) {
@@ -884,10 +954,7 @@ function servicesFromCompose(composePath: string) {
                         policy: booleanLabel(labels.get("mira.updater.autoUpdate"), false)
                             ? "auto"
                             : "notify",
-                        pinMode:
-                            configuredPinMode === "digest" || configuredPinMode === "tag"
-                                ? configuredPinMode
-                                : image.pinMode,
+                        pinMode,
                         tagMatchType,
                         tagMatchPattern,
                         enabled: labels.has("mira.updater.enabled")

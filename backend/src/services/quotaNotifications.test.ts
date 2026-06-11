@@ -381,6 +381,15 @@ describe("quota notifications", () => {
             title: "Synthetic.new usage high (80%)",
             description: "5h 100% left · weekly 3 left",
         });
+        assert.equal("status" in quotas.synthetic, false);
+        if ("status" in quotas.synthetic) {
+            throw new Error("expected synthetic quota snapshot");
+        }
+        quotas.synthetic.weeklyTokenLimit.remainingCredits = "0";
+        assert.deepEqual(quotaTesting.getNotificationPayload("synthetic", 80, quotas), {
+            title: "Synthetic.new usage high (80%)",
+            description: "5h 100% left · weekly 0 left",
+        });
         assert.deepEqual(quotaTesting.getState("openrouter", 80), { is_armed: 1 });
     });
 });

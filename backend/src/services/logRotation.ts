@@ -134,8 +134,11 @@ function validateConfig(config: LogRotationConfig): void {
     if (!Array.isArray(config.groups)) {
         throw new TypeError("Config groups must be an array");
     }
-    validateOptionalStringArray(config.approvedRoots, "approvedRoots");
-    validateOptionalStringArray(config.defaults?.approvedRoots, "defaults.approvedRoots");
+    validateNonEmptyOptionalStringArray(config.approvedRoots, "approvedRoots");
+    validateNonEmptyOptionalStringArray(
+        config.defaults?.approvedRoots,
+        "defaults.approvedRoots"
+    );
     validateOptionalStringArray(config.defaults?.paths, "defaults.paths");
     validateOptionalStringArray(config.defaults?.excludePaths, "defaults.excludePaths");
     validateOptionalStringArray(config.defaults?.archivePaths, "defaults.archivePaths");
@@ -156,7 +159,7 @@ function validateConfig(config: LogRotationConfig): void {
         if (typeof group.name !== "string" || group.name.trim() === "") {
             throw new Error("Every group needs a string name");
         }
-        validateOptionalStringArray(
+        validateNonEmptyOptionalStringArray(
             group.approvedRoots,
             `Group ${group.name} approvedRoots`
         );
@@ -243,6 +246,13 @@ function validateOptionalStringArray(value: unknown, fieldName: string): void {
         value.some((entry) => typeof entry !== "string" || entry.trim() === "")
     ) {
         throw new TypeError(`${fieldName} must be an array of non-empty strings`);
+    }
+}
+
+function validateNonEmptyOptionalStringArray(value: unknown, fieldName: string): void {
+    validateOptionalStringArray(value, fieldName);
+    if (Array.isArray(value) && value.length === 0) {
+        throw new TypeError(`${fieldName} must include at least one entry`);
     }
 }
 

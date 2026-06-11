@@ -2019,11 +2019,18 @@ setTimeout(() => process.exit(0), 30);
         );
         const emptyCompose = path.join(tempDir, "empty-compose.yaml");
         await writeFile(emptyCompose, "name: empty\n", "utf8");
-        assert.deepEqual(updater.__testing.servicesFromCompose(emptyCompose), {
-            appSlug: path.basename(tempDir),
-            ok: true,
-            services: [],
-        });
+        const missingServices = updater.__testing.servicesFromCompose(emptyCompose);
+        assert.equal(missingServices.ok, false);
+        assert.match(missingServices.error ?? "", /services object/u);
+        const invalidImageCompose = path.join(tempDir, "invalid-image-compose.yaml");
+        await writeFile(
+            invalidImageCompose,
+            "services:\n  app:\n    image:\n      repo: app\n",
+            "utf8"
+        );
+        const invalidImage = updater.__testing.servicesFromCompose(invalidImageCompose);
+        assert.equal(invalidImage.ok, false);
+        assert.match(invalidImage.error ?? "", /image as a string/u);
         const nestedTarget = { services: { app: { image: "repo/app:1" } } };
         updater.__testing.setNestedValue(
             nestedTarget,

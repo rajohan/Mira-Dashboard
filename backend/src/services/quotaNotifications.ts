@@ -19,7 +19,10 @@ const quotaMonitorIntervals = new Set<NodeJS.Timeout>();
 function formatSyntheticWeeklyRemaining(
     weeklyTokenLimit: SyntheticQuota["weeklyTokenLimit"]
 ): string {
-    if (weeklyTokenLimit.remainingCredits) {
+    if (
+        weeklyTokenLimit.remainingCredits !== undefined &&
+        weeklyTokenLimit.remainingCredits !== null
+    ) {
         return `${weeklyTokenLimit.remainingCredits} left`;
     }
     if (weeklyTokenLimit.percentRemaining === null) {

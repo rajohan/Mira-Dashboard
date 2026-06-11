@@ -103,6 +103,30 @@ function execBlockWithTransientLockRetry<T>(operation: () => T): T {
     throw lastError;
 }
 
+function execAlterTableWithDuplicateColumnRetry(
+    sql: string,
+    targetDb: Pick<MigrationDatabase, "exec"> = db,
+    sleepFor: (milliseconds: number) => void = sleepSync
+): void {
+    let lastError: unknown;
+    for (const delay of [0, 10, 25, 50, 100]) {
+        if (delay > 0) {
+            sleepFor(delay);
+        }
+        try {
+            targetDb.exec(sql);
+            return;
+        } catch (error) {
+            if (!isTransientSqliteLock(error)) {
+                assertDuplicateColumnError(error);
+                return;
+            }
+            lastError = error;
+        }
+    }
+    throw lastError;
+}
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -344,11 +368,7 @@ for (const sql of [
     "ALTER TABLE scheduled_jobs ADD COLUMN time_of_day TEXT",
     "ALTER TABLE scheduled_jobs ADD COLUMN cron_expression TEXT",
 ]) {
-    try {
-        db.exec(sql);
-    } catch (error) {
-        assertDuplicateColumnError(error);
-    }
+    execAlterTableWithDuplicateColumnRetry(sql);
 }
 
 /** Ensures older task databases have the automation column. */
@@ -612,6 +632,7 @@ export const __testing = {
     cleanupTaskForeignKeyOrphans,
     ensureDockerUpdateEventsSetNull,
     ensureCacheEntriesUpdatedAtNullable,
+    execAlterTableWithDuplicateColumnRetry,
     isDuplicateColumnError,
     validateTaskChildTableName,
 };

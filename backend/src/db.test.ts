@@ -266,6 +266,87 @@ test("classifies duplicate-column migration errors", async () => {
     }
 });
 
+test("retries transient scheduled job migration column locks", async () => {
+    const { cleanup, result } = await importWithTempDb("scheduledJobColumnRetry");
+    let attempts = 0;
+    const delays: number[] = [];
+    const targetDb = {
+        exec: () => {
+            attempts += 1;
+            if (attempts < 3) {
+                const error = new Error("database is locked") as Error & {
+                    code: string;
+                };
+                error.code = "SQLITE_BUSY";
+                throw error;
+            }
+        },
+    };
+
+    try {
+        result.__testing.execAlterTableWithDuplicateColumnRetry(
+            "ALTER TABLE scheduled_jobs ADD COLUMN retry_test TEXT",
+            targetDb,
+            (delay) => {
+                delays.push(delay);
+            }
+        );
+        assert.equal(attempts, 3);
+        assert.deepEqual(delays, [10, 25]);
+    } finally {
+        await cleanup();
+    }
+});
+
+test("handles duplicate scheduled job migration columns without retrying", async () => {
+    const { cleanup, result } = await importWithTempDb("scheduledJobColumnDuplicate");
+    let attempts = 0;
+
+    try {
+        assert.doesNotThrow(() =>
+            result.__testing.execAlterTableWithDuplicateColumnRetry(
+                "ALTER TABLE scheduled_jobs ADD COLUMN schedule_type TEXT",
+                {
+                    exec: () => {
+                        attempts += 1;
+                        throw new Error("duplicate column name: schedule_type");
+                    },
+                },
+                () => {
+                    throw new Error("duplicate columns should not sleep");
+                }
+            )
+        );
+        assert.equal(attempts, 1);
+    } finally {
+        await cleanup();
+    }
+});
+
+test("rethrows exhausted transient scheduled job migration locks", async () => {
+    const { cleanup, result } = await importWithTempDb("scheduledJobColumnExhausted");
+    const error = new Error("database is locked") as Error & { code: string };
+    error.code = "SQLITE_LOCKED";
+
+    try {
+        assert.throws(
+            () =>
+                result.__testing.execAlterTableWithDuplicateColumnRetry(
+                    "ALTER TABLE scheduled_jobs ADD COLUMN exhausted TEXT",
+                    {
+                        exec: () => {
+                            throw error;
+                        },
+                    },
+                    () => {}
+                ),
+            /database is locked/u
+        );
+    } finally {
+        await cleanup();
+    }
+});
+
 test("retries transient task orphan cleanup locks", async () => {
     const { cleanup, result } = await importWithTempDb("taskOrphanRetry");
     let attempts = 0;

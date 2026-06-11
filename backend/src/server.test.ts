@@ -805,6 +805,33 @@ describe("server bootstrap", () => {
         }
     });
 
+    it("keeps rollback close cleanup installed when server close fails", async () => {
+        const originalClose = server.close;
+        const calls: string[] = [];
+        serverStartTesting.removeCloseCleanup();
+        serverStartTesting.installCloseCleanup(() => {
+            calls.push("cleanup");
+        });
+        server.close = ((callback?: (error?: Error) => void) => {
+            callback?.(new Error("close failed"));
+            return server;
+        }) as unknown as typeof server.close;
+
+        try {
+            await assert.rejects(
+                () => serverStartTesting.closeServerForRollback(),
+                /close failed/u
+            );
+            assert.deepEqual(calls, []);
+            server.emit("close");
+            await serverStartTesting.waitForCloseCleanups();
+            assert.deepEqual(calls, ["cleanup"]);
+        } finally {
+            server.close = originalClose;
+            serverStartTesting.removeCloseCleanup();
+        }
+    });
+
     it("starts runtime services from the entrypoint helpers", async () => {
         const originalInit = gateway.init;
         const originalListen = server.listen;

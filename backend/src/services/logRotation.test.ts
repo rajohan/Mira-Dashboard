@@ -196,6 +196,47 @@ describe("log rotation service", { concurrency: false }, () => {
                     dryRun: true,
                     config: await writeConfig(tempDir, {
                         version: 1,
+                        approvedRoots: [],
+                        groups: [{ name: "invalid", paths: ["*.log"] }],
+                    }),
+                }),
+            /approvedRoots must include at least one entry/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
+                        defaults: { approvedRoots: [] },
+                        groups: [{ name: "invalid", paths: ["*.log"] }],
+                    }),
+                }),
+            /defaults\.approvedRoots must include at least one entry/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
+                        groups: [
+                            {
+                                name: "invalid",
+                                approvedRoots: [],
+                                paths: ["*.log"],
+                            },
+                        ],
+                    }),
+                }),
+            /Group invalid approvedRoots must include at least one entry/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
                         defaults: { excludePaths: "*.tmp" },
                         groups: [{ name: "invalid", paths: ["*.log"] }],
                     }),

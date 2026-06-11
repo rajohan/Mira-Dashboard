@@ -92,7 +92,6 @@ async function runCloseCleanups(): Promise<void> {
 }
 
 async function closeServerForRollback(): Promise<void> {
-    detachCloseCleanupListener();
     await new Promise<void>((resolve, reject) => {
         server.close((error) => {
             if (error) {
@@ -103,6 +102,7 @@ async function closeServerForRollback(): Promise<void> {
         });
     });
     await runManualCloseCleanups();
+    detachCloseCleanupListener();
 }
 
 function shouldStartScheduledJobs(nodeEnv = process.env.NODE_ENV): boolean {
@@ -126,8 +126,8 @@ export async function handleServerListening(): Promise<void> {
         }
 
         if (shouldStartScheduledJobs()) {
-            scheduledJobSchedulerStarted = true;
             startScheduledJobScheduler();
+            scheduledJobSchedulerStarted = true;
         }
         removeBackgroundCleanup = installCloseCleanup(async () => {
             if (scheduledJobSchedulerStarted) {
@@ -233,6 +233,7 @@ function setAfterBackgroundServicesStartedForTest(
 }
 
 export const __testing = Object.freeze({
+    closeServerForRollback,
     installCloseCleanup,
     removeCloseCleanup,
     setAfterBackgroundServicesStartedForTest,
