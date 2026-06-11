@@ -307,8 +307,8 @@ describe("notifications routes", () => {
                 body: {
                     title: "Whitespace fields",
                     description: "Body",
-                    source: "   ",
-                    dedupeKey: "   ",
+                    source: " ".repeat(3),
+                    dedupeKey: " ".repeat(3),
                     metadata: [],
                 },
             }

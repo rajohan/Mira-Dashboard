@@ -51,7 +51,7 @@ describe("cacheStore utilities", () => {
                 "postgresql://:@postgres:5432/n8n"
             );
 
-            process.env.DATABASE_HOST = "   ";
+            process.env.DATABASE_HOST = " ".repeat(3);
             process.env.DATABASE_PORT = "\t";
             assert.equal(
                 __testing.buildPostgresUri(),

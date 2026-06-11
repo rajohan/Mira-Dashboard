@@ -761,12 +761,7 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
     if (normalizedTool === "write" && resolvedPath) {
         return `write ${resolvedPath}`;
     }
-    if (
-        (normalizedTool === "exec" ||
-            normalizedTool === "exec_command" ||
-            normalizedTool === "bash") &&
-        command
-    ) {
+    if (["exec", "exec_command", "bash"].includes(normalizedTool) && command) {
         return `exec ${command.slice(0, 70)}`;
     }
     if (normalizedTool === "message" && message) {
@@ -964,7 +959,7 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
                     : typeof raw.message?.__openclaw?.mirrorIdentity === "string"
                       ? raw.message.__openclaw.mirrorIdentity
                       : null;
-            return mirrorIdentity ? mirrorIdentity.split(":")[0] || null : null;
+            return mirrorIdentity ? mirrorIdentity.split(":", 1)[0] || null : null;
         };
 
         let pendingTask: string | null = null;

@@ -1023,7 +1023,7 @@ describe("pull request routes", () => {
         });
         const parsedRows: Array<{ ok: number }> = [];
         __testing.parseGhJsonLine("", parsedRows);
-        __testing.parseGhJsonLine("   ", parsedRows);
+        __testing.parseGhJsonLine(" ".repeat(3), parsedRows);
         __testing.parseGhJsonLine('{"ok":1}', parsedRows);
         assert.deepEqual(parsedRows, [{ ok: 1 }]);
         assert.throws(
@@ -1252,7 +1252,7 @@ describe("pull request routes", () => {
         );
         const restoreReviewerEnv = saveEnv(["RAJOHAN_GITHUB_USERNAME"]);
         try {
-            process.env.RAJOHAN_GITHUB_USERNAME = "   ";
+            process.env.RAJOHAN_GITHUB_USERNAME = " ".repeat(3);
             assert.throws(
                 () =>
                     __testing.validateDashboardPrForReviewApproval({
@@ -1761,7 +1761,7 @@ describe("pull request routes", () => {
             assert.equal(__testing.buildCommandEnv().GH_TOKEN, "gh-token");
             assert.equal(__testing.buildCommandEnv().GITHUB_TOKEN, undefined);
 
-            process.env.GH_TOKEN = "   ";
+            process.env.GH_TOKEN = " ".repeat(3);
             process.env.GITHUB_TOKEN = "stale-token";
             assert.equal(__testing.buildCommandEnv().GH_TOKEN, "stale-token");
             assert.equal(__testing.buildCommandEnv().GITHUB_TOKEN, undefined);
