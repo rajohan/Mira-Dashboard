@@ -183,6 +183,31 @@ describe("LogRotationCard", () => {
         expect(screen.getByText("25 MB")).toBeInTheDocument();
     });
 
+    it("formats singular hour interval schedules", () => {
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: null,
+                    id: "ops.log-rotation",
+                    intervalSeconds: 3_600,
+                    scheduleType: "interval",
+                    settings: {},
+                    timeOfDay: null,
+                },
+            ],
+        });
+        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
+        hooks.useRunLogRotationDryRun.mockReturnValue({
+            isPending: false,
+            mutate: vi.fn(),
+        });
+        hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+
+        render(<LogRotationCard />);
+
+        expect(screen.getByText("1 hr interval")).toBeInTheDocument();
+    });
+
     it("renders cron schedule and missing setting fallbacks", () => {
         hooks.useScheduledJobs.mockReturnValue({
             data: [

@@ -242,6 +242,33 @@ describe("QuotaOverviewCard", () => {
         expect(regenLine).not.toHaveTextContent("+2%");
     });
 
+    it("renders unknown Synthetic weekly remaining when provider percent is unavailable", () => {
+        const synthetic = quotas.synthetic as SyntheticQuota;
+
+        render(
+            <QuotaOverviewCard
+                quotas={{
+                    ...quotas,
+                    synthetic: {
+                        ...quotas.synthetic,
+                        rollingFiveHourLimit: {
+                            ...synthetic.rollingFiveHourLimit,
+                            percentUsed: null,
+                        },
+                        weeklyTokenLimit: {
+                            ...synthetic.weeklyTokenLimit,
+                            percentRemaining: null,
+                            remainingCredits: null,
+                        },
+                    },
+                }}
+            />
+        );
+
+        expect(screen.getByText(/weekly unknown/u)).toBeInTheDocument();
+        expect(screen.queryByText("100%")).not.toBeInTheDocument();
+    });
+
     it("falls back to Synthetic weekly regen credits when regen percent is unavailable", () => {
         const synthetic = quotas.synthetic as SyntheticQuota;
 

@@ -13,6 +13,7 @@ export interface BackupJob {
     stderr: string;
     startedAt: number;
     endedAt: number | null;
+    refreshPending: boolean;
 }
 
 /** Represents the kopia backup API response. */
@@ -33,8 +34,8 @@ export function useKopiaBackup() {
         queryKey: backupKeys.kopia(),
         queryFn: () => apiFetchRequired<KopiaBackupResponse>("/backups/kopia"),
         refetchInterval: (query) => {
-            const status = query.state.data?.job?.status;
-            return status === "running" ? 1_000 : 5_000;
+            const job = query.state.data?.job;
+            return job?.status === "running" || job?.refreshPending ? 1_000 : 5_000;
         },
         staleTime: 1_000,
     });
@@ -46,8 +47,8 @@ export function useWalgBackup() {
         queryKey: backupKeys.walg(),
         queryFn: () => apiFetchRequired<KopiaBackupResponse>("/backups/walg"),
         refetchInterval: (query) => {
-            const status = query.state.data?.job?.status;
-            return status === "running" ? 1_000 : 5_000;
+            const job = query.state.data?.job;
+            return job?.status === "running" || job?.refreshPending ? 1_000 : 5_000;
         },
         staleTime: 1_000,
     });

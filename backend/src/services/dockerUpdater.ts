@@ -20,6 +20,35 @@ function getDockerBin(): string {
     return nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
 }
 
+function failedDiscoveryAppSlugs(register: DockerUpdaterStepResult): Set<string> {
+    if (!register.stderr) {
+        return new Set();
+    }
+    try {
+        const parsed = JSON.parse(register.stderr) as {
+            failed?: Array<{ appSlug?: unknown }>;
+        };
+        return new Set(
+            (parsed.failed ?? []).flatMap((failure) =>
+                typeof failure.appSlug === "string" ? [failure.appSlug] : []
+            )
+        );
+    } catch {
+        return new Set(["*"]);
+    }
+}
+
+function shouldBlockManualUpdateForDiscoveryFailure(
+    register: DockerUpdaterStepResult,
+    appSlug: string
+): boolean {
+    if (register.ok) {
+        return false;
+    }
+    const failedAppSlugs = failedDiscoveryAppSlugs(register);
+    return failedAppSlugs.has("*") || failedAppSlugs.has(appSlug);
+}
+
 function getDockerComposeWrapper(): string {
     const dockerRoot = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
     return nonEmptyEnvFallback(
@@ -1382,7 +1411,7 @@ export async function runDockerUpdaterService(
                   .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
                   .get(serviceId) as ManagedServiceRow | undefined);
     const register = await registerDockerUpdaterServices();
-    if (!register.ok) {
+    if (!register.ok && serviceId === undefined) {
         return [register];
     }
     if (serviceId !== undefined) {
@@ -1400,6 +1429,18 @@ export async function runDockerUpdaterService(
                     code: "NOT_FOUND",
                     stdout: "",
                     stderr: "Docker updater service not found",
+                },
+            ];
+        }
+        if (shouldBlockManualUpdateForDiscoveryFailure(register, service.app_slug)) {
+            return [
+                register,
+                {
+                    step: `manual-update:${serviceLabel(service)}`,
+                    ok: false,
+                    code: "CONFLICT",
+                    stdout: "",
+                    stderr: "Docker updater discovery failed for the selected service",
                 },
             ];
         }
@@ -1497,6 +1538,7 @@ export const __testing = {
     applyServiceUpdate,
     buildTargetImageRef,
     fetchJson,
+    failedDiscoveryAppSlugs,
     getDockerAppsRoot,
     getComposeCommand,
     imageRegistry,
@@ -1515,6 +1557,7 @@ export const __testing = {
     parseBearerChallenge,
     parseNextLink,
     setNestedValue,
+    shouldBlockManualUpdateForDiscoveryFailure,
     servicesFromCompose,
     stripRegistry,
     tagMatches,

@@ -908,6 +908,7 @@ describe("server bootstrap", () => {
                 initializedToken = token;
             };
             let intervalCalls = 0;
+            const originalSchedulerNodeEnv = process.env.NODE_ENV;
             globalThis.setInterval = ((...args: Parameters<typeof setInterval>) => {
                 intervalCalls += 1;
                 if (intervalCalls === 1) {
@@ -920,19 +921,32 @@ describe("server bootstrap", () => {
                 callback?.();
                 return server;
             }) as unknown as typeof server.close;
-            await assert.rejects(() => handleServerListening(), /scheduler failed/u);
-            assert.equal(closeCalled, true);
-            assert.equal(shutdownCalled, true);
-            await stopScheduledJobScheduler();
-            globalThis.setInterval = originalSetInterval;
-            closeCalled = false;
-            shutdownCalled = false;
-            serverStartTesting.setAfterBackgroundServicesStartedForTest(() => {
-                throw new Error("post scheduler failed");
-            });
-            await assert.rejects(() => handleServerListening(), /post scheduler failed/u);
-            assert.equal(closeCalled, true);
-            assert.equal(shutdownCalled, true);
+            process.env.NODE_ENV = "production";
+            try {
+                await assert.rejects(() => handleServerListening(), /scheduler failed/u);
+                assert.equal(closeCalled, true);
+                assert.equal(shutdownCalled, true);
+                await stopScheduledJobScheduler();
+                globalThis.setInterval = originalSetInterval;
+                closeCalled = false;
+                shutdownCalled = false;
+                serverStartTesting.setAfterBackgroundServicesStartedForTest(() => {
+                    throw new Error("post scheduler failed");
+                });
+                await assert.rejects(
+                    () => handleServerListening(),
+                    /post scheduler failed/u
+                );
+                assert.equal(closeCalled, true);
+                assert.equal(shutdownCalled, true);
+            } finally {
+                if (originalSchedulerNodeEnv === undefined) {
+                    delete process.env.NODE_ENV;
+                } else {
+                    process.env.NODE_ENV = originalSchedulerNodeEnv;
+                }
+                globalThis.setInterval = originalSetInterval;
+            }
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
             await stopScheduledJobScheduler();
             gateway.shutdown = () => {
@@ -944,23 +958,33 @@ describe("server bootstrap", () => {
             serverStartTesting.setAfterBackgroundServicesStartedForTest(() => {
                 throw new Error("post scheduler cleanup failed");
             });
-            await assert.rejects(
-                () => handleServerListening(),
-                /post scheduler cleanup failed/u
-            );
-            await new Promise((resolve) => setImmediate(resolve));
-            assert.equal(
-                errors.some((entry) =>
-                    String(entry[0]).includes("Failed to stop gateway")
-                ),
-                true
-            );
-            assert.equal(
-                errors.some((entry) =>
-                    String(entry[0]).includes("Failed to close server")
-                ),
-                true
-            );
+            const originalCleanupNodeEnv = process.env.NODE_ENV;
+            process.env.NODE_ENV = "production";
+            try {
+                await assert.rejects(
+                    () => handleServerListening(),
+                    /post scheduler cleanup failed/u
+                );
+                await new Promise((resolve) => setImmediate(resolve));
+                assert.equal(
+                    errors.some((entry) =>
+                        String(entry[0]).includes("Failed to stop gateway")
+                    ),
+                    true
+                );
+                assert.equal(
+                    errors.some((entry) =>
+                        String(entry[0]).includes("Failed to close server")
+                    ),
+                    true
+                );
+            } finally {
+                if (originalCleanupNodeEnv === undefined) {
+                    delete process.env.NODE_ENV;
+                } else {
+                    process.env.NODE_ENV = originalCleanupNodeEnv;
+                }
+            }
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
             await stopScheduledJobScheduler();
             gateway.shutdown = originalShutdown;
@@ -977,7 +1001,38 @@ describe("server bootstrap", () => {
                 serverStartTesting.shouldStartScheduledJobs("development"),
                 false
             );
+            assert.equal(serverStartTesting.shouldStartScheduledJobs("test"), false);
+            assert.equal(serverStartTesting.shouldStartScheduledJobs(), false);
             assert.equal(serverStartTesting.shouldStartScheduledJobs("production"), true);
+            const originalProductionCleanupNodeEnv = process.env.NODE_ENV;
+            process.env.NODE_ENV = "production";
+            try {
+                await handleServerListening();
+                server.emit("close");
+                await new Promise((resolve) => setImmediate(resolve));
+            } finally {
+                if (originalProductionCleanupNodeEnv === undefined) {
+                    delete process.env.NODE_ENV;
+                } else {
+                    process.env.NODE_ENV = originalProductionCleanupNodeEnv;
+                }
+                await stopScheduledJobScheduler();
+            }
+            const originalDisableScheduler = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
+            try {
+                process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER = "1";
+                assert.equal(
+                    serverStartTesting.shouldStartScheduledJobs("production"),
+                    false
+                );
+            } finally {
+                if (originalDisableScheduler === undefined) {
+                    delete process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
+                } else {
+                    process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER =
+                        originalDisableScheduler;
+                }
+            }
             const originalNodeEnv = process.env.NODE_ENV;
             let devModeIntervals = 0;
             globalThis.setInterval = ((...args: Parameters<typeof setInterval>) => {

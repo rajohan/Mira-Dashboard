@@ -179,7 +179,29 @@ function formatSyntheticWeeklyRemaining(
         return `${weeklyTokenLimit.remainingCredits} left`;
     }
 
+    if (
+        weeklyTokenLimit.percentRemaining === null ||
+        weeklyTokenLimit.percentRemaining === undefined
+    ) {
+        return "unknown";
+    }
+
     return `${Math.round(weeklyTokenLimit.percentRemaining)}% left`;
+}
+
+function syntheticPercentUsed(quotas: SyntheticQuota): number | null {
+    const candidates = [quotas.rollingFiveHourLimit.percentUsed];
+    if (
+        quotas.weeklyTokenLimit.percentRemaining !== null &&
+        quotas.weeklyTokenLimit.percentRemaining !== undefined
+    ) {
+        candidates.push(100 - quotas.weeklyTokenLimit.percentRemaining);
+    }
+    const finiteCandidates = candidates.filter(
+        (candidate): candidate is number =>
+            typeof candidate === "number" && Number.isFinite(candidate)
+    );
+    return finiteCandidates.length > 0 ? Math.round(Math.max(...finiteCandidates)) : null;
 }
 
 /** Renders the quota overview card UI. */
@@ -237,12 +259,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
                 : `Regen: ${formatSyntheticRegenSegment("5h", quotas.synthetic.rollingFiveHourLimit.nextTickAt, formatSyntheticFiveHourRegenAmount(quotas.synthetic.rollingFiveHourLimit), formatResetTime)} · ${formatSyntheticRegenSegment("weekly", quotas.synthetic.weeklyTokenLimit.nextRegenAt, formatSyntheticWeeklyRegenAmount(quotas.synthetic.weeklyTokenLimit))}`,
             percent: hasQuotaStatus(quotas.synthetic)
                 ? null
-                : Math.round(
-                      Math.max(
-                          quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0,
-                          100 - quotas.synthetic.weeklyTokenLimit.percentRemaining
-                      )
-                  ),
+                : syntheticPercentUsed(quotas.synthetic),
         },
         {
             key: "openai",

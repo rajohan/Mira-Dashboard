@@ -365,7 +365,7 @@ if (process.env.MIRA_FAKE_DOCKER_STOP_IN_CONTAINER_FAIL === "1" && args[0] === "
   process.exit(12);
 }
 if (args[0] === "exec" && args[1] === "app" && args[2] === "sh" && command.includes("sleep")) {
-  process.stdout.write("started long exec\n");
+  process.stdout.write("__MIRA_DOCKER_EXEC_PID__=4321\nstarted long exec\n");
   process.on("SIGTERM", () => process.exit(0));
   setInterval(() => {}, 1000);
   return;

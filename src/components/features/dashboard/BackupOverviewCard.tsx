@@ -110,6 +110,11 @@ export function BackupOverviewCard() {
     const runningWalgJob = walgState?.job?.status === "running" ? walgState.job : null;
     const isRunning = Boolean(runningJob);
     const isWalgRunning = Boolean(runningWalgJob);
+    const isRefreshPending = backupState?.job?.refreshPending === true;
+    const isWalgRefreshPending = walgState?.job?.refreshPending === true;
+    const backupActionDisabled = isRunning || isRefreshPending || runBackup.isPending;
+    const walgActionDisabled =
+        isWalgRunning || isWalgRefreshPending || runWalgBackup.isPending;
 
     /** Responds to run backup events. */
     const handleRunBackup = async () => {
@@ -157,16 +162,16 @@ export function BackupOverviewCard() {
                         <Button
                             type="button"
                             size="sm"
-                            disabled={isWalgRunning || runWalgBackup.isPending}
+                            disabled={walgActionDisabled}
                             onClick={() => {
                                 void handleRunWalgBackup();
                             }}
                             className="w-full sm:w-auto"
                         >
-                            {isWalgRunning ? (
+                            {isWalgRunning || isWalgRefreshPending ? (
                                 <>
                                     <Loader2 className="h-4 w-4 animate-spin" />
-                                    Running...
+                                    {isWalgRunning ? "Running..." : "Refreshing..."}
                                 </>
                             ) : (
                                 <>
@@ -192,14 +197,14 @@ export function BackupOverviewCard() {
                         <Button
                             type="button"
                             size="sm"
-                            disabled={isRunning || runBackup.isPending}
+                            disabled={backupActionDisabled}
                             onClick={() => setIsConfirmOpen(true)}
                             className="w-full sm:w-auto"
                         >
-                            {isRunning ? (
+                            {isRunning || isRefreshPending ? (
                                 <>
                                     <Loader2 className="h-4 w-4 animate-spin" />
-                                    Running...
+                                    {isRunning ? "Running..." : "Refreshing..."}
                                 </>
                             ) : (
                                 <>
@@ -231,6 +236,15 @@ export function BackupOverviewCard() {
                 </div>
             ) : null}
 
+            {!runningWalgJob && isWalgRefreshPending ? (
+                <div className="border-accent-500/30 bg-accent-500/10 text-accent-100 mb-4 rounded-lg border p-3 text-sm">
+                    <div className="flex items-center gap-2 font-medium">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Postgres backup status is refreshing
+                    </div>
+                </div>
+            ) : null}
+
             {runningJob ? (
                 <div className="border-accent-500/30 bg-accent-500/10 text-accent-100 mb-4 rounded-lg border p-3 text-sm">
                     <div className="flex items-center gap-2 font-medium">
@@ -245,6 +259,15 @@ export function BackupOverviewCard() {
                             <pre className="whitespace-pre-wrap">{runningJob.stdout}</pre>
                         </div>
                     ) : null}
+                </div>
+            ) : null}
+
+            {!runningJob && isRefreshPending ? (
+                <div className="border-accent-500/30 bg-accent-500/10 text-accent-100 mb-4 rounded-lg border p-3 text-sm">
+                    <div className="flex items-center gap-2 font-medium">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Backup status is refreshing
+                    </div>
                 </div>
             ) : null}
 

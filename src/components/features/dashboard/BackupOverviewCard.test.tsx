@@ -138,6 +138,7 @@ describe("BackupOverviewCard", () => {
         hooks.useKopiaBackup.mockReturnValue({
             data: {
                 job: {
+                    refreshPending: false,
                     startedAt: Date.now() - 30_000,
                     status: "running",
                     stdout: "kopia scanning files",
@@ -147,6 +148,7 @@ describe("BackupOverviewCard", () => {
         hooks.useWalgBackup.mockReturnValue({
             data: {
                 job: {
+                    refreshPending: false,
                     startedAt: Date.now() - 45_000,
                     status: "running",
                     stdout: "walg uploading base backup",
@@ -167,6 +169,7 @@ describe("BackupOverviewCard", () => {
         hooks.useKopiaBackup.mockReturnValue({
             data: {
                 job: {
+                    refreshPending: false,
                     startedAt: Date.now() - 30_000,
                     status: "running",
                     stdout: "",
@@ -176,6 +179,7 @@ describe("BackupOverviewCard", () => {
         hooks.useWalgBackup.mockReturnValue({
             data: {
                 job: {
+                    refreshPending: false,
                     startedAt: Date.now() - 45_000,
                     status: "running",
                     stdout: "",
@@ -186,6 +190,39 @@ describe("BackupOverviewCard", () => {
         expect(screen.getAllByText(/backup is running/iu).length).toBeGreaterThanOrEqual(
             2
         );
+    });
+
+    it("disables backup actions while status refresh is pending", () => {
+        hooks.useKopiaBackup.mockReturnValue({
+            data: {
+                job: {
+                    refreshPending: true,
+                    startedAt: Date.now() - 30_000,
+                    status: "done",
+                    stdout: "kopia complete",
+                },
+            },
+        });
+        hooks.useWalgBackup.mockReturnValue({
+            data: {
+                job: {
+                    refreshPending: true,
+                    startedAt: Date.now() - 45_000,
+                    status: "done",
+                    stdout: "walg complete",
+                },
+            },
+        });
+
+        render(<BackupOverviewCard />);
+
+        expect(
+            screen.getByText("Postgres backup status is refreshing")
+        ).toBeInTheDocument();
+        expect(screen.getByText("Backup status is refreshing")).toBeInTheDocument();
+        for (const button of screen.getAllByRole("button", { name: "Refreshing..." })) {
+            expect(button).toBeDisabled();
+        }
     });
 
     it("renders loading and empty states", () => {

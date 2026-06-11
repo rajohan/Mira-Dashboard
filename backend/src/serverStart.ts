@@ -106,7 +106,9 @@ async function closeServerForRollback(): Promise<void> {
 }
 
 function shouldStartScheduledJobs(nodeEnv = process.env.NODE_ENV): boolean {
-    return nodeEnv !== "development";
+    const isProduction = nodeEnv === "production";
+    const schedulerDisabled = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER === "1";
+    return isProduction && !schedulerDisabled;
 }
 
 /** Starts Gateway and production background services after the HTTP server is listening. */

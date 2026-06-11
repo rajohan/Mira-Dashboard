@@ -1252,11 +1252,13 @@ setTimeout(() => process.exit(0), 30);
         });
     });
 
-    it("does not block a manual update on unrelated registry failures", async () => {
+    it("does not block a manual update on unrelated registry or discovery failures", async () => {
         const appsRoot = path.join(tempDir, "apps");
         const appDir = path.join(appsRoot, "manual-scope");
+        const brokenAppDir = path.join(appsRoot, "broken-scope");
         const binDir = path.join(tempDir, "bin");
         await mkdir(appDir, { recursive: true });
+        await mkdir(brokenAppDir, { recursive: true });
         await mkdir(binDir);
         const composePath = path.join(appDir, "compose.yaml");
         await writeFile(
@@ -1272,6 +1274,7 @@ setTimeout(() => process.exit(0), 30);
 `,
             "utf8"
         );
+        await writeFile(path.join(brokenAppDir, "compose.yaml"), "services: [", "utf8");
         await writeExecutable(
             path.join(binDir, "docker"),
             "#!/usr/bin/env node\nprocess.exit(0);\n"
@@ -1299,20 +1302,125 @@ setTimeout(() => process.exit(0), 30);
 
         await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
             const updater = await import(`./dockerUpdater.js?manual-scope=${Date.now()}`);
+            assert.deepEqual(
+                [...updater.__testing.failedDiscoveryAppSlugs({ stderr: "" })],
+                []
+            );
+            assert.deepEqual(
+                [
+                    ...updater.__testing.failedDiscoveryAppSlugs({
+                        stderr: JSON.stringify({
+                            failed: [{ appSlug: "selected" }, { appSlug: 123 }, {}],
+                        }),
+                    }),
+                ],
+                ["selected"]
+            );
+            assert.deepEqual(
+                [
+                    ...updater.__testing.failedDiscoveryAppSlugs({
+                        stderr: JSON.stringify({ ok: false }),
+                    }),
+                ],
+                []
+            );
+            assert.deepEqual(
+                [
+                    ...updater.__testing.failedDiscoveryAppSlugs({
+                        stderr: "not json",
+                    }),
+                ],
+                ["*"]
+            );
+            assert.equal(
+                updater.__testing.shouldBlockManualUpdateForDiscoveryFailure(
+                    {
+                        step: "register-services",
+                        ok: true,
+                        code: null,
+                        stdout: "",
+                        stderr: "",
+                    },
+                    "selected"
+                ),
+                false
+            );
+            assert.equal(
+                updater.__testing.shouldBlockManualUpdateForDiscoveryFailure(
+                    {
+                        step: "register-services",
+                        ok: false,
+                        code: "PARTIAL_FAILURE",
+                        stdout: "",
+                        stderr: JSON.stringify({ failed: [{ appSlug: "selected" }] }),
+                    },
+                    "selected"
+                ),
+                true
+            );
             await updater.registerDockerUpdaterServices();
             const service = dbHandle
                 .prepare(
                     "SELECT id FROM docker_managed_services WHERE service_name = 'target'"
                 )
                 .get() as { id: number };
-            const steps = await updater.runDockerUpdaterService(service.id);
-            assert.equal(
-                (steps as StepResult[]).every((step) => step.ok),
-                true
-            );
+            const steps = (await updater.runDockerUpdaterService(
+                service.id
+            )) as StepResult[];
+            assert.equal(steps[0]?.step, "register-services");
+            assert.equal(steps[0]?.ok, false);
+            assert.equal(steps.at(-1)?.step, "manual-update:manual-scope/target");
+            assert.equal(steps.at(-1)?.ok, true);
         });
 
         assert.match(await readFile(composePath, "utf8"), /image: nginx:2/u);
+    });
+
+    it("blocks a manual update when discovery cannot classify failed apps", async () => {
+        const appsRoot = path.join(tempDir, "apps");
+        const appDir = path.join(appsRoot, "unavailable-apps-root");
+        await mkdir(appDir, { recursive: true });
+        const composePath = path.join(appDir, "compose.yaml");
+        await writeFile(
+            composePath,
+            `services:
+  target:
+    image: nginx:1
+    labels:
+      mira.updater.tagPattern: "^[0-9]+$"
+      mira.updater.tagPatternIsRegex: "true"
+`,
+            "utf8"
+        );
+
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
+            const updater = await import(
+                `./dockerUpdater.js?unavailable-apps-root=${Date.now()}`
+            );
+            await updater.registerDockerUpdaterServices();
+            const service = dbHandle
+                .prepare(
+                    "SELECT id FROM docker_managed_services WHERE service_name = 'target'"
+                )
+                .get() as { id: number };
+            await rm(appsRoot, { recursive: true, force: true });
+            await writeFile(appsRoot, "not a directory", "utf8");
+            const steps = (await updater.runDockerUpdaterService(
+                service.id
+            )) as StepResult[];
+            assert.equal(steps[0]?.step, "register-services");
+            assert.equal(steps[0]?.ok, false);
+            assert.equal(
+                steps.at(-1)?.step,
+                "manual-update:unavailable-apps-root/target"
+            );
+            assert.equal(steps.at(-1)?.ok, false);
+            assert.equal(steps.at(-1)?.code, "CONFLICT");
+            assert.equal(
+                steps.at(-1)?.stderr,
+                "Docker updater discovery failed for the selected service"
+            );
+        });
     });
 
     it("reports unsupported registries for registered manual services", async () => {
