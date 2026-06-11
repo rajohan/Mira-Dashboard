@@ -535,6 +535,7 @@ async function createNoFollowFile(
         mode
     );
     try {
+        await handle.chmod(mode);
         if (owner) {
             const created = await handle.stat();
             if (created.uid !== owner.uid || created.gid !== owner.gid) {

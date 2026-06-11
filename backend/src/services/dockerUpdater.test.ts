@@ -2402,11 +2402,16 @@ setTimeout(() => process.exit(0), 30);
             /network down/u
         );
 
+        const noChallengeDrained: string[] = [];
         globalThis.fetch = (async () =>
             ({
                 ok: false,
                 status: 401,
                 headers: new Headers(),
+                arrayBuffer: async () => {
+                    noChallengeDrained.push("401");
+                    return new ArrayBuffer(0);
+                },
                 json: async () => ({}),
             }) as Response) as typeof fetch;
         await assert.rejects(
@@ -2416,7 +2421,9 @@ setTimeout(() => process.exit(0), 30);
                 ),
             /HTTP 401/u
         );
+        assert.deepEqual(noChallengeDrained, ["401"]);
 
+        const authFailureDrained: string[] = [];
         globalThis.fetch = (async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();
             if (url.startsWith("https://ghcr.io/token")) {
@@ -2424,6 +2431,10 @@ setTimeout(() => process.exit(0), 30);
                     ok: false,
                     status: 503,
                     headers: new Headers(),
+                    arrayBuffer: async () => {
+                        authFailureDrained.push("token");
+                        return new ArrayBuffer(0);
+                    },
                     json: async () => ({}),
                 } as Response;
             }
@@ -2434,6 +2445,10 @@ setTimeout(() => process.exit(0), 30);
                     "www-authenticate":
                         'Bearer realm="https://ghcr.io/token",service="ghcr.io"',
                 }),
+                arrayBuffer: async () => {
+                    authFailureDrained.push("challenge");
+                    return new ArrayBuffer(0);
+                },
                 json: async () => ({}),
             } as Response;
         }) as typeof fetch;
@@ -2444,6 +2459,7 @@ setTimeout(() => process.exit(0), 30);
                 ),
             /HTTP 401/u
         );
+        assert.deepEqual(authFailureDrained, ["challenge", "token"]);
 
         globalThis.fetch = (async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();

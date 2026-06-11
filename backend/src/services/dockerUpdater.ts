@@ -15,6 +15,7 @@ const execFileAsync = promisify(execFile);
 const SUPPORTED_REGISTRIES = new Set(["docker.io", "ghcr.io"]);
 const MAX_REGISTRY_TAG_PAGES = 50;
 const composeUpdateLocks = new Map<string, Promise<void>>();
+const drainedRegistryResponses = new WeakSet<Response>();
 
 function getDockerBin(): string {
     return nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
@@ -251,6 +252,13 @@ function parseBearerChallenge(header: string | null): Record<string, string> | n
     return Object.fromEntries(params);
 }
 
+async function drainResponseBody(response: Response): Promise<void> {
+    if (drainedRegistryResponses.has(response)) return;
+    drainedRegistryResponses.add(response);
+    if (typeof response.arrayBuffer !== "function") return;
+    await response.arrayBuffer().catch(() => {});
+}
+
 async function fetchRegistryResponse(
     url: string,
     options: RegistryFetchOptions = {}
@@ -271,6 +279,7 @@ async function fetchRegistryResponse(
         if (!challenge?.realm) {
             return { response, clearTimer };
         }
+        await drainResponseBody(response);
         const tokenUrl = new URL(challenge.realm);
         if (challenge.service) tokenUrl.searchParams.set("service", challenge.service);
         if (challenge.scope) tokenUrl.searchParams.set("scope", challenge.scope);
@@ -282,6 +291,7 @@ async function fetchRegistryResponse(
             signal: controller.signal,
         });
         if (!tokenResponse.ok) {
+            await drainResponseBody(tokenResponse);
             return { response, clearTimer };
         }
         const tokenBody = asRecord(await tokenResponse.json());
@@ -336,6 +346,7 @@ async function fetchRegistryJsonWithHeaders(
     try {
         const { response, clearTimer } = await fetchRegistryResponse(url, options);
         if (!response.ok) {
+            await drainResponseBody(response);
             clearTimer();
             throw new Error(`HTTP ${response.status} for ${url}`);
         }

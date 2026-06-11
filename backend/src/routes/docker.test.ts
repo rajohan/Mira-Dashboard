@@ -1031,6 +1031,68 @@ describe("docker routes", { concurrency: false }, () => {
         try {
             __testing.setDockerUpdaterServiceRunnerForTests(async () => [
                 {
+                    step: "poll",
+                    ok: false,
+                    code: "UNSUPPORTED_REGISTRY",
+                    stdout: "",
+                    stderr: "Unsupported image registry: example.com",
+                },
+            ]);
+            assert.deepEqual(
+                await __testing.runManualUpdaterForService({
+                    id: 33,
+                    appSlug: "media",
+                    serviceName: "app",
+                    imageRepo: "example.com/repo/app",
+                    composeImageRef: "example.com/repo/app:1",
+                    currentTag: "1",
+                    currentDigest: null,
+                    latestTag: null,
+                    latestDigest: null,
+                    policy: "notify",
+                    pinMode: "tag",
+                    enabled: true,
+                    lastCheckedAt: null,
+                    lastUpdatedAt: null,
+                    lastStatus: "unsupported_registry",
+                    updateAvailable: false,
+                    metadata: {},
+                }),
+                {
+                    success: false,
+                    code: "UNSUPPORTED_REGISTRY",
+                    output: {},
+                    stderr: "Unsupported image registry: example.com",
+                    steps: [
+                        {
+                            step: "poll",
+                            ok: false,
+                            code: "UNSUPPORTED_REGISTRY",
+                            stdout: "",
+                            stderr: "Unsupported image registry: example.com",
+                        },
+                    ],
+                }
+            );
+        } finally {
+            __testing.setDockerUpdaterServiceRunnerForTests();
+        }
+        try {
+            __testing.setDockerUpdaterServiceRunnerForTests(async () => [
+                {
+                    step: "register-services",
+                    ok: false,
+                    code: "PARTIAL_FAILURE",
+                    stdout: "",
+                    stderr: "Unrelated compose discovery failed",
+                },
+                {
+                    step: "poll",
+                    ok: true,
+                    stdout: "",
+                    stderr: "",
+                },
+                {
                     step: "manual-update:media/app",
                     ok: true,
                     stdout: "updated",
@@ -1071,6 +1133,19 @@ describe("docker routes", { concurrency: false }, () => {
                     updated: [4],
                     failed: [],
                     steps: [
+                        {
+                            step: "register-services",
+                            ok: false,
+                            code: "PARTIAL_FAILURE",
+                            stdout: "",
+                            stderr: "Unrelated compose discovery failed",
+                        },
+                        {
+                            step: "poll",
+                            ok: true,
+                            stdout: "",
+                            stderr: "",
+                        },
                         {
                             step: "manual-update:media/app",
                             ok: true,

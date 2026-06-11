@@ -834,13 +834,21 @@ async function runManualUpdaterForService(
     }
     const serviceId = service.id;
     const steps = await runDockerUpdaterServiceForRoutes(serviceId);
-    if (steps.some((step) => !step.ok)) {
-        const stderr = steps
-            .filter((step) => !step.ok)
+    const manualStep = [...steps]
+        .reverse()
+        .find((step) => step.step.startsWith("manual-update"));
+    const failedSteps =
+        manualStep && manualStep.ok
+            ? []
+            : manualStep
+              ? [manualStep]
+              : steps.filter((step) => !step.ok);
+    if (failedSteps.length > 0) {
+        const stderr = failedSteps
             .map((step) => step.stderr)
             .filter(Boolean)
             .join("\n");
-        const stepCode = firstFailedStepCode(steps);
+        const stepCode = firstFailedStepCode(failedSteps);
         return {
             success: false,
             code: manualUpdaterFailureCode(stepCode),

@@ -483,14 +483,23 @@ describe("log rotation service", { concurrency: false }, () => {
             await __testing.resolveGlob(path.join(tempDir, "missing.log")),
             []
         );
+        const modeFile = path.join(tempDir, "mode.log");
+        const modeHandle = await __testing.createNoFollowFile(modeFile, 0o666);
+        await modeHandle.close();
+        const modeFileStats = await fsPromises.stat(modeFile);
+        assert.equal(modeFileStats.mode & 0o777, 0o666);
         const noOwnerFile = path.join(tempDir, "no-owner.log");
         const noOwnerHandle = await __testing.createNoFollowFile(noOwnerFile, 0o600);
         await noOwnerHandle.close();
         assert.equal(await readFile(noOwnerFile, "utf8"), "");
         const ownerFile = path.join(tempDir, "owner.log");
         const chownCalls: Array<{ uid: number; gid: number }> = [];
+        const chmodCalls: number[] = [];
         const closeCalls: string[] = [];
         mock.method(fsPromises, "open", async () => ({
+            chmod: async (mode: number) => {
+                chmodCalls.push(mode);
+            },
             chown: async (uid: number, gid: number) => {
                 chownCalls.push({ uid, gid });
             },
@@ -504,10 +513,12 @@ describe("log rotation service", { concurrency: false }, () => {
             gid: 456,
         });
         await ownerHandle.close();
+        assert.deepEqual(chmodCalls, [0o600]);
         assert.deepEqual(chownCalls, [{ uid: 123, gid: 456 }]);
         assert.deepEqual(closeCalls, [ownerFile]);
         mock.restoreAll();
         mock.method(fsPromises, "open", async () => ({
+            chmod: async () => {},
             close: async () => {
                 closeCalls.push("failed-owner");
             },
