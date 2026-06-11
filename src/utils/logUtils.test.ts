@@ -10,7 +10,7 @@ import {
 describe("log utils", () => {
     it("ignores blank log lines", () => {
         expect(parseLogLine("")).toBeNull();
-        expect(parseLogLine("   ")).toBeNull();
+        expect(parseLogLine(" ".repeat(3))).toBeNull();
     });
 
     it("parses structured JSON logs", () => {

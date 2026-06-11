@@ -56,8 +56,17 @@ const MAX_BACKUP_COPY_BYTES = 2 * 1024 * 1024;
 const JSON_PARSER_SIZE_HEADROOM = MAX_FILE_SIZE * 2;
 const JSON_WRITE_BODY_LIMIT = MAX_FILE_SIZE + JSON_PARSER_SIZE_HEADROOM;
 const HARD_LINK_ERROR = "Access denied: hard links are not supported";
+const FILE_OPEN_NOT_FOUND_ERROR_CODES = new Set([
+    "ENOENT",
+    "ENOTDIR",
+    "ERR_INVALID_ARG_VALUE",
+]);
 let listDirectoryRealpathSync = fs.realpathSync;
 let procSelfFdPath = "/proc/self/fd";
+
+function isFileOpenNotFoundErrorCode(code: string | undefined): boolean {
+    return code !== undefined && FILE_OPEN_NOT_FOUND_ERROR_CODES.has(code);
+}
 
 /** Represents file item. */
 interface FileItem {
@@ -401,11 +410,7 @@ export default function filesRoutes(
                         await file.close();
                     }
                     const code = (error as NodeJS.ErrnoException).code;
-                    if (
-                        code === "ENOENT" ||
-                        code === "ENOTDIR" ||
-                        code === "ERR_INVALID_ARG_VALUE"
-                    ) {
+                    if (isFileOpenNotFoundErrorCode(code)) {
                         res.status(404).json({ error: "File not found" });
                         return;
                     }

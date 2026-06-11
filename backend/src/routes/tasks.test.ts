@@ -139,7 +139,10 @@ describe("tasks routes", () => {
         assert.equal(__testing.serializeTaskEventPayload(missingPayload), "null");
         assert.equal(__testing.normalizeAutomationInput(null), "{}");
         assert.equal(__testing.normalizeAutomationInput([]), "{}");
-        assert.equal(__testing.normalizeAutomationInput({ cronJobId: "   " }), "{}");
+        assert.equal(
+            __testing.normalizeAutomationInput({ cronJobId: " ".repeat(3) }),
+            "{}"
+        );
         assert.deepEqual(__testing.normalizeCronJobs({ jobs: [{ id: "job-1" }] }), [
             { id: "job-1" },
         ]);
@@ -493,7 +496,7 @@ describe("tasks routes", () => {
             {
                 method: "PATCH",
                 body: {
-                    title: "   ",
+                    title: " ".repeat(3),
                     body: "Updated body",
                     labels: ["done", "priority-low"],
                     automation: null,

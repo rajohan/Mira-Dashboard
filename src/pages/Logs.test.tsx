@@ -181,7 +181,7 @@ function mockLogs(overrides = {}) {
 describe("Logs helpers", () => {
     it("recognizes named log files and sorts names descending", () => {
         expect(isNamedLogFile({ name: "openclaw.log" })).toBe(true);
-        expect(isNamedLogFile({ name: "   " })).toBe(false);
+        expect(isNamedLogFile({ name: " ".repeat(3) })).toBe(false);
         expect(isNamedLogFile(null)).toBe(false);
         expect(isNamedLogFile({ name: 123 })).toBe(false);
         expect(

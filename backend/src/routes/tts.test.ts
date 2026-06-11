@@ -73,7 +73,9 @@ describe("TTS routes", () => {
         assert.equal(noKey.body.error, "ELEVENLABS_API_KEY is not configured");
 
         process.env.ELEVENLABS_API_KEY = "test-key";
-        const missingText = await postJson<{ error: string }>(server, { text: "   " });
+        const missingText = await postJson<{ error: string }>(server, {
+            text: " ".repeat(3),
+        });
         assert.equal(missingText.status, 400);
         assert.equal(missingText.body.error, "Missing text");
 

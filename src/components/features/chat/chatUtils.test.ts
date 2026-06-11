@@ -45,7 +45,7 @@ describe("chat utils", () => {
             "Trimmed failure"
         );
         const emptyError = new Error("empty");
-        emptyError.message = "   ";
+        emptyError.message = " ".repeat(3);
         expect(chatErrorMessage(emptyError, "Fallback")).toBe("Fallback");
         expect(chatErrorMessage("bad", "Fallback")).toBe("Fallback");
     });

@@ -1,4 +1,4 @@
-import type { ChatHistoryMessage } from "./chatTypes";
+import { type ChatHistoryMessage, TOOL_ROLE_VARIANTS } from "./chatTypes";
 
 /** Defines max attachment bytes. */
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
@@ -80,8 +80,7 @@ export function messageIdentity(message: ChatHistoryMessage): string {
     const role = message.role.toLowerCase();
     const diagnosticIdentity = diagnosticMessageIdentity(message);
     const textIdentity = message.text.trim();
-    const isToolResultRole =
-        role === "tool" || role === "tool_result" || role === "toolresult";
+    const isToolResultRole = TOOL_ROLE_VARIANTS.includes(role);
     const identity = isToolResultRole
         ? diagnosticIdentity || textIdentity
         : textIdentity || diagnosticIdentity;

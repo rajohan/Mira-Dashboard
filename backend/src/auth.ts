@@ -70,7 +70,7 @@ function normalizeUsername(username: string): string {
 function isProduction(request?: IncomingMessage): boolean {
     const forwardedProto = request?.headers["x-forwarded-proto"];
     if (typeof forwardedProto === "string") {
-        return forwardedProto.split(",")[0]?.trim() === "https";
+        return forwardedProto.split(",", 1)[0]?.trim() === "https";
     }
     return process.env.NODE_ENV === "production";
 }
@@ -81,7 +81,7 @@ function isLoopbackAddress(address?: string | null): boolean {
         return false;
     }
 
-    return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+    return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address);
 }
 
 /** Returns whether loopback request. */

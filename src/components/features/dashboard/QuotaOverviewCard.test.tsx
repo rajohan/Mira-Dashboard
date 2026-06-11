@@ -320,7 +320,7 @@ describe("QuotaOverviewCard", () => {
                 return new RealDate(Number.NaN);
             }
 
-            if (this instanceof MockDate) {
+            if (new.target) {
                 return Reflect.construct(RealDate, args, MockDate);
             }
 
