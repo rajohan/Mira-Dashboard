@@ -128,6 +128,14 @@ function validateConfig(config: LogRotationConfig): void {
     if (!config || typeof config !== "object") {
         throw new Error("Config must be an object");
     }
+    if (
+        config.defaults !== undefined &&
+        (config.defaults === null ||
+            typeof config.defaults !== "object" ||
+            Array.isArray(config.defaults))
+    ) {
+        throw new Error("Config defaults must be an object");
+    }
     if (config.version !== 1) {
         throw new Error("Config version must be 1");
     }
@@ -545,6 +553,7 @@ async function gzipFile(filePath: string, approvedRoots: string[]): Promise<stri
     const source = await openVerifiedFile(filePath, approvedRoots, constants.O_RDONLY);
     const gzPath = `${filePath}.gz`;
     let destination: fs.FileHandle | null = null;
+    let sourceRemoved = false;
     try {
         await assertSafeNewFileParent(gzPath, approvedRoots);
         destination = await createNoFollowFile(gzPath, source.stat.mode & 0o777, {
@@ -569,12 +578,14 @@ async function gzipFile(filePath: string, approvedRoots: string[]): Promise<stri
         await destination.close();
         destination = null;
         await unlinkVerified(filePath, approvedRoots);
+        sourceRemoved = true;
         await source.handle.close();
         return gzPath;
     } catch (error) {
         await destination?.close().catch(() => {});
         await source.handle.close().catch(() => {});
         if (
+            !sourceRemoved &&
             !(
                 error instanceof Error &&
                 "code" in error &&

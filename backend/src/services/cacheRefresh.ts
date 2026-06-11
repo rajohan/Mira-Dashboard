@@ -845,8 +845,8 @@ export async function refreshGitCache() {
         if (!inside.ok) {
             repos.push({
                 ...repo,
-                exists: null,
-                dirty: true,
+                exists: false,
+                dirty: false,
                 error: inside.output,
             });
             continue;
@@ -869,8 +869,8 @@ export async function refreshGitCache() {
         const porcelain = statusShort.ok
             ? statusShort.output.split("\n").filter(Boolean)
             : [];
-        const statusSummary = summarizeStatus(porcelain);
-        const dirty = statusShort.ok ? statusSummary.total > 0 : true;
+        const statusSummary = statusShort.ok ? summarizeStatus(porcelain) : undefined;
+        const dirty = statusSummary ? statusSummary.total > 0 : true;
         repos.push({
             ...repo,
             exists: true,
@@ -880,7 +880,7 @@ export async function refreshGitCache() {
                 ? sanitizeRemoteUrl(remote.output.split(/\s+/u)[1] || null)
                 : null,
             dirty,
-            statusSummary,
+            ...(statusSummary ? { statusSummary } : {}),
             statusShort: porcelain.slice(0, 25),
             statusTruncated: porcelain.length > 25,
             ...(statusShort.ok ? {} : { statusError: statusShort.output }),

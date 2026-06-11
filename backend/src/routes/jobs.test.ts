@@ -450,6 +450,8 @@ test("covers jobs route status fallback helper", () => {
     assert.equal(jobsRouteTesting.httpStatusCode({ statusCode: 409 }), 409);
     assert.equal(jobsRouteTesting.httpStatusCode({ statusCode: Number.NaN }), 500);
     assert.equal(jobsRouteTesting.httpStatusCode({ statusCode: 99 }), 500);
+    assert.equal(jobsRouteTesting.httpStatusCode({ statusCode: 200 }), 500);
+    assert.equal(jobsRouteTesting.httpStatusCode({ statusCode: 399 }), 500);
     assert.equal(jobsRouteTesting.httpStatusCode({ statusCode: 600 }), 500);
     assert.equal(jobsRouteTesting.httpStatusCode(new Error("plain")), 500);
 

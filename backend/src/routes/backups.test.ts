@@ -197,7 +197,7 @@ async function waitForRefresh(
 
 describe("backup routes", () => {
     let server: TestServer;
-    let tempDir: string;
+    let tempDir = "";
     const refreshedKeys: string[] = [];
 
     before(async () => {
@@ -220,13 +220,17 @@ describe("backup routes", () => {
         backupTesting.clearJobsForTest();
         backupTesting.setRefreshBackupCacheForTest();
         backupTesting.setBackupRefreshTimeoutMsForTest();
-        await server.close();
+        if (server) {
+            await server.close();
+        }
         if (originalBackupShell === undefined) {
             delete process.env.MIRA_BACKUP_SHELL;
         } else {
             process.env.MIRA_BACKUP_SHELL = originalBackupShell;
         }
-        await rm(tempDir, { recursive: true, force: true });
+        if (typeof tempDir === "string" && tempDir) {
+            await rm(tempDir, { recursive: true, force: true });
+        }
     });
 
     it("reports no active backup jobs initially", async () => {

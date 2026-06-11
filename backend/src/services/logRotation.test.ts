@@ -220,6 +220,30 @@ describe("log rotation service", { concurrency: false }, () => {
                     dryRun: true,
                     config: await writeConfig(tempDir, {
                         version: 1,
+                        defaults: ["*.log"],
+                        groups: [{ name: "invalid", paths: ["*.log"] }],
+                    }),
+                }),
+            /Config defaults must be an object/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
+                        defaults: "not an object",
+                        groups: [{ name: "invalid", paths: ["*.log"] }],
+                    }),
+                }),
+            /Config defaults must be an object/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
                         groups: [
                             {
                                 name: "invalid",
@@ -739,6 +763,53 @@ describe("log rotation service", { concurrency: false }, () => {
             await assert.rejects(() => fsPromises.access(`${gzipDeniedSource}.gz`));
         } finally {
             openMock.mock.restore();
+        }
+        const gzipCloseFailureSource = path.join(tempDir, "gzip-close-source.log");
+        await writeFile(gzipCloseFailureSource, "close failure", "utf8");
+        const originalCloseFailureOpen = fsPromises.open.bind(fsPromises);
+        let threwSourceClose = false;
+        let gzipCloseFailureSourceOpenCount = 0;
+        const closeFailureOpenMock = mock.method(
+            fsPromises,
+            "open",
+            async (
+                target: Parameters<typeof fsPromises.open>[0],
+                flags?: Parameters<typeof fsPromises.open>[1],
+                mode?: Parameters<typeof fsPromises.open>[2]
+            ) => {
+                const handle = await originalCloseFailureOpen(target, flags, mode);
+                if (String(target) === gzipCloseFailureSource) {
+                    gzipCloseFailureSourceOpenCount += 1;
+                }
+                if (
+                    String(target) === gzipCloseFailureSource &&
+                    gzipCloseFailureSourceOpenCount === 1
+                ) {
+                    const originalClose = handle.close.bind(handle);
+                    handle.close = (async () => {
+                        await originalClose();
+                        if (!threwSourceClose) {
+                            threwSourceClose = true;
+                            throw new Error("source close failed");
+                        }
+                    }) as typeof handle.close;
+                }
+                return handle;
+            }
+        );
+        try {
+            await assert.rejects(
+                () => __testing.gzipFile(gzipCloseFailureSource, [tempDir]),
+                /source close failed/u
+            );
+            await assert.rejects(() => fsPromises.access(gzipCloseFailureSource));
+            const gzipCloseFailureArchive = await readFile(
+                `${gzipCloseFailureSource}.gz`
+            );
+            assert.equal(gzipCloseFailureArchive.byteLength > 0, true);
+        } finally {
+            closeFailureOpenMock.mock.restore();
+            await rm(`${gzipCloseFailureSource}.gz`, { force: true });
         }
         try {
             const unlinkMock = mock.method(fsPromises, "unlink", async () => {

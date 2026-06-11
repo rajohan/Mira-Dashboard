@@ -1136,6 +1136,10 @@ else if (command === "status --short") {
             /git -C .*mira-dashboard status --short/u
         );
         assert.equal(
+            data.repos.find((repo) => repo.key === "mira-dashboard")?.statusSummary,
+            undefined
+        );
+        assert.equal(
             data.repos.find((repo) => repo.key === "openclaw")?.statusSummary?.total,
             5
         );
@@ -1177,6 +1181,8 @@ else if (command === "status --short") process.stdout.write("");
         await refreshCacheProducer("git.workspace");
 
         const data = cacheRow("git.workspace").data as {
+            dirtyRepos: string[];
+            missingRepos: string[];
             repos: Array<{
                 key: string;
                 branch?: string | null;
@@ -1185,6 +1191,7 @@ else if (command === "status --short") process.stdout.write("");
                 exists?: boolean;
                 head?: string | null;
                 remote?: string | null;
+                statusSummary?: { total: number };
             }>;
         };
         const openclaw = data.repos.find((repo) => repo.key === "openclaw");
@@ -1195,10 +1202,14 @@ else if (command === "status --short") process.stdout.write("");
         assert.equal(dashboard?.branch, null);
         assert.equal(dashboard?.head, null);
         assert.equal(dashboard?.remote, null);
+        assert.equal(dashboard?.dirty, true);
+        assert.equal(dashboard?.statusSummary, undefined);
         const docker = data.repos.find((repo) => repo.key === "docker");
-        assert.equal(docker?.dirty, true);
-        assert.equal(docker?.exists, null);
+        assert.equal(docker?.dirty, false);
+        assert.equal(docker?.exists, false);
         assert.match(docker?.error ?? "", /git -C .* rev-parse --is-inside-work-tree/u);
+        assert.deepEqual(data.dirtyRepos, ["mira-dashboard"]);
+        assert.deepEqual(data.missingRepos, ["docker"]);
     });
 
     it("refreshes system, backup, quota, and producer-dispatch caches", async () => {

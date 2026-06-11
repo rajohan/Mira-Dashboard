@@ -470,7 +470,7 @@ async function lookupDockerHub(service: ManagedServiceRow) {
     } else if (service.tag_match_pattern) {
         latestTag = service.tag_match_pattern;
     }
-    let latestDigest = service.current_digest;
+    let latestDigest: string | null = null;
     if (latestTag) {
         const tagData = await fetchJson(
             `https://hub.docker.com/v2/repositories/${repo}/tags/${encodeURIComponent(latestTag)}`
@@ -516,7 +516,7 @@ async function lookupGhcr(service: ManagedServiceRow) {
         tag = candidates.at(-1) ?? tag;
     }
     if (!tag) {
-        return { latestTag: service.current_tag, latestDigest: service.current_digest };
+        return { latestTag: null, latestDigest: null };
     }
     const { body, headers } = await fetchRegistryJsonWithHeaders(
         `https://ghcr.io/v2/${repo}/manifests/${tag}`,
@@ -776,7 +776,10 @@ async function applyComposeUpdateUnlocked(
         );
     }
     const composeImageField = service.compose_image_field;
-    const composePath = service.compose_path;
+    const configuredComposePath = service.compose_path;
+    const composePath = fs.lstatSync(configuredComposePath).isSymbolicLink()
+        ? fs.realpathSync(configuredComposePath)
+        : configuredComposePath;
     const raw = fs.readFileSync(composePath, "utf8");
     const originalStats = fs.statSync(composePath);
     const doc = YAML.parse(raw) as JsonRecord;
@@ -1419,6 +1422,24 @@ export async function runDockerUpdaterService(
             .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
             .get(serviceId) as ManagedServiceRow | undefined;
         if (!service) {
+            if (
+                requestedService &&
+                shouldBlockManualUpdateForDiscoveryFailure(
+                    register,
+                    requestedService.app_slug
+                )
+            ) {
+                return [
+                    register,
+                    {
+                        step: `manual-update:${serviceLabel(requestedService)}`,
+                        ok: false,
+                        code: "CONFLICT",
+                        stdout: "",
+                        stderr: "Docker updater discovery failed for the selected service",
+                    },
+                ];
+            }
             return [
                 register,
                 {

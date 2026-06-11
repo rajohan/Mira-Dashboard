@@ -1326,7 +1326,9 @@ export default function dockerRoutes(app: express.Application): void {
 
             const result = await runManualUpdaterForService(service);
             const refreshedService = await getDockerUpdaterServiceById(service.id);
-            const updatedService = refreshedService ?? null;
+            const updatedService = result.success
+                ? (refreshedService ?? service)
+                : refreshedService;
             res.status(
                 result.success ? 200 : manualUpdaterFailureStatus(result.code)
             ).json({

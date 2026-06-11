@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+    chmod,
+    mkdir,
+    mkdtemp,
+    readFile,
+    rm,
+    stat,
+    symlink,
+    writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, afterEach, before, beforeEach, describe, it, mock } from "node:test";
@@ -1423,6 +1432,45 @@ setTimeout(() => process.exit(0), 30);
         });
     });
 
+    it("keeps discovery failure conflicts when registration deletes the selected service", async () => {
+        const appsRoot = path.join(tempDir, "apps");
+        const appDir = path.join(appsRoot, "failed-selected");
+        await mkdir(appDir, { recursive: true });
+        const composePath = path.join(appDir, "compose.yaml");
+        await writeFile(composePath, "services:\n  target: [unterminated\n", "utf8");
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                762, 'failed-selected', 'target', ?, 'nginx',
+                'nginx:1', 'services.target.image', '1', NULL,
+                '2', NULL, 'notify', 'tag', 'exact', '1', 1, '{}'
+            )`
+            )
+            .run(composePath);
+
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
+            const updater = await import(
+                `./dockerUpdater.js?failed-selected=${Date.now()}`
+            );
+            const steps = (await updater.runDockerUpdaterService(762)) as StepResult[];
+
+            assert.equal(steps[0]?.step, "register-services");
+            assert.equal(steps[0]?.ok, false);
+            assert.equal(steps.at(-1)?.step, "manual-update:failed-selected/target");
+            assert.equal(steps.at(-1)?.ok, false);
+            assert.equal(steps.at(-1)?.code, "CONFLICT");
+            assert.equal(
+                steps.at(-1)?.stderr,
+                "Docker updater discovery failed for the selected service"
+            );
+        });
+    });
+
     it("reports unsupported registries for registered manual services", async () => {
         const appsRoot = path.join(tempDir, "apps");
         const appDir = path.join(appsRoot, "unsupported-compose");
@@ -2234,7 +2282,7 @@ setTimeout(() => process.exit(0), 30);
                 current_tag: null,
                 tag_match_pattern: null,
             }),
-            { latestTag: null, latestDigest: "sha256:old" }
+            { latestTag: null, latestDigest: null }
         );
         globalThis.fetch = (async () =>
             ({
@@ -2798,7 +2846,7 @@ setTimeout(() => process.exit(0), 30);
                 ...baseService,
                 current_tag: null,
             }),
-            { latestTag: null, latestDigest: "sha256:old" }
+            { latestTag: null, latestDigest: null }
         );
         let dockerHubCall = 0;
         globalThis.fetch = (async () => {
@@ -2905,7 +2953,7 @@ setTimeout(() => process.exit(0), 30);
                 tag_match_type: "regex",
                 tag_match_pattern: String.raw`^\d$`,
             }),
-            { latestTag: null, latestDigest: "sha256:current" }
+            { latestTag: null, latestDigest: null }
         );
 
         dbHandle
@@ -3222,6 +3270,79 @@ process.exit(0);
         assert.equal(updatedStats.mode & 0o777, originalStats.mode & 0o777);
         assert.equal(updatedStats.uid, originalStats.uid);
         assert.equal(updatedStats.gid, originalStats.gid);
+    });
+
+    it("updates symlinked compose targets without replacing the symlink", async () => {
+        const appDir = path.join(tempDir, "symlink-compose");
+        const targetDir = path.join(tempDir, "symlink-compose-target");
+        const binDir = path.join(tempDir, "bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(targetDir, { recursive: true });
+        await mkdir(binDir);
+        const composeTargetPath = path.join(targetDir, "compose.yaml");
+        const composeLinkPath = path.join(appDir, "compose.yaml");
+        const callLogPath = path.join(tempDir, "symlink-compose-calls.log");
+        await writeFile(
+            composeTargetPath,
+            "services:\n  web:\n    image: nginx:1\n",
+            "utf8"
+        );
+        await symlink(composeTargetPath, composeLinkPath);
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            String.raw`#!/usr/bin/env node
+const fs = require("node:fs");
+fs.appendFileSync(${JSON.stringify(callLogPath)}, process.argv.slice(2).join(" ") + "\n");
+process.exit(0);
+`
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(`./dockerUpdater.js?symlink-compose=${Date.now()}`);
+        const service = {
+            id: 1,
+            app_slug: "symlink-compose",
+            service_name: "web",
+            compose_path: composeLinkPath,
+            image_repo: "nginx",
+            compose_image_ref: "nginx:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+            )
+            .run(service);
+
+        const result = await updater.__testing.applyServiceUpdate(service, "manual");
+
+        assert.equal(result.ok, true);
+        assert.equal(fs.lstatSync(composeLinkPath).isSymbolicLink(), true);
+        assert.match(await readFile(composeTargetPath, "utf8"), /nginx:2/u);
+        assert.match(await readFile(composeLinkPath, "utf8"), /nginx:2/u);
+        assert.match(await readFile(callLogPath, "utf8"), new RegExp(composeTargetPath));
+        assert.doesNotMatch(
+            await readFile(callLogPath, "utf8"),
+            new RegExp(composeLinkPath)
+        );
     });
 
     it("restores the compose file when writing the updated file fails", async () => {

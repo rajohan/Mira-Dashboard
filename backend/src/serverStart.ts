@@ -47,8 +47,8 @@ function removeCloseCleanup(cleanup?: () => void | Promise<void>): void {
         }
     } else {
         closeCleanups.length = 0;
+        closeCleanupPromise = undefined;
     }
-    closeCleanupPromise = undefined;
 
     if (!closeCleanupInstalled || closeCleanups.length > 0) {
         return;
@@ -106,9 +106,9 @@ async function closeServerForRollback(): Promise<void> {
 }
 
 function shouldStartScheduledJobs(nodeEnv = process.env.NODE_ENV): boolean {
-    const isProduction = nodeEnv === "production";
+    const isTestOrDevelopment = nodeEnv === "development" || nodeEnv === "test";
     const schedulerDisabled = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER === "1";
-    return isProduction && !schedulerDisabled;
+    return !isTestOrDevelopment && !schedulerDisabled;
 }
 
 /** Starts Gateway and production background services after the HTTP server is listening. */
@@ -128,8 +128,8 @@ export async function handleServerListening(): Promise<void> {
         }
 
         if (shouldStartScheduledJobs()) {
-            startScheduledJobScheduler();
             scheduledJobSchedulerStarted = true;
+            startScheduledJobScheduler();
         }
         removeBackgroundCleanup = installCloseCleanup(async () => {
             if (scheduledJobSchedulerStarted) {

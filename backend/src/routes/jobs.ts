@@ -33,7 +33,7 @@ function httpStatusCode(error: unknown): number {
             typeof statusCode === "number" &&
             Number.isFinite(statusCode) &&
             Number.isInteger(statusCode) &&
-            statusCode >= 100 &&
+            statusCode >= 400 &&
             statusCode <= 599
         ) {
             return statusCode;

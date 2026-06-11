@@ -764,6 +764,131 @@ test("adds nullable service ids to legacy docker updater events", async () => {
     }
 });
 
+test("rebuilds docker updater events when app snapshot columns lack empty defaults", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const { cleanup, result } = await importWithTempDb("dockerEventsSnapshotColumns");
+    const testDb = new DatabaseSync(":memory:");
+    try {
+        testDb.exec("PRAGMA foreign_keys = ON");
+        testDb.exec(`
+            CREATE TABLE docker_managed_services (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                app_slug TEXT NOT NULL,
+                service_name TEXT NOT NULL
+            );
+            CREATE TABLE docker_update_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                managed_service_id INTEGER,
+                app_slug TEXT NOT NULL,
+                service_name TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                from_tag TEXT,
+                to_tag TEXT,
+                from_digest TEXT,
+                to_digest TEXT,
+                message TEXT,
+                details_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(managed_service_id) REFERENCES docker_managed_services(id) ON DELETE SET NULL
+            );
+            INSERT INTO docker_update_events (
+                id, managed_service_id, app_slug, service_name, event_type, created_at
+            ) VALUES (
+                10, NULL, 'legacy', 'worker', 'updated', '2026-06-07T00:00:00.000Z'
+            );
+        `);
+
+        result.__testing.ensureDockerUpdateEventsSetNull(testDb);
+
+        const columns = testDb
+            .prepare("PRAGMA table_info(docker_update_events)")
+            .all() as Array<{
+            dflt_value: string | null;
+            name: string;
+            notnull: number;
+        }>;
+        const appSlug = columns.find((column) => column.name === "app_slug");
+        const serviceName = columns.find((column) => column.name === "service_name");
+        const event = testDb
+            .prepare(
+                `SELECT app_slug, service_name
+                 FROM docker_update_events WHERE id = 10`
+            )
+            .get() as { app_slug: string; service_name: string } | undefined;
+
+        assert.equal(appSlug?.notnull, 1);
+        assert.equal(appSlug?.dflt_value, "''");
+        assert.equal(serviceName?.notnull, 1);
+        assert.equal(serviceName?.dflt_value, "''");
+        assert.equal(event?.app_slug, "legacy");
+        assert.equal(event?.service_name, "worker");
+    } finally {
+        testDb.close();
+        await cleanup();
+    }
+});
+
+test("rebuilds docker updater events when app snapshot columns are nullable", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const { cleanup, result } = await importWithTempDb(
+        "dockerEventsSnapshotNullableColumns"
+    );
+    const testDb = new DatabaseSync(":memory:");
+    try {
+        testDb.exec("PRAGMA foreign_keys = ON");
+        testDb.exec(`
+            CREATE TABLE docker_managed_services (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                app_slug TEXT NOT NULL,
+                service_name TEXT NOT NULL
+            );
+            CREATE TABLE docker_update_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                managed_service_id INTEGER,
+                app_slug TEXT DEFAULT '',
+                service_name TEXT NOT NULL DEFAULT '',
+                event_type TEXT NOT NULL,
+                from_tag TEXT,
+                to_tag TEXT,
+                from_digest TEXT,
+                to_digest TEXT,
+                message TEXT,
+                details_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(managed_service_id) REFERENCES docker_managed_services(id) ON DELETE SET NULL
+            );
+            INSERT INTO docker_update_events (
+                id, managed_service_id, app_slug, service_name, event_type, created_at
+            ) VALUES (
+                11, NULL, 'nullable', 'worker', 'updated', '2026-06-07T00:00:00.000Z'
+            );
+        `);
+
+        result.__testing.ensureDockerUpdateEventsSetNull(testDb);
+
+        const columns = testDb
+            .prepare("PRAGMA table_info(docker_update_events)")
+            .all() as Array<{
+            name: string;
+            notnull: number;
+        }>;
+        const appSlug = columns.find((column) => column.name === "app_slug");
+        const event = testDb
+            .prepare(
+                `SELECT app_slug, service_name
+                 FROM docker_update_events WHERE id = 11`
+            )
+            .get() as { app_slug: string; service_name: string } | undefined;
+
+        assert.equal(appSlug?.notnull, 1);
+        assert.equal(event?.app_slug, "nullable");
+        assert.equal(event?.service_name, "worker");
+    } finally {
+        testDb.close();
+        await cleanup();
+    }
+});
+
 test("rolls back failed docker updater event migrations", async () => {
     const { cleanup, result } = await importWithTempDb("dockerEventsRollback");
     const calls: string[] = [];

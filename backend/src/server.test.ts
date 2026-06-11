@@ -1004,6 +1004,17 @@ describe("server bootstrap", () => {
             assert.equal(serverStartTesting.shouldStartScheduledJobs("test"), false);
             assert.equal(serverStartTesting.shouldStartScheduledJobs(), false);
             assert.equal(serverStartTesting.shouldStartScheduledJobs("production"), true);
+            const originalDefaultNodeEnv = process.env.NODE_ENV;
+            try {
+                delete process.env.NODE_ENV;
+                assert.equal(serverStartTesting.shouldStartScheduledJobs(), true);
+            } finally {
+                if (originalDefaultNodeEnv === undefined) {
+                    delete process.env.NODE_ENV;
+                } else {
+                    process.env.NODE_ENV = originalDefaultNodeEnv;
+                }
+            }
             const originalProductionCleanupNodeEnv = process.env.NODE_ENV;
             process.env.NODE_ENV = "production";
             try {
@@ -1198,17 +1209,33 @@ describe("server bootstrap", () => {
     it("does not start the server as a serverStart import side effect", async () => {
         const originalStartOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT;
         const originalListen = server.listen;
+        const originalAddress = server.address;
+        const originalListeningDescriptor = Object.getOwnPropertyDescriptor(
+            server,
+            "listening"
+        );
         let listenedPort: number | undefined;
         server.listen = ((port: number) => {
             listenedPort = port;
             return server;
         }) as typeof server.listen;
+        server.address = (() => null) as typeof server.address;
+        Object.defineProperty(server, "listening", {
+            configurable: true,
+            value: false,
+        });
         try {
             process.env.MIRA_DASHBOARD_START_ON_IMPORT = "1";
             await import(`./serverStart.js?noStart=${Date.now()}`);
             assert.equal(listenedPort, undefined);
         } finally {
             server.listen = originalListen;
+            server.address = originalAddress;
+            if (originalListeningDescriptor) {
+                Object.defineProperty(server, "listening", originalListeningDescriptor);
+            } else {
+                delete (server as { listening?: boolean }).listening;
+            }
             if (originalStartOnImport === undefined) {
                 delete process.env.MIRA_DASHBOARD_START_ON_IMPORT;
             } else {
@@ -1221,12 +1248,20 @@ describe("server bootstrap", () => {
         const originalStartOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT;
         const originalListen = server.listen;
         const originalAddress = server.address;
+        const originalListeningDescriptor = Object.getOwnPropertyDescriptor(
+            server,
+            "listening"
+        );
         let listenedPort: number | undefined;
         server.listen = ((port: number) => {
             listenedPort = port;
             return server;
         }) as typeof server.listen;
         server.address = (() => null) as typeof server.address;
+        Object.defineProperty(server, "listening", {
+            configurable: true,
+            value: false,
+        });
         try {
             delete process.env.MIRA_DASHBOARD_START_ON_IMPORT;
             await import(`./main.js?noStart=${Date.now()}`);
@@ -1238,6 +1273,11 @@ describe("server bootstrap", () => {
         } finally {
             server.listen = originalListen;
             server.address = originalAddress;
+            if (originalListeningDescriptor) {
+                Object.defineProperty(server, "listening", originalListeningDescriptor);
+            } else {
+                delete (server as { listening?: boolean }).listening;
+            }
             if (originalStartOnImport === undefined) {
                 delete process.env.MIRA_DASHBOARD_START_ON_IMPORT;
             } else {

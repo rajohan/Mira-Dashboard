@@ -662,7 +662,7 @@ async function seedDockerUpdaterState(tempDir: string): Promise<void> {
         "tag",
         "1",
         1,
-        "[]",
+        "{}",
         null
     );
     db.prepare(
@@ -2456,7 +2456,12 @@ describe("docker routes", { concurrency: false }, () => {
             );
             assert.equal(refreshedAfterSuccess.status, 200);
             assert.equal(refreshedAfterSuccess.body.success, true);
-            assert.equal(refreshedAfterSuccess.body.service, null);
+            assert.equal(refreshedAfterSuccess.body.service?.id, 1);
+            assert.equal(refreshedAfterSuccess.body.service?.currentTag, "1.0.0");
+            assert.equal(
+                refreshedAfterSuccess.body.service?.lastStatus,
+                "update_available"
+            );
         } finally {
             db.exec("DROP TRIGGER IF EXISTS delete_updated_manual_service_after_event");
         }

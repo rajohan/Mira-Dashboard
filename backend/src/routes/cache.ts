@@ -170,11 +170,7 @@ export default function cacheRoutes(app: express.Application): void {
 
         try {
             const result = await refreshCacheKey(key);
-            res.json(
-                Array.isArray(result)
-                    ? { ok: true, entries: result }
-                    : { ok: true, entry: result }
-            );
+            res.json({ ok: true, entries: Array.isArray(result) ? result : [result] });
         } catch (error) {
             res.status(httpStatusCode(error) || 500).json({
                 error: errorMessage(error, "Cache refresh failed"),

@@ -328,8 +328,16 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
                 `${server.baseUrl}/api/cache/quotas.summary/refresh`,
                 { method: "POST" }
             );
+            const routeRefreshBody = (await routeRefresh.json()) as {
+                entries: Array<{ key: string }>;
+                ok: boolean;
+            };
             assert.equal(routeRefresh.status, 200);
-            assert.equal(((await routeRefresh.json()) as { ok: boolean }).ok, true);
+            assert.equal(routeRefreshBody.ok, true);
+            assert.deepEqual(
+                routeRefreshBody.entries.map((entry) => entry.key),
+                ["quotas.summary"]
+            );
 
             __testing.setCacheRefreshCommandForTests("quotas.summary", []);
             assert.equal(__testing.getCacheRefreshCommand("quotas.summary"), undefined);

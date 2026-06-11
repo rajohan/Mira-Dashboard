@@ -16,7 +16,7 @@ export default defineConfig({
     },
     webServer: [
         {
-            command: `npm --prefix backend run build && mkdir -p .test-openclaw/media && OPENCLAW_HOME=$PWD/.test-openclaw PORT=${backendPort} node backend/dist/main.js`,
+            command: `npm --prefix backend run build && mkdir -p .test-openclaw/media && OPENCLAW_HOME=$PWD/.test-openclaw MIRA_DASHBOARD_DISABLE_SCHEDULER=1 PORT=${backendPort} node backend/dist/main.js`,
             url: `http://127.0.0.1:${backendPort}/api/health`,
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,

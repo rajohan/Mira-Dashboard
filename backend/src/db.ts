@@ -77,6 +77,16 @@ function isTransientSqliteLock(error: unknown): boolean {
     );
 }
 
+function hasNotNullEmptyTextDefault(
+    column: Record<string, unknown> | undefined
+): boolean {
+    return (
+        Boolean(column) &&
+        Number(column?.notnull || 0) === 1 &&
+        String(column?.dflt_value || "").trim() === "''"
+    );
+}
+
 async function sleep(milliseconds: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -591,8 +601,8 @@ export function ensureDockerUpdateEventsSetNull(targetDb: MigrationDatabase): vo
                 managedServiceId &&
                 Number(managedServiceId.notnull || 0) === 0 &&
                 String(serviceForeignKey?.on_delete || "").toUpperCase() === "SET NULL" &&
-                appSlug &&
-                serviceName
+                hasNotNullEmptyTextDefault(appSlug) &&
+                hasNotNullEmptyTextDefault(serviceName)
             ) {
                 return;
             }
