@@ -172,6 +172,39 @@ CREATE TABLE IF NOT EXISTS deployment_lock (
     job_id TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS scheduled_jobs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 0,
+    schedule_type TEXT NOT NULL,
+    interval_seconds INTEGER NOT NULL DEFAULT 3600,
+    time_of_day TEXT,
+    action_key TEXT NOT NULL,
+    action_payload_json TEXT NOT NULL DEFAULT '{}',
+    next_run_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_due
+    ON scheduled_jobs(enabled, next_run_at);
+
+CREATE TABLE IF NOT EXISTS scheduled_job_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    trigger_type TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    message TEXT,
+    output_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY(job_id) REFERENCES scheduled_jobs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_job_started
+    ON scheduled_job_runs(job_id, started_at DESC);
 `);
 
 /** Ensures older task databases have the automation column. */
