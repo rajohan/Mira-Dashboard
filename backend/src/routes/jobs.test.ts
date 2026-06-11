@@ -275,11 +275,24 @@ test("returns validation and missing job errors", async () => {
             "/api/jobs/cache.weather",
             { method: "PATCH", body: null }
         );
+        const malformedBodyResponse = await fetch(
+            `${server.baseUrl}/api/jobs/cache.weather`,
+            {
+                body: "{",
+                headers: { "Content-Type": "application/json" },
+                method: "PATCH",
+            }
+        );
+        const malformedBody = (await malformedBodyResponse.json()) as {
+            error: string;
+        };
 
         assert.equal(missingJob.status, 404);
         assert.equal(invalidPatch.status, 400);
         assert.equal(primitiveBody.status, 400);
         assert.equal(primitiveBody.body.error, "patch must be an object");
+        assert.equal(malformedBodyResponse.status, 400);
+        assert.equal(malformedBody.error, "Invalid scheduled job patch");
         assert.equal(missingRun.status, 404);
         assert.equal(missingPatch.status, 404);
         assert.equal(partialIntervalPatch.status, 200);
@@ -439,6 +452,18 @@ test("covers jobs route status fallback helper", () => {
     assert.equal(jobsRouteTesting.httpStatusCode({ statusCode: 99 }), 500);
     assert.equal(jobsRouteTesting.httpStatusCode({ statusCode: 600 }), 500);
     assert.equal(jobsRouteTesting.httpStatusCode(new Error("plain")), 500);
+
+    const forwarded = new Error("other parser failure");
+    let nextError: unknown;
+    jobsRouteTesting.invalidJobsJsonHandler(
+        forwarded,
+        {} as never,
+        {} as never,
+        (error) => {
+            nextError = error;
+        }
+    );
+    assert.equal(nextError, forwarded);
 });
 
 test("maps manual duplicate run status codes", async () => {

@@ -2447,7 +2447,7 @@ describe("docker routes", { concurrency: false }, () => {
                             id: number;
                             currentTag: string | null;
                             lastStatus: string | null;
-                        };
+                        } | null;
                     }>(server, "/api/docker/updater/services/1/update", {
                         method: "POST",
                         body: {},
@@ -2456,12 +2456,7 @@ describe("docker routes", { concurrency: false }, () => {
             );
             assert.equal(refreshedAfterSuccess.status, 200);
             assert.equal(refreshedAfterSuccess.body.success, true);
-            assert.equal(refreshedAfterSuccess.body.service.id, 1);
-            assert.equal(refreshedAfterSuccess.body.service.currentTag, "1.0.0");
-            assert.equal(
-                refreshedAfterSuccess.body.service.lastStatus,
-                "update_available"
-            );
+            assert.equal(refreshedAfterSuccess.body.service, null);
         } finally {
             db.exec("DROP TRIGGER IF EXISTS delete_updated_manual_service_after_event");
         }
@@ -2493,25 +2488,7 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(fallbackFailure.status, 409);
             assert.equal(fallbackFailure.body.success, false);
             assert.equal(fallbackFailure.body.error, "No update available");
-            assert.deepEqual(fallbackFailure.body.service, {
-                appSlug: "media",
-                composeImageRef: "repo/app:1.0.0@sha256:old",
-                currentDigest: "sha256:old",
-                currentTag: "1.0.0",
-                enabled: true,
-                id: 1,
-                imageRepo: "repo/app",
-                lastCheckedAt: "2026-05-11",
-                lastStatus: "update_available",
-                lastUpdatedAt: null,
-                latestDigest: "sha256:new",
-                latestTag: "1.0.1",
-                metadata: { owner: "mira" },
-                pinMode: "digest",
-                policy: "auto",
-                serviceName: "app",
-                updateAvailable: true,
-            });
+            assert.equal(fallbackFailure.body.service, null);
             assert.equal(fallbackFailure.body.stderr, "No update available");
         } finally {
             __testing.setDockerUpdaterServiceRunnerForTests();

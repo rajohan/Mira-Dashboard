@@ -160,7 +160,7 @@ describe("GitOverviewCard", () => {
         expect(container).toHaveTextContent("feature-branch · no changes");
     });
 
-    it("treats missing repo status summaries as no changes", () => {
+    it("treats missing repo status summaries as unknown changes", () => {
         hooks.useCacheEntry.mockReturnValue({
             data: {
                 data: {
@@ -186,6 +186,6 @@ describe("GitOverviewCard", () => {
         const { container } = render(<GitOverviewCard />);
 
         expect(screen.getByText("Mira Workspace")).toBeInTheDocument();
-        expect(container).toHaveTextContent("unknown branch · no changes");
+        expect(container).toHaveTextContent("unknown branch · unknown changes");
     });
 });

@@ -508,6 +508,93 @@ test("migrates cache updated_at to nullable while preserving rows", async () => 
     }
 });
 
+test("expands legacy cache entries before cache indexes are created", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const { cleanup, result } = await importWithTempDb("legacyCacheEntries");
+    const testDb = new DatabaseSync(":memory:");
+    try {
+        testDb.exec(`
+            CREATE TABLE cache_entries (
+                key TEXT PRIMARY KEY,
+                data_json TEXT,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            );
+            INSERT INTO cache_entries (
+                key, data_json, updated_at, expires_at
+            ) VALUES (
+                'legacy.key', '{"ok":true}', '2026-06-06T00:00:00.000Z',
+                '2026-06-06T01:00:00.000Z'
+            );
+        `);
+
+        result.__testing.ensureCacheEntriesUpdatedAtNullable(testDb);
+        result.__testing.ensureCacheEntriesIndexes(testDb);
+
+        const row = testDb
+            .prepare(
+                `SELECT source, status, metadata_json, consecutive_failures
+                 FROM cache_entries WHERE key = 'legacy.key'`
+            )
+            .get() as {
+            consecutive_failures: number;
+            metadata_json: string;
+            source: string;
+            status: string;
+        };
+        assert.equal(row.consecutive_failures, 0);
+        assert.equal(row.metadata_json, "{}");
+        assert.equal(row.source, "legacy");
+        assert.equal(row.status, "fresh");
+        assert.equal(
+            testDb
+                .prepare("SELECT name FROM sqlite_master WHERE name = ?")
+                .get("idx_cache_entries_status") !== undefined,
+            true
+        );
+    } finally {
+        testDb.close();
+        await cleanup();
+    }
+});
+
+test("expands legacy cache entries without updated_at", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const { cleanup, result } = await importWithTempDb("legacyCacheEntriesNoUpdatedAt");
+    const testDb = new DatabaseSync(":memory:");
+    try {
+        testDb.exec(`
+            CREATE TABLE cache_entries (
+                key TEXT PRIMARY KEY,
+                expires_at TEXT NOT NULL
+            );
+            INSERT INTO cache_entries (key, expires_at)
+            VALUES ('legacy.no-updated-at', '2026-06-06T01:00:00.000Z');
+        `);
+
+        result.__testing.ensureCacheEntriesUpdatedAtNullable(testDb);
+
+        const row = testDb
+            .prepare(
+                `SELECT data_json, updated_at, source, status
+                 FROM cache_entries WHERE key = 'legacy.no-updated-at'`
+            )
+            .get() as {
+            data_json: string | null;
+            source: string;
+            status: string;
+            updated_at: string | null;
+        };
+        assert.equal(row.data_json, null);
+        assert.equal(row.updated_at, null);
+        assert.equal(row.source, "legacy");
+        assert.equal(row.status, "fresh");
+    } finally {
+        testDb.close();
+        await cleanup();
+    }
+});
+
 test("migrates docker updater events to preserve service deletion history", async () => {
     const { DatabaseSync } = await import("node:sqlite");
     const { cleanup, result } = await importWithTempDb("dockerEventsSetNull");

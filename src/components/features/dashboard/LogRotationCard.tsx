@@ -10,6 +10,18 @@ import { formatDate } from "../../../utils/format";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 
+function formatIntervalSeconds(intervalSeconds: number): string {
+    if (intervalSeconds % 3600 === 0) {
+        const hours = intervalSeconds / 3600;
+        return `${hours} hr${hours === 1 ? "" : "s"} interval`;
+    }
+    if (intervalSeconds % 60 === 0) {
+        const minutes = intervalSeconds / 60;
+        return `${minutes} min interval`;
+    }
+    return `${intervalSeconds} sec interval`;
+}
+
 /** Renders the log rotation card UI. */
 export function LogRotationCard() {
     const jobs = useScheduledJobs();
@@ -25,7 +37,7 @@ export function LogRotationCard() {
         rawIntervalSeconds !== null &&
         rawIntervalSeconds !== undefined &&
         Number.isFinite(intervalSeconds)
-            ? `${Math.round(intervalSeconds / 60)} min interval`
+            ? formatIntervalSeconds(intervalSeconds)
             : "—";
     const scheduleDisplay =
         logRotationJob?.scheduleType === "daily" && logRotationJob.timeOfDay

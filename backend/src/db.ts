@@ -201,9 +201,6 @@ CREATE TABLE IF NOT EXISTS cache_entries (
     metadata_json TEXT NOT NULL DEFAULT '{}'
 );
 
-CREATE INDEX IF NOT EXISTS idx_cache_entries_status ON cache_entries(status);
-CREATE INDEX IF NOT EXISTS idx_cache_entries_expires_at ON cache_entries(expires_at);
-
 CREATE TABLE IF NOT EXISTS quota_alert_state (
     provider TEXT NOT NULL,
     bucket INTEGER NOT NULL,
@@ -457,9 +454,52 @@ export function ensureCacheEntriesUpdatedAtNullable(targetDb: MigrationDatabase)
         try {
             const columns = targetDb.prepare("PRAGMA table_info(cache_entries)").all();
             const updatedAt = columns.find((column) => column.name === "updated_at");
-            if (!updatedAt || Number(updatedAt.notnull || 0) === 0) {
+            const columnNames = new Set(columns.map((column) => String(column.name)));
+            const requiredColumns = [
+                "data_json",
+                "source",
+                "last_attempt_at",
+                "expires_at",
+                "status",
+                "error_code",
+                "error_message",
+                "consecutive_failures",
+                "metadata_json",
+            ];
+            const hasExpandedSchema = requiredColumns.every((column) =>
+                columnNames.has(column)
+            );
+            if (updatedAt && Number(updatedAt.notnull || 0) === 0 && hasExpandedSchema) {
                 return;
             }
+            const dataExpression = columnNames.has("data_json") ? "data_json" : "NULL";
+            const sourceExpression = columnNames.has("source") ? "source" : "'legacy'";
+            const updatedAtExpression = columnNames.has("updated_at")
+                ? "updated_at"
+                : "NULL";
+            const lastAttemptExpression = columnNames.has("last_attempt_at")
+                ? "last_attempt_at"
+                : columnNames.has("updated_at")
+                  ? "COALESCE(updated_at, datetime('now'))"
+                  : "datetime('now')";
+            const expiresAtExpression = columnNames.has("expires_at")
+                ? "expires_at"
+                : columnNames.has("updated_at")
+                  ? "COALESCE(updated_at, datetime('now'))"
+                  : "datetime('now')";
+            const statusExpression = columnNames.has("status") ? "status" : "'fresh'";
+            const errorCodeExpression = columnNames.has("error_code")
+                ? "error_code"
+                : "NULL";
+            const errorMessageExpression = columnNames.has("error_message")
+                ? "error_message"
+                : "NULL";
+            const consecutiveFailuresExpression = columnNames.has("consecutive_failures")
+                ? "consecutive_failures"
+                : "0";
+            const metadataExpression = columnNames.has("metadata_json")
+                ? "metadata_json"
+                : "'{}'";
 
             targetDb.exec("BEGIN IMMEDIATE");
             targetDb.exec(`
@@ -482,8 +522,17 @@ export function ensureCacheEntriesUpdatedAtNullable(targetDb: MigrationDatabase)
                     status, error_code, error_message, consecutive_failures, metadata_json
                 )
                 SELECT
-                    key, data_json, source, updated_at, last_attempt_at, expires_at,
-                    status, error_code, error_message, consecutive_failures, metadata_json
+                    key,
+                    ${dataExpression},
+                    ${sourceExpression},
+                    ${updatedAtExpression},
+                    ${lastAttemptExpression},
+                    ${expiresAtExpression},
+                    ${statusExpression},
+                    ${errorCodeExpression},
+                    ${errorMessageExpression},
+                    ${consecutiveFailuresExpression},
+                    ${metadataExpression}
                 FROM cache_entries_old;
                 DROP TABLE cache_entries_old;
                 CREATE INDEX IF NOT EXISTS idx_cache_entries_status ON cache_entries(status);
@@ -505,6 +554,13 @@ export function ensureCacheEntriesUpdatedAtNullable(targetDb: MigrationDatabase)
     }
 
     throw lastError;
+}
+
+function ensureCacheEntriesIndexes(targetDb: MigrationDatabase): void {
+    targetDb.exec(`
+        CREATE INDEX IF NOT EXISTS idx_cache_entries_status ON cache_entries(status);
+        CREATE INDEX IF NOT EXISTS idx_cache_entries_expires_at ON cache_entries(expires_at);
+    `);
 }
 
 export function ensureDockerUpdateEventsSetNull(targetDb: MigrationDatabase): void {
@@ -625,6 +681,7 @@ export function ensureDockerUpdateEventsSetNull(targetDb: MigrationDatabase): vo
 
 ensureDockerUpdateEventsSetNull(db);
 ensureCacheEntriesUpdatedAtNullable(db);
+ensureCacheEntriesIndexes(db);
 await ensureTaskAutomationColumn(db);
 
 export const __testing = {
@@ -632,6 +689,7 @@ export const __testing = {
     cleanupTaskForeignKeyOrphans,
     ensureDockerUpdateEventsSetNull,
     ensureCacheEntriesUpdatedAtNullable,
+    ensureCacheEntriesIndexes,
     execAlterTableWithDuplicateColumnRetry,
     isDuplicateColumnError,
     validateTaskChildTableName,

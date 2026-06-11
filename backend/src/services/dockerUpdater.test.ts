@@ -408,15 +408,10 @@ process.stdout.write("updated\n");
     platform: linux/amd64
     labels:
       mira.updater.autoUpdate: "yes"
-  invalidRegex:
-    image: repo/invalid:stable
+  safeRegex:
+    image: repo/safe:v1
     labels:
-      mira.updater.tagPattern: "["
-      mira.updater.tagPatternIsRegex: "true"
-  unsafeRegex:
-    image: repo/unsafe:stable
-    labels:
-      mira.updater.tagPattern: "(a+)+$"
+      mira.updater.tagPattern: "^v[0-9]+$"
       mira.updater.tagPatternIsRegex: "true"
 `,
             "utf8"
@@ -441,10 +436,40 @@ process.stdout.write("updated\n");
                 assert.equal(services.services[0].currentTag, "latest");
                 assert.equal(services.services[1].pinMode, "digest");
                 assert.equal(services.services[1].metadata.platform, "linux/amd64");
-                assert.equal(services.services[2].tagMatchType, "exact");
-                assert.equal(services.services[2].tagMatchPattern, "stable");
-                assert.equal(services.services[3].tagMatchType, "exact");
-                assert.equal(services.services[3].tagMatchPattern, "stable");
+                assert.equal(services.services[2].tagMatchType, "regex");
+                assert.equal(services.services[2].tagMatchPattern, "^v[0-9]+$");
+                const invalidRegexCompose = path.join(tempDir, "invalid-regex.yaml");
+                await writeFile(
+                    invalidRegexCompose,
+                    `services:
+  invalidRegex:
+    image: repo/invalid:stable
+    labels:
+      mira.updater.tagPattern: "["
+      mira.updater.tagPatternIsRegex: "true"
+`,
+                    "utf8"
+                );
+                const invalidRegex =
+                    updater.__testing.servicesFromCompose(invalidRegexCompose);
+                assert.equal(invalidRegex.ok, false);
+                assert.match(invalidRegex.error ?? "", /Invalid tag pattern regex/u);
+                const unsafeRegexCompose = path.join(tempDir, "unsafe-regex.yaml");
+                await writeFile(
+                    unsafeRegexCompose,
+                    `services:
+  unsafeRegex:
+    image: repo/unsafe:stable
+    labels:
+      mira.updater.tagPattern: "(a+)+$"
+      mira.updater.tagPatternIsRegex: "true"
+`,
+                    "utf8"
+                );
+                const unsafeRegex =
+                    updater.__testing.servicesFromCompose(unsafeRegexCompose);
+                assert.equal(unsafeRegex.ok, false);
+                assert.match(unsafeRegex.error ?? "", /Unsafe tag pattern regex/u);
                 const steps = await updater.runDockerUpdaterService(123);
                 assert.equal(steps.length, 2);
                 assert.equal(steps.at(-1)?.stderr, "Docker updater service not found");

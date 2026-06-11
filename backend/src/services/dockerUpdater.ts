@@ -911,24 +911,10 @@ function servicesFromCompose(composePath: string):
                               ? "digest"
                               : "tag";
                     let tagMatchType: "exact" | "regex" = "exact";
-                    let tagMatchPattern = tagPattern ?? currentTag;
+                    const tagMatchPattern = tagPattern ?? currentTag;
                     if (tagPattern && tagPatternIsRegex) {
                         try {
                             new RegExp(tagPattern);
-                            if (isSafeTagRegexPattern(tagPattern)) {
-                                tagMatchType = "regex";
-                            } else {
-                                console.warn(
-                                    "[DockerUpdater] Ignoring unsafe tag pattern regex",
-                                    {
-                                        appSlug,
-                                        serviceName,
-                                        tagPattern,
-                                        error: "pattern failed safety checks",
-                                    }
-                                );
-                                tagMatchPattern = currentTag;
-                            }
                         } catch (error) {
                             console.warn(
                                 "[DockerUpdater] Ignoring invalid tag pattern regex",
@@ -939,8 +925,27 @@ function servicesFromCompose(composePath: string):
                                     error: caughtMessage(error),
                                 }
                             );
-                            tagMatchPattern = currentTag;
+                            throw new Error(
+                                `Invalid tag pattern regex for ${appSlug}/${serviceName}: ${tagPattern} (${caughtMessage(error)})`,
+                                { cause: error }
+                            );
                         }
+                        if (!isSafeTagRegexPattern(tagPattern)) {
+                            const message = "pattern failed safety checks";
+                            console.warn(
+                                "[DockerUpdater] Ignoring unsafe tag pattern regex",
+                                {
+                                    appSlug,
+                                    serviceName,
+                                    tagPattern,
+                                    error: message,
+                                }
+                            );
+                            throw new Error(
+                                `Unsafe tag pattern regex for ${appSlug}/${serviceName}: ${tagPattern} (${message})`
+                            );
+                        }
+                        tagMatchType = "regex";
                     }
                     return {
                         appSlug,

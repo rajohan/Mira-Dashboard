@@ -1,4 +1,4 @@
-import express, { type RequestHandler } from "express";
+import express, { type ErrorRequestHandler, type RequestHandler } from "express";
 
 import { asyncRoute as baseAsyncRoute, errorMessage } from "../lib/errors.js";
 import {
@@ -12,6 +12,15 @@ import {
 } from "../services/scheduledJobs.js";
 
 const JOBS_JSON_LIMIT = "2097152b";
+
+const invalidJobsJsonHandler: ErrorRequestHandler = (error, _req, res, next) => {
+    const status = Number((error as { status?: unknown }).status);
+    if (error instanceof SyntaxError && status === 400) {
+        res.status(400).json({ error: "Invalid scheduled job patch" });
+        return;
+    }
+    next(error);
+};
 
 interface HttpStatusError extends Error {
     statusCode?: number;
@@ -112,6 +121,7 @@ export default function jobsRoutes(app: express.Application): void {
     app.patch(
         "/api/jobs/:id",
         express.json({ limit: JOBS_JSON_LIMIT, strict: false }),
+        invalidJobsJsonHandler,
         asyncRoute(async (req, res) => {
             const patch = req.body?.patch;
             if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
@@ -211,5 +221,6 @@ export default function jobsRoutes(app: express.Application): void {
 
 export const __testing = {
     httpStatusCode,
+    invalidJobsJsonHandler,
     invalidPatchField,
 };

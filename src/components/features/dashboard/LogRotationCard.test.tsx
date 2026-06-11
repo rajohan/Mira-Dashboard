@@ -97,6 +97,31 @@ describe("LogRotationCard", () => {
         expect(screen.getByText("No recorded run yet")).toBeInTheDocument();
     });
 
+    it("formats interval schedules without rounding seconds", () => {
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: null,
+                    id: "ops.log-rotation",
+                    intervalSeconds: 90,
+                    scheduleType: "interval",
+                    settings: {},
+                    timeOfDay: null,
+                },
+            ],
+        });
+        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
+        hooks.useRunLogRotationDryRun.mockReturnValue({
+            isPending: false,
+            mutate: vi.fn(),
+        });
+        hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+
+        render(<LogRotationCard />);
+
+        expect(screen.getByText("90 sec interval")).toBeInTheDocument();
+    });
+
     it("shows pending and empty states", () => {
         hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: true });
         hooks.useRunLogRotationDryRun.mockReturnValue({
