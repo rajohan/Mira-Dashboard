@@ -280,7 +280,7 @@ describe("ChatMessagesList", () => {
             {
                 key: "assistant-empty",
                 kind: "message",
-                message: { content: "", role: "assistant", text: "   " },
+                message: { content: "", role: "assistant", text: " ".repeat(3) },
             },
             {
                 key: "tool-1",
@@ -409,7 +409,7 @@ describe("ChatMessagesList", () => {
         const user = userEvent.setup();
         const onTtsError = vi.fn();
         const rows = makeRows();
-        rows[1]!.message.text = "   ";
+        rows[1]!.message.text = " ".repeat(3);
 
         const { rerender } = renderMessages({
             chatRows: rows,

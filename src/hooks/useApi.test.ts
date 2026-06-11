@@ -67,7 +67,7 @@ describe("apiFetch", () => {
         mockFetch({
             ok: true,
             status: 200,
-            text: async () => "   ",
+            text: async () => " ".repeat(3),
         } as Partial<Response>);
 
         await expect(apiFetch("/empty-text")).resolves.toBeUndefined();

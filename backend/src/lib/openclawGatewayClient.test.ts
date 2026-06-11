@@ -154,7 +154,7 @@ describe("OpenClaw gateway client helpers", () => {
             __testing.normalizeDeviceMetadataForAuth("  NodeJS  "),
             "nodejS".toLowerCase()
         );
-        assert.equal(__testing.normalizeDeviceMetadataForAuth("   "), "");
+        assert.equal(__testing.normalizeDeviceMetadataForAuth(" ".repeat(3)), "");
         assert.equal(__testing.asError("plain").message, "plain");
         const existingError = new Error("existing");
         assert.equal(__testing.asError(existingError), existingError);
@@ -816,7 +816,7 @@ describe("OpenClaw gateway client websocket protocol", () => {
     });
 
     it("validates and normalizes start URLs and request timeouts", async () => {
-        const blankUrlClient = new OpenClawGatewayClient({ url: "   " });
+        const blankUrlClient = new OpenClawGatewayClient({ url: " ".repeat(3) });
         assert.throws(
             () => blankUrlClient.start(),
             /Gateway URL must be a non-empty string/u
@@ -922,7 +922,7 @@ describe("OpenClaw gateway client websocket protocol", () => {
         try {
             const identityFile = path.join(identityDir, "device.json");
             internals.opts.deviceIdentity = loadOrCreateDeviceIdentity(identityFile);
-            internals.opts.token = "   ";
+            internals.opts.token = " ".repeat(3);
             internals.sendConnect({ nonce: "nonce-token-null" });
             await waitFor(() => defaultConnectParams[1], "device connect params");
             const deviceParams = defaultConnectParams[1] as Record<string, unknown>;

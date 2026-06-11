@@ -2203,7 +2203,7 @@ describe("docker routes", { concurrency: false }, () => {
         const blankCommand = await requestJson<{ error: string }>(
             server,
             "/api/docker/exec/start",
-            { method: "POST", body: { containerId: "app", command: "   " } }
+            { method: "POST", body: { containerId: "app", command: " ".repeat(3) } }
         );
         assert.equal(blankCommand.status, 400);
         assert.equal(blankCommand.body.error, "Invalid command");

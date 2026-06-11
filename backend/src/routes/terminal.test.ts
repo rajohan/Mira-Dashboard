@@ -120,7 +120,7 @@ describe("terminal routes", () => {
         const blankPartial = await requestJson<{
             completions: Array<{ completion: string; display: string; type: string }>;
             commonPrefix: string;
-        }>(server, "/api/terminal/complete", { partial: "   ", cwd: tempDir });
+        }>(server, "/api/terminal/complete", { partial: " ".repeat(3), cwd: tempDir });
         assert.equal(blankPartial.status, 200);
         assert.equal(
             blankPartial.body.completions.some((item) => item.display === appDirName),
@@ -245,7 +245,7 @@ describe("terminal routes", () => {
         const emptyCwd = await requestJson<{ error: string }>(
             server,
             "/api/terminal/complete",
-            { partial: "definitely-missing", cwd: "   " }
+            { partial: "definitely-missing", cwd: " ".repeat(3) }
         );
         assert.equal(emptyCwd.status, 400);
         assert.equal(emptyCwd.body.error, "Missing or invalid cwd");

@@ -1120,7 +1120,7 @@ async function runDockerExecCommand(
         const wrappedCommand = [
             `if command -v setsid >/dev/null 2>&1; then setsid sh -lc ${shellQuote(command)} & command_pid=$!; else sh -lc ${shellQuote(command)} & command_pid=$!; fi`,
             String.raw`printf '%s%s\n' ${shellQuote(DOCKER_EXEC_PID_MARKER)} "$command_pid"`,
-            String.raw`wait "$command_pid"`,
+            'wait "$command_pid"',
         ].join("; ");
         const child = spawn(
             dockerBin,

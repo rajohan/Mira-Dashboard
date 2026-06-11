@@ -666,7 +666,7 @@ describe("OpenClaw config routes", () => {
             const binPath = path.join(tempDir, "openclaw");
             await writeFile(
                 binPath,
-                String.raw`#!${process.execPath}
+                `#!${process.execPath}
 process.exit(0);
 `,
                 "utf8"
@@ -684,7 +684,7 @@ process.exit(0);
             const failingBinPath = path.join(tempDir, "openclaw-fail");
             await writeFile(
                 failingBinPath,
-                String.raw`#!${process.execPath}
+                `#!${process.execPath}
 throw new Error("restart failed");
 `,
                 "utf8"
@@ -733,8 +733,8 @@ throw new Error("restart failed");
             assert.equal(__testing.getOpenClawPackageRootForTest(), envPackageRoot);
             assert.equal(__testing.getOpenClawBinForTest(), envBin);
 
-            process.env.OPENCLAW_PACKAGE_ROOT = "   ";
-            process.env.OPENCLAW_BIN = "   ";
+            process.env.OPENCLAW_PACKAGE_ROOT = " ".repeat(3);
+            process.env.OPENCLAW_BIN = " ".repeat(3);
             assert.equal(
                 __testing.getOpenClawPackageRootForTest(),
                 path.resolve(

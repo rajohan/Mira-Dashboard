@@ -212,7 +212,7 @@ describe("STT routes", () => {
             return Response.json({ text: `${file.name}:${file.type}` });
         };
         assert.equal(
-            await __testing.transcribeWithElevenLabs(Buffer.from([1]), "   "),
+            await __testing.transcribeWithElevenLabs(Buffer.from([1]), " ".repeat(3)),
             "recording.webm:application/octet-stream"
         );
         assert.equal(
