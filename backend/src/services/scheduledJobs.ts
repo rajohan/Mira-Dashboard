@@ -2,13 +2,16 @@ import { db } from "../db.js";
 import { errorMessage } from "../lib/errors.js";
 
 const schedulerTickMs = 30_000;
+const defaultScheduledJobRunTimeoutMs = 5 * 60 * 1000;
 const minimumIntervalSeconds = 60;
 const latestRunsJobIdChunkSize = 900;
 const runningJobs = new Set<string>();
+const scheduledJobRuns = new Set<Promise<void>>();
 const actionHandlers = new Map<string, ScheduledJobActionHandler>();
 
 let scheduler: NodeJS.Timeout | null = null;
 let schedulerTickRunning = false;
+let scheduledJobRunTimeoutMs = defaultScheduledJobRunTimeoutMs;
 
 export type ScheduledJobScheduleType = "interval" | "daily" | "cron";
 export type ScheduledJobRunStatus = "running" | "success" | "failed";
@@ -682,18 +685,66 @@ export async function runScheduledJob(
     }
     runningJobs.add(id);
     try {
-        if (!handler) {
-            throw new ScheduledJobValidationError(
-                `No scheduled job action registered for ${job.actionKey}`
+        let output: Record<string, unknown>;
+        try {
+            if (!handler) {
+                throw new ScheduledJobValidationError(
+                    `No scheduled job action registered for ${job.actionKey}`
+                );
+            }
+            output = (await handler(job)) ?? {};
+        } catch (error) {
+            return finishRun(
+                run,
+                "failed",
+                errorMessage(error, "Scheduled job failed"),
+                {}
             );
         }
-        const output = (await handler(job)) ?? {};
-        return finishRun(run, "success", null, output);
-    } catch (error) {
-        return finishRun(run, "failed", errorMessage(error, "Scheduled job failed"), {});
+        try {
+            return finishRun(run, "success", null, output);
+        } catch (error) {
+            console.warn(
+                "[ScheduledJobs] Failed to persist successful scheduled job run:",
+                error
+            );
+            return {
+                ...run,
+                status: "success",
+                finishedAt: nowIso(),
+                message: errorMessage(error, "Scheduled job success persistence failed"),
+                output,
+            };
+        }
     } finally {
         runningJobs.delete(id);
     }
+}
+
+function runWithTimeout(id: string, run: Promise<ScheduledJobRun>): Promise<void> {
+    let timeout: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<void>((resolve) => {
+        timeout = setTimeout(() => {
+            runningJobs.delete(id);
+            console.warn(
+                `[ScheduledJobs] Scheduled job ${id} exceeded ${scheduledJobRunTimeoutMs}ms`
+            );
+            resolve();
+        }, scheduledJobRunTimeoutMs);
+        timeout.unref();
+    });
+    return Promise.race([run.then(() => {}), timeoutPromise]).finally(() => {
+        if (timeout) {
+            clearTimeout(timeout);
+        }
+    });
+}
+
+function trackScheduledRun(run: Promise<void>): void {
+    scheduledJobRuns.add(run);
+    void run.finally(() => {
+        scheduledJobRuns.delete(run);
+    });
 }
 
 async function runDueJobs(): Promise<void> {
@@ -705,7 +756,6 @@ async function runDueJobs(): Promise<void> {
              ORDER BY next_run_at, id`
         )
         .all(dueAt) as Array<{ id: string }>;
-    const runs: Array<Promise<ScheduledJobRun | void>> = [];
     for (const row of rows) {
         if (!runningJobs.has(row.id)) {
             try {
@@ -717,17 +767,18 @@ async function runDueJobs(): Promise<void> {
                 ) {
                     continue;
                 }
-                runs.push(
-                    runScheduledJob(row.id, "schedule").catch(() => {
-                        // Keep unrelated due jobs running even if one row is stale.
-                    })
-                );
+                const run = runWithTimeout(
+                    row.id,
+                    runScheduledJob(row.id, "schedule")
+                ).catch(() => {
+                    // Keep unrelated due jobs running even if one row is stale.
+                });
+                trackScheduledRun(run);
             } catch {
                 // Keep later due jobs running even if a persisted row is stale.
             }
         }
     }
-    await Promise.all(runs);
 }
 
 function scheduleTick(): void {
@@ -769,15 +820,21 @@ export const __testing = {
     resetSchedulerState(): void {
         stopScheduledJobScheduler();
         runningJobs.clear();
+        scheduledJobRuns.clear();
+        scheduledJobRunTimeoutMs = defaultScheduledJobRunTimeoutMs;
         schedulerTickRunning = false;
     },
     async runDueJobsForTest(): Promise<void> {
         await runDueJobs();
+        await Promise.allSettled(scheduledJobRuns);
     },
     mapRunForTest(row?: ScheduledJobRunRow): ScheduledJobRun | null {
         return mapRun(row);
     },
     runSchedulerTickForTest(): void {
         scheduleTick();
+    },
+    setScheduledJobRunTimeoutMsForTest(timeoutMs: number): void {
+        scheduledJobRunTimeoutMs = timeoutMs;
     },
 };

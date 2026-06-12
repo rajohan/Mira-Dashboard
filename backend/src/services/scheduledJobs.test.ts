@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { db } from "../db.js";
-import {
+const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
+const tempDbDir = mkdtempSync(path.join(os.tmpdir(), "scheduled-jobs-test-"));
+process.env.MIRA_DASHBOARD_DB_PATH = path.join(tempDbDir, "mira-dashboard.db");
+
+const { db } = await import("../db.js");
+const {
     __testing,
     calculateNextRunAt,
     getScheduledJob,
@@ -14,7 +21,17 @@ import {
     stopScheduledJobScheduler,
     updateScheduledJob,
     upsertScheduledJob,
-} from "./scheduledJobs.js";
+} = await import("./scheduledJobs.js");
+
+test.after(() => {
+    db.close();
+    if (originalDbPath === undefined) {
+        delete process.env.MIRA_DASHBOARD_DB_PATH;
+    } else {
+        process.env.MIRA_DASHBOARD_DB_PATH = originalDbPath;
+    }
+    rmSync(tempDbDir, { recursive: true, force: true });
+});
 
 test.beforeEach(() => {
     db.exec("DELETE FROM scheduled_job_runs; DELETE FROM scheduled_jobs;");
@@ -512,6 +529,49 @@ test("records failures and rejects missing or unregistered jobs", async () => {
     assert.equal(run.message, "refresh failed");
 });
 
+test("does not mark handler success failed when success persistence fails", async (t) => {
+    const warnMock = t.mock.method(console, "warn", () => {});
+    registerScheduledJobAction("cache.refresh", () => ({ ok: true }));
+    upsertScheduledJob({
+        id: "cache.weather",
+        name: "Weather cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+    const prepare = db.prepare.bind(db);
+    const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+        const statement = prepare(sql);
+        if (sql.includes("UPDATE scheduled_job_runs")) {
+            const runStatement = statement.run.bind(statement) as (
+                ...args: unknown[]
+            ) => unknown;
+            return {
+                run: (...args: unknown[]) => {
+                    if (args[0] === "success") {
+                        throw new Error("success write failed");
+                    }
+                    return runStatement(...args);
+                },
+            } as unknown as ReturnType<typeof db.prepare>;
+        }
+        return statement;
+    });
+
+    try {
+        const run = await runScheduledJob("cache.weather");
+
+        assert.equal(run.status, "success");
+        assert.equal(run.message, "success write failed");
+        assert.deepEqual(run.output, { ok: true });
+        assert.equal(warnMock.mock.callCount(), 1);
+    } finally {
+        prepareMock.mock.restore();
+        warnMock.mock.restore();
+    }
+});
+
 test("rejects concurrent runs for the same job", async () => {
     let releaseHandler: () => void = () => {};
     registerScheduledJobAction(
@@ -803,6 +863,59 @@ test("logs scheduler tick query failures without leaving ticks stuck", async (t)
 
     assert.equal(warnMock.mock.callCount(), 1);
     __testing.runSchedulerTickForTest();
+});
+
+test("releases scheduler ticks while a scheduled handler is stalled", async (t) => {
+    const calls: string[] = [];
+    const warnMock = t.mock.method(console, "warn", () => {});
+    try {
+        __testing.setScheduledJobRunTimeoutMsForTest(20);
+        registerScheduledJobAction(
+            "cache.refresh",
+            (job) =>
+                new Promise<void>((resolve) => {
+                    calls.push(job.id);
+                    if (job.id === "cache.fast") {
+                        resolve();
+                    }
+                })
+        );
+        upsertScheduledJob({
+            id: "cache.stalled",
+            name: "Stalled cache",
+            enabled: true,
+            scheduleType: "interval",
+            intervalSeconds: 120,
+            actionKey: "cache.refresh",
+        });
+        db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+            "2026-01-01T00:00:00.000Z",
+            "cache.stalled"
+        );
+
+        __testing.runSchedulerTickForTest();
+        await delay(0);
+        upsertScheduledJob({
+            id: "cache.fast",
+            name: "Fast cache",
+            enabled: true,
+            scheduleType: "interval",
+            intervalSeconds: 120,
+            actionKey: "cache.refresh",
+        });
+        db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+            "2026-01-01T00:00:00.000Z",
+            "cache.fast"
+        );
+        __testing.runSchedulerTickForTest();
+        await delay(0);
+
+        assert.deepEqual(calls, ["cache.stalled", "cache.fast"]);
+        await delay(25);
+        assert.equal(warnMock.mock.callCount(), 1);
+    } finally {
+        warnMock.mock.restore();
+    }
 });
 
 test("advances failed scheduled runs without moving manual schedules", async () => {
