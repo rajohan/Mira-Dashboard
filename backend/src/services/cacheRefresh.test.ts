@@ -2944,9 +2944,21 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
+            "backup.kopia.status",
+            "backup.walg.status",
         ]);
         try {
             registerCacheRefreshScheduledJobs();
+            assert.ok(
+                db
+                    .prepare("SELECT 1 FROM scheduled_jobs WHERE id = 'cache.backup.kopia'")
+                    .get()
+            );
+            assert.ok(
+                db
+                    .prepare("SELECT 1 FROM scheduled_jobs WHERE id = 'cache.backup.walg'")
+                    .get()
+            );
             await withFetch(
                 (url) => {
                     assert.ok(url.includes("wttr.in"));
@@ -3026,6 +3038,8 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
+            "backup.kopia.status",
+            "backup.walg.status",
         ]);
         scheduledJobsTesting.clearActionHandlers();
         scheduledJobsTesting.resetSchedulerState();
@@ -3082,6 +3096,8 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
+            "backup.kopia.status",
+            "backup.walg.status",
         ]);
         scheduledJobsTesting.clearActionHandlers();
         scheduledJobsTesting.resetSchedulerState();
@@ -3137,6 +3153,8 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
+            "backup.kopia.status",
+            "backup.walg.status",
         ]);
         registerCacheRefreshScheduledJobs();
         db.prepare("UPDATE scheduled_jobs SET enabled = 0 WHERE id = ?").run(
@@ -3153,6 +3171,8 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
+            "backup.kopia.status",
+            "backup.walg.status",
         ]);
         try {
             registerCacheRefreshScheduledJobs();
@@ -3180,6 +3200,8 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
+            "backup.kopia.status",
+            "backup.walg.status",
         ]);
         scheduledJobsTesting.clearActionHandlers();
         scheduledJobsTesting.resetSchedulerState();

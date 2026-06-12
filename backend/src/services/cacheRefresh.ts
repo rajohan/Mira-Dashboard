@@ -1960,6 +1960,24 @@ const cacheRefreshScheduledJobs = [
         actionKey: "cache.refresh",
         actionPayload: { key: "moltbook" },
     },
+    {
+        id: "cache.backup.kopia",
+        name: "Kopia backup status cache",
+        description: "Refresh Kopia backup status cache.",
+        scheduleType: "interval",
+        intervalSeconds: 60 * 60,
+        actionKey: "cache.refresh",
+        actionPayload: { key: "backup.kopia.status" },
+    },
+    {
+        id: "cache.backup.walg",
+        name: "WAL-G backup status cache",
+        description: "Refresh WAL-G backup status cache.",
+        scheduleType: "interval",
+        intervalSeconds: 60 * 60,
+        actionKey: "cache.refresh",
+        actionPayload: { key: "backup.walg.status" },
+    },
 ] as const;
 
 function getScheduledCacheKey(job: ScheduledJob): string {
