@@ -639,13 +639,48 @@ function claimScheduledRun(job: ScheduledJob): ScheduledJobRun | null {
 }
 
 function markAbandonedRunningRuns(): void {
-    db.prepare(
-        `UPDATE scheduled_job_runs
-         SET status = 'failed',
-             finished_at = COALESCE(finished_at, ?),
-             message = COALESCE(message, ?)
-         WHERE status = 'running'`
-    ).run(nowIso(), "Scheduled job abandoned after backend restart");
+    try {
+        db.prepare(
+            `UPDATE scheduled_job_runs
+             SET status = 'failed',
+                 finished_at = COALESCE(finished_at, ?),
+                 message = COALESCE(message, ?)
+             WHERE status = 'running'`
+        ).run(nowIso(), "Scheduled job abandoned after backend restart");
+    } catch (error) {
+        console.warn("[ScheduledJobs] Failed to mark abandoned scheduled runs:", error);
+    }
+}
+
+function persistedRunFallback(
+    run: ScheduledJobRun,
+    status: Exclude<ScheduledJobRunStatus, "running">,
+    message: string | null,
+    output: Record<string, unknown>
+): ScheduledJobRun {
+    return { ...run, status, finishedAt: nowIso(), message, output };
+}
+
+function finishRunOrReport(
+    run: ScheduledJobRun,
+    status: Exclude<ScheduledJobRunStatus, "running">,
+    message: string | null,
+    output: Record<string, unknown>
+): ScheduledJobRun {
+    try {
+        return finishRun(run, status, message, output);
+    } catch (error) {
+        console.warn(
+            `[ScheduledJobs] Failed to persist ${status} scheduled job run:`,
+            error
+        );
+        return persistedRunFallback(
+            run,
+            status,
+            errorMessage(error, `Scheduled job ${status} persistence failed`),
+            output
+        );
+    }
 }
 
 export async function runScheduledJob(
@@ -694,28 +729,14 @@ export async function runScheduledJob(
             }
             output = (await handler(job)) ?? {};
         } catch (error) {
-            return finishRun(
+            return finishRunOrReport(
                 run,
                 "failed",
                 errorMessage(error, "Scheduled job failed"),
                 {}
             );
         }
-        try {
-            return finishRun(run, "success", null, output);
-        } catch (error) {
-            console.warn(
-                "[ScheduledJobs] Failed to persist successful scheduled job run:",
-                error
-            );
-            return {
-                ...run,
-                status: "success",
-                finishedAt: nowIso(),
-                message: errorMessage(error, "Scheduled job success persistence failed"),
-                output,
-            };
-        }
+        return finishRunOrReport(run, "success", null, output);
     } finally {
         runningJobs.delete(id);
     }
@@ -725,7 +746,6 @@ function runWithTimeout(id: string, run: Promise<ScheduledJobRun>): Promise<void
     let timeout: NodeJS.Timeout | undefined;
     const timeoutPromise = new Promise<void>((resolve) => {
         timeout = setTimeout(() => {
-            runningJobs.delete(id);
             console.warn(
                 `[ScheduledJobs] Scheduled job ${id} exceeded ${scheduledJobRunTimeoutMs}ms`
             );

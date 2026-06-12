@@ -572,6 +572,44 @@ test("does not mark handler success failed when success persistence fails", asyn
     }
 });
 
+test("reports handler failures even when failure persistence fails", async (t) => {
+    const warnMock = t.mock.method(console, "warn", () => {});
+    registerScheduledJobAction("cache.refresh", () => {
+        throw new Error("handler failed");
+    });
+    upsertScheduledJob({
+        id: "cache.weather",
+        name: "Weather cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+    const prepare = db.prepare.bind(db);
+    const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+        const statement = prepare(sql);
+        if (sql.includes("UPDATE scheduled_job_runs")) {
+            return {
+                run: () => {
+                    throw new Error("failed write failed");
+                },
+            } as unknown as ReturnType<typeof db.prepare>;
+        }
+        return statement;
+    });
+
+    try {
+        const run = await runScheduledJob("cache.weather");
+
+        assert.equal(run.status, "failed");
+        assert.equal(run.message, "failed write failed");
+        assert.equal(warnMock.mock.callCount(), 1);
+    } finally {
+        prepareMock.mock.restore();
+        warnMock.mock.restore();
+    }
+});
+
 test("rejects concurrent runs for the same job", async () => {
     let releaseHandler: () => void = () => {};
     registerScheduledJobAction(
@@ -869,7 +907,7 @@ test("releases scheduler ticks while a scheduled handler is stalled", async (t) 
     const calls: string[] = [];
     const warnMock = t.mock.method(console, "warn", () => {});
     try {
-        __testing.setScheduledJobRunTimeoutMsForTest(20);
+        __testing.setScheduledJobRunTimeoutMsForTest(100);
         registerScheduledJobAction(
             "cache.refresh",
             (job) =>
@@ -911,8 +949,15 @@ test("releases scheduler ticks while a scheduled handler is stalled", async (t) 
         await delay(0);
 
         assert.deepEqual(calls, ["cache.stalled", "cache.fast"]);
-        await delay(25);
+        await delay(120);
         assert.equal(warnMock.mock.callCount(), 1);
+        db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+            "2026-01-01T00:00:00.000Z",
+            "cache.stalled"
+        );
+        __testing.runSchedulerTickForTest();
+        await delay(0);
+        assert.deepEqual(calls, ["cache.stalled", "cache.fast"]);
     } finally {
         warnMock.mock.restore();
     }
@@ -1185,6 +1230,26 @@ test("marks orphaned running rows failed when the scheduler starts", () => {
     assert.equal(lastRun?.status, "failed");
     assert.equal(lastRun?.message, "Scheduled job abandoned after backend restart");
     assert.ok(lastRun?.finishedAt);
+});
+
+test("continues scheduler startup when abandoned-run cleanup fails", (t) => {
+    const prepare = db.prepare.bind(db);
+    const warnMock = t.mock.method(console, "warn", () => {});
+    const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+        if (sql.includes("UPDATE scheduled_job_runs")) {
+            throw new Error("cleanup locked");
+        }
+        return prepare(sql);
+    });
+
+    try {
+        assert.doesNotThrow(() => startScheduledJobScheduler());
+        assert.equal(warnMock.mock.callCount(), 1);
+    } finally {
+        stopScheduledJobScheduler();
+        prepareMock.mock.restore();
+        warnMock.mock.restore();
+    }
 });
 
 test("skips due jobs that are already running", async () => {
