@@ -1252,9 +1252,17 @@ else if (command === "status --short") {
             data.repos.find((repo) => repo.key === "mira-dashboard")?.statusError || "",
             /git -C .*mira-dashboard status --short/u
         );
-        assert.equal(
+        assert.deepEqual(
             data.repos.find((repo) => repo.key === "mira-dashboard")?.statusSummary,
-            undefined
+            {
+                staged: 0,
+                modified: 0,
+                deleted: 0,
+                untracked: 0,
+                renamed: 0,
+                conflicted: 0,
+                total: 0,
+            }
         );
         assert.equal(
             data.repos.find((repo) => repo.key === "openclaw")?.statusSummary?.total,
@@ -1320,7 +1328,15 @@ else if (command === "status --short") process.stdout.write("");
         assert.equal(dashboard?.head, null);
         assert.equal(dashboard?.remote, null);
         assert.equal(dashboard?.dirty, true);
-        assert.equal(dashboard?.statusSummary, undefined);
+        assert.deepEqual(dashboard?.statusSummary, {
+            staged: 0,
+            modified: 0,
+            deleted: 0,
+            untracked: 0,
+            renamed: 0,
+            conflicted: 0,
+            total: 0,
+        });
         const docker = data.repos.find((repo) => repo.key === "docker");
         assert.equal(docker?.dirty, false);
         assert.equal(docker?.exists, false);
@@ -1532,12 +1548,13 @@ if (args.includes("capture-pane")) {
         const data = cacheRow("quotas.summary").data as {
             openrouter: { status: string };
             elevenlabs: { status: string };
-            synthetic: { subscription: { percentUsed: number | null } };
+            synthetic: { note: string; status: string };
             openai: { status: string };
         };
         assert.equal(data.openrouter.status, "not_configured");
         assert.equal(data.elevenlabs.status, "error");
-        assert.equal(data.synthetic.subscription.percentUsed, null);
+        assert.equal(data.synthetic.status, "error");
+        assert.equal(data.synthetic.note, "Synthetic weekly token percentage missing");
         assert.ok(["not_configured", "error"].includes(data.openai.status));
     });
 
@@ -1721,14 +1738,45 @@ if (args.includes("capture-pane")) {
                         const elevenLabsQuota = await __testing.checkElevenLabsQuota();
                         assert.equal(elevenLabsQuota.resetAt, "2030-01-01T00:00:00.000Z");
                         const synthetic = (await __testing.checkSyntheticQuota()) as {
+                            note: string;
+                            status: string;
+                        };
+                        assert.equal(synthetic.status, "error");
+                        assert.equal(
+                            synthetic.note,
+                            "Synthetic weekly token percentage missing"
+                        );
+                    }
+                );
+            }
+        );
+
+        await withEnv(
+            {
+                SYNTHETIC_API_KEY: "synthetic",
+            },
+            async () => {
+                await withFetch(
+                    () => ({
+                        subscription: { limit: 0, requests: 0 },
+                        search: { hourly: { limit: 0, requests: 0 } },
+                        weeklyTokenLimit: {
+                            maxCredits: "$10.00",
+                            remainingCredits: "$4.00",
+                            nextRegenCredits: "$2.00",
+                        },
+                        rollingFiveHourLimit: { max: 0, remaining: 0 },
+                    }),
+                    async () => {
+                        const synthetic = (await __testing.checkSyntheticQuota()) as {
                             weeklyTokenLimit: {
                                 nextRegenPercent: number | null;
                                 percentRemaining: number | null;
                             };
                             rollingFiveHourLimit: { percentUsed: number | null };
                         };
-                        assert.equal(synthetic.weeklyTokenLimit.nextRegenPercent, null);
-                        assert.equal(synthetic.weeklyTokenLimit.percentRemaining, null);
+                        assert.equal(synthetic.weeklyTokenLimit.nextRegenPercent, 20);
+                        assert.equal(synthetic.weeklyTokenLimit.percentRemaining, 40);
                         assert.equal(synthetic.rollingFiveHourLimit.percentUsed, null);
                     }
                 );
@@ -1744,6 +1792,33 @@ if (args.includes("capture-pane")) {
                     async () => {
                         const elevenLabsQuota = await __testing.checkElevenLabsQuota();
                         assert.equal(elevenLabsQuota.resetAt, "2030-01-01T00:00:00.000Z");
+                    }
+                );
+
+                await withFetch(
+                    () => ({
+                        subscription: { limit: 0, requests: 0 },
+                        search: { hourly: { limit: 0, requests: 0 } },
+                        weeklyTokenLimit: {
+                            percentRemaining: 75,
+                        },
+                        rollingFiveHourLimit: { max: 0, remaining: 0 },
+                    }),
+                    async () => {
+                        const synthetic = (await __testing.checkSyntheticQuota()) as {
+                            weeklyTokenLimit: {
+                                maxCredits: string | null;
+                                nextRegenCredits: string | null;
+                                nextRegenPercent: number | null;
+                                percentRemaining: number | null;
+                                remainingCredits: string | null;
+                            };
+                        };
+                        assert.equal(synthetic.weeklyTokenLimit.percentRemaining, 75);
+                        assert.equal(synthetic.weeklyTokenLimit.maxCredits, null);
+                        assert.equal(synthetic.weeklyTokenLimit.remainingCredits, null);
+                        assert.equal(synthetic.weeklyTokenLimit.nextRegenCredits, null);
+                        assert.equal(synthetic.weeklyTokenLimit.nextRegenPercent, null);
                     }
                 );
             }
@@ -3134,7 +3209,7 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             path.join(binDir, "docker"),
             `#!/usr/bin/env node
 const args = process.argv.slice(2).join(" ");
-if (args === "exec kopia kopia snapshot list --all --json") {
+if (args === "exec kopia kopia snapshot list --all --json-verbose --json") {
   if (process.env.EMPTY_BACKUP_OUTPUT === "1") process.exit(0);
   process.stdout.write(JSON.stringify([
     { id: "ignored" },
@@ -3148,7 +3223,8 @@ if (args === "exec kopia kopia snapshot list --all --json") {
 } else if (args === "exec walg wal-g backup-list --detail --json") {
   if (process.env.EMPTY_BACKUP_OUTPUT === "1") process.exit(0);
   process.stdout.write(process.env.EMPTY_WALG === "1" ? "[]" : JSON.stringify([
-    { backup_name: "finish", finish_time: "2099-01-02T00:00:00.000Z" },
+    { backup_name: "modified-only", modified: "2099-01-03T00:00:00.000Z", finish_time: "2098-01-02T00:00:00.000Z" },
+    { backup_name: "finish", modified: "2099-01-01T00:00:00.000Z", finish_time: "2099-01-02T00:00:00.000Z" },
     { backup_name: "time", time: "2099-01-01T00:00:00.000Z" }
   ]));
 }
@@ -3165,11 +3241,12 @@ if (args === "exec kopia kopia snapshot list --all --json") {
                 endTime: string | null;
                 retentionReason: unknown[];
             }>;
+            ok: boolean;
             snapshotsByPath: Array<{
                 path: string;
                 snapshots: Array<{ id: string; fileCount: number | null }>;
             }>;
-            stale: Array<{ path: string }>;
+            stale: Array<{ missing?: boolean; path: string }>;
         };
         assert.equal(kopia.latest[0]?.id, "latest-end");
         assert.equal(kopia.latest[0]?.endTime, "2099-01-02T00:00:00.000Z");
@@ -3188,13 +3265,19 @@ if (args === "exec kopia kopia snapshot list --all --json") {
             { path: "/source/openclaw", endTime: "not-a-date" },
             { path: "/source/projects", endTime: null },
         ]);
+        assert.equal(kopia.ok, false);
 
         const walg = cacheRow("backup.walg.status").data as {
-            latest: { backupName: string | null; modified: string | null };
+            latest: {
+                backupName: string | null;
+                freshnessTime: string | null;
+                modified: string | null;
+            };
             stale: boolean;
         };
         assert.equal(walg.latest.backupName, "finish");
         assert.equal(walg.latest.modified, "2099-01-02T00:00:00.000Z");
+        assert.equal(walg.latest.freshnessTime, "2099-01-02T00:00:00.000Z");
         assert.equal(walg.stale, false);
 
         await withEnv(
@@ -3220,6 +3303,18 @@ if (args === "exec kopia kopia snapshot list --all --json") {
         assert.deepEqual(
             (cacheRow("backup.kopia.status").data as { latest: unknown[] }).latest,
             []
+        );
+        assert.deepEqual(
+            (
+                cacheRow("backup.kopia.status").data as {
+                    stale: Array<{ missing?: boolean; path: string }>;
+                }
+            ).stale,
+            [
+                { path: "/source/docker", endTime: null, missing: true },
+                { path: "/source/openclaw", endTime: null, missing: true },
+                { path: "/source/projects", endTime: null, missing: true },
+            ]
         );
         assert.equal(
             (cacheRow("backup.walg.status").data as { latest: unknown }).latest,

@@ -33,7 +33,7 @@ async function installFakeDocker(tempDir: string): Promise<string> {
         dockerPath,
         `#!${process.execPath}
 const args = process.argv.slice(2).join(" ");
-if (args === "exec kopia kopia snapshot list --all --json") {
+if (args === "exec kopia kopia snapshot list --all --json-verbose --json") {
     process.stdout.write(JSON.stringify([
         {
             id: "kopia-1",
@@ -42,6 +42,20 @@ if (args === "exec kopia kopia snapshot list --all --json") {
             startTime: "2099-01-01T00:00:00.000Z",
             endTime: "2099-01-01T00:01:00.000Z",
             stats: { fileCount: 2, totalSize: 512, errorCount: 0, ignoredErrorCount: 0 },
+            retentionReason: ["latest"]
+        },
+        {
+            id: "kopia-2",
+            source: { path: "/source/projects" },
+            endTime: "2099-01-01T00:01:00.000Z",
+            stats: { fileCount: 1, totalSize: 256, errorCount: 0, ignoredErrorCount: 0 },
+            retentionReason: ["latest"]
+        },
+        {
+            id: "kopia-3",
+            source: { path: "/source/openclaw" },
+            endTime: "2099-01-01T00:01:00.000Z",
+            stats: { fileCount: 1, totalSize: 128, errorCount: 0, ignoredErrorCount: 0 },
             retentionReason: ["latest"]
         }
     ]));

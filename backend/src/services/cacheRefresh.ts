@@ -27,6 +27,11 @@ const codexTrustConfigLocks = new Map<string, Promise<void>>();
 const CODEX_TRUST_LOCK_TIMEOUT_MS = 5_000;
 const CODEX_TRUST_LOCK_RETRY_MS = 100;
 const CODEX_TRUST_STALE_LOCK_MS = 5 * 60 * 1000;
+const KOPIA_EXPECTED_SOURCE_PATHS = [
+    "/source/docker",
+    "/source/projects",
+    "/source/openclaw",
+] as const;
 
 type CacheTtlUnit = "hours" | "minutes";
 type JsonRecord = Record<string, unknown>;
@@ -884,8 +889,8 @@ export async function refreshGitCache() {
         const porcelain = statusShort.ok
             ? statusShort.output.split("\n").filter(Boolean)
             : [];
-        const statusSummary = statusShort.ok ? summarizeStatus(porcelain) : undefined;
-        const dirty = statusSummary ? statusSummary.total > 0 : true;
+        const statusSummary = statusShort.ok ? summarizeStatus(porcelain) : emptyStatusSummary();
+        const dirty = statusShort.ok ? statusSummary.total > 0 : true;
         repos.push({
             ...repo,
             exists: true,
@@ -895,7 +900,7 @@ export async function refreshGitCache() {
                 ? sanitizeRemoteUrl(remote.output.split(/\s+/u, 2)[1] || null)
                 : null,
             dirty,
-            ...(statusSummary ? { statusSummary } : {}),
+            statusSummary,
             statusShort: porcelain.slice(0, 25),
             statusTruncated: porcelain.length > 25,
             ...(statusShort.ok ? {} : { statusError: statusShort.output }),
@@ -1095,6 +1100,7 @@ async function refreshKopiaBackupCache() {
         "snapshot",
         "list",
         "--all",
+        "--json-verbose",
         "--json",
     ]);
     const snapshots = JSON.parse(output || "[]") as unknown[];
@@ -1124,7 +1130,7 @@ async function refreshKopiaBackupCache() {
             };
         });
     const latest = snapshotsByPath.map((group) => group.latest).filter(Boolean);
-    const stale = latest
+    const staleSnapshots = latest
         .filter((snapshot) => {
             if (!snapshot.endTime) {
                 return true;
@@ -1137,13 +1143,17 @@ async function refreshKopiaBackupCache() {
             return ageHours > 30;
         })
         .map((snapshot) => ({ path: snapshot.path, endTime: snapshot.endTime }));
+    const missingSources = KOPIA_EXPECTED_SOURCE_PATHS.filter((pathName) => !byPath.has(pathName))
+        .sort((pathA, pathB) => pathA.localeCompare(pathB))
+        .map((pathName) => ({ path: pathName, endTime: null, missing: true }));
+    const stale = [...staleSnapshots, ...missingSources];
     const payload = {
         checkedAt: nowIso(),
         tool: "kopia",
         latest,
         snapshotsByPath,
         stale,
-        ok: stale.length === 0 && latest.length > 0,
+        ok: stale.length === 0 && latest.length >= KOPIA_EXPECTED_SOURCE_PATHS.length,
     };
     writeCacheSuccess({
         key: "backup.kopia.status",
@@ -1167,8 +1177,14 @@ async function refreshKopiaBackupCache() {
 function summarizeWalgBackup(value: unknown) {
     const backup = asRecord(value);
     const modified = firstValidTimestampValue(
-        stringOrNull(backup.modified),
         stringOrNull(backup.finish_time),
+        stringOrNull(backup.start_time),
+        stringOrNull(backup.time),
+        stringOrNull(backup.modified)
+    );
+    const freshnessTime = firstValidTimestampValue(
+        stringOrNull(backup.finish_time),
+        stringOrNull(backup.start_time),
         stringOrNull(backup.time)
     );
     return {
@@ -1177,13 +1193,14 @@ function summarizeWalgBackup(value: unknown) {
         time: stringOrNull(backup.time),
         startTime: stringOrNull(backup.start_time),
         finishTime: stringOrNull(backup.finish_time),
+        freshnessTime: freshnessTime ?? modified,
         walFileName: stringOrNull(backup.wal_file_name),
         storageName: stringOrNull(backup.storage_name),
     };
 }
 
-function getWalgBackupTime(backup: { modified: string | null }) {
-    return firstValidTimestamp(backup.modified);
+function getWalgBackupTime(backup: { freshnessTime: string | null }) {
+    return firstValidTimestamp(backup.freshnessTime);
 }
 
 async function refreshWalgBackupCache() {
@@ -1202,11 +1219,11 @@ async function refreshWalgBackupCache() {
         );
 
     const latest = backups[0] ?? null;
-    const latestModifiedMs = latest?.modified
-        ? new Date(latest.modified).getTime()
+    const latestFreshnessMs = latest?.freshnessTime
+        ? new Date(latest.freshnessTime).getTime()
         : Number.NaN;
-    const latestAgeHours = Number.isFinite(latestModifiedMs)
-        ? (Date.now() - latestModifiedMs) / 36e5
+    const latestAgeHours = Number.isFinite(latestFreshnessMs)
+        ? (Date.now() - latestFreshnessMs) / 36e5
         : null;
     const stale = !latest || latestAgeHours === null || latestAgeHours > 30;
     const payload = {
@@ -1314,8 +1331,23 @@ async function checkSyntheticQuota() {
     const rollingFiveHourMax = toNumber(rollingFiveHourLimit.max);
     const rollingFiveHourRemaining = toNumber(rollingFiveHourLimit.remaining);
     const weeklyMaxCredits = toCurrencyNumber(weeklyTokenLimit.maxCredits);
+    const weeklyRemainingCredits = toCurrencyNumber(weeklyTokenLimit.remainingCredits);
     const weeklyNextRegenCredits = toCurrencyNumber(weeklyTokenLimit.nextRegenCredits);
-    const weeklyPercentRemaining = toNullableNumber(weeklyTokenLimit.percentRemaining);
+    const explicitWeeklyPercentRemaining = toNullableNumber(
+        weeklyTokenLimit.percentRemaining
+    );
+    const computedWeeklyPercentRemaining =
+        weeklyMaxCredits && weeklyRemainingCredits !== null
+            ? (weeklyRemainingCredits / weeklyMaxCredits) * 100
+            : null;
+    const weeklyPercentRemaining =
+        explicitWeeklyPercentRemaining ?? computedWeeklyPercentRemaining;
+    if (weeklyPercentRemaining === null) {
+        return {
+            status: "error",
+            note: "Synthetic weekly token percentage missing",
+        };
+    }
     return {
         subscription: {
             limit: subscriptionLimit,
