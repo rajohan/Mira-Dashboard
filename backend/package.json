@@ -6,7 +6,7 @@
     "type": "module",
     "scripts": {
         "build": "tsc",
-        "start": "doppler run --config prd --project rajohan -- node dist/serverStart.js",
+        "start": "NODE_ENV=production doppler run --config prd --project rajohan -- node dist/serverStart.js",
         "dev": "doppler run --config prd --project rajohan -- tsx watch src/serverStart.ts",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",

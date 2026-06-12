@@ -20,10 +20,19 @@ let isStarting = false;
 let afterBackgroundServicesStartedForTest: (() => void) | undefined;
 let stopSchedulerOnServerClose: (() => void) | undefined;
 
-function shouldStartScheduledJobs(nodeEnv = process.env.NODE_ENV): boolean {
-    return (
-        nodeEnv === "production" && process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER !== "1"
-    );
+function isPackagedServerEntrypoint(argvPath = process.argv[1]): boolean {
+    return Boolean(argvPath?.replaceAll("\\", "/").endsWith("/dist/serverStart.js"));
+}
+
+function shouldStartScheduledJobs(
+    nodeEnv = process.env.NODE_ENV,
+    disableScheduler = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER,
+    argvPath = process.argv[1]
+): boolean {
+    if (disableScheduler === "1" || nodeEnv === "development" || nodeEnv === "test") {
+        return false;
+    }
+    return nodeEnv === "production" || isPackagedServerEntrypoint(argvPath);
 }
 
 function installSchedulerCloseCleanup(): void {

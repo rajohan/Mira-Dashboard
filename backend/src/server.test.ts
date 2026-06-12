@@ -1114,12 +1114,46 @@ describe("server bootstrap", () => {
             assert.equal(shouldStartOnImport("0", false), false);
             assert.equal(shouldStartOnImport("1", false), true);
             delete process.env.NODE_ENV;
-            assert.equal(serverStartTesting.shouldStartScheduledJobs(), false);
             assert.equal(
-                serverStartTesting.shouldStartScheduledJobs("development"),
+                serverStartTesting.shouldStartScheduledJobs(
+                    undefined,
+                    undefined,
+                    "/srv/dashboard/backend/dist/serverStart.js"
+                ),
+                true
+            );
+            assert.equal(
+                serverStartTesting.shouldStartScheduledJobs(
+                    undefined,
+                    "1",
+                    "/srv/dashboard/backend/dist/serverStart.js"
+                ),
                 false
             );
-            assert.equal(serverStartTesting.shouldStartScheduledJobs("test"), false);
+            assert.equal(
+                serverStartTesting.shouldStartScheduledJobs(
+                    undefined,
+                    undefined,
+                    "/srv/dashboard/backend/src/serverStart.ts"
+                ),
+                false
+            );
+            assert.equal(
+                serverStartTesting.shouldStartScheduledJobs(
+                    "development",
+                    undefined,
+                    "/srv/dashboard/backend/dist/serverStart.js"
+                ),
+                false
+            );
+            assert.equal(
+                serverStartTesting.shouldStartScheduledJobs(
+                    "test",
+                    undefined,
+                    "/srv/dashboard/backend/dist/serverStart.js"
+                ),
+                false
+            );
             assert.equal(serverStartTesting.shouldStartScheduledJobs("production"), true);
 
             process.env.MIRA_DASHBOARD_START_ON_IMPORT = "1";

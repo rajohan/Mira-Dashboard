@@ -92,6 +92,7 @@ function withDeploymentDb<T>(tempDir: string, action: (db: DatabaseSync) => T): 
         path.join(tempDir, "data", "mira-dashboard.db")
     );
     try {
+        deploymentDb.exec("PRAGMA foreign_keys = ON");
         deploymentDb.exec("PRAGMA busy_timeout = 1000");
         return action(deploymentDb);
     } finally {

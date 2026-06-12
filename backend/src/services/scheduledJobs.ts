@@ -214,6 +214,19 @@ function parseCronField(
     return values;
 }
 
+function cronFieldIsWildcard(
+    values: Set<number>,
+    minimum: number,
+    maximum: number
+): boolean {
+    for (let value = minimum; value <= maximum; value += 1) {
+        if (!values.has(value)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 function parseCronExpression(expression: string): {
     minutes: Set<number>;
     hours: Set<number>;
@@ -246,8 +259,8 @@ function parseCronExpression(expression: string): {
         daysOfMonth,
         months,
         daysOfWeek,
-        dayOfMonthWildcard: dayOfMonth === "*",
-        dayOfWeekWildcard: dayOfWeek === "*",
+        dayOfMonthWildcard: cronFieldIsWildcard(daysOfMonth, 1, 31),
+        dayOfWeekWildcard: cronFieldIsWildcard(daysOfWeek, 0, 6),
     };
 }
 
@@ -573,15 +586,53 @@ function finishRun(
     return { ...run, status, finishedAt, message, output };
 }
 
-function advanceScheduledRun(job: ScheduledJob): void {
+function claimScheduledRun(job: ScheduledJob): ScheduledJobRun | null {
     const currentJob = getScheduledJob(job.id);
-    if (!currentJob) {
-        return;
+    const dueAt = nowIso();
+    if (!currentJob?.enabled || !currentJob.nextRunAt || currentJob.nextRunAt > dueAt) {
+        return null;
     }
     const nextRunAt = calculateNextRunAt(currentJob);
-    db.prepare(
-        "UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE id = ?"
-    ).run(nextRunAt, nowIso(), currentJob.id);
+    const startedAt = nowIso();
+    try {
+        db.exec("BEGIN IMMEDIATE");
+        const updateResult = db
+            .prepare(
+                `UPDATE scheduled_jobs
+                 SET next_run_at = ?, updated_at = ?
+                 WHERE id = ? AND enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?`
+            )
+            .run(nextRunAt, startedAt, currentJob.id, dueAt);
+        if (updateResult.changes === 0) {
+            db.exec("ROLLBACK");
+            return null;
+        }
+        const insertResult = db
+            .prepare(
+                `INSERT INTO scheduled_job_runs (
+                    job_id, status, trigger_type, started_at, output_json
+                ) VALUES (?, 'running', 'schedule', ?, '{}')`
+            )
+            .run(currentJob.id, startedAt);
+        db.exec("COMMIT");
+        return {
+            id: Number(insertResult.lastInsertRowid),
+            jobId: currentJob.id,
+            status: "running",
+            triggerType: "schedule",
+            startedAt,
+            finishedAt: null,
+            message: null,
+            output: {},
+        };
+    } catch (error) {
+        try {
+            db.exec("ROLLBACK");
+        } catch {
+            // Ignore rollback failures after SQLite has already unwound the transaction.
+        }
+        throw error;
+    }
 }
 
 function markAbandonedRunningRuns(): void {
@@ -620,7 +671,15 @@ export async function runScheduledJob(
         );
     }
 
-    const run = createRun(id, triggerType);
+    const run =
+        triggerType === "schedule" ? claimScheduledRun(job) : createRun(id, triggerType);
+    if (!run) {
+        const error = new Error("Scheduled job is no longer due") as Error & {
+            statusCode?: number;
+        };
+        error.statusCode = 409;
+        throw error;
+    }
     runningJobs.add(id);
     try {
         if (!handler) {
@@ -633,13 +692,7 @@ export async function runScheduledJob(
     } catch (error) {
         return finishRun(run, "failed", errorMessage(error, "Scheduled job failed"), {});
     } finally {
-        try {
-            if (triggerType === "schedule") {
-                advanceScheduledRun(job);
-            }
-        } finally {
-            runningJobs.delete(id);
-        }
+        runningJobs.delete(id);
     }
 }
 

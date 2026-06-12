@@ -193,6 +193,58 @@ test("calculates cron next-run times", () => {
         ),
         "2026-06-08T09:00:00.000Z"
     );
+    assert.equal(
+        calculateNextRunAt(
+            {
+                cronExpression: "0 9 */1 * 1",
+                enabled: true,
+                intervalSeconds: 3600,
+                scheduleType: "cron",
+                timeOfDay: null,
+            },
+            new Date("2026-06-09T09:00:00.000Z")
+        ),
+        "2026-06-15T09:00:00.000Z"
+    );
+    assert.equal(
+        calculateNextRunAt(
+            {
+                cronExpression: "0 9 1-31 * 1",
+                enabled: true,
+                intervalSeconds: 3600,
+                scheduleType: "cron",
+                timeOfDay: null,
+            },
+            new Date("2026-06-09T09:00:00.000Z")
+        ),
+        "2026-06-15T09:00:00.000Z"
+    );
+    assert.equal(
+        calculateNextRunAt(
+            {
+                cronExpression: "0 9 1 * 0-7",
+                enabled: true,
+                intervalSeconds: 3600,
+                scheduleType: "cron",
+                timeOfDay: null,
+            },
+            new Date("2026-06-09T09:00:00.000Z")
+        ),
+        "2026-07-01T09:00:00.000Z"
+    );
+    assert.equal(
+        calculateNextRunAt(
+            {
+                cronExpression: "0 9 */2 * 1",
+                enabled: true,
+                intervalSeconds: 3600,
+                scheduleType: "cron",
+                timeOfDay: null,
+            },
+            new Date("2026-06-09T09:00:00.000Z")
+        ),
+        "2026-06-11T09:00:00.000Z"
+    );
     assert.throws(
         () =>
             calculateNextRunAt(
@@ -242,6 +294,38 @@ test("runs registered actions and records latest run state", async () => {
     assert.equal(run.status, "success");
     assert.deepEqual(run.output, { key: "weather.spydeberg" });
     assert.equal(getScheduledJob("cache.weather")?.lastRun?.id, run.id);
+});
+
+test("cascades scheduled job runs when deleting jobs", async () => {
+    registerScheduledJobAction("cache.refresh", () => ({}));
+    upsertScheduledJob({
+        id: "cache.weather",
+        name: "Weather cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+
+    await runScheduledJob("cache.weather", "manual");
+    assert.equal(
+        (
+            db.prepare("SELECT COUNT(*) AS count FROM scheduled_job_runs").get() as {
+                count: number;
+            }
+        ).count,
+        1
+    );
+
+    db.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run("cache.weather");
+    assert.equal(
+        (
+            db.prepare("SELECT COUNT(*) AS count FROM scheduled_job_runs").get() as {
+                count: number;
+            }
+        ).count,
+        0
+    );
 });
 
 test("lists latest runs for jobs across query chunks", () => {
@@ -786,8 +870,11 @@ test("preserves no-op patch due times and uses fresh schedule after running", as
     assert.ok(new Date(nextRunAt).getTime() - Date.now() > 3_000_000);
 });
 
-test("clears running state when scheduled rescheduling fails", async (t) => {
-    registerScheduledJobAction("cache.refresh", () => {});
+test("does not run handlers when scheduled claim fails", async (t) => {
+    let handlerCalled = false;
+    registerScheduledJobAction("cache.refresh", () => {
+        handlerCalled = true;
+    });
     upsertScheduledJob({
         id: "cache.weather",
         name: "Weather cache",
@@ -796,12 +883,16 @@ test("clears running state when scheduled rescheduling fails", async (t) => {
         intervalSeconds: 120,
         actionKey: "cache.refresh",
     });
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+        "2026-01-01T00:00:00.000Z",
+        "cache.weather"
+    );
     const prepare = db.prepare.bind(db);
     const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
-        if (sql.includes("UPDATE scheduled_jobs SET next_run_at")) {
+        if (sql.includes("UPDATE scheduled_jobs")) {
             return {
                 run: () => {
-                    throw new Error("reschedule failed");
+                    throw new Error("claim failed");
                 },
             } as unknown as ReturnType<typeof db.prepare>;
         }
@@ -811,14 +902,121 @@ test("clears running state when scheduled rescheduling fails", async (t) => {
     try {
         await assert.rejects(
             runScheduledJob("cache.weather", "schedule"),
-            /reschedule failed/u
+            /claim failed/u
         );
     } finally {
         prepareMock.mock.restore();
     }
 
+    assert.equal(handlerCalled, false);
     await runScheduledJob("cache.weather", "manual");
     assert.equal(getScheduledJob("cache.weather")?.isRunning, false);
+});
+
+test("rejects scheduled runs that are not due", async () => {
+    let handlerCalled = false;
+    registerScheduledJobAction("cache.refresh", () => {
+        handlerCalled = true;
+    });
+    upsertScheduledJob({
+        id: "cache.weather",
+        name: "Weather cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+
+    await assert.rejects(
+        runScheduledJob("cache.weather", "schedule"),
+        /Scheduled job is no longer due/u
+    );
+    assert.equal(handlerCalled, false);
+});
+
+test("rejects scheduled runs when another worker claims the due job", async (t) => {
+    let handlerCalled = false;
+    registerScheduledJobAction("cache.refresh", () => {
+        handlerCalled = true;
+    });
+    upsertScheduledJob({
+        id: "cache.weather",
+        name: "Weather cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+        "2026-01-01T00:00:00.000Z",
+        "cache.weather"
+    );
+    const prepare = db.prepare.bind(db);
+    const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+        if (sql.includes("UPDATE scheduled_jobs")) {
+            return {
+                run: () => ({ changes: 0 }),
+            } as unknown as ReturnType<typeof db.prepare>;
+        }
+        return prepare(sql);
+    });
+
+    try {
+        await assert.rejects(
+            runScheduledJob("cache.weather", "schedule"),
+            /Scheduled job is no longer due/u
+        );
+    } finally {
+        prepareMock.mock.restore();
+    }
+    assert.equal(handlerCalled, false);
+});
+
+test("preserves scheduled claim errors when rollback also fails", async (t) => {
+    registerScheduledJobAction("cache.refresh", () => ({}));
+    upsertScheduledJob({
+        id: "cache.weather",
+        name: "Weather cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+        "2026-01-01T00:00:00.000Z",
+        "cache.weather"
+    );
+    const exec = db.exec.bind(db);
+    const prepare = db.prepare.bind(db);
+    const execMock = t.mock.method(db, "exec", (sql: string) => {
+        if (sql === "BEGIN IMMEDIATE") {
+            return;
+        }
+        if (sql === "ROLLBACK") {
+            throw new Error("rollback failed");
+        }
+        return exec(sql);
+    });
+    const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+        if (sql.includes("UPDATE scheduled_jobs")) {
+            return {
+                run: () => {
+                    throw new Error("claim failed");
+                },
+            } as unknown as ReturnType<typeof db.prepare>;
+        }
+        return prepare(sql);
+    });
+
+    try {
+        await assert.rejects(
+            runScheduledJob("cache.weather", "schedule"),
+            /claim failed/u
+        );
+    } finally {
+        prepareMock.mock.restore();
+        execMock.mock.restore();
+    }
 });
 
 test("does not advance schedule when a running job is deleted", async () => {
@@ -838,6 +1036,10 @@ test("does not advance schedule when a running job is deleted", async () => {
         intervalSeconds: 120,
         actionKey: "cache.refresh",
     });
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+        "2026-01-01T00:00:00.000Z",
+        "cache.weather"
+    );
 
     const scheduledRun = runScheduledJob("cache.weather", "schedule");
     db.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run("cache.weather");
