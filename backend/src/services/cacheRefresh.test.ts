@@ -2951,12 +2951,16 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
             registerCacheRefreshScheduledJobs();
             assert.ok(
                 db
-                    .prepare("SELECT 1 FROM scheduled_jobs WHERE id = 'cache.backup.kopia'")
+                    .prepare(
+                        "SELECT 1 FROM scheduled_jobs WHERE id = 'cache.backup.kopia'"
+                    )
                     .get()
             );
             assert.ok(
                 db
-                    .prepare("SELECT 1 FROM scheduled_jobs WHERE id = 'cache.backup.walg'")
+                    .prepare(
+                        "SELECT 1 FROM scheduled_jobs WHERE id = 'cache.backup.walg'"
+                    )
                     .get()
             );
             await withFetch(
@@ -3178,7 +3182,9 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             registerCacheRefreshScheduledJobs();
             assert.equal(
                 db
-                    .prepare("SELECT 1 FROM cache_entries WHERE key = 'weather.spydeberg'")
+                    .prepare(
+                        "SELECT 1 FROM cache_entries WHERE key = 'weather.spydeberg'"
+                    )
                     .get(),
                 undefined
             );

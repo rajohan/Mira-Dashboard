@@ -889,7 +889,9 @@ export async function refreshGitCache() {
         const porcelain = statusShort.ok
             ? statusShort.output.split("\n").filter(Boolean)
             : [];
-        const statusSummary = statusShort.ok ? summarizeStatus(porcelain) : emptyStatusSummary();
+        const statusSummary = statusShort.ok
+            ? summarizeStatus(porcelain)
+            : emptyStatusSummary();
         const dirty = statusShort.ok ? statusSummary.total > 0 : true;
         repos.push({
             ...repo,
@@ -1143,7 +1145,9 @@ async function refreshKopiaBackupCache() {
             return ageHours > 30;
         })
         .map((snapshot) => ({ path: snapshot.path, endTime: snapshot.endTime }));
-    const missingSources = KOPIA_EXPECTED_SOURCE_PATHS.filter((pathName) => !byPath.has(pathName))
+    const missingSources = KOPIA_EXPECTED_SOURCE_PATHS.filter(
+        (pathName) => !byPath.has(pathName)
+    )
         .sort((pathA, pathB) => pathA.localeCompare(pathB))
         .map((pathName) => ({ path: pathName, endTime: null, missing: true }));
     const stale = [...staleSnapshots, ...missingSources];
