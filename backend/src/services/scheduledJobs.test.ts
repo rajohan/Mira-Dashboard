@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { db } from "../db.js";
 import {
@@ -475,6 +476,40 @@ test("runs due enabled jobs once per scheduler tick", async () => {
     assert.equal(getScheduledJob("cache.weather")?.lastRun?.triggerType, "schedule");
 });
 
+test("starts independent due jobs without waiting for long-running handlers", async () => {
+    const calls: string[] = [];
+    let releaseSlowJob!: () => void;
+    const slowJob = new Promise<void>((resolve) => {
+        releaseSlowJob = resolve;
+    });
+    registerScheduledJobAction("cache.refresh", async (job) => {
+        calls.push(job.id);
+        if (job.id === "cache.a-slow") {
+            await slowJob;
+        }
+    });
+    for (const id of ["cache.a-slow", "cache.b-fast"]) {
+        upsertScheduledJob({
+            id,
+            name: id,
+            enabled: true,
+            scheduleType: "interval",
+            intervalSeconds: 120,
+            actionKey: "cache.refresh",
+        });
+    }
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ?").run(
+        "2026-01-01T00:00:00.000Z"
+    );
+
+    const dueJobs = __testing.runDueJobsForTest();
+    await delay(0);
+
+    assert.deepEqual(calls, ["cache.a-slow", "cache.b-fast"]);
+    releaseSlowJob();
+    await dueJobs;
+});
+
 test("keeps due jobs isolated when one persisted job is invalid", async () => {
     const calls: string[] = [];
     registerScheduledJobAction("cache.refresh", (job) => {
@@ -532,6 +567,55 @@ test("continues due job loop after a row disappears", async (t) => {
         if (sql.includes("SELECT id FROM scheduled_jobs")) {
             return {
                 all: () => [{ id: "cache.missing" }, { id: "cache.weather" }],
+            } as unknown as ReturnType<typeof db.prepare>;
+        }
+        return prepare(sql);
+    });
+
+    try {
+        await __testing.runDueJobsForTest();
+    } finally {
+        prepareMock.mock.restore();
+    }
+
+    assert.deepEqual(calls, ["cache.weather"]);
+});
+
+test("continues due job loop after a job lookup throws", async (t) => {
+    const calls: string[] = [];
+    registerScheduledJobAction("cache.refresh", (job) => {
+        calls.push(job.id);
+    });
+    upsertScheduledJob({
+        id: "cache.weather",
+        name: "Weather cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+        "2026-01-01T00:00:00.000Z",
+        "cache.weather"
+    );
+    const prepare = db.prepare.bind(db);
+    let jobLookupCalls = 0;
+    const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+        if (sql.includes("SELECT id FROM scheduled_jobs")) {
+            return {
+                all: () => [{ id: "cache.broken" }, { id: "cache.weather" }],
+            } as unknown as ReturnType<typeof db.prepare>;
+        }
+        if (sql.includes("SELECT * FROM scheduled_jobs WHERE id = ?")) {
+            const statement = prepare(sql);
+            return {
+                get: (...args: Parameters<typeof statement.get>) => {
+                    jobLookupCalls += 1;
+                    if (jobLookupCalls === 1) {
+                        throw new Error("lookup failed");
+                    }
+                    return statement.get(...args);
+                },
             } as unknown as ReturnType<typeof db.prepare>;
         }
         return prepare(sql);

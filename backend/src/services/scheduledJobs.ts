@@ -639,6 +639,7 @@ async function runDueJobs(): Promise<void> {
              ORDER BY next_run_at, id`
         )
         .all(dueAt) as Array<{ id: string }>;
+    const runs: Array<Promise<ScheduledJobRun | void>> = [];
     for (const row of rows) {
         if (!runningJobs.has(row.id)) {
             try {
@@ -650,12 +651,17 @@ async function runDueJobs(): Promise<void> {
                 ) {
                     continue;
                 }
-                await runScheduledJob(row.id, "schedule");
+                runs.push(
+                    runScheduledJob(row.id, "schedule").catch(() => {
+                        // Keep unrelated due jobs running even if one row is stale.
+                    })
+                );
             } catch {
                 // Keep later due jobs running even if a persisted row is stale.
             }
         }
     }
+    await Promise.all(runs);
 }
 
 function scheduleTick(): void {
