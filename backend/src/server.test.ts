@@ -897,6 +897,7 @@ describe("server bootstrap", () => {
             server,
             "listening"
         );
+        const originalNodeEnv = process.env.NODE_ENV;
         const originalToken = process.env.OPENCLAW_TOKEN;
         const originalStartOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT;
         const originalConsoleWarn = console.warn;
@@ -924,6 +925,18 @@ describe("server bootstrap", () => {
             assert.equal(initializedToken, "test-token");
             stopQuotaNotificationMonitor();
             stopOpenClawNotificationMonitor();
+            process.env.NODE_ENV = "production";
+            server.emit("close");
+            const closeListenersBeforeScheduler = server.listenerCount("close");
+            handleServerListening();
+            const closeListenersAfterScheduler = server.listenerCount("close");
+            handleServerListening();
+            assert.equal(server.listenerCount("close"), closeListenersAfterScheduler);
+            assert.equal(closeListenersAfterScheduler, closeListenersBeforeScheduler + 1);
+            server.emit("close");
+            stopQuotaNotificationMonitor();
+            stopOpenClawNotificationMonitor();
+            process.env.NODE_ENV = originalNodeEnv;
             gateway.init = () => {
                 throw new Error("gateway failed");
             };
@@ -1102,6 +1115,11 @@ describe("server bootstrap", () => {
                 delete process.env.MIRA_DASHBOARD_START_ON_IMPORT;
             } else {
                 process.env.MIRA_DASHBOARD_START_ON_IMPORT = originalStartOnImport;
+            }
+            if (originalNodeEnv === undefined) {
+                delete process.env.NODE_ENV;
+            } else {
+                process.env.NODE_ENV = originalNodeEnv;
             }
             gateway.init = originalInit;
             server.listen = originalListen;

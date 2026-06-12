@@ -40,9 +40,10 @@ function columnExists(
 }
 
 function isDuplicateColumnError(error: unknown, columnName: string): boolean {
+    const escapedName = columnName.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
     return (
         error instanceof Error &&
-        new RegExp(String.raw`duplicate column name:\s*${columnName}`, "u").test(
+        new RegExp(String.raw`duplicate column name:\s*${escapedName}`, "u").test(
             error.message
         )
     );

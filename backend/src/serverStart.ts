@@ -29,6 +29,9 @@ function shouldStartScheduledJobs(nodeEnv = process.env.NODE_ENV): boolean {
 }
 
 function installSchedulerCloseCleanup(): void {
+    if (stopSchedulerOnServerClose) {
+        return;
+    }
     stopSchedulerOnServerClose = () => {
         stopScheduledJobScheduler();
         stopSchedulerOnServerClose = undefined;
@@ -38,7 +41,7 @@ function installSchedulerCloseCleanup(): void {
 
 function removeSchedulerCloseCleanup(): void {
     if (stopSchedulerOnServerClose) {
-        server.off("close", stopSchedulerOnServerClose);
+        server.removeListener("close", stopSchedulerOnServerClose);
         stopSchedulerOnServerClose = undefined;
     }
 }
