@@ -5,6 +5,7 @@ import path from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 
 import { db } from "../db.js";
+import { insertCacheEntry } from "../testUtils/cacheFixtures.js";
 
 const originalPath = process.env.PATH;
 const originalUpdateAvailable = process.env.FAKE_OPENCLAW_UPDATE_AVAILABLE;
@@ -69,6 +70,28 @@ function openClawNotifications(): Array<{
         });
 }
 
+function insertSystemHostCacheFromEnv(): void {
+    const updateAvailable = process.env.FAKE_OPENCLAW_UPDATE_AVAILABLE !== "false";
+    const latest = process.env.FAKE_OPENCLAW_LATEST || "v2026.5.99";
+    const version =
+        process.env.FAKE_OPENCLAW_MISSING_VERSION === "true"
+            ? undefined
+            : {
+                  current: "v2026.5.4",
+                  latest,
+                  updateAvailable,
+                  checkedAt: 1_800_000_000_000,
+              };
+    insertCacheEntry({
+        key: "system.host",
+        data: {
+            version,
+            checkedAt: "2026-05-11T00:00:00.000Z",
+        },
+        source: "system",
+    });
+}
+
 describe("OpenClaw update notifications", () => {
     let tempDir: string;
     let runOpenClawNotificationCheck: () => Promise<void>;
@@ -80,8 +103,12 @@ describe("OpenClaw update notifications", () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-openclaw-notifications-"));
         await installFakeDocker(tempDir);
         const openClawNotifications = await import("./openclawNotifications.js");
-        ({ runOpenClawNotificationCheck, startOpenClawNotificationMonitor } =
-            openClawNotifications);
+        startOpenClawNotificationMonitor =
+            openClawNotifications.startOpenClawNotificationMonitor;
+        runOpenClawNotificationCheck = async () => {
+            insertSystemHostCacheFromEnv();
+            await openClawNotifications.runOpenClawNotificationCheck();
+        };
         ({ getState, stopOpenClawNotificationMonitorForTest } =
             openClawNotifications.__testing);
     });

@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { getPersistedGatewayToken } from "./auth.js";
 import gateway from "./gateway.js";
 import { resolveListenPort, server } from "./server.js";
+import { registerCacheRefreshScheduledJobs } from "./services/cacheRefresh.js";
 import {
     startOpenClawNotificationMonitor,
     stopOpenClawNotificationMonitor,
@@ -75,6 +76,7 @@ export function handleServerListening(): void {
         startOpenClawNotificationMonitor();
         openClawMonitorStarted = true;
         if (shouldStartScheduledJobs()) {
+            registerCacheRefreshScheduledJobs();
             startScheduledJobScheduler();
             scheduledJobSchedulerStarted = true;
             installSchedulerCloseCleanup();

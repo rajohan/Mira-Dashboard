@@ -55,7 +55,7 @@ export async function fetchCachedSystemHost(): Promise<CachedSystemHostResponse>
         expiresAt: row.expires_at || null,
         errorCode: row.error_code || null,
         errorMessage: row.error_message || null,
-        consecutiveFailures: Number(row.consecutive_failures || 0),
+        consecutiveFailures: Number(row.consecutive_failures),
         data,
         meta: parseJsonField<Record<string, unknown>>(row.meta) ?? {},
     };

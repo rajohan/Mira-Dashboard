@@ -1,58 +1,28 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
-import os from "node:os";
-import path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { after, before, beforeEach, describe, it } from "node:test";
 
 import express from "express";
+
+import { clearCacheEntries, insertCacheEntry } from "../testUtils/cacheFixtures.js";
 
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
 }
 
-const originalPath = process.env.PATH;
-
-async function installFakeDocker(tempDir: string): Promise<void> {
-    const binDir = path.join(tempDir, "bin");
-    await mkdir(binDir, { recursive: true });
-    const dockerPath = path.join(binDir, "docker");
-    await writeFile(
-        dockerPath,
-        String.raw`#!${process.execPath}
-const command = process.argv.at(-1) || "";
-function row(key, data, meta = {}) {
-  return [
-    "key\tdata\tsource\tupdated_at\tlast_attempt_at\texpires_at\tstatus\terror_code\terror_message\tconsecutive_failures\tmeta",
-    key + "\t" + JSON.stringify(data) + "\tmoltbook\t2026-05-11T00:00:00.000Z\t2026-05-11T00:00:00.000Z\t2026-05-11T01:00:00.000Z\tfresh\t\t\t0\t" + JSON.stringify(meta),
-    "",
-  ].join("\n");
-}
-if (command.includes("moltbook.home")) {
-  if (process.env.MIRA_TEST_MOLTBOOK_FAIL === "home") throw new Error("home cache failed");
-  process.stdout.write(row("moltbook.home", { pendingRequestCount: 1, unreadMessageCount: 2, activityOnYourPostsCount: 0, activityOnYourPosts: [], latestAnnouncement: { postId: "post-1", title: "Hello", authorName: "Mira", createdAt: "2026-05-11", preview: "Hi" }, postsFromAccountsYouFollowCount: 3, exploreCount: 4, nextActions: ["reply"], fetchedAt: "2026-05-11T00:00:00.000Z" }, { ttl: 60 }));
-} else if (command.includes("moltbook.feed.new")) {
-  if (process.env.MIRA_TEST_MOLTBOOK_FAIL === "feed") throw new Error("feed cache failed");
-  process.stdout.write(row("moltbook.feed.new", { posts: [{ id: "new-1" }], feedType: "explore", feedFilter: "new", hasMore: false, tip: null }));
-} else if (command.includes("moltbook.feed.hot")) {
-  if (process.env.MIRA_TEST_MOLTBOOK_FAIL === "feed") throw new Error("feed cache failed");
-  process.stdout.write(row("moltbook.feed.hot", { posts: [{ id: "hot-1" }], feedType: "explore", feedFilter: "hot", hasMore: true, tip: "Be specific" }));
-} else if (command.includes("moltbook.profile")) {
-  if (process.env.MIRA_TEST_MOLTBOOK_FAIL === "profile") throw new Error("profile cache failed");
-  process.stdout.write(row("moltbook.profile", { agent: { username: "mira_2026" } }));
-} else if (command.includes("moltbook.my-content")) {
-  if (process.env.MIRA_TEST_MOLTBOOK_FAIL === "content") throw new Error("content cache failed");
-  process.stdout.write(row("moltbook.my-content", { posts: [{ id: "mine-1" }], comments: [{ id: "comment-1" }] }));
-} else {
-  process.stderr.write("Unexpected fake docker command: " + command);
-  process.exit(1);
-}
-`,
-        "utf8"
-    );
-    await chmod(dockerPath, 0o755);
-    process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+function insertMoltbookEntry(
+    key: string,
+    data: unknown,
+    options: Partial<Parameters<typeof insertCacheEntry>[0]> = {}
+): void {
+    insertCacheEntry({
+        key,
+        data,
+        source: "moltbook",
+        meta: {},
+        ...options,
+    });
 }
 
 async function startServer(): Promise<TestServer> {
@@ -90,30 +60,44 @@ async function startServer(): Promise<TestServer> {
 
 describe("moltbook routes", () => {
     let server: TestServer;
-    let tempDir: string;
 
     before(async () => {
-        tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-moltbook-route-"));
-        await installFakeDocker(tempDir);
         server = await startServer();
+    });
+
+    beforeEach(() => {
+        clearCacheEntries();
     });
 
     after(async () => {
         if (server) {
             await server.close();
         }
-        if (originalPath === undefined) {
-            delete process.env.PATH;
-        } else {
-            process.env.PATH = originalPath;
-        }
-        delete process.env.MIRA_TEST_MOLTBOOK_FAIL;
-        if (tempDir) {
-            await rm(tempDir, { recursive: true, force: true });
-        }
     });
 
     it("returns cached Moltbook home metadata", async () => {
+        insertMoltbookEntry(
+            "moltbook.home",
+            {
+                pendingRequestCount: 1,
+                unreadMessageCount: 2,
+                activityOnYourPostsCount: 0,
+                activityOnYourPosts: [],
+                latestAnnouncement: {
+                    postId: "post-1",
+                    title: "Hello",
+                    authorName: "Mira",
+                    createdAt: "2026-05-11",
+                    preview: "Hi",
+                },
+                postsFromAccountsYouFollowCount: 3,
+                exploreCount: 4,
+                nextActions: ["reply"],
+                fetchedAt: "2026-05-11T00:00:00.000Z",
+            },
+            { meta: { ttl: 60 } }
+        );
+
         const response = await fetch(`${server.baseUrl}/api/moltbook/home`);
         const body = (await response.json()) as {
             source: string;
@@ -133,6 +117,21 @@ describe("moltbook routes", () => {
     });
 
     it("returns default hot and explicit new feed data", async () => {
+        insertMoltbookEntry("moltbook.feed.hot", {
+            posts: [{ id: "hot-1" }],
+            feedType: "explore",
+            feedFilter: "hot",
+            hasMore: true,
+            tip: "Be specific",
+        });
+        insertMoltbookEntry("moltbook.feed.new", {
+            posts: [{ id: "new-1" }],
+            feedType: "explore",
+            feedFilter: "new",
+            hasMore: false,
+            tip: null,
+        });
+
         const hot = await fetch(`${server.baseUrl}/api/moltbook/feed`);
         const hotBody = (await hot.json()) as {
             posts: Array<{ id: string }>;
@@ -153,6 +152,14 @@ describe("moltbook routes", () => {
     });
 
     it("returns cached profile and personal content", async () => {
+        insertMoltbookEntry("moltbook.profile", {
+            agent: { username: "mira_2026" },
+        });
+        insertMoltbookEntry("moltbook.my-content", {
+            posts: [{ id: "mine-1" }],
+            comments: [{ id: "comment-1" }],
+        });
+
         const profile = await fetch(`${server.baseUrl}/api/moltbook/profile`);
         assert.equal(profile.status, 200);
         assert.deepEqual(await profile.json(), { agent: { username: "mira_2026" } });
@@ -165,27 +172,21 @@ describe("moltbook routes", () => {
         });
     });
 
-    it("maps cache command failures to 503 responses", async () => {
+    it("maps cache failures to 503 responses", async () => {
         const cases = [
-            ["home", "/api/moltbook/home", "home cache failed"],
-            ["feed", "/api/moltbook/feed", "feed cache failed"],
-            ["profile", "/api/moltbook/profile", "profile cache failed"],
-            ["content", "/api/moltbook/my-posts", "content cache failed"],
+            ["/api/moltbook/home", "moltbook.home"],
+            ["/api/moltbook/feed", "moltbook.feed.hot"],
+            ["/api/moltbook/profile", "moltbook.profile"],
+            ["/api/moltbook/my-posts", "moltbook.my-content"],
         ] as const;
 
-        for (const [failure, route, expectedError] of cases) {
-            try {
-                process.env.MIRA_TEST_MOLTBOOK_FAIL = failure;
-                const response = await fetch(`${server.baseUrl}${route}`);
-                const body = (await response.json()) as { error: string };
-                assert.equal(response.status, 503);
-                assert.ok(
-                    body.error.includes(expectedError),
-                    `unexpected error: ${body.error}`
-                );
-            } finally {
-                delete process.env.MIRA_TEST_MOLTBOOK_FAIL;
-            }
+        for (const [route, key] of cases) {
+            clearCacheEntries();
+            insertMoltbookEntry(key, { posts: [] }, { status: "stale" });
+            const response = await fetch(`${server.baseUrl}${route}`);
+            const body = (await response.json()) as { error: string };
+            assert.equal(response.status, 503);
+            assert.ok(body.error.includes(key), `unexpected error: ${body.error}`);
         }
     });
 });

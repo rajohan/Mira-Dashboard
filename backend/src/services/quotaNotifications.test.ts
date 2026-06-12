@@ -5,6 +5,7 @@ import path from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 
 import { db } from "../db.js";
+import { insertCacheEntry } from "../testUtils/cacheFixtures.js";
 
 const originalPath = process.env.PATH;
 const originalPercent = process.env.FAKE_OPENROUTER_PERCENT;
@@ -53,6 +54,38 @@ function quotaNotifications(): Array<{
         .all() as Array<{ title: string; dedupe_key: string; metadata_json: string }>;
 }
 
+function insertQuotaCacheFromEnv(): void {
+    const percent = Number(process.env.FAKE_OPENROUTER_PERCENT || "91");
+    let data: unknown;
+    if (process.env.FAKE_QUOTAS_JSON) {
+        try {
+            data = JSON.parse(process.env.FAKE_QUOTAS_JSON);
+        } catch {
+            data = process.env.FAKE_QUOTAS_JSON;
+        }
+    } else {
+        data = {
+            openrouter: {
+                usage: 9,
+                totalCredits: 10,
+                remaining: 1.23,
+                usageMonthly: 9,
+                percentUsed: percent,
+            },
+            elevenlabs: { status: "not_configured" },
+            synthetic: { status: "not_configured" },
+            openai: { status: "not_configured" },
+            checkedAt: 1_800_000_000_000,
+            cacheAgeMs: 0,
+        };
+    }
+    insertCacheEntry({
+        key: "quotas.summary",
+        data,
+        source: "quotas",
+    });
+}
+
 describe("quota notifications", () => {
     let tempDir: string;
     let runQuotaNotificationCheck: () => Promise<void>;
@@ -69,6 +102,11 @@ describe("quota notifications", () => {
             stopQuotaNotificationMonitor,
         } = await import("./quotaNotifications.js"));
         ({ __testing: quotaTesting } = await import("./quotaNotifications.js"));
+        const actualRunQuotaNotificationCheck = runQuotaNotificationCheck;
+        runQuotaNotificationCheck = async () => {
+            insertQuotaCacheFromEnv();
+            await actualRunQuotaNotificationCheck();
+        };
     });
 
     beforeEach(() => {

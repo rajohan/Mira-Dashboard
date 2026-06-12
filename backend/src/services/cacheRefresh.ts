@@ -1,0 +1,1759 @@
+import { execFile } from "node:child_process";
+import { openSync, renameSync, rmSync, type Stats, statSync } from "node:fs";
+import {
+    type FileHandle,
+    mkdir,
+    open,
+    readFile,
+    rename,
+    rm,
+    stat,
+    writeFile,
+} from "node:fs/promises";
+import os from "node:os";
+import { promisify } from "node:util";
+
+import { db } from "../db.js";
+import { nonEmptyEnvFallback } from "../lib/values.js";
+import {
+    getScheduledJob,
+    registerScheduledJobAction,
+    type ScheduledJob,
+    upsertScheduledJob,
+} from "./scheduledJobs.js";
+
+const execFileAsync = promisify(execFile);
+const codexTrustConfigLocks = new Map<string, Promise<void>>();
+const CODEX_TRUST_LOCK_TIMEOUT_MS = 5_000;
+const CODEX_TRUST_LOCK_RETRY_MS = 100;
+const CODEX_TRUST_STALE_LOCK_MS = 5 * 60 * 1000;
+
+type CacheTtlUnit = "hours" | "minutes";
+type JsonRecord = Record<string, unknown>;
+
+interface CacheWriteOptions {
+    key: string;
+    data: unknown;
+    source: string;
+    ttl: number;
+    ttlUnit: CacheTtlUnit;
+    metadata: Record<string, unknown>;
+}
+
+interface CacheFailureOptions {
+    key: string;
+    source: string;
+    ttl: number;
+    ttlUnit: CacheTtlUnit;
+    error: unknown;
+    metadata: Record<string, unknown>;
+}
+
+const MOLTBOOK_API = "https://www.moltbook.com/api/v1";
+const SPYDEBERG = {
+    name: "Spydeberg",
+    wttrUrl: "https://wttr.in/Spydeberg?format=j1",
+    openMeteoUrl:
+        "https://api.open-meteo.com/v1/forecast?latitude=59.62&longitude=11.08&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Europe%2FOslo&forecast_days=3",
+};
+const CODEX_TRUSTED_DIRS = [
+    "/home/ubuntu/.openclaw",
+    "/home/ubuntu/projects",
+    "/home/ubuntu/projects/mira-dashboard",
+];
+const MOLTBOOK_CACHE_KEY_LIST = [
+    "moltbook.home",
+    "moltbook.feed.hot",
+    "moltbook.feed.new",
+    "moltbook.profile",
+    "moltbook.my-content",
+] as const;
+type MoltbookCacheKey = (typeof MOLTBOOK_CACHE_KEY_LIST)[number];
+const MOLTBOOK_CACHE_KEYS = new Set<string>(MOLTBOOK_CACHE_KEY_LIST);
+
+const gitRepos = [
+    {
+        key: "openclaw",
+        name: ".openclaw",
+        path: "/home/ubuntu/.openclaw",
+        category: "workspace",
+    },
+    {
+        key: "mira-dashboard",
+        name: "mira-dashboard",
+        path: "/home/ubuntu/projects/mira-dashboard",
+        category: "project",
+    },
+    {
+        key: "docker",
+        name: "docker",
+        path: "/opt/docker",
+        category: "infra",
+    },
+    {
+        key: "n8n",
+        name: "n8n",
+        path: "/home/ubuntu/projects/n8n",
+        category: "project",
+    },
+];
+
+function nowIso(): string {
+    return new Date().toISOString();
+}
+
+function ttlDate(ttl: number, unit: CacheTtlUnit): string {
+    const multiplier = unit === "hours" ? 60 * 60 * 1000 : 60 * 1000;
+    return new Date(Date.now() + ttl * multiplier).toISOString();
+}
+
+function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+function toNumber(value: unknown, fallback = 0): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function toNullableNumber(value: unknown): number | null {
+    if (value === null || value === undefined) {
+        return null;
+    }
+    if (typeof value === "string" && value.trim() === "") {
+        return null;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toCurrencyNumber(value: unknown): number | null {
+    if (typeof value === "number") {
+        return Number.isFinite(value) ? value : null;
+    }
+    if (typeof value !== "string") {
+        return null;
+    }
+    const cleaned = value.replaceAll(/[^0-9.-]/gu, "");
+    if (cleaned === "" || !/\d/u.test(cleaned)) {
+        return null;
+    }
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sleepSync(ms: number): void {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+
+type CodexTrustConfigLockDependencies = {
+    now?: () => number;
+    open?: typeof openSync;
+    remove?: typeof rmSync;
+    rename?: typeof renameSync;
+    sleep?: typeof sleepSync;
+    stat?: typeof statSync;
+};
+
+type CodexTrustConfigFileHandle = Pick<FileHandle, "close">;
+
+type AsyncCodexTrustConfigLockDependencies = {
+    now?: () => number;
+    open?: (
+        path: string,
+        flags: string,
+        mode: number
+    ) => Promise<CodexTrustConfigFileHandle>;
+    remove?: typeof rm;
+    rename?: typeof rename;
+    sleep?: typeof sleep;
+    stat?: typeof stat;
+};
+
+function sameFileStat(left: Stats, right: Stats): boolean {
+    return (
+        left.mtimeMs === right.mtimeMs && left.dev === right.dev && left.ino === right.ino
+    );
+}
+
+function acquireCodexTrustConfigLock(
+    lockPath: string,
+    dependencies: CodexTrustConfigLockDependencies = {}
+): number {
+    const now = dependencies.now ?? Date.now;
+    const openFile = dependencies.open ?? openSync;
+    const removeFile = dependencies.remove ?? rmSync;
+    const renameFile = dependencies.rename ?? renameSync;
+    const sleep = dependencies.sleep ?? sleepSync;
+    const statFile = dependencies.stat ?? statSync;
+    const startedAt = now();
+    let staleRecoveryAttempted = false;
+    for (;;) {
+        try {
+            return openFile(lockPath, "wx", 0o600);
+        } catch (error) {
+            if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) {
+                throw error;
+            }
+            const elapsedMs = now() - startedAt;
+            if (elapsedMs < CODEX_TRUST_LOCK_TIMEOUT_MS) {
+                sleep(CODEX_TRUST_LOCK_RETRY_MS);
+                continue;
+            }
+            if (!staleRecoveryAttempted) {
+                staleRecoveryAttempted = true;
+                try {
+                    const stat = statFile(lockPath);
+                    if (now() - stat.mtimeMs > CODEX_TRUST_STALE_LOCK_MS) {
+                        const reclaimedPath = `${lockPath}.reclaimed.${process.pid}`;
+                        try {
+                            renameFile(lockPath, reclaimedPath);
+                            const reclaimedStat = statFile(reclaimedPath);
+                            if (sameFileStat(stat, reclaimedStat)) {
+                                removeFile(reclaimedPath, { force: true });
+                                continue;
+                            }
+                            try {
+                                if (sameFileStat(stat, statFile(reclaimedPath))) {
+                                    renameFile(reclaimedPath, lockPath);
+                                }
+                            } catch {
+                                // Best effort: preserve the live lock path if a newer owner won.
+                            }
+                        } catch (renameError) {
+                            if (
+                                renameError instanceof Error &&
+                                "code" in renameError &&
+                                renameError.code === "ENOENT"
+                            ) {
+                                continue;
+                            }
+                        }
+                        throw error;
+                    }
+                } catch (statError) {
+                    if (
+                        statError instanceof Error &&
+                        "code" in statError &&
+                        statError.code === "ENOENT"
+                    ) {
+                        continue;
+                    }
+                    throw statError;
+                }
+            }
+            throw error;
+        }
+    }
+}
+
+async function acquireCodexTrustConfigLockAsync(
+    lockPath: string,
+    dependencies: AsyncCodexTrustConfigLockDependencies = {}
+): Promise<CodexTrustConfigFileHandle> {
+    const now = dependencies.now ?? Date.now;
+    const openFile = dependencies.open ?? open;
+    const removeFile = dependencies.remove ?? rm;
+    const renameFile = dependencies.rename ?? rename;
+    const sleepFor = dependencies.sleep ?? sleep;
+    const statFile = dependencies.stat ?? stat;
+    const startedAt = now();
+    let staleRecoveryAttempted = false;
+    for (;;) {
+        try {
+            return await openFile(lockPath, "wx", 0o600);
+        } catch (error) {
+            if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) {
+                throw error;
+            }
+            const elapsedMs = now() - startedAt;
+            if (elapsedMs < CODEX_TRUST_LOCK_TIMEOUT_MS) {
+                await sleepFor(CODEX_TRUST_LOCK_RETRY_MS);
+                continue;
+            }
+            if (!staleRecoveryAttempted) {
+                staleRecoveryAttempted = true;
+                try {
+                    const lockStat = await statFile(lockPath);
+                    if (now() - lockStat.mtimeMs > CODEX_TRUST_STALE_LOCK_MS) {
+                        const reclaimedPath = `${lockPath}.reclaimed.${process.pid}`;
+                        try {
+                            await renameFile(lockPath, reclaimedPath);
+                            const reclaimedStat = await statFile(reclaimedPath);
+                            if (sameFileStat(lockStat, reclaimedStat)) {
+                                await removeFile(reclaimedPath, { force: true });
+                                continue;
+                            }
+                            try {
+                                if (
+                                    sameFileStat(lockStat, await statFile(reclaimedPath))
+                                ) {
+                                    await renameFile(reclaimedPath, lockPath);
+                                }
+                            } catch {
+                                // Best effort: preserve the live lock path if a newer owner won.
+                            }
+                        } catch (renameError) {
+                            if (
+                                renameError instanceof Error &&
+                                "code" in renameError &&
+                                renameError.code === "ENOENT"
+                            ) {
+                                continue;
+                            }
+                        }
+                        throw error;
+                    }
+                } catch (statError) {
+                    if (
+                        statError instanceof Error &&
+                        "code" in statError &&
+                        statError.code === "ENOENT"
+                    ) {
+                        continue;
+                    }
+                    throw statError;
+                }
+            }
+            throw error;
+        }
+    }
+}
+
+export function writeCacheSuccess(options: CacheWriteOptions): void {
+    const timestamp = nowIso();
+    db.prepare(
+        `INSERT INTO cache_entries (
+            key, data_json, source, updated_at, last_attempt_at, expires_at,
+            status, error_code, error_message, consecutive_failures, metadata_json
+         ) VALUES (?, ?, ?, ?, ?, ?, 'fresh', NULL, NULL, 0, ?)
+         ON CONFLICT(key) DO UPDATE SET
+            data_json = excluded.data_json,
+            source = excluded.source,
+            updated_at = excluded.updated_at,
+            last_attempt_at = excluded.last_attempt_at,
+            expires_at = excluded.expires_at,
+            status = 'fresh',
+            error_code = NULL,
+            error_message = NULL,
+            consecutive_failures = 0,
+            metadata_json = excluded.metadata_json`
+    ).run(
+        options.key,
+        JSON.stringify(options.data),
+        options.source,
+        timestamp,
+        timestamp,
+        ttlDate(options.ttl, options.ttlUnit),
+        JSON.stringify(options.metadata)
+    );
+}
+
+export function writeCacheFailure(options: CacheFailureOptions): void {
+    const timestamp = nowIso();
+    db.prepare(
+        `INSERT INTO cache_entries (
+            key, data_json, source, updated_at, last_attempt_at, expires_at,
+            status, error_code, error_message, consecutive_failures, metadata_json
+         ) VALUES (?, NULL, ?, NULL, ?, ?, 'error', 'check_failed', ?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET
+            last_attempt_at = excluded.last_attempt_at,
+            expires_at = excluded.expires_at,
+            status = 'error',
+            error_code = excluded.error_code,
+            error_message = excluded.error_message,
+            consecutive_failures = COALESCE(cache_entries.consecutive_failures, 0) + 1,
+            metadata_json = excluded.metadata_json`
+    ).run(
+        options.key,
+        options.source,
+        timestamp,
+        ttlDate(options.ttl, options.ttlUnit),
+        errorMessage(options.error),
+        1,
+        JSON.stringify({ ...options.metadata, lastFailureAt: timestamp })
+    );
+}
+
+async function fetchJson(url: string, headers: Record<string, string> = {}) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+        const response = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+                Accept: "application/json",
+                "User-Agent": "mira-dashboard-cache/1.0",
+                ...headers,
+            },
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status} for ${url}`);
+        }
+        return (await response.json()) as unknown;
+    } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+            throw new Error(`Request timeout for ${url}`, { cause: error });
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+async function fetchMoltbookJson(path: string) {
+    const apiKey = process.env.MOLTBOOK_API_KEY?.trim();
+    if (!apiKey) {
+        throw new Error("MOLTBOOK_API_KEY is not configured");
+    }
+    return fetchJson(`${MOLTBOOK_API}${path}`, {
+        Authorization: `Bearer ${apiKey}`,
+    });
+}
+
+function asRecord(value: unknown): JsonRecord {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? (value as JsonRecord)
+        : {};
+}
+
+function normalizeMoltbookHome(value: unknown) {
+    const data = asRecord(value);
+    const dm = asRecord(data.your_direct_messages);
+    const activity = Array.isArray(data.activity_on_your_posts)
+        ? data.activity_on_your_posts
+        : [];
+    const next = Array.isArray(data.what_to_do_next) ? data.what_to_do_next : [];
+    const announcement = asRecord(data.latest_moltbook_announcement);
+    return {
+        pendingRequestCount: toNumber(dm.pending_request_count),
+        unreadMessageCount: toNumber(dm.unread_message_count),
+        activityOnYourPostsCount: activity.length,
+        activityOnYourPosts: activity.slice(0, 10),
+        latestAnnouncement:
+            Object.keys(announcement).length > 0
+                ? {
+                      postId: announcement.post_id ?? null,
+                      title: announcement.title ?? null,
+                      authorName: announcement.author_name ?? null,
+                      createdAt: announcement.created_at ?? null,
+                      preview: announcement.preview ?? null,
+                  }
+                : null,
+        postsFromAccountsYouFollowCount: Array.isArray(
+            data.posts_from_accounts_you_follow
+        )
+            ? data.posts_from_accounts_you_follow.length
+            : null,
+        exploreCount: Array.isArray(data.explore) ? data.explore.length : null,
+        nextActions: next,
+        fetchedAt: nowIso(),
+    };
+}
+
+function normalizeMoltbookFeed(value: unknown, sort: "hot" | "new") {
+    const data = asRecord(value);
+    return {
+        posts: Array.isArray(data.posts) ? data.posts : [],
+        feedType: data.feed_type ?? sort,
+        feedFilter: data.feed_filter ?? null,
+        hasMore: Boolean(data.has_more),
+        tip: data.tip ?? null,
+    };
+}
+
+type MoltbookFetchTask =
+    | { kind: "home"; promise: Promise<unknown> }
+    | {
+          kind: "feed";
+          key: MoltbookCacheKey;
+          sort: "hot" | "new";
+          promise: Promise<unknown>;
+      }
+    | { kind: "profile"; promise: Promise<unknown> };
+
+function createMoltbookRefreshError(
+    message: string,
+    options: { cause: unknown; failedKeys: MoltbookCacheKey[] }
+): Error & { failedKeys: MoltbookCacheKey[] } {
+    return Object.assign(new Error(message, { cause: options.cause }), {
+        failedKeys: options.failedKeys,
+    });
+}
+
+function failedKeysForMoltbookTask(
+    task: MoltbookFetchTask,
+    requestedKeys: readonly MoltbookCacheKey[]
+): MoltbookCacheKey[] {
+    if (task.kind === "home") {
+        return ["moltbook.home"];
+    }
+    if (task.kind === "feed") {
+        return [task.key];
+    }
+    return ["moltbook.profile", "moltbook.my-content"].filter((key) =>
+        requestedKeys.includes(key as MoltbookCacheKey)
+    ) as MoltbookCacheKey[];
+}
+
+function getMoltbookFailureKeys(error: unknown): MoltbookCacheKey[] | undefined {
+    const failedKeys = asRecord(error).failedKeys;
+    return Array.isArray(failedKeys) ? (failedKeys as MoltbookCacheKey[]) : undefined;
+}
+
+export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
+    const requestedKeys = targetKey ? [targetKey] : MOLTBOOK_CACHE_KEY_LIST;
+    const writes: Array<{
+        key: MoltbookCacheKey;
+        data: unknown;
+        metadata: Record<string, unknown>;
+    }> = [];
+    const tasks: MoltbookFetchTask[] = [];
+    const failedKeys = new Set<MoltbookCacheKey>();
+
+    if (requestedKeys.includes("moltbook.home")) {
+        tasks.push({ kind: "home", promise: fetchMoltbookJson("/home") });
+    }
+
+    for (const sort of ["hot", "new"] as const) {
+        const key = `moltbook.feed.${sort}` as MoltbookCacheKey;
+        if (!requestedKeys.includes(key)) continue;
+        tasks.push({
+            kind: "feed",
+            key,
+            sort,
+            promise: fetchMoltbookJson(`/feed?sort=${sort}&limit=25`),
+        });
+    }
+
+    if (
+        requestedKeys.includes("moltbook.profile") ||
+        requestedKeys.includes("moltbook.my-content")
+    ) {
+        tasks.push({
+            kind: "profile",
+            promise: fetchMoltbookJson("/agents/profile?name=mira_2026"),
+        });
+    }
+
+    const results = await Promise.allSettled(
+        tasks.map(async (task) => {
+            try {
+                return { task, value: await task.promise };
+            } catch (error) {
+                throw { task, error };
+            }
+        })
+    );
+    let firstFailure: unknown;
+    for (const result of results) {
+        if (result.status === "rejected") {
+            const failed = result.reason as {
+                error: unknown;
+                task: MoltbookFetchTask;
+            };
+            firstFailure ??= failed.error;
+            for (const failedKey of failedKeysForMoltbookTask(
+                failed.task,
+                requestedKeys
+            )) {
+                failedKeys.add(failedKey);
+            }
+            continue;
+        }
+        const { task, value } = result.value;
+
+        if (task.kind === "home") {
+            writes.push({
+                key: "moltbook.home",
+                data: normalizeMoltbookHome(value),
+                metadata: { workflow: "Cache Foundation - Moltbook", kind: "home" },
+            });
+            continue;
+        }
+
+        if (task.kind === "feed") {
+            writes.push({
+                key: task.key,
+                data: normalizeMoltbookFeed(value, task.sort),
+                metadata: {
+                    workflow: "Cache Foundation - Moltbook",
+                    kind: "feed",
+                    sort: task.sort,
+                },
+            });
+            continue;
+        }
+
+        const profile = asRecord(value);
+        if (requestedKeys.includes("moltbook.profile")) {
+            writes.push({
+                key: "moltbook.profile",
+                data: { agent: profile.agent ?? null },
+                metadata: { workflow: "Cache Foundation - Moltbook", kind: "profile" },
+            });
+        }
+        if (requestedKeys.includes("moltbook.my-content")) {
+            writes.push({
+                key: "moltbook.my-content",
+                data: {
+                    posts: Array.isArray(profile.recentPosts) ? profile.recentPosts : [],
+                    comments: Array.isArray(profile.recentComments)
+                        ? profile.recentComments
+                        : [],
+                },
+                metadata: { workflow: "Cache Foundation - Moltbook", kind: "my-content" },
+            });
+        }
+    }
+
+    if (writes.length === 0 && firstFailure !== undefined) {
+        throw createMoltbookRefreshError(
+            `Moltbook refresh failed: ${errorMessage(firstFailure)}`,
+            {
+                cause: firstFailure,
+                failedKeys: [...failedKeys],
+            }
+        );
+    }
+
+    db.exec("SAVEPOINT moltbook_cache_write");
+    try {
+        for (const item of writes) {
+            writeCacheSuccess({
+                key: item.key,
+                data: item.data,
+                source: "moltbook-api",
+                ttl: 30,
+                ttlUnit: "minutes",
+                metadata: item.metadata,
+            });
+        }
+        db.exec("RELEASE SAVEPOINT moltbook_cache_write");
+    } catch (error) {
+        db.exec("ROLLBACK TO SAVEPOINT moltbook_cache_write");
+        db.exec("RELEASE SAVEPOINT moltbook_cache_write");
+        throw error;
+    }
+    if (firstFailure !== undefined) {
+        throw createMoltbookRefreshError("Moltbook refresh had sub-request failures", {
+            cause: firstFailure,
+            failedKeys: [...failedKeys],
+        });
+    }
+    return { refreshed: writes.map((item) => item.key) };
+}
+
+function openMeteoCodeToDescription(code: unknown): string {
+    if (code === null || code === undefined) return "Unknown";
+    if (typeof code === "string" && code.trim() === "") return "Unknown";
+    const numericCode = Number(code);
+    if (!Number.isFinite(numericCode)) return "Unknown";
+    if (numericCode === 0) return "Clear";
+    if ([1, 2, 3].includes(numericCode)) return "Partly cloudy";
+    if ([45, 48].includes(numericCode)) return "Fog";
+    if ([51, 53, 55, 56, 57].includes(numericCode)) return "Drizzle";
+    if ([61, 63, 65, 66, 67, 80, 81, 82].includes(numericCode)) return "Rain";
+    if ([71, 73, 75, 77, 85, 86].includes(numericCode)) return "Snow";
+    if ([95, 96, 99].includes(numericCode)) return "Thunderstorm";
+    return "Unknown";
+}
+
+async function fetchSpydebergWeather() {
+    try {
+        const data = asRecord(await fetchJson(SPYDEBERG.wttrUrl));
+        const current = asRecord(
+            Array.isArray(data.current_condition) ? data.current_condition[0] : null
+        );
+        const today = asRecord(Array.isArray(data.weather) ? data.weather[0] : null);
+        return {
+            source: "wttr.in",
+            data: {
+                location: SPYDEBERG.name,
+                temperatureC: toNullableNumber(current.temp_C),
+                feelsLikeC: toNullableNumber(current.FeelsLikeC),
+                humidityPercent: toNullableNumber(current.humidity),
+                windKph: toNullableNumber(current.windspeedKmph),
+                description:
+                    asRecord(
+                        Array.isArray(current.weatherDesc) ? current.weatherDesc[0] : null
+                    ).value || "Unknown",
+                minTempC: toNullableNumber(today.mintempC),
+                maxTempC: toNullableNumber(today.maxtempC),
+                forecast: (Array.isArray(data.weather) ? data.weather : [])
+                    .slice(0, 3)
+                    .map((dayValue) => {
+                        const day = asRecord(dayValue);
+                        const hourly = asRecord(
+                            Array.isArray(day.hourly) ? day.hourly[0] : null
+                        );
+                        return {
+                            date: day.date,
+                            minTempC: toNullableNumber(day.mintempC),
+                            maxTempC: toNullableNumber(day.maxtempC),
+                            description:
+                                asRecord(
+                                    Array.isArray(hourly.weatherDesc)
+                                        ? hourly.weatherDesc[0]
+                                        : null
+                                ).value || "Unknown",
+                        };
+                    }),
+                fetchedAt: nowIso(),
+            },
+            fallbackReason: null,
+        };
+    } catch (error) {
+        const data = asRecord(await fetchJson(SPYDEBERG.openMeteoUrl));
+        const current = asRecord(data.current);
+        const daily = asRecord(data.daily);
+        const minTemps = Array.isArray(daily.temperature_2m_min)
+            ? daily.temperature_2m_min
+            : [];
+        const maxTemps = Array.isArray(daily.temperature_2m_max)
+            ? daily.temperature_2m_max
+            : [];
+        const weatherCodes = Array.isArray(daily.weather_code) ? daily.weather_code : [];
+        return {
+            source: "open-meteo",
+            data: {
+                location: SPYDEBERG.name,
+                temperatureC: current.temperature_2m ?? null,
+                feelsLikeC: current.apparent_temperature ?? null,
+                humidityPercent: current.relative_humidity_2m ?? null,
+                windKph: current.wind_speed_10m ?? null,
+                description: openMeteoCodeToDescription(current.weather_code),
+                minTempC: minTemps[0] ?? null,
+                maxTempC: maxTemps[0] ?? null,
+                forecast: (Array.isArray(daily.time) ? daily.time : [])
+                    .slice(0, 3)
+                    .map((date: string, index: number) => ({
+                        date,
+                        minTempC: minTemps[index] ?? null,
+                        maxTempC: maxTemps[index] ?? null,
+                        description: openMeteoCodeToDescription(weatherCodes[index]),
+                    })),
+                fetchedAt: nowIso(),
+            },
+            fallbackReason: errorMessage(error),
+        };
+    }
+}
+
+export async function refreshWeatherCache() {
+    const result = await fetchSpydebergWeather();
+    writeCacheSuccess({
+        key: "weather.spydeberg",
+        data: result.data,
+        source: result.source,
+        ttl: 6,
+        ttlUnit: "hours",
+        metadata: {
+            workflow: "Cache Foundation - Weather Spydeberg",
+            location: SPYDEBERG.name,
+            country: "NO",
+            fallbackUsed: result.source !== "wttr.in",
+            fallbackReason: result.fallbackReason,
+            providerPriority: ["wttr.in", "open-meteo"],
+        },
+    });
+    return { refreshed: ["weather.spydeberg"] };
+}
+
+async function runCommand(file: string, args: string[], cwd?: string): Promise<string> {
+    const { stdout } = await execFileAsync(file, args, {
+        cwd,
+        encoding: "utf8",
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 90_000,
+    });
+    return stdout.trimEnd();
+}
+
+async function safeGit(repoPath: string, args: string[]) {
+    try {
+        return { ok: true, output: await runCommand("git", ["-C", repoPath, ...args]) };
+    } catch (error) {
+        return { ok: false, output: errorMessage(error) };
+    }
+}
+
+function summarizeStatus(lines: string[]) {
+    const chars = lines.map((line) => ({
+        index: line[0] ?? " ",
+        workTree: line[1] ?? " ",
+        line,
+    }));
+    const unmergedStatuses = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
+    return {
+        staged: chars.filter(
+            ({ index, workTree }) =>
+                index !== " " &&
+                index !== "?" &&
+                !unmergedStatuses.has(`${index}${workTree}`)
+        ).length,
+        modified: chars.filter(({ workTree }) => workTree === "M").length,
+        deleted: chars.filter(({ index, workTree }) => index === "D" || workTree === "D")
+            .length,
+        untracked: chars.filter(({ line }) => line.startsWith("??")).length,
+        renamed: chars.filter(({ index, workTree }) => index === "R" || workTree === "R")
+            .length,
+        conflicted: chars.filter(
+            ({ index, workTree }) =>
+                unmergedStatuses.has(`${index}${workTree}`) ||
+                index === "U" ||
+                workTree === "U"
+        ).length,
+        total: lines.length,
+    };
+}
+
+function sanitizeRemoteUrl(value: string | null): string | null {
+    if (!value) {
+        return null;
+    }
+    try {
+        const url = new URL(value);
+        url.username = "";
+        url.password = "";
+        url.search = "";
+        url.hash = "";
+        return url.toString();
+    } catch {
+        const withoutQuery = value.replace(/\?.*$/u, "");
+        const scpStyleMatch = withoutQuery.match(/^([^@\s]+)@([^:\s]+:.+)$/u);
+        if (scpStyleMatch) {
+            return scpStyleMatch[2];
+        }
+        return withoutQuery.replace(/\/\/[^/@\s]+@/u, "//");
+    }
+}
+
+export async function refreshGitCache() {
+    const repos = [];
+    for (const repo of gitRepos) {
+        const inside = await safeGit(repo.path, ["rev-parse", "--is-inside-work-tree"]);
+        if (!inside.ok) {
+            repos.push({
+                ...repo,
+                exists: false,
+                dirty: false,
+                error: inside.output,
+            });
+            continue;
+        }
+        if (inside.output.trim() !== "true") {
+            repos.push({
+                ...repo,
+                exists: false,
+                dirty: false,
+                error: "Not a git repository",
+            });
+            continue;
+        }
+        const [branch, head, remote, statusShort] = await Promise.all([
+            safeGit(repo.path, ["branch", "--show-current"]),
+            safeGit(repo.path, ["rev-parse", "HEAD"]),
+            safeGit(repo.path, ["remote", "-v"]),
+            safeGit(repo.path, ["status", "--short"]),
+        ]);
+        const porcelain = statusShort.ok
+            ? statusShort.output.split("\n").filter(Boolean)
+            : [];
+        const statusSummary = statusShort.ok ? summarizeStatus(porcelain) : undefined;
+        const dirty = statusSummary ? statusSummary.total > 0 : true;
+        repos.push({
+            ...repo,
+            exists: true,
+            branch: branch.ok ? branch.output || null : null,
+            head: head.ok ? head.output || null : null,
+            remote: remote.ok
+                ? sanitizeRemoteUrl(remote.output.split(/\s+/u, 2)[1] || null)
+                : null,
+            dirty,
+            ...(statusSummary ? { statusSummary } : {}),
+            statusShort: porcelain.slice(0, 25),
+            statusTruncated: porcelain.length > 25,
+            ...(statusShort.ok ? {} : { statusError: statusShort.output }),
+            checkedAt: nowIso(),
+        });
+    }
+    const dirtyRepos = repos.filter((repo) => repo.dirty).map((repo) => repo.key);
+    const missingRepos = repos
+        .filter((repo) => repo.exists === false)
+        .map((repo) => repo.key);
+    const payload = {
+        repos,
+        dirtyRepos,
+        dirtyCount: dirtyRepos.length,
+        missingRepos,
+        checkedAt: nowIso(),
+    };
+    writeCacheSuccess({
+        key: "git.workspace",
+        data: payload,
+        source: "backend",
+        ttl: 24,
+        ttlUnit: "hours",
+        metadata: {
+            workflow: "Cache Foundation - Git Workspace",
+            summary: {
+                repoCount: repos.length,
+                dirtyCount: dirtyRepos.length,
+                dirtyRepos,
+                missingRepos,
+            },
+        },
+    });
+    return { refreshed: ["git.workspace"] };
+}
+
+async function refreshSystemCache() {
+    const openclawBin = getOpenclawBin();
+    const checkedAt = nowIso();
+    const statusOutput = await runCommand(openclawBin, ["status", "--json"]);
+    const [doctorResult, securityResult, hostResult] = await Promise.allSettled([
+        runCommand(openclawBin, ["doctor"]),
+        runCommand(openclawBin, ["security", "audit", "--json"]),
+        getHostSummary(),
+    ]);
+    const status = JSON.parse(statusOutput) as JsonRecord;
+    const doctorError =
+        doctorResult.status === "rejected" ? errorMessage(doctorResult.reason) : null;
+    let securityError =
+        securityResult.status === "rejected" ? errorMessage(securityResult.reason) : null;
+    let security: JsonRecord | null = null;
+    if (securityResult.status === "fulfilled") {
+        try {
+            security = JSON.parse(securityResult.value) as JsonRecord;
+        } catch (error) {
+            securityError = errorMessage(error);
+            console.warn(
+                "[CacheRefresh] Failed to parse OpenClaw security audit JSON:",
+                error
+            );
+        }
+    }
+    const doctorWarnings =
+        doctorResult.status === "fulfilled"
+            ? doctorResult.value
+                  .split("\n")
+                  .map((line) =>
+                      line
+                          .replaceAll(
+                              new RegExp(String.raw`\u001B\[[0-9;?]*[ -/]*[@-~]`, "gu"),
+                              ""
+                          )
+                          .trim()
+                  )
+                  .filter((line) => line.startsWith("- WARNING:"))
+                  .map((line) => line.replace(/^- WARNING:\s*/u, "").trim())
+            : [];
+    const currentVersion = String(status.runtimeVersion || "unknown");
+    const update = asRecord(status.update);
+    const registry = asRecord(update.registry);
+    const latestVersion = registry.latestVersion ? String(registry.latestVersion) : null;
+    const version = {
+        current: currentVersion,
+        latest: latestVersion,
+        updateAvailable: Boolean(
+            currentVersion !== "unknown" &&
+            latestVersion &&
+            currentVersion !== latestVersion
+        ),
+        checkedAt: Date.now(),
+    };
+    const openclawPayload = {
+        version,
+        gateway: status.gateway ?? null,
+        gatewayService: status.gatewayService ?? null,
+        nodeService: status.nodeService ?? null,
+        heartbeat: status.heartbeat ?? null,
+        tasks: status.tasks ?? null,
+        taskAudit: status.taskAudit ?? null,
+        doctorWarnings,
+        doctorError,
+        doctorWarningCount: doctorWarnings.length,
+        security,
+        securityError,
+        checkedAt,
+    };
+    const host =
+        hostResult.status === "fulfilled"
+            ? hostResult.value
+            : buildFallbackHostSummary(checkedAt);
+    const hostPayload = {
+        ...host,
+        version: {
+            ...version,
+            hostError:
+                hostResult.status === "rejected" ? errorMessage(hostResult.reason) : null,
+        },
+        checkedAt,
+    };
+    writeCacheSuccess({
+        key: "system.openclaw",
+        data: openclawPayload,
+        source: "backend",
+        ttl: 24,
+        ttlUnit: "hours",
+        metadata: {
+            workflow: "Cache Foundation - System Checks",
+            kind: "openclaw",
+            summary: {
+                updateAvailable: version.updateAvailable,
+                doctorWarningCount: doctorWarnings.length,
+            },
+        },
+    });
+    writeCacheSuccess({
+        key: "system.host",
+        data: hostPayload,
+        source: "backend",
+        ttl: 24,
+        ttlUnit: "hours",
+        metadata: {
+            workflow: "Cache Foundation - System Checks",
+            kind: "host",
+            summary: {
+                diskPercent: host.disk.percent,
+                memoryFreeMb: host.memory.freeMb,
+                uptimeSeconds: host.uptimeSeconds,
+            },
+        },
+    });
+    return { refreshed: ["system.openclaw", "system.host"] };
+}
+
+async function checkOpenRouterQuota() {
+    const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+    if (!apiKey) return { status: "not_configured" };
+    const [keyInfo, creditsInfo] = await Promise.all([
+        fetchJson("https://openrouter.ai/api/v1/key", {
+            Authorization: `Bearer ${apiKey}`,
+        }) as Promise<JsonRecord>,
+        fetchJson("https://openrouter.ai/api/v1/credits", {
+            Authorization: `Bearer ${apiKey}`,
+        }) as Promise<JsonRecord>,
+    ]);
+    const usage = toNumber(asRecord(keyInfo.data).usage);
+    const totalCredits = toNumber(asRecord(creditsInfo.data).total_credits);
+    return {
+        usage,
+        totalCredits,
+        remaining: Math.max(totalCredits - usage, 0),
+        usageMonthly: toNumber(asRecord(keyInfo.data).usage_monthly),
+        percentUsed: totalCredits > 0 ? Math.round((usage / totalCredits) * 100) : null,
+    };
+}
+
+async function checkElevenLabsQuota() {
+    const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
+    if (!apiKey) return { status: "not_configured" };
+    const data = asRecord(
+        await fetchJson("https://api.elevenlabs.io/v1/user", {
+            "xi-api-key": apiKey,
+        })
+    );
+    const subscription = asRecord(data.subscription);
+    const used = toNumber(subscription.character_count);
+    const total = toNumber(subscription.character_limit);
+    const resetMsCandidate = toNullableNumber(
+        subscription.next_character_count_reset_unix_ms
+    );
+    const resetSecCandidate = toNullableNumber(
+        subscription.next_character_count_reset_unix
+    );
+    return {
+        used,
+        total,
+        remaining: Math.max(total - used, 0),
+        tier: subscription.tier || "unknown",
+        percentUsed: total > 0 ? Math.round((used / total) * 100) : null,
+        resetAt:
+            resetMsCandidate !== null && resetMsCandidate > 0
+                ? new Date(resetMsCandidate).toISOString()
+                : resetSecCandidate !== null && resetSecCandidate > 0
+                  ? new Date(resetSecCandidate * 1000).toISOString()
+                  : null,
+    };
+}
+
+async function checkSyntheticQuota() {
+    const apiKey = process.env.SYNTHETIC_API_KEY?.trim();
+    if (!apiKey) return { status: "not_configured" };
+    const data = asRecord(
+        await fetchJson("https://api.synthetic.new/v2/quotas", {
+            Authorization: `Bearer ${apiKey}`,
+        })
+    );
+    const subscription = asRecord(data.subscription);
+    const search = asRecord(data.search);
+    const searchHourly = asRecord(search.hourly);
+    const weeklyTokenLimit = asRecord(data.weeklyTokenLimit);
+    const rollingFiveHourLimit = asRecord(data.rollingFiveHourLimit);
+    const subscriptionLimit = toNumber(subscription.limit);
+    const subscriptionRequests = toNumber(subscription.requests);
+    const searchHourlyLimit = toNumber(searchHourly.limit);
+    const searchHourlyRequests = toNumber(searchHourly.requests);
+    const rollingFiveHourMax = toNumber(rollingFiveHourLimit.max);
+    const rollingFiveHourRemaining = toNumber(rollingFiveHourLimit.remaining);
+    const weeklyMaxCredits = toCurrencyNumber(weeklyTokenLimit.maxCredits);
+    const weeklyNextRegenCredits = toCurrencyNumber(weeklyTokenLimit.nextRegenCredits);
+    const weeklyPercentRemaining = toNullableNumber(weeklyTokenLimit.percentRemaining);
+    return {
+        subscription: {
+            limit: subscriptionLimit,
+            requests: subscriptionRequests,
+            remaining: Math.max(subscriptionLimit - subscriptionRequests, 0),
+            renewsAt: subscription.renewsAt || null,
+            percentUsed:
+                subscriptionLimit > 0
+                    ? Math.round((subscriptionRequests / subscriptionLimit) * 100)
+                    : null,
+        },
+        searchHourly: {
+            limit: searchHourlyLimit,
+            requests: searchHourlyRequests,
+            remaining: Math.max(searchHourlyLimit - searchHourlyRequests, 0),
+            renewsAt: searchHourly.renewsAt || null,
+            percentUsed:
+                searchHourlyLimit > 0
+                    ? Math.round((searchHourlyRequests / searchHourlyLimit) * 100)
+                    : null,
+        },
+        weeklyTokenLimit: {
+            percentRemaining: weeklyPercentRemaining,
+            nextRegenAt: weeklyTokenLimit.nextRegenAt || null,
+            maxCredits: weeklyTokenLimit.maxCredits || null,
+            remainingCredits: weeklyTokenLimit.remainingCredits || null,
+            nextRegenCredits: weeklyTokenLimit.nextRegenCredits || null,
+            nextRegenPercent:
+                weeklyMaxCredits && weeklyNextRegenCredits !== null
+                    ? (weeklyNextRegenCredits / weeklyMaxCredits) * 100
+                    : null,
+        },
+        rollingFiveHourLimit: {
+            remaining: rollingFiveHourRemaining,
+            max: rollingFiveHourMax,
+            limited: Boolean(rollingFiveHourLimit.limited),
+            nextTickAt: rollingFiveHourLimit.nextTickAt || null,
+            tickPercent: toNumber(rollingFiveHourLimit.tickPercent, 0),
+            percentUsed:
+                rollingFiveHourMax > 0
+                    ? Math.round(
+                          ((rollingFiveHourMax - rollingFiveHourRemaining) /
+                              rollingFiveHourMax) *
+                              100
+                      )
+                    : null,
+        },
+    };
+}
+
+function getQuotaCodexHome() {
+    return nonEmptyEnvFallback("QUOTAS_CODEX_HOME", "/home/ubuntu/.codex");
+}
+
+function getOpenclawBin() {
+    return nonEmptyEnvFallback("OPENCLAW_BIN", "/home/ubuntu/.npm-global/bin/openclaw");
+}
+
+async function getHostSummary() {
+    let disk = {
+        totalBytes: 0,
+        usedBytes: 0,
+        percent: 0,
+    };
+    try {
+        const output = await runCommand("df", ["-B1", "/"]);
+        const line = output.trim().split("\n").at(-1)!;
+        const parts = line.trim().split(/\s+/u);
+        disk = {
+            totalBytes: toNumber(parts[1]),
+            usedBytes: toNumber(parts[2]),
+            percent: toNumber(String(parts[4] ?? "0").replace("%", "")),
+        };
+    } catch (error) {
+        console.warn("[CacheRefresh] Failed to read host disk summary:", error);
+    }
+
+    const totalMemory = os.totalmem();
+    const freeMemory = os.freemem();
+    return {
+        hostname: os.hostname(),
+        platform: os.platform(),
+        uptimeSeconds: os.uptime(),
+        disk,
+        memory: {
+            totalBytes: totalMemory,
+            usedBytes: totalMemory - freeMemory,
+            freeBytes: freeMemory,
+            freeMb: Math.round(freeMemory / 1024 / 1024),
+        },
+        checkedAt: nowIso(),
+    };
+}
+
+function buildFallbackHostSummary(checkedAt: string) {
+    return {
+        hostname: os.hostname(),
+        platform: os.platform(),
+        uptimeSeconds: os.uptime(),
+        disk: { totalBytes: 0, usedBytes: 0, percent: 0 },
+        memory: {
+            totalBytes: os.totalmem(),
+            usedBytes: os.totalmem() - os.freemem(),
+            freeBytes: os.freemem(),
+            freeMb: Math.round(os.freemem() / 1024 / 1024),
+        },
+        checkedAt,
+    };
+}
+
+function getCodexBin() {
+    return nonEmptyEnvFallback("CODEX_BIN", "/home/ubuntu/.npm-global/bin/codex");
+}
+
+async function ensureCodexTrustConfig(codexHome: string) {
+    const existing = codexTrustConfigLocks.get(codexHome);
+    if (existing) {
+        await existing;
+        return;
+    }
+    const update = updateCodexTrustConfig(codexHome);
+    codexTrustConfigLocks.set(codexHome, update);
+    try {
+        await update;
+    } finally {
+        codexTrustConfigLocks.delete(codexHome);
+    }
+}
+
+async function updateCodexTrustConfig(codexHome: string) {
+    const lockPath = `${codexHome}/config.toml.lock`;
+    let lockHandle: CodexTrustConfigFileHandle | null = null;
+    try {
+        await mkdir(codexHome, { recursive: true });
+        lockHandle = await acquireCodexTrustConfigLockAsync(lockPath);
+        const configPath = `${codexHome}/config.toml`;
+        let existing = "";
+        try {
+            existing = await readFile(configPath, "utf8");
+        } catch (error) {
+            if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+                throw error;
+            }
+        }
+        let next = existing;
+        const additions = CODEX_TRUSTED_DIRS.flatMap((dir) => {
+            const header = `[projects.${JSON.stringify(dir)}]`;
+            const normalizedConfig = ensureCodexTrustedSection(next, header);
+            if (normalizedConfig === null) {
+                return [`${header}\ntrust_level = "trusted"\n`];
+            }
+            next = normalizedConfig;
+            return [];
+        });
+        if (additions.length > 0) {
+            const prefix = next && !next.endsWith("\n") ? "\n" : "";
+            const separator = next ? "\n" : "";
+            next = `${next}${prefix}${separator}${additions.join("\n")}`;
+        }
+        if (next !== existing) {
+            const tempPath = `${configPath}.${process.pid}.tmp`;
+            await writeFile(tempPath, next, { mode: 0o600 });
+            await rename(tempPath, configPath);
+        }
+    } finally {
+        if (lockHandle !== null) {
+            await lockHandle.close();
+            await rm(lockPath, { force: true });
+        }
+    }
+}
+
+function ensureCodexTrustedSection(config: string, header: string) {
+    const lines = config.split("\n");
+    const headerIndex = lines.findIndex((line) => line.trim() === header);
+    if (headerIndex === -1) {
+        return null;
+    }
+    const nextHeaderIndex = lines.findIndex(
+        (line, index) => index > headerIndex && /^\s*\[.*\]\s*$/u.test(line)
+    );
+    const sectionEndIndex = nextHeaderIndex === -1 ? lines.length : nextHeaderIndex;
+    const trustLevelIndex = lines.findIndex(
+        (line, index) =>
+            index > headerIndex &&
+            index < sectionEndIndex &&
+            /^\s*trust_level\s*=/u.test(line)
+    );
+    if (trustLevelIndex === -1) {
+        lines.splice(headerIndex + 1, 0, 'trust_level = "trusted"');
+    } else if (lines[trustLevelIndex] !== 'trust_level = "trusted"') {
+        lines[trustLevelIndex] = 'trust_level = "trusted"';
+    }
+    return lines.join("\n");
+}
+
+function stripAnsi(value: string) {
+    return value
+        .replaceAll(new RegExp(String.raw`\u001B\[[0-9;?]*[ -/]*[@-~]`, "gu"), "")
+        .replaceAll(new RegExp(String.raw`\u001B[@-_]`, "gu"), "");
+}
+
+function cleanPanelText(value: string | undefined) {
+    if (!value) return null;
+    return value.replaceAll(/[│╭╮╰╯]/gu, "").trim() || null;
+}
+
+function parseOpenAiQuotaOutput(output: string) {
+    if (output.includes("__ERR__:tmux_not_found")) {
+        return { status: "error", note: "tmux not found" };
+    }
+    if (output.includes("__ERR__:codex_not_found")) {
+        return { status: "not_configured", note: "codex binary not found" };
+    }
+    function parseLimit(prefix: string) {
+        const lines = output
+            .split("\n")
+            .map((line) => line.replaceAll(/[│╭╮╰╯]/gu, "").trim())
+            .filter(Boolean);
+        const index = lines.findIndex((line) =>
+            line.toLowerCase().includes(prefix.toLowerCase())
+        );
+        if (index === -1) return null;
+        const joined = `${lines[index]} ${lines[index + 1] || ""} ${lines[index + 2] || ""}`;
+        const leftMatch = joined.match(/(\d+)%\s*left/iu);
+        if (!leftMatch) return null;
+        const resetMatch = joined.match(/\(resets\s*([^)]+)\)/iu);
+        return {
+            leftPercent: toNumber(leftMatch[1]),
+            resetAt: resetMatch?.[1]?.trim() || null,
+        };
+    }
+    const fiveHour = parseLimit("5h limit:");
+    const weekly = parseLimit("weekly limit:");
+    if (!fiveHour || !weekly) {
+        return { status: "error", note: "Could not parse Codex /status output" };
+    }
+    return {
+        account: cleanPanelText(output.match(/Account:\s*(.+)/iu)?.[1]),
+        model: cleanPanelText(output.match(/Model:\s*(.+?)(?:\s*\(|$)/iu)?.[1]),
+        fiveHourLeftPercent: fiveHour.leftPercent,
+        weeklyLeftPercent: weekly.leftPercent,
+        fiveHourReset: fiveHour.resetAt,
+        weeklyReset: weekly.resetAt,
+        percentUsed: Math.max(
+            100 - Math.min(fiveHour.leftPercent, weekly.leftPercent),
+            0
+        ),
+        resetAt: weekly.resetAt,
+    };
+}
+
+async function checkOpenAiQuota() {
+    try {
+        const codexPath = getCodexBin();
+        const codexHome = getQuotaCodexHome();
+        await ensureCodexTrustConfig(codexHome);
+        const command = String.raw`set -e
+SESSION="codex_quota_$$_$(date +%s)"
+cleanup(){ tmux has-session -t "$SESSION" 2>/dev/null && tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+command -v tmux >/dev/null 2>&1 || { echo "__ERR__:tmux_not_found"; exit 0; }
+if [[ "$MIRA_QUOTA_CODEX_BIN" == */* ]]; then
+  [ -x "$MIRA_QUOTA_CODEX_BIN" ] || { echo "__ERR__:codex_not_found"; exit 0; }
+else
+  command -v "$MIRA_QUOTA_CODEX_BIN" >/dev/null 2>&1 || {
+    echo "__ERR__:codex_not_found"
+    exit 0
+  }
+fi
+tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw env CODEX_HOME="$MIRA_QUOTA_CODEX_HOME" CODEX_DISABLE_UPDATE_CHECK=1 NO_UPDATE_NOTIFIER=1 "$MIRA_QUOTA_CODEX_BIN" --cd /home/ubuntu/.openclaw --no-alt-screen
+OUT=""
+for i in $(seq 1 12); do
+  tmux send-keys -t "$SESSION" C-u
+  tmux send-keys -t "$SESSION" "/status" Enter
+  sleep 0.5
+  OUT=$(tmux capture-pane -pt "$SESSION" -S -320 || true)
+  echo "$OUT" | grep -Eiq "5h limit:|Weekly limit:" && break
+done
+for i in $(seq 1 20); do OUT=$(tmux capture-pane -pt "$SESSION" -S -320 || true); echo "$OUT" | grep -Eiq "5h limit:|Weekly limit:" && break; sleep 1; done
+printf "%s\n" "$OUT"
+`;
+        const { stdout } = await execFileAsync("bash", ["-c", command], {
+            env: {
+                PATH: process.env.PATH,
+                NODE_ENV: process.env.NODE_ENV,
+                MIRA_QUOTA_CODEX_BIN: codexPath,
+                MIRA_QUOTA_CODEX_HOME: codexHome,
+            },
+            encoding: "utf8",
+            timeout: 120_000,
+            maxBuffer: 1024 * 1024,
+        });
+        const output = stripAnsi(stdout).replaceAll("\r", "");
+        return parseOpenAiQuotaOutput(output);
+    } catch (error) {
+        return { status: "error", note: errorMessage(error) };
+    }
+}
+
+function buildQuotaMissingProviders(
+    openrouter: Record<string, unknown>,
+    elevenlabs: Record<string, unknown>,
+    synthetic: Record<string, unknown>,
+    openai: Record<string, unknown>
+) {
+    return [
+        openrouter.status === "not_configured" ? "openrouter" : null,
+        elevenlabs.status === "not_configured" ? "elevenlabs" : null,
+        synthetic.status === "not_configured" ? "synthetic" : null,
+        openai.status === "not_configured" ? "openai" : null,
+    ].filter(Boolean);
+}
+
+async function refreshQuotasCache() {
+    const checkedAt = Date.now();
+    const [openrouter, elevenlabs, synthetic, openai] = await Promise.all([
+        checkOpenRouterQuota().catch((error) => ({
+            status: "error",
+            note: errorMessage(error),
+        })),
+        checkElevenLabsQuota().catch((error) => ({
+            status: "error",
+            note: errorMessage(error),
+        })),
+        checkSyntheticQuota().catch((error) => ({
+            status: "error",
+            note: errorMessage(error),
+        })),
+        checkOpenAiQuota(),
+    ]);
+    const payload = {
+        openrouter,
+        elevenlabs,
+        synthetic,
+        openai: redactOpenAiQuotaAccount(openai),
+        checkedAt,
+        cacheAgeMs: 0,
+    };
+    writeCacheSuccess({
+        key: "quotas.summary",
+        data: payload,
+        source: "backend",
+        ttl: 1,
+        ttlUnit: "hours",
+        metadata: {
+            workflow: "Cache Foundation - Quotas Summary",
+            producers: ["openrouter", "elevenlabs", "synthetic", "openai"],
+            missing: buildQuotaMissingProviders(
+                openrouter,
+                elevenlabs,
+                synthetic,
+                openai
+            ),
+        },
+    });
+    return { refreshed: ["quotas.summary"] };
+}
+
+function redactOpenAiQuotaAccount(openai: Awaited<ReturnType<typeof checkOpenAiQuota>>) {
+    if (!openai || typeof openai !== "object" || !("account" in openai)) {
+        return openai;
+    }
+    const { account, ...redacted } = openai;
+    void account;
+    return redacted;
+}
+
+const inFlightCacheRefreshes = new Map<string, Promise<{ refreshed: string[] }>>();
+
+function cacheRefreshScopeKey(key: string): string {
+    return key === "moltbook" ? "moltbook" : key;
+}
+
+function isSupportedCacheProducerKey(key: string): boolean {
+    return (
+        key === "moltbook" ||
+        MOLTBOOK_CACHE_KEYS.has(key) ||
+        key === "weather.spydeberg" ||
+        key === "git.workspace" ||
+        key === "system.host" ||
+        key === "quotas.summary"
+    );
+}
+
+async function refreshCacheProducerUnlocked(key: string) {
+    const refreshWithFailureRecord = async (
+        refresh: () => Promise<{ refreshed: string[] }>,
+        failureKeys: string[] = [key]
+    ) => {
+        try {
+            return await refresh();
+        } catch (error) {
+            for (const failureKey of failureKeys) {
+                writeCacheFailure({
+                    key: failureKey,
+                    source: "backend",
+                    ttl: 15,
+                    ttlUnit: "minutes",
+                    error,
+                    metadata: {
+                        producer: "refreshCacheProducer",
+                    },
+                });
+            }
+            throw error;
+        }
+    };
+
+    if (key === "moltbook") {
+        try {
+            return await refreshMoltbookCache();
+        } catch (error) {
+            const failureKeys = getMoltbookFailureKeys(error) ?? [
+                ...MOLTBOOK_CACHE_KEY_LIST,
+            ];
+            for (const failureKey of failureKeys) {
+                writeCacheFailure({
+                    key: failureKey,
+                    source: "backend",
+                    ttl: 15,
+                    ttlUnit: "minutes",
+                    error,
+                    metadata: {
+                        producer: "refreshCacheProducer",
+                    },
+                });
+            }
+            throw error;
+        }
+    }
+    if (MOLTBOOK_CACHE_KEYS.has(key)) {
+        return refreshWithFailureRecord(() =>
+            refreshMoltbookCache(key as MoltbookCacheKey)
+        );
+    }
+    if (key.startsWith("moltbook.")) {
+        throw Object.assign(new Error(`Unsupported Moltbook cache key: ${key}`), {
+            statusCode: 400,
+        });
+    }
+    if (key === "weather.spydeberg") {
+        return refreshWithFailureRecord(refreshWeatherCache);
+    }
+    if (key === "git.workspace") {
+        return refreshWithFailureRecord(refreshGitCache);
+    }
+    if (key === "system.host") {
+        return refreshWithFailureRecord(refreshSystemCache);
+    }
+    if (key === "quotas.summary") {
+        return refreshWithFailureRecord(refreshQuotasCache);
+    }
+    throw Object.assign(
+        new Error(`No backend refresh producer configured for cache key: ${key}`),
+        {
+            statusCode: 400,
+        }
+    );
+}
+
+function abortError(): Error {
+    return Object.assign(new Error("Cache refresh aborted"), { name: "AbortError" });
+}
+
+async function waitForRefreshWithSignal<T>(
+    refresh: Promise<T>,
+    signal: AbortSignal | undefined
+): Promise<T> {
+    if (!signal) {
+        return await refresh;
+    }
+    if (signal.aborted) {
+        throw abortError();
+    }
+    return await Promise.race([
+        refresh,
+        new Promise<never>((_resolve, reject) => {
+            const onAbort = () => reject(abortError());
+            signal.addEventListener("abort", onAbort, { once: true });
+            void refresh
+                .finally(() => signal.removeEventListener("abort", onAbort))
+                .catch(() => {});
+        }),
+    ]);
+}
+
+async function waitForExistingRefresh(
+    requestedKey: string,
+    scopeKey: string,
+    refresh: Promise<{ refreshed: string[] }>,
+    signal: AbortSignal | undefined
+): Promise<{ refreshed: string[] }> {
+    try {
+        return await waitForRefreshWithSignal(refresh, signal);
+    } catch (error) {
+        const failedKeys = getMoltbookFailureKeys(error);
+        if (
+            failedKeys &&
+            MOLTBOOK_CACHE_KEYS.has(scopeKey) &&
+            failedKeys.length > 0 &&
+            !failedKeys.includes(scopeKey as MoltbookCacheKey)
+        ) {
+            return { refreshed: [requestedKey] };
+        }
+        throw error;
+    }
+}
+
+export async function refreshCacheProducer(key: string, signal?: AbortSignal) {
+    if (signal?.aborted) {
+        throw abortError();
+    }
+    const scopeKey = cacheRefreshScopeKey(key);
+    const inFlightEntries = isSupportedCacheProducerKey(key)
+        ? [...inFlightCacheRefreshes.entries()]
+        : [];
+    const existing = inFlightEntries
+        .filter(
+            ([inFlightKey]) =>
+                inFlightKey === scopeKey || scopeKey.startsWith(`${inFlightKey}.`)
+        )
+        .sort(([left], [right]) => left.length - right.length)[0]?.[1];
+    if (existing !== undefined) {
+        return await waitForExistingRefresh(key, scopeKey, existing, signal);
+    }
+    const childRefreshes = inFlightEntries
+        .filter(([inFlightKey]) => inFlightKey.startsWith(`${scopeKey}.`))
+        .map(([, refresh]) => refresh);
+    const refresh =
+        childRefreshes.length > 0
+            ? Promise.allSettled(childRefreshes).then(() =>
+                  refreshCacheProducerUnlocked(key)
+              )
+            : refreshCacheProducerUnlocked(key);
+    inFlightCacheRefreshes.set(scopeKey, refresh);
+    void refresh
+        .finally(() => {
+            if (inFlightCacheRefreshes.get(scopeKey) === refresh) {
+                inFlightCacheRefreshes.delete(scopeKey);
+            }
+        })
+        .catch(() => {});
+    return await waitForRefreshWithSignal(refresh, signal);
+}
+
+const cacheRefreshScheduledJobs = [
+    {
+        id: "cache.weather",
+        name: "Weather cache",
+        description: "Refresh Spydeberg weather cache.",
+        scheduleType: "interval",
+        intervalSeconds: 60 * 60,
+        actionKey: "cache.refresh",
+        actionPayload: { key: "weather.spydeberg" },
+    },
+    {
+        id: "cache.quotas",
+        name: "Quota cache",
+        description: "Refresh provider quota summaries.",
+        scheduleType: "interval",
+        intervalSeconds: 30 * 60,
+        actionKey: "cache.refresh",
+        actionPayload: { key: "quotas.summary" },
+    },
+    {
+        id: "cache.system",
+        name: "System cache",
+        description: "Refresh host and OpenClaw system checks.",
+        scheduleType: "daily",
+        intervalSeconds: 24 * 60 * 60,
+        timeOfDay: "02:50",
+        actionKey: "cache.refresh",
+        actionPayload: { key: "system.host" },
+    },
+    {
+        id: "cache.git",
+        name: "Git cache",
+        description: "Refresh workspace git status cache.",
+        scheduleType: "daily",
+        intervalSeconds: 24 * 60 * 60,
+        timeOfDay: "02:40",
+        actionKey: "cache.refresh",
+        actionPayload: { key: "git.workspace" },
+    },
+    {
+        id: "cache.moltbook",
+        name: "Moltbook cache",
+        description: "Refresh Moltbook home, feeds, profile, and own content caches.",
+        scheduleType: "interval",
+        intervalSeconds: 30 * 60,
+        actionKey: "cache.refresh",
+        actionPayload: { key: "moltbook" },
+    },
+] as const;
+
+function getScheduledCacheKey(job: ScheduledJob): string {
+    const key = job.actionPayload.key;
+    if (typeof key !== "string" || key.trim() === "") {
+        throw Object.assign(
+            new Error(`Scheduled cache job ${job.id} is missing actionPayload.key`),
+            { statusCode: 400 }
+        );
+    }
+    return key;
+}
+
+export function registerCacheRefreshScheduledJobs(): void {
+    registerScheduledJobAction("cache.refresh", async (job, signal) => {
+        const key = getScheduledCacheKey(job);
+        const result = await refreshCacheProducer(key, signal);
+        return { key, ...result };
+    });
+
+    for (const job of cacheRefreshScheduledJobs) {
+        upsertScheduledJob({
+            ...job,
+            enabled: getScheduledJob(job.id)?.enabled ?? true,
+        });
+    }
+}
+
+export const __testing = {
+    checkElevenLabsQuota,
+    checkOpenAiQuota,
+    checkOpenRouterQuota,
+    checkSyntheticQuota,
+    buildFallbackHostSummary,
+    buildQuotaMissingProviders,
+    cleanPanelText,
+    codexTrustConfigLocks,
+    acquireCodexTrustConfigLock,
+    acquireCodexTrustConfigLockAsync,
+    sleepSync,
+    sleep,
+    ensureCodexTrustConfig,
+    errorMessage,
+    fetchSpydebergWeather,
+    getOpenclawBin,
+    getCodexBin,
+    getQuotaCodexHome,
+    normalizeMoltbookFeed,
+    normalizeMoltbookHome,
+    openMeteoCodeToDescription,
+    parseOpenAiQuotaOutput,
+    sanitizeRemoteUrl,
+    summarizeStatus,
+    toCurrencyNumber,
+    toNullableNumber,
+};
