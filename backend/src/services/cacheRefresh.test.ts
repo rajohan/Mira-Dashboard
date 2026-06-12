@@ -1753,6 +1753,7 @@ if (args.includes("capture-pane")) {
 
         await withEnv(
             {
+                ELEVENLABS_API_KEY: "eleven",
                 SYNTHETIC_API_KEY: "synthetic",
             },
             async () => {
