@@ -17,7 +17,8 @@ export type ScheduledJobScheduleType = "interval" | "daily" | "cron";
 export type ScheduledJobRunStatus = "running" | "success" | "failed";
 export type ScheduledJobTriggerType = "manual" | "schedule";
 export type ScheduledJobActionHandler = (
-    job: ScheduledJob
+    job: ScheduledJob,
+    signal?: AbortSignal
 ) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void;
 
 export interface ScheduledJob {
@@ -429,12 +430,12 @@ export function upsertScheduledJob(definition: ScheduledJobDefinition): Schedule
     assertValidId(definition.id);
     assertValidActionKey(definition.actionKey);
     const existing = getScheduledJob(definition.id);
-    const enabled = existing?.enabled ?? definition.enabled ?? false;
-    const scheduleType = existing?.scheduleType ?? definition.scheduleType;
+    const enabled = definition.enabled ?? existing?.enabled ?? false;
+    const scheduleType = definition.scheduleType ?? existing?.scheduleType;
     const intervalSeconds =
-        existing?.intervalSeconds ?? definition.intervalSeconds ?? 3600;
-    const timeOfDay = existing?.timeOfDay ?? definition.timeOfDay ?? null;
-    const cronExpression = existing?.cronExpression ?? definition.cronExpression ?? null;
+        definition.intervalSeconds ?? existing?.intervalSeconds ?? 3600;
+    const timeOfDay = definition.timeOfDay ?? existing?.timeOfDay ?? null;
+    const cronExpression = definition.cronExpression ?? existing?.cronExpression ?? null;
     assertValidSchedule(scheduleType, intervalSeconds, timeOfDay, cronExpression);
 
     const timestamp = nowIso();
@@ -589,6 +590,25 @@ function finishRun(
     return { ...run, status, finishedAt, message, output };
 }
 
+function markLatestRunningRunFailed(jobId: string, message: string): void {
+    try {
+        db.prepare(
+            `UPDATE scheduled_job_runs
+             SET status = 'failed',
+                 finished_at = COALESCE(finished_at, ?),
+                 message = COALESCE(message, ?)
+             WHERE id = (
+                 SELECT id FROM scheduled_job_runs
+                 WHERE job_id = ? AND status = 'running'
+                 ORDER BY started_at DESC, id DESC
+                 LIMIT 1
+             )`
+        ).run(nowIso(), message, jobId);
+    } catch (error) {
+        console.warn("[ScheduledJobs] Failed to persist scheduled job timeout:", error);
+    }
+}
+
 function claimScheduledRun(job: ScheduledJob): ScheduledJobRun | null {
     const currentJob = getScheduledJob(job.id);
     const dueAt = nowIso();
@@ -685,7 +705,8 @@ function finishRunOrReport(
 
 export async function runScheduledJob(
     id: string,
-    triggerType: ScheduledJobTriggerType = "manual"
+    triggerType: ScheduledJobTriggerType = "manual",
+    signal?: AbortSignal
 ): Promise<ScheduledJobRun> {
     const job = getScheduledJob(id);
     if (!job) {
@@ -727,7 +748,10 @@ export async function runScheduledJob(
                     `No scheduled job action registered for ${job.actionKey}`
                 );
             }
-            output = (await handler(job)) ?? {};
+            output = (await handler(job, signal)) ?? {};
+            if (signal?.aborted) {
+                return finishRunOrReport(run, "failed", "Scheduled job timed out", {});
+            }
         } catch (error) {
             return finishRunOrReport(
                 run,
@@ -742,10 +766,18 @@ export async function runScheduledJob(
     }
 }
 
-function runWithTimeout(id: string, run: Promise<ScheduledJobRun>): Promise<void> {
+function runWithTimeout(
+    id: string,
+    run: (signal: AbortSignal) => Promise<ScheduledJobRun>
+): Promise<void> {
+    const controller = new AbortController();
     let timeout: NodeJS.Timeout | undefined;
+    const runPromise = run(controller.signal);
     const timeoutPromise = new Promise<void>((resolve) => {
         timeout = setTimeout(() => {
+            controller.abort();
+            markLatestRunningRunFailed(id, "Scheduled job timed out");
+            runningJobs.delete(id);
             console.warn(
                 `[ScheduledJobs] Scheduled job ${id} exceeded ${scheduledJobRunTimeoutMs}ms`
             );
@@ -753,7 +785,7 @@ function runWithTimeout(id: string, run: Promise<ScheduledJobRun>): Promise<void
         }, scheduledJobRunTimeoutMs);
         timeout.unref();
     });
-    return Promise.race([run.then(() => {}), timeoutPromise]).finally(() => {
+    return Promise.race([runPromise.then(() => {}), timeoutPromise]).finally(() => {
         if (timeout) {
             clearTimeout(timeout);
         }
@@ -787,9 +819,8 @@ async function runDueJobs(): Promise<void> {
                 ) {
                     continue;
                 }
-                const run = runWithTimeout(
-                    row.id,
-                    runScheduledJob(row.id, "schedule")
+                const run = runWithTimeout(row.id, (signal) =>
+                    runScheduledJob(row.id, "schedule", signal)
                 ).catch(() => {
                     // Keep unrelated due jobs running even if one row is stale.
                 });

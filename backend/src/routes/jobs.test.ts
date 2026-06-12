@@ -224,7 +224,7 @@ test("maps malformed patch JSON when mounted behind global parser skip", async (
     const app = express();
     const globalJsonParser = express.json({ limit: "2097152b" });
     app.use((request, response, next) => {
-        if (request.method === "PATCH" && /^\/api\/jobs\/[^/]+$/u.test(request.path)) {
+        if (request.method === "PATCH" && /^\/api\/jobs\/[^/]+\/?$/u.test(request.path)) {
             next();
             return;
         }
@@ -265,6 +265,20 @@ test("maps malformed patch JSON when mounted behind global parser skip", async (
         assert.equal(result.status, 400);
         assert.deepEqual(result.body, { error: "Invalid scheduled job patch" });
 
+        const trailingSlashResult = await requestRaw(
+            testServer,
+            "/api/jobs/cache.weather/",
+            {
+                method: "PATCH",
+                body: "{",
+            }
+        );
+
+        assert.equal(trailingSlashResult.status, 400);
+        assert.deepEqual(trailingSlashResult.body, {
+            error: "Invalid scheduled job patch",
+        });
+
         const oversized = await requestRaw(testServer, "/api/jobs/cache.weather", {
             method: "PATCH",
             body: "x".repeat(Number.parseInt(jobsRouteTesting.JOBS_JSON_LIMIT, 10) + 1),
@@ -272,6 +286,22 @@ test("maps malformed patch JSON when mounted behind global parser skip", async (
 
         assert.equal(oversized.status, 413);
         assert.deepEqual(oversized.body, { error: "Scheduled job patch is too large" });
+
+        const trailingSlashOversized = await requestRaw(
+            testServer,
+            "/api/jobs/cache.weather/",
+            {
+                method: "PATCH",
+                body: "x".repeat(
+                    Number.parseInt(jobsRouteTesting.JOBS_JSON_LIMIT, 10) + 1
+                ),
+            }
+        );
+
+        assert.equal(trailingSlashOversized.status, 413);
+        assert.deepEqual(trailingSlashOversized.body, {
+            error: "Scheduled job patch is too large",
+        });
     } finally {
         await testServer.close();
     }
