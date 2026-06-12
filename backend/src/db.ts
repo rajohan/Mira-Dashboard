@@ -11,6 +11,7 @@ fs.mkdirSync(dataDir, { recursive: true });
 
 /** Defines db. */
 export const db = new DatabaseSync(miraDbPath);
+db.exec("PRAGMA foreign_keys = ON");
 db.exec("PRAGMA busy_timeout = 5000");
 
 interface MigrationDatabase {
@@ -22,16 +23,34 @@ interface MigrationDatabase {
 
 const TASK_AUTOMATION_COLUMN_SQL =
     "ALTER TABLE tasks ADD COLUMN automation_json TEXT NOT NULL DEFAULT '{}'";
+const SCHEDULED_JOBS_CRON_EXPRESSION_COLUMN_SQL =
+    "ALTER TABLE scheduled_jobs ADD COLUMN cron_expression TEXT";
 
 function taskAutomationColumnExists(targetDb: MigrationDatabase): boolean {
     const taskColumns = targetDb.prepare("PRAGMA table_info(tasks)").all();
     return taskColumns.some((column) => column.name === "automation_json");
 }
 
-function isDuplicateColumnError(error: unknown): boolean {
+/**
+ * table must be a trusted literal (no user input); SQLite PRAGMA table names
+ * cannot be parameterized.
+ */
+function columnExists(
+    targetDb: MigrationDatabase,
+    table: string,
+    columnName: string
+): boolean {
+    const columns = targetDb.prepare(`PRAGMA table_info(${table})`).all();
+    return columns.some((column) => column.name === columnName);
+}
+
+function isDuplicateColumnError(error: unknown, columnName: string): boolean {
+    const escapedName = columnName.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
     return (
         error instanceof Error &&
-        /duplicate column name:\s*automation_json/u.test(error.message)
+        new RegExp(String.raw`duplicate column name:\s*${escapedName}`, "u").test(
+            error.message
+        )
     );
 }
 
@@ -172,6 +191,40 @@ CREATE TABLE IF NOT EXISTS deployment_lock (
     job_id TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS scheduled_jobs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 0,
+    schedule_type TEXT NOT NULL,
+    interval_seconds INTEGER NOT NULL DEFAULT 3600,
+    time_of_day TEXT,
+    cron_expression TEXT,
+    action_key TEXT NOT NULL,
+    action_payload_json TEXT NOT NULL DEFAULT '{}',
+    next_run_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_due
+    ON scheduled_jobs(enabled, next_run_at);
+
+CREATE TABLE IF NOT EXISTS scheduled_job_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    trigger_type TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    message TEXT,
+    output_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY(job_id) REFERENCES scheduled_jobs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_job_started
+    ON scheduled_job_runs(job_id, started_at DESC);
 `);
 
 /** Ensures older task databases have the automation column. */
@@ -200,7 +253,7 @@ export async function ensureTaskAutomationColumn(
             return;
         } catch (error) {
             lastError = error;
-            if (isDuplicateColumnError(error)) {
+            if (isDuplicateColumnError(error, "automation_json")) {
                 return;
             }
 
@@ -232,3 +285,65 @@ export async function ensureTaskAutomationColumn(
 }
 
 await ensureTaskAutomationColumn(db);
+
+/** Ensures older scheduled job databases have the cron expression column. */
+export async function ensureScheduledJobCronExpressionColumn(
+    targetDb: MigrationDatabase
+): Promise<void> {
+    const cronExpressionColumnExists = (): boolean =>
+        columnExists(targetDb, "scheduled_jobs", "cron_expression");
+
+    try {
+        if (cronExpressionColumnExists()) {
+            return;
+        }
+    } catch (error) {
+        if (!isTransientSqliteLock(error)) {
+            throw error;
+        }
+    }
+
+    let lastError: unknown;
+
+    for (const delay of [0, 10, 25, 50]) {
+        if (delay > 0) {
+            await sleep(delay);
+        }
+
+        try {
+            targetDb.exec(SCHEDULED_JOBS_CRON_EXPRESSION_COLUMN_SQL);
+            return;
+        } catch (error) {
+            lastError = error;
+            if (isDuplicateColumnError(error, "cron_expression")) {
+                return;
+            }
+
+            try {
+                if (cronExpressionColumnExists()) {
+                    return;
+                }
+            } catch (columnError) {
+                if (!isTransientSqliteLock(columnError)) {
+                    throw columnError;
+                }
+            }
+
+            if (!isTransientSqliteLock(error)) {
+                throw error;
+            }
+        }
+    }
+
+    try {
+        if (cronExpressionColumnExists()) {
+            return;
+        }
+    } catch {
+        // Preserve the migration error that triggered the retry loop.
+    }
+
+    throw lastError;
+}
+
+await ensureScheduledJobCronExpressionColumn(db);

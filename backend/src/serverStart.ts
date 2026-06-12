@@ -11,15 +11,54 @@ import {
     startQuotaNotificationMonitor,
     stopQuotaNotificationMonitor,
 } from "./services/quotaNotifications.js";
+import {
+    startScheduledJobScheduler,
+    stopScheduledJobScheduler,
+} from "./services/scheduledJobs.js";
 
 let isStarting = false;
 let afterBackgroundServicesStartedForTest: (() => void) | undefined;
+let stopSchedulerOnServerClose: (() => void) | undefined;
+
+function isPackagedServerEntrypoint(argvPath = process.argv[1]): boolean {
+    return Boolean(argvPath?.replaceAll("\\", "/").endsWith("/dist/serverStart.js"));
+}
+
+function shouldStartScheduledJobs(
+    nodeEnv = process.env.NODE_ENV,
+    disableScheduler = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER,
+    argvPath = process.argv[1]
+): boolean {
+    if (disableScheduler === "1" || nodeEnv === "development" || nodeEnv === "test") {
+        return false;
+    }
+    return nodeEnv === "production" || isPackagedServerEntrypoint(argvPath);
+}
+
+function installSchedulerCloseCleanup(): void {
+    if (stopSchedulerOnServerClose) {
+        return;
+    }
+    stopSchedulerOnServerClose = () => {
+        stopScheduledJobScheduler();
+        stopSchedulerOnServerClose = undefined;
+    };
+    server.once("close", stopSchedulerOnServerClose);
+}
+
+function removeSchedulerCloseCleanup(): void {
+    if (stopSchedulerOnServerClose) {
+        server.removeListener("close", stopSchedulerOnServerClose);
+        stopSchedulerOnServerClose = undefined;
+    }
+}
 
 /** Starts Gateway and notification monitors after the HTTP server is listening. */
 export function handleServerListening(): void {
     let gatewayStarted = false;
     let quotaMonitorStarted = false;
     let openClawMonitorStarted = false;
+    let scheduledJobSchedulerStarted = false;
     try {
         const token = getPersistedGatewayToken() || process.env.OPENCLAW_TOKEN;
         if (token) {
@@ -35,6 +74,11 @@ export function handleServerListening(): void {
         quotaMonitorStarted = true;
         startOpenClawNotificationMonitor();
         openClawMonitorStarted = true;
+        if (shouldStartScheduledJobs()) {
+            startScheduledJobScheduler();
+            scheduledJobSchedulerStarted = true;
+            installSchedulerCloseCleanup();
+        }
         afterBackgroundServicesStartedForTest?.();
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
@@ -49,6 +93,13 @@ export function handleServerListening(): void {
             rollback(
                 stopOpenClawNotificationMonitor,
                 "[Backend] Failed to stop OpenClaw notification monitor:"
+            );
+        }
+        if (scheduledJobSchedulerStarted) {
+            removeSchedulerCloseCleanup();
+            rollback(
+                stopScheduledJobScheduler,
+                "[Backend] Failed to stop scheduled job scheduler:"
             );
         }
         if (quotaMonitorStarted) {
@@ -117,4 +168,5 @@ export const __testing = {
     setAfterBackgroundServicesStartedForTest(callback: (() => void) | undefined): void {
         afterBackgroundServicesStartedForTest = callback;
     },
+    shouldStartScheduledJobs,
 };

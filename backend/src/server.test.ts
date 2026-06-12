@@ -12,7 +12,11 @@ import { fileURLToPath } from "node:url";
 
 import { WebSocket } from "ws";
 
-import { db, ensureTaskAutomationColumn } from "./db.js";
+import {
+    db,
+    ensureScheduledJobCronExpressionColumn,
+    ensureTaskAutomationColumn,
+} from "./db.js";
 import gateway from "./gateway.js";
 import { stopOpenClawNotificationMonitor } from "./services/openclawNotifications.js";
 import { stopQuotaNotificationMonitor } from "./services/quotaNotifications.js";
@@ -36,6 +40,7 @@ let resolveBackendCommit: (typeof import("./server.js"))["resolveBackendCommit"]
 let resolveListenPort: (typeof import("./server.js"))["resolveListenPort"];
 let server: (typeof import("./server.js"))["server"];
 let sessionsHandler: (typeof import("./server.js"))["sessionsHandler"];
+let shouldSkipGlobalJsonParser: (typeof import("./server.js"))["shouldSkipGlobalJsonParser"];
 let handleServerListening: (typeof import("./serverStart.js"))["handleServerListening"];
 let isDirectEntrypoint: (typeof import("./serverStart.js"))["isDirectEntrypoint"];
 let serverStartTesting: (typeof import("./serverStart.js"))["__testing"];
@@ -237,6 +242,7 @@ describe("server bootstrap", () => {
                 resolveListenPort,
                 server,
                 sessionsHandler,
+                shouldSkipGlobalJsonParser,
             } = await import("./server.js"));
             ({
                 handleServerListening,
@@ -311,6 +317,42 @@ describe("server bootstrap", () => {
         assert.equal(resolveListenPort("dashboard.sock"), 3100);
         assert.equal(resolveListenPort("1234abc"), 3100);
         assert.equal(resolveListenPort("65536"), 3100);
+        assert.equal(
+            shouldSkipGlobalJsonParser({
+                method: "PATCH",
+                path: "/api/jobs/cache.weather",
+            }),
+            true
+        );
+        assert.equal(
+            shouldSkipGlobalJsonParser({
+                method: "PATCH",
+                path: "/api/jobs/cache.weather/",
+            }),
+            true
+        );
+        assert.equal(
+            shouldSkipGlobalJsonParser({
+                method: "PATCH",
+                path: "/api/jobs/cache.weather/run",
+            }),
+            false
+        );
+        assert.equal(
+            shouldSkipGlobalJsonParser({
+                method: "PUT",
+                path: "/api/config-files/settings.json",
+            }),
+            true
+        );
+        assert.equal(
+            shouldSkipGlobalJsonParser({ method: "PUT", path: "/api/files/report.md" }),
+            true
+        );
+        assert.equal(
+            shouldSkipGlobalJsonParser({ method: "POST", path: "/api/jobs" }),
+            false
+        );
         const configuredPort = process.env.PORT;
         delete process.env.PORT;
         try {
@@ -553,6 +595,128 @@ describe("server bootstrap", () => {
             }),
         });
 
+        const scheduledJobMigrationSql: string[] = [];
+        await ensureScheduledJobCronExpressionColumn({
+            exec: (sql) => scheduledJobMigrationSql.push(sql),
+            prepare: () => ({
+                all: () => [{ name: "id" }],
+            }),
+        });
+        assert.deepEqual(scheduledJobMigrationSql, [
+            "ALTER TABLE scheduled_jobs ADD COLUMN cron_expression TEXT",
+        ]);
+
+        scheduledJobMigrationSql.length = 0;
+        await ensureScheduledJobCronExpressionColumn({
+            exec: (sql) => scheduledJobMigrationSql.push(sql),
+            prepare: () => ({
+                all: () => [{ name: "cron_expression" }],
+            }),
+        });
+        assert.deepEqual(scheduledJobMigrationSql, []);
+
+        await ensureScheduledJobCronExpressionColumn({
+            exec: () => {
+                throw new Error("duplicate column name: cron_expression");
+            },
+            prepare: () => ({
+                all: () => [{ name: "id" }],
+            }),
+        });
+
+        let cronResolvedAfterRetries = 0;
+        let cronResolvedAfterRetryChecks = 0;
+        await ensureScheduledJobCronExpressionColumn({
+            exec: () => {
+                cronResolvedAfterRetries += 1;
+                throw new Error("SQLITE_BUSY");
+            },
+            prepare: () => ({
+                all: () => {
+                    cronResolvedAfterRetryChecks += 1;
+                    return cronResolvedAfterRetryChecks >= 6
+                        ? [{ name: "cron_expression" }]
+                        : [{ name: "id" }];
+                },
+            }),
+        });
+        assert.equal(cronResolvedAfterRetries, 4);
+
+        let cronResolvedAfterColumnCheck = 0;
+        let cronResolvedAfterColumnCheckReads = 0;
+        await ensureScheduledJobCronExpressionColumn({
+            exec: () => {
+                cronResolvedAfterColumnCheck += 1;
+                throw new Error("SQLITE_BUSY");
+            },
+            prepare: () => ({
+                all: () => {
+                    cronResolvedAfterColumnCheckReads += 1;
+                    return cronResolvedAfterColumnCheckReads >= 2
+                        ? [{ name: "cron_expression" }]
+                        : [{ name: "id" }];
+                },
+            }),
+        });
+        assert.equal(cronResolvedAfterColumnCheck, 1);
+
+        let cronInnerSchemaChecks = 0;
+        await assert.rejects(
+            ensureScheduledJobCronExpressionColumn({
+                exec: () => {
+                    throw new Error("SQLITE_BUSY");
+                },
+                prepare: () => ({
+                    all: () => {
+                        cronInnerSchemaChecks += 1;
+                        if (cronInnerSchemaChecks === 1) {
+                            return [{ name: "id" }];
+                        }
+                        throw new Error("schema unavailable");
+                    },
+                }),
+            }),
+            /schema unavailable/u
+        );
+
+        await assert.rejects(
+            ensureScheduledJobCronExpressionColumn({
+                exec: () => {
+                    throw new Error("SQLITE_BUSY");
+                },
+                prepare: () => ({
+                    all: () => {
+                        throw new Error("SQLITE_BUSY");
+                    },
+                }),
+            }),
+            /SQLITE_BUSY/u
+        );
+
+        await assert.rejects(
+            ensureScheduledJobCronExpressionColumn({
+                exec: () => {
+                    throw new Error("migration failed");
+                },
+                prepare: () => ({
+                    all: () => [{ name: "id" }],
+                }),
+            }),
+            /migration failed/u
+        );
+
+        await assert.rejects(
+            ensureScheduledJobCronExpressionColumn({
+                exec: () => {},
+                prepare: () => ({
+                    all: () => {
+                        throw new Error("schema unavailable");
+                    },
+                }),
+            }),
+            /schema unavailable/u
+        );
+
         assert.equal(
             resolveBackendCommit("/missing", () => {
                 throw new Error("git unavailable");
@@ -733,6 +897,7 @@ describe("server bootstrap", () => {
             server,
             "listening"
         );
+        const originalNodeEnv = process.env.NODE_ENV;
         const originalToken = process.env.OPENCLAW_TOKEN;
         const originalStartOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT;
         const originalConsoleWarn = console.warn;
@@ -741,7 +906,7 @@ describe("server bootstrap", () => {
         const originalShutdown = gateway.shutdown;
         let initializedToken: string | undefined;
         let listenedPort: number | undefined;
-        let closeCalled = false;
+        let closeCalled: boolean;
         let shutdownCalled = false;
         const warnings: unknown[][] = [];
         const errors: unknown[][] = [];
@@ -760,6 +925,33 @@ describe("server bootstrap", () => {
             assert.equal(initializedToken, "test-token");
             stopQuotaNotificationMonitor();
             stopOpenClawNotificationMonitor();
+            process.env.NODE_ENV = "production";
+            server.emit("close");
+            const closeListenersBeforeScheduler = server.listenerCount("close");
+            handleServerListening();
+            const closeListenersAfterScheduler = server.listenerCount("close");
+            handleServerListening();
+            assert.equal(server.listenerCount("close"), closeListenersAfterScheduler);
+            assert.equal(closeListenersAfterScheduler, closeListenersBeforeScheduler + 1);
+            server.emit("close");
+            stopQuotaNotificationMonitor();
+            stopOpenClawNotificationMonitor();
+            server.close = (() => {
+                closeCalled = true;
+                return server;
+            }) as typeof server.close;
+            closeCalled = false;
+            serverStartTesting.setAfterBackgroundServicesStartedForTest(() => {
+                throw new Error("post scheduler failed");
+            });
+            assert.throws(() => handleServerListening(), /post scheduler failed/u);
+            assert.equal(closeCalled, true);
+            assert.equal(server.listenerCount("close"), closeListenersBeforeScheduler);
+            serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
+            server.close = originalClose;
+            stopQuotaNotificationMonitor();
+            stopOpenClawNotificationMonitor();
+            process.env.NODE_ENV = originalNodeEnv;
             gateway.init = () => {
                 throw new Error("gateway failed");
             };
@@ -921,6 +1113,48 @@ describe("server bootstrap", () => {
             assert.equal(shouldStartOnImport(undefined, true), true);
             assert.equal(shouldStartOnImport("0", false), false);
             assert.equal(shouldStartOnImport("1", false), true);
+            delete process.env.NODE_ENV;
+            assert.equal(
+                serverStartTesting.shouldStartScheduledJobs(
+                    undefined,
+                    undefined,
+                    "/srv/dashboard/backend/dist/serverStart.js"
+                ),
+                true
+            );
+            assert.equal(
+                serverStartTesting.shouldStartScheduledJobs(
+                    undefined,
+                    "1",
+                    "/srv/dashboard/backend/dist/serverStart.js"
+                ),
+                false
+            );
+            assert.equal(
+                serverStartTesting.shouldStartScheduledJobs(
+                    undefined,
+                    undefined,
+                    "/srv/dashboard/backend/src/serverStart.ts"
+                ),
+                false
+            );
+            assert.equal(
+                serverStartTesting.shouldStartScheduledJobs(
+                    "development",
+                    undefined,
+                    "/srv/dashboard/backend/dist/serverStart.js"
+                ),
+                false
+            );
+            assert.equal(
+                serverStartTesting.shouldStartScheduledJobs(
+                    "test",
+                    undefined,
+                    "/srv/dashboard/backend/dist/serverStart.js"
+                ),
+                false
+            );
+            assert.equal(serverStartTesting.shouldStartScheduledJobs("production"), true);
 
             process.env.MIRA_DASHBOARD_START_ON_IMPORT = "1";
             assert.equal(shouldStartOnImport(), true);
@@ -938,6 +1172,11 @@ describe("server bootstrap", () => {
                 delete process.env.MIRA_DASHBOARD_START_ON_IMPORT;
             } else {
                 process.env.MIRA_DASHBOARD_START_ON_IMPORT = originalStartOnImport;
+            }
+            if (originalNodeEnv === undefined) {
+                delete process.env.NODE_ENV;
+            } else {
+                process.env.NODE_ENV = originalNodeEnv;
             }
             gateway.init = originalInit;
             server.listen = originalListen;

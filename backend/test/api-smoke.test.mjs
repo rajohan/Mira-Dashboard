@@ -132,6 +132,7 @@ async function startServer() {
             ...process.env,
             HOME: homeRoot,
             MIRA_DASHBOARD_OPENCLAW_HOME: dashboardOpenClawHome,
+            MIRA_DASHBOARD_DISABLE_SCHEDULER: "1",
             OPENCLAW_HOME: openClawHome,
             PORT: String(port),
             WORKSPACE_ROOT: workspaceRoot,

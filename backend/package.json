@@ -6,7 +6,7 @@
     "type": "module",
     "scripts": {
         "build": "tsc",
-        "start": "doppler run --config prd --project rajohan -- node dist/serverStart.js",
+        "start": "NODE_ENV=production doppler run --config prd --project rajohan -- node dist/serverStart.js",
         "dev": "doppler run --config prd --project rajohan -- tsx watch src/serverStart.ts",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
@@ -16,7 +16,6 @@
         "test:coverage": "npm run build && c8 --all --src src --extension=.ts --extension=.js --report-dir coverage --reporter=lcovonly --reporter=text-summary --check-coverage --lines=100 --branches=100 --functions=100 --statements=100 node --test-isolation=process --test-concurrency=1 --import ./test/setup-environment.js --import tsx --test \"src/**/*.test.*\" \"test/**/*.test.*\""
     },
     "dependencies": {
-        "@types/shell-quote": "^1.7.5",
         "dotenv": "^17.4.2",
         "express": "^5.2.1",
         "express-rate-limit": "^8.5.2",
@@ -28,6 +27,7 @@
         "@eslint/js": "^10.0.1",
         "@types/express": "^5.0.6",
         "@types/node": "^25.9.3",
+        "@types/shell-quote": "^1.7.5",
         "@types/ws": "^8.18.1",
         "c8": "^11.0.0",
         "eslint": "^10.4.1",

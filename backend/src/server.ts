@@ -20,6 +20,7 @@ import databaseRoutes from "./routes/database.js";
 import dockerRoutes from "./routes/docker.js";
 import execRoutes from "./routes/exec.js";
 import filesRoutes from "./routes/files.js";
+import jobsRoutes from "./routes/jobs.js";
 import logsRoutes from "./routes/logs.js";
 import mediaRoutes from "./routes/media.js";
 import metricsRoutes from "./routes/metrics.js";
@@ -45,6 +46,16 @@ export const app = express();
 const GLOBAL_JSON_LIMIT = "2097152b";
 const globalJsonParser = express.json({ limit: GLOBAL_JSON_LIMIT });
 
+export function shouldSkipGlobalJsonParser(
+    request: Pick<express.Request, "method" | "path">
+): boolean {
+    return (
+        (request.method === "PATCH" && /^\/api\/jobs\/[^/]+\/?$/u.test(request.path)) ||
+        (request.method === "PUT" && request.path.startsWith("/api/config-files/")) ||
+        (request.method === "PUT" && request.path.startsWith("/api/files/"))
+    );
+}
+
 /** Parses Express trust-proxy config from environment strings. */
 export function parseTrustProxy(value?: string): boolean | number | string {
     if (value === undefined || value.trim() === "") {
@@ -68,11 +79,7 @@ export function parseTrustProxy(value?: string): boolean | number | string {
 
 app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
 app.use((request, response, next) => {
-    if (request.method === "PUT" && request.path.startsWith("/api/config-files/")) {
-        next();
-        return;
-    }
-    if (request.method === "PUT" && request.path.startsWith("/api/files/")) {
+    if (shouldSkipGlobalJsonParser(request)) {
         next();
         return;
     }
@@ -202,6 +209,7 @@ cronRoutes(app);
 databaseRoutes(app);
 dockerRoutes(app);
 execRoutes(app, express);
+jobsRoutes(app);
 openClawConfigRoutes(app);
 mediaRoutes(app);
 metricsRoutes(app);

@@ -1070,6 +1070,7 @@ function deploymentJobUpdateCommand(job: DeploymentJob): string {
 const { DatabaseSync } = require("node:sqlite");
 const job = JSON.parse(process.env.MIRA_DEPLOYMENT_JOB || "{}");
 const db = new DatabaseSync(process.env.MIRA_DEPLOYMENT_DB);
+db.exec("PRAGMA foreign_keys = ON");
 db.exec("PRAGMA busy_timeout = 5000");
 try {
     db.exec("BEGIN IMMEDIATE");
