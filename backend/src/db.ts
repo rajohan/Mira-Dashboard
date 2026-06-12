@@ -30,6 +30,10 @@ function taskAutomationColumnExists(targetDb: MigrationDatabase): boolean {
     return taskColumns.some((column) => column.name === "automation_json");
 }
 
+/**
+ * table must be a trusted literal (no user input); SQLite PRAGMA table names
+ * cannot be parameterized.
+ */
 function columnExists(
     targetDb: MigrationDatabase,
     table: string,
