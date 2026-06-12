@@ -264,6 +264,14 @@ test("maps malformed patch JSON when mounted behind global parser skip", async (
 
         assert.equal(result.status, 400);
         assert.deepEqual(result.body, { error: "Invalid scheduled job patch" });
+
+        const oversized = await requestRaw(testServer, "/api/jobs/cache.weather", {
+            method: "PATCH",
+            body: "x".repeat(Number.parseInt(jobsRouteTesting.JOBS_JSON_LIMIT, 10) + 1),
+        });
+
+        assert.equal(oversized.status, 413);
+        assert.deepEqual(oversized.body, { error: "Scheduled job patch is too large" });
     } finally {
         await testServer.close();
     }

@@ -3,6 +3,7 @@ import { errorMessage } from "../lib/errors.js";
 
 const schedulerTickMs = 30_000;
 const minimumIntervalSeconds = 60;
+const latestRunsJobIdChunkSize = 900;
 const runningJobs = new Set<string>();
 const actionHandlers = new Map<string, ScheduledJobActionHandler>();
 
@@ -344,30 +345,33 @@ function latestRunsByJobId(jobIds: string[]): Map<string, ScheduledJobRun> {
     if (jobIds.length === 0) {
         return new Map();
     }
-    const placeholders = jobIds.map(() => "?").join(",");
-    const rows = db
-        .prepare(
-            `SELECT run.*
-             FROM scheduled_job_runs run
-             WHERE run.job_id IN (${placeholders})
-               AND NOT EXISTS (
-                   SELECT 1
-                   FROM scheduled_job_runs newer
-                   WHERE newer.job_id = run.job_id
-                     AND (
-                         newer.started_at > run.started_at
-                         OR (newer.started_at = run.started_at AND newer.id > run.id)
-                     )
-               )
-             ORDER BY run.job_id, run.started_at DESC, run.id DESC`
-        )
-        .all(...jobIds) as unknown as ScheduledJobRunRow[];
     const runs = new Map<string, ScheduledJobRun>();
-    for (const row of rows) {
-        if (!runs.has(row.job_id)) {
-            const run = mapRun(row);
-            if (run) {
-                runs.set(row.job_id, run);
+    for (let index = 0; index < jobIds.length; index += latestRunsJobIdChunkSize) {
+        const chunk = jobIds.slice(index, index + latestRunsJobIdChunkSize);
+        const placeholders = chunk.map(() => "?").join(",");
+        const rows = db
+            .prepare(
+                `SELECT run.*
+                 FROM scheduled_job_runs run
+                 WHERE run.job_id IN (${placeholders})
+                   AND NOT EXISTS (
+                       SELECT 1
+                       FROM scheduled_job_runs newer
+                       WHERE newer.job_id = run.job_id
+                         AND (
+                             newer.started_at > run.started_at
+                             OR (newer.started_at = run.started_at AND newer.id > run.id)
+                         )
+                   )
+                 ORDER BY run.job_id, run.started_at DESC, run.id DESC`
+            )
+            .all(...chunk) as unknown as ScheduledJobRunRow[];
+        for (const row of rows) {
+            if (!runs.has(row.job_id)) {
+                const run = mapRun(row);
+                if (run) {
+                    runs.set(row.job_id, run);
+                }
             }
         }
     }

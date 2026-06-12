@@ -243,6 +243,44 @@ test("runs registered actions and records latest run state", async () => {
     assert.equal(getScheduledJob("cache.weather")?.lastRun?.id, run.id);
 });
 
+test("lists latest runs for jobs across query chunks", () => {
+    const insertJob = db.prepare(
+        `INSERT INTO scheduled_jobs (
+            id, name, description, enabled, schedule_type, interval_seconds, time_of_day,
+            cron_expression, action_key, action_payload_json, next_run_at, created_at, updated_at
+        ) VALUES (?, ?, '', 1, 'interval', 120, NULL, NULL, 'cache.refresh', '{}', NULL, ?, ?)`
+    );
+    const insertRun = db.prepare(
+        `INSERT INTO scheduled_job_runs (
+            job_id, status, trigger_type, started_at, finished_at, message, output_json
+        ) VALUES (?, 'success', 'schedule', ?, ?, ?, '{}')`
+    );
+    for (let index = 0; index < 901; index += 1) {
+        const id = `cache.job.${String(index).padStart(3, "0")}`;
+        insertJob.run(id, id, "2026-06-11T00:00:00.000Z", "2026-06-11T00:00:00.000Z");
+        if (index === 0 || index === 900) {
+            insertRun.run(
+                id,
+                "2026-06-11T00:00:00.000Z",
+                "2026-06-11T00:00:01.000Z",
+                `${id}.old`
+            );
+            insertRun.run(
+                id,
+                "2026-06-11T00:01:00.000Z",
+                "2026-06-11T00:01:01.000Z",
+                `${id}.latest`
+            );
+        }
+    }
+
+    const jobs = listScheduledJobs();
+
+    assert.equal(jobs.length, 901);
+    assert.equal(jobs.at(0)?.lastRun?.message, "cache.job.000.latest");
+    assert.equal(jobs.at(-1)?.lastRun?.message, "cache.job.900.latest");
+});
+
 test("normalizes non-object JSON payloads from persisted rows", async () => {
     registerScheduledJobAction("cache.refresh", async (job) => ({
         key: job.actionPayload.key,

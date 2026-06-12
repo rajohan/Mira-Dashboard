@@ -190,4 +190,5 @@ export const __testing = {
     httpStatusCode,
     invalidJobsJsonHandler,
     invalidPatchField,
+    JOBS_JSON_LIMIT,
 };
