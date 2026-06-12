@@ -131,6 +131,7 @@ function startBackupJob(type: BackupJob["type"], command: string) {
     }
 
     job.process = child;
+    let finalized = false;
 
     child.stdout?.on("data", (data) => {
         job.stdout = trimOutput(job.stdout + String(data));
@@ -141,6 +142,10 @@ function startBackupJob(type: BackupJob["type"], command: string) {
     });
 
     child.on("close", (code, signal) => {
+        if (finalized) {
+            return;
+        }
+        finalized = true;
         job.status = "done";
         job.code = signal ? 130 : code;
         job.endedAt = Date.now();
@@ -150,6 +155,10 @@ function startBackupJob(type: BackupJob["type"], command: string) {
     });
 
     child.on("error", (error) => {
+        if (finalized) {
+            return;
+        }
+        finalized = true;
         job.status = "done";
         job.code = 1;
         job.stderr = trimOutput(`${job.stderr}\n${error.message}`.trim());

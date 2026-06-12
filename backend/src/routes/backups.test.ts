@@ -179,6 +179,28 @@ async function waitForDone(
     throw new Error("Backup job did not finish");
 }
 
+async function waitForDoneWithRefreshFailure(
+    server: TestServer,
+    pathName: string
+): Promise<{ status: string; code: number; stdout: string; stderr: string }> {
+    const deadline = Date.now() + 5_000;
+    let latest = await waitForDone(server, pathName);
+    while (Date.now() < deadline) {
+        if (
+            /Status refresh failed/u.test(latest.stderr) &&
+            /missing-docker|ENOENT/u.test(latest.stderr)
+        ) {
+            return latest;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const response = await requestJson<{
+            job: { status: string; code: number; stdout: string; stderr: string } | null;
+        }>(server, pathName);
+        latest = response.body.job ?? latest;
+    }
+    throw new Error(`Backup status refresh failure was not recorded: ${latest.stderr}`);
+}
+
 async function waitForCacheEntry(key: string): Promise<Record<string, unknown>> {
     for (let attempt = 0; attempt < 40; attempt += 1) {
         const row = db
@@ -314,8 +336,10 @@ describe("backup routes", () => {
                 assert.equal(started.status, 200);
                 assert.equal(started.body.ok, true);
 
-                await new Promise((resolve) => setTimeout(resolve, 100));
-                const done = await waitForDone(server, "/api/backups/kopia");
+                const done = await waitForDoneWithRefreshFailure(
+                    server,
+                    "/api/backups/kopia"
+                );
                 assert.match(done.stderr, /Status refresh failed/u);
                 assert.match(done.stderr, /missing-docker|ENOENT/u);
             }
@@ -365,6 +389,55 @@ describe("backup routes", () => {
             assert.equal(done.status, "done");
             assert.equal(done.code, 1);
             assert.match(done.stderr, /spawn failed/);
+        } finally {
+            backupTesting.setSpawnBackupProcessForTest(createFakeBackupSpawn());
+        }
+    });
+
+    it("keeps the first backup process terminal event", async () => {
+        backupTesting.setSpawnBackupProcessForTest((() => {
+            const child = createFakeBackupProcess();
+            queueMicrotask(() => {
+                child.emit("error", new Error("spawn failed first"));
+                child.emit("close", 0, null);
+            });
+            return child;
+        }) as unknown as typeof spawn);
+        try {
+            const started = await requestJson<{
+                ok: boolean;
+                job: { status: string; code: number | null };
+            }>(server, "/api/backups/walg/run", { method: "POST" });
+            assert.equal(started.status, 200);
+            assert.equal(started.body.ok, true);
+
+            const done = await waitForDone(server, "/api/backups/walg");
+            assert.equal(done.code, 1);
+            assert.match(done.stderr, /spawn failed first/);
+            assert.doesNotMatch(done.stderr, /Status refresh failed/u);
+        } finally {
+            backupTesting.setSpawnBackupProcessForTest(createFakeBackupSpawn());
+        }
+
+        backupTesting.setSpawnBackupProcessForTest((() => {
+            const child = createFakeBackupProcess();
+            queueMicrotask(() => {
+                child.emit("close", 0, null);
+                child.emit("error", new Error("late spawn error"));
+            });
+            return child;
+        }) as unknown as typeof spawn);
+        try {
+            const started = await requestJson<{
+                ok: boolean;
+                job: { status: string; code: number | null };
+            }>(server, "/api/backups/walg/run", { method: "POST" });
+            assert.equal(started.status, 200);
+            assert.equal(started.body.ok, true);
+
+            const done = await waitForDone(server, "/api/backups/walg");
+            assert.equal(done.code, 0);
+            assert.doesNotMatch(done.stderr, /late spawn error/u);
         } finally {
             backupTesting.setSpawnBackupProcessForTest(createFakeBackupSpawn());
         }

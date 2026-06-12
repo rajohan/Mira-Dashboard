@@ -826,6 +826,10 @@ function summarizeStatus(lines: string[]) {
     };
 }
 
+function emptyStatusSummary(): ReturnType<typeof summarizeStatus> {
+    return summarizeStatus([]);
+}
+
 function sanitizeRemoteUrl(value: string | null): string | null {
     if (!value) {
         return null;
@@ -857,6 +861,7 @@ export async function refreshGitCache() {
                 exists: false,
                 dirty: false,
                 error: inside.output,
+                statusSummary: emptyStatusSummary(),
             });
             continue;
         }
@@ -866,6 +871,7 @@ export async function refreshGitCache() {
                 exists: false,
                 dirty: false,
                 error: "Not a git repository",
+                statusSummary: emptyStatusSummary(),
             });
             continue;
         }
@@ -1681,7 +1687,13 @@ function redactOpenAiQuotaAccount(openai: Awaited<ReturnType<typeof checkOpenAiQ
 const inFlightCacheRefreshes = new Map<string, Promise<{ refreshed: string[] }>>();
 
 function cacheRefreshScopeKey(key: string): string {
-    return key === "moltbook" ? "moltbook" : key;
+    if (key === "moltbook") {
+        return "moltbook";
+    }
+    if (key === "system.openclaw") {
+        return "system.host";
+    }
+    return key;
 }
 
 function isSupportedCacheProducerKey(key: string): boolean {
@@ -1690,6 +1702,7 @@ function isSupportedCacheProducerKey(key: string): boolean {
         MOLTBOOK_CACHE_KEYS.has(key) ||
         key === "weather.spydeberg" ||
         key === "git.workspace" ||
+        key === "system.openclaw" ||
         key === "system.host" ||
         key === "backup.kopia.status" ||
         key === "backup.walg.status" ||
@@ -1759,8 +1772,11 @@ async function refreshCacheProducerUnlocked(key: string) {
     if (key === "git.workspace") {
         return refreshWithFailureRecord(refreshGitCache);
     }
-    if (key === "system.host") {
-        return refreshWithFailureRecord(refreshSystemCache);
+    if (key === "system.host" || key === "system.openclaw") {
+        return refreshWithFailureRecord(refreshSystemCache, [
+            "system.openclaw",
+            "system.host",
+        ]);
     }
     if (key === "backup.kopia.status") {
         return refreshWithFailureRecord(refreshKopiaBackupCache);
@@ -1926,8 +1942,14 @@ function getScheduledCacheKey(job: ScheduledJob): string {
 }
 
 function cacheEntryExists(key: string): boolean {
-    const row = db.prepare("SELECT 1 FROM cache_entries WHERE key = ? LIMIT 1").get(key);
-    return row !== undefined;
+    const keys =
+        key === "moltbook"
+            ? MOLTBOOK_CACHE_KEY_LIST
+            : key === "system.host" || key === "system.openclaw"
+              ? ["system.openclaw", "system.host"]
+              : [key];
+    const statement = db.prepare("SELECT 1 FROM cache_entries WHERE key = ? LIMIT 1");
+    return keys.every((cacheKey) => statement.get(cacheKey) !== undefined);
 }
 
 function seedMissingLocalCacheEntry(key: string): void {
@@ -1947,11 +1969,12 @@ export function registerCacheRefreshScheduledJobs(): void {
     });
 
     for (const job of cacheRefreshScheduledJobs) {
+        const enabled = getScheduledJob(job.id)?.enabled ?? true;
         upsertScheduledJob({
             ...job,
-            enabled: getScheduledJob(job.id)?.enabled ?? true,
+            enabled,
         });
-        if (job.scheduleType === "daily") {
+        if (enabled) {
             seedMissingLocalCacheEntry(job.actionPayload.key);
         }
     }

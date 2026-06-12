@@ -48,6 +48,19 @@ function cacheRow(key: string) {
     };
 }
 
+function seedFreshCacheEntries(keys: string[]): void {
+    for (const key of keys) {
+        writeCacheSuccess({
+            key,
+            data: { seeded: true },
+            source: "test",
+            ttl: 1,
+            ttlUnit: "hours",
+            metadata: {},
+        });
+    }
+}
+
 async function withFetch(
     handler: (url: string, init: RequestInit | undefined) => unknown,
     callback: () => Promise<void>
@@ -1312,6 +1325,15 @@ else if (command === "status --short") process.stdout.write("");
         assert.equal(docker?.dirty, false);
         assert.equal(docker?.exists, false);
         assert.match(docker?.error ?? "", /git -C .* rev-parse --is-inside-work-tree/u);
+        assert.deepEqual(docker?.statusSummary, {
+            staged: 0,
+            modified: 0,
+            deleted: 0,
+            untracked: 0,
+            renamed: 0,
+            conflicted: 0,
+            total: 0,
+        });
         assert.deepEqual(data.dirtyRepos, ["mira-dashboard"]);
         assert.deepEqual(data.missingRepos, ["docker"]);
     });
@@ -1398,6 +1420,9 @@ if (args.includes("capture-pane")) {
                     },
                     async () => {
                         assert.deepEqual(await refreshCacheProducer("system.host"), {
+                            refreshed: ["system.openclaw", "system.host"],
+                        });
+                        assert.deepEqual(await refreshCacheProducer("system.openclaw"), {
                             refreshed: ["system.openclaw", "system.host"],
                         });
                         assert.deepEqual(await refreshCacheProducer("quotas.summary"), {
@@ -2833,22 +2858,18 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
     it("registers scheduled cache refresh jobs and validates job payloads", async () => {
         scheduledJobsTesting.clearActionHandlers();
         scheduledJobsTesting.resetSchedulerState();
-        writeCacheSuccess({
-            key: "system.host",
-            data: { seeded: true },
-            source: "test",
-            ttl: 1,
-            ttlUnit: "hours",
-            metadata: {},
-        });
-        writeCacheSuccess({
-            key: "git.workspace",
-            data: { seeded: true },
-            source: "test",
-            ttl: 1,
-            ttlUnit: "hours",
-            metadata: {},
-        });
+        seedFreshCacheEntries([
+            "weather.spydeberg",
+            "quotas.summary",
+            "system.openclaw",
+            "system.host",
+            "git.workspace",
+            "moltbook.home",
+            "moltbook.feed.hot",
+            "moltbook.feed.new",
+            "moltbook.profile",
+            "moltbook.my-content",
+        ]);
         try {
             registerCacheRefreshScheduledJobs();
             await withFetch(
@@ -2891,7 +2912,7 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
         }
     });
 
-    it("seeds missing daily cache entries when scheduled jobs are registered", async () => {
+    it("seeds missing enabled cache entries when scheduled jobs are registered", async () => {
         const binDir = path.join(tempDir, "registration-seed-bin");
         await mkdir(binDir);
         await writeExecutable(
@@ -2922,6 +2943,15 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
 `
         );
         db.exec("DELETE FROM cache_entries;");
+        seedFreshCacheEntries([
+            "weather.spydeberg",
+            "quotas.summary",
+            "moltbook.home",
+            "moltbook.feed.hot",
+            "moltbook.feed.new",
+            "moltbook.profile",
+            "moltbook.my-content",
+        ]);
         scheduledJobsTesting.clearActionHandlers();
         scheduledJobsTesting.resetSchedulerState();
         await withEnv({ OPENCLAW_BIN: path.join(binDir, "openclaw") }, async () => {
@@ -2931,6 +2961,13 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
                 registerCacheRefreshScheduledJobs();
                 await waitFor(
                     () =>
+                        Boolean(
+                            db
+                                .prepare(
+                                    "SELECT 1 FROM cache_entries WHERE key = 'system.openclaw'"
+                                )
+                                .get()
+                        ) &&
                         Boolean(
                             db
                                 .prepare(
@@ -2953,13 +2990,122 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             }
         });
 
+        assert.equal(cacheRow("system.openclaw").status, "fresh");
         assert.equal(cacheRow("system.host").status, "fresh");
         assert.equal(cacheRow("git.workspace").status, "fresh");
+    });
+
+    it("seeds missing interval cache entries when scheduled jobs are registered", async () => {
+        db.exec("DELETE FROM cache_entries;");
+        seedFreshCacheEntries([
+            "quotas.summary",
+            "system.openclaw",
+            "system.host",
+            "git.workspace",
+            "moltbook.home",
+            "moltbook.feed.hot",
+            "moltbook.feed.new",
+            "moltbook.profile",
+            "moltbook.my-content",
+        ]);
+        scheduledJobsTesting.clearActionHandlers();
+        scheduledJobsTesting.resetSchedulerState();
+        try {
+            await withFetch(
+                (url) => {
+                    assert.ok(url.includes("wttr.in"));
+                    return {
+                        current_condition: [
+                            {
+                                temp_C: "8",
+                                FeelsLikeC: "7",
+                                humidity: "75",
+                                windspeedKmph: "10",
+                                weatherDesc: [{ value: "Cloudy" }],
+                            },
+                        ],
+                        weather: [],
+                    };
+                },
+                async () => {
+                    registerCacheRefreshScheduledJobs();
+                    await waitFor(() =>
+                        Boolean(
+                            db
+                                .prepare(
+                                    "SELECT 1 FROM cache_entries WHERE key = 'weather.spydeberg'"
+                                )
+                                .get()
+                        )
+                    );
+                }
+            );
+        } finally {
+            scheduledJobsTesting.clearActionHandlers();
+            scheduledJobsTesting.resetSchedulerState();
+        }
+
+        assert.equal(cacheRow("weather.spydeberg").status, "fresh");
+    });
+
+    it("does not seed disabled cache jobs when scheduled jobs are registered", () => {
+        scheduledJobsTesting.clearActionHandlers();
+        scheduledJobsTesting.resetSchedulerState();
+        seedFreshCacheEntries([
+            "weather.spydeberg",
+            "quotas.summary",
+            "system.openclaw",
+            "system.host",
+            "git.workspace",
+            "moltbook.home",
+            "moltbook.feed.hot",
+            "moltbook.feed.new",
+            "moltbook.profile",
+            "moltbook.my-content",
+        ]);
+        registerCacheRefreshScheduledJobs();
+        db.prepare("UPDATE scheduled_jobs SET enabled = 0 WHERE id = ?").run(
+            "cache.weather"
+        );
+        db.exec("DELETE FROM cache_entries;");
+        seedFreshCacheEntries([
+            "quotas.summary",
+            "system.openclaw",
+            "system.host",
+            "git.workspace",
+            "moltbook.home",
+            "moltbook.feed.hot",
+            "moltbook.feed.new",
+            "moltbook.profile",
+            "moltbook.my-content",
+        ]);
+        try {
+            registerCacheRefreshScheduledJobs();
+            assert.equal(
+                db
+                    .prepare("SELECT 1 FROM cache_entries WHERE key = 'weather.spydeberg'")
+                    .get(),
+                undefined
+            );
+        } finally {
+            scheduledJobsTesting.clearActionHandlers();
+            scheduledJobsTesting.resetSchedulerState();
+        }
     });
 
     it("records seed failures without blocking scheduled job registration", async () => {
         const warn = mock.method(console, "warn", () => {});
         db.exec("DELETE FROM cache_entries;");
+        seedFreshCacheEntries([
+            "weather.spydeberg",
+            "quotas.summary",
+            "git.workspace",
+            "moltbook.home",
+            "moltbook.feed.hot",
+            "moltbook.feed.new",
+            "moltbook.profile",
+            "moltbook.my-content",
+        ]);
         scheduledJobsTesting.clearActionHandlers();
         scheduledJobsTesting.resetSchedulerState();
         await withEnv(

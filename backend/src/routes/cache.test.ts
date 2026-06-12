@@ -4,7 +4,10 @@ import { after, before, beforeEach, describe, it } from "node:test";
 
 import express from "express";
 
-import { db } from "../db.js";
+import {
+    clearCacheEntries,
+    insertCacheEntry as insertCacheFixture,
+} from "../testUtils/cacheFixtures.js";
 import cacheRoutes from "./cache.js";
 import {
     __testing,
@@ -33,35 +36,19 @@ interface TestServer {
 }
 
 function insertCacheEntry(key = "quotas.summary"): void {
-    db.prepare(
-        `INSERT INTO cache_entries (
-            key, data_json, source, updated_at, last_attempt_at, expires_at, status,
-            error_code, error_message, consecutive_failures, metadata_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(key) DO UPDATE SET
-            data_json = excluded.data_json,
-            source = excluded.source,
-            updated_at = excluded.updated_at,
-            last_attempt_at = excluded.last_attempt_at,
-            expires_at = excluded.expires_at,
-            status = excluded.status,
-            error_code = excluded.error_code,
-            error_message = excluded.error_message,
-            consecutive_failures = excluded.consecutive_failures,
-            metadata_json = excluded.metadata_json`
-    ).run(
+    insertCacheFixture({
         key,
-        '{"usage":12}',
-        "backend",
-        "2026-05-10T19:00:00.000Z",
-        "2026-05-10T19:01:00.000Z",
-        "2099-05-10T20:00:00.000Z",
-        "fresh",
-        null,
-        null,
-        2,
-        '{"job":"quotas"}'
-    );
+        data: { usage: 12 },
+        source: "backend",
+        updatedAt: "2026-05-10T19:00:00.000Z",
+        lastAttemptAt: "2026-05-10T19:01:00.000Z",
+        expiresAt: "2099-05-10T20:00:00.000Z",
+        status: "fresh",
+        errorCode: null,
+        errorMessage: null,
+        consecutiveFailures: 2,
+        meta: { job: "quotas" },
+    });
 }
 
 async function startServer(): Promise<TestServer> {
@@ -103,7 +90,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
     });
 
     beforeEach(() => {
-        db.prepare("DELETE FROM cache_entries").run();
+        clearCacheEntries();
         __testing.resetCacheRefreshForTests();
     });
 
