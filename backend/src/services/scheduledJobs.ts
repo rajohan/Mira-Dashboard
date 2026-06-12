@@ -434,8 +434,14 @@ export function upsertScheduledJob(definition: ScheduledJobDefinition): Schedule
     const scheduleType = definition.scheduleType ?? existing?.scheduleType;
     const intervalSeconds =
         definition.intervalSeconds ?? existing?.intervalSeconds ?? 3600;
-    const timeOfDay = definition.timeOfDay ?? existing?.timeOfDay ?? null;
-    const cronExpression = definition.cronExpression ?? existing?.cronExpression ?? null;
+    const timeOfDay =
+        definition.timeOfDay === undefined
+            ? (existing?.timeOfDay ?? null)
+            : definition.timeOfDay;
+    const cronExpression =
+        definition.cronExpression === undefined
+            ? (existing?.cronExpression ?? null)
+            : definition.cronExpression;
     assertValidSchedule(scheduleType, intervalSeconds, timeOfDay, cronExpression);
 
     const timestamp = nowIso();
@@ -774,13 +780,14 @@ function runWithTimeout(
     let timeout: NodeJS.Timeout | undefined;
     const runPromise = run(controller.signal);
     const timeoutPromise = new Promise<void>((resolve) => {
-        timeout = setTimeout(() => {
+        timeout = setTimeout(async () => {
             controller.abort();
-            markLatestRunningRunFailed(id, "Scheduled job timed out");
-            runningJobs.delete(id);
             console.warn(
                 `[ScheduledJobs] Scheduled job ${id} exceeded ${scheduledJobRunTimeoutMs}ms`
             );
+            await runPromise.catch(() => {});
+            markLatestRunningRunFailed(id, "Scheduled job timed out");
+            runningJobs.delete(id);
             resolve();
         }, scheduledJobRunTimeoutMs);
         timeout.unref();

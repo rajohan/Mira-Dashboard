@@ -491,6 +491,50 @@ test("applies provided schedule values when upserting jobs", () => {
     assert.ok(updated.nextRunAt);
 });
 
+test("clears nullable schedule values when upserting explicit nulls", () => {
+    upsertScheduledJob({
+        id: "cache.daily",
+        name: "Daily cache",
+        enabled: true,
+        scheduleType: "daily",
+        timeOfDay: "04:30",
+        actionKey: "cache.refresh",
+    });
+    const intervalJob = upsertScheduledJob({
+        id: "cache.daily",
+        name: "Interval cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        timeOfDay: null,
+        actionKey: "cache.refresh",
+    });
+
+    assert.equal(intervalJob.scheduleType, "interval");
+    assert.equal(intervalJob.timeOfDay, null);
+
+    upsertScheduledJob({
+        id: "cache.cron",
+        name: "Cron cache",
+        enabled: true,
+        scheduleType: "cron",
+        cronExpression: "*/5 * * * *",
+        actionKey: "cache.refresh",
+    });
+    const dailyJob = upsertScheduledJob({
+        id: "cache.cron",
+        name: "Daily cache",
+        enabled: true,
+        scheduleType: "daily",
+        timeOfDay: "05:00",
+        cronExpression: null,
+        actionKey: "cache.refresh",
+    });
+
+    assert.equal(dailyJob.scheduleType, "daily");
+    assert.equal(dailyJob.cronExpression, null);
+});
+
 test("creates and updates cron jobs", () => {
     const job = upsertScheduledJob({
         id: "cache.cron",
@@ -966,19 +1010,21 @@ test("releases scheduler ticks while a scheduled handler is stalled", async (t) 
         await delay(120);
         assert.equal(warnMock.mock.callCount(), 1);
         assert.equal(aborts, 1);
-        assert.equal(getScheduledJob("cache.stalled")?.lastRun?.status, "failed");
-        assert.equal(getScheduledJob("cache.stalled")?.isRunning, false);
+        assert.equal(getScheduledJob("cache.stalled")?.lastRun?.status, "running");
+        assert.equal(getScheduledJob("cache.stalled")?.isRunning, true);
         db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
             "2026-01-01T00:00:00.000Z",
             "cache.stalled"
         );
         __testing.runSchedulerTickForTest();
         await delay(0);
-        assert.deepEqual(calls, ["cache.stalled", "cache.fast", "cache.stalled"]);
+        assert.deepEqual(calls, ["cache.stalled", "cache.fast"]);
         for (const releaseStalledJob of releaseStalledJobs) {
             releaseStalledJob();
         }
         await delay(0);
+        assert.equal(getScheduledJob("cache.stalled")?.lastRun?.status, "failed");
+        assert.equal(getScheduledJob("cache.stalled")?.isRunning, false);
     } finally {
         for (const releaseStalledJob of releaseStalledJobs) {
             releaseStalledJob();
@@ -1022,10 +1068,13 @@ test("logs timeout persistence failures while releasing stalled jobs", async (t)
         __testing.runSchedulerTickForTest();
         await delay(120);
 
-        assert.equal(warnMock.mock.callCount(), 2);
-        assert.equal(getScheduledJob("cache.stalled")?.isRunning, false);
+        assert.equal(warnMock.mock.callCount(), 1);
+        assert.equal(getScheduledJob("cache.stalled")?.isRunning, true);
     } finally {
         releaseHandler();
+        await delay(0);
+        assert.equal(warnMock.mock.callCount(), 3);
+        assert.equal(getScheduledJob("cache.stalled")?.isRunning, false);
         prepareMock.mock.restore();
         warnMock.mock.restore();
         await delay(0);
