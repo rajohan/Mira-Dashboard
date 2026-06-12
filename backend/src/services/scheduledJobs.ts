@@ -193,7 +193,10 @@ function parseCronField(
                 ? [minimum, maximum]
                 : rangePart.includes("-")
                   ? rangePieces.map(Number)
-                  : [Number(rangePart), Number(rangePart)];
+                  : [
+                        Number(rangePart),
+                        stepPart === undefined ? Number(rangePart) : maximum,
+                    ];
         if (
             !Number.isInteger(start) ||
             !Number.isInteger(end) ||
@@ -216,6 +219,8 @@ function parseCronExpression(expression: string): {
     daysOfMonth: Set<number>;
     months: Set<number>;
     daysOfWeek: Set<number>;
+    dayOfMonthWildcard: boolean;
+    dayOfWeekWildcard: boolean;
 } | null {
     const fields = expression.trim().split(/\s+/u);
     if (fields.length !== 5) {
@@ -234,7 +239,27 @@ function parseCronExpression(expression: string): {
         daysOfWeek.add(0);
         daysOfWeek.delete(7);
     }
-    return { minutes, hours, daysOfMonth, months, daysOfWeek };
+    return {
+        minutes,
+        hours,
+        daysOfMonth,
+        months,
+        daysOfWeek,
+        dayOfMonthWildcard: dayOfMonth === "*",
+        dayOfWeekWildcard: dayOfWeek === "*",
+    };
+}
+
+function cronDayMatches(
+    cron: NonNullable<ReturnType<typeof parseCronExpression>>,
+    day: Date
+): boolean {
+    const dayOfMonthMatches = cron.daysOfMonth.has(day.getUTCDate());
+    const dayOfWeekMatches = cron.daysOfWeek.has(day.getUTCDay());
+    if (!cron.dayOfMonthWildcard && !cron.dayOfWeekWildcard) {
+        return dayOfMonthMatches || dayOfWeekMatches;
+    }
+    return dayOfMonthMatches && dayOfWeekMatches;
 }
 
 function nextCronRun(now: Date, expression: string): Date {
@@ -247,13 +272,11 @@ function nextCronRun(now: Date, expression: string): Date {
     next.setUTCMinutes(next.getUTCMinutes() + 1);
     const maximumAttempts = 5 * 366 * 24 * 60;
     for (let index = 0; index < maximumAttempts; index += 1) {
-        const dayOfWeek = next.getUTCDay();
         if (
             cron.minutes.has(next.getUTCMinutes()) &&
             cron.hours.has(next.getUTCHours()) &&
-            cron.daysOfMonth.has(next.getUTCDate()) &&
             cron.months.has(next.getUTCMonth() + 1) &&
-            cron.daysOfWeek.has(dayOfWeek)
+            cronDayMatches(cron, next)
         ) {
             return next;
         }
@@ -615,6 +638,14 @@ async function runDueJobs(): Promise<void> {
     for (const row of rows) {
         if (!runningJobs.has(row.id)) {
             try {
+                const currentJob = getScheduledJob(row.id);
+                if (
+                    !currentJob?.enabled ||
+                    !currentJob.nextRunAt ||
+                    currentJob.nextRunAt > nowIso()
+                ) {
+                    continue;
+                }
                 await runScheduledJob(row.id, "schedule");
             } catch {
                 // Keep later due jobs running even if a persisted row is stale.

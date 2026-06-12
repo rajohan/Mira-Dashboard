@@ -102,6 +102,18 @@ test("calculates interval and daily next-run times", () => {
     assert.equal(
         calculateNextRunAt(
             {
+                enabled: true,
+                intervalSeconds: 3600,
+                scheduleType: "daily",
+                timeOfDay: "10:00",
+            },
+            from
+        ),
+        "2026-06-12T10:00:00.000Z"
+    );
+    assert.equal(
+        calculateNextRunAt(
+            {
                 enabled: false,
                 intervalSeconds: 3600,
                 scheduleType: "interval",
@@ -153,6 +165,32 @@ test("calculates cron next-run times", () => {
             new Date("2026-06-13T23:59:00.000Z")
         ),
         "2026-06-14T00:00:00.000Z"
+    );
+    assert.equal(
+        calculateNextRunAt(
+            {
+                cronExpression: "5/15 10 * * *",
+                enabled: true,
+                intervalSeconds: 3600,
+                scheduleType: "cron",
+                timeOfDay: null,
+            },
+            new Date("2026-06-11T10:00:00.000Z")
+        ),
+        "2026-06-11T10:05:00.000Z"
+    );
+    assert.equal(
+        calculateNextRunAt(
+            {
+                cronExpression: "0 9 1 * 1",
+                enabled: true,
+                intervalSeconds: 3600,
+                scheduleType: "cron",
+                timeOfDay: null,
+            },
+            new Date("2026-06-02T09:00:00.000Z")
+        ),
+        "2026-06-08T09:00:00.000Z"
     );
     assert.throws(
         () =>
@@ -437,6 +475,10 @@ test("continues due job loop after a row disappears", async (t) => {
         intervalSeconds: 120,
         actionKey: "cache.refresh",
     });
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+        "2026-01-01T00:00:00.000Z",
+        "cache.weather"
+    );
     const prepare = db.prepare.bind(db);
     const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
         if (sql.includes("SELECT id FROM scheduled_jobs")) {
@@ -454,6 +496,75 @@ test("continues due job loop after a row disappears", async (t) => {
     }
 
     assert.deepEqual(calls, ["cache.weather"]);
+});
+
+test("rechecks due job state before scheduled execution", async () => {
+    const calls: string[] = [];
+    registerScheduledJobAction("cache.refresh", (job) => {
+        calls.push(job.id);
+        if (job.id === "cache.first") {
+            updateScheduledJob("cache.second", { enabled: false });
+        }
+    });
+    for (const id of ["cache.first", "cache.second"]) {
+        upsertScheduledJob({
+            id,
+            name: id,
+            enabled: true,
+            scheduleType: "interval",
+            intervalSeconds: 120,
+            actionKey: "cache.refresh",
+        });
+    }
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ?").run(
+        "2026-01-01T00:00:00.000Z"
+    );
+
+    await __testing.runDueJobsForTest();
+
+    assert.deepEqual(calls, ["cache.first"]);
+    assert.equal(getScheduledJob("cache.second")?.lastRun, null);
+});
+
+test("continues due job loop after one scheduled run throws", async (t) => {
+    const calls: string[] = [];
+    registerScheduledJobAction("cache.refresh", (job) => {
+        calls.push(job.id);
+    });
+    for (const id of ["cache.first", "cache.second"]) {
+        upsertScheduledJob({
+            id,
+            name: id,
+            enabled: true,
+            scheduleType: "interval",
+            intervalSeconds: 120,
+            actionKey: "cache.refresh",
+        });
+    }
+    db.prepare("UPDATE scheduled_jobs SET next_run_at = ?").run(
+        "2026-01-01T00:00:00.000Z"
+    );
+    const prepare = db.prepare.bind(db);
+    let insertFailures = 0;
+    const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+        if (sql.includes("INSERT INTO scheduled_job_runs") && insertFailures === 0) {
+            insertFailures += 1;
+            return {
+                run: () => {
+                    throw new Error("run insert failed");
+                },
+            } as unknown as ReturnType<typeof db.prepare>;
+        }
+        return prepare(sql);
+    });
+
+    try {
+        await __testing.runDueJobsForTest();
+    } finally {
+        prepareMock.mock.restore();
+    }
+
+    assert.deepEqual(calls, ["cache.second"]);
 });
 
 test("logs scheduler tick query failures without leaving ticks stuck", async (t) => {
@@ -699,6 +810,7 @@ test("validates schedule definitions and exposes idempotent scheduler controls",
         "*/0 * * * *",
         "*/5/2 * * * *",
         "1-2-3 * * * *",
+        "60/2 * * * *",
     ]) {
         assert.throws(
             () =>

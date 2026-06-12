@@ -624,6 +624,75 @@ describe("server bootstrap", () => {
             }),
         });
 
+        let cronResolvedAfterRetries = 0;
+        let cronResolvedAfterRetryChecks = 0;
+        await ensureScheduledJobCronExpressionColumn({
+            exec: () => {
+                cronResolvedAfterRetries += 1;
+                throw new Error("SQLITE_BUSY");
+            },
+            prepare: () => ({
+                all: () => {
+                    cronResolvedAfterRetryChecks += 1;
+                    return cronResolvedAfterRetryChecks >= 6
+                        ? [{ name: "cron_expression" }]
+                        : [{ name: "id" }];
+                },
+            }),
+        });
+        assert.equal(cronResolvedAfterRetries, 4);
+
+        let cronResolvedAfterColumnCheck = 0;
+        let cronResolvedAfterColumnCheckReads = 0;
+        await ensureScheduledJobCronExpressionColumn({
+            exec: () => {
+                cronResolvedAfterColumnCheck += 1;
+                throw new Error("SQLITE_BUSY");
+            },
+            prepare: () => ({
+                all: () => {
+                    cronResolvedAfterColumnCheckReads += 1;
+                    return cronResolvedAfterColumnCheckReads >= 2
+                        ? [{ name: "cron_expression" }]
+                        : [{ name: "id" }];
+                },
+            }),
+        });
+        assert.equal(cronResolvedAfterColumnCheck, 1);
+
+        let cronInnerSchemaChecks = 0;
+        await assert.rejects(
+            ensureScheduledJobCronExpressionColumn({
+                exec: () => {
+                    throw new Error("SQLITE_BUSY");
+                },
+                prepare: () => ({
+                    all: () => {
+                        cronInnerSchemaChecks += 1;
+                        if (cronInnerSchemaChecks === 1) {
+                            return [{ name: "id" }];
+                        }
+                        throw new Error("schema unavailable");
+                    },
+                }),
+            }),
+            /schema unavailable/u
+        );
+
+        await assert.rejects(
+            ensureScheduledJobCronExpressionColumn({
+                exec: () => {
+                    throw new Error("SQLITE_BUSY");
+                },
+                prepare: () => ({
+                    all: () => {
+                        throw new Error("SQLITE_BUSY");
+                    },
+                }),
+            }),
+            /SQLITE_BUSY/u
+        );
+
         await assert.rejects(
             ensureScheduledJobCronExpressionColumn({
                 exec: () => {

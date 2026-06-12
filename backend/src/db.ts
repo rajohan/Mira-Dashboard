@@ -284,8 +284,11 @@ await ensureTaskAutomationColumn(db);
 export async function ensureScheduledJobCronExpressionColumn(
     targetDb: MigrationDatabase
 ): Promise<void> {
+    const cronExpressionColumnExists = (): boolean =>
+        columnExists(targetDb, "scheduled_jobs", "cron_expression");
+
     try {
-        if (columnExists(targetDb, "scheduled_jobs", "cron_expression")) {
+        if (cronExpressionColumnExists()) {
             return;
         }
     } catch (error) {
@@ -294,13 +297,47 @@ export async function ensureScheduledJobCronExpressionColumn(
         }
     }
 
-    try {
-        targetDb.exec(SCHEDULED_JOBS_CRON_EXPRESSION_COLUMN_SQL);
-    } catch (error) {
-        if (!isDuplicateColumnError(error, "cron_expression")) {
-            throw error;
+    let lastError: unknown;
+
+    for (const delay of [0, 10, 25, 50]) {
+        if (delay > 0) {
+            await sleep(delay);
+        }
+
+        try {
+            targetDb.exec(SCHEDULED_JOBS_CRON_EXPRESSION_COLUMN_SQL);
+            return;
+        } catch (error) {
+            lastError = error;
+            if (isDuplicateColumnError(error, "cron_expression")) {
+                return;
+            }
+
+            try {
+                if (cronExpressionColumnExists()) {
+                    return;
+                }
+            } catch (columnError) {
+                if (!isTransientSqliteLock(columnError)) {
+                    throw columnError;
+                }
+            }
+
+            if (!isTransientSqliteLock(error)) {
+                throw error;
+            }
         }
     }
+
+    try {
+        if (cronExpressionColumnExists()) {
+            return;
+        }
+    } catch {
+        // Preserve the migration error that triggered the retry loop.
+    }
+
+    throw lastError;
 }
 
 await ensureScheduledJobCronExpressionColumn(db);
