@@ -2833,6 +2833,22 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
     it("registers scheduled cache refresh jobs and validates job payloads", async () => {
         scheduledJobsTesting.clearActionHandlers();
         scheduledJobsTesting.resetSchedulerState();
+        writeCacheSuccess({
+            key: "system.host",
+            data: { seeded: true },
+            source: "test",
+            ttl: 1,
+            ttlUnit: "hours",
+            metadata: {},
+        });
+        writeCacheSuccess({
+            key: "git.workspace",
+            data: { seeded: true },
+            source: "test",
+            ttl: 1,
+            ttlUnit: "hours",
+            metadata: {},
+        });
         try {
             registerCacheRefreshScheduledJobs();
             await withFetch(
@@ -2873,6 +2889,196 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
             scheduledJobsTesting.clearActionHandlers();
             scheduledJobsTesting.resetSchedulerState();
         }
+    });
+
+    it("seeds missing daily cache entries when scheduled jobs are registered", async () => {
+        const binDir = path.join(tempDir, "registration-seed-bin");
+        await mkdir(binDir);
+        await writeExecutable(
+            path.join(binDir, "openclaw"),
+            String.raw`#!/usr/bin/env node
+const args = process.argv.slice(2).join(" ");
+if (args === "status --json") process.stdout.write(JSON.stringify({ runtimeVersion: "2026.6.6" }));
+else if (args === "doctor") process.stdout.write("- OK: fine\n");
+else if (args === "security audit --json") process.stdout.write(JSON.stringify({ ok: true }));
+`
+        );
+        await writeExecutable(
+            path.join(binDir, "git"),
+            String.raw`#!/usr/bin/env node
+const args = process.argv.slice(2);
+const command = args.slice(2).join(" ");
+if (command === "status --short") process.stdout.write("");
+else if (command === "rev-parse --abbrev-ref HEAD") process.stdout.write("main\n");
+else if (command === "rev-parse --show-toplevel") process.stdout.write(args[1] + "\n");
+else if (command === "rev-list --left-right --count @{upstream}...HEAD") process.stdout.write("0\t0\n");
+else process.stdout.write("");
+`
+        );
+        await writeExecutable(
+            path.join(binDir, "df"),
+            String.raw`#!/usr/bin/env node
+process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/root 1000 250 750 25% /\n");
+`
+        );
+        db.exec("DELETE FROM cache_entries;");
+        scheduledJobsTesting.clearActionHandlers();
+        scheduledJobsTesting.resetSchedulerState();
+        await withEnv({ OPENCLAW_BIN: path.join(binDir, "openclaw") }, async () => {
+            const savedPath = process.env.PATH;
+            process.env.PATH = `${binDir}${path.delimiter}${savedPath || ""}`;
+            try {
+                registerCacheRefreshScheduledJobs();
+                await waitFor(
+                    () =>
+                        Boolean(
+                            db
+                                .prepare(
+                                    "SELECT 1 FROM cache_entries WHERE key = 'system.host'"
+                                )
+                                .get()
+                        ) &&
+                        Boolean(
+                            db
+                                .prepare(
+                                    "SELECT 1 FROM cache_entries WHERE key = 'git.workspace'"
+                                )
+                                .get()
+                        )
+                );
+            } finally {
+                process.env.PATH = savedPath;
+                scheduledJobsTesting.clearActionHandlers();
+                scheduledJobsTesting.resetSchedulerState();
+            }
+        });
+
+        assert.equal(cacheRow("system.host").status, "fresh");
+        assert.equal(cacheRow("git.workspace").status, "fresh");
+    });
+
+    it("records seed failures without blocking scheduled job registration", async () => {
+        const warn = mock.method(console, "warn", () => {});
+        db.exec("DELETE FROM cache_entries;");
+        scheduledJobsTesting.clearActionHandlers();
+        scheduledJobsTesting.resetSchedulerState();
+        await withEnv(
+            { OPENCLAW_BIN: path.join(tempDir, "missing-openclaw") },
+            async () => {
+                registerCacheRefreshScheduledJobs();
+                await waitFor(() => warn.mock.callCount() > 0);
+            }
+        );
+        try {
+            assert.ok(warn.mock.callCount() > 0);
+            assert.ok(
+                db.prepare("SELECT 1 FROM scheduled_jobs WHERE id = 'cache.system'").get()
+            );
+        } finally {
+            warn.mock.restore();
+            scheduledJobsTesting.clearActionHandlers();
+            scheduledJobsTesting.resetSchedulerState();
+        }
+    });
+
+    it("covers backup producer empty and malformed timestamp fallbacks", async () => {
+        const binDir = path.join(tempDir, "backup-fallback-bin");
+        await mkdir(binDir);
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            `#!/usr/bin/env node
+const args = process.argv.slice(2).join(" ");
+if (args === "exec kopia kopia snapshot list --all --json") {
+  if (process.env.EMPTY_BACKUP_OUTPUT === "1") process.exit(0);
+  process.stdout.write(JSON.stringify([
+    { id: "ignored" },
+    { id: "invalid-end", source: { path: "/source/openclaw" }, endTime: "not-a-date", stats: {}, retentionReason: "latest" },
+    { id: "invalid-start", source: { path: "/source/openclaw" }, startTime: "also-not-a-date", stats: {}, retentionReason: [] },
+    { id: "start-only", source: { path: "/source/docker" }, startTime: "2099-01-01T00:00:00.000Z", stats: {}, retentionReason: [] },
+    { id: "older-end", source: { path: "/source/docker" }, endTime: "2098-01-01T00:00:00.000Z", stats: { fileCount: 1 }, retentionReason: [] },
+    { id: "latest-end", source: { path: "/source/docker" }, endTime: "2099-01-02T00:00:00.000Z", stats: { fileCount: 2 }, retentionReason: ["latest"] },
+    { id: "untimed", source: { path: "/source/projects" }, stats: {}, retentionReason: "latest" }
+  ]));
+} else if (args === "exec walg wal-g backup-list --detail --json") {
+  if (process.env.EMPTY_BACKUP_OUTPUT === "1") process.exit(0);
+  process.stdout.write(process.env.EMPTY_WALG === "1" ? "[]" : JSON.stringify([
+    { backup_name: "finish", finish_time: "2099-01-02T00:00:00.000Z" },
+    { backup_name: "time", time: "2099-01-01T00:00:00.000Z" }
+  ]));
+}
+`
+        );
+
+        await withEnv({ MIRA_DOCKER_BIN: path.join(binDir, "docker") }, async () => {
+            await refreshCacheProducer("backup.kopia.status");
+            await refreshCacheProducer("backup.walg.status");
+        });
+        const kopia = cacheRow("backup.kopia.status").data as {
+            latest: Array<{
+                id: string;
+                endTime: string | null;
+                retentionReason: unknown[];
+            }>;
+            snapshotsByPath: Array<{
+                path: string;
+                snapshots: Array<{ id: string; fileCount: number | null }>;
+            }>;
+            stale: Array<{ path: string }>;
+        };
+        assert.equal(kopia.latest[0]?.id, "latest-end");
+        assert.equal(kopia.latest[0]?.endTime, "2099-01-02T00:00:00.000Z");
+        assert.deepEqual(kopia.latest[0]?.retentionReason, ["latest"]);
+        assert.deepEqual(
+            kopia.snapshotsByPath
+                .find((group) => group.path === "/source/docker")
+                ?.snapshots.map((snapshot) => [snapshot.id, snapshot.fileCount]),
+            [
+                ["latest-end", 2],
+                ["start-only", null],
+                ["older-end", 1],
+            ]
+        );
+        assert.deepEqual(kopia.stale, [
+            { path: "/source/openclaw", endTime: "not-a-date" },
+            { path: "/source/projects", endTime: null },
+        ]);
+
+        const walg = cacheRow("backup.walg.status").data as {
+            latest: { backupName: string | null; modified: string | null };
+            stale: boolean;
+        };
+        assert.equal(walg.latest.backupName, "finish");
+        assert.equal(walg.latest.modified, "2099-01-02T00:00:00.000Z");
+        assert.equal(walg.stale, false);
+
+        await withEnv(
+            { EMPTY_WALG: "1", MIRA_DOCKER_BIN: path.join(binDir, "docker") },
+            async () => {
+                await refreshCacheProducer("backup.walg.status");
+            }
+        );
+        const emptyWalg = cacheRow("backup.walg.status").data as {
+            latestAgeHours: number | null;
+            stale: boolean;
+        };
+        assert.equal(emptyWalg.latestAgeHours, null);
+        assert.equal(emptyWalg.stale, true);
+
+        await withEnv(
+            { EMPTY_BACKUP_OUTPUT: "1", MIRA_DOCKER_BIN: path.join(binDir, "docker") },
+            async () => {
+                await refreshCacheProducer("backup.kopia.status");
+                await refreshCacheProducer("backup.walg.status");
+            }
+        );
+        assert.deepEqual(
+            (cacheRow("backup.kopia.status").data as { latest: unknown[] }).latest,
+            []
+        );
+        assert.equal(
+            (cacheRow("backup.walg.status").data as { latest: unknown }).latest,
+            null
+        );
     });
 
     it("covers additional producer fallback branches", async () => {

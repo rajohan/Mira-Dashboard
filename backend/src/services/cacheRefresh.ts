@@ -127,6 +127,14 @@ function toNullableNumber(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null;
 }
 
+function stringOrNull(value: unknown): string | null {
+    return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+function numberOrNull(value: unknown): number | null {
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function toCurrencyNumber(value: unknown): number | null {
     if (typeof value === "number") {
         return Number.isFinite(value) ? value : null;
@@ -776,6 +784,10 @@ async function runCommand(file: string, args: string[], cwd?: string): Promise<s
     return stdout.trimEnd();
 }
 
+function getDockerBin(): string {
+    return nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
+}
+
 async function safeGit(repoPath: string, args: string[]) {
     try {
         return { ok: true, output: await runCommand("git", ["-C", repoPath, ...args]) };
@@ -1029,6 +1041,197 @@ async function refreshSystemCache() {
         },
     });
     return { refreshed: ["system.openclaw", "system.host"] };
+}
+
+function firstValidTimestamp(value: string | null): number {
+    if (!value) {
+        return 0;
+    }
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function firstValidTimestampValue(...values: Array<string | null>): string | null {
+    return values.find((value) => firstValidTimestamp(value) > 0) ?? null;
+}
+
+function summarizeKopiaSnapshot(value: unknown) {
+    const snapshot = asRecord(value);
+    const source = asRecord(snapshot.source);
+    const stats = asRecord(snapshot.stats);
+    return {
+        id: stringOrNull(snapshot.id),
+        path: stringOrNull(source.path),
+        description: stringOrNull(snapshot.description),
+        startTime: stringOrNull(snapshot.startTime),
+        endTime: stringOrNull(snapshot.endTime),
+        fileCount: numberOrNull(stats.fileCount),
+        totalSize: numberOrNull(stats.totalSize),
+        errorCount: numberOrNull(stats.errorCount),
+        ignoredErrorCount: numberOrNull(stats.ignoredErrorCount),
+        retentionReason: Array.isArray(snapshot.retentionReason)
+            ? snapshot.retentionReason
+            : [],
+    };
+}
+
+function getSnapshotTime(snapshot: { endTime: string | null; startTime: string | null }) {
+    return firstValidTimestamp(
+        firstValidTimestampValue(snapshot.endTime, snapshot.startTime)
+    );
+}
+
+async function refreshKopiaBackupCache() {
+    const output = await runCommand(getDockerBin(), [
+        "exec",
+        "kopia",
+        "kopia",
+        "snapshot",
+        "list",
+        "--all",
+        "--json",
+    ]);
+    const snapshots = JSON.parse(output || "[]") as unknown[];
+    const byPath = new Map<string, ReturnType<typeof summarizeKopiaSnapshot>[]>();
+    for (const snapshot of snapshots) {
+        const summarized = summarizeKopiaSnapshot(snapshot);
+        if (!summarized.path) {
+            continue;
+        }
+        const grouped = byPath.get(summarized.path) ?? [];
+        grouped.push(summarized);
+        byPath.set(summarized.path, grouped);
+    }
+
+    const snapshotsByPath = [...byPath.entries()]
+        .sort(([pathA], [pathB]) => pathA.localeCompare(pathB))
+        .map(([pathName, groupedSnapshots]) => {
+            const sortedSnapshots = groupedSnapshots.sort(
+                (snapshotA, snapshotB) =>
+                    getSnapshotTime(snapshotB) - getSnapshotTime(snapshotA)
+            );
+            return {
+                path: pathName,
+                latest: sortedSnapshots[0],
+                snapshots: sortedSnapshots,
+                snapshotCount: sortedSnapshots.length,
+            };
+        });
+    const latest = snapshotsByPath.map((group) => group.latest).filter(Boolean);
+    const stale = latest
+        .filter((snapshot) => {
+            if (!snapshot.endTime) {
+                return true;
+            }
+            const endTimeMs = new Date(snapshot.endTime).getTime();
+            if (!Number.isFinite(endTimeMs)) {
+                return true;
+            }
+            const ageHours = (Date.now() - endTimeMs) / 36e5;
+            return ageHours > 30;
+        })
+        .map((snapshot) => ({ path: snapshot.path, endTime: snapshot.endTime }));
+    const payload = {
+        checkedAt: nowIso(),
+        tool: "kopia",
+        latest,
+        snapshotsByPath,
+        stale,
+        ok: stale.length === 0 && latest.length > 0,
+    };
+    writeCacheSuccess({
+        key: "backup.kopia.status",
+        data: payload,
+        source: "backend",
+        ttl: 1,
+        ttlUnit: "hours",
+        metadata: {
+            workflow: "Cache Foundation - Kopia Backup Status",
+            summary: {
+                ok: payload.ok,
+                snapshotCount: payload.latest.length,
+                staleCount: payload.stale.length,
+                stalePaths: payload.stale.map((item) => item.path),
+            },
+        },
+    });
+    return { refreshed: ["backup.kopia.status"] };
+}
+
+function summarizeWalgBackup(value: unknown) {
+    const backup = asRecord(value);
+    const modified = firstValidTimestampValue(
+        stringOrNull(backup.modified),
+        stringOrNull(backup.finish_time),
+        stringOrNull(backup.time)
+    );
+    return {
+        backupName: stringOrNull(backup.backup_name),
+        modified,
+        time: stringOrNull(backup.time),
+        startTime: stringOrNull(backup.start_time),
+        finishTime: stringOrNull(backup.finish_time),
+        walFileName: stringOrNull(backup.wal_file_name),
+        storageName: stringOrNull(backup.storage_name),
+    };
+}
+
+function getWalgBackupTime(backup: { modified: string | null }) {
+    return firstValidTimestamp(backup.modified);
+}
+
+async function refreshWalgBackupCache() {
+    const output = await runCommand(getDockerBin(), [
+        "exec",
+        "walg",
+        "wal-g",
+        "backup-list",
+        "--detail",
+        "--json",
+    ]);
+    const backups = (JSON.parse(output || "[]") as unknown[])
+        .map(summarizeWalgBackup)
+        .sort(
+            (backupA, backupB) => getWalgBackupTime(backupB) - getWalgBackupTime(backupA)
+        );
+
+    const latest = backups[0] ?? null;
+    const latestModifiedMs = latest?.modified
+        ? new Date(latest.modified).getTime()
+        : Number.NaN;
+    const latestAgeHours = Number.isFinite(latestModifiedMs)
+        ? (Date.now() - latestModifiedMs) / 36e5
+        : null;
+    const stale = !latest || latestAgeHours === null || latestAgeHours > 30;
+    const payload = {
+        checkedAt: nowIso(),
+        tool: "wal-g",
+        latest,
+        backups,
+        backupCount: backups.length,
+        latestAgeHours,
+        stale,
+        ok: !stale,
+    };
+
+    writeCacheSuccess({
+        key: "backup.walg.status",
+        data: payload,
+        source: "backend",
+        ttl: 1,
+        ttlUnit: "hours",
+        metadata: {
+            workflow: "Cache Foundation - WAL-G Base Backup Status",
+            summary: {
+                ok: payload.ok,
+                backupCount: payload.backupCount,
+                latestBackupName: payload.latest?.backupName ?? null,
+                stale: payload.stale,
+                latestAgeHours: payload.latestAgeHours,
+            },
+        },
+    });
+    return { refreshed: ["backup.walg.status"] };
 }
 
 async function checkOpenRouterQuota() {
@@ -1488,6 +1691,8 @@ function isSupportedCacheProducerKey(key: string): boolean {
         key === "weather.spydeberg" ||
         key === "git.workspace" ||
         key === "system.host" ||
+        key === "backup.kopia.status" ||
+        key === "backup.walg.status" ||
         key === "quotas.summary"
     );
 }
@@ -1556,6 +1761,12 @@ async function refreshCacheProducerUnlocked(key: string) {
     }
     if (key === "system.host") {
         return refreshWithFailureRecord(refreshSystemCache);
+    }
+    if (key === "backup.kopia.status") {
+        return refreshWithFailureRecord(refreshKopiaBackupCache);
+    }
+    if (key === "backup.walg.status") {
+        return refreshWithFailureRecord(refreshWalgBackupCache);
     }
     if (key === "quotas.summary") {
         return refreshWithFailureRecord(refreshQuotasCache);
@@ -1714,6 +1925,20 @@ function getScheduledCacheKey(job: ScheduledJob): string {
     return key;
 }
 
+function cacheEntryExists(key: string): boolean {
+    const row = db.prepare("SELECT 1 FROM cache_entries WHERE key = ? LIMIT 1").get(key);
+    return row !== undefined;
+}
+
+function seedMissingLocalCacheEntry(key: string): void {
+    if (cacheEntryExists(key)) {
+        return;
+    }
+    void refreshCacheProducer(key).catch((error: unknown) => {
+        console.warn(`[CacheRefresh] Failed to seed missing cache entry ${key}:`, error);
+    });
+}
+
 export function registerCacheRefreshScheduledJobs(): void {
     registerScheduledJobAction("cache.refresh", async (job, signal) => {
         const key = getScheduledCacheKey(job);
@@ -1726,6 +1951,9 @@ export function registerCacheRefreshScheduledJobs(): void {
             ...job,
             enabled: getScheduledJob(job.id)?.enabled ?? true,
         });
+        if (job.scheduleType === "daily") {
+            seedMissingLocalCacheEntry(job.actionPayload.key);
+        }
     }
 }
 
