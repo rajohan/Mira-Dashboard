@@ -413,12 +413,12 @@ export function upsertScheduledJob(definition: ScheduledJobDefinition): Schedule
     assertValidId(definition.id);
     assertValidActionKey(definition.actionKey);
     const existing = getScheduledJob(definition.id);
-    const enabled = definition.enabled ?? existing?.enabled ?? false;
-    const scheduleType = definition.scheduleType;
+    const enabled = existing?.enabled ?? definition.enabled ?? false;
+    const scheduleType = existing?.scheduleType ?? definition.scheduleType;
     const intervalSeconds =
-        definition.intervalSeconds ?? existing?.intervalSeconds ?? 3600;
-    const timeOfDay = definition.timeOfDay ?? existing?.timeOfDay ?? null;
-    const cronExpression = definition.cronExpression ?? existing?.cronExpression ?? null;
+        existing?.intervalSeconds ?? definition.intervalSeconds ?? 3600;
+    const timeOfDay = existing?.timeOfDay ?? definition.timeOfDay ?? null;
+    const cronExpression = existing?.cronExpression ?? definition.cronExpression ?? null;
     assertValidSchedule(scheduleType, intervalSeconds, timeOfDay, cronExpression);
 
     const timestamp = nowIso();

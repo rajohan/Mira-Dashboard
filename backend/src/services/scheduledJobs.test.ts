@@ -352,7 +352,7 @@ test("keeps existing schedule defaults and due time when upserting existing jobs
     assert.equal(disabled.enabled, false);
 });
 
-test("inherits existing daily time when upserting daily jobs", () => {
+test("preserves user-edited enabled state and daily time when upserting jobs", () => {
     upsertScheduledJob({
         id: "cache.daily",
         name: "Daily cache",
@@ -361,15 +361,25 @@ test("inherits existing daily time when upserting daily jobs", () => {
         timeOfDay: "04:30",
         actionKey: "cache.refresh",
     });
+    const patched = updateScheduledJob("cache.daily", {
+        enabled: false,
+        timeOfDay: "06:45",
+    });
+    assert.equal(patched?.enabled, false);
+    assert.equal(patched?.timeOfDay, "06:45");
 
     const updated = upsertScheduledJob({
         id: "cache.daily",
         name: "Daily cache renamed",
+        enabled: true,
         scheduleType: "daily",
+        timeOfDay: "04:30",
         actionKey: "cache.refresh",
     });
 
-    assert.equal(updated.timeOfDay, "04:30");
+    assert.equal(updated.enabled, false);
+    assert.equal(updated.timeOfDay, "06:45");
+    assert.equal(updated.nextRunAt, null);
 });
 
 test("creates and updates cron jobs", () => {
