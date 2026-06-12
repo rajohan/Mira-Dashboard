@@ -22,9 +22,7 @@ let stopSchedulerOnServerClose: (() => void) | undefined;
 
 function shouldStartScheduledJobs(nodeEnv = process.env.NODE_ENV): boolean {
     return (
-        nodeEnv !== "development" &&
-        nodeEnv !== "test" &&
-        process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER !== "1"
+        nodeEnv === "production" && process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER !== "1"
     );
 }
 

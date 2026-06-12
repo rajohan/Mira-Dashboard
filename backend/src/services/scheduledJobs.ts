@@ -584,6 +584,16 @@ function advanceScheduledRun(job: ScheduledJob): void {
     ).run(nextRunAt, nowIso(), currentJob.id);
 }
 
+function markAbandonedRunningRuns(): void {
+    db.prepare(
+        `UPDATE scheduled_job_runs
+         SET status = 'failed',
+             finished_at = COALESCE(finished_at, ?),
+             message = COALESCE(message, ?)
+         WHERE status = 'running'`
+    ).run(nowIso(), "Scheduled job abandoned after backend restart");
+}
+
 export async function runScheduledJob(
     id: string,
     triggerType: ScheduledJobTriggerType = "manual"
@@ -623,10 +633,13 @@ export async function runScheduledJob(
     } catch (error) {
         return finishRun(run, "failed", errorMessage(error, "Scheduled job failed"), {});
     } finally {
-        if (triggerType === "schedule") {
-            advanceScheduledRun(job);
+        try {
+            if (triggerType === "schedule") {
+                advanceScheduledRun(job);
+            }
+        } finally {
+            runningJobs.delete(id);
         }
-        runningJobs.delete(id);
     }
 }
 
@@ -682,6 +695,7 @@ export function startScheduledJobScheduler(): void {
     if (scheduler) {
         return;
     }
+    markAbandonedRunningRuns();
     scheduler = setInterval(scheduleTick, schedulerTickMs);
     scheduler.unref();
     scheduleTick();

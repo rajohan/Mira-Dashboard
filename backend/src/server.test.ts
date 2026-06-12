@@ -906,7 +906,7 @@ describe("server bootstrap", () => {
         const originalShutdown = gateway.shutdown;
         let initializedToken: string | undefined;
         let listenedPort: number | undefined;
-        let closeCalled = false;
+        let closeCalled: boolean;
         let shutdownCalled = false;
         const warnings: unknown[][] = [];
         const errors: unknown[][] = [];
@@ -934,6 +934,21 @@ describe("server bootstrap", () => {
             assert.equal(server.listenerCount("close"), closeListenersAfterScheduler);
             assert.equal(closeListenersAfterScheduler, closeListenersBeforeScheduler + 1);
             server.emit("close");
+            stopQuotaNotificationMonitor();
+            stopOpenClawNotificationMonitor();
+            server.close = (() => {
+                closeCalled = true;
+                return server;
+            }) as typeof server.close;
+            closeCalled = false;
+            serverStartTesting.setAfterBackgroundServicesStartedForTest(() => {
+                throw new Error("post scheduler failed");
+            });
+            assert.throws(() => handleServerListening(), /post scheduler failed/u);
+            assert.equal(closeCalled, true);
+            assert.equal(server.listenerCount("close"), closeListenersBeforeScheduler);
+            serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
+            server.close = originalClose;
             stopQuotaNotificationMonitor();
             stopOpenClawNotificationMonitor();
             process.env.NODE_ENV = originalNodeEnv;
@@ -1098,6 +1113,14 @@ describe("server bootstrap", () => {
             assert.equal(shouldStartOnImport(undefined, true), true);
             assert.equal(shouldStartOnImport("0", false), false);
             assert.equal(shouldStartOnImport("1", false), true);
+            delete process.env.NODE_ENV;
+            assert.equal(serverStartTesting.shouldStartScheduledJobs(), false);
+            assert.equal(
+                serverStartTesting.shouldStartScheduledJobs("development"),
+                false
+            );
+            assert.equal(serverStartTesting.shouldStartScheduledJobs("test"), false);
+            assert.equal(serverStartTesting.shouldStartScheduledJobs("production"), true);
 
             process.env.MIRA_DASHBOARD_START_ON_IMPORT = "1";
             assert.equal(shouldStartOnImport(), true);

@@ -786,6 +786,41 @@ test("preserves no-op patch due times and uses fresh schedule after running", as
     assert.ok(new Date(nextRunAt).getTime() - Date.now() > 3_000_000);
 });
 
+test("clears running state when scheduled rescheduling fails", async (t) => {
+    registerScheduledJobAction("cache.refresh", () => {});
+    upsertScheduledJob({
+        id: "cache.weather",
+        name: "Weather cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+    const prepare = db.prepare.bind(db);
+    const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+        if (sql.includes("UPDATE scheduled_jobs SET next_run_at")) {
+            return {
+                run: () => {
+                    throw new Error("reschedule failed");
+                },
+            } as unknown as ReturnType<typeof db.prepare>;
+        }
+        return prepare(sql);
+    });
+
+    try {
+        await assert.rejects(
+            runScheduledJob("cache.weather", "schedule"),
+            /reschedule failed/u
+        );
+    } finally {
+        prepareMock.mock.restore();
+    }
+
+    await runScheduledJob("cache.weather", "manual");
+    assert.equal(getScheduledJob("cache.weather")?.isRunning, false);
+});
+
 test("does not advance schedule when a running job is deleted", async () => {
     let releaseHandler: () => void = () => {};
     registerScheduledJobAction(
@@ -811,6 +846,30 @@ test("does not advance schedule when a running job is deleted", async () => {
     const run = await scheduledRun;
     assert.equal(run.status, "success");
     assert.equal(getScheduledJob("cache.weather"), null);
+});
+
+test("marks orphaned running rows failed when the scheduler starts", () => {
+    upsertScheduledJob({
+        id: "cache.weather",
+        name: "Weather cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+    db.prepare(
+        `INSERT INTO scheduled_job_runs (
+            job_id, status, trigger_type, started_at, output_json
+        ) VALUES (?, 'running', 'schedule', ?, '{}')`
+    ).run("cache.weather", "2026-01-01T00:00:00.000Z");
+
+    startScheduledJobScheduler();
+    stopScheduledJobScheduler();
+
+    const lastRun = getScheduledJob("cache.weather")?.lastRun;
+    assert.equal(lastRun?.status, "failed");
+    assert.equal(lastRun?.message, "Scheduled job abandoned after backend restart");
+    assert.ok(lastRun?.finishedAt);
 });
 
 test("skips due jobs that are already running", async () => {
