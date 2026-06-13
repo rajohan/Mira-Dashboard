@@ -231,6 +231,15 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
 
         const refreshed = await refreshCacheKey("system.openclaw");
         assert.equal(refreshed.key, "system.host");
+
+        __testing.setCacheRefreshProducerForTests(async () => {
+            insertCacheEntry("system.openclaw");
+            insertCacheEntry("system.host");
+            return { refreshed: ["system.openclaw", "system.host"] };
+        });
+
+        const multiKeyRefresh = await refreshCacheKey("system.host");
+        assert.equal(multiKeyRefresh.key, "system.host");
     });
 
     it("rejects empty and multi-row cache refresh results", async () => {
@@ -250,8 +259,8 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
             refreshed: ["system.openclaw", "system.host"],
         }));
 
-        await assert.rejects(() => refreshCacheKey("system.host"), {
-            message: "Cache refresh returned multiple keys for: system.host",
+        await assert.rejects(() => refreshCacheKey("weather.spydeberg"), {
+            message: "Cache refresh returned multiple keys for: weather.spydeberg",
         });
 
         __testing.setCacheRefreshProducerForTests(async () => ({

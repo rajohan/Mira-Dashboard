@@ -2049,12 +2049,22 @@ if (args.includes("capture-pane")) {
         const pathCodexBin = path.join(tempDir, "path-codex-bin");
         await import("node:fs/promises").then((fs) => fs.mkdir(pathCodexBin));
         await writeExecutable(path.join(pathCodexBin, "codex"), "#!/usr/bin/env node\n");
+        const tmuxCaptureState = path.join(tempDir, "path-codex-tmux-captures");
         await writeExecutable(
             path.join(pathCodexBin, "tmux"),
-            String.raw`#!/usr/bin/env node
+            String.raw`#!${process.execPath}
+const fs = require("node:fs");
 const args = process.argv.slice(2);
 if (args.includes("capture-pane")) {
-  process.stdout.write("Account: path@example.test\nModel: gpt-5.5 (high)\n5h limit: 70% left\nWeekly limit: 60% left\n");
+  const statePath = ${JSON.stringify(tmuxCaptureState)};
+  let count = 0;
+  try { count = Number(fs.readFileSync(statePath, "utf8")); } catch {}
+  fs.writeFileSync(statePath, String(count + 1));
+  if (count < 2) {
+    process.stdout.write("Account: path@example.test\nModel: gpt-5.5 (high)\n5h limit: 70% left\n");
+  } else {
+    process.stdout.write("Account: path@example.test\nModel: gpt-5.5 (high)\n5h limit: 70% left\nWeekly limit: 60% left\n");
+  }
 }
 `
         );
@@ -3223,6 +3233,62 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
         }
 
         assert.equal(cacheRow("weather.spydeberg").status, "fresh");
+    });
+
+    it("seeds existing non-fresh cache entries when scheduled jobs are registered", async () => {
+        seedFreshCacheEntries([
+            "weather.spydeberg",
+            "quotas.summary",
+            "system.openclaw",
+            "system.host",
+            "git.workspace",
+            "moltbook.home",
+            "moltbook.feed.hot",
+            "moltbook.feed.new",
+            "moltbook.profile",
+            "moltbook.my-content",
+            "backup.kopia.status",
+            "backup.walg.status",
+        ]);
+        db.prepare("UPDATE cache_entries SET expires_at = '' WHERE key = ?").run(
+            "weather.spydeberg"
+        );
+        scheduledJobsTesting.clearActionHandlers();
+        scheduledJobsTesting.resetSchedulerState();
+        try {
+            await withFetch(
+                (url) => {
+                    assert.ok(url.includes("wttr.in"));
+                    return {
+                        current_condition: [
+                            {
+                                temp_C: "9",
+                                FeelsLikeC: "8",
+                                humidity: "80",
+                                windspeedKmph: "11",
+                                weatherDesc: [{ value: "Clear" }],
+                            },
+                        ],
+                        weather: [],
+                    };
+                },
+                async () => {
+                    registerCacheRefreshScheduledJobs();
+                    await waitFor(
+                        () => cacheRow("weather.spydeberg").source === "wttr.in"
+                    );
+                }
+            );
+        } finally {
+            scheduledJobsTesting.clearActionHandlers();
+            scheduledJobsTesting.resetSchedulerState();
+        }
+
+        assert.equal(cacheRow("weather.spydeberg").status, "fresh");
+        assert.equal(
+            (cacheRow("weather.spydeberg").data as { temperatureC: number }).temperatureC,
+            9
+        );
     });
 
     it("logs seed failures when missing cache entries cannot refresh", async () => {

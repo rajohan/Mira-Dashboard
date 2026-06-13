@@ -63,17 +63,21 @@ export async function refreshCacheKey(key: string) {
             statusCode: 404,
         });
     }
-    if (refreshed.length > 1) {
-        throw Object.assign(
-            new Error(`Cache refresh returned multiple keys for: ${key}`),
-            { statusCode: 400 }
-        );
-    }
-    const refreshedKey = stringFallback(refreshed[0]).trim();
+    const refreshedKeys = refreshed
+        .map((refreshedKey) => stringFallback(refreshedKey).trim())
+        .filter((refreshedKey) => refreshedKey !== "");
+    const refreshedKey =
+        refreshedKeys.find((candidate) => candidate === key) ?? refreshedKeys[0] ?? "";
     if (!refreshedKey) {
         throw Object.assign(new Error(`No cache keys refreshed for: ${key}`), {
             statusCode: 404,
         });
+    }
+    if (refreshedKeys.length > 1 && !refreshedKeys.includes(key)) {
+        throw Object.assign(
+            new Error(`Cache refresh returned multiple keys for: ${key}`),
+            { statusCode: 400 }
+        );
     }
     const row = await getCacheEntry(refreshedKey);
     if (!row) {

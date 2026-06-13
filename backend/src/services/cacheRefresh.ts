@@ -1644,17 +1644,18 @@ else
   }
 fi
 tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw env CODEX_HOME="$MIRA_QUOTA_CODEX_HOME" CODEX_DISABLE_UPDATE_CHECK=1 NO_UPDATE_NOTIFIER=1 "$MIRA_QUOTA_CODEX_BIN" --cd /home/ubuntu/.openclaw --no-alt-screen
-OUT=""
-for i in $(seq 1 12); do
-  tmux send-keys -t "$SESSION" C-u
-  tmux send-keys -t "$SESSION" "/status" Enter
-  sleep 0.5
-  OUT=$(tmux capture-pane -pt "$SESSION" -S -320 || true)
-  echo "$OUT" | grep -Eiq "5h limit:|Weekly limit:" && break
-done
-for i in $(seq 1 20); do OUT=$(tmux capture-pane -pt "$SESSION" -S -320 || true); echo "$OUT" | grep -Eiq "5h limit:|Weekly limit:" && break; sleep 1; done
-printf "%s\n" "$OUT"
-`;
+	OUT=""
+	has_limits(){ echo "$OUT" | grep -Eiq "5h limit:" && echo "$OUT" | grep -Eiq "Weekly limit:"; }
+	for i in $(seq 1 12); do
+	  tmux send-keys -t "$SESSION" C-u
+	  tmux send-keys -t "$SESSION" "/status" Enter
+	  sleep 0.5
+	  OUT=$(tmux capture-pane -pt "$SESSION" -S -320 || true)
+	  has_limits && break
+	done
+	for i in $(seq 1 20); do OUT=$(tmux capture-pane -pt "$SESSION" -S -320 || true); has_limits && break; sleep 1; done
+	printf "%s\n" "$OUT"
+	`;
         const { stdout } = await execFileAsync("bash", ["-c", command], {
             env: {
                 PATH: process.env.PATH,
@@ -2016,19 +2017,31 @@ function getScheduledCacheKey(job: ScheduledJob): string {
     return key;
 }
 
-function cacheEntryExists(key: string): boolean {
+function cacheEntryIsFresh(key: string): boolean {
     const keys =
         key === "moltbook"
             ? MOLTBOOK_CACHE_KEY_LIST
             : key === "system.host" || key === "system.openclaw"
               ? ["system.openclaw", "system.host"]
               : [key];
-    const statement = db.prepare("SELECT 1 FROM cache_entries WHERE key = ? LIMIT 1");
-    return keys.every((cacheKey) => statement.get(cacheKey) !== undefined);
+    const statement = db.prepare(
+        "SELECT status, expires_at FROM cache_entries WHERE key = ? LIMIT 1"
+    );
+    return keys.every((cacheKey) => {
+        const row = statement.get(cacheKey) as
+            | { status: string; expires_at: string }
+            | undefined;
+        if (!row || row.status !== "fresh") {
+            return false;
+        }
+        const expiresAtMs =
+            row.expires_at === "" ? Number.NaN : Date.parse(row.expires_at);
+        return Number.isFinite(expiresAtMs) && expiresAtMs > Date.now();
+    });
 }
 
 function seedMissingLocalCacheEntry(key: string): void {
-    if (cacheEntryExists(key)) {
+    if (cacheEntryIsFresh(key)) {
         return;
     }
     void refreshCacheProducer(key).catch((error: unknown) => {
