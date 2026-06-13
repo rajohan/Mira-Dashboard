@@ -313,7 +313,14 @@ async function waitForDoneWithRefreshFailure(
 }
 
 async function waitForCacheEntry(key: string): Promise<Record<string, unknown>> {
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    return waitForCacheEntryAttempts(key, 40);
+}
+
+async function waitForCacheEntryAttempts(
+    key: string,
+    attempts: number
+): Promise<Record<string, unknown>> {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
         const row = db
             .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
             .get(key) as { data_json: string | null } | undefined;
@@ -367,6 +374,7 @@ describe("backup routes", () => {
         fakeContainerPgrepCalls = 0;
         backupTesting.resetJobsForTest();
         backupTesting.setBackupAbortContainerTimeoutsForTest(30_000, 1_000);
+        backupTesting.setBackupAbortContainerConfirmAttemptsForTest(3);
         backupTesting.setBackupAbortDockerExecTimeoutForTest(5_000);
         db.prepare(
             "DELETE FROM cache_entries WHERE key IN ('backup.kopia.status', 'backup.walg.status')"
@@ -380,6 +388,7 @@ describe("backup routes", () => {
         await server.close();
         backupTesting.setSpawnBackupProcessForTest();
         backupTesting.setBackupAbortContainerTimeoutsForTest(30_000, 1_000);
+        backupTesting.setBackupAbortContainerConfirmAttemptsForTest(3);
         backupTesting.setBackupAbortDockerExecTimeoutForTest(5_000);
         if (originalDockerBin === undefined) {
             delete process.env.MIRA_DOCKER_BIN;
@@ -1021,6 +1030,36 @@ describe("backup routes", () => {
         );
     });
 
+    it("finishes aborted WAL-G jobs as needing attention after bounded confirmation retries", async () => {
+        registerBackupScheduledJobs();
+        backupTesting.setBackupAbortContainerTimeoutsForTest(1, 1);
+        backupTesting.setBackupAbortContainerConfirmAttemptsForTest(2);
+        await withEnv(
+            { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_CONTAINER_PGREP_CODE: "0" },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = runScheduledJob(
+                    "backup.walg",
+                    "manual",
+                    controller.signal
+                );
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+
+                const run = await runPromise;
+                assert.equal(run.status, "failed");
+                assert.match(run.message ?? "", /needs attention/u);
+                assert.match(run.message ?? "", /2 failed confirmation attempts/u);
+                const activeWalg = await requestJson<{
+                    job: { status: string } | null;
+                }>(server, "/api/backups/walg");
+                assert.equal(activeWalg.body.job?.status, "done");
+            }
+        );
+    });
+
     it("records in-container WAL-G force termination failures", async () => {
         registerBackupScheduledJobs();
         const originalKill = process.kill;
@@ -1252,6 +1291,22 @@ describe("backup routes", () => {
             assert.equal(nextStarted.body.ok, true);
             assert.notEqual(nextStarted.body.job.id, started.body.job.id);
             await waitForDone(server, "/api/backups/kopia");
+        });
+    });
+
+    it("resolves successful scheduled backups before status refresh completes", async () => {
+        await withEnv({ FAKE_DOCKER_STATUS_DELAY_MS: "1000" }, async () => {
+            const scheduledRun = backupTesting.startScheduledBackup("kopia");
+            const result = await Promise.race([
+                scheduledRun.then(() => "settled"),
+                new Promise<"pending">((resolve) =>
+                    setTimeout(() => resolve("pending"), 100)
+                ),
+            ]);
+
+            assert.equal(result, "settled");
+            const cache = await waitForCacheEntryAttempts("backup.kopia.status", 150);
+            assert.equal(cache.ok, true);
         });
     });
 

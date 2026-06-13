@@ -21,6 +21,7 @@ const WALG_BACKUP_SCRIPT_PATTERN = "/usr/local/bin/backup-push.sh";
 let spawnBackupProcess = spawn;
 let backupAbortContainerWaitMs = 30_000;
 let backupAbortContainerPollMs = 1_000;
+let backupAbortContainerConfirmAttempts = 3;
 let backupAbortDockerExecTimeoutMs = 5_000;
 
 interface BackupAbortConfig {
@@ -197,8 +198,9 @@ function startBackupJob(
         if (signalName && abortConfig) {
             await waitForContainerProcessExitWithRetries(abortConfig, job);
         }
+        const completedCode = signalName ? 130 : code;
         job.status = "done";
-        job.code = signalName ? 130 : code;
+        job.code = completedCode;
         job.endedAt = Date.now();
         finalized = true;
         if (abortKillTimer) {
@@ -206,10 +208,13 @@ function startBackupJob(
             abortKillTimer = null;
         }
         signal?.removeEventListener("abort", abortBackup);
-        if (!signalName) {
+        if (!signalName && completedCode !== 0) {
             await refreshBackupStatus(type, job);
         }
         resolveCompleted(job);
+        if (!signalName && completedCode === 0) {
+            await refreshBackupStatus(type, job);
+        }
     };
 
     const abortBackup = () => {
@@ -373,7 +378,7 @@ async function waitForContainerProcessExitWithRetries(
     config: BackupAbortConfig,
     job: BackupJob
 ): Promise<void> {
-    for (;;) {
+    for (let attempt = 1; attempt <= backupAbortContainerConfirmAttempts; attempt += 1) {
         try {
             await waitForContainerProcessExit(config);
             return;
@@ -381,6 +386,12 @@ async function waitForContainerProcessExitWithRetries(
             job.stderr = trimOutput(
                 `${job.stderr}\nFailed to confirm backup process termination: ${String(error)}`.trim()
             );
+            if (attempt >= backupAbortContainerConfirmAttempts) {
+                job.stderr = trimOutput(
+                    `${job.stderr}\nBackup termination needs attention; proceeding after ${attempt} failed confirmation attempts`.trim()
+                );
+                return;
+            }
             await new Promise((resolve) =>
                 setTimeout(resolve, backupAbortContainerPollMs)
             );
@@ -573,6 +584,9 @@ export const __testing = {
     setBackupAbortContainerTimeoutsForTest(waitMs: number, pollMs: number): void {
         backupAbortContainerWaitMs = waitMs;
         backupAbortContainerPollMs = pollMs;
+    },
+    setBackupAbortContainerConfirmAttemptsForTest(attempts: number): void {
+        backupAbortContainerConfirmAttempts = attempts;
     },
     setBackupAbortDockerExecTimeoutForTest(timeoutMs: number): void {
         backupAbortDockerExecTimeoutMs = timeoutMs;
