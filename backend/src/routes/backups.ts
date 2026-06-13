@@ -17,7 +17,15 @@ import {
 const MAX_OUTPUT_CHARS = 100_000;
 const SCHEDULED_BACKUP_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const BACKUP_ABORT_SIGKILL_GRACE_MS = 10_000;
+const WALG_BACKUP_SCRIPT_PATTERN = "/usr/local/bin/backup-push.sh";
 let spawnBackupProcess = spawn;
+let backupAbortContainerWaitMs = 30_000;
+let backupAbortContainerPollMs = 1_000;
+
+interface BackupAbortConfig {
+    container: string;
+    processPattern: string;
+}
 
 /** Represents backup job. */
 interface BackupJob {
@@ -124,7 +132,12 @@ function backupStatusCacheKey(type: BackupJob["type"]) {
 }
 
 /** Performs start backup job. */
-function startBackupJob(type: BackupJob["type"], command: string, signal?: AbortSignal) {
+function startBackupJob(
+    type: BackupJob["type"],
+    command: string,
+    signal?: AbortSignal,
+    abortConfig?: BackupAbortConfig
+) {
     const existingJob = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
     if (existingJob?.status === "running") {
         return existingJob;
@@ -180,6 +193,13 @@ function startBackupJob(type: BackupJob["type"], command: string, signal?: Abort
             return;
         }
         finalizing = true;
+        if (signalName && abortConfig) {
+            await waitForContainerProcessExit(abortConfig).catch((error: unknown) => {
+                job.stderr = trimOutput(
+                    `${job.stderr}\nFailed to confirm backup process termination: ${String(error)}`.trim()
+                );
+            });
+        }
         job.status = "done";
         job.code = signalName ? 130 : code;
         job.endedAt = Date.now();
@@ -197,11 +217,27 @@ function startBackupJob(type: BackupJob["type"], command: string, signal?: Abort
 
     const abortBackup = () => {
         job.stderr = trimOutput(`${job.stderr}\nBackup aborted by scheduler`.trim());
+        if (abortConfig) {
+            terminateContainerProcess(abortConfig, "TERM").catch((error: unknown) => {
+                job.stderr = trimOutput(
+                    `${job.stderr}\nFailed to terminate container backup process: ${String(error)}`.trim()
+                );
+            });
+        }
         try {
             if (typeof child.pid === "number") {
                 const processGroupId = -child.pid;
                 process.kill(processGroupId, "SIGTERM");
                 abortKillTimer = setTimeout(() => {
+                    if (abortConfig) {
+                        terminateContainerProcess(abortConfig, "KILL").catch(
+                            (error: unknown) => {
+                                job.stderr = trimOutput(
+                                    `${job.stderr}\nFailed to force terminate container backup process: ${String(error)}`.trim()
+                                );
+                            }
+                        );
+                    }
                     try {
                         process.kill(processGroupId, "SIGKILL");
                     } catch (error) {
@@ -261,6 +297,63 @@ function startBackupJob(type: BackupJob["type"], command: string, signal?: Abort
     return job;
 }
 
+function runDockerExec(
+    container: string,
+    args: readonly string[]
+): Promise<{ code: number; stdout: string; stderr: string }> {
+    return new Promise((resolve, reject) => {
+        const child = spawnBackupProcess("docker", ["exec", container, ...args], {
+            env: process.env,
+        });
+        let stdout = "";
+        let stderr = "";
+        child.stdout?.on("data", (data) => {
+            stdout = trimOutput(stdout + String(data));
+        });
+        child.stderr?.on("data", (data) => {
+            stderr = trimOutput(stderr + String(data));
+        });
+        child.on("error", reject);
+        child.on("close", (code) => {
+            resolve({ code: code ?? 1, stdout, stderr });
+        });
+    });
+}
+
+async function terminateContainerProcess(
+    config: BackupAbortConfig,
+    signalName: "TERM" | "KILL"
+): Promise<void> {
+    const result = await runDockerExec(config.container, [
+        "pkill",
+        `-${signalName}`,
+        "-f",
+        config.processPattern,
+    ]);
+    if (result.code > 1) {
+        throw new Error(result.stderr || `docker exec pkill exited ${result.code}`);
+    }
+}
+
+async function waitForContainerProcessExit(config: BackupAbortConfig): Promise<void> {
+    const deadline = Date.now() + backupAbortContainerWaitMs;
+    while (Date.now() < deadline) {
+        const result = await runDockerExec(config.container, [
+            "pgrep",
+            "-f",
+            config.processPattern,
+        ]);
+        if (result.code === 1) {
+            return;
+        }
+        if (result.code > 1) {
+            throw new Error(result.stderr || `docker exec pgrep exited ${result.code}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, backupAbortContainerPollMs));
+    }
+    throw new Error(`Timed out waiting for ${config.processPattern} to exit`);
+}
+
 async function refreshBackupStatus(
     type: BackupJob["type"],
     job: BackupJob
@@ -284,7 +377,8 @@ function startWalgBackupJob(signal?: AbortSignal) {
     return startBackupJob(
         "walg",
         "docker exec walg /bin/sh /usr/local/bin/backup-push.sh",
-        signal
+        signal,
+        { container: "walg", processPattern: WALG_BACKUP_SCRIPT_PATTERN }
     );
 }
 
@@ -419,7 +513,8 @@ export function registerBackupScheduledJobs(): void {
     }
 
     for (const job of backupStatusScheduledJobs) {
-        const existing = getScheduledJob(job.id);
+        const legacy = getScheduledJob(`cache.backup.${job.actionPayload.type}`);
+        const existing = getScheduledJob(job.id) ?? legacy;
         upsertScheduledJob({
             ...job,
             enabled: existing?.enabled ?? true,
@@ -440,6 +535,10 @@ export const __testing = {
     refreshScheduledBackupStatus,
     setSpawnBackupProcessForTest(nextSpawn?: typeof spawn): void {
         spawnBackupProcess = nextSpawn ?? spawn;
+    },
+    setBackupAbortContainerTimeoutsForTest(waitMs: number, pollMs: number): void {
+        backupAbortContainerWaitMs = waitMs;
+        backupAbortContainerPollMs = pollMs;
     },
 };
 

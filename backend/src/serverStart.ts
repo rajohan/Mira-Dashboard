@@ -77,8 +77,8 @@ export function handleServerListening(): void {
         }
 
         if (shouldStartScheduledJobs()) {
-            registerCacheRefreshScheduledJobs();
             registerBackupScheduledJobs();
+            registerCacheRefreshScheduledJobs();
             startScheduledJobScheduler();
             scheduledJobSchedulerStarted = true;
             installSchedulerCloseCleanup();

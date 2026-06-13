@@ -34,6 +34,8 @@ interface FakeBackupProcess extends ChildProcess {
 
 const originalDockerBin = process.env.MIRA_DOCKER_BIN;
 let lastFakeBackupProcess: FakeBackupProcess | null = null;
+const fakeDockerExecCalls: string[][] = [];
+let fakeContainerPgrepCalls = 0;
 
 async function installFakeDocker(tempDir: string): Promise<string> {
     const dockerPath = path.join(tempDir, "docker");
@@ -119,8 +121,54 @@ function createFakeBackupProcess(): FakeBackupProcess {
 }
 
 function createFakeBackupSpawn(): typeof spawn {
-    return ((_file: string, args: readonly string[]) => {
+    return ((file: string, args: readonly string[]) => {
         const child = createFakeBackupProcess();
+        if (file === "docker") {
+            fakeDockerExecCalls.push([...args].map(String));
+            queueMicrotask(() => {
+                if (process.env.FAKE_DOCKER_EXEC_STDOUT) {
+                    child.stdout.write(process.env.FAKE_DOCKER_EXEC_STDOUT);
+                }
+                if (process.env.FAKE_DOCKER_EXEC_STDERR) {
+                    child.stderr.write(process.env.FAKE_DOCKER_EXEC_STDERR);
+                }
+                if (args.includes("pgrep")) {
+                    fakeContainerPgrepCalls += 1;
+                    let code = 1;
+                    if (process.env.FAKE_CONTAINER_PGREP_CODE) {
+                        code = Number(process.env.FAKE_CONTAINER_PGREP_CODE);
+                    } else if (
+                        process.env.FAKE_CONTAINER_PGREP_RUNNING === "1" ||
+                        (process.env.FAKE_CONTAINER_PGREP_RUNNING_ONCE === "1" &&
+                            fakeContainerPgrepCalls === 1)
+                    ) {
+                        code = 0;
+                    }
+                    child.emit(
+                        "close",
+                        process.env.FAKE_DOCKER_EXEC_NULL_CLOSE === "1" ? null : code,
+                        null
+                    );
+                    return;
+                }
+                let code = 0;
+                if (
+                    args.includes("-KILL") &&
+                    process.env.FAKE_CONTAINER_PKILL_KILL_CODE
+                ) {
+                    code = Number(process.env.FAKE_CONTAINER_PKILL_KILL_CODE);
+                } else if (process.env.FAKE_CONTAINER_PKILL_CODE) {
+                    code = Number(process.env.FAKE_CONTAINER_PKILL_CODE);
+                }
+                child.emit(
+                    "close",
+                    process.env.FAKE_DOCKER_EXEC_NULL_CLOSE === "1" ? null : code,
+                    null
+                );
+            });
+            return child;
+        }
+
         lastFakeBackupProcess = child;
         const command = String(args.at(-1) ?? "");
         queueMicrotask(() => {
@@ -281,6 +329,10 @@ describe("backup routes", () => {
     });
 
     beforeEach(() => {
+        lastFakeBackupProcess = null;
+        fakeDockerExecCalls.length = 0;
+        fakeContainerPgrepCalls = 0;
+        backupTesting.setBackupAbortContainerTimeoutsForTest(30_000, 1_000);
         db.prepare(
             "DELETE FROM cache_entries WHERE key IN ('backup.kopia.status', 'backup.walg.status')"
         ).run();
@@ -292,6 +344,7 @@ describe("backup routes", () => {
     after(async () => {
         await server.close();
         backupTesting.setSpawnBackupProcessForTest();
+        backupTesting.setBackupAbortContainerTimeoutsForTest(30_000, 1_000);
         if (originalDockerBin === undefined) {
             delete process.env.MIRA_DOCKER_BIN;
         } else {
@@ -393,6 +446,25 @@ describe("backup routes", () => {
             actionKey: "backup.run",
             actionPayload: { type: "walg" },
         });
+        upsertScheduledJob({
+            id: "cache.backup.walg",
+            name: "Legacy WAL-G status refresh",
+            enabled: false,
+            scheduleType: "daily",
+            intervalSeconds: 7200,
+            timeOfDay: "04:10",
+            actionKey: "cache.refresh",
+            actionPayload: { key: "backup.walg.status" },
+        });
+        upsertScheduledJob({
+            id: "cache.backup.kopia",
+            name: "Legacy Kopia status refresh",
+            enabled: true,
+            scheduleType: "interval",
+            intervalSeconds: 1800,
+            actionKey: "cache.refresh",
+            actionPayload: { key: "backup.kopia.status" },
+        });
 
         registerBackupScheduledJobs();
 
@@ -411,14 +483,17 @@ describe("backup routes", () => {
         assert.deepEqual(kopiaJob?.actionPayload, { type: "kopia" });
 
         const walgStatusJob = getScheduledJob("backup.status.walg");
-        assert.equal(walgStatusJob?.scheduleType, "interval");
-        assert.equal(walgStatusJob?.intervalSeconds, 60 * 60);
+        assert.equal(walgStatusJob?.enabled, false);
+        assert.equal(walgStatusJob?.scheduleType, "daily");
+        assert.equal(walgStatusJob?.intervalSeconds, 7200);
+        assert.equal(walgStatusJob?.timeOfDay, "04:10");
         assert.equal(walgStatusJob?.actionKey, "backup.status.refresh");
         assert.deepEqual(walgStatusJob?.actionPayload, { type: "walg" });
 
         const kopiaStatusJob = getScheduledJob("backup.status.kopia");
+        assert.equal(kopiaStatusJob?.enabled, true);
         assert.equal(kopiaStatusJob?.scheduleType, "interval");
-        assert.equal(kopiaStatusJob?.intervalSeconds, 60 * 60);
+        assert.equal(kopiaStatusJob?.intervalSeconds, 1800);
         assert.equal(kopiaStatusJob?.actionKey, "backup.status.refresh");
         assert.deepEqual(kopiaStatusJob?.actionPayload, { type: "kopia" });
 
@@ -565,39 +640,45 @@ describe("backup routes", () => {
 
     it("terminates scheduled backup jobs when the scheduler aborts them", async () => {
         registerBackupScheduledJobs();
-        await withEnv({ FAKE_BACKUP_NEVER_CLOSE: "1" }, async () => {
-            const controller = new AbortController();
-            const runPromise = runScheduledJob(
-                "backup.walg",
-                "manual",
-                controller.signal
-            );
+        await withEnv(
+            { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_DOCKER_EXEC_NULL_CLOSE: "1" },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = runScheduledJob(
+                    "backup.walg",
+                    "manual",
+                    controller.signal
+                );
 
-            await new Promise<void>((resolve) => setImmediate(resolve));
-            controller.abort();
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
 
-            const earlyResult = await Promise.race([
-                runPromise.then(() => "settled"),
-                new Promise<"pending">((resolve) => {
-                    setTimeout(() => resolve("pending"), 20);
-                }),
-            ]);
-            assert.equal(earlyResult, "pending");
-            lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                const earlyResult = await Promise.race([
+                    runPromise.then(() => "settled"),
+                    new Promise<"pending">((resolve) => {
+                        setTimeout(() => resolve("pending"), 20);
+                    }),
+                ]);
+                assert.equal(earlyResult, "pending");
+                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
 
-            const run = await runPromise;
-            assert.equal(run.status, "failed");
-            assert.match(run.message ?? "", /WALG backup failed with code 130/u);
-            assert.match(run.message ?? "", /Backup aborted by scheduler/u);
-            assert.equal(lastFakeBackupProcess?.killedWithSignal, "SIGTERM");
+                const run = await runPromise;
+                assert.equal(run.status, "failed");
+                assert.match(run.message ?? "", /WALG backup failed with code 130/u);
+                assert.match(run.message ?? "", /Backup aborted by scheduler/u);
+                assert.equal(lastFakeBackupProcess?.killedWithSignal, "SIGTERM");
 
-            const current = await requestJson<{
-                job: { status: string; code: number; stderr: string } | null;
-            }>(server, "/api/backups/walg");
-            assert.equal(current.body.job?.status, "done");
-            assert.equal(current.body.job?.code, 130);
-            assert.match(current.body.job?.stderr ?? "", /Backup aborted by scheduler/u);
-        });
+                const current = await requestJson<{
+                    job: { status: string; code: number; stderr: string } | null;
+                }>(server, "/api/backups/walg");
+                assert.equal(current.body.job?.status, "done");
+                assert.equal(current.body.job?.code, 130);
+                assert.match(
+                    current.body.job?.stderr ?? "",
+                    /Backup aborted by scheduler/u
+                );
+            }
+        );
     });
 
     it("waits for process-group close after aborting scheduled backup jobs", async () => {
@@ -641,6 +722,229 @@ describe("backup routes", () => {
                 }
             );
         } finally {
+            process.kill = originalKill;
+        }
+    });
+
+    it("waits for in-container WAL-G process exit after aborting scheduled backups", async () => {
+        registerBackupScheduledJobs();
+        await withEnv(
+            {
+                FAKE_BACKUP_NEVER_CLOSE: "1",
+                FAKE_CONTAINER_PGREP_RUNNING_ONCE: "1",
+            },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = runScheduledJob(
+                    "backup.walg",
+                    "manual",
+                    controller.signal
+                );
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+
+                const earlyResult = await Promise.race([
+                    runPromise.then(() => "settled"),
+                    new Promise<"pending">((resolve) => {
+                        setTimeout(() => resolve("pending"), 20);
+                    }),
+                ]);
+                assert.equal(earlyResult, "pending");
+
+                const run = await runPromise;
+                assert.equal(run.status, "failed");
+                assert.match(run.message ?? "", /Backup aborted by scheduler/u);
+                assert.ok(
+                    fakeDockerExecCalls.some((args) =>
+                        args
+                            .join(" ")
+                            .includes("walg pkill -TERM -f /usr/local/bin/backup-push.sh")
+                    )
+                );
+                assert.ok(
+                    fakeDockerExecCalls.some((args) =>
+                        args
+                            .join(" ")
+                            .includes("walg pgrep -f /usr/local/bin/backup-push.sh")
+                    )
+                );
+                assert.equal(fakeContainerPgrepCalls, 2);
+            }
+        );
+    });
+
+    it("records in-container WAL-G termination failures", async () => {
+        registerBackupScheduledJobs();
+        await withEnv(
+            {
+                FAKE_BACKUP_NEVER_CLOSE: "1",
+                FAKE_CONTAINER_PKILL_CODE: "2",
+                FAKE_DOCKER_EXEC_STDERR: "container pkill failed",
+            },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = runScheduledJob(
+                    "backup.walg",
+                    "manual",
+                    controller.signal
+                );
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+
+                const run = await runPromise;
+                assert.equal(run.status, "failed");
+                assert.match(run.message ?? "", /container pkill failed/u);
+            }
+        );
+    });
+
+    it("records fallback messages for in-container WAL-G termination failures", async () => {
+        registerBackupScheduledJobs();
+        await withEnv(
+            {
+                FAKE_BACKUP_NEVER_CLOSE: "1",
+                FAKE_CONTAINER_PKILL_CODE: "2",
+            },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = runScheduledJob(
+                    "backup.walg",
+                    "manual",
+                    controller.signal
+                );
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+
+                const run = await runPromise;
+                assert.equal(run.status, "failed");
+                assert.match(run.message ?? "", /docker exec pkill exited 2/u);
+            }
+        );
+    });
+
+    it("records in-container WAL-G process lookup failures", async () => {
+        registerBackupScheduledJobs();
+        await withEnv(
+            {
+                FAKE_BACKUP_NEVER_CLOSE: "1",
+                FAKE_CONTAINER_PGREP_CODE: "2",
+                FAKE_DOCKER_EXEC_STDOUT: "still running",
+                FAKE_DOCKER_EXEC_STDERR: "container pgrep failed",
+            },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = runScheduledJob(
+                    "backup.walg",
+                    "manual",
+                    controller.signal
+                );
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+
+                const run = await runPromise;
+                assert.equal(run.status, "failed");
+                assert.match(
+                    run.message ?? "",
+                    /Failed to confirm backup process termination/u
+                );
+                assert.match(run.message ?? "", /container pgrep failed/u);
+            }
+        );
+    });
+
+    it("records fallback messages for in-container WAL-G process lookup failures", async () => {
+        registerBackupScheduledJobs();
+        await withEnv(
+            { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_CONTAINER_PGREP_CODE: "2" },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = runScheduledJob(
+                    "backup.walg",
+                    "manual",
+                    controller.signal
+                );
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+
+                const run = await runPromise;
+                assert.equal(run.status, "failed");
+                assert.match(run.message ?? "", /docker exec pgrep exited 2/u);
+            }
+        );
+    });
+
+    it("records in-container WAL-G process termination wait timeouts", async () => {
+        registerBackupScheduledJobs();
+        backupTesting.setBackupAbortContainerTimeoutsForTest(1, 1);
+        await withEnv(
+            { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_CONTAINER_PGREP_RUNNING: "1" },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = runScheduledJob(
+                    "backup.walg",
+                    "manual",
+                    controller.signal
+                );
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+
+                const run = await runPromise;
+                assert.equal(run.status, "failed");
+                assert.match(run.message ?? "", /Timed out waiting/u);
+            }
+        );
+    });
+
+    it("records in-container WAL-G force termination failures", async () => {
+        registerBackupScheduledJobs();
+        const originalKill = process.kill;
+        process.kill = ((_pid: number, _signal?: NodeJS.Signals | number) =>
+            true) as typeof process.kill;
+
+        try {
+            mock.timers.enable({ apis: ["setTimeout"] });
+            await withEnv(
+                {
+                    FAKE_BACKUP_NEVER_CLOSE: "1",
+                    FAKE_BACKUP_PID: "1357",
+                    FAKE_CONTAINER_PKILL_KILL_CODE: "2",
+                    FAKE_DOCKER_EXEC_STDERR: "container force kill failed",
+                },
+                async () => {
+                    const controller = new AbortController();
+                    const runPromise = runScheduledJob(
+                        "backup.walg",
+                        "manual",
+                        controller.signal
+                    );
+
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+                    controller.abort();
+                    mock.timers.tick(10_000);
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+                    lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+
+                    const run = await runPromise;
+                    assert.equal(run.status, "failed");
+                    assert.match(run.message ?? "", /container force kill failed/u);
+                }
+            );
+        } finally {
+            mock.timers.reset();
             process.kill = originalKill;
         }
     });

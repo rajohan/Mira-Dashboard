@@ -769,7 +769,7 @@ export async function runScheduledJob(
                     `No scheduled job action registered for ${job.actionKey}`
                 );
             }
-            output = await runActionWithTimeout(id, timeoutMs, action, job, signal);
+            output = await runActionWithTimeout(timeoutMs, action, job, signal);
         } catch (error) {
             return finishRunOrReport(
                 run,
@@ -785,7 +785,6 @@ export async function runScheduledJob(
 }
 
 async function runActionWithTimeout(
-    id: string,
     timeoutMs: number,
     action: ScheduledJobActionRegistration,
     job: ScheduledJob,
@@ -806,7 +805,9 @@ async function runActionWithTimeout(
         timeout = setTimeout(() => {
             timedOut = true;
             controller.abort();
-            console.warn(`[ScheduledJobs] Scheduled job ${id} exceeded ${timeoutMs}ms`);
+            console.warn("[ScheduledJobs] Scheduled job exceeded timeout", {
+                timeoutMs,
+            });
         }, timeoutMs);
         timeout.unref();
         const output = (await action.handler(job, controller.signal)) ?? {};
