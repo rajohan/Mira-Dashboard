@@ -633,6 +633,35 @@ describe("backup routes", () => {
         });
     });
 
+    it("resolves failed scheduled backups before status refresh completes", async () => {
+        registerBackupScheduledJobs();
+        await withEnv(
+            { FAKE_BACKUP_EXIT_CODE: "12", FAKE_DOCKER_STATUS_DELAY_MS: "1000" },
+            async () => {
+                const scheduledRun = runScheduledJob("backup.walg");
+                const result = await Promise.race([
+                    scheduledRun,
+                    new Promise<"pending">((resolve) =>
+                        setTimeout(() => resolve("pending"), 100)
+                    ),
+                ]);
+
+                if (result === "pending") {
+                    assert.fail(
+                        "Scheduled backup failure did not resolve before refresh"
+                    );
+                }
+                assert.equal(result.status, "failed");
+                assert.match(result.message ?? "", /WALG backup failed with code 12/u);
+                const refreshedStatus = await waitForCacheEntryAttempts(
+                    "backup.walg.status",
+                    150
+                );
+                assert.equal(refreshedStatus.ok, true);
+            }
+        );
+    });
+
     it("records scheduled backup failures without process output", async () => {
         registerBackupScheduledJobs();
         await withEnv(

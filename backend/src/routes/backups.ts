@@ -208,11 +208,8 @@ function startBackupJob(
             abortKillTimer = null;
         }
         signal?.removeEventListener("abort", abortBackup);
-        if (!signalName && completedCode !== 0) {
-            await refreshBackupStatus(type, job);
-        }
         resolveCompleted(job);
-        if (!signalName && completedCode === 0) {
+        if (!signalName) {
             await refreshBackupStatus(type, job);
         }
     };
