@@ -5,6 +5,11 @@ import express, { type RequestHandler } from "express";
 
 import { asyncRoute } from "../lib/errors.js";
 import { refreshCacheProducer } from "../services/cacheRefresh.js";
+import {
+    getScheduledJob,
+    registerScheduledJobAction,
+    upsertScheduledJob,
+} from "../services/scheduledJobs.js";
 const MAX_OUTPUT_CHARS = 100_000;
 let spawnBackupProcess = spawn;
 
@@ -196,10 +201,64 @@ function startWalgBackupJob() {
     );
 }
 
+function startScheduledBackup(type: BackupJob["type"]) {
+    const job = type === "kopia" ? startKopiaBackupJob() : startWalgBackupJob();
+    return { backup: mapJob(job) };
+}
+
+const backupScheduledJobs = [
+    {
+        id: "backup.walg.nightly",
+        name: "WAL-G nightly backup",
+        description: "Run the nightly WAL-G PostgreSQL base backup.",
+        scheduleType: "daily",
+        intervalSeconds: 24 * 60 * 60,
+        timeOfDay: "03:20",
+        actionKey: "backup.run",
+        actionPayload: { type: "walg" },
+    },
+    {
+        id: "backup.kopia.nightly",
+        name: "Kopia nightly backup",
+        description: "Run the nightly Kopia filesystem backup.",
+        scheduleType: "daily",
+        intervalSeconds: 24 * 60 * 60,
+        timeOfDay: "03:50",
+        actionKey: "backup.run",
+        actionPayload: { type: "kopia" },
+    },
+] as const;
+
+export function registerBackupScheduledJobs(): void {
+    registerScheduledJobAction("backup.run", (job) => {
+        const type = job.actionPayload.type;
+        if (type !== "kopia" && type !== "walg") {
+            throw Object.assign(
+                new Error(`Scheduled backup job ${job.id} has invalid backup type`),
+                { statusCode: 400 }
+            );
+        }
+        return startScheduledBackup(type);
+    });
+
+    for (const job of backupScheduledJobs) {
+        const existing = getScheduledJob(job.id);
+        upsertScheduledJob({
+            ...job,
+            enabled: existing?.enabled ?? true,
+            scheduleType: existing?.scheduleType ?? job.scheduleType,
+            intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
+            timeOfDay: existing ? existing.timeOfDay : job.timeOfDay,
+            cronExpression: existing?.cronExpression ?? null,
+        });
+    }
+}
+
 export const __testing = {
     trimOutput,
     getCurrentJob,
     mapJob,
+    startScheduledBackup,
     setSpawnBackupProcessForTest(nextSpawn?: typeof spawn): void {
         spawnBackupProcess = nextSpawn ?? spawn;
     },

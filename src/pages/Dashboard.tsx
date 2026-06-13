@@ -289,21 +289,6 @@ export function Dashboard() {
                             label: "Host",
                             description: "Disk, memory and host warnings",
                         },
-                        {
-                            key: "backup.kopia.status",
-                            label: "Kopia backup",
-                            description: "Filesystem backup snapshot status",
-                        },
-                        {
-                            key: "backup.walg.status",
-                            label: "Postgres backup",
-                            description: "Daily Postgres backup status",
-                        },
-                        {
-                            key: "log_rotation.state",
-                            label: "Log rotation",
-                            description: "Docker file log rotation status",
-                        },
                     ]}
                 />
             </div>

@@ -11,8 +11,13 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import express from "express";
 
 import { db } from "../db.js";
+import {
+    __testing as scheduledJobsTesting,
+    getScheduledJob,
+    runScheduledJob,
+} from "../services/scheduledJobs.js";
 import { withEnv } from "../testUtils/env.js";
-import backupRoutes from "./backups.js";
+import backupRoutes, { registerBackupScheduledJobs } from "./backups.js";
 import { __testing as backupTesting } from "./backups.js";
 
 interface TestServer {
@@ -245,6 +250,9 @@ describe("backup routes", () => {
         db.prepare(
             "DELETE FROM cache_entries WHERE key IN ('backup.kopia.status', 'backup.walg.status')"
         ).run();
+        db.exec("DELETE FROM scheduled_job_runs; DELETE FROM scheduled_jobs;");
+        scheduledJobsTesting.clearActionHandlers();
+        scheduledJobsTesting.resetSchedulerState();
     });
 
     after(async () => {
@@ -339,6 +347,68 @@ describe("backup routes", () => {
         const cache = await waitForCacheEntry("backup.walg.status");
         assert.equal(cache.ok, true);
         assert.equal(cache.tool, "wal-g");
+    });
+
+    it("registers nightly backup schedules and starts backup jobs from scheduler", async () => {
+        registerBackupScheduledJobs();
+
+        const walgJob = getScheduledJob("backup.walg.nightly");
+        assert.equal(walgJob?.scheduleType, "daily");
+        assert.equal(walgJob?.timeOfDay, "03:20");
+        assert.equal(walgJob?.actionKey, "backup.run");
+        assert.deepEqual(walgJob?.actionPayload, { type: "walg" });
+
+        const kopiaJob = getScheduledJob("backup.kopia.nightly");
+        assert.equal(kopiaJob?.scheduleType, "daily");
+        assert.equal(kopiaJob?.timeOfDay, "03:50");
+        assert.equal(kopiaJob?.actionKey, "backup.run");
+        assert.deepEqual(kopiaJob?.actionPayload, { type: "kopia" });
+
+        const walgRun = await runScheduledJob("backup.walg.nightly");
+        assert.equal(walgRun.status, "success");
+        assert.equal(
+            (walgRun.output as { backup?: { type?: string; status?: string } }).backup
+                ?.type,
+            "walg"
+        );
+        assert.equal(
+            (walgRun.output as { backup?: { type?: string; status?: string } }).backup
+                ?.status,
+            "running"
+        );
+
+        const done = await waitForDone(server, "/api/backups/walg");
+        assert.equal(done.status, "done");
+        assert.equal(done.code, 0);
+
+        const kopiaRun = await runScheduledJob("backup.kopia.nightly");
+        assert.equal(kopiaRun.status, "success");
+        assert.equal(
+            (kopiaRun.output as { backup?: { type?: string; status?: string } }).backup
+                ?.type,
+            "kopia"
+        );
+        assert.equal(
+            (kopiaRun.output as { backup?: { type?: string; status?: string } }).backup
+                ?.status,
+            "running"
+        );
+
+        const kopiaDone = await waitForDone(server, "/api/backups/kopia");
+        assert.equal(kopiaDone.status, "done");
+        assert.equal(kopiaDone.code, 0);
+    });
+
+    it("rejects invalid scheduled backup payloads", async () => {
+        registerBackupScheduledJobs();
+        db.prepare("UPDATE scheduled_jobs SET action_payload_json = ? WHERE id = ?").run(
+            JSON.stringify({ type: "postgres" }),
+            "backup.walg.nightly"
+        );
+
+        const run = await runScheduledJob("backup.walg.nightly");
+        assert.equal(run.status, "failed");
+        assert.match(run.message ?? "", /invalid backup type/u);
     });
 
     it("records status refresh failures on successful backup jobs", async () => {

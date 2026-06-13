@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 
 import { getPersistedGatewayToken } from "./auth.js";
 import gateway from "./gateway.js";
+import { registerBackupScheduledJobs } from "./routes/backups.js";
 import { resolveListenPort, server } from "./server.js";
 import {
     registerCacheRefreshScheduledJobs,
@@ -77,6 +78,7 @@ export function handleServerListening(): void {
 
         if (shouldStartScheduledJobs()) {
             registerCacheRefreshScheduledJobs();
+            registerBackupScheduledJobs();
             startScheduledJobScheduler();
             scheduledJobSchedulerStarted = true;
             installSchedulerCloseCleanup();
