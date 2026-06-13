@@ -521,6 +521,26 @@ export function getScheduledJob(id: string): ScheduledJob | null {
     return row ? mapJob(row) : null;
 }
 
+export function removeScheduledJobsNotInAction(
+    actionKey: string,
+    registeredIds: readonly string[]
+): void {
+    assertValidActionKey(actionKey);
+    for (const id of registeredIds) {
+        assertValidId(id);
+    }
+    if (registeredIds.length === 0) {
+        db.prepare("DELETE FROM scheduled_jobs WHERE action_key = ?").run(actionKey);
+        return;
+    }
+    const placeholders = registeredIds.map(() => "?").join(",");
+    db.prepare(
+        `DELETE FROM scheduled_jobs
+         WHERE action_key = ?
+           AND id NOT IN (${placeholders})`
+    ).run(actionKey, ...registeredIds);
+}
+
 export function updateScheduledJob(
     id: string,
     patch: ScheduledJobPatch

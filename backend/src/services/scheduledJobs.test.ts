@@ -16,6 +16,7 @@ const {
     getScheduledJob,
     listScheduledJobs,
     registerScheduledJobAction,
+    removeScheduledJobsNotInAction,
     runScheduledJob,
     startScheduledJobScheduler,
     stopScheduledJobScheduler,
@@ -77,6 +78,44 @@ test("creates, lists, updates, and schedules jobs", () => {
     assert.equal(updated?.scheduleType, "daily");
     assert.equal(updated?.timeOfDay, "04:30");
     assert.equal(updateScheduledJob("missing", { enabled: true }), null);
+});
+
+test("removes scheduled jobs for an action that are no longer registered", () => {
+    upsertScheduledJob({
+        id: "cache.weather",
+        name: "Weather cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+    upsertScheduledJob({
+        id: "cache.legacy",
+        name: "Legacy cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+    upsertScheduledJob({
+        id: "backup.walg",
+        name: "WAL-G backup",
+        enabled: true,
+        scheduleType: "daily",
+        timeOfDay: "03:20",
+        actionKey: "backup.run",
+    });
+
+    removeScheduledJobsNotInAction("cache.refresh", ["cache.weather"]);
+
+    assert.ok(getScheduledJob("cache.weather"));
+    assert.equal(getScheduledJob("cache.legacy"), null);
+    assert.ok(getScheduledJob("backup.walg"));
+
+    removeScheduledJobsNotInAction("cache.refresh", []);
+
+    assert.equal(getScheduledJob("cache.weather"), null);
+    assert.ok(getScheduledJob("backup.walg"));
 });
 
 test("calculates interval and daily next-run times", () => {

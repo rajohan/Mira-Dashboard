@@ -15,6 +15,7 @@ import {
     __testing as scheduledJobsTesting,
     getScheduledJob,
     runScheduledJob,
+    upsertScheduledJob,
 } from "../services/scheduledJobs.js";
 import { withEnv } from "../testUtils/env.js";
 import backupRoutes, { registerBackupScheduledJobs } from "./backups.js";
@@ -28,9 +29,11 @@ interface TestServer {
 interface FakeBackupProcess extends ChildProcess {
     stderr: PassThrough;
     stdout: PassThrough;
+    killedWithSignal?: NodeJS.Signals | number;
 }
 
 const originalDockerBin = process.env.MIRA_DOCKER_BIN;
+let lastFakeBackupProcess: FakeBackupProcess | null = null;
 
 async function installFakeDocker(tempDir: string): Promise<string> {
     const dockerPath = path.join(tempDir, "docker");
@@ -91,16 +94,28 @@ function createFakeBackupProcess(): FakeBackupProcess {
     const child = new PassThrough() as unknown as FakeBackupProcess;
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
+    child.kill = ((signal?: NodeJS.Signals | number) => {
+        if (process.env.FAKE_BACKUP_KILL_THROWS === "1") {
+            throw new Error("kill unavailable");
+        }
+        child.killedWithSignal = signal ?? "SIGTERM";
+        return true;
+    }) as ChildProcess["kill"];
     return child;
 }
 
 function createFakeBackupSpawn(): typeof spawn {
     return ((_file: string, args: readonly string[]) => {
         const child = createFakeBackupProcess();
+        lastFakeBackupProcess = child;
         const command = String(args.at(-1) ?? "");
         queueMicrotask(() => {
             if (process.env.FAKE_BACKUP_SIGNAL === "1") {
                 child.emit("close", null, "SIGTERM");
+                return;
+            }
+            if (process.env.FAKE_BACKUP_NULL_CLOSE === "1") {
+                child.emit("close", null, null);
                 return;
             }
             if (process.env.FAKE_BACKUP_EMPTY_OUTPUT !== "1") {
@@ -114,6 +129,9 @@ function createFakeBackupSpawn(): typeof spawn {
                         child.emit("close", 0, null);
                     }
                 }, 10);
+                return;
+            }
+            if (process.env.FAKE_BACKUP_NEVER_CLOSE === "1") {
                 return;
             }
             setTimeout(() => {
@@ -352,7 +370,19 @@ describe("backup routes", () => {
     });
 
     it("registers nightly backup schedules and starts backup jobs from scheduler", async () => {
+        upsertScheduledJob({
+            id: "backup.legacy",
+            name: "Legacy backup",
+            enabled: true,
+            scheduleType: "daily",
+            timeOfDay: "02:00",
+            actionKey: "backup.run",
+            actionPayload: { type: "walg" },
+        });
+
         registerBackupScheduledJobs();
+
+        assert.equal(getScheduledJob("backup.legacy"), null);
 
         const walgJob = getScheduledJob("backup.walg");
         assert.equal(walgJob?.scheduleType, "daily");
@@ -444,6 +474,71 @@ describe("backup routes", () => {
         );
     });
 
+    it("terminates scheduled backup jobs when the scheduler aborts them", async () => {
+        registerBackupScheduledJobs();
+        await withEnv({ FAKE_BACKUP_NEVER_CLOSE: "1" }, async () => {
+            const controller = new AbortController();
+            const runPromise = runScheduledJob(
+                "backup.walg",
+                "manual",
+                controller.signal
+            );
+
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            controller.abort();
+
+            const run = await runPromise;
+            assert.equal(run.status, "failed");
+            assert.match(run.message ?? "", /WALG backup failed with code 130/u);
+            assert.match(run.message ?? "", /Backup aborted by scheduler/u);
+            assert.equal(lastFakeBackupProcess?.killedWithSignal, "SIGTERM");
+
+            const current = await requestJson<{
+                job: { status: string; code: number; stderr: string } | null;
+            }>(server, "/api/backups/walg");
+            assert.equal(current.body.job?.status, "done");
+            assert.equal(current.body.job?.code, 130);
+            assert.match(current.body.job?.stderr ?? "", /Backup aborted by scheduler/u);
+        });
+    });
+
+    it("records termination failures when aborting scheduled backup jobs", async () => {
+        registerBackupScheduledJobs();
+        await withEnv(
+            { FAKE_BACKUP_KILL_THROWS: "1", FAKE_BACKUP_NEVER_CLOSE: "1" },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = runScheduledJob(
+                    "backup.walg",
+                    "manual",
+                    controller.signal
+                );
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+
+                const run = await runPromise;
+                assert.equal(run.status, "failed");
+                assert.match(run.message ?? "", /Failed to terminate backup process/u);
+                assert.match(run.message ?? "", /kill unavailable/u);
+            }
+        );
+    });
+
+    it("terminates scheduled backup jobs when the signal is already aborted", async () => {
+        registerBackupScheduledJobs();
+        await withEnv({ FAKE_BACKUP_NEVER_CLOSE: "1" }, async () => {
+            const controller = new AbortController();
+            controller.abort();
+
+            const run = await runScheduledJob("backup.walg", "manual", controller.signal);
+
+            assert.equal(run.status, "failed");
+            assert.match(run.message ?? "", /Backup aborted by scheduler/u);
+            assert.equal(lastFakeBackupProcess?.killedWithSignal, "SIGTERM");
+        });
+    });
+
     it("records status refresh failures on successful backup jobs", async () => {
         await withEnv(
             { MIRA_DOCKER_BIN: path.join(tempDir, "missing-docker") },
@@ -512,6 +607,24 @@ describe("backup routes", () => {
         }
     });
 
+    it("maps missing backup exit codes to failure", async () => {
+        await withEnv({ FAKE_BACKUP_NULL_CLOSE: "1" }, async () => {
+            const started = await requestJson<{
+                ok: boolean;
+                job: { status: string; code: number | null };
+            }>(server, "/api/backups/kopia/run", { method: "POST" });
+
+            assert.equal(started.status, 200);
+            assert.equal(started.body.ok, true);
+            assert.equal(started.body.job.status, "running");
+            assert.equal(started.body.job.code, null);
+
+            const done = await waitForDone(server, "/api/backups/kopia");
+            assert.equal(done.status, "done");
+            assert.equal(done.code, 1);
+        });
+    });
+
     it("marks jobs done when the backup process emits an error", async () => {
         backupTesting.setSpawnBackupProcessForTest((() => {
             const child = createFakeBackupProcess();
@@ -534,6 +647,28 @@ describe("backup routes", () => {
             assert.equal(done.status, "done");
             assert.equal(done.code, 1);
             assert.match(done.stderr, /spawn failed/);
+        } finally {
+            backupTesting.setSpawnBackupProcessForTest(createFakeBackupSpawn());
+        }
+    });
+
+    it("marks scheduled jobs done when the backup process emits an error", async () => {
+        backupTesting.setSpawnBackupProcessForTest((() => {
+            const child = createFakeBackupProcess();
+            queueMicrotask(() => {
+                child.emit("error", new Error("spawn failed"));
+            });
+            return child;
+        }) as unknown as typeof spawn);
+        try {
+            registerBackupScheduledJobs();
+            const run = await runScheduledJob(
+                "backup.walg",
+                "manual",
+                new AbortController().signal
+            );
+            assert.equal(run.status, "failed");
+            assert.match(run.message ?? "", /spawn failed/u);
         } finally {
             backupTesting.setSpawnBackupProcessForTest(createFakeBackupSpawn());
         }

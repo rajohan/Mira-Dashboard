@@ -11,6 +11,7 @@ import {
 import {
     getScheduledJob,
     registerScheduledJobAction,
+    removeScheduledJobsNotInAction,
     upsertScheduledJob,
 } from "../services/scheduledJobs.js";
 const MAX_OUTPUT_CHARS = 100_000;
@@ -121,7 +122,7 @@ function backupStatusCacheKey(type: BackupJob["type"]) {
 }
 
 /** Performs start backup job. */
-function startBackupJob(type: BackupJob["type"], command: string) {
+function startBackupJob(type: BackupJob["type"], command: string, signal?: AbortSignal) {
     const existingJob = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
     if (existingJob?.status === "running") {
         return existingJob;
@@ -170,6 +171,44 @@ function startBackupJob(type: BackupJob["type"], command: string) {
     let finalized = false;
     let finalizing = false;
 
+    const finalizeJob = async (
+        code: number,
+        signalName: NodeJS.Signals | null,
+        refreshOnSuccess: boolean
+    ) => {
+        if (finalized || finalizing) {
+            return;
+        }
+        finalizing = true;
+        job.status = "done";
+        job.code = signalName ? 130 : code;
+        job.endedAt = Date.now();
+        finalized = true;
+        signal?.removeEventListener("abort", abortBackup);
+        if (refreshOnSuccess && !signalName && code === 0) {
+            await refreshBackupStatus(type, job);
+        }
+        resolveCompleted(job);
+    };
+
+    const abortBackup = () => {
+        job.stderr = trimOutput(`${job.stderr}\nBackup aborted by scheduler`.trim());
+        try {
+            child.kill("SIGTERM");
+        } catch (error) {
+            job.stderr = trimOutput(
+                `${job.stderr}\nFailed to terminate backup process: ${String(error)}`.trim()
+            );
+        }
+        void finalizeJob(130, "SIGTERM", false);
+    };
+
+    if (signal?.aborted) {
+        abortBackup();
+    } else {
+        signal?.addEventListener("abort", abortBackup, { once: true });
+    }
+
     child.stdout?.on("data", (data) => {
         job.stdout = trimOutput(job.stdout + String(data));
     });
@@ -179,18 +218,7 @@ function startBackupJob(type: BackupJob["type"], command: string) {
     });
 
     child.on("close", async (code, signal) => {
-        if (finalized || finalizing) {
-            return;
-        }
-        finalizing = true;
-        job.status = "done";
-        job.code = signal ? 130 : code;
-        job.endedAt = Date.now();
-        finalized = true;
-        if (!signal && code === 0) {
-            await refreshBackupStatus(type, job);
-        }
-        resolveCompleted(job);
+        await finalizeJob(signal ? 130 : (code ?? 1), signal, true);
     });
 
     child.on("error", (error) => {
@@ -203,6 +231,7 @@ function startBackupJob(type: BackupJob["type"], command: string) {
         job.code = 1;
         job.stderr = trimOutput(`${job.stderr}\n${error.message}`.trim());
         job.endedAt = Date.now();
+        signal?.removeEventListener("abort", abortBackup);
         resolveCompleted(job);
     });
 
@@ -222,20 +251,22 @@ async function refreshBackupStatus(
 }
 
 /** Performs start kopia backup job. */
-function startKopiaBackupJob() {
-    return startBackupJob("kopia", "/opt/docker/apps/kopia/backup.sh");
+function startKopiaBackupJob(signal?: AbortSignal) {
+    return startBackupJob("kopia", "/opt/docker/apps/kopia/backup.sh", signal);
 }
 
 /** Performs start walg backup job. */
-function startWalgBackupJob() {
+function startWalgBackupJob(signal?: AbortSignal) {
     return startBackupJob(
         "walg",
-        "docker exec walg /bin/sh /usr/local/bin/backup-push.sh"
+        "docker exec walg /bin/sh /usr/local/bin/backup-push.sh",
+        signal
     );
 }
 
-async function startScheduledBackup(type: BackupJob["type"]) {
-    const job = type === "kopia" ? startKopiaBackupJob() : startWalgBackupJob();
+async function startScheduledBackup(type: BackupJob["type"], signal?: AbortSignal) {
+    const job =
+        type === "kopia" ? startKopiaBackupJob(signal) : startWalgBackupJob(signal);
     const completedJob = await job.completed;
     if (completedJob.code !== 0) {
         await refreshBackupStatus(type, completedJob);
@@ -275,7 +306,7 @@ const backupScheduledJobs = [
 export function registerBackupScheduledJobs(): void {
     registerScheduledJobAction(
         "backup.run",
-        (job) => {
+        (job, signal) => {
             const type = getScheduledBackupType(job.actionPayload);
             if (type !== "kopia" && type !== "walg") {
                 throw Object.assign(
@@ -283,9 +314,13 @@ export function registerBackupScheduledJobs(): void {
                     { statusCode: 400 }
                 );
             }
-            return startScheduledBackup(type);
+            return startScheduledBackup(type, signal);
         },
         { timeoutMs: SCHEDULED_BACKUP_TIMEOUT_MS }
+    );
+    removeScheduledJobsNotInAction(
+        "backup.run",
+        backupScheduledJobs.map((job) => job.id)
     );
 
     for (const job of backupScheduledJobs) {

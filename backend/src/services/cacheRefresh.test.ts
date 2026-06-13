@@ -3001,6 +3001,30 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
             "moltbook.profile",
             "moltbook.my-content",
         ]);
+        db.prepare(
+            `INSERT INTO scheduled_jobs (
+                id, name, description, enabled, schedule_type, interval_seconds,
+                time_of_day, cron_expression, action_key, action_payload_json, next_run_at, created_at, updated_at
+            ) VALUES (?, ?, '', 1, 'interval', 3600, NULL, NULL, 'cache.refresh', ?, NULL, ?, ?)`
+        ).run(
+            "cache.backup.kopia",
+            "Legacy Kopia cache refresh",
+            JSON.stringify({ key: "backup.kopia.status" }),
+            new Date().toISOString(),
+            new Date().toISOString()
+        );
+        db.prepare(
+            `INSERT INTO scheduled_jobs (
+                id, name, description, enabled, schedule_type, interval_seconds,
+                time_of_day, cron_expression, action_key, action_payload_json, next_run_at, created_at, updated_at
+            ) VALUES (?, ?, '', 1, 'interval', 3600, NULL, NULL, 'cache.refresh', ?, NULL, ?, ?)`
+        ).run(
+            "cache.backup.walg",
+            "Legacy WAL-G cache refresh",
+            JSON.stringify({ key: "backup.walg.status" }),
+            new Date().toISOString(),
+            new Date().toISOString()
+        );
         try {
             registerCacheRefreshScheduledJobs();
             assert.equal(

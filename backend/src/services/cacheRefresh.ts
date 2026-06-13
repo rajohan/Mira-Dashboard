@@ -18,6 +18,7 @@ import { nonEmptyEnvFallback } from "../lib/values.js";
 import {
     getScheduledJob,
     registerScheduledJobAction,
+    removeScheduledJobsNotInAction,
     type ScheduledJob,
     upsertScheduledJob,
 } from "./scheduledJobs.js";
@@ -2062,6 +2063,10 @@ export function registerCacheRefreshScheduledJobs(): void {
         const result = await refreshCacheProducer(key, signal);
         return { key, ...result };
     });
+    removeScheduledJobsNotInAction(
+        "cache.refresh",
+        cacheRefreshScheduledJobs.map((job) => job.id)
+    );
 
     for (const job of cacheRefreshScheduledJobs) {
         const existing = getScheduledJob(job.id);
