@@ -35,6 +35,7 @@ interface FakeBackupProcess extends ChildProcess {
 const originalDockerBin = process.env.MIRA_DOCKER_BIN;
 let lastFakeBackupProcess: FakeBackupProcess | null = null;
 const fakeDockerExecCalls: string[][] = [];
+let fakeBackupSpawnCalls = 0;
 let fakeContainerPgrepCalls = 0;
 
 async function installFakeDocker(tempDir: string): Promise<string> {
@@ -177,6 +178,7 @@ function createFakeBackupSpawn(): typeof spawn {
         }
 
         lastFakeBackupProcess = child;
+        fakeBackupSpawnCalls += 1;
         const command = String(args.at(-1) ?? "");
         queueMicrotask(() => {
             if (process.env.FAKE_BACKUP_SIGNAL === "1") {
@@ -371,6 +373,7 @@ describe("backup routes", () => {
     beforeEach(() => {
         lastFakeBackupProcess = null;
         fakeDockerExecCalls.length = 0;
+        fakeBackupSpawnCalls = 0;
         fakeContainerPgrepCalls = 0;
         backupTesting.resetJobsForTest();
         backupTesting.setBackupAbortContainerTimeoutsForTest(30_000, 1_000);
@@ -491,25 +494,6 @@ describe("backup routes", () => {
             actionKey: "backup.run",
             actionPayload: { type: "walg" },
         });
-        upsertScheduledJob({
-            id: "cache.backup.walg",
-            name: "Legacy WAL-G status refresh",
-            enabled: false,
-            scheduleType: "daily",
-            intervalSeconds: 7200,
-            timeOfDay: "04:10",
-            actionKey: "cache.refresh",
-            actionPayload: { key: "backup.walg.status" },
-        });
-        upsertScheduledJob({
-            id: "cache.backup.kopia",
-            name: "Legacy Kopia status refresh",
-            enabled: true,
-            scheduleType: "interval",
-            intervalSeconds: 1800,
-            actionKey: "cache.refresh",
-            actionPayload: { key: "backup.kopia.status" },
-        });
 
         registerBackupScheduledJobs();
 
@@ -527,28 +511,21 @@ describe("backup routes", () => {
         assert.equal(kopiaJob?.actionKey, "backup.run");
         assert.deepEqual(kopiaJob?.actionPayload, { type: "kopia" });
 
-        const walgStatusJob = getScheduledJob("backup.status.walg");
-        assert.equal(walgStatusJob?.enabled, false);
-        assert.equal(walgStatusJob?.scheduleType, "daily");
-        assert.equal(walgStatusJob?.intervalSeconds, 7200);
-        assert.equal(walgStatusJob?.timeOfDay, "04:10");
-        assert.equal(walgStatusJob?.actionKey, "backup.status.refresh");
-        assert.deepEqual(walgStatusJob?.actionPayload, { type: "walg" });
-
-        const kopiaStatusJob = getScheduledJob("backup.status.kopia");
-        assert.equal(kopiaStatusJob?.enabled, true);
-        assert.equal(kopiaStatusJob?.scheduleType, "interval");
-        assert.equal(kopiaStatusJob?.intervalSeconds, 1800);
-        assert.equal(kopiaStatusJob?.actionKey, "backup.status.refresh");
-        assert.deepEqual(kopiaStatusJob?.actionPayload, { type: "kopia" });
-
-        const seededKopiaStatus = await waitForCacheEntry("backup.kopia.status");
-        assert.equal(seededKopiaStatus.ok, true);
+        assert.equal(getScheduledJob("backup.status.walg"), null);
+        assert.equal(getScheduledJob("backup.status.kopia"), null);
         assert.equal(
             (
                 db
                     .prepare("SELECT COUNT(*) AS count FROM cache_entries WHERE key = ?")
                     .get("backup.walg.status") as { count: number }
+            ).count,
+            0
+        );
+        assert.equal(
+            (
+                db
+                    .prepare("SELECT COUNT(*) AS count FROM cache_entries WHERE key = ?")
+                    .get("backup.kopia.status") as { count: number }
             ).count,
             0
         );
@@ -565,6 +542,8 @@ describe("backup routes", () => {
                 ?.status,
             "done"
         );
+        const refreshedWalgStatus = await waitForCacheEntry("backup.walg.status");
+        assert.equal(refreshedWalgStatus.ok, true);
 
         const kopiaRun = await runScheduledJob("backup.kopia");
         assert.equal(kopiaRun.status, "success");
@@ -578,16 +557,8 @@ describe("backup routes", () => {
                 ?.status,
             "done"
         );
-
-        db.prepare("DELETE FROM cache_entries WHERE key = ?").run("backup.walg.status");
-        const statusRun = await runScheduledJob("backup.status.walg");
-        assert.equal(statusRun.status, "success");
-        assert.deepEqual(statusRun.output, {
-            key: "backup.walg.status",
-            refreshed: ["backup.walg.status"],
-        });
-        const refreshedWalgStatus = await waitForCacheEntry("backup.walg.status");
-        assert.equal(refreshedWalgStatus.ok, true);
+        const refreshedKopiaStatus = await waitForCacheEntry("backup.kopia.status");
+        assert.equal(refreshedKopiaStatus.ok, true);
     });
 
     it("rejects invalid scheduled backup payloads", async () => {
@@ -611,14 +582,7 @@ describe("backup routes", () => {
             assert.match(shapeRun.message ?? "", /invalid backup type/u);
         }
 
-        db.prepare("UPDATE scheduled_jobs SET action_payload_json = ? WHERE id = ?").run(
-            JSON.stringify({ type: "postgres" }),
-            "backup.status.walg"
-        );
-
-        const statusRun = await runScheduledJob("backup.status.walg");
-        assert.equal(statusRun.status, "failed");
-        assert.match(statusRun.message ?? "", /invalid backup type/u);
+        assert.equal(getScheduledJob("backup.status.walg"), null);
     });
 
     it("records scheduled backup failures after the process exits", async () => {
@@ -1255,7 +1219,7 @@ describe("backup routes", () => {
         );
     });
 
-    it("terminates scheduled backup jobs when the signal is already aborted", async () => {
+    it("does not start scheduled backup jobs when the signal is already aborted", async () => {
         registerBackupScheduledJobs();
         await withEnv(
             { FAKE_BACKUP_CLOSE_ON_KILL: "1", FAKE_BACKUP_NEVER_CLOSE: "1" },
@@ -1271,7 +1235,12 @@ describe("backup routes", () => {
 
                 assert.equal(run.status, "failed");
                 assert.match(run.message ?? "", /Backup aborted by scheduler/u);
-                assert.equal(lastFakeBackupProcess?.killedWithSignal, "SIGTERM");
+                assert.equal(fakeBackupSpawnCalls, 0);
+                assert.equal(lastFakeBackupProcess, null);
+                const activeWalg = await requestJson<{
+                    job: { status: string } | null;
+                }>(server, "/api/backups/walg");
+                assert.equal(activeWalg.body.job, null);
             }
         );
     });

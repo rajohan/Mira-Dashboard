@@ -4,10 +4,7 @@ import { randomUUID } from "node:crypto";
 import express, { type RequestHandler } from "express";
 
 import { asyncRoute } from "../lib/errors.js";
-import {
-    refreshCacheProducer,
-    seedMissingLocalCacheEntry,
-} from "../services/cacheRefresh.js";
+import { refreshCacheProducer } from "../services/cacheRefresh.js";
 import {
     getScheduledJob,
     registerScheduledJobAction,
@@ -144,6 +141,9 @@ function startBackupJob(
     if (existingJob?.status === "running") {
         return existingJob;
     }
+    if (signal?.aborted) {
+        throw new Error("Backup aborted by scheduler");
+    }
 
     const jobId = randomUUID();
     let resolveCompleted!: (job: BackupJob) => void;
@@ -260,11 +260,7 @@ function startBackupJob(
         }
     };
 
-    if (signal?.aborted) {
-        abortBackup();
-    } else {
-        signal?.addEventListener("abort", abortBackup, { once: true });
-    }
+    signal?.addEventListener("abort", abortBackup, { once: true });
 
     child.stdout?.on("data", (data) => {
         job.stdout = trimOutput(job.stdout + String(data));
@@ -289,8 +285,8 @@ function startBackupJob(
         job.stderr = trimOutput(`${job.stderr}\n${error.message}`.trim());
         job.endedAt = Date.now();
         signal?.removeEventListener("abort", abortBackup);
-        await refreshBackupStatus(type, job);
         resolveCompleted(job);
+        await refreshBackupStatus(type, job);
     });
 
     return job;
@@ -440,9 +436,6 @@ async function startScheduledBackup(type: BackupJob["type"], signal?: AbortSigna
         type === "kopia" ? startKopiaBackupJob(signal) : startWalgBackupJob(signal);
     const completedJob = await job.completed;
     if (completedJob.code !== 0) {
-        if (!completedJob.statusRefreshed) {
-            await refreshBackupStatus(type, completedJob);
-        }
         const details = completedJob.stderr || completedJob.stdout;
         throw new Error(
             `${type.toUpperCase()} backup failed with code ${completedJob.code}${
@@ -451,12 +444,6 @@ async function startScheduledBackup(type: BackupJob["type"], signal?: AbortSigna
         );
     }
     return { backup: mapJob(completedJob) };
-}
-
-async function refreshScheduledBackupStatus(type: BackupJob["type"]) {
-    const cacheKey = backupStatusCacheKey(type);
-    const result = await refreshCacheProducer(cacheKey);
-    return { key: cacheKey, ...result };
 }
 
 const backupScheduledJobs = [
@@ -482,27 +469,6 @@ const backupScheduledJobs = [
     },
 ] as const;
 
-const backupStatusScheduledJobs = [
-    {
-        id: "backup.status.walg",
-        name: "WAL-G backup status refresh",
-        description: "Refresh WAL-G backup status without starting a backup.",
-        scheduleType: "interval",
-        intervalSeconds: 60 * 60,
-        actionKey: "backup.status.refresh",
-        actionPayload: { type: "walg" },
-    },
-    {
-        id: "backup.status.kopia",
-        name: "Kopia backup status refresh",
-        description: "Refresh Kopia backup status without starting a backup.",
-        scheduleType: "interval",
-        intervalSeconds: 60 * 60,
-        actionKey: "backup.status.refresh",
-        actionPayload: { type: "kopia" },
-    },
-] as const;
-
 export function registerBackupScheduledJobs(): void {
     registerScheduledJobAction(
         "backup.run",
@@ -522,22 +488,6 @@ export function registerBackupScheduledJobs(): void {
         "backup.run",
         backupScheduledJobs.map((job) => job.id)
     );
-    registerScheduledJobAction("backup.status.refresh", (job) => {
-        const type = getScheduledBackupType(job.actionPayload);
-        if (type !== "kopia" && type !== "walg") {
-            throw Object.assign(
-                new Error(
-                    `Scheduled backup status job ${job.id} has invalid backup type`
-                ),
-                { statusCode: 400 }
-            );
-        }
-        return refreshScheduledBackupStatus(type);
-    });
-    removeScheduledJobsNotInAction(
-        "backup.status.refresh",
-        backupStatusScheduledJobs.map((job) => job.id)
-    );
 
     for (const job of backupScheduledJobs) {
         const existing = getScheduledJob(job.id);
@@ -550,22 +500,6 @@ export function registerBackupScheduledJobs(): void {
             cronExpression: existing?.cronExpression ?? null,
         });
     }
-
-    for (const job of backupStatusScheduledJobs) {
-        const legacy = getScheduledJob(`cache.backup.${job.actionPayload.type}`);
-        const existing = getScheduledJob(job.id) ?? legacy;
-        upsertScheduledJob({
-            ...job,
-            enabled: existing?.enabled ?? true,
-            scheduleType: existing?.scheduleType ?? job.scheduleType,
-            intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
-            timeOfDay: existing ? existing.timeOfDay : null,
-            cronExpression: existing?.cronExpression ?? null,
-        });
-        if (existing?.enabled ?? true) {
-            seedMissingLocalCacheEntry(backupStatusCacheKey(job.actionPayload.type));
-        }
-    }
 }
 
 export const __testing = {
@@ -574,7 +508,6 @@ export const __testing = {
     mapJob,
     getScheduledBackupType,
     startScheduledBackup,
-    refreshScheduledBackupStatus,
     setSpawnBackupProcessForTest(nextSpawn?: typeof spawn): void {
         spawnBackupProcess = nextSpawn ?? spawn;
     },
