@@ -1461,6 +1461,48 @@ if (args.includes("capture-pane")) {
                         assert.deepEqual(await refreshCacheProducer("quotas.summary"), {
                             refreshed: ["quotas.summary"],
                         });
+                        assert.deepEqual(
+                            await refreshCacheProducer("log_rotation.state"),
+                            {
+                                refreshed: ["log_rotation.state"],
+                            }
+                        );
+                        assert.deepEqual(cacheRow("log_rotation.state").data, {
+                            version: 1,
+                            files: {},
+                        });
+                        db.prepare(
+                            "UPDATE cache_entries SET data_json = ? WHERE key = ?"
+                        ).run(
+                            JSON.stringify({
+                                version: 1,
+                                files: { "/tmp/app.log": { lastSizeBytes: 12 } },
+                            }),
+                            "log_rotation.state"
+                        );
+                        assert.deepEqual(
+                            await refreshCacheProducer("log_rotation.state"),
+                            {
+                                refreshed: ["log_rotation.state"],
+                            }
+                        );
+                        assert.deepEqual(cacheRow("log_rotation.state").data, {
+                            version: 1,
+                            files: { "/tmp/app.log": { lastSizeBytes: 12 } },
+                        });
+                        db.prepare(
+                            "UPDATE cache_entries SET data_json = ? WHERE key = ?"
+                        ).run("{not-json", "log_rotation.state");
+                        assert.deepEqual(
+                            await refreshCacheProducer("log_rotation.state"),
+                            {
+                                refreshed: ["log_rotation.state"],
+                            }
+                        );
+                        assert.deepEqual(cacheRow("log_rotation.state").data, {
+                            version: 1,
+                            files: {},
+                        });
                     }
                 );
             }
@@ -3046,6 +3088,45 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                 ).count,
                 0
             );
+            assert.ok(
+                db
+                    .prepare("SELECT 1 FROM scheduled_jobs WHERE id = 'ops.log-rotation'")
+                    .get()
+            );
+            const logRotationModule = await import("./logRotation.js");
+            const logRotationTesting = logRotationModule.__testing;
+            logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
+                stderr: "",
+                stdout: JSON.stringify({ ok: true, dryRun: false }),
+            }));
+            try {
+                const logRotationRun = await runScheduledJob("ops.log-rotation");
+                assert.deepEqual(logRotationRun.output, {
+                    logRotation: {
+                        result: { ok: true, dryRun: false },
+                        stderr: "",
+                    },
+                });
+
+                logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
+                    stderr: "permission denied",
+                    stdout: JSON.stringify({ ok: false }),
+                }));
+                const failedLogRotationRun = await runScheduledJob("ops.log-rotation");
+                assert.equal(failedLogRotationRun.status, "failed");
+                assert.equal(failedLogRotationRun.message, "permission denied");
+
+                logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
+                    stderr: "",
+                    stdout: JSON.stringify({ ok: false }),
+                }));
+                const failedLogRotationRunFallback =
+                    await runScheduledJob("ops.log-rotation");
+                assert.equal(failedLogRotationRunFallback.status, "failed");
+                assert.equal(failedLogRotationRunFallback.message, "Log rotation failed");
+            } finally {
+                logRotationTesting.resetElevatedLogRotationExecFileRunner();
+            }
             await withFetch(
                 (url) => {
                     assert.ok(url.includes("wttr.in"));

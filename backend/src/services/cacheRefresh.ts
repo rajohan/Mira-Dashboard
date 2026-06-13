@@ -15,6 +15,8 @@ import { promisify } from "node:util";
 
 import { db } from "../db.js";
 import { nonEmptyEnvFallback } from "../lib/values.js";
+import { writeCacheSuccess } from "./cacheEntryWriter.js";
+import { runElevatedLogRotationService } from "./logRotation.js";
 import {
     getScheduledJob,
     registerScheduledJobAction,
@@ -36,17 +38,8 @@ const KOPIA_EXPECTED_SOURCE_PATHS = [
 const BACKUP_STATUS_STALE_HOURS = 30;
 const BACKUP_STATUS_MAX_TTL_HOURS = 25;
 
-type CacheTtlUnit = "hours" | "minutes";
 type JsonRecord = Record<string, unknown>;
-
-interface CacheWriteOptions {
-    key: string;
-    data: unknown;
-    source: string;
-    ttl: number;
-    ttlUnit: CacheTtlUnit;
-    metadata: Record<string, unknown>;
-}
+type CacheTtlUnit = "hours" | "minutes";
 
 interface CacheFailureOptions {
     key: string;
@@ -78,6 +71,7 @@ const MOLTBOOK_CACHE_KEY_LIST = [
 ] as const;
 type MoltbookCacheKey = (typeof MOLTBOOK_CACHE_KEY_LIST)[number];
 const MOLTBOOK_CACHE_KEYS = new Set<string>(MOLTBOOK_CACHE_KEY_LIST);
+const LOG_ROTATION_STATE_KEY = "log_rotation.state";
 
 const gitRepos = [
     {
@@ -360,34 +354,7 @@ async function acquireCodexTrustConfigLockAsync(
     }
 }
 
-export function writeCacheSuccess(options: CacheWriteOptions): void {
-    const timestamp = nowIso();
-    db.prepare(
-        `INSERT INTO cache_entries (
-            key, data_json, source, updated_at, last_attempt_at, expires_at,
-            status, error_code, error_message, consecutive_failures, metadata_json
-         ) VALUES (?, ?, ?, ?, ?, ?, 'fresh', NULL, NULL, 0, ?)
-         ON CONFLICT(key) DO UPDATE SET
-            data_json = excluded.data_json,
-            source = excluded.source,
-            updated_at = excluded.updated_at,
-            last_attempt_at = excluded.last_attempt_at,
-            expires_at = excluded.expires_at,
-            status = 'fresh',
-            error_code = NULL,
-            error_message = NULL,
-            consecutive_failures = 0,
-            metadata_json = excluded.metadata_json`
-    ).run(
-        options.key,
-        JSON.stringify(options.data),
-        options.source,
-        timestamp,
-        timestamp,
-        ttlDate(options.ttl, options.ttlUnit),
-        JSON.stringify(options.metadata)
-    );
-}
+export { writeCacheSuccess } from "./cacheEntryWriter.js";
 
 export function writeCacheFailure(options: CacheFailureOptions): void {
     const timestamp = nowIso();
@@ -1767,6 +1734,32 @@ async function refreshQuotasCache() {
     return { refreshed: ["quotas.summary"] };
 }
 
+async function refreshLogRotationStateCache() {
+    const row = db
+        .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
+        .get(LOG_ROTATION_STATE_KEY) as { data_json?: string | null } | undefined;
+    let data: unknown = { version: 1, files: {} };
+    if (row?.data_json) {
+        try {
+            data = JSON.parse(row.data_json) as unknown;
+        } catch {
+            data = { version: 1, files: {} };
+        }
+    }
+    writeCacheSuccess({
+        key: LOG_ROTATION_STATE_KEY,
+        data,
+        source: "backend",
+        ttl: 90 * 24,
+        ttlUnit: "hours",
+        metadata: {
+            producer: "refreshCacheProducer",
+            workflow: "Log Rotation - Foundation",
+        },
+    });
+    return { refreshed: [LOG_ROTATION_STATE_KEY] };
+}
+
 function redactOpenAiQuotaAccount(openai: Awaited<ReturnType<typeof checkOpenAiQuota>>) {
     if (!openai || typeof openai !== "object" || !("account" in openai)) {
         return openai;
@@ -1798,7 +1791,8 @@ function isSupportedCacheProducerKey(key: string): boolean {
         key === "system.host" ||
         key === "backup.kopia.status" ||
         key === "backup.walg.status" ||
-        key === "quotas.summary"
+        key === "quotas.summary" ||
+        key === LOG_ROTATION_STATE_KEY
     );
 }
 
@@ -1878,6 +1872,9 @@ async function refreshCacheProducerUnlocked(key: string) {
     }
     if (key === "quotas.summary") {
         return refreshWithFailureRecord(refreshQuotasCache);
+    }
+    if (key === LOG_ROTATION_STATE_KEY) {
+        return refreshWithFailureRecord(refreshLogRotationStateCache);
     }
     throw Object.assign(
         new Error(`No backend refresh producer configured for cache key: ${key}`),
@@ -2030,6 +2027,37 @@ const cacheRefreshScheduledJobs = [
         actionKey: "cache.refresh",
         actionPayload: { key: "moltbook" },
     },
+<<<<<<< HEAD
+=======
+    {
+        id: "cache.backup.kopia",
+        name: "Kopia backup status cache",
+        description: "Refresh Kopia backup status cache.",
+        scheduleType: "interval",
+        intervalSeconds: 60 * 60,
+        actionKey: "cache.refresh",
+        actionPayload: { key: "backup.kopia.status" },
+    },
+    {
+        id: "cache.backup.walg",
+        name: "WAL-G backup status cache",
+        description: "Refresh WAL-G backup status cache.",
+        scheduleType: "interval",
+        intervalSeconds: 60 * 60,
+        actionKey: "cache.refresh",
+        actionPayload: { key: "backup.walg.status" },
+    },
+    {
+        id: "ops.log-rotation",
+        name: "Log rotation",
+        description: "Rotate approved Docker file logs and update log rotation cache.",
+        scheduleType: "daily",
+        intervalSeconds: 24 * 60 * 60,
+        timeOfDay: "02:10",
+        actionKey: "ops.log-rotation",
+        actionPayload: { key: LOG_ROTATION_STATE_KEY },
+    },
+>>>>>>> 5f3ac96 (Move log rotation into dashboard scheduler)
 ] as const;
 
 function getScheduledCacheKey(job: ScheduledJob): string {
@@ -2101,6 +2129,17 @@ export function registerCacheRefreshScheduledJobs(): void {
         const key = getScheduledCacheKey(job);
         const result = await refreshCacheProducer(key, signal);
         return { key, ...result };
+    });
+    registerScheduledJobAction("ops.log-rotation", async () => {
+        const logRotation = await runElevatedLogRotationService({ dryRun: false });
+        if (logRotation.result?.ok !== true) {
+            const error =
+                typeof logRotation.stderr === "string" && logRotation.stderr.trim()
+                    ? logRotation.stderr.trim()
+                    : "Log rotation failed";
+            throw new Error(error);
+        }
+        return { logRotation };
     });
     const seedKeys: string[] = [];
     db.exec("BEGIN");
