@@ -21,6 +21,7 @@ const WALG_BACKUP_SCRIPT_PATTERN = "/usr/local/bin/backup-push.sh";
 let spawnBackupProcess = spawn;
 let backupAbortContainerWaitMs = 30_000;
 let backupAbortContainerPollMs = 1_000;
+let backupAbortDockerExecTimeoutMs = 5_000;
 
 interface BackupAbortConfig {
     container: string;
@@ -303,8 +304,22 @@ function runDockerExec(
 ): Promise<{ code: number; stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
         const child = spawnBackupProcess("docker", ["exec", container, ...args], {
+            detached: true,
             env: process.env,
         });
+        const timeout = setTimeout(() => {
+            try {
+                if (typeof child.pid === "number") {
+                    process.kill(-child.pid, "SIGKILL");
+                } else {
+                    child.kill("SIGKILL");
+                }
+            } catch {
+                child.kill("SIGKILL");
+            }
+            reject(new Error(`Timed out waiting for docker exec ${args[0]}`));
+        }, backupAbortDockerExecTimeoutMs);
+        timeout.unref();
         let stdout = "";
         let stderr = "";
         child.stdout?.on("data", (data) => {
@@ -313,8 +328,12 @@ function runDockerExec(
         child.stderr?.on("data", (data) => {
             stderr = trimOutput(stderr + String(data));
         });
-        child.on("error", reject);
+        child.on("error", (error) => {
+            clearTimeout(timeout);
+            reject(error);
+        });
         child.on("close", (code) => {
+            clearTimeout(timeout);
             resolve({ code: code ?? 1, stdout, stderr });
         });
     });
@@ -539,6 +558,9 @@ export const __testing = {
     setBackupAbortContainerTimeoutsForTest(waitMs: number, pollMs: number): void {
         backupAbortContainerWaitMs = waitMs;
         backupAbortContainerPollMs = pollMs;
+    },
+    setBackupAbortDockerExecTimeoutForTest(timeoutMs: number): void {
+        backupAbortDockerExecTimeoutMs = timeoutMs;
     },
 };
 

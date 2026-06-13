@@ -126,6 +126,13 @@ function createFakeBackupSpawn(): typeof spawn {
         if (file === "docker") {
             fakeDockerExecCalls.push([...args].map(String));
             queueMicrotask(() => {
+                if (process.env.FAKE_DOCKER_EXEC_ERROR === "1") {
+                    child.emit("error", new Error("docker exec failed"));
+                    return;
+                }
+                if (process.env.FAKE_DOCKER_EXEC_NEVER_CLOSE === "1") {
+                    return;
+                }
                 if (process.env.FAKE_DOCKER_EXEC_STDOUT) {
                     child.stdout.write(process.env.FAKE_DOCKER_EXEC_STDOUT);
                 }
@@ -333,6 +340,7 @@ describe("backup routes", () => {
         fakeDockerExecCalls.length = 0;
         fakeContainerPgrepCalls = 0;
         backupTesting.setBackupAbortContainerTimeoutsForTest(30_000, 1_000);
+        backupTesting.setBackupAbortDockerExecTimeoutForTest(5_000);
         db.prepare(
             "DELETE FROM cache_entries WHERE key IN ('backup.kopia.status', 'backup.walg.status')"
         ).run();
@@ -345,6 +353,7 @@ describe("backup routes", () => {
         await server.close();
         backupTesting.setSpawnBackupProcessForTest();
         backupTesting.setBackupAbortContainerTimeoutsForTest(30_000, 1_000);
+        backupTesting.setBackupAbortDockerExecTimeoutForTest(5_000);
         if (originalDockerBin === undefined) {
             delete process.env.MIRA_DOCKER_BIN;
         } else {
@@ -885,6 +894,53 @@ describe("backup routes", () => {
         );
     });
 
+    it("bounds hung in-container WAL-G process probes", async () => {
+        registerBackupScheduledJobs();
+        backupTesting.setBackupAbortDockerExecTimeoutForTest(1);
+        await withEnv(
+            { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_DOCKER_EXEC_NEVER_CLOSE: "1" },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = runScheduledJob(
+                    "backup.walg",
+                    "manual",
+                    controller.signal
+                );
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+
+                const run = await runPromise;
+                assert.equal(run.status, "failed");
+                assert.match(run.message ?? "", /Timed out waiting for docker exec/u);
+            }
+        );
+    });
+
+    it("records docker exec probe spawn failures", async () => {
+        registerBackupScheduledJobs();
+        await withEnv(
+            { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_DOCKER_EXEC_ERROR: "1" },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = runScheduledJob(
+                    "backup.walg",
+                    "manual",
+                    controller.signal
+                );
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+
+                const run = await runPromise;
+                assert.equal(run.status, "failed");
+                assert.match(run.message ?? "", /docker exec failed/u);
+            }
+        );
+    });
+
     it("records in-container WAL-G process termination wait timeouts", async () => {
         registerBackupScheduledJobs();
         backupTesting.setBackupAbortContainerTimeoutsForTest(1, 1);
@@ -959,6 +1015,7 @@ describe("backup routes", () => {
         }) as typeof process.kill;
 
         try {
+            backupTesting.setBackupAbortDockerExecTimeoutForTest(20_000);
             mock.timers.enable({ apis: ["setTimeout"] });
             await withEnv(
                 { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_BACKUP_PID: "9876" },
