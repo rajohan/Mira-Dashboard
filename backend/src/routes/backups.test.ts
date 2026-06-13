@@ -410,6 +410,18 @@ describe("backup routes", () => {
         assert.equal(kopiaJob?.actionKey, "backup.run");
         assert.deepEqual(kopiaJob?.actionPayload, { type: "kopia" });
 
+        const walgStatusJob = getScheduledJob("backup.status.walg");
+        assert.equal(walgStatusJob?.scheduleType, "interval");
+        assert.equal(walgStatusJob?.intervalSeconds, 60 * 60);
+        assert.equal(walgStatusJob?.actionKey, "backup.status.refresh");
+        assert.deepEqual(walgStatusJob?.actionPayload, { type: "walg" });
+
+        const kopiaStatusJob = getScheduledJob("backup.status.kopia");
+        assert.equal(kopiaStatusJob?.scheduleType, "interval");
+        assert.equal(kopiaStatusJob?.intervalSeconds, 60 * 60);
+        assert.equal(kopiaStatusJob?.actionKey, "backup.status.refresh");
+        assert.deepEqual(kopiaStatusJob?.actionPayload, { type: "kopia" });
+
         const seededWalgStatus = await waitForCacheEntry("backup.walg.status");
         const seededKopiaStatus = await waitForCacheEntry("backup.kopia.status");
         assert.equal(seededWalgStatus.ok, true);
@@ -440,6 +452,16 @@ describe("backup routes", () => {
                 ?.status,
             "done"
         );
+
+        db.prepare("DELETE FROM cache_entries WHERE key = ?").run("backup.walg.status");
+        const statusRun = await runScheduledJob("backup.status.walg");
+        assert.equal(statusRun.status, "success");
+        assert.deepEqual(statusRun.output, {
+            key: "backup.walg.status",
+            refreshed: ["backup.walg.status"],
+        });
+        const refreshedWalgStatus = await waitForCacheEntry("backup.walg.status");
+        assert.equal(refreshedWalgStatus.ok, true);
     });
 
     it("rejects invalid scheduled backup payloads", async () => {
@@ -462,6 +484,15 @@ describe("backup routes", () => {
             assert.equal(shapeRun.status, "failed");
             assert.match(shapeRun.message ?? "", /invalid backup type/u);
         }
+
+        db.prepare("UPDATE scheduled_jobs SET action_payload_json = ? WHERE id = ?").run(
+            JSON.stringify({ type: "postgres" }),
+            "backup.status.walg"
+        );
+
+        const statusRun = await runScheduledJob("backup.status.walg");
+        assert.equal(statusRun.status, "failed");
+        assert.match(statusRun.message ?? "", /invalid backup type/u);
     });
 
     it("records scheduled backup failures after the process exits", async () => {
@@ -486,6 +517,50 @@ describe("backup routes", () => {
                 assert.match(run.message ?? "", /^WALG backup failed with code 12$/u);
             }
         );
+    });
+
+    it("refreshes backup status after manual backup failures", async () => {
+        await withEnv({ FAKE_BACKUP_EXIT_CODE: "12" }, async () => {
+            const started = await requestJson<{
+                ok: boolean;
+                job: { status: string; code: number | null };
+            }>(server, "/api/backups/walg/run", { method: "POST" });
+
+            assert.equal(started.status, 200);
+            assert.equal(started.body.ok, true);
+            assert.equal(started.body.job.status, "running");
+            assert.equal(started.body.job.code, null);
+
+            const done = await waitForDone(server, "/api/backups/walg");
+            assert.equal(done.status, "done");
+            assert.equal(done.code, 12);
+            const refreshedStatus = await waitForCacheEntry("backup.walg.status");
+            assert.equal(refreshedStatus.ok, true);
+        });
+    });
+
+    it("rejects scheduled backups when a manual backup is already running", async () => {
+        const releasePath = path.join(tempDir, "release-active-manual-walg");
+        await withEnv({ FAKE_BACKUP_HOLD_UNTIL: releasePath }, async () => {
+            const started = await requestJson<{
+                ok: boolean;
+                job: { id: string; type: string; status: string };
+            }>(server, "/api/backups/walg/run", { method: "POST" });
+            assert.equal(started.status, 200);
+            assert.equal(started.body.ok, true);
+            assert.equal(started.body.job.status, "running");
+
+            registerBackupScheduledJobs();
+            const run = await runScheduledJob("backup.walg");
+
+            assert.equal(run.status, "failed");
+            assert.match(run.message ?? "", /WALG backup is already running/u);
+
+            await writeFile(releasePath, "release", "utf8");
+            const done = await waitForDone(server, "/api/backups/walg");
+            assert.equal(done.status, "done");
+            assert.equal(done.code, 0);
+        });
     });
 
     it("terminates scheduled backup jobs when the scheduler aborts them", async () => {

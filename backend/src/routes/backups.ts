@@ -174,11 +174,7 @@ function startBackupJob(type: BackupJob["type"], command: string, signal?: Abort
     let finalizing = false;
     let abortKillTimer: NodeJS.Timeout | null = null;
 
-    const finalizeJob = async (
-        code: number,
-        signalName: NodeJS.Signals | null,
-        refreshOnSuccess: boolean
-    ) => {
+    const finalizeJob = async (code: number, signalName: NodeJS.Signals | null) => {
         if (finalized || finalizing) {
             return;
         }
@@ -192,7 +188,7 @@ function startBackupJob(type: BackupJob["type"], command: string, signal?: Abort
             abortKillTimer = null;
         }
         signal?.removeEventListener("abort", abortBackup);
-        if (refreshOnSuccess && !signalName && code === 0) {
+        if (!signalName) {
             await refreshBackupStatus(type, job);
         }
         resolveCompleted(job);
@@ -218,13 +214,13 @@ function startBackupJob(type: BackupJob["type"], command: string, signal?: Abort
                 job.stderr = trimOutput(
                     `${job.stderr}\nFailed to terminate backup process`.trim()
                 );
-                void finalizeJob(130, "SIGTERM", false);
+                void finalizeJob(130, "SIGTERM");
             }
         } catch (error) {
             job.stderr = trimOutput(
                 `${job.stderr}\nFailed to terminate backup process: ${String(error)}`.trim()
             );
-            void finalizeJob(130, "SIGTERM", false);
+            void finalizeJob(130, "SIGTERM");
         }
     };
 
@@ -243,10 +239,10 @@ function startBackupJob(type: BackupJob["type"], command: string, signal?: Abort
     });
 
     child.on("close", async (code, signal) => {
-        await finalizeJob(signal ? 130 : (code ?? 1), signal, true);
+        await finalizeJob(signal ? 130 : (code ?? 1), signal);
     });
 
-    child.on("error", (error) => {
+    child.on("error", async (error) => {
         if (finalized || finalizing) {
             return;
         }
@@ -257,6 +253,7 @@ function startBackupJob(type: BackupJob["type"], command: string, signal?: Abort
         job.stderr = trimOutput(`${job.stderr}\n${error.message}`.trim());
         job.endedAt = Date.now();
         signal?.removeEventListener("abort", abortBackup);
+        await refreshBackupStatus(type, job);
         resolveCompleted(job);
     });
 
@@ -290,6 +287,17 @@ function startWalgBackupJob(signal?: AbortSignal) {
 }
 
 async function startScheduledBackup(type: BackupJob["type"], signal?: AbortSignal) {
+    if (
+        (type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob())?.status ===
+        "running"
+    ) {
+        throw Object.assign(
+            new Error(`${type.toUpperCase()} backup is already running`),
+            {
+                statusCode: 409,
+            }
+        );
+    }
     const job =
         type === "kopia" ? startKopiaBackupJob(signal) : startWalgBackupJob(signal);
     const completedJob = await job.completed;
@@ -303,6 +311,12 @@ async function startScheduledBackup(type: BackupJob["type"], signal?: AbortSigna
         );
     }
     return { backup: mapJob(completedJob) };
+}
+
+async function refreshScheduledBackupStatus(type: BackupJob["type"]) {
+    const cacheKey = backupStatusCacheKey(type);
+    const result = await refreshCacheProducer(cacheKey);
+    return { key: cacheKey, ...result };
 }
 
 const backupScheduledJobs = [
@@ -328,6 +342,27 @@ const backupScheduledJobs = [
     },
 ] as const;
 
+const backupStatusScheduledJobs = [
+    {
+        id: "backup.status.walg",
+        name: "WAL-G backup status refresh",
+        description: "Refresh WAL-G backup status without starting a backup.",
+        scheduleType: "interval",
+        intervalSeconds: 60 * 60,
+        actionKey: "backup.status.refresh",
+        actionPayload: { type: "walg" },
+    },
+    {
+        id: "backup.status.kopia",
+        name: "Kopia backup status refresh",
+        description: "Refresh Kopia backup status without starting a backup.",
+        scheduleType: "interval",
+        intervalSeconds: 60 * 60,
+        actionKey: "backup.status.refresh",
+        actionPayload: { type: "kopia" },
+    },
+] as const;
+
 export function registerBackupScheduledJobs(): void {
     registerScheduledJobAction(
         "backup.run",
@@ -347,6 +382,22 @@ export function registerBackupScheduledJobs(): void {
         "backup.run",
         backupScheduledJobs.map((job) => job.id)
     );
+    registerScheduledJobAction("backup.status.refresh", (job) => {
+        const type = getScheduledBackupType(job.actionPayload);
+        if (type !== "kopia" && type !== "walg") {
+            throw Object.assign(
+                new Error(
+                    `Scheduled backup status job ${job.id} has invalid backup type`
+                ),
+                { statusCode: 400 }
+            );
+        }
+        return refreshScheduledBackupStatus(type);
+    });
+    removeScheduledJobsNotInAction(
+        "backup.status.refresh",
+        backupStatusScheduledJobs.map((job) => job.id)
+    );
 
     for (const job of backupScheduledJobs) {
         const existing = getScheduledJob(job.id);
@@ -362,6 +413,18 @@ export function registerBackupScheduledJobs(): void {
             seedMissingLocalCacheEntry(backupStatusCacheKey(job.actionPayload.type));
         }
     }
+
+    for (const job of backupStatusScheduledJobs) {
+        const existing = getScheduledJob(job.id);
+        upsertScheduledJob({
+            ...job,
+            enabled: existing?.enabled ?? true,
+            scheduleType: existing?.scheduleType ?? job.scheduleType,
+            intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
+            timeOfDay: existing ? existing.timeOfDay : null,
+            cronExpression: existing?.cronExpression ?? null,
+        });
+    }
 }
 
 export const __testing = {
@@ -370,6 +433,7 @@ export const __testing = {
     mapJob,
     getScheduledBackupType,
     startScheduledBackup,
+    refreshScheduledBackupStatus,
     setSpawnBackupProcessForTest(nextSpawn?: typeof spawn): void {
         spawnBackupProcess = nextSpawn ?? spawn;
     },
