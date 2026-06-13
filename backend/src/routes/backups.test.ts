@@ -6,7 +6,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
-import { after, before, beforeEach, describe, it } from "node:test";
+import { after, before, beforeEach, describe, it, mock } from "node:test";
 
 import express from "express";
 
@@ -94,11 +94,25 @@ function createFakeBackupProcess(): FakeBackupProcess {
     const child = new PassThrough() as unknown as FakeBackupProcess;
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
+    if (process.env.FAKE_BACKUP_PID) {
+        Object.defineProperty(child, "pid", {
+            configurable: true,
+            value: Number(process.env.FAKE_BACKUP_PID),
+        });
+    }
     child.kill = ((signal?: NodeJS.Signals | number) => {
         if (process.env.FAKE_BACKUP_KILL_THROWS === "1") {
             throw new Error("kill unavailable");
         }
+        if (process.env.FAKE_BACKUP_KILL_RETURNS_FALSE === "1") {
+            return false;
+        }
         child.killedWithSignal = signal ?? "SIGTERM";
+        if (process.env.FAKE_BACKUP_CLOSE_ON_KILL === "1") {
+            queueMicrotask(() => {
+                child.emit("close", null, child.killedWithSignal);
+            });
+        }
         return true;
     }) as ChildProcess["kill"];
     return child;
@@ -487,6 +501,15 @@ describe("backup routes", () => {
             await new Promise<void>((resolve) => setImmediate(resolve));
             controller.abort();
 
+            const earlyResult = await Promise.race([
+                runPromise.then(() => "settled"),
+                new Promise<"pending">((resolve) => {
+                    setTimeout(() => resolve("pending"), 20);
+                }),
+            ]);
+            assert.equal(earlyResult, "pending");
+            lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+
             const run = await runPromise;
             assert.equal(run.status, "failed");
             assert.match(run.message ?? "", /WALG backup failed with code 130/u);
@@ -500,6 +523,131 @@ describe("backup routes", () => {
             assert.equal(current.body.job?.code, 130);
             assert.match(current.body.job?.stderr ?? "", /Backup aborted by scheduler/u);
         });
+    });
+
+    it("waits for process-group close after aborting scheduled backup jobs", async () => {
+        registerBackupScheduledJobs();
+        const originalKill = process.kill;
+        const signals: Array<[number, NodeJS.Signals | number | undefined]> = [];
+        process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+            signals.push([pid, signal]);
+            return true;
+        }) as typeof process.kill;
+
+        try {
+            await withEnv(
+                { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_BACKUP_PID: "4321" },
+                async () => {
+                    const controller = new AbortController();
+                    const runPromise = runScheduledJob(
+                        "backup.walg",
+                        "manual",
+                        controller.signal
+                    );
+
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+                    controller.abort();
+
+                    const earlyResult = await Promise.race([
+                        runPromise.then(() => "settled"),
+                        new Promise<"pending">((resolve) => {
+                            setTimeout(() => resolve("pending"), 20);
+                        }),
+                    ]);
+                    assert.equal(earlyResult, "pending");
+                    assert.deepEqual(signals, [[-4321, "SIGTERM"]]);
+
+                    lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                    const run = await runPromise;
+
+                    assert.equal(run.status, "failed");
+                    assert.match(run.message ?? "", /Backup aborted by scheduler/u);
+                    assert.deepEqual(signals, [[-4321, "SIGTERM"]]);
+                }
+            );
+        } finally {
+            process.kill = originalKill;
+        }
+    });
+
+    it("force terminates process groups when aborted backups do not exit", async () => {
+        registerBackupScheduledJobs();
+        const originalKill = process.kill;
+        const signals: Array<[number, NodeJS.Signals | number | undefined]> = [];
+        process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+            signals.push([pid, signal]);
+            return true;
+        }) as typeof process.kill;
+
+        try {
+            mock.timers.enable({ apis: ["setTimeout"] });
+            await withEnv(
+                { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_BACKUP_PID: "9876" },
+                async () => {
+                    const controller = new AbortController();
+                    const runPromise = runScheduledJob(
+                        "backup.walg",
+                        "manual",
+                        controller.signal
+                    );
+
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+                    controller.abort();
+                    mock.timers.tick(10_000);
+                    lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+
+                    const run = await runPromise;
+                    assert.equal(run.status, "failed");
+                    assert.deepEqual(signals, [
+                        [-9876, "SIGTERM"],
+                        [-9876, "SIGKILL"],
+                    ]);
+                }
+            );
+        } finally {
+            mock.timers.reset();
+            process.kill = originalKill;
+        }
+    });
+
+    it("records process-group force termination failures", async () => {
+        registerBackupScheduledJobs();
+        const originalKill = process.kill;
+        process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+            assert.equal(pid, -2468);
+            if (signal === "SIGKILL") {
+                throw new Error("group kill unavailable");
+            }
+            return true;
+        }) as typeof process.kill;
+
+        try {
+            mock.timers.enable({ apis: ["setTimeout"] });
+            await withEnv(
+                { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_BACKUP_PID: "2468" },
+                async () => {
+                    const controller = new AbortController();
+                    const runPromise = runScheduledJob(
+                        "backup.walg",
+                        "manual",
+                        controller.signal
+                    );
+
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+                    controller.abort();
+                    mock.timers.tick(10_000);
+                    lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+
+                    const run = await runPromise;
+                    assert.equal(run.status, "failed");
+                    assert.match(run.message ?? "", /Failed to force terminate/u);
+                    assert.match(run.message ?? "", /group kill unavailable/u);
+                }
+            );
+        } finally {
+            mock.timers.reset();
+            process.kill = originalKill;
+        }
     });
 
     it("records termination failures when aborting scheduled backup jobs", async () => {
@@ -525,18 +673,47 @@ describe("backup routes", () => {
         );
     });
 
+    it("records failed termination signals when aborting scheduled backup jobs", async () => {
+        registerBackupScheduledJobs();
+        await withEnv(
+            { FAKE_BACKUP_KILL_RETURNS_FALSE: "1", FAKE_BACKUP_NEVER_CLOSE: "1" },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = runScheduledJob(
+                    "backup.walg",
+                    "manual",
+                    controller.signal
+                );
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+
+                const run = await runPromise;
+                assert.equal(run.status, "failed");
+                assert.match(run.message ?? "", /Failed to terminate backup process/u);
+            }
+        );
+    });
+
     it("terminates scheduled backup jobs when the signal is already aborted", async () => {
         registerBackupScheduledJobs();
-        await withEnv({ FAKE_BACKUP_NEVER_CLOSE: "1" }, async () => {
-            const controller = new AbortController();
-            controller.abort();
+        await withEnv(
+            { FAKE_BACKUP_CLOSE_ON_KILL: "1", FAKE_BACKUP_NEVER_CLOSE: "1" },
+            async () => {
+                const controller = new AbortController();
+                controller.abort();
 
-            const run = await runScheduledJob("backup.walg", "manual", controller.signal);
+                const run = await runScheduledJob(
+                    "backup.walg",
+                    "manual",
+                    controller.signal
+                );
 
-            assert.equal(run.status, "failed");
-            assert.match(run.message ?? "", /Backup aborted by scheduler/u);
-            assert.equal(lastFakeBackupProcess?.killedWithSignal, "SIGTERM");
-        });
+                assert.equal(run.status, "failed");
+                assert.match(run.message ?? "", /Backup aborted by scheduler/u);
+                assert.equal(lastFakeBackupProcess?.killedWithSignal, "SIGTERM");
+            }
+        );
     });
 
     it("records status refresh failures on successful backup jobs", async () => {

@@ -16,6 +16,7 @@ import {
 } from "../services/scheduledJobs.js";
 const MAX_OUTPUT_CHARS = 100_000;
 const SCHEDULED_BACKUP_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+const BACKUP_ABORT_SIGKILL_GRACE_MS = 10_000;
 let spawnBackupProcess = spawn;
 
 /** Represents backup job. */
@@ -154,6 +155,7 @@ function startBackupJob(type: BackupJob["type"], command: string, signal?: Abort
     let child: ReturnType<typeof spawn>;
     try {
         child = spawnBackupProcess("bash", ["-lc", command], {
+            detached: true,
             env: process.env,
         });
     } catch (error) {
@@ -170,6 +172,7 @@ function startBackupJob(type: BackupJob["type"], command: string, signal?: Abort
     job.process = child;
     let finalized = false;
     let finalizing = false;
+    let abortKillTimer: NodeJS.Timeout | null = null;
 
     const finalizeJob = async (
         code: number,
@@ -184,6 +187,10 @@ function startBackupJob(type: BackupJob["type"], command: string, signal?: Abort
         job.code = signalName ? 130 : code;
         job.endedAt = Date.now();
         finalized = true;
+        if (abortKillTimer) {
+            clearTimeout(abortKillTimer);
+            abortKillTimer = null;
+        }
         signal?.removeEventListener("abort", abortBackup);
         if (refreshOnSuccess && !signalName && code === 0) {
             await refreshBackupStatus(type, job);
@@ -194,13 +201,31 @@ function startBackupJob(type: BackupJob["type"], command: string, signal?: Abort
     const abortBackup = () => {
         job.stderr = trimOutput(`${job.stderr}\nBackup aborted by scheduler`.trim());
         try {
-            child.kill("SIGTERM");
+            if (typeof child.pid === "number") {
+                const processGroupId = -child.pid;
+                process.kill(processGroupId, "SIGTERM");
+                abortKillTimer = setTimeout(() => {
+                    try {
+                        process.kill(processGroupId, "SIGKILL");
+                    } catch (error) {
+                        job.stderr = trimOutput(
+                            `${job.stderr}\nFailed to force terminate backup process group: ${String(error)}`.trim()
+                        );
+                    }
+                }, BACKUP_ABORT_SIGKILL_GRACE_MS);
+                abortKillTimer.unref();
+            } else if (!child.kill("SIGTERM")) {
+                job.stderr = trimOutput(
+                    `${job.stderr}\nFailed to terminate backup process`.trim()
+                );
+                void finalizeJob(130, "SIGTERM", false);
+            }
         } catch (error) {
             job.stderr = trimOutput(
                 `${job.stderr}\nFailed to terminate backup process: ${String(error)}`.trim()
             );
+            void finalizeJob(130, "SIGTERM", false);
         }
-        void finalizeJob(130, "SIGTERM", false);
     };
 
     if (signal?.aborted) {
