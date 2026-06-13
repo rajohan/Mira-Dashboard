@@ -309,11 +309,16 @@ function runDockerExec(
             try {
                 if (typeof child.pid === "number") {
                     process.kill(-child.pid, "SIGKILL");
-                } else {
-                    child.kill("SIGKILL");
+                    reject(new Error(`Timed out waiting for docker exec ${args[0]}`));
+                    return;
                 }
             } catch {
+                // Fall back to the direct child handle when process-group kill fails.
+            }
+            try {
                 child.kill("SIGKILL");
+            } catch {
+                // The timeout error below is still the actionable failure.
             }
             reject(new Error(`Timed out waiting for docker exec ${args[0]}`));
         }, backupAbortDockerExecTimeoutMs);

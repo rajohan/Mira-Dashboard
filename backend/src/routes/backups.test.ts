@@ -1012,6 +1012,41 @@ describe("backup routes", () => {
         );
     });
 
+    it("bounds hung docker exec probes when fallback kill throws", async () => {
+        registerBackupScheduledJobs();
+        backupTesting.setBackupAbortDockerExecTimeoutForTest(1);
+        await withEnv(
+            {
+                FAKE_BACKUP_NEVER_CLOSE: "1",
+                FAKE_BACKUP_KILL_THROWS: "1",
+                FAKE_DOCKER_EXEC_NEVER_CLOSE: "1",
+            },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = runScheduledJob(
+                    "backup.walg",
+                    "manual",
+                    controller.signal
+                );
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+
+                await assertAbortedWalgRemainsRunningUntilTerminationConfirmed(
+                    server,
+                    runPromise,
+                    /Timed out waiting for docker exec/u,
+                    () => {
+                        delete process.env.FAKE_DOCKER_EXEC_NEVER_CLOSE;
+                        delete process.env.FAKE_BACKUP_KILL_THROWS;
+                        process.env.FAKE_CONTAINER_PGREP_CODE = "1";
+                    }
+                );
+            }
+        );
+    });
+
     it("records docker exec probe spawn failures", async () => {
         registerBackupScheduledJobs();
         await withEnv(
