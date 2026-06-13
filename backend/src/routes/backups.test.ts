@@ -770,6 +770,53 @@ describe("backup routes", () => {
         }
     });
 
+    it("clears host force-kill timer before waiting for in-container WAL-G exit", async () => {
+        registerBackupScheduledJobs();
+        const originalKill = process.kill;
+        const signals: Array<[number, NodeJS.Signals | number | undefined]> = [];
+        process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+            signals.push([pid, signal]);
+            return true;
+        }) as typeof process.kill;
+
+        try {
+            mock.timers.enable({ apis: ["setTimeout"] });
+            await withEnv(
+                {
+                    FAKE_BACKUP_NEVER_CLOSE: "1",
+                    FAKE_BACKUP_PID: "4321",
+                    FAKE_CONTAINER_PGREP_RUNNING_ONCE: "1",
+                },
+                async () => {
+                    const controller = new AbortController();
+                    const runPromise = runScheduledJob(
+                        "backup.walg",
+                        "manual",
+                        controller.signal
+                    );
+
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+                    controller.abort();
+                    lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+
+                    mock.timers.tick(10_000);
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+
+                    const run = await runPromise;
+                    assert.equal(run.status, "failed");
+                    assert.deepEqual(
+                        signals.filter(([pid]) => pid === -4321),
+                        [[-4321, "SIGTERM"]]
+                    );
+                }
+            );
+        } finally {
+            mock.timers.reset();
+            process.kill = originalKill;
+        }
+    });
+
     it("waits for in-container WAL-G process exit after aborting scheduled backups", async () => {
         registerBackupScheduledJobs();
         await withEnv(

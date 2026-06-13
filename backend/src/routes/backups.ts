@@ -188,25 +188,30 @@ function startBackupJob(
     job.process = child;
     let finalized = false;
     let finalizing = false;
-    let abortKillTimer: NodeJS.Timeout | null = null;
+    let hostAbortKillTimer: NodeJS.Timeout | null = null;
+    let containerAbortKillTimer: NodeJS.Timeout | null = null;
 
     const finalizeJob = async (code: number, signalName: NodeJS.Signals | null) => {
         if (finalized || finalizing) {
             return;
         }
         finalizing = true;
+        if (hostAbortKillTimer) {
+            clearTimeout(hostAbortKillTimer);
+            hostAbortKillTimer = null;
+        }
         if (signalName && abortConfig) {
             await waitForContainerProcessExitWithRetries(abortConfig, job);
+        }
+        if (containerAbortKillTimer) {
+            clearTimeout(containerAbortKillTimer);
+            containerAbortKillTimer = null;
         }
         const completedCode = signalName ? 130 : code;
         job.status = "done";
         job.code = completedCode;
         job.endedAt = Date.now();
         finalized = true;
-        if (abortKillTimer) {
-            clearTimeout(abortKillTimer);
-            abortKillTimer = null;
-        }
         signal?.removeEventListener("abort", abortBackup);
         resolveCompleted(job);
         if (!signalName) {
@@ -222,21 +227,20 @@ function startBackupJob(
                     `${job.stderr}\nFailed to terminate container backup process: ${String(error)}`.trim()
                 );
             });
+            containerAbortKillTimer = setTimeout(() => {
+                terminateContainerProcess(abortConfig, "KILL").catch((error: unknown) => {
+                    job.stderr = trimOutput(
+                        `${job.stderr}\nFailed to force terminate container backup process: ${String(error)}`.trim()
+                    );
+                });
+            }, BACKUP_ABORT_SIGKILL_GRACE_MS);
+            containerAbortKillTimer.unref();
         }
         try {
             if (typeof child.pid === "number") {
                 const processGroupId = -child.pid;
                 process.kill(processGroupId, "SIGTERM");
-                abortKillTimer = setTimeout(() => {
-                    if (abortConfig) {
-                        terminateContainerProcess(abortConfig, "KILL").catch(
-                            (error: unknown) => {
-                                job.stderr = trimOutput(
-                                    `${job.stderr}\nFailed to force terminate container backup process: ${String(error)}`.trim()
-                                );
-                            }
-                        );
-                    }
+                hostAbortKillTimer = setTimeout(() => {
                     try {
                         process.kill(processGroupId, "SIGKILL");
                     } catch (error) {
@@ -245,7 +249,7 @@ function startBackupJob(
                         );
                     }
                 }, BACKUP_ABORT_SIGKILL_GRACE_MS);
-                abortKillTimer.unref();
+                hostAbortKillTimer.unref();
             } else if (!child.kill("SIGTERM")) {
                 job.stderr = trimOutput(
                     `${job.stderr}\nFailed to terminate backup process`.trim()
