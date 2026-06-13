@@ -197,6 +197,7 @@ function startBackupJob(
     job.process = child;
     let finalized = false;
     let finalizing = false;
+    let abortRequested = false;
     let hostAbortKillTimer: NodeJS.Timeout | null = null;
     let containerAbortKillTimer: NodeJS.Timeout | null = null;
 
@@ -209,26 +210,28 @@ function startBackupJob(
             clearTimeout(hostAbortKillTimer);
             hostAbortKillTimer = null;
         }
-        if (signalName && abortConfig) {
+        const interrupted = abortRequested || signalName !== null;
+        if (interrupted && abortConfig) {
             await waitForContainerProcessExitWithRetries(abortConfig, job);
         }
         if (containerAbortKillTimer) {
             clearTimeout(containerAbortKillTimer);
             containerAbortKillTimer = null;
         }
-        const completedCode = signalName ? 130 : code;
+        const completedCode = interrupted ? 130 : code;
         job.status = "done";
         job.code = completedCode;
         job.endedAt = Date.now();
         finalized = true;
         signal?.removeEventListener("abort", abortBackup);
         resolveCompleted(job);
-        if (!signalName) {
+        if (!interrupted || completedCode !== 0) {
             await refreshBackupStatus(type, job);
         }
     };
 
     const abortBackup = () => {
+        abortRequested = true;
         job.stderr = trimOutput(`${job.stderr}\nBackup aborted by scheduler`.trim());
         if (abortConfig) {
             terminateContainerProcess(abortConfig, "TERM").catch((error: unknown) => {

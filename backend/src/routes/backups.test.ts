@@ -111,6 +111,11 @@ function createFakeBackupProcess(): FakeBackupProcess {
             return false;
         }
         child.killedWithSignal = signal ?? "SIGTERM";
+        if (process.env.FAKE_BACKUP_CLOSE_ZERO_ON_KILL === "1") {
+            queueMicrotask(() => {
+                child.emit("close", 0, null);
+            });
+        }
         if (process.env.FAKE_BACKUP_CLOSE_ON_KILL === "1") {
             queueMicrotask(() => {
                 child.emit("close", null, child.killedWithSignal);
@@ -742,6 +747,43 @@ describe("backup routes", () => {
                     current.body.job?.stderr ?? "",
                     /Backup aborted by scheduler/u
                 );
+                const refreshedStatus = await waitForCacheEntry("backup.walg.status");
+                assert.equal(refreshedStatus.ok, true);
+            }
+        );
+    });
+
+    it("marks aborted backup jobs interrupted when the child exits cleanly", async () => {
+        registerBackupScheduledJobs();
+        await withEnv(
+            { FAKE_BACKUP_CLOSE_ZERO_ON_KILL: "1", FAKE_BACKUP_NEVER_CLOSE: "1" },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = runScheduledJob(
+                    "backup.kopia",
+                    "manual",
+                    controller.signal
+                );
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+
+                const run = await runPromise;
+                assert.equal(run.status, "failed");
+                assert.match(run.message ?? "", /KOPIA backup failed with code 130/u);
+                assert.match(run.message ?? "", /Backup aborted by scheduler/u);
+
+                const current = await requestJson<{
+                    job: { status: string; code: number; stderr: string } | null;
+                }>(server, "/api/backups/kopia");
+                assert.equal(current.body.job?.status, "done");
+                assert.equal(current.body.job?.code, 130);
+                assert.match(
+                    current.body.job?.stderr ?? "",
+                    /Backup aborted by scheduler/u
+                );
+                const refreshedStatus = await waitForCacheEntry("backup.kopia.status");
+                assert.equal(refreshedStatus.ok, true);
             }
         );
     });
