@@ -354,19 +354,24 @@ describe("backup routes", () => {
     it("registers nightly backup schedules and starts backup jobs from scheduler", async () => {
         registerBackupScheduledJobs();
 
-        const walgJob = getScheduledJob("backup.walg.nightly");
+        const walgJob = getScheduledJob("backup.walg");
         assert.equal(walgJob?.scheduleType, "daily");
         assert.equal(walgJob?.timeOfDay, "03:20");
         assert.equal(walgJob?.actionKey, "backup.run");
         assert.deepEqual(walgJob?.actionPayload, { type: "walg" });
 
-        const kopiaJob = getScheduledJob("backup.kopia.nightly");
+        const kopiaJob = getScheduledJob("backup.kopia");
         assert.equal(kopiaJob?.scheduleType, "daily");
         assert.equal(kopiaJob?.timeOfDay, "03:50");
         assert.equal(kopiaJob?.actionKey, "backup.run");
         assert.deepEqual(kopiaJob?.actionPayload, { type: "kopia" });
 
-        const walgRun = await runScheduledJob("backup.walg.nightly");
+        const seededWalgStatus = await waitForCacheEntry("backup.walg.status");
+        const seededKopiaStatus = await waitForCacheEntry("backup.kopia.status");
+        assert.equal(seededWalgStatus.ok, true);
+        assert.equal(seededKopiaStatus.ok, true);
+
+        const walgRun = await runScheduledJob("backup.walg");
         assert.equal(walgRun.status, "success");
         assert.equal(
             (walgRun.output as { backup?: { type?: string; status?: string } }).backup
@@ -379,7 +384,7 @@ describe("backup routes", () => {
             "done"
         );
 
-        const kopiaRun = await runScheduledJob("backup.kopia.nightly");
+        const kopiaRun = await runScheduledJob("backup.kopia");
         assert.equal(kopiaRun.status, "success");
         assert.equal(
             (kopiaRun.output as { backup?: { type?: string; status?: string } }).backup
@@ -397,19 +402,19 @@ describe("backup routes", () => {
         registerBackupScheduledJobs();
         db.prepare("UPDATE scheduled_jobs SET action_payload_json = ? WHERE id = ?").run(
             JSON.stringify({ type: "postgres" }),
-            "backup.walg.nightly"
+            "backup.walg"
         );
 
-        const run = await runScheduledJob("backup.walg.nightly");
+        const run = await runScheduledJob("backup.walg");
         assert.equal(run.status, "failed");
         assert.match(run.message ?? "", /invalid backup type/u);
 
         for (const payload of ["null", JSON.stringify("walg")]) {
             db.prepare(
                 "UPDATE scheduled_jobs SET action_payload_json = ? WHERE id = ?"
-            ).run(payload, "backup.walg.nightly");
+            ).run(payload, "backup.walg");
 
-            const shapeRun = await runScheduledJob("backup.walg.nightly");
+            const shapeRun = await runScheduledJob("backup.walg");
             assert.equal(shapeRun.status, "failed");
             assert.match(shapeRun.message ?? "", /invalid backup type/u);
         }
@@ -418,10 +423,12 @@ describe("backup routes", () => {
     it("records scheduled backup failures after the process exits", async () => {
         registerBackupScheduledJobs();
         await withEnv({ FAKE_BACKUP_EXIT_CODE: "12" }, async () => {
-            const run = await runScheduledJob("backup.walg.nightly");
+            const run = await runScheduledJob("backup.walg");
             assert.equal(run.status, "failed");
             assert.match(run.message ?? "", /WALG backup failed with code 12/u);
             assert.match(run.message ?? "", /backup warning/u);
+            const refreshedStatus = await waitForCacheEntry("backup.walg.status");
+            assert.equal(refreshedStatus.ok, true);
         });
     });
 
@@ -430,7 +437,7 @@ describe("backup routes", () => {
         await withEnv(
             { FAKE_BACKUP_EMPTY_OUTPUT: "1", FAKE_BACKUP_EXIT_CODE: "12" },
             async () => {
-                const run = await runScheduledJob("backup.walg.nightly");
+                const run = await runScheduledJob("backup.walg");
                 assert.equal(run.status, "failed");
                 assert.match(run.message ?? "", /^WALG backup failed with code 12$/u);
             }

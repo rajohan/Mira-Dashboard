@@ -7,7 +7,7 @@ const minimumIntervalSeconds = 60;
 const latestRunsJobIdChunkSize = 900;
 const runningJobs = new Set<string>();
 const scheduledJobRuns = new Set<Promise<void>>();
-const actionHandlers = new Map<string, ScheduledJobActionHandler>();
+const actionHandlers = new Map<string, ScheduledJobActionRegistration>();
 
 let scheduler: NodeJS.Timeout | null = null;
 let schedulerTickRunning = false;
@@ -20,6 +20,15 @@ export type ScheduledJobActionHandler = (
     job: ScheduledJob,
     signal?: AbortSignal
 ) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void;
+
+export interface ScheduledJobActionOptions {
+    timeoutMs?: number;
+}
+
+interface ScheduledJobActionRegistration {
+    handler: ScheduledJobActionHandler;
+    timeoutMs?: number;
+}
 
 export interface ScheduledJob {
     id: string;
@@ -420,10 +429,14 @@ function mapJob(
 
 export function registerScheduledJobAction(
     actionKey: string,
-    handler: ScheduledJobActionHandler
+    handler: ScheduledJobActionHandler,
+    options: ScheduledJobActionOptions = {}
 ): void {
     assertValidActionKey(actionKey);
-    actionHandlers.set(actionKey, handler);
+    actionHandlers.set(actionKey, {
+        handler,
+        timeoutMs: options.timeoutMs,
+    });
 }
 
 export function upsertScheduledJob(definition: ScheduledJobDefinition): ScheduledJob {
@@ -729,8 +742,8 @@ export async function runScheduledJob(
         error.statusCode = 409;
         throw error;
     }
-    const handler = actionHandlers.get(job.actionKey);
-    if (!handler && triggerType === "manual") {
+    const action = actionHandlers.get(job.actionKey);
+    if (!action && triggerType === "manual") {
         throw new ScheduledJobValidationError(
             `No scheduled job action registered for ${job.actionKey}`
         );
@@ -749,12 +762,12 @@ export async function runScheduledJob(
     try {
         let output: Record<string, unknown>;
         try {
-            if (!handler) {
+            if (!action) {
                 throw new ScheduledJobValidationError(
                     `No scheduled job action registered for ${job.actionKey}`
                 );
             }
-            output = (await handler(job, signal)) ?? {};
+            output = (await action.handler(job, signal)) ?? {};
             if (signal?.aborted) {
                 return finishRunOrReport(run, "failed", "Scheduled job timed out", {});
             }
@@ -774,6 +787,7 @@ export async function runScheduledJob(
 
 function runWithTimeout(
     id: string,
+    timeoutMs: number,
     run: (signal: AbortSignal) => Promise<ScheduledJobRun>
 ): Promise<void> {
     const controller = new AbortController();
@@ -782,14 +796,12 @@ function runWithTimeout(
     const timeoutPromise = new Promise<void>((resolve) => {
         timeout = setTimeout(async () => {
             controller.abort();
-            console.warn(
-                `[ScheduledJobs] Scheduled job ${id} exceeded ${scheduledJobRunTimeoutMs}ms`
-            );
+            console.warn(`[ScheduledJobs] Scheduled job ${id} exceeded ${timeoutMs}ms`);
             await runPromise.catch(() => {});
             markLatestRunningRunFailed(id, "Scheduled job timed out");
             runningJobs.delete(id);
             resolve();
-        }, scheduledJobRunTimeoutMs);
+        }, timeoutMs);
         timeout.unref();
     });
     return Promise.race([runPromise.then(() => {}), timeoutPromise]).finally(() => {
@@ -826,7 +838,10 @@ async function runDueJobs(): Promise<void> {
                 ) {
                     continue;
                 }
-                const run = runWithTimeout(row.id, (signal) =>
+                const timeoutMs =
+                    actionHandlers.get(currentJob.actionKey)?.timeoutMs ??
+                    scheduledJobRunTimeoutMs;
+                const run = runWithTimeout(row.id, timeoutMs, (signal) =>
                     runScheduledJob(row.id, "schedule", signal)
                 ).catch(() => {
                     // Keep unrelated due jobs running even if one row is stale.

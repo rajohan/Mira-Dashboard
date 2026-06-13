@@ -2036,7 +2036,7 @@ export function waitForLocalCacheSeed(key: string): Promise<void> {
     return localCacheSeedPromises.get(key) ?? Promise.resolve();
 }
 
-function seedMissingLocalCacheEntry(key: string): void {
+export function seedMissingLocalCacheEntry(key: string): void {
     if (cacheEntryIsFresh(key)) {
         return;
     }

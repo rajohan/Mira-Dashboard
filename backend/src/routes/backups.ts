@@ -4,13 +4,17 @@ import { randomUUID } from "node:crypto";
 import express, { type RequestHandler } from "express";
 
 import { asyncRoute } from "../lib/errors.js";
-import { refreshCacheProducer } from "../services/cacheRefresh.js";
+import {
+    refreshCacheProducer,
+    seedMissingLocalCacheEntry,
+} from "../services/cacheRefresh.js";
 import {
     getScheduledJob,
     registerScheduledJobAction,
     upsertScheduledJob,
 } from "../services/scheduledJobs.js";
 const MAX_OUTPUT_CHARS = 100_000;
+const SCHEDULED_BACKUP_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 let spawnBackupProcess = spawn;
 
 /** Represents backup job. */
@@ -112,6 +116,10 @@ function getScheduledBackupType(payload: unknown) {
     return (payload as { type?: unknown }).type;
 }
 
+function backupStatusCacheKey(type: BackupJob["type"]) {
+    return type === "kopia" ? "backup.kopia.status" : "backup.walg.status";
+}
+
 /** Performs start backup job. */
 function startBackupJob(type: BackupJob["type"], command: string) {
     const existingJob = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
@@ -205,7 +213,7 @@ async function refreshBackupStatus(
     type: BackupJob["type"],
     job: BackupJob
 ): Promise<void> {
-    const cacheKey = type === "kopia" ? "backup.kopia.status" : "backup.walg.status";
+    const cacheKey = backupStatusCacheKey(type);
     await refreshCacheProducer(cacheKey).catch((error: unknown) => {
         job.stderr = trimOutput(
             `${job.stderr}\nStatus refresh failed: ${String(error)}`.trim()
@@ -230,6 +238,7 @@ async function startScheduledBackup(type: BackupJob["type"]) {
     const job = type === "kopia" ? startKopiaBackupJob() : startWalgBackupJob();
     const completedJob = await job.completed;
     if (completedJob.code !== 0) {
+        await refreshBackupStatus(type, completedJob);
         const details = completedJob.stderr || completedJob.stdout;
         throw new Error(
             `${type.toUpperCase()} backup failed with code ${completedJob.code}${
@@ -242,7 +251,7 @@ async function startScheduledBackup(type: BackupJob["type"]) {
 
 const backupScheduledJobs = [
     {
-        id: "backup.walg.nightly",
+        id: "backup.walg",
         name: "WAL-G nightly backup",
         description: "Run the nightly WAL-G PostgreSQL base backup.",
         scheduleType: "daily",
@@ -252,7 +261,7 @@ const backupScheduledJobs = [
         actionPayload: { type: "walg" },
     },
     {
-        id: "backup.kopia.nightly",
+        id: "backup.kopia",
         name: "Kopia nightly backup",
         description: "Run the nightly Kopia filesystem backup.",
         scheduleType: "daily",
@@ -264,16 +273,20 @@ const backupScheduledJobs = [
 ] as const;
 
 export function registerBackupScheduledJobs(): void {
-    registerScheduledJobAction("backup.run", (job) => {
-        const type = getScheduledBackupType(job.actionPayload);
-        if (type !== "kopia" && type !== "walg") {
-            throw Object.assign(
-                new Error(`Scheduled backup job ${job.id} has invalid backup type`),
-                { statusCode: 400 }
-            );
-        }
-        return startScheduledBackup(type);
-    });
+    registerScheduledJobAction(
+        "backup.run",
+        (job) => {
+            const type = getScheduledBackupType(job.actionPayload);
+            if (type !== "kopia" && type !== "walg") {
+                throw Object.assign(
+                    new Error(`Scheduled backup job ${job.id} has invalid backup type`),
+                    { statusCode: 400 }
+                );
+            }
+            return startScheduledBackup(type);
+        },
+        { timeoutMs: SCHEDULED_BACKUP_TIMEOUT_MS }
+    );
 
     for (const job of backupScheduledJobs) {
         const existing = getScheduledJob(job.id);
@@ -285,6 +298,9 @@ export function registerBackupScheduledJobs(): void {
             timeOfDay: existing ? existing.timeOfDay : job.timeOfDay,
             cronExpression: existing?.cronExpression ?? null,
         });
+        if (existing?.enabled ?? true) {
+            seedMissingLocalCacheEntry(backupStatusCacheKey(job.actionPayload.type));
+        }
     }
 }
 
