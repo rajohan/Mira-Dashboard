@@ -1,77 +1,47 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { after, before, beforeEach, describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 
-import { __testing as cacheStoreTesting } from "./cacheStore.js";
+import { clearCacheEntries, insertCacheEntry } from "../testUtils/cacheFixtures.js";
+import { fetchCachedSystemHost } from "./systemCache.js";
 
-const originalPath = process.env.PATH;
-const originalMode = process.env.FAKE_SYSTEM_CACHE_MODE;
-
-async function installFakeDocker(tempDir: string): Promise<void> {
-    const binDir = path.join(tempDir, "bin");
-    await mkdir(binDir, { recursive: true });
-    const dockerPath = path.join(binDir, "docker");
-    await writeFile(
-        dockerPath,
-        String.raw`#!${process.execPath}
-const mode = process.env.FAKE_SYSTEM_CACHE_MODE || "fresh";
-if (mode === "missing") {
-  process.exit(0);
-}
-const status = mode === "stale" ? "stale" : "fresh";
-const data = mode === "invalid" ? "not-json" : JSON.stringify({ version: { current: "v2026.5.4", latest: "v2026.5.5", updateAvailable: true, checkedAt: 1800000000000 }, doctorWarningCount: 2 });
-const nullable = mode === "nullable";
-process.stdout.write([
-  "key\tdata\tsource\tupdated_at\tlast_attempt_at\texpires_at\tstatus\terror_code\terror_message\tconsecutive_failures\tmeta",
-  "system.host\t" + data + "\tsystem\t" + (nullable ? "" : "2026-05-11T00:00:00.000Z") + "\t" + (nullable ? "" : "2026-05-11T00:00:00.000Z") + "\t" + (nullable ? "" : "2026-05-11T01:00:00.000Z") + "\t" + status + "\t" + (nullable ? "" : "WARN") + "\t" + (nullable ? "" : "Careful") + "\t" + (nullable ? "" : "2") + "\t" + (nullable ? "" : "{\"producer\":\"test\"}"),
-  "",
-].join("\n"));
-`,
-        "utf8"
-    );
-    await chmod(dockerPath, 0o755);
-    process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
-    cacheStoreTesting.setDockerBinForTests(dockerPath);
+function insertSystemHost(
+    data: unknown,
+    options: Partial<Parameters<typeof insertCacheEntry>[0]> = {}
+): void {
+    insertCacheEntry({
+        key: "system.host",
+        data,
+        source: "system",
+        errorCode: "WARN",
+        errorMessage: "Careful",
+        consecutiveFailures: 2,
+        meta: { producer: "test" },
+        ...options,
+    });
 }
 
 describe("system cache helpers", () => {
-    let tempDir: string;
-    let fetchCachedSystemHost: typeof import("./systemCache.js").fetchCachedSystemHost;
-
-    before(async () => {
-        tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-system-cache-"));
-        await installFakeDocker(tempDir);
-        ({ fetchCachedSystemHost } = await import("./systemCache.js"));
-    });
-
     beforeEach(() => {
-        process.env.FAKE_SYSTEM_CACHE_MODE = "fresh";
-    });
-
-    after(async () => {
-        if (originalPath === undefined) {
-            delete process.env.PATH;
-        } else {
-            process.env.PATH = originalPath;
-        }
-        if (originalMode === undefined) {
-            delete process.env.FAKE_SYSTEM_CACHE_MODE;
-        } else {
-            process.env.FAKE_SYSTEM_CACHE_MODE = originalMode;
-        }
-        cacheStoreTesting.setDockerBinForTests(undefined);
-        await rm(tempDir, { recursive: true, force: true });
+        clearCacheEntries();
     });
 
     it("maps fresh system.host cache rows into API shape", async () => {
+        insertSystemHost({
+            version: {
+                current: "v2026.5.4",
+                latest: "v2026.5.5",
+                updateAvailable: true,
+                checkedAt: 1_800_000_000_000,
+            },
+            doctorWarningCount: 2,
+        });
+
         const cached = await fetchCachedSystemHost();
 
         assert.equal(cached.source, "system");
         assert.equal(cached.status, "fresh");
         assert.equal(cached.updatedAt, "2026-05-11T00:00:00.000Z");
-        assert.equal(cached.expiresAt, "2026-05-11T01:00:00.000Z");
+        assert.equal(cached.expiresAt, "2099-05-11T01:00:00.000Z");
         assert.equal(cached.errorCode, "WARN");
         assert.equal(cached.errorMessage, "Careful");
         assert.equal(cached.consecutiveFailures, 2);
@@ -80,13 +50,30 @@ describe("system cache helpers", () => {
             current: "v2026.5.4",
             latest: "v2026.5.5",
             updateAvailable: true,
-            checkedAt: 1800000000000,
+            checkedAt: 1_800_000_000_000,
         });
         assert.equal(cached.data.doctorWarningCount, 2);
     });
 
     it("maps nullable metadata fields to null/default values", async () => {
-        process.env.FAKE_SYSTEM_CACHE_MODE = "nullable";
+        insertSystemHost(
+            {
+                version: {
+                    current: "v2026.5.4",
+                    latest: null,
+                    updateAvailable: false,
+                },
+            },
+            {
+                consecutiveFailures: 0,
+                errorCode: null,
+                errorMessage: null,
+                expiresAt: "",
+                lastAttemptAt: "",
+                meta: "not-json",
+                updatedAt: null,
+            }
+        );
 
         const cached = await fetchCachedSystemHost();
 
@@ -100,17 +87,16 @@ describe("system cache helpers", () => {
     });
 
     it("rejects missing, stale, and invalid system host cache rows", async () => {
-        process.env.FAKE_SYSTEM_CACHE_MODE = "missing";
         await assert.rejects(fetchCachedSystemHost, {
             message: "System host cache entry not found or not fresh",
         });
 
-        process.env.FAKE_SYSTEM_CACHE_MODE = "stale";
+        insertSystemHost({ version: {} }, { status: "stale" });
         await assert.rejects(fetchCachedSystemHost, {
             message: "System host cache entry not found or not fresh",
         });
 
-        process.env.FAKE_SYSTEM_CACHE_MODE = "invalid";
+        insertSystemHost("not-json");
         await assert.rejects(fetchCachedSystemHost, {
             message: "System host cache payload is invalid",
         });

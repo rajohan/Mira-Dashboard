@@ -4,10 +4,15 @@ import { getPersistedGatewayToken } from "./auth.js";
 import gateway from "./gateway.js";
 import { resolveListenPort, server } from "./server.js";
 import {
+    registerCacheRefreshScheduledJobs,
+    waitForLocalCacheSeed,
+} from "./services/cacheRefresh.js";
+import {
     startOpenClawNotificationMonitor,
     stopOpenClawNotificationMonitor,
 } from "./services/openclawNotifications.js";
 import {
+    runQuotaNotificationCheck,
     startQuotaNotificationMonitor,
     stopQuotaNotificationMonitor,
 } from "./services/quotaNotifications.js";
@@ -70,15 +75,19 @@ export function handleServerListening(): void {
             );
         }
 
-        startQuotaNotificationMonitor();
-        quotaMonitorStarted = true;
-        startOpenClawNotificationMonitor();
-        openClawMonitorStarted = true;
         if (shouldStartScheduledJobs()) {
+            registerCacheRefreshScheduledJobs();
             startScheduledJobScheduler();
             scheduledJobSchedulerStarted = true;
             installSchedulerCloseCleanup();
         }
+        startQuotaNotificationMonitor();
+        quotaMonitorStarted = true;
+        void waitForLocalCacheSeed("quotas.summary").then(() =>
+            runQuotaNotificationCheck()
+        );
+        startOpenClawNotificationMonitor();
+        openClawMonitorStarted = true;
         afterBackgroundServicesStartedForTest?.();
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);

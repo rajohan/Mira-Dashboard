@@ -1,46 +1,12 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 
 import { db } from "../db.js";
+import { insertCacheEntry } from "../testUtils/cacheFixtures.js";
 
-const originalPath = process.env.PATH;
 const originalUpdateAvailable = process.env.FAKE_OPENCLAW_UPDATE_AVAILABLE;
 const originalLatest = process.env.FAKE_OPENCLAW_LATEST;
 const originalMissingVersion = process.env.FAKE_OPENCLAW_MISSING_VERSION;
-
-async function installFakeDocker(tempDir: string): Promise<void> {
-    const binDir = path.join(tempDir, "bin");
-    await mkdir(binDir, { recursive: true });
-    const dockerPath = path.join(binDir, "docker");
-    await writeFile(
-        dockerPath,
-        String.raw`#!${process.execPath}
-	const updateAvailable = process.env.FAKE_OPENCLAW_UPDATE_AVAILABLE !== "false";
-	const latest = process.env.FAKE_OPENCLAW_LATEST || "v2026.5.99";
-	const version = process.env.FAKE_OPENCLAW_MISSING_VERSION === "true" ? undefined : {
-	  current: "v2026.5.4",
-	  latest,
-	  updateAvailable,
-	  checkedAt: 1800000000000,
-	};
-	const data = {
-	  version,
-	  checkedAt: "2026-05-11T00:00:00.000Z",
-	};
-process.stdout.write([
-  "key\tdata\tsource\tupdated_at\tlast_attempt_at\texpires_at\tstatus\terror_code\terror_message\tconsecutive_failures\tmeta",
-  "system.host\t" + JSON.stringify(data) + "\tsystem\t2026-05-11T00:00:00.000Z\t2026-05-11T00:00:00.000Z\t2026-05-11T01:00:00.000Z\tfresh\t\t\t0\t{}",
-  "",
-].join("\n"));
-`,
-        "utf8"
-    );
-    await chmod(dockerPath, 0o755);
-    process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
-}
 
 function openClawNotifications(): Array<{
     title: string;
@@ -69,19 +35,42 @@ function openClawNotifications(): Array<{
         });
 }
 
+function insertSystemHostCacheFromEnv(): void {
+    const updateAvailable = process.env.FAKE_OPENCLAW_UPDATE_AVAILABLE !== "false";
+    const latest = process.env.FAKE_OPENCLAW_LATEST || "v2026.5.99";
+    const version =
+        process.env.FAKE_OPENCLAW_MISSING_VERSION === "true"
+            ? undefined
+            : {
+                  current: "v2026.5.4",
+                  latest,
+                  updateAvailable,
+                  checkedAt: 1_800_000_000_000,
+              };
+    insertCacheEntry({
+        key: "system.host",
+        data: {
+            version,
+            checkedAt: "2026-05-11T00:00:00.000Z",
+        },
+        source: "system",
+    });
+}
+
 describe("OpenClaw update notifications", () => {
-    let tempDir: string;
     let runOpenClawNotificationCheck: () => Promise<void>;
     let startOpenClawNotificationMonitor: (intervalMs?: number) => void;
     let getState: () => { is_armed: number; last_latest: string | null };
     let stopOpenClawNotificationMonitorForTest: () => void;
 
     before(async () => {
-        tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-openclaw-notifications-"));
-        await installFakeDocker(tempDir);
         const openClawNotifications = await import("./openclawNotifications.js");
-        ({ runOpenClawNotificationCheck, startOpenClawNotificationMonitor } =
-            openClawNotifications);
+        startOpenClawNotificationMonitor =
+            openClawNotifications.startOpenClawNotificationMonitor;
+        runOpenClawNotificationCheck = async () => {
+            insertSystemHostCacheFromEnv();
+            await openClawNotifications.runOpenClawNotificationCheck();
+        };
         ({ getState, stopOpenClawNotificationMonitorForTest } =
             openClawNotifications.__testing);
     });
@@ -98,7 +87,6 @@ describe("OpenClaw update notifications", () => {
     });
 
     after(async () => {
-        process.env.PATH = originalPath;
         if (originalUpdateAvailable === undefined) {
             delete process.env.FAKE_OPENCLAW_UPDATE_AVAILABLE;
         } else {
@@ -114,7 +102,6 @@ describe("OpenClaw update notifications", () => {
         } else {
             process.env.FAKE_OPENCLAW_MISSING_VERSION = originalMissingVersion;
         }
-        await rm(tempDir, { recursive: true, force: true });
     });
 
     it("creates one update notification per latest version and disarms repeated alerts", async () => {

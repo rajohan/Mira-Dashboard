@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
+import { type ChildProcess, type spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { PassThrough } from "node:stream";
+import { after, before, beforeEach, describe, it } from "node:test";
 
 import express from "express";
 
+import { db } from "../db.js";
 import { withEnv } from "../testUtils/env.js";
 import backupRoutes from "./backups.js";
 import { __testing as backupTesting } from "./backups.js";
@@ -16,62 +20,114 @@ interface TestServer {
     close: () => Promise<void>;
 }
 
-const originalDopplerBin = process.env.DOPPLER_BIN;
-const originalN8nRoot = process.env.MIRA_N8N_ROOT;
+interface FakeBackupProcess extends ChildProcess {
+    stderr: PassThrough;
+    stdout: PassThrough;
+}
 
-async function installFakeDoppler(tempDir: string): Promise<string> {
-    const dopplerPath = path.join(tempDir, "doppler");
+const originalDockerBin = process.env.MIRA_DOCKER_BIN;
+
+async function installFakeDocker(tempDir: string): Promise<string> {
+    const dockerPath = path.join(tempDir, "docker");
     await writeFile(
-        dopplerPath,
-        String.raw`#!${process.execPath}
-const args = process.argv.slice(2);
-const command = args.at(-1) || "";
-if (process.env.FAKE_BACKUP_SIGNAL === "1") {
-    process.kill(process.pid, "SIGTERM");
-    setInterval(() => {}, 1000);
+        dockerPath,
+        `#!${process.execPath}
+const args = process.argv.slice(2).join(" ");
+if (args === "exec kopia kopia snapshot list --all --json-verbose --json") {
+    const writeSnapshots = () => process.stdout.write(JSON.stringify([
+        {
+            id: "kopia-1",
+            source: { path: "/source/docker" },
+            description: "Docker snapshot",
+            startTime: "2099-01-01T00:00:00.000Z",
+            endTime: "2099-01-01T00:01:00.000Z",
+            stats: { fileCount: 2, totalSize: 512, errorCount: 0, ignoredErrorCount: 0 },
+            retentionReason: ["latest"]
+        },
+        {
+            id: "kopia-2",
+            source: { path: "/source/projects" },
+            endTime: "2099-01-01T00:01:00.000Z",
+            stats: { fileCount: 1, totalSize: 256, errorCount: 0, ignoredErrorCount: 0 },
+            retentionReason: ["latest"]
+        },
+        {
+            id: "kopia-3",
+            source: { path: "/source/openclaw" },
+            endTime: "2099-01-01T00:01:00.000Z",
+            stats: { fileCount: 1, totalSize: 128, errorCount: 0, ignoredErrorCount: 0 },
+            retentionReason: ["latest"]
+        }
+    ]));
+    const delayMs = Number(process.env.FAKE_DOCKER_STATUS_DELAY_MS || 0);
+    if (delayMs > 0) setTimeout(writeSnapshots, delayMs);
+    else writeSnapshots();
+} else if (args === "exec walg wal-g backup-list --detail --json") {
+    process.stdout.write(JSON.stringify([
+        {
+            backup_name: "base_2099",
+            modified: "2099-01-01T00:02:00.000Z",
+            wal_file_name: "000000010000000000000001",
+            storage_name: "default"
+        }
+    ]));
 } else {
-    process.stdout.write("started backup\n" + command + "\n");
-    process.stderr.write("backup warning\n");
-    if (process.env.FAKE_BACKUP_HOLD_UNTIL) {
-        const fs = require("node:fs");
-        const timer = setInterval(() => {
-            if (fs.existsSync(process.env.FAKE_BACKUP_HOLD_UNTIL)) {
-                clearInterval(timer);
-                process.exit(0);
-            }
-        }, 10);
-        return;
-    }
-    setTimeout(() => process.exit(0), 10);
+    process.stderr.write("unexpected docker args: " + args);
+    process.exit(2);
 }
 `,
         "utf8"
     );
-    await chmod(dopplerPath, 0o755);
-    return dopplerPath;
+    await chmod(dockerPath, 0o755);
+    return dockerPath;
 }
 
-async function createTestServer(
-    tempDir: string,
-    dopplerBin: string
-): Promise<TestServer> {
-    const savedDopplerBin = process.env.DOPPLER_BIN;
-    const savedN8nRoot = process.env.MIRA_N8N_ROOT;
+function createFakeBackupProcess(): FakeBackupProcess {
+    const child = new PassThrough() as unknown as FakeBackupProcess;
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    return child;
+}
+
+function createFakeBackupSpawn(): typeof spawn {
+    return ((_file: string, args: readonly string[]) => {
+        const child = createFakeBackupProcess();
+        const command = String(args.at(-1) ?? "");
+        queueMicrotask(() => {
+            if (process.env.FAKE_BACKUP_SIGNAL === "1") {
+                child.emit("close", null, "SIGTERM");
+                return;
+            }
+            child.stdout?.write(`started backup\n${command}\n`);
+            child.stderr?.write("backup warning\n");
+            if (process.env.FAKE_BACKUP_HOLD_UNTIL) {
+                const timer = setInterval(() => {
+                    if (existsSync(process.env.FAKE_BACKUP_HOLD_UNTIL || "")) {
+                        clearInterval(timer);
+                        child.emit("close", 0, null);
+                    }
+                }, 10);
+                return;
+            }
+            setTimeout(() => {
+                child.emit("close", 0, null);
+            }, 10);
+        });
+        return child;
+    }) as unknown as typeof spawn;
+}
+
+async function createTestServer(tempDir: string): Promise<TestServer> {
+    const savedDockerBin = process.env.MIRA_DOCKER_BIN;
     const restoreEnv = () => {
-        if (savedDopplerBin === undefined) {
-            delete process.env.DOPPLER_BIN;
+        if (savedDockerBin === undefined) {
+            delete process.env.MIRA_DOCKER_BIN;
         } else {
-            process.env.DOPPLER_BIN = savedDopplerBin;
-        }
-        if (savedN8nRoot === undefined) {
-            delete process.env.MIRA_N8N_ROOT;
-        } else {
-            process.env.MIRA_N8N_ROOT = savedN8nRoot;
+            process.env.MIRA_DOCKER_BIN = savedDockerBin;
         }
     };
 
-    process.env.DOPPLER_BIN = dopplerBin;
-    process.env.MIRA_N8N_ROOT = tempDir;
+    process.env.MIRA_DOCKER_BIN = await installFakeDocker(tempDir);
     try {
         const app = express();
         app.use(express.json());
@@ -106,14 +162,7 @@ async function createTestServer(
 }
 
 async function startServer(tempDir: string): Promise<TestServer> {
-    return createTestServer(tempDir, await installFakeDoppler(tempDir));
-}
-
-async function startServerWithDoppler(
-    tempDir: string,
-    dopplerBin: string
-): Promise<TestServer> {
-    return createTestServer(tempDir, dopplerBin);
+    return createTestServer(tempDir);
 }
 
 async function requestJson<T>(
@@ -147,26 +196,64 @@ async function waitForDone(
     throw new Error("Backup job did not finish");
 }
 
+async function waitForDoneWithRefreshFailure(
+    server: TestServer,
+    pathName: string
+): Promise<{ status: string; code: number; stdout: string; stderr: string }> {
+    const deadline = Date.now() + 5_000;
+    let latest = await waitForDone(server, pathName);
+    while (Date.now() < deadline) {
+        if (
+            /Status refresh failed/u.test(latest.stderr) &&
+            /missing-docker|ENOENT/u.test(latest.stderr)
+        ) {
+            return latest;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const response = await requestJson<{
+            job: { status: string; code: number; stdout: string; stderr: string } | null;
+        }>(server, pathName);
+        latest = response.body.job ?? latest;
+    }
+    throw new Error(`Backup status refresh failure was not recorded: ${latest.stderr}`);
+}
+
+async function waitForCacheEntry(key: string): Promise<Record<string, unknown>> {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+        const row = db
+            .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
+            .get(key) as { data_json: string | null } | undefined;
+        if (row?.data_json) {
+            return JSON.parse(row.data_json) as Record<string, unknown>;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(`Cache entry ${key} was not refreshed`);
+}
+
 describe("backup routes", () => {
     let server: TestServer;
     let tempDir: string;
 
     before(async () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-backup-routes-"));
+        backupTesting.setSpawnBackupProcessForTest(createFakeBackupSpawn());
         server = await startServer(tempDir);
+    });
+
+    beforeEach(() => {
+        db.prepare(
+            "DELETE FROM cache_entries WHERE key IN ('backup.kopia.status', 'backup.walg.status')"
+        ).run();
     });
 
     after(async () => {
         await server.close();
-        if (originalDopplerBin === undefined) {
-            delete process.env.DOPPLER_BIN;
+        backupTesting.setSpawnBackupProcessForTest();
+        if (originalDockerBin === undefined) {
+            delete process.env.MIRA_DOCKER_BIN;
         } else {
-            process.env.DOPPLER_BIN = originalDopplerBin;
-        }
-        if (originalN8nRoot === undefined) {
-            delete process.env.MIRA_N8N_ROOT;
-        } else {
-            process.env.MIRA_N8N_ROOT = originalN8nRoot;
+            process.env.MIRA_DOCKER_BIN = originalDockerBin;
         }
         await rm(tempDir, { recursive: true, force: true });
     });
@@ -183,7 +270,7 @@ describe("backup routes", () => {
         assert.deepEqual(walg.body, { job: null });
     });
 
-    it("starts and completes Kopia backup jobs through Doppler", async () => {
+    it("starts and completes Kopia backup jobs", async () => {
         const started = await requestJson<{
             ok: boolean;
             job: { id: string; type: string; status: string; code: number | null };
@@ -198,8 +285,12 @@ describe("backup routes", () => {
         const done = await waitForDone(server, "/api/backups/kopia");
         assert.equal(done.status, "done");
         assert.equal(done.code, 0);
-        assert.match(done.stdout, /backup-kopia-status\.mjs/);
+        assert.match(done.stdout, /\/opt\/docker\/apps\/kopia\/backup\.sh/);
+        assert.doesNotMatch(done.stdout, /backup-kopia-status\.mjs/);
         assert.equal(done.stderr, "backup warning\n");
+        const cache = await waitForCacheEntry("backup.kopia.status");
+        assert.equal(cache.ok, true);
+        assert.equal(cache.tool, "kopia");
     });
 
     it("returns the active job when a Kopia backup is already running", async () => {
@@ -227,7 +318,7 @@ describe("backup routes", () => {
         });
     });
 
-    it("starts and completes WAL-G backup jobs through Doppler", async () => {
+    it("starts and completes WAL-G backup jobs", async () => {
         const started = await requestJson<{
             ok: boolean;
             job: { id: string; type: string; status: string; code: number | null };
@@ -242,8 +333,59 @@ describe("backup routes", () => {
         const done = await waitForDone(server, "/api/backups/walg");
         assert.equal(done.status, "done");
         assert.equal(done.code, 0);
-        assert.match(done.stdout, /backup-walg-status\.mjs/);
+        assert.match(done.stdout, /docker exec walg/);
+        assert.doesNotMatch(done.stdout, /backup-walg-status\.mjs/);
         assert.equal(done.stderr, "backup warning\n");
+        const cache = await waitForCacheEntry("backup.walg.status");
+        assert.equal(cache.ok, true);
+        assert.equal(cache.tool, "wal-g");
+    });
+
+    it("records status refresh failures on successful backup jobs", async () => {
+        await withEnv(
+            { MIRA_DOCKER_BIN: path.join(tempDir, "missing-docker") },
+            async () => {
+                const started = await requestJson<{
+                    ok: boolean;
+                    job: { id: string; status: string };
+                }>(server, "/api/backups/kopia/run", { method: "POST" });
+
+                assert.equal(started.status, 200);
+                assert.equal(started.body.ok, true);
+
+                const done = await waitForDoneWithRefreshFailure(
+                    server,
+                    "/api/backups/kopia"
+                );
+                assert.match(done.stderr, /Status refresh failed/u);
+                assert.match(done.stderr, /missing-docker|ENOENT/u);
+            }
+        );
+    });
+
+    it("marks successful backup jobs done before status refresh completes", async () => {
+        await withEnv({ FAKE_DOCKER_STATUS_DELAY_MS: "1000" }, async () => {
+            const started = await requestJson<{
+                ok: boolean;
+                job: { id: string; status: string };
+            }>(server, "/api/backups/kopia/run", { method: "POST" });
+
+            assert.equal(started.status, 200);
+            assert.equal(started.body.ok, true);
+
+            const done = await waitForDone(server, "/api/backups/kopia");
+            assert.equal(done.status, "done");
+            assert.equal(done.code, 0);
+
+            const nextStarted = await requestJson<{
+                ok: boolean;
+                job: { id: string; status: string };
+            }>(server, "/api/backups/kopia/run", { method: "POST" });
+            assert.equal(nextStarted.status, 200);
+            assert.equal(nextStarted.body.ok, true);
+            assert.notEqual(nextStarted.body.job.id, started.body.job.id);
+            await waitForDone(server, "/api/backups/kopia");
+        });
     });
 
     it("maps signaled backup exits to interrupted status code", async () => {
@@ -267,36 +409,79 @@ describe("backup routes", () => {
         }
     });
 
-    it("marks jobs done when the backup process fails to spawn", async () => {
-        const brokenTempDir = await mkdtemp(
-            path.join(os.tmpdir(), "mira-backup-broken-")
-        );
-        const brokenServer = await startServerWithDoppler(
-            brokenTempDir,
-            path.join(brokenTempDir, "missing-doppler")
-        );
+    it("marks jobs done when the backup process emits an error", async () => {
+        backupTesting.setSpawnBackupProcessForTest((() => {
+            const child = createFakeBackupProcess();
+            queueMicrotask(() => {
+                child.emit("error", new Error("spawn failed"));
+            });
+            return child;
+        }) as unknown as typeof spawn);
         try {
             const started = await requestJson<{
                 ok: boolean;
                 job: { status: string; code: number | null };
-            }>(brokenServer, "/api/backups/walg/run", { method: "POST" });
+            }>(server, "/api/backups/walg/run", { method: "POST" });
             assert.equal(started.status, 200);
             assert.equal(started.body.ok, true);
             assert.equal(started.body.job.status, "running");
             assert.equal(started.body.job.code, null);
 
-            const done = await waitForDone(brokenServer, "/api/backups/walg");
+            const done = await waitForDone(server, "/api/backups/walg");
             assert.equal(done.status, "done");
-            assert.notEqual(done.code, 0);
-            assert.match(done.stderr, /ENOENT|missing-doppler/);
+            assert.equal(done.code, 1);
+            assert.match(done.stderr, /spawn failed/);
         } finally {
-            try {
-                await brokenServer.close();
-            } finally {
-                process.env.DOPPLER_BIN = await installFakeDoppler(tempDir);
-                process.env.MIRA_N8N_ROOT = tempDir;
-                await rm(brokenTempDir, { recursive: true, force: true });
-            }
+            backupTesting.setSpawnBackupProcessForTest(createFakeBackupSpawn());
+        }
+    });
+
+    it("keeps the first backup process terminal event", async () => {
+        backupTesting.setSpawnBackupProcessForTest((() => {
+            const child = createFakeBackupProcess();
+            queueMicrotask(() => {
+                child.emit("error", new Error("spawn failed first"));
+                child.emit("close", 0, null);
+            });
+            return child;
+        }) as unknown as typeof spawn);
+        try {
+            const started = await requestJson<{
+                ok: boolean;
+                job: { status: string; code: number | null };
+            }>(server, "/api/backups/walg/run", { method: "POST" });
+            assert.equal(started.status, 200);
+            assert.equal(started.body.ok, true);
+
+            const done = await waitForDone(server, "/api/backups/walg");
+            assert.equal(done.code, 1);
+            assert.match(done.stderr, /spawn failed first/);
+            assert.doesNotMatch(done.stderr, /Status refresh failed/u);
+        } finally {
+            backupTesting.setSpawnBackupProcessForTest(createFakeBackupSpawn());
+        }
+
+        backupTesting.setSpawnBackupProcessForTest((() => {
+            const child = createFakeBackupProcess();
+            queueMicrotask(() => {
+                child.emit("close", 0, null);
+                child.emit("error", new Error("late spawn error"));
+            });
+            return child;
+        }) as unknown as typeof spawn);
+        try {
+            const started = await requestJson<{
+                ok: boolean;
+                job: { status: string; code: number | null };
+            }>(server, "/api/backups/walg/run", { method: "POST" });
+            assert.equal(started.status, 200);
+            assert.equal(started.body.ok, true);
+
+            const done = await waitForDone(server, "/api/backups/walg");
+            assert.equal(done.code, 0);
+            assert.doesNotMatch(done.stderr, /late spawn error/u);
+        } finally {
+            backupTesting.setSpawnBackupProcessForTest(createFakeBackupSpawn());
         }
     });
 
@@ -335,7 +520,7 @@ describe("backup routes", () => {
             assert.equal(activeWalg.status, 200);
             assert.equal(activeWalg.body.job, null);
         } finally {
-            backupTesting.setSpawnBackupProcessForTest();
+            backupTesting.setSpawnBackupProcessForTest(createFakeBackupSpawn());
         }
     });
 
@@ -353,96 +538,5 @@ describe("backup routes", () => {
         );
         assert.equal(backupTesting.mapJob(null), null);
         assert.equal(backupTesting.trimOutput("x".repeat(100_001)).length, 100_000);
-        assert.equal(backupTesting.createBackupEnv().DB_POSTGRESDB_DATABASE, "n8n");
-        await withEnv(
-            {
-                DB_POSTGRESDB_USER: " native-user ",
-                DB_POSTGRESDB_PASSWORD: " native-password ",
-                DATABASE_USERNAME: undefined,
-                DATABASE_PASSWORD: undefined,
-            },
-            async () => {
-                const env = backupTesting.createBackupEnv();
-                assert.equal(env.DB_POSTGRESDB_USER, " native-user ");
-                assert.equal(env.DB_POSTGRESDB_PASSWORD, " native-password ");
-            }
-        );
-        await withEnv(
-            {
-                DB_POSTGRESDB_USER: "",
-                DB_POSTGRESDB_PASSWORD: "",
-                DATABASE_USERNAME: "legacy-user",
-                DATABASE_PASSWORD: "legacy-password",
-            },
-            async () => {
-                const fallbackEnv = backupTesting.createBackupEnv();
-                assert.equal(fallbackEnv.DB_POSTGRESDB_USER, "legacy-user");
-                assert.equal(fallbackEnv.DB_POSTGRESDB_PASSWORD, "legacy-password");
-            }
-        );
-        await withEnv(
-            {
-                DB_POSTGRESDB_USER: " ".repeat(3),
-                DB_POSTGRESDB_PASSWORD: "\t",
-                DATABASE_USERNAME: "legacy-user",
-                DATABASE_PASSWORD: "legacy-password",
-            },
-            async () => {
-                const whitespaceEnv = backupTesting.createBackupEnv();
-                assert.equal(whitespaceEnv.DB_POSTGRESDB_USER, "legacy-user");
-                assert.equal(whitespaceEnv.DB_POSTGRESDB_PASSWORD, "legacy-password");
-            }
-        );
-        await withEnv(
-            {
-                DB_POSTGRESDB_USER: undefined,
-                DB_POSTGRESDB_PASSWORD: undefined,
-                DATABASE_USERNAME: "legacy-user",
-                DATABASE_PASSWORD: "legacy-password",
-            },
-            async () => {
-                const legacyEnv = backupTesting.createBackupEnv();
-                assert.equal(legacyEnv.DB_POSTGRESDB_USER, "legacy-user");
-                assert.equal(legacyEnv.DB_POSTGRESDB_PASSWORD, "legacy-password");
-            }
-        );
-        await withEnv(
-            {
-                DB_POSTGRESDB_USER: undefined,
-                DB_POSTGRESDB_PASSWORD: undefined,
-                DATABASE_USERNAME: " ",
-                DATABASE_PASSWORD: "\t",
-            },
-            async () => {
-                const blankCredentialEnv = backupTesting.createBackupEnv();
-                assert.equal("DB_POSTGRESDB_USER" in blankCredentialEnv, false);
-                assert.equal("DB_POSTGRESDB_PASSWORD" in blankCredentialEnv, false);
-            }
-        );
-        await withEnv(
-            {
-                DB_POSTGRESDB_USER: "",
-                DB_POSTGRESDB_PASSWORD: "",
-                DATABASE_USERNAME: " ",
-                DATABASE_PASSWORD: "\t",
-            },
-            async () => {
-                const blankNativeEnv = backupTesting.createBackupEnv();
-                assert.equal("DB_POSTGRESDB_USER" in blankNativeEnv, false);
-                assert.equal("DB_POSTGRESDB_PASSWORD" in blankNativeEnv, false);
-            }
-        );
-        assert.equal(backupTesting.getN8nRoot(), tempDir);
-        await withEnv({ MIRA_N8N_ROOT: "" }, async () => {
-            assert.equal(backupTesting.getN8nRoot(), "/home/ubuntu/projects/n8n");
-        });
-        await withEnv({ DOPPLER_BIN: "" }, async () => {
-            assert.equal(backupTesting.getDopplerBin(), "/usr/local/bin/doppler");
-        });
-        assert.equal(typeof backupTesting.getDopplerBin(), "string");
-        assert.equal(
-            backupTesting.shellQuote("/srv/mira dashboard/it's/scripts/status.mjs"),
-            String.raw`'/srv/mira dashboard/it'\''s/scripts/status.mjs'`
-        );
     });
 });
