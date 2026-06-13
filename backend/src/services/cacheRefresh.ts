@@ -18,6 +18,7 @@ import { nonEmptyEnvFallback } from "../lib/values.js";
 import {
     getScheduledJob,
     registerScheduledJobAction,
+    removeScheduledJobsNotInAction,
     type ScheduledJob,
     upsertScheduledJob,
 } from "./scheduledJobs.js";
@@ -1994,24 +1995,6 @@ const cacheRefreshScheduledJobs = [
         actionKey: "cache.refresh",
         actionPayload: { key: "moltbook" },
     },
-    {
-        id: "cache.backup.kopia",
-        name: "Kopia backup status cache",
-        description: "Refresh Kopia backup status cache.",
-        scheduleType: "interval",
-        intervalSeconds: 60 * 60,
-        actionKey: "cache.refresh",
-        actionPayload: { key: "backup.kopia.status" },
-    },
-    {
-        id: "cache.backup.walg",
-        name: "WAL-G backup status cache",
-        description: "Refresh WAL-G backup status cache.",
-        scheduleType: "interval",
-        intervalSeconds: 60 * 60,
-        actionKey: "cache.refresh",
-        actionPayload: { key: "backup.walg.status" },
-    },
 ] as const;
 
 function getScheduledCacheKey(job: ScheduledJob): string {
@@ -2054,7 +2037,7 @@ export function waitForLocalCacheSeed(key: string): Promise<void> {
     return localCacheSeedPromises.get(key) ?? Promise.resolve();
 }
 
-function seedMissingLocalCacheEntry(key: string): void {
+export function seedMissingLocalCacheEntry(key: string): void {
     if (cacheEntryIsFresh(key)) {
         return;
     }
@@ -2080,6 +2063,10 @@ export function registerCacheRefreshScheduledJobs(): void {
         const result = await refreshCacheProducer(key, signal);
         return { key, ...result };
     });
+    removeScheduledJobsNotInAction(
+        "cache.refresh",
+        cacheRefreshScheduledJobs.map((job) => job.id)
+    );
 
     for (const job of cacheRefreshScheduledJobs) {
         const existing = getScheduledJob(job.id);

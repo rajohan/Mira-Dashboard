@@ -3000,24 +3000,42 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
+        db.prepare(
+            `INSERT INTO scheduled_jobs (
+                id, name, description, enabled, schedule_type, interval_seconds,
+                time_of_day, cron_expression, action_key, action_payload_json, next_run_at, created_at, updated_at
+            ) VALUES (?, ?, '', 1, 'interval', 3600, NULL, NULL, 'cache.refresh', ?, NULL, ?, ?)`
+        ).run(
+            "cache.backup.kopia",
+            "Legacy Kopia cache refresh",
+            JSON.stringify({ key: "backup.kopia.status" }),
+            new Date().toISOString(),
+            new Date().toISOString()
+        );
+        db.prepare(
+            `INSERT INTO scheduled_jobs (
+                id, name, description, enabled, schedule_type, interval_seconds,
+                time_of_day, cron_expression, action_key, action_payload_json, next_run_at, created_at, updated_at
+            ) VALUES (?, ?, '', 1, 'interval', 3600, NULL, NULL, 'cache.refresh', ?, NULL, ?, ?)`
+        ).run(
+            "cache.backup.walg",
+            "Legacy WAL-G cache refresh",
+            JSON.stringify({ key: "backup.walg.status" }),
+            new Date().toISOString(),
+            new Date().toISOString()
+        );
         try {
             registerCacheRefreshScheduledJobs();
-            assert.ok(
-                db
-                    .prepare(
-                        "SELECT 1 FROM scheduled_jobs WHERE id = 'cache.backup.kopia'"
-                    )
-                    .get()
-            );
-            assert.ok(
-                db
-                    .prepare(
-                        "SELECT 1 FROM scheduled_jobs WHERE id = 'cache.backup.walg'"
-                    )
-                    .get()
+            assert.equal(
+                (
+                    db
+                        .prepare(
+                            "SELECT COUNT(*) AS count FROM scheduled_jobs WHERE id IN ('cache.backup.kopia', 'cache.backup.walg')"
+                        )
+                        .get() as { count: number }
+                ).count,
+                0
             );
             await withFetch(
                 (url) => {
@@ -3073,8 +3091,6 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
         try {
             registerCacheRefreshScheduledJobs();
@@ -3158,8 +3174,6 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
         scheduledJobsTesting.clearActionHandlers();
         scheduledJobsTesting.resetSchedulerState();
@@ -3216,8 +3230,6 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
         scheduledJobsTesting.clearActionHandlers();
         scheduledJobsTesting.resetSchedulerState();
@@ -3271,8 +3283,6 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
         db.prepare("UPDATE cache_entries SET expires_at = '' WHERE key = ?").run(
             "weather.spydeberg"
@@ -3327,8 +3337,6 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
         scheduledJobsTesting.clearActionHandlers();
         scheduledJobsTesting.resetSchedulerState();
@@ -3368,8 +3376,6 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
         registerCacheRefreshScheduledJobs();
         db.prepare("UPDATE scheduled_jobs SET enabled = 0 WHERE id = ?").run(
@@ -3386,8 +3392,6 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
         try {
             registerCacheRefreshScheduledJobs();
@@ -3416,8 +3420,6 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
         scheduledJobsTesting.clearActionHandlers();
         scheduledJobsTesting.resetSchedulerState();

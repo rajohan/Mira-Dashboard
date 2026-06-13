@@ -16,6 +16,7 @@ const {
     getScheduledJob,
     listScheduledJobs,
     registerScheduledJobAction,
+    removeScheduledJobsNotInAction,
     runScheduledJob,
     startScheduledJobScheduler,
     stopScheduledJobScheduler,
@@ -77,6 +78,44 @@ test("creates, lists, updates, and schedules jobs", () => {
     assert.equal(updated?.scheduleType, "daily");
     assert.equal(updated?.timeOfDay, "04:30");
     assert.equal(updateScheduledJob("missing", { enabled: true }), null);
+});
+
+test("removes scheduled jobs for an action that are no longer registered", () => {
+    upsertScheduledJob({
+        id: "cache.weather",
+        name: "Weather cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+    upsertScheduledJob({
+        id: "cache.legacy",
+        name: "Legacy cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+    upsertScheduledJob({
+        id: "backup.walg",
+        name: "WAL-G backup",
+        enabled: true,
+        scheduleType: "daily",
+        timeOfDay: "03:20",
+        actionKey: "backup.run",
+    });
+
+    removeScheduledJobsNotInAction("cache.refresh", ["cache.weather"]);
+
+    assert.ok(getScheduledJob("cache.weather"));
+    assert.equal(getScheduledJob("cache.legacy"), null);
+    assert.ok(getScheduledJob("backup.walg"));
+
+    removeScheduledJobsNotInAction("cache.refresh", []);
+
+    assert.equal(getScheduledJob("cache.weather"), null);
+    assert.ok(getScheduledJob("backup.walg"));
 });
 
 test("calculates interval and daily next-run times", () => {
@@ -1033,6 +1072,80 @@ test("releases scheduler ticks while a scheduled handler is stalled", async (t) 
     }
 });
 
+test("uses registered action timeout for scheduled runs", async (t) => {
+    const warnMock = t.mock.method(console, "warn", () => {});
+    try {
+        __testing.setScheduledJobRunTimeoutMsForTest(25);
+        let aborted = false;
+        registerScheduledJobAction(
+            "backup.run",
+            (_job, signal) =>
+                new Promise<void>((resolve) => {
+                    signal?.addEventListener("abort", () => {
+                        aborted = true;
+                    });
+                    setTimeout(resolve, 60);
+                }),
+            { timeoutMs: 250 }
+        );
+        upsertScheduledJob({
+            id: "backup.walg",
+            name: "WAL-G backup",
+            enabled: true,
+            scheduleType: "daily",
+            timeOfDay: "03:20",
+            actionKey: "backup.run",
+        });
+        db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+            "2026-01-01T00:00:00.000Z",
+            "backup.walg"
+        );
+
+        await __testing.runDueJobsForTest();
+
+        assert.equal(aborted, false);
+        assert.equal(warnMock.mock.callCount(), 0);
+        assert.equal(getScheduledJob("backup.walg")?.lastRun?.status, "success");
+    } finally {
+        warnMock.mock.restore();
+    }
+});
+
+test("uses registered action timeout for manual runs", async (t) => {
+    const warnMock = t.mock.method(console, "warn", () => {});
+    try {
+        __testing.setScheduledJobRunTimeoutMsForTest(25);
+        let aborted = false;
+        registerScheduledJobAction(
+            "backup.run",
+            (_job, signal) =>
+                new Promise<void>((resolve) => {
+                    signal?.addEventListener("abort", () => {
+                        aborted = true;
+                    });
+                    setTimeout(resolve, 60);
+                }),
+            { timeoutMs: 250 }
+        );
+        upsertScheduledJob({
+            id: "backup.walg",
+            name: "WAL-G backup",
+            enabled: true,
+            scheduleType: "daily",
+            timeOfDay: "03:20",
+            actionKey: "backup.run",
+        });
+
+        const run = await runScheduledJob("backup.walg", "manual");
+
+        assert.equal(aborted, false);
+        assert.equal(warnMock.mock.callCount(), 0);
+        assert.equal(run.status, "success");
+    } finally {
+        warnMock.mock.restore();
+    }
+});
+
 test("logs timeout persistence failures while releasing stalled jobs", async (t) => {
     let releaseHandler: () => void = () => {};
     const warnMock = t.mock.method(console, "warn", () => {});
@@ -1073,7 +1186,7 @@ test("logs timeout persistence failures while releasing stalled jobs", async (t)
     } finally {
         releaseHandler();
         await delay(0);
-        assert.equal(warnMock.mock.callCount(), 3);
+        assert.equal(warnMock.mock.callCount(), 2);
         assert.equal(getScheduledJob("cache.stalled")?.isRunning, false);
         prepareMock.mock.restore();
         warnMock.mock.restore();

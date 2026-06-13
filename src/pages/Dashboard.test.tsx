@@ -134,7 +134,7 @@ describe("Dashboard page", () => {
         expect(screen.getByTestId("metric-upload")).toHaveTextContent("5.67 Mbit/s");
 
         expect(screen.getByTestId("quota-card")).toHaveTextContent("loaded");
-        expect(screen.getByTestId("cache-card")).toHaveTextContent("Cache items: 8");
+        expect(screen.getByTestId("cache-card")).toHaveTextContent("Cache items: 5");
         expect(screen.getByTestId("backup-card")).toBeInTheDocument();
         expect(screen.getByTestId("service-actions-card")).toBeInTheDocument();
         expect(screen.getByTestId("log-rotation-card")).toBeInTheDocument();
