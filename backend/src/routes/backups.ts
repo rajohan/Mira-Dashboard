@@ -195,15 +195,7 @@ function startBackupJob(
         }
         finalizing = true;
         if (signalName && abortConfig) {
-            try {
-                await waitForContainerProcessExit(abortConfig);
-            } catch (error: unknown) {
-                job.stderr = trimOutput(
-                    `${job.stderr}\nFailed to confirm backup process termination: ${String(error)}`.trim()
-                );
-                finalizing = false;
-                return;
-            }
+            await waitForContainerProcessExitWithRetries(abortConfig, job);
         }
         job.status = "done";
         job.code = signalName ? 130 : code;
@@ -375,6 +367,25 @@ async function waitForContainerProcessExit(config: BackupAbortConfig): Promise<v
         await new Promise((resolve) => setTimeout(resolve, backupAbortContainerPollMs));
     }
     throw new Error(`Timed out waiting for ${config.processPattern} to exit`);
+}
+
+async function waitForContainerProcessExitWithRetries(
+    config: BackupAbortConfig,
+    job: BackupJob
+): Promise<void> {
+    for (;;) {
+        try {
+            await waitForContainerProcessExit(config);
+            return;
+        } catch (error: unknown) {
+            job.stderr = trimOutput(
+                `${job.stderr}\nFailed to confirm backup process termination: ${String(error)}`.trim()
+            );
+            await new Promise((resolve) =>
+                setTimeout(resolve, backupAbortContainerPollMs)
+            );
+        }
+    }
 }
 
 async function refreshBackupStatus(
