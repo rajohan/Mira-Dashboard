@@ -31,6 +31,7 @@ interface BackupJob {
     endedAt: number | null;
     completed: Promise<BackupJob>;
     process?: ChildProcess;
+    statusRefreshed?: boolean;
 }
 
 /** Represents the backup job API response. */
@@ -270,6 +271,7 @@ async function refreshBackupStatus(
             `${job.stderr}\nStatus refresh failed: ${String(error)}`.trim()
         );
     });
+    job.statusRefreshed = true;
 }
 
 /** Performs start kopia backup job. */
@@ -302,7 +304,9 @@ async function startScheduledBackup(type: BackupJob["type"], signal?: AbortSigna
         type === "kopia" ? startKopiaBackupJob(signal) : startWalgBackupJob(signal);
     const completedJob = await job.completed;
     if (completedJob.code !== 0) {
-        await refreshBackupStatus(type, completedJob);
+        if (!completedJob.statusRefreshed) {
+            await refreshBackupStatus(type, completedJob);
+        }
         const details = completedJob.stderr || completedJob.stdout;
         throw new Error(
             `${type.toUpperCase()} backup failed with code ${completedJob.code}${

@@ -1111,6 +1111,41 @@ test("uses registered action timeout for scheduled runs", async (t) => {
     }
 });
 
+test("uses registered action timeout for manual runs", async (t) => {
+    const warnMock = t.mock.method(console, "warn", () => {});
+    try {
+        __testing.setScheduledJobRunTimeoutMsForTest(25);
+        let aborted = false;
+        registerScheduledJobAction(
+            "backup.run",
+            (_job, signal) =>
+                new Promise<void>((resolve) => {
+                    signal?.addEventListener("abort", () => {
+                        aborted = true;
+                    });
+                    setTimeout(resolve, 60);
+                }),
+            { timeoutMs: 250 }
+        );
+        upsertScheduledJob({
+            id: "backup.walg",
+            name: "WAL-G backup",
+            enabled: true,
+            scheduleType: "daily",
+            timeOfDay: "03:20",
+            actionKey: "backup.run",
+        });
+
+        const run = await runScheduledJob("backup.walg", "manual");
+
+        assert.equal(aborted, false);
+        assert.equal(warnMock.mock.callCount(), 0);
+        assert.equal(run.status, "success");
+    } finally {
+        warnMock.mock.restore();
+    }
+});
+
 test("logs timeout persistence failures while releasing stalled jobs", async (t) => {
     let releaseHandler: () => void = () => {};
     const warnMock = t.mock.method(console, "warn", () => {});
@@ -1151,7 +1186,7 @@ test("logs timeout persistence failures while releasing stalled jobs", async (t)
     } finally {
         releaseHandler();
         await delay(0);
-        assert.equal(warnMock.mock.callCount(), 3);
+        assert.equal(warnMock.mock.callCount(), 2);
         assert.equal(getScheduledJob("cache.stalled")?.isRunning, false);
         prepareMock.mock.restore();
         warnMock.mock.restore();
