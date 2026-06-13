@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiFetchRequired, apiPostRequired } from "./useApi";
+import { cacheKeys } from "./useCache";
 
 /** Represents log rotation summary. */
 export interface LogRotationSummary {
@@ -69,7 +70,13 @@ export function useRunLogRotationNow() {
     return useMutation({
         mutationFn: () => apiPostRequired<LogRotationRunResult>("/ops/log-rotation/run"),
         onSuccess: async () => {
-            await queryClient.invalidateQueries({ queryKey: logRotationKeys.status });
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: logRotationKeys.status }),
+                queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
+                queryClient.invalidateQueries({
+                    queryKey: cacheKeys.entry("log_rotation.state"),
+                }),
+            ]);
         },
     });
 }
