@@ -1,14 +1,13 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
-import os from "node:os";
-import path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { after, before, beforeEach, describe, it } from "node:test";
 
 import express from "express";
 
-import { __testing as cacheStoreTesting } from "../lib/cacheStore.js";
-import { withEnv } from "../testUtils/env.js";
+import {
+    clearCacheEntries,
+    insertCacheEntry as insertCacheFixture,
+} from "../testUtils/cacheFixtures.js";
 import cacheRoutes from "./cache.js";
 import {
     __testing,
@@ -20,7 +19,7 @@ import {
 const baseRow = {
     key: "quotas.summary",
     data: '{"usage":12}',
-    source: "n8n",
+    source: "backend",
     updated_at: "2026-05-10T19:00:00.000Z",
     last_attempt_at: "2026-05-10T19:01:00.000Z",
     expires_at: "2026-05-10T20:00:00.000Z",
@@ -36,27 +35,20 @@ interface TestServer {
     close: () => Promise<void>;
 }
 
-async function installFakeDocker(tempDir: string): Promise<string> {
-    const binDir = path.join(tempDir, "bin");
-    await mkdir(binDir, { recursive: true });
-    const dockerPath = path.join(binDir, "docker");
-    await writeFile(
-        dockerPath,
-        String.raw`#!${process.execPath}
-const command = process.argv.join(" ");
-const header = "key\tdata\tsource\tupdated_at\tlast_attempt_at\texpires_at\tstatus\terror_code\terror_message\tconsecutive_failures\tmeta";
-const row = "quotas.summary\t{\"usage\":12}\tn8n\t2026-05-10T19:00:00.000Z\t2026-05-10T19:01:00.000Z\t2026-05-10T20:00:00.000Z\tfresh\t\t\t2\t{\"job\":\"quotas\"}";
-if (command.includes("WHERE key = 'missing.key'")) {
-  process.stdout.write(header + "\n");
-} else {
-  process.stdout.write(header + "\n" + row + "\n");
-}
-`,
-        "utf8"
-    );
-    await chmod(dockerPath, 0o755);
-    cacheStoreTesting.setDockerBinForTests(dockerPath);
-    return dockerPath;
+function insertCacheEntry(key = "quotas.summary"): void {
+    insertCacheFixture({
+        key,
+        data: { usage: 12 },
+        source: "backend",
+        updatedAt: "2026-05-10T19:00:00.000Z",
+        lastAttemptAt: "2026-05-10T19:01:00.000Z",
+        expiresAt: "2099-05-10T20:00:00.000Z",
+        status: "fresh",
+        errorCode: null,
+        errorMessage: null,
+        consecutiveFailures: 2,
+        meta: { job: "quotas" },
+    });
 }
 
 async function startServer(): Promise<TestServer> {
@@ -91,26 +83,22 @@ async function startServer(): Promise<TestServer> {
 }
 
 describe("cache route mapping helpers", { concurrency: false }, () => {
-    let tempDir: string;
     let server: TestServer;
 
     before(async () => {
-        tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-cache-route-"));
-        __testing.setCacheRefreshCwdForTests(tempDir);
-        await installFakeDocker(tempDir);
         server = await startServer();
+    });
+
+    beforeEach(() => {
+        clearCacheEntries();
+        __testing.resetCacheRefreshForTests();
     });
 
     after(async () => {
         if (server) {
             await server.close();
         }
-        __testing.setCacheRefreshCwdForTests(undefined);
         __testing.resetCacheRefreshForTests();
-        cacheStoreTesting.setDockerBinForTests(undefined);
-        if (tempDir) {
-            await rm(tempDir, { recursive: true, force: true });
-        }
     });
 
     it("keeps scalar cache payloads when they are not JSON", () => {
@@ -121,7 +109,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
     it("maps cache database rows into API response shape", () => {
         assert.deepEqual(mapCacheRowForResponse(baseRow), {
             key: "quotas.summary",
-            source: "n8n",
+            source: "backend",
             status: "fresh",
             updatedAt: "2026-05-10T19:00:00.000Z",
             lastAttemptAt: "2026-05-10T19:01:00.000Z",
@@ -157,33 +145,9 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         assert.deepEqual(mapped.meta, {});
     });
 
-    it("rejects refresh requests for unconfigured cache keys before shelling out", async () => {
-        assert.deepEqual(__testing.getCacheRefreshCommand("quotas.summary"), [
-            "/usr/local/bin/doppler",
-            "run",
-            "--project",
-            "rajohan",
-            "--config",
-            "prd",
-            "--",
-            "node",
-            `${tempDir}/scripts/quotas-cache.mjs`,
-        ]);
-
-        await assert.rejects(
-            () => refreshCacheKey("not.configured"),
-            (error: unknown) => {
-                assert.equal(
-                    (error as Error).message,
-                    "No refresh command configured for cache key: not.configured"
-                );
-                assert.equal((error as { statusCode?: number }).statusCode, 400);
-                return true;
-            }
-        );
-    });
-
     it("serves heartbeat and cache entries from the cache store", async () => {
+        insertCacheEntry();
+
         const heartbeat = await fetch(`${server.baseUrl}/api/cache/heartbeat`);
         const heartbeatBody = (await heartbeat.json()) as {
             count: number;
@@ -228,153 +192,83 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         );
         assert.equal(refresh.status, 400);
         assert.deepEqual(await refresh.json(), {
-            error: "No refresh command configured for cache key: not.configured",
+            error: "No backend refresh producer configured for cache key: not.configured",
         });
+
+        __testing.setCacheRefreshProducerForTests(async () => {
+            throw Object.assign(new Error("fallback status"), { statusCode: 0 });
+        });
+        const fallbackStatus = await fetch(
+            `${server.baseUrl}/api/cache/fallback.status/refresh`,
+            { method: "POST" }
+        );
+        assert.equal(fallbackStatus.status, 500);
+        assert.deepEqual(await fallbackStatus.json(), { error: "fallback status" });
     });
 
-    it("refreshes configured cache keys and reports missing refreshed rows", async () => {
-        const refreshCommand = ["/bin/sh", "-c", "exit 0"];
+    it("refreshes cache keys through the configured producer", async () => {
+        __testing.setCacheRefreshProducerForTests(async (key) => {
+            insertCacheEntry(key);
+            return { refreshed: [key] };
+        });
 
-        __testing.setCacheRefreshCommandForTests("quotas.summary", refreshCommand);
-        try {
-            const refreshed = await refreshCacheKey("quotas.summary");
-            assert.equal(refreshed.key, "quotas.summary");
+        const refreshed = await refreshCacheKey("quotas.summary");
+        assert.equal(refreshed.key, "quotas.summary");
 
-            __testing.setCacheRefreshCommandForTests("missing.key", refreshCommand);
-            try {
-                await assert.rejects(() => refreshCacheKey("missing.key"), {
-                    message: "Cache key not found after refresh: missing.key",
-                });
-            } finally {
-                __testing.setCacheRefreshCommandForTests("missing.key", undefined);
-            }
-
-            const routeRefresh = await fetch(
-                `${server.baseUrl}/api/cache/quotas.summary/refresh`,
-                { method: "POST" }
-            );
-            assert.equal(routeRefresh.status, 200);
-            assert.equal(((await routeRefresh.json()) as { ok: boolean }).ok, true);
-
-            __testing.setCacheRefreshCommandForTests("quotas.summary", [
-                "/bin/sh",
-                "-c",
-                "exit 2",
-            ]);
-            const failedRouteRefresh = await fetch(
-                `${server.baseUrl}/api/cache/quotas.summary/refresh`,
-                { method: "POST" }
-            );
-            assert.equal(failedRouteRefresh.status, 500);
-        } finally {
-            __testing.setCacheRefreshCommandForTests("quotas.summary", undefined);
-        }
+        const routeRefresh = await fetch(
+            `${server.baseUrl}/api/cache/quotas.summary/refresh`,
+            { method: "POST" }
+        );
+        assert.equal(routeRefresh.status, 200);
+        assert.equal(((await routeRefresh.json()) as { ok: boolean }).ok, true);
     });
 
-    it("does not pass literal undefined database credentials to refresh commands", async () => {
-        const envPath = path.join(tempDir, "refresh-env.json");
-        const refreshCommand = [
-            process.execPath,
-            "-e",
-            `require("node:fs").writeFileSync(${JSON.stringify(envPath)}, JSON.stringify({ user: process.env.DB_POSTGRESDB_USER, password: process.env.DB_POSTGRESDB_PASSWORD }))`,
-        ];
+    it("uses the producer result to return the refreshed cache row", async () => {
+        __testing.setCacheRefreshProducerForTests(async () => {
+            insertCacheEntry("system.host");
+            return { refreshed: ["system.host"] };
+        });
 
-        try {
-            __testing.setCacheRefreshCommandForTests("quotas.summary", refreshCommand);
+        const refreshed = await refreshCacheKey("system.openclaw");
+        assert.equal(refreshed.key, "system.host");
 
-            await withEnv({ DOPPLER_BIN: "/tmp/custom-doppler" }, async () => {
-                assert.equal(
-                    __testing.getCacheRefreshCommand("quotas.summary")?.[0],
-                    "/tmp/custom-doppler"
-                );
-            });
+        __testing.setCacheRefreshProducerForTests(async () => {
+            insertCacheEntry("system.openclaw");
+            insertCacheEntry("system.host");
+            return { refreshed: ["system.openclaw", "system.host"] };
+        });
 
-            await withEnv(
-                {
-                    DATABASE_USERNAME: undefined,
-                    DATABASE_PASSWORD: undefined,
-                    DB_POSTGRESDB_USER: undefined,
-                    DB_POSTGRESDB_PASSWORD: undefined,
-                },
-                () => refreshCacheKey("quotas.summary")
-            );
+        const multiKeyRefresh = await refreshCacheKey("system.host");
+        assert.equal(multiKeyRefresh.key, "system.host");
+    });
 
-            const payload = JSON.parse(await readFile(envPath, "utf8")) as {
-                user?: string;
-                password?: string;
-            };
-            assert.deepEqual(payload, { user: "postgres", password: "postgres" });
+    it("rejects empty and multi-row cache refresh results", async () => {
+        __testing.setCacheRefreshProducerForTests(async () => {});
 
-            await withEnv(
-                {
-                    DATABASE_USERNAME: "",
-                    DATABASE_PASSWORD: "",
-                    DB_POSTGRESDB_USER: "",
-                    DB_POSTGRESDB_PASSWORD: "",
-                },
-                () => refreshCacheKey("quotas.summary")
-            );
-            const blankPayload = JSON.parse(await readFile(envPath, "utf8")) as {
-                user?: string;
-                password?: string;
-            };
-            assert.deepEqual(blankPayload, { user: "postgres", password: "postgres" });
+        await assert.rejects(() => refreshCacheKey("missing.key"), {
+            message: "No cache keys refreshed for: missing.key",
+        });
 
-            await withEnv(
-                {
-                    DATABASE_USERNAME: " legacy-user ",
-                    DATABASE_PASSWORD: "\tlegacy-password ",
-                    DB_POSTGRESDB_USER: "  ",
-                    DB_POSTGRESDB_PASSWORD: "\t",
-                },
-                () => refreshCacheKey("quotas.summary")
-            );
-            const whitespacePayload = JSON.parse(await readFile(envPath, "utf8")) as {
-                user?: string;
-                password?: string;
-            };
-            assert.deepEqual(whitespacePayload, {
-                user: " legacy-user ",
-                password: "\tlegacy-password ",
-            });
+        __testing.setCacheRefreshProducerForTests(async () => ({ refreshed: [" "] }));
 
-            await withEnv(
-                {
-                    DATABASE_USERNAME: "  ",
-                    DATABASE_PASSWORD: "\t",
-                    DB_POSTGRESDB_USER: undefined,
-                    DB_POSTGRESDB_PASSWORD: undefined,
-                },
-                () => refreshCacheKey("quotas.summary")
-            );
-            const whitespaceLegacyPayload = JSON.parse(
-                await readFile(envPath, "utf8")
-            ) as {
-                user?: string;
-                password?: string;
-            };
-            assert.deepEqual(whitespaceLegacyPayload, {
-                user: "postgres",
-                password: "postgres",
-            });
+        await assert.rejects(() => refreshCacheKey("blank.key"), {
+            message: "No cache keys refreshed for: blank.key",
+        });
 
-            await withEnv(
-                {
-                    DB_POSTGRESDB_USER: "native-user",
-                    DB_POSTGRESDB_PASSWORD: "native-password",
-                },
-                () => refreshCacheKey("quotas.summary")
-            );
-            const inheritedPayload = JSON.parse(await readFile(envPath, "utf8")) as {
-                user?: string;
-                password?: string;
-            };
-            assert.deepEqual(inheritedPayload, {
-                user: "native-user",
-                password: "native-password",
-            });
-        } finally {
-            __testing.setCacheRefreshCommandForTests("quotas.summary", undefined);
-        }
+        __testing.setCacheRefreshProducerForTests(async () => ({
+            refreshed: ["system.openclaw", "system.host"],
+        }));
+
+        await assert.rejects(() => refreshCacheKey("weather.spydeberg"), {
+            message: "Cache refresh returned multiple keys for: weather.spydeberg",
+        });
+
+        __testing.setCacheRefreshProducerForTests(async () => ({
+            refreshed: ["missing.after.refresh"],
+        }));
+
+        await assert.rejects(() => refreshCacheKey("missing.after.refresh"), {
+            message: "Cache key not found after refresh: missing.after.refresh",
+        });
     });
 });

@@ -4,32 +4,9 @@ import { randomUUID } from "node:crypto";
 import express, { type RequestHandler } from "express";
 
 import { asyncRoute } from "../lib/errors.js";
-import { envFallback, nonEmptyEnvFallback } from "../lib/values.js";
-const N8N_DATABASE = "n8n";
+import { refreshCacheProducer } from "../services/cacheRefresh.js";
 const MAX_OUTPUT_CHARS = 100_000;
 let spawnBackupProcess = spawn;
-
-function getN8nRoot(): string {
-    return nonEmptyEnvFallback("MIRA_N8N_ROOT", "/home/ubuntu/projects/n8n");
-}
-
-function getDopplerBin(): string {
-    return nonEmptyEnvFallback("DOPPLER_BIN", "/usr/local/bin/doppler");
-}
-
-function envFallbackUnlessBlank(name: string, fallbackName: string): string | undefined {
-    const value = process.env[name];
-    if (value !== undefined && value.trim() !== "") {
-        return value;
-    }
-
-    const fallback = envFallback(fallbackName, "");
-    return fallback.trim() === "" ? undefined : fallback;
-}
-
-function shellQuote(value: string): string {
-    return `'${value.replaceAll("'", String.raw`'\''`)}'`;
-}
 
 /** Represents backup job. */
 interface BackupJob {
@@ -111,32 +88,6 @@ function mapJob(job: BackupJob | null) {
     };
 }
 
-/** Creates backup env. */
-function createBackupEnv() {
-    const postgresUser = envFallbackUnlessBlank(
-        "DB_POSTGRESDB_USER",
-        "DATABASE_USERNAME"
-    );
-    const postgresPassword = envFallbackUnlessBlank(
-        "DB_POSTGRESDB_PASSWORD",
-        "DATABASE_PASSWORD"
-    );
-    const baseEnv = { ...process.env };
-    delete baseEnv.DB_POSTGRESDB_PASSWORD;
-    delete baseEnv.DB_POSTGRESDB_USER;
-
-    return {
-        ...baseEnv,
-        DB_POSTGRESDB_HOST: "127.0.0.1",
-        DB_POSTGRESDB_PORT: "6432",
-        DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        ...(postgresUser === undefined ? {} : { DB_POSTGRESDB_USER: postgresUser }),
-        ...(postgresPassword === undefined
-            ? {}
-            : { DB_POSTGRESDB_PASSWORD: postgresPassword }),
-    };
-}
-
 /** Performs start backup job. */
 function startBackupJob(type: BackupJob["type"], command: string) {
     const existingJob = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
@@ -165,24 +116,9 @@ function startBackupJob(type: BackupJob["type"], command: string) {
 
     let child: ReturnType<typeof spawn>;
     try {
-        child = spawnBackupProcess(
-            getDopplerBin(),
-            [
-                "run",
-                "--project",
-                "rajohan",
-                "--config",
-                "prd",
-                "--",
-                "bash",
-                "-lc",
-                command,
-            ],
-            {
-                cwd: getN8nRoot(),
-                env: createBackupEnv(),
-            }
-        );
+        child = spawnBackupProcess("bash", ["-lc", command], {
+            env: process.env,
+        });
     } catch (error) {
         backupJobs.delete(jobId);
         if (activeKopiaJobId === jobId) {
@@ -195,6 +131,8 @@ function startBackupJob(type: BackupJob["type"], command: string) {
     }
 
     job.process = child;
+    let finalized = false;
+    let finalizing = false;
 
     child.stdout?.on("data", (data) => {
         job.stdout = trimOutput(job.stdout + String(data));
@@ -204,13 +142,26 @@ function startBackupJob(type: BackupJob["type"], command: string) {
         job.stderr = trimOutput(job.stderr + String(data));
     });
 
-    child.on("close", (code, signal) => {
+    child.on("close", async (code, signal) => {
+        if (finalized || finalizing) {
+            return;
+        }
+        finalizing = true;
         job.status = "done";
         job.code = signal ? 130 : code;
         job.endedAt = Date.now();
+        finalized = true;
+        if (!signal && code === 0) {
+            await refreshBackupStatus(type, job);
+        }
     });
 
     child.on("error", (error) => {
+        if (finalized || finalizing) {
+            return;
+        }
+        finalizing = true;
+        finalized = true;
         job.status = "done";
         job.code = 1;
         job.stderr = trimOutput(`${job.stderr}\n${error.message}`.trim());
@@ -220,21 +171,28 @@ function startBackupJob(type: BackupJob["type"], command: string) {
     return job;
 }
 
+async function refreshBackupStatus(
+    type: BackupJob["type"],
+    job: BackupJob
+): Promise<void> {
+    const cacheKey = type === "kopia" ? "backup.kopia.status" : "backup.walg.status";
+    await refreshCacheProducer(cacheKey).catch((error: unknown) => {
+        job.stderr = trimOutput(
+            `${job.stderr}\nStatus refresh failed: ${String(error)}`.trim()
+        );
+    });
+}
+
 /** Performs start kopia backup job. */
 function startKopiaBackupJob() {
-    const kopiaStatusScript = `${getN8nRoot()}/scripts/backup-kopia-status.mjs`;
-    return startBackupJob(
-        "kopia",
-        `/opt/docker/apps/kopia/backup.sh && node ${shellQuote(kopiaStatusScript)}`
-    );
+    return startBackupJob("kopia", "/opt/docker/apps/kopia/backup.sh");
 }
 
 /** Performs start walg backup job. */
 function startWalgBackupJob() {
-    const walgStatusScript = `${getN8nRoot()}/scripts/backup-walg-status.mjs`;
     return startBackupJob(
         "walg",
-        `docker exec walg /bin/sh /usr/local/bin/backup-push.sh && node ${shellQuote(walgStatusScript)}`
+        "docker exec walg /bin/sh /usr/local/bin/backup-push.sh"
     );
 }
 
@@ -242,13 +200,9 @@ export const __testing = {
     trimOutput,
     getCurrentJob,
     mapJob,
-    createBackupEnv,
-    getN8nRoot,
-    getDopplerBin,
     setSpawnBackupProcessForTest(nextSpawn?: typeof spawn): void {
         spawnBackupProcess = nextSpawn ?? spawn;
     },
-    shellQuote,
 };
 
 /** Registers backup API routes. */
