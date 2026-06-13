@@ -932,6 +932,7 @@ test("rechecks due job state before scheduled execution", async () => {
 
 test("continues due job loop after one scheduled run throws", async (t) => {
     const calls: string[] = [];
+    const warnMock = t.mock.method(console, "warn", () => {});
     registerScheduledJobAction("cache.refresh", (job) => {
         calls.push(job.id);
     });
@@ -955,7 +956,9 @@ test("continues due job loop after one scheduled run throws", async (t) => {
             insertFailures += 1;
             return {
                 run: () => {
-                    throw new Error("run insert failed");
+                    throw Object.assign(new Error("run insert failed"), {
+                        statusCode: 500,
+                    });
                 },
             } as unknown as ReturnType<typeof db.prepare>;
         }
@@ -966,9 +969,11 @@ test("continues due job loop after one scheduled run throws", async (t) => {
         await __testing.runDueJobsForTest();
     } finally {
         prepareMock.mock.restore();
+        warnMock.mock.restore();
     }
 
     assert.deepEqual(calls, ["cache.second"]);
+    assert.equal(warnMock.mock.callCount(), 1);
 });
 
 test("logs scheduler tick query failures without leaving ticks stuck", async (t) => {

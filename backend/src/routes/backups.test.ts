@@ -359,10 +359,18 @@ async function assertAbortedWalgRemainsRunningUntilTerminationConfirmed(
     assert.match(activeWalg.body.job?.stderr ?? "", stderrPattern);
 
     release();
-    lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+    closeLastFakeBackupProcess();
     const run = await runPromise;
     assert.equal(run.status, "failed");
     assert.match(run.message ?? "", /Backup aborted by scheduler/u);
+}
+
+function closeLastFakeBackupProcess(
+    code: number | null = null,
+    signal: NodeJS.Signals | null = "SIGTERM"
+): void {
+    assert.ok(lastFakeBackupProcess, "Expected fake backup process to be spawned");
+    lastFakeBackupProcess.emit("close", code, signal);
 }
 
 describe("backup routes", () => {
@@ -730,7 +738,7 @@ describe("backup routes", () => {
                     }),
                 ]);
                 assert.equal(earlyResult, "pending");
-                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                closeLastFakeBackupProcess();
 
                 const run = await runPromise;
                 assert.equal(run.status, "failed");
@@ -820,7 +828,7 @@ describe("backup routes", () => {
                     assert.equal(earlyResult, "pending");
                     assert.deepEqual(signals, [[-4321, "SIGTERM"]]);
 
-                    lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                    closeLastFakeBackupProcess();
                     const run = await runPromise;
 
                     assert.equal(run.status, "failed");
@@ -860,7 +868,7 @@ describe("backup routes", () => {
 
                     await new Promise<void>((resolve) => setImmediate(resolve));
                     controller.abort();
-                    lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                    closeLastFakeBackupProcess();
                     await new Promise<void>((resolve) => setImmediate(resolve));
 
                     mock.timers.tick(10_000);
@@ -897,7 +905,7 @@ describe("backup routes", () => {
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
-                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                closeLastFakeBackupProcess();
 
                 const earlyResult = await Promise.race([
                     runPromise.then(() => "settled"),
@@ -948,7 +956,7 @@ describe("backup routes", () => {
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
                 await new Promise<void>((resolve) => setImmediate(resolve));
-                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                closeLastFakeBackupProcess();
 
                 const run = await runPromise;
                 assert.equal(run.status, "failed");
@@ -975,7 +983,7 @@ describe("backup routes", () => {
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
                 await new Promise<void>((resolve) => setImmediate(resolve));
-                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                closeLastFakeBackupProcess();
 
                 const run = await runPromise;
                 assert.equal(run.status, "failed");
@@ -1003,7 +1011,7 @@ describe("backup routes", () => {
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
-                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                closeLastFakeBackupProcess();
 
                 await assertAbortedWalgRemainsRunningUntilTerminationConfirmed(
                     server,
@@ -1031,7 +1039,7 @@ describe("backup routes", () => {
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
-                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                closeLastFakeBackupProcess();
 
                 await assertAbortedWalgRemainsRunningUntilTerminationConfirmed(
                     server,
@@ -1060,7 +1068,7 @@ describe("backup routes", () => {
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
-                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                closeLastFakeBackupProcess();
 
                 await assertAbortedWalgRemainsRunningUntilTerminationConfirmed(
                     server,
@@ -1094,7 +1102,7 @@ describe("backup routes", () => {
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
-                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                closeLastFakeBackupProcess();
 
                 await assertAbortedWalgRemainsRunningUntilTerminationConfirmed(
                     server,
@@ -1124,7 +1132,7 @@ describe("backup routes", () => {
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
-                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                closeLastFakeBackupProcess();
 
                 await assertAbortedWalgRemainsRunningUntilTerminationConfirmed(
                     server,
@@ -1154,7 +1162,7 @@ describe("backup routes", () => {
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
-                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                closeLastFakeBackupProcess();
 
                 await assertAbortedWalgRemainsRunningUntilTerminationConfirmed(
                     server,
@@ -1184,7 +1192,7 @@ describe("backup routes", () => {
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
-                lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                closeLastFakeBackupProcess();
 
                 const run = await runPromise;
                 assert.equal(run.status, "failed");
@@ -1193,7 +1201,19 @@ describe("backup routes", () => {
                 const activeWalg = await requestJson<{
                     job: { status: string } | null;
                 }>(server, "/api/backups/walg");
-                assert.equal(activeWalg.body.job?.status, "done");
+                assert.equal(activeWalg.body.job?.status, "needs_attention");
+
+                const blockedRun = await runScheduledJob("backup.walg", "manual");
+                assert.equal(blockedRun.status, "failed");
+                assert.match(blockedRun.message ?? "", /WALG backup needs attention/u);
+
+                const blockedManual = await requestJson<{ error: string }>(
+                    server,
+                    "/api/backups/walg/run",
+                    { method: "POST" }
+                );
+                assert.equal(blockedManual.status, 409);
+                assert.match(blockedManual.body.error, /WALG backup needs attention/u);
             }
         );
     });
@@ -1225,7 +1245,7 @@ describe("backup routes", () => {
                     controller.abort();
                     mock.timers.tick(10_000);
                     await new Promise<void>((resolve) => setImmediate(resolve));
-                    lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                    closeLastFakeBackupProcess();
 
                     const run = await runPromise;
                     assert.equal(run.status, "failed");
@@ -1263,7 +1283,7 @@ describe("backup routes", () => {
                     await new Promise<void>((resolve) => setImmediate(resolve));
                     controller.abort();
                     mock.timers.tick(10_000);
-                    lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                    closeLastFakeBackupProcess();
 
                     const run = await runPromise;
                     assert.equal(run.status, "failed");
@@ -1305,7 +1325,7 @@ describe("backup routes", () => {
                     await new Promise<void>((resolve) => setImmediate(resolve));
                     controller.abort();
                     mock.timers.tick(10_000);
-                    lastFakeBackupProcess?.emit("close", null, "SIGTERM");
+                    closeLastFakeBackupProcess();
 
                     const run = await runPromise;
                     assert.equal(run.status, "failed");

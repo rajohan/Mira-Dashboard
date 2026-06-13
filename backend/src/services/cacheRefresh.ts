@@ -2063,28 +2063,39 @@ export function registerCacheRefreshScheduledJobs(): void {
         const result = await refreshCacheProducer(key, signal);
         return { key, ...result };
     });
-    removeScheduledJobsNotInAction(
-        "cache.refresh",
-        cacheRefreshScheduledJobs.map((job) => job.id)
-    );
+    const seedKeys: string[] = [];
+    db.exec("BEGIN");
+    try {
+        removeScheduledJobsNotInAction(
+            "cache.refresh",
+            cacheRefreshScheduledJobs.map((job) => job.id)
+        );
 
-    for (const job of cacheRefreshScheduledJobs) {
-        const existing = getScheduledJob(job.id);
-        upsertScheduledJob({
-            ...job,
-            enabled: existing?.enabled ?? true,
-            scheduleType: existing?.scheduleType ?? job.scheduleType,
-            intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
-            timeOfDay: existing
-                ? existing.timeOfDay
-                : "timeOfDay" in job && typeof job.timeOfDay === "string"
-                  ? job.timeOfDay
-                  : null,
-            cronExpression: existing?.cronExpression ?? null,
-        });
-        if (existing?.enabled ?? true) {
-            seedMissingLocalCacheEntry(job.actionPayload.key);
+        for (const job of cacheRefreshScheduledJobs) {
+            const existing = getScheduledJob(job.id);
+            upsertScheduledJob({
+                ...job,
+                enabled: existing?.enabled ?? true,
+                scheduleType: existing?.scheduleType ?? job.scheduleType,
+                intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
+                timeOfDay: existing
+                    ? existing.timeOfDay
+                    : "timeOfDay" in job && typeof job.timeOfDay === "string"
+                      ? job.timeOfDay
+                      : null,
+                cronExpression: existing?.cronExpression ?? null,
+            });
+            if (existing?.enabled ?? true) {
+                seedKeys.push(job.actionPayload.key);
+            }
         }
+        db.exec("COMMIT");
+    } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+    }
+    for (const key of seedKeys) {
+        seedMissingLocalCacheEntry(key);
     }
 }
 

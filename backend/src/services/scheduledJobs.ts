@@ -835,6 +835,14 @@ function trackScheduledRun(run: Promise<void>): void {
     });
 }
 
+function isStaleScheduledRunError(error: unknown): boolean {
+    return (
+        error instanceof Error &&
+        "statusCode" in error &&
+        (error as { statusCode?: unknown }).statusCode === 409
+    );
+}
+
 async function runDueJobs(): Promise<void> {
     const dueAt = nowIso();
     const rows = db
@@ -857,11 +865,20 @@ async function runDueJobs(): Promise<void> {
                 }
                 const run = runScheduledJob(row.id, "schedule")
                     .then(() => {})
-                    .catch(() => {
-                        // Keep unrelated due jobs running even if one row is stale.
+                    .catch((error: unknown) => {
+                        if (!isStaleScheduledRunError(error)) {
+                            console.warn(
+                                "[ScheduledJobs] Scheduled run failed unexpectedly:",
+                                error
+                            );
+                        }
                     });
                 trackScheduledRun(run);
-            } catch {
+            } catch (error) {
+                console.warn(
+                    "[ScheduledJobs] Failed to inspect due scheduled job:",
+                    error
+                );
                 // Keep later due jobs running even if a persisted row is stale.
             }
         }

@@ -20,6 +20,7 @@ let refreshMoltbookCache: Awaited<
 let registerCacheRefreshScheduledJobs: Awaited<
     typeof import("./cacheRefresh.js")
 >["registerCacheRefreshScheduledJobs"];
+let getScheduledJob: Awaited<typeof import("./scheduledJobs.js")>["getScheduledJob"];
 let runScheduledJob: Awaited<typeof import("./scheduledJobs.js")>["runScheduledJob"];
 let scheduledJobsTesting: Awaited<typeof import("./scheduledJobs.js")>["__testing"];
 let writeCacheFailure: Awaited<typeof import("./cacheRefresh.js")>["writeCacheFailure"];
@@ -141,8 +142,11 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
             writeCacheFailure,
             writeCacheSuccess,
         } = await import("./cacheRefresh.js"));
-        ({ __testing: scheduledJobsTesting, runScheduledJob } =
-            await import("./scheduledJobs.js"));
+        ({
+            __testing: scheduledJobsTesting,
+            getScheduledJob,
+            runScheduledJob,
+        } = await import("./scheduledJobs.js"));
     });
 
     beforeEach(async () => {
@@ -3133,6 +3137,46 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
             scheduledJobsTesting.clearActionHandlers();
             scheduledJobsTesting.resetSchedulerState();
         }
+    });
+
+    it("rolls back cache refresh job pruning when registration fails", (t) => {
+        scheduledJobsTesting.clearActionHandlers();
+        scheduledJobsTesting.resetSchedulerState();
+        const timestamp = new Date().toISOString();
+        db.prepare(
+            `INSERT INTO scheduled_jobs (
+                id, name, description, enabled, schedule_type, interval_seconds,
+                time_of_day, cron_expression, action_key, action_payload_json, next_run_at, created_at, updated_at
+            ) VALUES (?, ?, '', 1, 'interval', 3600, NULL, NULL, 'cache.refresh', ?, NULL, ?, ?)`
+        ).run(
+            "cache.obsolete",
+            "Obsolete cache refresh",
+            JSON.stringify({ key: "obsolete.cache" }),
+            timestamp,
+            timestamp
+        );
+
+        const prepare = db.prepare.bind(db);
+        const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+            if (sql.includes("INSERT INTO scheduled_jobs")) {
+                return {
+                    run: () => {
+                        throw new Error("upsert failed");
+                    },
+                } as unknown as ReturnType<typeof db.prepare>;
+            }
+            return prepare(sql);
+        });
+
+        try {
+            assert.throws(() => registerCacheRefreshScheduledJobs(), /upsert failed/u);
+        } finally {
+            prepareMock.mock.restore();
+            scheduledJobsTesting.clearActionHandlers();
+            scheduledJobsTesting.resetSchedulerState();
+        }
+
+        assert.ok(getScheduledJob("cache.obsolete"));
     });
 
     it("seeds missing enabled cache entries when scheduled jobs are registered", async () => {

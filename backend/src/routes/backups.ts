@@ -30,7 +30,7 @@ interface BackupAbortConfig {
 interface BackupJob {
     id: string;
     type: "kopia" | "walg";
-    status: "running" | "done";
+    status: "running" | "done" | "needs_attention";
     code: number | null;
     stdout: string;
     stderr: string;
@@ -149,6 +149,11 @@ function startBackupJob(
     if (existingJob?.status === "running") {
         return existingJob;
     }
+    if (existingJob?.status === "needs_attention") {
+        throw Object.assign(new Error(`${type.toUpperCase()} backup needs attention`), {
+            statusCode: 409,
+        });
+    }
     if (signal?.aborted) {
         throw new Error("Backup aborted by scheduler");
     }
@@ -211,15 +216,19 @@ function startBackupJob(
             hostAbortKillTimer = null;
         }
         const interrupted = abortRequested || signalName !== null;
+        let needsAttention = false;
         if (interrupted && abortConfig) {
-            await waitForContainerProcessExitWithRetries(abortConfig, job);
+            needsAttention = !(await waitForContainerProcessExitWithRetries(
+                abortConfig,
+                job
+            ));
         }
         if (containerAbortKillTimer) {
             clearTimeout(containerAbortKillTimer);
             containerAbortKillTimer = null;
         }
         const completedCode = interrupted ? 130 : code;
-        job.status = "done";
+        job.status = needsAttention ? "needs_attention" : "done";
         job.code = completedCode;
         job.endedAt = Date.now();
         finalized = true;
@@ -391,26 +400,27 @@ async function waitForContainerProcessExit(config: BackupAbortConfig): Promise<v
 async function waitForContainerProcessExitWithRetries(
     config: BackupAbortConfig,
     job: BackupJob
-): Promise<void> {
+): Promise<boolean> {
     for (let attempt = 1; attempt <= backupAbortContainerConfirmAttempts; attempt += 1) {
         try {
             await waitForContainerProcessExit(config);
-            return;
+            return true;
         } catch (error: unknown) {
             job.stderr = trimOutput(
                 `${job.stderr}\nFailed to confirm backup process termination: ${String(error)}`.trim()
             );
             if (attempt >= backupAbortContainerConfirmAttempts) {
                 job.stderr = trimOutput(
-                    `${job.stderr}\nBackup termination needs attention; proceeding after ${attempt} failed confirmation attempts`.trim()
+                    `${job.stderr}\nBackup termination needs attention after ${attempt} failed confirmation attempts`.trim()
                 );
-                return;
+                return false;
             }
             await new Promise((resolve) =>
                 setTimeout(resolve, backupAbortContainerPollMs)
             );
         }
     }
+    return false;
 }
 
 async function refreshBackupStatus(
@@ -442,12 +452,14 @@ function startWalgBackupJob(signal?: AbortSignal) {
 }
 
 async function startScheduledBackup(type: BackupJob["type"], signal?: AbortSignal) {
-    if (
-        (type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob())?.status ===
-        "running"
-    ) {
+    const currentJob = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
+    if (currentJob?.status === "running" || currentJob?.status === "needs_attention") {
         throw Object.assign(
-            new Error(`${type.toUpperCase()} backup is already running`),
+            new Error(
+                currentJob.status === "needs_attention"
+                    ? `${type.toUpperCase()} backup needs attention`
+                    : `${type.toUpperCase()} backup is already running`
+            ),
             {
                 statusCode: 409,
             }
