@@ -195,11 +195,15 @@ function startBackupJob(
         }
         finalizing = true;
         if (signalName && abortConfig) {
-            await waitForContainerProcessExit(abortConfig).catch((error: unknown) => {
+            try {
+                await waitForContainerProcessExit(abortConfig);
+            } catch (error: unknown) {
                 job.stderr = trimOutput(
                     `${job.stderr}\nFailed to confirm backup process termination: ${String(error)}`.trim()
                 );
-            });
+                finalizing = false;
+                return;
+            }
         }
         job.status = "done";
         job.code = signalName ? 130 : code;
@@ -526,9 +530,6 @@ export function registerBackupScheduledJobs(): void {
             timeOfDay: existing ? existing.timeOfDay : job.timeOfDay,
             cronExpression: existing?.cronExpression ?? null,
         });
-        if (existing?.enabled ?? true) {
-            seedMissingLocalCacheEntry(backupStatusCacheKey(job.actionPayload.type));
-        }
     }
 
     for (const job of backupStatusScheduledJobs) {
@@ -542,6 +543,9 @@ export function registerBackupScheduledJobs(): void {
             timeOfDay: existing ? existing.timeOfDay : null,
             cronExpression: existing?.cronExpression ?? null,
         });
+        if (existing?.enabled ?? true) {
+            seedMissingLocalCacheEntry(backupStatusCacheKey(job.actionPayload.type));
+        }
     }
 }
 
@@ -561,6 +565,11 @@ export const __testing = {
     },
     setBackupAbortDockerExecTimeoutForTest(timeoutMs: number): void {
         backupAbortDockerExecTimeoutMs = timeoutMs;
+    },
+    resetJobsForTest(): void {
+        backupJobs.clear();
+        activeKopiaJobId = null;
+        activeWalgJobId = null;
     },
 };
 
