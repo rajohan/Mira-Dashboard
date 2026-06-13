@@ -949,12 +949,20 @@ async function refreshSystemCache() {
             runCommand(openclawBin, ["security", "audit", "--json"]),
             getHostSummary(),
         ]);
-    const statusError =
+    let statusError =
         statusResult.status === "rejected" ? errorMessage(statusResult.reason) : null;
-    const status =
-        statusResult.status === "fulfilled"
-            ? (JSON.parse(statusResult.value) as JsonRecord)
-            : {};
+    let statusFailure: unknown =
+        statusResult.status === "rejected" ? statusResult.reason : null;
+    let status: JsonRecord = {};
+    if (statusResult.status === "fulfilled") {
+        try {
+            status = JSON.parse(statusResult.value) as JsonRecord;
+        } catch (error) {
+            statusError = errorMessage(error);
+            statusFailure = error;
+            console.warn("[CacheRefresh] Failed to parse OpenClaw status JSON:", error);
+        }
+    }
     const doctorError =
         doctorResult.status === "rejected" ? errorMessage(doctorResult.reason) : null;
     let securityError =
@@ -1014,13 +1022,13 @@ async function refreshSystemCache() {
         },
         checkedAt,
     };
-    if (statusResult.status === "rejected") {
+    if (statusError) {
         writeCacheFailure({
             key: "system.openclaw",
             source: "backend",
             ttl: 15,
             ttlUnit: "minutes",
-            error: statusResult.reason,
+            error: statusFailure,
             metadata: {
                 workflow: "Cache Foundation - System Checks",
                 kind: "openclaw",
@@ -2040,12 +2048,29 @@ function cacheEntryIsFresh(key: string): boolean {
     });
 }
 
+const localCacheSeedPromises = new Map<string, Promise<void>>();
+
+export function waitForLocalCacheSeed(key: string): Promise<void> {
+    return localCacheSeedPromises.get(key) ?? Promise.resolve();
+}
+
 function seedMissingLocalCacheEntry(key: string): void {
     if (cacheEntryIsFresh(key)) {
         return;
     }
-    void refreshCacheProducer(key).catch((error: unknown) => {
-        console.warn(`[CacheRefresh] Failed to seed missing cache entry ${key}:`, error);
+    const seedPromise = refreshCacheProducer(key)
+        .catch((error: unknown) => {
+            console.warn(
+                `[CacheRefresh] Failed to seed missing cache entry ${key}:`,
+                error
+            );
+        })
+        .then(() => {});
+    localCacheSeedPromises.set(key, seedPromise);
+    void seedPromise.finally(() => {
+        if (localCacheSeedPromises.get(key) === seedPromise) {
+            localCacheSeedPromises.delete(key);
+        }
     });
 }
 

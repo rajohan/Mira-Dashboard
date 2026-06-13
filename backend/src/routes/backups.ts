@@ -147,13 +147,13 @@ function startBackupJob(type: BackupJob["type"], command: string) {
             return;
         }
         finalizing = true;
-        if (!signal && code === 0) {
-            await refreshBackupStatus(type, job);
-        }
         job.status = "done";
         job.code = signal ? 130 : code;
         job.endedAt = Date.now();
         finalized = true;
+        if (!signal && code === 0) {
+            await refreshBackupStatus(type, job);
+        }
     });
 
     child.on("error", (error) => {

@@ -1364,10 +1364,14 @@ else if (command === "status --short") process.stdout.write("");
         await writeExecutable(
             path.join(binDir, "openclaw"),
             String.raw`#!/usr/bin/env node
-const args = process.argv.slice(2).join(" ");
-if (args === "status --json") {
-  process.stdout.write(JSON.stringify({ runtimeVersion: "2026.5.1", update: { registry: { latestVersion: "2026.5.2" } }, gateway: { ok: true } }));
-} else if (args === "doctor") {
+	const args = process.argv.slice(2).join(" ");
+	if (args === "status --json") {
+	  if (process.env.MALFORMED_OPENCLAW_STATUS === "1") {
+	    process.stdout.write("{");
+	    process.exit(0);
+	  }
+	  process.stdout.write(JSON.stringify({ runtimeVersion: "2026.5.1", update: { registry: { latestVersion: "2026.5.2" } }, gateway: { ok: true } }));
+	} else if (args === "doctor") {
   if (process.env.FAIL_OPENCLAW_AUX === "1") throw new Error("doctor failed");
   process.stdout.write("- OK: fine\n- WARNING: Gateway clients warning\n");
 } else if (args === "security audit --json") {
@@ -1537,6 +1541,26 @@ if (args.includes("capture-pane")) {
         assert.equal(malformedOpenclawSystem.version.current, "2026.5.1");
         assert.equal(malformedOpenclawSystem.security, null);
         assert.match(malformedOpenclawSystem.securityError ?? "", /JSON/u);
+
+        const statusWarnMock = mock.method(console, "warn", () => {});
+        try {
+            await withEnv(
+                {
+                    MALFORMED_OPENCLAW_STATUS: "1",
+                    OPENCLAW_BIN: path.join(binDir, "openclaw"),
+                },
+                async () => {
+                    assert.deepEqual(await refreshCacheProducer("system.host"), {
+                        refreshed: ["system.openclaw", "system.host"],
+                    });
+                }
+            );
+        } finally {
+            statusWarnMock.mock.restore();
+        }
+        assert.equal(cacheRow("system.host").status, "fresh");
+        assert.equal(cacheRow("system.openclaw").status, "error");
+        assert.match(cacheRow("system.openclaw").error_message ?? "", /JSON/u);
     });
 
     it("reports quota providers as missing or errored when credentials and calls fail", async () => {

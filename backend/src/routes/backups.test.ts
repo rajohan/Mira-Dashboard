@@ -34,7 +34,7 @@ async function installFakeDocker(tempDir: string): Promise<string> {
         `#!${process.execPath}
 const args = process.argv.slice(2).join(" ");
 if (args === "exec kopia kopia snapshot list --all --json-verbose --json") {
-    process.stdout.write(JSON.stringify([
+    const writeSnapshots = () => process.stdout.write(JSON.stringify([
         {
             id: "kopia-1",
             source: { path: "/source/docker" },
@@ -59,6 +59,9 @@ if (args === "exec kopia kopia snapshot list --all --json-verbose --json") {
             retentionReason: ["latest"]
         }
     ]));
+    const delayMs = Number(process.env.FAKE_DOCKER_STATUS_DELAY_MS || 0);
+    if (delayMs > 0) setTimeout(writeSnapshots, delayMs);
+    else writeSnapshots();
 } else if (args === "exec walg wal-g backup-list --detail --json") {
     process.stdout.write(JSON.stringify([
         {
@@ -358,6 +361,31 @@ describe("backup routes", () => {
                 assert.match(done.stderr, /missing-docker|ENOENT/u);
             }
         );
+    });
+
+    it("marks successful backup jobs done before status refresh completes", async () => {
+        await withEnv({ FAKE_DOCKER_STATUS_DELAY_MS: "1000" }, async () => {
+            const started = await requestJson<{
+                ok: boolean;
+                job: { id: string; status: string };
+            }>(server, "/api/backups/kopia/run", { method: "POST" });
+
+            assert.equal(started.status, 200);
+            assert.equal(started.body.ok, true);
+
+            const done = await waitForDone(server, "/api/backups/kopia");
+            assert.equal(done.status, "done");
+            assert.equal(done.code, 0);
+
+            const nextStarted = await requestJson<{
+                ok: boolean;
+                job: { id: string; status: string };
+            }>(server, "/api/backups/kopia/run", { method: "POST" });
+            assert.equal(nextStarted.status, 200);
+            assert.equal(nextStarted.body.ok, true);
+            assert.notEqual(nextStarted.body.job.id, started.body.job.id);
+            await waitForDone(server, "/api/backups/kopia");
+        });
     });
 
     it("maps signaled backup exits to interrupted status code", async () => {
