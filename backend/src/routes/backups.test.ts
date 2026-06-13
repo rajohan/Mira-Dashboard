@@ -436,6 +436,27 @@ describe("backup routes", () => {
         assert.equal(cache.tool, "kopia");
     });
 
+    it("evicts older completed backup jobs before starting the next run", async () => {
+        const first = await requestJson<{
+            ok: boolean;
+            job: { id: string; status: string };
+        }>(server, "/api/backups/kopia/run", { method: "POST" });
+        assert.equal(first.status, 200);
+        assert.equal(first.body.ok, true);
+        await waitForDone(server, "/api/backups/kopia");
+        assert.equal(backupTesting.getBackupJobCountForTest(), 1);
+
+        const second = await requestJson<{
+            ok: boolean;
+            job: { id: string; status: string };
+        }>(server, "/api/backups/kopia/run", { method: "POST" });
+        assert.equal(second.status, 200);
+        assert.equal(second.body.ok, true);
+        assert.notEqual(second.body.job.id, first.body.job.id);
+        await waitForDone(server, "/api/backups/kopia");
+        assert.equal(backupTesting.getBackupJobCountForTest(), 1);
+    });
+
     it("returns the active job when a Kopia backup is already running", async () => {
         const releasePath = path.join(tempDir, "release-kopia");
         await withEnv({ FAKE_BACKUP_HOLD_UNTIL: releasePath }, async () => {

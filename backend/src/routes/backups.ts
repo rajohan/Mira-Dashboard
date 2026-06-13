@@ -130,6 +130,14 @@ function backupStatusCacheKey(type: BackupJob["type"]) {
     return type === "kopia" ? "backup.kopia.status" : "backup.walg.status";
 }
 
+function evictCompletedBackupJobs(type: BackupJob["type"]) {
+    for (const [id, job] of backupJobs) {
+        if (job.type === type && job.status === "done") {
+            backupJobs.delete(id);
+        }
+    }
+}
+
 /** Performs start backup job. */
 function startBackupJob(
     type: BackupJob["type"],
@@ -144,6 +152,7 @@ function startBackupJob(
     if (signal?.aborted) {
         throw new Error("Backup aborted by scheduler");
     }
+    evictCompletedBackupJobs(type);
 
     const jobId = randomUUID();
     let resolveCompleted!: (job: BackupJob) => void;
@@ -529,6 +538,9 @@ export const __testing = {
     },
     setBackupAbortDockerExecTimeoutForTest(timeoutMs: number): void {
         backupAbortDockerExecTimeoutMs = timeoutMs;
+    },
+    getBackupJobCountForTest(): number {
+        return backupJobs.size;
     },
     resetJobsForTest(): void {
         backupJobs.clear();
