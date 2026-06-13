@@ -14,7 +14,7 @@ interface HttpStatusError extends Error {
     statusCode?: number;
 }
 
-type CacheRefreshProducer = (key: string) => Promise<unknown>;
+type CacheRefreshProducer = (key: string) => Promise<{ refreshed?: unknown } | void>;
 let cacheRefreshProducerForTests: CacheRefreshProducer | null = null;
 
 function setCacheRefreshProducerForTests(producer: CacheRefreshProducer | null): void {
@@ -56,10 +56,28 @@ export function mapCacheRowForResponse(row: CacheEntryRow) {
 /** Performs refresh cache key. */
 export async function refreshCacheKey(key: string) {
     const producer = cacheRefreshProducerForTests ?? refreshCacheProducer;
-    await producer(key);
-    const row = await getCacheEntry(key);
+    const result = await producer(key);
+    const refreshed = Array.isArray(result?.refreshed) ? result.refreshed : [];
+    if (refreshed.length === 0) {
+        throw Object.assign(new Error(`No cache keys refreshed for: ${key}`), {
+            statusCode: 404,
+        });
+    }
+    if (refreshed.length > 1) {
+        throw Object.assign(
+            new Error(`Cache refresh returned multiple keys for: ${key}`),
+            { statusCode: 400 }
+        );
+    }
+    const refreshedKey = stringFallback(refreshed[0]).trim();
+    if (!refreshedKey) {
+        throw Object.assign(new Error(`No cache keys refreshed for: ${key}`), {
+            statusCode: 404,
+        });
+    }
+    const row = await getCacheEntry(refreshedKey);
     if (!row) {
-        throw new Error(`Cache key not found after refresh: ${key}`);
+        throw new Error(`Cache key not found after refresh: ${refreshedKey}`);
     }
     return mapCacheRowForResponse(row);
 }

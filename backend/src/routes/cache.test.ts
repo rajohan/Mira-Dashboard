@@ -209,6 +209,7 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
     it("refreshes cache keys through the configured producer", async () => {
         __testing.setCacheRefreshProducerForTests(async (key) => {
             insertCacheEntry(key);
+            return { refreshed: [key] };
         });
 
         const refreshed = await refreshCacheKey("quotas.summary");
@@ -222,11 +223,43 @@ describe("cache route mapping helpers", { concurrency: false }, () => {
         assert.equal(((await routeRefresh.json()) as { ok: boolean }).ok, true);
     });
 
-    it("reports when a producer does not write the requested cache row", async () => {
+    it("uses the producer result to return the refreshed cache row", async () => {
+        __testing.setCacheRefreshProducerForTests(async () => {
+            insertCacheEntry("system.host");
+            return { refreshed: ["system.host"] };
+        });
+
+        const refreshed = await refreshCacheKey("system.openclaw");
+        assert.equal(refreshed.key, "system.host");
+    });
+
+    it("rejects empty and multi-row cache refresh results", async () => {
         __testing.setCacheRefreshProducerForTests(async () => {});
 
         await assert.rejects(() => refreshCacheKey("missing.key"), {
-            message: "Cache key not found after refresh: missing.key",
+            message: "No cache keys refreshed for: missing.key",
+        });
+
+        __testing.setCacheRefreshProducerForTests(async () => ({ refreshed: [" "] }));
+
+        await assert.rejects(() => refreshCacheKey("blank.key"), {
+            message: "No cache keys refreshed for: blank.key",
+        });
+
+        __testing.setCacheRefreshProducerForTests(async () => ({
+            refreshed: ["system.openclaw", "system.host"],
+        }));
+
+        await assert.rejects(() => refreshCacheKey("system.host"), {
+            message: "Cache refresh returned multiple keys for: system.host",
+        });
+
+        __testing.setCacheRefreshProducerForTests(async () => ({
+            refreshed: ["missing.after.refresh"],
+        }));
+
+        await assert.rejects(() => refreshCacheKey("missing.after.refresh"), {
+            message: "Cache key not found after refresh: missing.after.refresh",
         });
     });
 });

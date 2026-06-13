@@ -942,13 +942,19 @@ export async function refreshGitCache() {
 async function refreshSystemCache() {
     const openclawBin = getOpenclawBin();
     const checkedAt = nowIso();
-    const statusOutput = await runCommand(openclawBin, ["status", "--json"]);
-    const [doctorResult, securityResult, hostResult] = await Promise.allSettled([
-        runCommand(openclawBin, ["doctor"]),
-        runCommand(openclawBin, ["security", "audit", "--json"]),
-        getHostSummary(),
-    ]);
-    const status = JSON.parse(statusOutput) as JsonRecord;
+    const [statusResult, doctorResult, securityResult, hostResult] =
+        await Promise.allSettled([
+            runCommand(openclawBin, ["status", "--json"]),
+            runCommand(openclawBin, ["doctor"]),
+            runCommand(openclawBin, ["security", "audit", "--json"]),
+            getHostSummary(),
+        ]);
+    const statusError =
+        statusResult.status === "rejected" ? errorMessage(statusResult.reason) : null;
+    const status =
+        statusResult.status === "fulfilled"
+            ? (JSON.parse(statusResult.value) as JsonRecord)
+            : {};
     const doctorError =
         doctorResult.status === "rejected" ? errorMessage(doctorResult.reason) : null;
     let securityError =
@@ -994,21 +1000,6 @@ async function refreshSystemCache() {
         ),
         checkedAt: Date.now(),
     };
-    const openclawPayload = {
-        version,
-        gateway: status.gateway ?? null,
-        gatewayService: status.gatewayService ?? null,
-        nodeService: status.nodeService ?? null,
-        heartbeat: status.heartbeat ?? null,
-        tasks: status.tasks ?? null,
-        taskAudit: status.taskAudit ?? null,
-        doctorWarnings,
-        doctorError,
-        doctorWarningCount: doctorWarnings.length,
-        security,
-        securityError,
-        checkedAt,
-    };
     const host =
         hostResult.status === "fulfilled"
             ? hostResult.value
@@ -1019,24 +1010,54 @@ async function refreshSystemCache() {
             ...version,
             hostError:
                 hostResult.status === "rejected" ? errorMessage(hostResult.reason) : null,
+            openclawError: statusError,
         },
         checkedAt,
     };
-    writeCacheSuccess({
-        key: "system.openclaw",
-        data: openclawPayload,
-        source: "backend",
-        ttl: 24,
-        ttlUnit: "hours",
-        metadata: {
-            workflow: "Cache Foundation - System Checks",
-            kind: "openclaw",
-            summary: {
-                updateAvailable: version.updateAvailable,
-                doctorWarningCount: doctorWarnings.length,
+    if (statusResult.status === "rejected") {
+        writeCacheFailure({
+            key: "system.openclaw",
+            source: "backend",
+            ttl: 15,
+            ttlUnit: "minutes",
+            error: statusResult.reason,
+            metadata: {
+                workflow: "Cache Foundation - System Checks",
+                kind: "openclaw",
             },
-        },
-    });
+        });
+    } else {
+        const openclawPayload = {
+            version,
+            gateway: status.gateway ?? null,
+            gatewayService: status.gatewayService ?? null,
+            nodeService: status.nodeService ?? null,
+            heartbeat: status.heartbeat ?? null,
+            tasks: status.tasks ?? null,
+            taskAudit: status.taskAudit ?? null,
+            doctorWarnings,
+            doctorError,
+            doctorWarningCount: doctorWarnings.length,
+            security,
+            securityError,
+            checkedAt,
+        };
+        writeCacheSuccess({
+            key: "system.openclaw",
+            data: openclawPayload,
+            source: "backend",
+            ttl: 24,
+            ttlUnit: "hours",
+            metadata: {
+                workflow: "Cache Foundation - System Checks",
+                kind: "openclaw",
+                summary: {
+                    updateAvailable: version.updateAvailable,
+                    doctorWarningCount: doctorWarnings.length,
+                },
+            },
+        });
+    }
     writeCacheSuccess({
         key: "system.host",
         data: hostPayload,
@@ -2023,12 +2044,20 @@ export function registerCacheRefreshScheduledJobs(): void {
     });
 
     for (const job of cacheRefreshScheduledJobs) {
-        const enabled = getScheduledJob(job.id)?.enabled ?? true;
+        const existing = getScheduledJob(job.id);
         upsertScheduledJob({
             ...job,
-            enabled,
+            enabled: existing?.enabled ?? true,
+            scheduleType: existing?.scheduleType ?? job.scheduleType,
+            intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
+            timeOfDay: existing
+                ? existing.timeOfDay
+                : "timeOfDay" in job && typeof job.timeOfDay === "string"
+                  ? job.timeOfDay
+                  : null,
+            cronExpression: existing?.cronExpression ?? null,
         });
-        if (enabled) {
+        if (existing?.enabled ?? true) {
             seedMissingLocalCacheEntry(job.actionPayload.key);
         }
     }

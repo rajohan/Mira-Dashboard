@@ -132,6 +132,7 @@ function startBackupJob(type: BackupJob["type"], command: string) {
 
     job.process = child;
     let finalized = false;
+    let finalizing = false;
 
     child.stdout?.on("data", (data) => {
         job.stdout = trimOutput(job.stdout + String(data));
@@ -141,23 +142,25 @@ function startBackupJob(type: BackupJob["type"], command: string) {
         job.stderr = trimOutput(job.stderr + String(data));
     });
 
-    child.on("close", (code, signal) => {
-        if (finalized) {
+    child.on("close", async (code, signal) => {
+        if (finalized || finalizing) {
             return;
         }
-        finalized = true;
+        finalizing = true;
+        if (!signal && code === 0) {
+            await refreshBackupStatus(type, job);
+        }
         job.status = "done";
         job.code = signal ? 130 : code;
         job.endedAt = Date.now();
-        if (!signal && code === 0) {
-            refreshBackupStatus(type, job);
-        }
+        finalized = true;
     });
 
     child.on("error", (error) => {
-        if (finalized) {
+        if (finalized || finalizing) {
             return;
         }
+        finalizing = true;
         finalized = true;
         job.status = "done";
         job.code = 1;
@@ -168,9 +171,12 @@ function startBackupJob(type: BackupJob["type"], command: string) {
     return job;
 }
 
-function refreshBackupStatus(type: BackupJob["type"], job: BackupJob): void {
+async function refreshBackupStatus(
+    type: BackupJob["type"],
+    job: BackupJob
+): Promise<void> {
     const cacheKey = type === "kopia" ? "backup.kopia.status" : "backup.walg.status";
-    void refreshCacheProducer(cacheKey).catch((error: unknown) => {
+    await refreshCacheProducer(cacheKey).catch((error: unknown) => {
         job.stderr = trimOutput(
             `${job.stderr}\nStatus refresh failed: ${String(error)}`.trim()
         );

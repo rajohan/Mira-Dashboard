@@ -149,6 +149,8 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-cache-refresh-"));
         originalPath = process.env.PATH;
         db.exec("DELETE FROM cache_entries;");
+        db.exec("DELETE FROM scheduled_job_runs;");
+        db.exec("DELETE FROM scheduled_jobs;");
     });
 
     afterEach(async () => {
@@ -160,6 +162,8 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         }
         await rm(tempDir, { recursive: true, force: true });
         db.exec("DELETE FROM cache_entries;");
+        db.exec("DELETE FROM scheduled_job_runs;");
+        db.exec("DELETE FROM scheduled_jobs;");
     });
 
     after(async () => {
@@ -1490,6 +1494,23 @@ if (args.includes("capture-pane")) {
         assert.deepEqual(openclawSystem.doctorWarnings, []);
         assert.equal(openclawSystem.security, null);
         assert.match(openclawSystem.securityError ?? "", /security failed/u);
+
+        await withEnv(
+            {
+                OPENCLAW_BIN: path.join(binDir, "missing-openclaw"),
+            },
+            async () => {
+                assert.deepEqual(await refreshCacheProducer("system.host"), {
+                    refreshed: ["system.openclaw", "system.host"],
+                });
+            }
+        );
+        assert.equal(cacheRow("system.host").status, "fresh");
+        assert.equal(cacheRow("system.openclaw").status, "error");
+        assert.match(
+            cacheRow("system.openclaw").error_message ?? "",
+            /missing-openclaw|ENOENT/u
+        );
 
         const warnMock = mock.method(console, "warn", () => {});
         try {
@@ -3004,6 +3025,66 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
         }
     });
 
+    it("preserves customized cache refresh schedules when jobs are registered", () => {
+        scheduledJobsTesting.clearActionHandlers();
+        scheduledJobsTesting.resetSchedulerState();
+        seedFreshCacheEntries([
+            "weather.spydeberg",
+            "quotas.summary",
+            "system.openclaw",
+            "system.host",
+            "git.workspace",
+            "moltbook.home",
+            "moltbook.feed.hot",
+            "moltbook.feed.new",
+            "moltbook.profile",
+            "moltbook.my-content",
+            "backup.kopia.status",
+            "backup.walg.status",
+        ]);
+        try {
+            registerCacheRefreshScheduledJobs();
+            db.prepare(
+                `UPDATE scheduled_jobs
+                    SET enabled = 0,
+                        schedule_type = 'daily',
+                        interval_seconds = 7200,
+                        time_of_day = '06:45',
+                        cron_expression = NULL
+                  WHERE id = 'cache.weather'`
+            ).run();
+
+            registerCacheRefreshScheduledJobs();
+
+            const row = db
+                .prepare(
+                    `SELECT enabled, schedule_type, interval_seconds, time_of_day, cron_expression
+                       FROM scheduled_jobs
+                      WHERE id = 'cache.weather'`
+                )
+                .get() as {
+                enabled: number;
+                schedule_type: string;
+                interval_seconds: number;
+                time_of_day: string | null;
+                cron_expression: string | null;
+            };
+            assert.deepEqual(
+                { ...row },
+                {
+                    enabled: 0,
+                    schedule_type: "daily",
+                    interval_seconds: 7200,
+                    time_of_day: "06:45",
+                    cron_expression: null,
+                }
+            );
+        } finally {
+            scheduledJobsTesting.clearActionHandlers();
+            scheduledJobsTesting.resetSchedulerState();
+        }
+    });
+
     it("seeds missing enabled cache entries when scheduled jobs are registered", async () => {
         const binDir = path.join(tempDir, "registration-seed-bin");
         await mkdir(binDir);
@@ -3144,6 +3225,45 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
         assert.equal(cacheRow("weather.spydeberg").status, "fresh");
     });
 
+    it("logs seed failures when missing cache entries cannot refresh", async () => {
+        db.exec("DELETE FROM cache_entries;");
+        seedFreshCacheEntries([
+            "quotas.summary",
+            "system.openclaw",
+            "system.host",
+            "git.workspace",
+            "moltbook.home",
+            "moltbook.feed.hot",
+            "moltbook.feed.new",
+            "moltbook.profile",
+            "moltbook.my-content",
+            "backup.kopia.status",
+            "backup.walg.status",
+        ]);
+        scheduledJobsTesting.clearActionHandlers();
+        scheduledJobsTesting.resetSchedulerState();
+        const warnMock = mock.method(console, "warn", () => {});
+        try {
+            await withFetch(
+                () => {
+                    throw new Error("weather unavailable");
+                },
+                async () => {
+                    registerCacheRefreshScheduledJobs();
+                    await waitFor(() => warnMock.mock.callCount() > 0);
+                }
+            );
+            assert.match(
+                String(warnMock.mock.calls[0]?.arguments[0] ?? ""),
+                /Failed to seed missing cache entry weather\.spydeberg/u
+            );
+        } finally {
+            warnMock.mock.restore();
+            scheduledJobsTesting.clearActionHandlers();
+            scheduledJobsTesting.resetSchedulerState();
+        }
+    });
+
     it("does not seed disabled cache jobs when scheduled jobs are registered", () => {
         scheduledJobsTesting.clearActionHandlers();
         scheduledJobsTesting.resetSchedulerState();
@@ -3195,8 +3315,7 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
         }
     });
 
-    it("records seed failures without blocking scheduled job registration", async () => {
-        const warn = mock.method(console, "warn", () => {});
+    it("seeds host cache even when OpenClaw status is unavailable", async () => {
         db.exec("DELETE FROM cache_entries;");
         seedFreshCacheEntries([
             "weather.spydeberg",
@@ -3216,16 +3335,24 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             { OPENCLAW_BIN: path.join(tempDir, "missing-openclaw") },
             async () => {
                 registerCacheRefreshScheduledJobs();
-                await waitFor(() => warn.mock.callCount() > 0);
+                await waitFor(() =>
+                    Boolean(
+                        db
+                            .prepare(
+                                "SELECT 1 FROM cache_entries WHERE key = 'system.host'"
+                            )
+                            .get()
+                    )
+                );
             }
         );
         try {
-            assert.ok(warn.mock.callCount() > 0);
+            assert.equal(cacheRow("system.host").status, "fresh");
+            assert.equal(cacheRow("system.openclaw").status, "error");
             assert.ok(
                 db.prepare("SELECT 1 FROM scheduled_jobs WHERE id = 'cache.system'").get()
             );
         } finally {
-            warn.mock.restore();
             scheduledJobsTesting.clearActionHandlers();
             scheduledJobsTesting.resetSchedulerState();
         }

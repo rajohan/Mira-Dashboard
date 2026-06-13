@@ -71,16 +71,16 @@ export function handleServerListening(): void {
             );
         }
 
-        startQuotaNotificationMonitor();
-        quotaMonitorStarted = true;
-        startOpenClawNotificationMonitor();
-        openClawMonitorStarted = true;
         if (shouldStartScheduledJobs()) {
             registerCacheRefreshScheduledJobs();
             startScheduledJobScheduler();
             scheduledJobSchedulerStarted = true;
             installSchedulerCloseCleanup();
         }
+        startQuotaNotificationMonitor();
+        quotaMonitorStarted = true;
+        startOpenClawNotificationMonitor();
+        openClawMonitorStarted = true;
         afterBackgroundServicesStartedForTest?.();
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
