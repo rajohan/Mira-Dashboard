@@ -103,8 +103,10 @@ function createFakeBackupSpawn(): typeof spawn {
                 child.emit("close", null, "SIGTERM");
                 return;
             }
-            child.stdout?.write(`started backup\n${command}\n`);
-            child.stderr?.write("backup warning\n");
+            if (process.env.FAKE_BACKUP_EMPTY_OUTPUT !== "1") {
+                child.stdout?.write(`started backup\n${command}\n`);
+                child.stderr?.write("backup warning\n");
+            }
             if (process.env.FAKE_BACKUP_HOLD_UNTIL) {
                 const timer = setInterval(() => {
                     if (existsSync(process.env.FAKE_BACKUP_HOLD_UNTIL || "")) {
@@ -115,7 +117,7 @@ function createFakeBackupSpawn(): typeof spawn {
                 return;
             }
             setTimeout(() => {
-                child.emit("close", 0, null);
+                child.emit("close", Number(process.env.FAKE_BACKUP_EXIT_CODE || 0), null);
             }, 10);
         });
         return child;
@@ -374,12 +376,8 @@ describe("backup routes", () => {
         assert.equal(
             (walgRun.output as { backup?: { type?: string; status?: string } }).backup
                 ?.status,
-            "running"
+            "done"
         );
-
-        const done = await waitForDone(server, "/api/backups/walg");
-        assert.equal(done.status, "done");
-        assert.equal(done.code, 0);
 
         const kopiaRun = await runScheduledJob("backup.kopia.nightly");
         assert.equal(kopiaRun.status, "success");
@@ -391,12 +389,8 @@ describe("backup routes", () => {
         assert.equal(
             (kopiaRun.output as { backup?: { type?: string; status?: string } }).backup
                 ?.status,
-            "running"
+            "done"
         );
-
-        const kopiaDone = await waitForDone(server, "/api/backups/kopia");
-        assert.equal(kopiaDone.status, "done");
-        assert.equal(kopiaDone.code, 0);
     });
 
     it("rejects invalid scheduled backup payloads", async () => {
@@ -409,6 +403,38 @@ describe("backup routes", () => {
         const run = await runScheduledJob("backup.walg.nightly");
         assert.equal(run.status, "failed");
         assert.match(run.message ?? "", /invalid backup type/u);
+
+        for (const payload of ["null", JSON.stringify("walg")]) {
+            db.prepare(
+                "UPDATE scheduled_jobs SET action_payload_json = ? WHERE id = ?"
+            ).run(payload, "backup.walg.nightly");
+
+            const shapeRun = await runScheduledJob("backup.walg.nightly");
+            assert.equal(shapeRun.status, "failed");
+            assert.match(shapeRun.message ?? "", /invalid backup type/u);
+        }
+    });
+
+    it("records scheduled backup failures after the process exits", async () => {
+        registerBackupScheduledJobs();
+        await withEnv({ FAKE_BACKUP_EXIT_CODE: "12" }, async () => {
+            const run = await runScheduledJob("backup.walg.nightly");
+            assert.equal(run.status, "failed");
+            assert.match(run.message ?? "", /WALG backup failed with code 12/u);
+            assert.match(run.message ?? "", /backup warning/u);
+        });
+    });
+
+    it("records scheduled backup failures without process output", async () => {
+        registerBackupScheduledJobs();
+        await withEnv(
+            { FAKE_BACKUP_EMPTY_OUTPUT: "1", FAKE_BACKUP_EXIT_CODE: "12" },
+            async () => {
+                const run = await runScheduledJob("backup.walg.nightly");
+                assert.equal(run.status, "failed");
+                assert.match(run.message ?? "", /^WALG backup failed with code 12$/u);
+            }
+        );
     });
 
     it("records status refresh failures on successful backup jobs", async () => {
@@ -607,6 +633,9 @@ describe("backup routes", () => {
             null
         );
         assert.equal(backupTesting.mapJob(null), null);
+        assert.equal(backupTesting.getScheduledBackupType(null), undefined);
+        assert.equal(backupTesting.getScheduledBackupType("walg"), undefined);
+        assert.equal(backupTesting.getScheduledBackupType({ type: "kopia" }), "kopia");
         assert.equal(backupTesting.trimOutput("x".repeat(100_001)).length, 100_000);
     });
 });

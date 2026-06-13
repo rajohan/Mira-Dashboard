@@ -23,12 +23,22 @@ interface BackupJob {
     stderr: string;
     startedAt: number;
     endedAt: number | null;
+    completed: Promise<BackupJob>;
     process?: ChildProcess;
 }
 
 /** Represents the backup job API response. */
 interface BackupJobResponse {
-    job: BackupJob | null;
+    job: {
+        id: string;
+        type: BackupJob["type"];
+        status: BackupJob["status"];
+        code: number | null;
+        stdout: string;
+        stderr: string;
+        startedAt: number;
+        endedAt: number | null;
+    } | null;
 }
 
 const backupJobs = new Map<string, BackupJob>();
@@ -93,6 +103,15 @@ function mapJob(job: BackupJob | null) {
     };
 }
 
+/** Returns backup type from scheduled job payload. */
+function getScheduledBackupType(payload: unknown) {
+    if (typeof payload !== "object" || payload === null) {
+        return;
+    }
+
+    return (payload as { type?: unknown }).type;
+}
+
 /** Performs start backup job. */
 function startBackupJob(type: BackupJob["type"], command: string) {
     const existingJob = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
@@ -101,6 +120,7 @@ function startBackupJob(type: BackupJob["type"], command: string) {
     }
 
     const jobId = randomUUID();
+    let resolveCompleted!: (job: BackupJob) => void;
     const job: BackupJob = {
         id: jobId,
         type,
@@ -110,6 +130,9 @@ function startBackupJob(type: BackupJob["type"], command: string) {
         stderr: "",
         startedAt: Date.now(),
         endedAt: null,
+        completed: new Promise<BackupJob>((resolve) => {
+            resolveCompleted = resolve;
+        }),
     };
 
     backupJobs.set(jobId, job);
@@ -159,6 +182,7 @@ function startBackupJob(type: BackupJob["type"], command: string) {
         if (!signal && code === 0) {
             await refreshBackupStatus(type, job);
         }
+        resolveCompleted(job);
     });
 
     child.on("error", (error) => {
@@ -171,6 +195,7 @@ function startBackupJob(type: BackupJob["type"], command: string) {
         job.code = 1;
         job.stderr = trimOutput(`${job.stderr}\n${error.message}`.trim());
         job.endedAt = Date.now();
+        resolveCompleted(job);
     });
 
     return job;
@@ -201,9 +226,18 @@ function startWalgBackupJob() {
     );
 }
 
-function startScheduledBackup(type: BackupJob["type"]) {
+async function startScheduledBackup(type: BackupJob["type"]) {
     const job = type === "kopia" ? startKopiaBackupJob() : startWalgBackupJob();
-    return { backup: mapJob(job) };
+    const completedJob = await job.completed;
+    if (completedJob.code !== 0) {
+        const details = completedJob.stderr || completedJob.stdout;
+        throw new Error(
+            `${type.toUpperCase()} backup failed with code ${completedJob.code}${
+                details ? `: ${details}` : ""
+            }`
+        );
+    }
+    return { backup: mapJob(completedJob) };
 }
 
 const backupScheduledJobs = [
@@ -231,7 +265,7 @@ const backupScheduledJobs = [
 
 export function registerBackupScheduledJobs(): void {
     registerScheduledJobAction("backup.run", (job) => {
-        const type = job.actionPayload.type;
+        const type = getScheduledBackupType(job.actionPayload);
         if (type !== "kopia" && type !== "walg") {
             throw Object.assign(
                 new Error(`Scheduled backup job ${job.id} has invalid backup type`),
@@ -258,6 +292,7 @@ export const __testing = {
     trimOutput,
     getCurrentJob,
     mapJob,
+    getScheduledBackupType,
     startScheduledBackup,
     setSpawnBackupProcessForTest(nextSpawn?: typeof spawn): void {
         spawnBackupProcess = nextSpawn ?? spawn;
