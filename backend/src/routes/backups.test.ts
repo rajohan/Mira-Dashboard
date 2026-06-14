@@ -2060,6 +2060,53 @@ describe("backup routes", () => {
         }
     });
 
+    it("keeps close finalization when force termination failure races with process close", async () => {
+        registerBackupScheduledJobs();
+        const originalKill = process.kill;
+        const signals: Array<[number, NodeJS.Signals | number | undefined]> = [];
+        process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+            signals.push([pid, signal]);
+            if (signal === "SIGKILL") {
+                if (pid > 0) {
+                    closeLastFakeBackupProcess(0, null);
+                }
+                throw new Error("force kill unavailable");
+            }
+            return true;
+        }) as typeof process.kill;
+
+        try {
+            mock.timers.enable({ apis: ["setTimeout"] });
+            await withEnv(
+                { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_BACKUP_PID: "24680" },
+                async () => {
+                    const controller = new AbortController();
+                    const runPromise = startTestScheduledBackup(
+                        "kopia",
+                        controller.signal
+                    );
+
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+                    controller.abort();
+                    mock.timers.tick(10_000);
+
+                    await assertScheduledBackupRejects(
+                        runPromise,
+                        /Failed to force terminate backup process[\s\S]*force kill unavailable/u
+                    );
+                    assert.deepEqual(signals, [
+                        [-24680, "SIGTERM"],
+                        [-24680, "SIGKILL"],
+                        [24680, "SIGKILL"],
+                    ]);
+                }
+            );
+        } finally {
+            mock.timers.reset();
+            process.kill = originalKill;
+        }
+    });
+
     it("records termination failures when aborting scheduled backup jobs", async () => {
         registerBackupScheduledJobs();
         await withEnv(

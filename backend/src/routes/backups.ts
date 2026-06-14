@@ -290,6 +290,9 @@ function startBackupJob(
     };
 
     const markNeedsAttention = async () => {
+        if (finalized || finalizing) {
+            return;
+        }
         finalizing = true;
         if (hostAbortKillTimer) {
             clearTimeout(hostAbortKillTimer);
