@@ -36,7 +36,7 @@ const originalDockerBin = process.env.MIRA_DOCKER_BIN;
 let lastFakeBackupProcess: FakeBackupProcess | null = null;
 const fakeDockerExecCalls: string[][] = [];
 let fakeBackupSpawnCalls = 0;
-let fakeContainerPgrepCalls = 0;
+let fakeContainerPostStartPgrepCalls = 0;
 
 async function installFakeDocker(tempDir: string): Promise<string> {
     const dockerPath = path.join(tempDir, "docker");
@@ -132,11 +132,17 @@ function createFakeBackupSpawn(): typeof spawn {
         if (file === "docker") {
             fakeDockerExecCalls.push([...args].map(String));
             queueMicrotask(() => {
-                if (process.env.FAKE_DOCKER_EXEC_ERROR === "1") {
+                if (
+                    process.env.FAKE_DOCKER_EXEC_ERROR === "1" &&
+                    fakeBackupSpawnCalls > 0
+                ) {
                     child.emit("error", new Error("docker exec failed"));
                     return;
                 }
-                if (process.env.FAKE_DOCKER_EXEC_NEVER_CLOSE === "1") {
+                if (
+                    process.env.FAKE_DOCKER_EXEC_NEVER_CLOSE === "1" &&
+                    fakeBackupSpawnCalls > 0
+                ) {
                     return;
                 }
                 if (process.env.FAKE_DOCKER_EXEC_STDOUT) {
@@ -146,14 +152,24 @@ function createFakeBackupSpawn(): typeof spawn {
                     child.stderr.write(process.env.FAKE_DOCKER_EXEC_STDERR);
                 }
                 if (args.includes("pgrep")) {
-                    fakeContainerPgrepCalls += 1;
+                    const preStartProbe = fakeBackupSpawnCalls === 0;
+                    if (!preStartProbe) {
+                        fakeContainerPostStartPgrepCalls += 1;
+                    }
                     let code = 1;
-                    if (process.env.FAKE_CONTAINER_PGREP_CODE) {
+                    if (preStartProbe && process.env.FAKE_CONTAINER_PGREP_PRESTART_CODE) {
+                        code = Number(process.env.FAKE_CONTAINER_PGREP_PRESTART_CODE);
+                    } else if (
+                        preStartProbe &&
+                        !process.env.FAKE_CONTAINER_PGREP_PRESTART_CODE
+                    ) {
+                        code = 1;
+                    } else if (process.env.FAKE_CONTAINER_PGREP_CODE) {
                         code = Number(process.env.FAKE_CONTAINER_PGREP_CODE);
                     } else if (
                         process.env.FAKE_CONTAINER_PGREP_RUNNING === "1" ||
                         (process.env.FAKE_CONTAINER_PGREP_RUNNING_ONCE === "1" &&
-                            fakeContainerPgrepCalls === 1)
+                            fakeContainerPostStartPgrepCalls === 1)
                     ) {
                         code = 0;
                     }
@@ -373,6 +389,13 @@ function closeLastFakeBackupProcess(
     lastFakeBackupProcess.emit("close", code, signal);
 }
 
+async function closeLastFakeBackupProcessAndWaitForStatusRefresh(
+    type: "kopia" | "walg"
+): Promise<void> {
+    closeLastFakeBackupProcess();
+    await waitForCacheEntry(`backup.${type}.status`);
+}
+
 describe("backup routes", () => {
     let server: TestServer;
     let tempDir: string;
@@ -387,7 +410,7 @@ describe("backup routes", () => {
         lastFakeBackupProcess = null;
         fakeDockerExecCalls.length = 0;
         fakeBackupSpawnCalls = 0;
-        fakeContainerPgrepCalls = 0;
+        fakeContainerPostStartPgrepCalls = 0;
         backupTesting.resetJobsForTest();
         backupTesting.setBackupAbortContainerTimeoutsForTest(30_000, 1_000);
         backupTesting.setBackupAbortContainerConfirmAttemptsForTest(3);
@@ -932,7 +955,7 @@ describe("backup routes", () => {
                             .includes("walg pgrep -f /usr/local/bin/backup-push.sh")
                     )
                 );
-                assert.equal(fakeContainerPgrepCalls, 2);
+                assert.equal(fakeContainerPostStartPgrepCalls, 2);
             }
         );
     });
@@ -1231,6 +1254,7 @@ describe("backup routes", () => {
                 );
                 assert.equal(afterClear.body.job, null);
 
+                process.env.FAKE_CONTAINER_PGREP_CODE = "1";
                 const restarted = await requestJson<{
                     ok: boolean;
                     job: { status: string };
@@ -1245,8 +1269,30 @@ describe("backup routes", () => {
                     { method: "POST" }
                 );
                 assert.equal(clearedRestart.status, 200);
+                await closeLastFakeBackupProcessAndWaitForStatusRefresh("walg");
             }
         );
+    });
+
+    it("blocks WAL-G starts after restart when the container backup is still running", async () => {
+        registerBackupScheduledJobs();
+        await withEnv({ FAKE_CONTAINER_PGREP_PRESTART_CODE: "0" }, async () => {
+            backupTesting.resetJobsForTest();
+
+            const manual = await requestJson<{ error: string }>(
+                server,
+                "/api/backups/walg/run",
+                { method: "POST" }
+            );
+            assert.equal(manual.status, 409);
+            assert.match(manual.body.error, /WALG backup needs attention/u);
+            assert.equal(fakeBackupSpawnCalls, 0);
+
+            const scheduled = await runScheduledJob("backup.walg", "manual");
+            assert.equal(scheduled.status, "failed");
+            assert.match(scheduled.message ?? "", /WALG backup needs attention/u);
+            assert.equal(fakeBackupSpawnCalls, 0);
+        });
     });
 
     it("rejects clearing backup attention when no attention is required", async () => {
@@ -1282,6 +1328,7 @@ describe("backup routes", () => {
         });
         assert.equal(cleared.status, 200);
         assert.equal(cleared.body.cleared.status, "needs_attention");
+        await closeLastFakeBackupProcessAndWaitForStatusRefresh("kopia");
 
         const afterClear = await requestJson<{ job: unknown }>(
             server,
@@ -1596,13 +1643,13 @@ describe("backup routes", () => {
             const started = await requestJson<{
                 ok: boolean;
                 job: { status: string; code: number | null };
-            }>(server, "/api/backups/walg/run", { method: "POST" });
+            }>(server, "/api/backups/kopia/run", { method: "POST" });
             assert.equal(started.status, 200);
             assert.equal(started.body.ok, true);
             assert.equal(started.body.job.status, "running");
             assert.equal(started.body.job.code, null);
 
-            const done = await waitForDone(server, "/api/backups/walg");
+            const done = await waitForDone(server, "/api/backups/kopia");
             assert.equal(done.status, "done");
             assert.equal(done.code, 1);
             assert.match(done.stderr, /spawn failed/);
@@ -1646,11 +1693,11 @@ describe("backup routes", () => {
             const started = await requestJson<{
                 ok: boolean;
                 job: { status: string; code: number | null };
-            }>(server, "/api/backups/walg/run", { method: "POST" });
+            }>(server, "/api/backups/kopia/run", { method: "POST" });
             assert.equal(started.status, 200);
             assert.equal(started.body.ok, true);
 
-            const done = await waitForDone(server, "/api/backups/walg");
+            const done = await waitForDone(server, "/api/backups/kopia");
             assert.equal(done.code, 1);
             assert.match(done.stderr, /spawn failed first/);
             assert.doesNotMatch(done.stderr, /Status refresh failed/u);
@@ -1670,11 +1717,11 @@ describe("backup routes", () => {
             const started = await requestJson<{
                 ok: boolean;
                 job: { status: string; code: number | null };
-            }>(server, "/api/backups/walg/run", { method: "POST" });
+            }>(server, "/api/backups/kopia/run", { method: "POST" });
             assert.equal(started.status, 200);
             assert.equal(started.body.ok, true);
 
-            const done = await waitForDone(server, "/api/backups/walg");
+            const done = await waitForDone(server, "/api/backups/kopia");
             assert.equal(done.code, 0);
             assert.doesNotMatch(done.stderr, /late spawn error/u);
         } finally {

@@ -253,6 +253,46 @@ describe("BackupOverviewCard", () => {
         expect(hooks.runKopiaBackup).not.toHaveBeenCalled();
     });
 
+    it("disables attention clear actions while clearing", () => {
+        hooks.useClearKopiaBackupAttention.mockReturnValue({
+            isPending: true,
+            mutateAsync: hooks.clearKopiaAttention,
+        });
+        hooks.useClearWalgBackupAttention.mockReturnValue({
+            isPending: true,
+            mutateAsync: hooks.clearWalgAttention,
+        });
+        hooks.useKopiaBackup.mockReturnValue({
+            data: {
+                job: {
+                    startedAt: Date.now() - 30_000,
+                    status: "needs_attention",
+                    stderr: "",
+                },
+            },
+        });
+        hooks.useWalgBackup.mockReturnValue({
+            data: {
+                job: {
+                    startedAt: Date.now() - 45_000,
+                    status: "needs_attention",
+                    stderr: "",
+                },
+            },
+        });
+
+        render(<BackupOverviewCard />);
+
+        for (const button of screen.getAllByRole("button", {
+            name: "Clear attention",
+        })) {
+            expect(button).toBeDisabled();
+        }
+        expect(
+            screen.queryByText(/termination was not confirmed/u)
+        ).not.toBeInTheDocument();
+    });
+
     it("renders loading and empty states", () => {
         hooks.useCacheEntry.mockImplementation((key: string) => ({
             data: key === "backup.walg.status" ? { data: {}, status: "missing" } : null,

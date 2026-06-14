@@ -386,6 +386,29 @@ function runDockerExec(
     });
 }
 
+async function assertNoContainerBackupInProgress(
+    config: BackupAbortConfig
+): Promise<void> {
+    const result = await runDockerExec(config.container, [
+        "pgrep",
+        "-f",
+        config.processPattern,
+    ]);
+    if (result.code === 1) {
+        return;
+    }
+    if (result.code === 0) {
+        throw Object.assign(
+            new Error("WALG backup needs attention: backup process is still running"),
+            { statusCode: 409 }
+        );
+    }
+    throw Object.assign(
+        new Error(result.stderr || `docker exec pgrep exited ${result.code}`),
+        { statusCode: 503 }
+    );
+}
+
 async function terminateContainerProcess(
     config: BackupAbortConfig,
     signalName: "TERM" | "KILL"
@@ -465,12 +488,17 @@ function startKopiaBackupJob(signal?: AbortSignal) {
 }
 
 /** Performs start walg backup job. */
-function startWalgBackupJob(signal?: AbortSignal) {
+async function startWalgBackupJob(signal?: AbortSignal) {
+    const abortConfig = {
+        container: "walg",
+        processPattern: WALG_BACKUP_SCRIPT_PATTERN,
+    };
+    await assertNoContainerBackupInProgress(abortConfig);
     return startBackupJob(
         "walg",
         "docker exec walg /bin/sh /usr/local/bin/backup-push.sh",
         signal,
-        { container: "walg", processPattern: WALG_BACKUP_SCRIPT_PATTERN }
+        abortConfig
     );
 }
 
@@ -489,7 +517,7 @@ async function startScheduledBackup(type: BackupJob["type"], signal?: AbortSigna
         );
     }
     const job =
-        type === "kopia" ? startKopiaBackupJob(signal) : startWalgBackupJob(signal);
+        type === "kopia" ? startKopiaBackupJob(signal) : await startWalgBackupJob(signal);
     const completedJob = await job.completed;
     if (completedJob.code !== 0) {
         const details = completedJob.stderr || completedJob.stdout;
@@ -632,7 +660,7 @@ export default function backupRoutes(
         "/api/backups/walg/run",
         asyncRoute(
             async (_req, res) => {
-                const job = startWalgBackupJob();
+                const job = await startWalgBackupJob();
                 res.json({ ok: true, job: mapJob(job) });
             },
             { fallback: "Failed to start WAL-G backup" }
