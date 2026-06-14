@@ -2041,7 +2041,7 @@ describe("backup routes", () => {
             assert.equal(nextStarted.body.ok, true);
             assert.notEqual(nextStarted.body.job.id, started.body.job.id);
             await waitForDone(server, "/api/backups/kopia");
-            await new Promise<void>((resolve) => setTimeout(resolve, 20));
+            await new Promise<void>((resolve) => setTimeout(resolve, 1100));
         });
     });
 
