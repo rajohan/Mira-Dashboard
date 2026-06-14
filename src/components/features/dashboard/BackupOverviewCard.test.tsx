@@ -5,8 +5,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BackupOverviewCard } from "./BackupOverviewCard";
 
 const hooks = vi.hoisted(() => ({
+    clearKopiaAttention: vi.fn(),
+    clearWalgAttention: vi.fn(),
     runKopiaBackup: vi.fn(),
     runWalgBackup: vi.fn(),
+    useClearKopiaBackupAttention: vi.fn(),
+    useClearWalgBackupAttention: vi.fn(),
     useCacheEntry: vi.fn(),
     useKopiaBackup: vi.fn(),
     useRunKopiaBackup: vi.fn(),
@@ -15,6 +19,8 @@ const hooks = vi.hoisted(() => ({
 }));
 
 vi.mock("../../../hooks", () => ({
+    useClearKopiaBackupAttention: hooks.useClearKopiaBackupAttention,
+    useClearWalgBackupAttention: hooks.useClearWalgBackupAttention,
     useCacheEntry: hooks.useCacheEntry,
     useKopiaBackup: hooks.useKopiaBackup,
     useRunKopiaBackup: hooks.useRunKopiaBackup,
@@ -27,8 +33,20 @@ function setupHooks() {
     hooks.runKopiaBackup.mockResolvedValue({});
     hooks.runWalgBackup.mockReset();
     hooks.runWalgBackup.mockResolvedValue({});
+    hooks.clearKopiaAttention.mockReset();
+    hooks.clearKopiaAttention.mockResolvedValue({});
+    hooks.clearWalgAttention.mockReset();
+    hooks.clearWalgAttention.mockResolvedValue({});
     hooks.useKopiaBackup.mockReturnValue({ data: { job: null } });
     hooks.useWalgBackup.mockReturnValue({ data: { job: null } });
+    hooks.useClearKopiaBackupAttention.mockReturnValue({
+        isPending: false,
+        mutateAsync: hooks.clearKopiaAttention,
+    });
+    hooks.useClearWalgBackupAttention.mockReturnValue({
+        isPending: false,
+        mutateAsync: hooks.clearWalgAttention,
+    });
     hooks.useRunKopiaBackup.mockReturnValue({
         isPending: false,
         mutateAsync: hooks.runKopiaBackup,
@@ -185,6 +203,54 @@ describe("BackupOverviewCard", () => {
         expect(screen.getAllByText(/backup is running/iu).length).toBeGreaterThanOrEqual(
             2
         );
+    });
+
+    it("shows and clears backup jobs that need attention", async () => {
+        const user = userEvent.setup();
+        hooks.useKopiaBackup.mockReturnValue({
+            data: {
+                job: {
+                    startedAt: Date.now() - 30_000,
+                    status: "needs_attention",
+                    stderr: "kopia termination was not confirmed",
+                },
+            },
+        });
+        hooks.useWalgBackup.mockReturnValue({
+            data: {
+                job: {
+                    startedAt: Date.now() - 45_000,
+                    status: "needs_attention",
+                    stderr: "walg termination was not confirmed",
+                },
+            },
+        });
+
+        render(<BackupOverviewCard />);
+
+        expect(screen.getByText("Postgres backup needs attention")).toBeInTheDocument();
+        expect(screen.getByText("Backup needs attention")).toBeInTheDocument();
+        expect(
+            screen.getByText("walg termination was not confirmed")
+        ).toBeInTheDocument();
+        expect(
+            screen.getByText("kopia termination was not confirmed")
+        ).toBeInTheDocument();
+        expect(
+            screen.getByRole("button", { name: /Run Postgres backup/u })
+        ).toBeDisabled();
+        expect(
+            screen.getByRole("button", { name: /Run filesystem backup/u })
+        ).toBeDisabled();
+
+        const clearButtons = screen.getAllByRole("button", { name: "Clear attention" });
+        await user.click(clearButtons[0]);
+        await user.click(clearButtons[1]);
+
+        expect(hooks.clearWalgAttention).toHaveBeenCalledTimes(1);
+        expect(hooks.clearKopiaAttention).toHaveBeenCalledTimes(1);
+        expect(hooks.runWalgBackup).not.toHaveBeenCalled();
+        expect(hooks.runKopiaBackup).not.toHaveBeenCalled();
     });
 
     it("renders loading and empty states", () => {

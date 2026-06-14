@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
 import {
     backupKeys,
+    useClearKopiaBackupAttention,
+    useClearWalgBackupAttention,
     useKopiaBackup,
     useRunKopiaBackup,
     useRunWalgBackup,
@@ -94,5 +96,42 @@ describe("backup hooks", () => {
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: backupKeys.kopia() });
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: backupKeys.walg() });
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: cacheKeys.heartbeat() });
+    });
+
+    it("clears backup attention and invalidates backup state", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ ok: true, cleared: { id: "job" } }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        const queryClient = createTestQueryClient();
+        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const wrapper = createQueryWrapper(queryClient);
+
+        const { result: kopia } = renderHook(() => useClearKopiaBackupAttention(), {
+            wrapper,
+        });
+        const { result: walg } = renderHook(() => useClearWalgBackupAttention(), {
+            wrapper,
+        });
+
+        await act(async () => {
+            await kopia.current.mutateAsync();
+            await walg.current.mutateAsync();
+        });
+
+        expect(fetchMock).toHaveBeenNthCalledWith(
+            1,
+            "/api/backups/kopia/clear-needs-attention",
+            expect.objectContaining({ method: "POST" })
+        );
+        expect(fetchMock).toHaveBeenNthCalledWith(
+            2,
+            "/api/backups/walg/clear-needs-attention",
+            expect.objectContaining({ method: "POST" })
+        );
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: backupKeys.kopia() });
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: backupKeys.walg() });
     });
 });

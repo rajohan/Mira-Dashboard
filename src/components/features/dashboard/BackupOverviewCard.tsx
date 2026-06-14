@@ -3,6 +3,8 @@ import { useState } from "react";
 
 import {
     useCacheEntry,
+    useClearKopiaBackupAttention,
+    useClearWalgBackupAttention,
     useKopiaBackup,
     useRunKopiaBackup,
     useRunWalgBackup,
@@ -97,6 +99,8 @@ export function BackupOverviewCard() {
     const { data: walgState } = useWalgBackup();
     const runBackup = useRunKopiaBackup();
     const runWalgBackup = useRunWalgBackup();
+    const clearKopiaAttention = useClearKopiaBackupAttention();
+    const clearWalgAttention = useClearWalgBackupAttention();
 
     const entry = data;
     const walgEntry = walgData;
@@ -108,8 +112,14 @@ export function BackupOverviewCard() {
     );
     const runningJob = backupState?.job?.status === "running" ? backupState.job : null;
     const runningWalgJob = walgState?.job?.status === "running" ? walgState.job : null;
+    const attentionJob =
+        backupState?.job?.status === "needs_attention" ? backupState.job : null;
+    const attentionWalgJob =
+        walgState?.job?.status === "needs_attention" ? walgState.job : null;
     const isRunning = Boolean(runningJob);
     const isWalgRunning = Boolean(runningWalgJob);
+    const isBlocked = isRunning || Boolean(attentionJob);
+    const isWalgBlocked = isWalgRunning || Boolean(attentionWalgJob);
 
     /** Responds to run backup events. */
     const handleRunBackup = async () => {
@@ -157,7 +167,7 @@ export function BackupOverviewCard() {
                         <Button
                             type="button"
                             size="sm"
-                            disabled={isWalgRunning || runWalgBackup.isPending}
+                            disabled={isWalgBlocked || runWalgBackup.isPending}
                             onClick={() => {
                                 void handleRunWalgBackup();
                             }}
@@ -192,7 +202,7 @@ export function BackupOverviewCard() {
                         <Button
                             type="button"
                             size="sm"
-                            disabled={isRunning || runBackup.isPending}
+                            disabled={isBlocked || runBackup.isPending}
                             onClick={() => setIsConfirmOpen(true)}
                             className="w-full sm:w-auto"
                         >
@@ -231,6 +241,41 @@ export function BackupOverviewCard() {
                 </div>
             ) : null}
 
+            {attentionWalgJob ? (
+                <div className="mb-4 rounded-lg border border-yellow-400/40 bg-yellow-400/10 p-3 text-sm text-yellow-100">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                            <div className="flex items-center gap-2 font-medium">
+                                <AlertTriangle className="h-4 w-4" />
+                                Postgres backup needs attention
+                            </div>
+                            <div className="mt-1 text-yellow-100/80">
+                                Verify no WAL-G backup is still running before clearing.
+                            </div>
+                        </div>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            disabled={clearWalgAttention.isPending}
+                            onClick={() => {
+                                void clearWalgAttention.mutateAsync();
+                            }}
+                            className="w-full sm:w-auto"
+                        >
+                            Clear attention
+                        </Button>
+                    </div>
+                    {attentionWalgJob.stderr ? (
+                        <div className="bg-primary-950/50 text-primary-200 mt-2 max-h-24 overflow-y-auto rounded p-2 font-mono text-xs">
+                            <pre className="whitespace-pre-wrap">
+                                {attentionWalgJob.stderr}
+                            </pre>
+                        </div>
+                    ) : null}
+                </div>
+            ) : null}
+
             {runningJob ? (
                 <div className="border-accent-500/30 bg-accent-500/10 text-accent-100 mb-4 rounded-lg border p-3 text-sm">
                     <div className="flex items-center gap-2 font-medium">
@@ -243,6 +288,41 @@ export function BackupOverviewCard() {
                     {runningJob.stdout ? (
                         <div className="bg-primary-950/50 text-primary-200 mt-2 max-h-24 overflow-y-auto rounded p-2 font-mono text-xs">
                             <pre className="whitespace-pre-wrap">{runningJob.stdout}</pre>
+                        </div>
+                    ) : null}
+                </div>
+            ) : null}
+
+            {attentionJob ? (
+                <div className="mb-4 rounded-lg border border-yellow-400/40 bg-yellow-400/10 p-3 text-sm text-yellow-100">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                            <div className="flex items-center gap-2 font-medium">
+                                <AlertTriangle className="h-4 w-4" />
+                                Backup needs attention
+                            </div>
+                            <div className="mt-1 text-yellow-100/80">
+                                Verify the backup process is stopped before clearing.
+                            </div>
+                        </div>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            disabled={clearKopiaAttention.isPending}
+                            onClick={() => {
+                                void clearKopiaAttention.mutateAsync();
+                            }}
+                            className="w-full sm:w-auto"
+                        >
+                            Clear attention
+                        </Button>
+                    </div>
+                    {attentionJob.stderr ? (
+                        <div className="bg-primary-950/50 text-primary-200 mt-2 max-h-24 overflow-y-auto rounded p-2 font-mono text-xs">
+                            <pre className="whitespace-pre-wrap">
+                                {attentionJob.stderr}
+                            </pre>
                         </div>
                     ) : null}
                 </div>

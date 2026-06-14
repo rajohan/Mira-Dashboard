@@ -802,18 +802,22 @@ async function runActionWithTimeout(
     let timedOut = false;
     let timeout: NodeJS.Timeout | undefined;
     try {
-        timeout = setTimeout(() => {
-            timedOut = true;
-            controller.abort();
-            console.warn("[ScheduledJobs] Scheduled job exceeded timeout", {
-                timeoutMs,
-            });
-        }, timeoutMs);
-        timeout.unref();
-        const output = (await action.handler(job, controller.signal)) ?? {};
-        if (timedOut) {
-            throw new Error("Scheduled job timed out");
-        }
+        const timeoutPromise = new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(() => {
+                timedOut = true;
+                controller.abort();
+                console.warn("[ScheduledJobs] Scheduled job exceeded timeout", {
+                    timeoutMs,
+                });
+                reject(new Error("Scheduled job timed out"));
+            }, timeoutMs);
+        });
+        timeout?.unref();
+        const handlerPromise = Promise.resolve(action.handler(job, controller.signal));
+        handlerPromise.catch(() => {
+            // The race below reports handler failures unless the timeout already won.
+        });
+        const output = (await Promise.race([handlerPromise, timeoutPromise])) ?? {};
         return output;
     } catch (error) {
         if (timedOut) {

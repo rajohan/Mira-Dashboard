@@ -7,7 +7,7 @@ import { cacheKeys } from "./useCache";
 export interface BackupJob {
     id: string;
     type: "kopia" | "walg";
-    status: "running" | "done";
+    status: "running" | "done" | "needs_attention";
     code: number | null;
     stdout: string;
     stderr: string;
@@ -72,6 +72,21 @@ export function useRunKopiaBackup() {
     });
 }
 
+/** Provides clear kopia backup attention. */
+export function useClearKopiaBackupAttention() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: () =>
+            apiPostRequired<{ ok: boolean; cleared: BackupJob }>(
+                "/backups/kopia/clear-needs-attention"
+            ),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: backupKeys.kopia() });
+        },
+    });
+}
+
 /** Provides run walg backup. */
 export function useRunWalgBackup() {
     const queryClient = useQueryClient();
@@ -87,6 +102,21 @@ export function useRunWalgBackup() {
                 }),
                 queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
             ]);
+        },
+    });
+}
+
+/** Provides clear walg backup attention. */
+export function useClearWalgBackupAttention() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: () =>
+            apiPostRequired<{ ok: boolean; cleared: BackupJob }>(
+                "/backups/walg/clear-needs-attention"
+            ),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: backupKeys.walg() });
         },
     });
 }

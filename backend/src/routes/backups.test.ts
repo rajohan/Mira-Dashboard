@@ -1214,8 +1214,80 @@ describe("backup routes", () => {
                 );
                 assert.equal(blockedManual.status, 409);
                 assert.match(blockedManual.body.error, /WALG backup needs attention/u);
+
+                const cleared = await requestJson<{
+                    ok: boolean;
+                    cleared: { status: string };
+                }>(server, "/api/backups/walg/clear-needs-attention", {
+                    method: "POST",
+                });
+                assert.equal(cleared.status, 200);
+                assert.equal(cleared.body.ok, true);
+                assert.equal(cleared.body.cleared.status, "needs_attention");
+
+                const afterClear = await requestJson<{ job: unknown }>(
+                    server,
+                    "/api/backups/walg"
+                );
+                assert.equal(afterClear.body.job, null);
+
+                const restarted = await requestJson<{
+                    ok: boolean;
+                    job: { status: string };
+                }>(server, "/api/backups/walg/run", { method: "POST" });
+                assert.equal(restarted.status, 200);
+                assert.equal(restarted.body.job.status, "running");
+
+                backupTesting.markActiveJobNeedsAttentionForTest("walg");
+                const clearedRestart = await requestJson<{ ok: boolean }>(
+                    server,
+                    "/api/backups/walg/clear-needs-attention",
+                    { method: "POST" }
+                );
+                assert.equal(clearedRestart.status, 200);
             }
         );
+    });
+
+    it("rejects clearing backup attention when no attention is required", async () => {
+        const missing = await requestJson<{ error: string }>(
+            server,
+            "/api/backups/kopia/clear-needs-attention",
+            { method: "POST" }
+        );
+        assert.equal(missing.status, 404);
+        assert.match(missing.body.error, /KOPIA backup job not found/u);
+
+        const started = await requestJson<{ job: { status: string } }>(
+            server,
+            "/api/backups/kopia/run",
+            { method: "POST" }
+        );
+        assert.equal(started.status, 200);
+
+        const active = await requestJson<{ error: string }>(
+            server,
+            "/api/backups/kopia/clear-needs-attention",
+            { method: "POST" }
+        );
+        assert.equal(active.status, 409);
+        assert.match(active.body.error, /KOPIA backup does not need attention/u);
+
+        backupTesting.markActiveJobNeedsAttentionForTest("kopia");
+        const cleared = await requestJson<{
+            ok: boolean;
+            cleared: { status: string };
+        }>(server, "/api/backups/kopia/clear-needs-attention", {
+            method: "POST",
+        });
+        assert.equal(cleared.status, 200);
+        assert.equal(cleared.body.cleared.status, "needs_attention");
+
+        const afterClear = await requestJson<{ job: unknown }>(
+            server,
+            "/api/backups/kopia"
+        );
+        assert.equal(afterClear.body.job, null);
     });
 
     it("records in-container WAL-G force termination failures", async () => {

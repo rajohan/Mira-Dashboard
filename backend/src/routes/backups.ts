@@ -138,6 +138,29 @@ function evictCompletedBackupJobs(type: BackupJob["type"]) {
     }
 }
 
+function clearNeedsAttentionBackupJob(type: BackupJob["type"]) {
+    const job = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
+    if (!job) {
+        throw Object.assign(new Error(`${type.toUpperCase()} backup job not found`), {
+            statusCode: 404,
+        });
+    }
+    if (job.status !== "needs_attention") {
+        throw Object.assign(
+            new Error(`${type.toUpperCase()} backup does not need attention`),
+            { statusCode: 409 }
+        );
+    }
+    backupJobs.delete(job.id);
+    if (type === "kopia" && activeKopiaJobId === job.id) {
+        activeKopiaJobId = null;
+    }
+    if (type === "walg" && activeWalgJobId === job.id) {
+        activeWalgJobId = null;
+    }
+    return job;
+}
+
 /** Performs start backup job. */
 function startBackupJob(
     type: BackupJob["type"],
@@ -557,6 +580,12 @@ export const __testing = {
     getBackupJobCountForTest(): number {
         return backupJobs.size;
     },
+    markActiveJobNeedsAttentionForTest(type: BackupJob["type"]): void {
+        const job = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
+        if (job) {
+            job.status = "needs_attention";
+        }
+    },
     resetJobsForTest(): void {
         backupJobs.clear();
         activeKopiaJobId = null;
@@ -584,6 +613,17 @@ export default function backupRoutes(
         )
     );
 
+    app.post(
+        "/api/backups/kopia/clear-needs-attention",
+        asyncRoute(
+            async (_req, res) => {
+                const job = clearNeedsAttentionBackupJob("kopia");
+                res.json({ ok: true, cleared: mapJob(job) });
+            },
+            { fallback: "Failed to clear Kopia backup attention" }
+        )
+    );
+
     app.get("/api/backups/walg", ((_req, res) => {
         res.json({ job: mapJob(getCurrentWalgJob()) } satisfies BackupJobResponse);
     }) as RequestHandler);
@@ -596,6 +636,17 @@ export default function backupRoutes(
                 res.json({ ok: true, job: mapJob(job) });
             },
             { fallback: "Failed to start WAL-G backup" }
+        )
+    );
+
+    app.post(
+        "/api/backups/walg/clear-needs-attention",
+        asyncRoute(
+            async (_req, res) => {
+                const job = clearNeedsAttentionBackupJob("walg");
+                res.json({ ok: true, cleared: mapJob(job) });
+            },
+            { fallback: "Failed to clear WAL-G backup attention" }
         )
     );
 }

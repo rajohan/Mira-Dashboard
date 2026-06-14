@@ -1054,20 +1054,19 @@ test("releases scheduler ticks while a scheduled handler is stalled", async (t) 
         await delay(120);
         assert.equal(warnMock.mock.callCount(), 1);
         assert.equal(aborts, 1);
-        assert.equal(getScheduledJob("cache.stalled")?.lastRun?.status, "running");
-        assert.equal(getScheduledJob("cache.stalled")?.isRunning, true);
+        assert.equal(getScheduledJob("cache.stalled")?.lastRun?.status, "failed");
+        assert.equal(getScheduledJob("cache.stalled")?.isRunning, false);
         db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
             "2026-01-01T00:00:00.000Z",
             "cache.stalled"
         );
         __testing.runSchedulerTickForTest();
         await delay(0);
-        assert.deepEqual(calls, ["cache.stalled", "cache.fast"]);
+        assert.deepEqual(calls, ["cache.stalled", "cache.fast", "cache.stalled"]);
         for (const releaseStalledJob of releaseStalledJobs) {
             releaseStalledJob();
         }
         await delay(0);
-        assert.equal(getScheduledJob("cache.stalled")?.lastRun?.status, "failed");
         assert.equal(getScheduledJob("cache.stalled")?.isRunning, false);
     } finally {
         for (const releaseStalledJob of releaseStalledJobs) {
@@ -1186,12 +1185,11 @@ test("logs timeout persistence failures while releasing stalled jobs", async (t)
         __testing.runSchedulerTickForTest();
         await delay(120);
 
-        assert.equal(warnMock.mock.callCount(), 1);
-        assert.equal(getScheduledJob("cache.stalled")?.isRunning, true);
+        assert.equal(warnMock.mock.callCount(), 2);
+        assert.equal(getScheduledJob("cache.stalled")?.isRunning, false);
     } finally {
         releaseHandler();
         await delay(0);
-        assert.equal(warnMock.mock.callCount(), 2);
         assert.equal(getScheduledJob("cache.stalled")?.isRunning, false);
         prepareMock.mock.restore();
         warnMock.mock.restore();

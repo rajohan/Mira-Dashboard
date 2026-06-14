@@ -7,6 +7,8 @@ export { useQueryClient } from "@tanstack/react-query";
 // Domain hooks
 export {
     backupKeys,
+    useClearKopiaBackupAttention,
+    useClearWalgBackupAttention,
     useKopiaBackup,
     useRunKopiaBackup,
     useRunWalgBackup,
