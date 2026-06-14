@@ -1,6 +1,6 @@
 import type { RequestHandler } from "express";
 
-interface HttpStatusError extends Error {
+export interface HttpStatusError extends Error {
     statusCode?: number;
 }
 
@@ -12,7 +12,7 @@ export function errorMessage(error: unknown, fallback: string): string {
     return error.message.trim() || fallback;
 }
 
-function httpStatusCode(error: unknown): number {
+export function httpStatusCode(error: unknown): number {
     if (typeof error === "object" && error !== null) {
         const statusCode = (error as HttpStatusError).statusCode;
         if (
