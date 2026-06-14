@@ -82,7 +82,12 @@ export function useClearKopiaBackupAttention() {
                 "/backups/kopia/clear-needs-attention"
             ),
         onSuccess: async () => {
-            await queryClient.invalidateQueries({ queryKey: backupKeys.kopia() });
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: backupKeys.kopia() }),
+                queryClient.invalidateQueries({
+                    queryKey: cacheKeys.entry("backup.kopia.status"),
+                }),
+            ]);
         },
     });
 }

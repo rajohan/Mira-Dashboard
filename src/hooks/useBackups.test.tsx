@@ -132,6 +132,9 @@ describe("backup hooks", () => {
             expect.objectContaining({ method: "POST" })
         );
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: backupKeys.kopia() });
+        expect(invalidateSpy).toHaveBeenCalledWith({
+            queryKey: cacheKeys.entry("backup.kopia.status"),
+        });
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: backupKeys.walg() });
     });
 });
