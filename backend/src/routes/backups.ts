@@ -648,11 +648,19 @@ async function startWalgBackupJob(signal?: AbortSignal) {
             statusCode: 409,
         });
     }
-    const containerJob = await assertNoContainerBackupInProgress(
-        abortConfig,
-        "walg",
-        getCurrentWalgJob
-    );
+    let containerJob: BackupJob | null;
+    try {
+        containerJob = await assertNoContainerBackupInProgress(
+            abortConfig,
+            "walg",
+            getCurrentWalgJob
+        );
+    } catch (error) {
+        await refreshCacheProducer(backupStatusCacheKey("walg")).catch(() => {
+            // Preserve the original preflight failure for the API response.
+        });
+        throw error;
+    }
     if (containerJob) {
         return containerJob;
     }

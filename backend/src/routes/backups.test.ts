@@ -1718,9 +1718,12 @@ describe("backup routes", () => {
                 assert.equal(failed.status, 503);
                 assert.match(failed.body.error, /pgrep unavailable/u);
                 assert.equal(fakeBackupSpawnCalls, 0);
+                const refreshedStatus = await waitForCacheEntry("backup.walg.status");
+                assert.ok(refreshedStatus.latest);
             }
         );
 
+        db.prepare("DELETE FROM cache_entries WHERE key = 'backup.walg.status'").run();
         await withEnv({ FAKE_CONTAINER_PGREP_PRESTART_CODE: "2" }, async () => {
             const failed = await requestJson<{ error: string }>(
                 server,
@@ -1731,6 +1734,24 @@ describe("backup routes", () => {
             assert.match(failed.body.error, /docker exec pgrep exited 2/u);
             assert.equal(fakeBackupSpawnCalls, 0);
         });
+
+        await withEnv(
+            {
+                FAKE_CONTAINER_PGREP_PRESTART_CODE: "2",
+                FAKE_DOCKER_EXEC_STDERR: "pgrep unavailable",
+                MIRA_DOCKER_BIN: path.join(tempDir, "missing-docker"),
+            },
+            async () => {
+                const failed = await requestJson<{ error: string }>(
+                    server,
+                    "/api/backups/walg/run",
+                    { method: "POST" }
+                );
+                assert.equal(failed.status, 503);
+                assert.match(failed.body.error, /pgrep unavailable/u);
+                assert.equal(fakeBackupSpawnCalls, 0);
+            }
+        );
     });
 
     it("rejects clearing backup attention when no attention is required", async () => {
