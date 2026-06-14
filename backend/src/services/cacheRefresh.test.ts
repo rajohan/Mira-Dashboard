@@ -20,6 +20,9 @@ let refreshMoltbookCache: Awaited<
 let registerCacheRefreshScheduledJobs: Awaited<
     typeof import("./cacheRefresh.js")
 >["registerCacheRefreshScheduledJobs"];
+let waitForLocalCacheSeed: Awaited<
+    typeof import("./cacheRefresh.js")
+>["waitForLocalCacheSeed"];
 let getScheduledJob: Awaited<typeof import("./scheduledJobs.js")>["getScheduledJob"];
 let runScheduledJob: Awaited<typeof import("./scheduledJobs.js")>["runScheduledJob"];
 let scheduledJobsTesting: Awaited<typeof import("./scheduledJobs.js")>["__testing"];
@@ -139,6 +142,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
             refreshCacheProducer,
             refreshMoltbookCache,
             registerCacheRefreshScheduledJobs,
+            waitForLocalCacheSeed,
             writeCacheFailure,
             writeCacheSuccess,
         } = await import("./cacheRefresh.js"));
@@ -3429,9 +3433,13 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
                 },
                 async () => {
                     registerCacheRefreshScheduledJobs();
-                    await waitFor(() => warnMock.mock.callCount() > 0);
+                    await assert.rejects(
+                        waitForLocalCacheSeed("weather.spydeberg"),
+                        /weather unavailable/u
+                    );
                 }
             );
+            assert.equal(warnMock.mock.callCount(), 1);
             assert.match(
                 String(warnMock.mock.calls[0]?.arguments[0] ?? ""),
                 /Failed to seed missing cache entry weather\.spydeberg/u

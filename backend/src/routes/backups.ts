@@ -480,7 +480,11 @@ function runHostPgrep(pattern: string): Promise<{ code: number; stderr: string }
                     child.kill("SIGKILL");
                 }
             } catch {
-                // The timeout error below is still the actionable failure.
+                try {
+                    child.kill("SIGKILL");
+                } catch {
+                    // The timeout error below is still the actionable failure.
+                }
             }
             reject(new Error(`Timed out waiting for pgrep ${pattern}`));
         }, backupAbortDockerExecTimeoutMs);
@@ -685,6 +689,9 @@ async function startWalgBackupJob(signal?: AbortSignal) {
 }
 
 async function startScheduledBackup(type: BackupJob["type"], signal?: AbortSignal) {
+    if (signal?.aborted) {
+        throw new Error("Backup aborted by scheduler");
+    }
     const currentJob = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
     if (currentJob?.status === "running" || currentJob?.status === "needs_attention") {
         throw Object.assign(
@@ -783,8 +790,12 @@ export const __testing = {
     mapJob,
     getScheduledBackupType,
     startScheduledBackup,
-    startBackupJobForTest(type: BackupJob["type"], command: string): BackupJob {
-        return startBackupJob(type, command);
+    startBackupJobForTest(
+        type: BackupJob["type"],
+        command: string,
+        signal?: AbortSignal
+    ): BackupJob {
+        return startBackupJob(type, command, signal);
     },
     recordBackupNeedsAttentionForTest(type: BackupJob["type"]): BackupJob {
         return recordBackupNeedsAttention(type, `${type.toUpperCase()} test attention`);

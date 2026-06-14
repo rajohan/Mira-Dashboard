@@ -34,6 +34,7 @@ interface FakeBackupProcess extends ChildProcess {
 
 const originalDockerBin = process.env.MIRA_DOCKER_BIN;
 let lastFakeBackupProcess: FakeBackupProcess | null = null;
+let lastFakeHostPgrepProcess: FakeBackupProcess | null = null;
 const fakeDockerExecCalls: string[][] = [];
 let fakeBackupSpawnCalls = 0;
 let fakeHostPgrepCalls = 0;
@@ -144,6 +145,7 @@ function createFakeBackupProcess(): FakeBackupProcess {
 }
 
 function handleHostPgrepSpawn(child: FakeBackupProcess): FakeBackupProcess {
+    lastFakeHostPgrepProcess = child;
     fakeHostPgrepCalls += 1;
     const hostPgrepCall = fakeHostPgrepCalls;
     queueMicrotask(() => {
@@ -547,6 +549,7 @@ describe("backup routes", () => {
     beforeEach(() => {
         clearFakeBackupHoldTimers();
         lastFakeBackupProcess = null;
+        lastFakeHostPgrepProcess = null;
         fakeDockerExecCalls.length = 0;
         fakeBackupSpawnCalls = 0;
         fakeHostPgrepCalls = 0;
@@ -1692,7 +1695,11 @@ describe("backup routes", () => {
     it("bounds hung Kopia host prestart probes", async () => {
         backupTesting.setBackupAbortDockerExecTimeoutForTest(10);
         await withEnv(
-            { FAKE_BACKUP_CLOSE_ON_KILL: "1", FAKE_HOST_PGREP_NEVER_CLOSE: "1" },
+            {
+                FAKE_BACKUP_CLOSE_ON_KILL: "1",
+                FAKE_BACKUP_PID: "999999",
+                FAKE_HOST_PGREP_NEVER_CLOSE: "1",
+            },
             async () => {
                 const failed = await requestJson<{ error: string }>(
                     server,
@@ -1711,6 +1718,21 @@ describe("backup routes", () => {
                 FAKE_BACKUP_PID: "4567",
                 FAKE_HOST_PGREP_NEVER_CLOSE: "1",
             },
+            async () => {
+                const failed = await requestJson<{ error: string }>(
+                    server,
+                    "/api/backups/kopia/run",
+                    { method: "POST" }
+                );
+                assert.equal(failed.status, 500);
+                assert.match(failed.body.error, /Timed out waiting for pgrep/u);
+                assert.equal(fakeBackupSpawnCalls, 0);
+                assert.equal(lastFakeHostPgrepProcess?.killedWithSignal, "SIGKILL");
+            }
+        );
+
+        await withEnv(
+            { FAKE_BACKUP_KILL_THROWS: "1", FAKE_HOST_PGREP_NEVER_CLOSE: "1" },
             async () => {
                 const failed = await requestJson<{ error: string }>(
                     server,
@@ -2027,6 +2049,8 @@ describe("backup routes", () => {
                 assert.equal(run.status, "failed");
                 assert.match(run.message ?? "", /Scheduled job aborted/u);
                 assert.equal(fakeBackupSpawnCalls, 0);
+                assert.equal(fakeHostPgrepCalls, 0);
+                assert.equal(fakeContainerPreStartPgrepCalls, 0);
                 assert.equal(lastFakeBackupProcess, null);
                 const activeWalg = await requestJson<{
                     job: { status: string } | null;
@@ -2045,6 +2069,8 @@ describe("backup routes", () => {
             /Backup aborted by scheduler/u
         );
         assert.equal(fakeBackupSpawnCalls, 0);
+        assert.equal(fakeHostPgrepCalls, 0);
+        assert.equal(fakeContainerPreStartPgrepCalls, 0);
         assert.equal(lastFakeBackupProcess, null);
     });
 
@@ -2355,6 +2381,19 @@ describe("backup routes", () => {
                     "/opt/docker/apps/kopia/backup.sh"
                 ),
             /KOPIA backup needs attention/u
+        );
+
+        backupTesting.resetJobsForTest();
+        const controller = new AbortController();
+        controller.abort();
+        assert.throws(
+            () =>
+                backupTesting.startBackupJobForTest(
+                    "kopia",
+                    "/opt/docker/apps/kopia/backup.sh",
+                    controller.signal
+                ),
+            /Backup aborted by scheduler/u
         );
 
         backupTesting.resetJobsForTest();

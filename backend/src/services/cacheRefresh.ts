@@ -2041,20 +2041,24 @@ export function seedMissingLocalCacheEntry(key: string): void {
     if (cacheEntryIsFresh(key)) {
         return;
     }
-    const seedPromise = refreshCacheProducer(key)
-        .catch((error: unknown) => {
+    const seedPromise = refreshCacheProducer(key).then(
+        () => {},
+        (error: unknown) => {
             console.warn(
                 `[CacheRefresh] Failed to seed missing cache entry ${key}:`,
                 error
             );
-        })
-        .then(() => {});
-    localCacheSeedPromises.set(key, seedPromise);
-    void seedPromise.finally(() => {
-        if (localCacheSeedPromises.get(key) === seedPromise) {
-            localCacheSeedPromises.delete(key);
+            throw error;
         }
-    });
+    );
+    localCacheSeedPromises.set(key, seedPromise);
+    void seedPromise
+        .finally(() => {
+            if (localCacheSeedPromises.get(key) === seedPromise) {
+                localCacheSeedPromises.delete(key);
+            }
+        })
+        .catch(() => {});
 }
 
 export function registerCacheRefreshScheduledJobs(): void {
