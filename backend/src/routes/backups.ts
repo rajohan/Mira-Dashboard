@@ -309,7 +309,8 @@ function startBackupJob(
         }
         try {
             if (typeof child.pid === "number") {
-                const processGroupId = -child.pid;
+                const childPid = child.pid;
+                const processGroupId = -childPid;
                 process.kill(processGroupId, "SIGTERM");
                 hostAbortKillTimer = setTimeout(() => {
                     try {
@@ -318,6 +319,13 @@ function startBackupJob(
                         job.stderr = trimOutput(
                             `${job.stderr}\nFailed to force terminate backup process group: ${String(error)}`.trim()
                         );
+                        try {
+                            process.kill(childPid, "SIGKILL");
+                        } catch (childKillError) {
+                            job.stderr = trimOutput(
+                                `${job.stderr}\nFailed to force terminate backup process: ${String(childKillError)}`.trim()
+                            );
+                        }
                     }
                 }, BACKUP_ABORT_SIGKILL_GRACE_MS);
                 hostAbortKillTimer.unref();

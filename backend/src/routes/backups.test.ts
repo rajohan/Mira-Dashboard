@@ -84,7 +84,7 @@ if (args === "exec kopia kopia snapshot list --all --json-verbose --json") {
     if (delayMs > 0) setTimeout(writeSnapshots, delayMs);
     else writeSnapshots();
 } else if (args === "exec walg wal-g backup-list --detail --json") {
-    process.stdout.write(JSON.stringify([
+    const writeBackups = () => process.stdout.write(JSON.stringify([
         {
             backup_name: "base_2099",
             modified: "2099-01-01T00:02:00.000Z",
@@ -92,6 +92,9 @@ if (args === "exec kopia kopia snapshot list --all --json-verbose --json") {
             storage_name: "default"
         }
     ]));
+    const delayMs = Number(process.env.FAKE_DOCKER_WALG_STATUS_DELAY_MS || 0);
+    if (delayMs > 0) setTimeout(writeBackups, delayMs);
+    else writeBackups();
 } else {
     process.stderr.write("unexpected docker args: " + args);
     process.exit(2);
@@ -469,14 +472,37 @@ async function waitForCacheEntryAttempts(
     throw new Error(`Cache entry ${key} was not refreshed`);
 }
 
+async function assertScheduledBackupRejects(
+    promise: Promise<unknown>,
+    pattern: RegExp
+): Promise<void> {
+    await assert.rejects(promise, (error) => {
+        assert.match(error instanceof Error ? error.message : String(error), pattern);
+        return true;
+    });
+}
+
+function startTestScheduledBackup(
+    ...args: Parameters<typeof backupTesting.startScheduledBackup>
+): ReturnType<typeof backupTesting.startScheduledBackup> {
+    const promise = backupTesting.startScheduledBackup(...args);
+    promise.catch(() => {
+        // Expected failure paths are asserted later; observe them immediately.
+    });
+    return promise;
+}
+
 async function assertAbortedWalgRemainsRunningUntilTerminationConfirmed(
     server: TestServer,
-    runPromise: Promise<{ status: string; message?: string | null }>,
+    runPromise: Promise<unknown>,
     stderrPattern: RegExp,
     release: () => void
 ): Promise<void> {
     const result = await Promise.race([
-        runPromise.then(() => "settled"),
+        runPromise.then(
+            () => "settled",
+            () => "settled"
+        ),
         new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 20)),
     ]);
     assert.equal(result, "pending");
@@ -490,9 +516,7 @@ async function assertAbortedWalgRemainsRunningUntilTerminationConfirmed(
 
     release();
     closeLastFakeBackupProcess();
-    const run = await runPromise;
-    assert.equal(run.status, "failed");
-    assert.match(run.message ?? "", /Backup aborted by scheduler/u);
+    await assertScheduledBackupRejects(runPromise, /Backup aborted by scheduler/u);
 }
 
 function closeLastFakeBackupProcess(
@@ -833,6 +857,7 @@ describe("backup routes", () => {
         }
 
         assert.notEqual(getScheduledJob("backup.legacy"), null);
+        assert.equal(getScheduledJob("backup.walg"), null);
         assert.equal(getScheduledJob("backup.kopia"), null);
     });
 
@@ -875,7 +900,10 @@ describe("backup routes", () => {
     it("resolves failed scheduled backups before status refresh completes", async () => {
         registerBackupScheduledJobs();
         await withEnv(
-            { FAKE_BACKUP_EXIT_CODE: "12", FAKE_DOCKER_STATUS_DELAY_MS: "1000" },
+            {
+                FAKE_BACKUP_EXIT_CODE: "12",
+                FAKE_DOCKER_WALG_STATUS_DELAY_MS: "1000",
+            },
             async () => {
                 const scheduledRun = runScheduledJob("backup.walg");
                 const result = await Promise.race([
@@ -963,17 +991,16 @@ describe("backup routes", () => {
             { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_DOCKER_EXEC_NULL_CLOSE: "1" },
             async () => {
                 const controller = new AbortController();
-                const runPromise = runScheduledJob(
-                    "backup.walg",
-                    "manual",
-                    controller.signal
-                );
+                const runPromise = startTestScheduledBackup("walg", controller.signal);
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
 
                 const earlyResult = await Promise.race([
-                    runPromise.then(() => "settled"),
+                    runPromise.then(
+                        () => "settled",
+                        () => "settled"
+                    ),
                     new Promise<"pending">((resolve) => {
                         setTimeout(() => resolve("pending"), 20);
                     }),
@@ -981,10 +1008,10 @@ describe("backup routes", () => {
                 assert.equal(earlyResult, "pending");
                 closeLastFakeBackupProcess();
 
-                const run = await runPromise;
-                assert.equal(run.status, "failed");
-                assert.match(run.message ?? "", /WALG backup failed with code 130/u);
-                assert.match(run.message ?? "", /Backup aborted by scheduler/u);
+                await assertScheduledBackupRejects(
+                    runPromise,
+                    /WALG backup failed with code 130[\s\S]*Backup aborted by scheduler/u
+                );
                 assert.equal(lastFakeBackupProcess?.killedWithSignal, "SIGTERM");
 
                 const current = await requestJson<{
@@ -1008,19 +1035,15 @@ describe("backup routes", () => {
             { FAKE_BACKUP_CLOSE_ZERO_ON_KILL: "1", FAKE_BACKUP_NEVER_CLOSE: "1" },
             async () => {
                 const controller = new AbortController();
-                const runPromise = runScheduledJob(
-                    "backup.kopia",
-                    "manual",
-                    controller.signal
-                );
+                const runPromise = startTestScheduledBackup("kopia", controller.signal);
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
 
-                const run = await runPromise;
-                assert.equal(run.status, "failed");
-                assert.match(run.message ?? "", /KOPIA backup failed with code 130/u);
-                assert.match(run.message ?? "", /Backup aborted by scheduler/u);
+                await assertScheduledBackupRejects(
+                    runPromise,
+                    /KOPIA backup failed with code 130[\s\S]*Backup aborted by scheduler/u
+                );
 
                 const current = await requestJson<{
                     job: { status: string; code: number; stderr: string } | null;
@@ -1051,9 +1074,8 @@ describe("backup routes", () => {
                 { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_BACKUP_PID: "4321" },
                 async () => {
                     const controller = new AbortController();
-                    const runPromise = runScheduledJob(
-                        "backup.walg",
-                        "manual",
+                    const runPromise = startTestScheduledBackup(
+                        "walg",
                         controller.signal
                     );
 
@@ -1061,7 +1083,10 @@ describe("backup routes", () => {
                     controller.abort();
 
                     const earlyResult = await Promise.race([
-                        runPromise.then(() => "settled"),
+                        runPromise.then(
+                            () => "settled",
+                            () => "settled"
+                        ),
                         new Promise<"pending">((resolve) => {
                             setTimeout(() => resolve("pending"), 20);
                         }),
@@ -1070,10 +1095,10 @@ describe("backup routes", () => {
                     assert.deepEqual(signals, [[-4321, "SIGTERM"]]);
 
                     closeLastFakeBackupProcess();
-                    const run = await runPromise;
-
-                    assert.equal(run.status, "failed");
-                    assert.match(run.message ?? "", /Backup aborted by scheduler/u);
+                    await assertScheduledBackupRejects(
+                        runPromise,
+                        /Backup aborted by scheduler/u
+                    );
                     assert.deepEqual(signals, [[-4321, "SIGTERM"]]);
                 }
             );
@@ -1101,9 +1126,8 @@ describe("backup routes", () => {
                 },
                 async () => {
                     const controller = new AbortController();
-                    const runPromise = runScheduledJob(
-                        "backup.walg",
-                        "manual",
+                    const runPromise = startTestScheduledBackup(
+                        "walg",
                         controller.signal
                     );
 
@@ -1115,8 +1139,10 @@ describe("backup routes", () => {
                     mock.timers.tick(10_000);
                     await new Promise<void>((resolve) => setImmediate(resolve));
 
-                    const run = await runPromise;
-                    assert.equal(run.status, "failed");
+                    await assertScheduledBackupRejects(
+                        runPromise,
+                        /Backup aborted by scheduler/u
+                    );
                     assert.deepEqual(
                         signals.filter(([pid]) => pid === -4321),
                         [[-4321, "SIGTERM"]]
@@ -1138,27 +1164,27 @@ describe("backup routes", () => {
             },
             async () => {
                 const controller = new AbortController();
-                const runPromise = runScheduledJob(
-                    "backup.walg",
-                    "manual",
-                    controller.signal
-                );
+                const runPromise = startTestScheduledBackup("walg", controller.signal);
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
                 closeLastFakeBackupProcess();
 
                 const earlyResult = await Promise.race([
-                    runPromise.then(() => "settled"),
+                    runPromise.then(
+                        () => "settled",
+                        () => "settled"
+                    ),
                     new Promise<"pending">((resolve) => {
                         setTimeout(() => resolve("pending"), 20);
                     }),
                 ]);
                 assert.equal(earlyResult, "pending");
 
-                const run = await runPromise;
-                assert.equal(run.status, "failed");
-                assert.match(run.message ?? "", /Backup aborted by scheduler/u);
+                await assertScheduledBackupRejects(
+                    runPromise,
+                    /Backup aborted by scheduler/u
+                );
                 assert.ok(
                     fakeDockerExecCalls.some((args) =>
                         args
@@ -1188,20 +1214,14 @@ describe("backup routes", () => {
             },
             async () => {
                 const controller = new AbortController();
-                const runPromise = runScheduledJob(
-                    "backup.walg",
-                    "manual",
-                    controller.signal
-                );
+                const runPromise = startTestScheduledBackup("walg", controller.signal);
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 closeLastFakeBackupProcess();
 
-                const run = await runPromise;
-                assert.equal(run.status, "failed");
-                assert.match(run.message ?? "", /container pkill failed/u);
+                await assertScheduledBackupRejects(runPromise, /container pkill failed/u);
             }
         );
     });
@@ -1215,20 +1235,17 @@ describe("backup routes", () => {
             },
             async () => {
                 const controller = new AbortController();
-                const runPromise = runScheduledJob(
-                    "backup.walg",
-                    "manual",
-                    controller.signal
-                );
+                const runPromise = startTestScheduledBackup("walg", controller.signal);
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 closeLastFakeBackupProcess();
 
-                const run = await runPromise;
-                assert.equal(run.status, "failed");
-                assert.match(run.message ?? "", /docker exec pkill exited 2/u);
+                await assertScheduledBackupRejects(
+                    runPromise,
+                    /docker exec pkill exited 2/u
+                );
             }
         );
     });
@@ -1244,11 +1261,7 @@ describe("backup routes", () => {
             },
             async () => {
                 const controller = new AbortController();
-                const runPromise = runScheduledJob(
-                    "backup.walg",
-                    "manual",
-                    controller.signal
-                );
+                const runPromise = startTestScheduledBackup("walg", controller.signal);
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
@@ -1272,11 +1285,7 @@ describe("backup routes", () => {
             { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_CONTAINER_PGREP_CODE: "2" },
             async () => {
                 const controller = new AbortController();
-                const runPromise = runScheduledJob(
-                    "backup.walg",
-                    "manual",
-                    controller.signal
-                );
+                const runPromise = startTestScheduledBackup("walg", controller.signal);
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
@@ -1301,11 +1310,7 @@ describe("backup routes", () => {
             { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_DOCKER_EXEC_NEVER_CLOSE: "1" },
             async () => {
                 const controller = new AbortController();
-                const runPromise = runScheduledJob(
-                    "backup.walg",
-                    "manual",
-                    controller.signal
-                );
+                const runPromise = startTestScheduledBackup("walg", controller.signal);
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
@@ -1335,11 +1340,7 @@ describe("backup routes", () => {
             },
             async () => {
                 const controller = new AbortController();
-                const runPromise = runScheduledJob(
-                    "backup.walg",
-                    "manual",
-                    controller.signal
-                );
+                const runPromise = startTestScheduledBackup("walg", controller.signal);
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
@@ -1365,11 +1366,7 @@ describe("backup routes", () => {
             { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_DOCKER_EXEC_ERROR: "1" },
             async () => {
                 const controller = new AbortController();
-                const runPromise = runScheduledJob(
-                    "backup.walg",
-                    "manual",
-                    controller.signal
-                );
+                const runPromise = startTestScheduledBackup("walg", controller.signal);
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
@@ -1395,11 +1392,7 @@ describe("backup routes", () => {
             { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_CONTAINER_PGREP_CODE: "0" },
             async () => {
                 const controller = new AbortController();
-                const runPromise = runScheduledJob(
-                    "backup.walg",
-                    "manual",
-                    controller.signal
-                );
+                const runPromise = startTestScheduledBackup("walg", controller.signal);
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
@@ -1425,20 +1418,16 @@ describe("backup routes", () => {
             { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_CONTAINER_PGREP_CODE: "0" },
             async () => {
                 const controller = new AbortController();
-                const runPromise = runScheduledJob(
-                    "backup.walg",
-                    "manual",
-                    controller.signal
-                );
+                const runPromise = startTestScheduledBackup("walg", controller.signal);
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
                 closeLastFakeBackupProcess();
 
-                const run = await runPromise;
-                assert.equal(run.status, "failed");
-                assert.match(run.message ?? "", /needs attention/u);
-                assert.match(run.message ?? "", /2 failed confirmation attempts/u);
+                await assertScheduledBackupRejects(
+                    runPromise,
+                    /needs attention[\s\S]*2 failed confirmation attempts/u
+                );
                 const activeWalg = await requestJson<{
                     job: { status: string } | null;
                 }>(server, "/api/backups/walg");
@@ -1815,9 +1804,8 @@ describe("backup routes", () => {
                 },
                 async () => {
                     const controller = new AbortController();
-                    const runPromise = runScheduledJob(
-                        "backup.walg",
-                        "manual",
+                    const runPromise = startTestScheduledBackup(
+                        "walg",
                         controller.signal
                     );
 
@@ -1827,9 +1815,10 @@ describe("backup routes", () => {
                     await new Promise<void>((resolve) => setImmediate(resolve));
                     closeLastFakeBackupProcess();
 
-                    const run = await runPromise;
-                    assert.equal(run.status, "failed");
-                    assert.match(run.message ?? "", /container force kill failed/u);
+                    await assertScheduledBackupRejects(
+                        runPromise,
+                        /container force kill failed/u
+                    );
                 }
             );
         } finally {
@@ -1854,9 +1843,8 @@ describe("backup routes", () => {
                 { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_BACKUP_PID: "9876" },
                 async () => {
                     const controller = new AbortController();
-                    const runPromise = runScheduledJob(
-                        "backup.walg",
-                        "manual",
+                    const runPromise = startTestScheduledBackup(
+                        "walg",
                         controller.signal
                     );
 
@@ -1865,8 +1853,10 @@ describe("backup routes", () => {
                     mock.timers.tick(10_000);
                     closeLastFakeBackupProcess();
 
-                    const run = await runPromise;
-                    assert.equal(run.status, "failed");
+                    await assertScheduledBackupRejects(
+                        runPromise,
+                        /Backup aborted by scheduler/u
+                    );
                     assert.deepEqual(signals, [
                         [-9876, "SIGTERM"],
                         [-9876, "SIGKILL"],
@@ -1882,8 +1872,9 @@ describe("backup routes", () => {
     it("records process-group force termination failures", async () => {
         registerBackupScheduledJobs();
         const originalKill = process.kill;
+        const signals: Array<[number, NodeJS.Signals | number | undefined]> = [];
         process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
-            assert.equal(pid, -2468);
+            signals.push([pid, signal]);
             if (signal === "SIGKILL") {
                 throw new Error("group kill unavailable");
             }
@@ -1896,9 +1887,8 @@ describe("backup routes", () => {
                 { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_BACKUP_PID: "2468" },
                 async () => {
                     const controller = new AbortController();
-                    const runPromise = runScheduledJob(
-                        "backup.walg",
-                        "manual",
+                    const runPromise = startTestScheduledBackup(
+                        "walg",
                         controller.signal
                     );
 
@@ -1907,10 +1897,21 @@ describe("backup routes", () => {
                     mock.timers.tick(10_000);
                     closeLastFakeBackupProcess();
 
-                    const run = await runPromise;
-                    assert.equal(run.status, "failed");
-                    assert.match(run.message ?? "", /Failed to force terminate/u);
-                    assert.match(run.message ?? "", /group kill unavailable/u);
+                    await assertScheduledBackupRejects(
+                        runPromise,
+                        /Failed to force terminate[\s\S]*group kill unavailable/u
+                    );
+                    assert.deepEqual(signals.at(0), [-2468, "SIGTERM"]);
+                    assert.ok(
+                        signals.some(
+                            ([pid, signal]) => pid === -2468 && signal === "SIGKILL"
+                        )
+                    );
+                    assert.ok(
+                        signals.some(
+                            ([pid, signal]) => pid === 2468 && signal === "SIGKILL"
+                        )
+                    );
                 }
             );
         } finally {
@@ -1925,19 +1926,15 @@ describe("backup routes", () => {
             { FAKE_BACKUP_KILL_THROWS: "1", FAKE_BACKUP_NEVER_CLOSE: "1" },
             async () => {
                 const controller = new AbortController();
-                const runPromise = runScheduledJob(
-                    "backup.walg",
-                    "manual",
-                    controller.signal
-                );
+                const runPromise = startTestScheduledBackup("walg", controller.signal);
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
 
-                const run = await runPromise;
-                assert.equal(run.status, "failed");
-                assert.match(run.message ?? "", /Failed to terminate backup process/u);
-                assert.match(run.message ?? "", /kill unavailable/u);
+                await assertScheduledBackupRejects(
+                    runPromise,
+                    /Failed to terminate backup process[\s\S]*kill unavailable/u
+                );
             }
         );
     });
@@ -1948,18 +1945,15 @@ describe("backup routes", () => {
             { FAKE_BACKUP_KILL_RETURNS_FALSE: "1", FAKE_BACKUP_NEVER_CLOSE: "1" },
             async () => {
                 const controller = new AbortController();
-                const runPromise = runScheduledJob(
-                    "backup.walg",
-                    "manual",
-                    controller.signal
-                );
+                const runPromise = startTestScheduledBackup("walg", controller.signal);
 
                 await new Promise<void>((resolve) => setImmediate(resolve));
                 controller.abort();
 
-                const run = await runPromise;
-                assert.equal(run.status, "failed");
-                assert.match(run.message ?? "", /Failed to terminate backup process/u);
+                await assertScheduledBackupRejects(
+                    runPromise,
+                    /Failed to terminate backup process/u
+                );
             }
         );
     });
@@ -1979,7 +1973,7 @@ describe("backup routes", () => {
                 );
 
                 assert.equal(run.status, "failed");
-                assert.match(run.message ?? "", /Backup aborted by scheduler/u);
+                assert.match(run.message ?? "", /Scheduled job aborted/u);
                 assert.equal(fakeBackupSpawnCalls, 0);
                 assert.equal(lastFakeBackupProcess, null);
                 const activeWalg = await requestJson<{
@@ -1988,6 +1982,18 @@ describe("backup routes", () => {
                 assert.equal(activeWalg.body.job, null);
             }
         );
+    });
+
+    it("does not start direct scheduled backup helpers when the signal is already aborted", async () => {
+        const controller = new AbortController();
+        controller.abort();
+
+        await assertScheduledBackupRejects(
+            startTestScheduledBackup("walg", controller.signal),
+            /Backup aborted by scheduler/u
+        );
+        assert.equal(fakeBackupSpawnCalls, 0);
+        assert.equal(lastFakeBackupProcess, null);
     });
 
     it("records status refresh failures on successful backup jobs", async () => {
@@ -2026,6 +2032,7 @@ describe("backup routes", () => {
             assert.equal(done.status, "done");
             assert.equal(done.code, 0);
 
+            process.env.FAKE_DOCKER_STATUS_DELAY_MS = "1";
             const nextStarted = await requestJson<{
                 ok: boolean;
                 job: { id: string; status: string };
@@ -2034,12 +2041,13 @@ describe("backup routes", () => {
             assert.equal(nextStarted.body.ok, true);
             assert.notEqual(nextStarted.body.job.id, started.body.job.id);
             await waitForDone(server, "/api/backups/kopia");
+            await new Promise<void>((resolve) => setTimeout(resolve, 20));
         });
     });
 
     it("resolves successful scheduled backups before status refresh completes", async () => {
         await withEnv({ FAKE_DOCKER_STATUS_DELAY_MS: "1000" }, async () => {
-            const scheduledRun = backupTesting.startScheduledBackup("kopia");
+            const scheduledRun = startTestScheduledBackup("kopia");
             const result = await Promise.race([
                 scheduledRun.then(() => "settled"),
                 new Promise<"pending">((resolve) =>

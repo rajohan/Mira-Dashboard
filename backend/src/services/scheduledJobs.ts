@@ -802,15 +802,19 @@ async function runActionWithTimeout(
     job: ScheduledJob,
     signal?: AbortSignal
 ): Promise<Record<string, unknown>> {
+    if (signal?.aborted) {
+        throw new Error("Scheduled job aborted");
+    }
     const controller = new AbortController();
+    let rejectAbort: ((error: Error) => void) | undefined;
+    const abortPromise = new Promise<never>((_resolve, reject) => {
+        rejectAbort = reject;
+    });
     const abortFromSignal = () => {
         controller.abort();
+        rejectAbort?.(new Error("Scheduled job aborted"));
     };
-    if (signal?.aborted) {
-        controller.abort();
-    } else {
-        signal?.addEventListener("abort", abortFromSignal, { once: true });
-    }
+    signal?.addEventListener("abort", abortFromSignal, { once: true });
     let timedOut = false;
     let timeout: NodeJS.Timeout | undefined;
     try {
@@ -829,7 +833,8 @@ async function runActionWithTimeout(
         handlerPromise.catch(() => {
             // The race below reports handler failures unless the timeout already won.
         });
-        const output = (await Promise.race([handlerPromise, timeoutPromise])) ?? {};
+        const output =
+            (await Promise.race([handlerPromise, timeoutPromise, abortPromise])) ?? {};
         return output;
     } catch (error) {
         if (timedOut) {

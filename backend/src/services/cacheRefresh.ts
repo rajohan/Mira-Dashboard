@@ -2091,7 +2091,11 @@ export function registerCacheRefreshScheduledJobs(): void {
         }
         db.exec("COMMIT");
     } catch (error) {
-        db.exec("ROLLBACK");
+        try {
+            db.exec("ROLLBACK");
+        } catch {
+            // Preserve the original transaction failure.
+        }
         throw error;
     }
     for (const key of seedKeys) {

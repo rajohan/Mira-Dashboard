@@ -3179,6 +3179,43 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
         assert.ok(getScheduledJob("cache.obsolete"));
     });
 
+    it("preserves cache refresh registration errors when rollback fails", (t) => {
+        scheduledJobsTesting.clearActionHandlers();
+        scheduledJobsTesting.resetSchedulerState();
+        const exec = db.exec.bind(db);
+        const prepare = db.prepare.bind(db);
+        const execMock = t.mock.method(db, "exec", (sql: string) => {
+            if (sql === "ROLLBACK") {
+                throw new Error("rollback failed");
+            }
+            return exec(sql);
+        });
+        const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+            if (sql.includes("INSERT INTO scheduled_jobs")) {
+                return {
+                    run: () => {
+                        throw new Error("upsert failed");
+                    },
+                } as unknown as ReturnType<typeof db.prepare>;
+            }
+            return prepare(sql);
+        });
+
+        try {
+            assert.throws(() => registerCacheRefreshScheduledJobs(), /upsert failed/u);
+        } finally {
+            execMock.mock.restore();
+            prepareMock.mock.restore();
+            scheduledJobsTesting.clearActionHandlers();
+            scheduledJobsTesting.resetSchedulerState();
+            try {
+                db.exec("ROLLBACK");
+            } catch {
+                // The transaction may already be unwound depending on the failure path.
+            }
+        }
+    });
+
     it("seeds missing enabled cache entries when scheduled jobs are registered", async () => {
         const binDir = path.join(tempDir, "registration-seed-bin");
         await mkdir(binDir);
