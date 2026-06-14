@@ -30,6 +30,12 @@ interface ScheduledJobActionRegistration {
     timeoutMs?: number;
 }
 
+class ScheduledJobAbortError extends Error {
+    constructor(readonly handlerSettled: Promise<unknown>) {
+        super("Scheduled job aborted");
+    }
+}
+
 export interface ScheduledJob {
     id: string;
     name: string;
@@ -788,6 +794,9 @@ export async function runScheduledJob(
             }
             output = await runActionWithTimeout(timeoutMs, action, job, signal);
         } catch (error) {
+            if (error instanceof ScheduledJobAbortError) {
+                await error.handlerSettled;
+            }
             return finishRunOrReport(
                 run,
                 "failed",
@@ -815,9 +824,10 @@ async function runActionWithTimeout(
     const abortPromise = new Promise<never>((_resolve, reject) => {
         rejectAbort = reject;
     });
+    let handlerSettled: Promise<unknown> = Promise.resolve();
     const abortFromSignal = () => {
         controller.abort();
-        rejectAbort?.(new Error("Scheduled job aborted"));
+        rejectAbort?.(new ScheduledJobAbortError(handlerSettled));
     };
     signal?.addEventListener("abort", abortFromSignal, { once: true });
     let timedOut = false;
@@ -835,6 +845,7 @@ async function runActionWithTimeout(
         });
         timeout?.unref();
         const handlerPromise = Promise.resolve(action.handler(job, controller.signal));
+        handlerSettled = handlerPromise.catch(() => {});
         handlerPromise.catch(() => {
             // The race below reports handler failures unless the timeout already won.
         });

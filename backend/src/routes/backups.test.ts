@@ -561,6 +561,7 @@ function closeLastFakeBackupProcess(
 async function closeLastFakeBackupProcessAndWaitForStatusRefresh(
     type: "kopia" | "walg"
 ): Promise<void> {
+    db.prepare("DELETE FROM cache_entries WHERE key = ?").run(`backup.${type}.status`);
     closeLastFakeBackupProcess();
     await waitForCacheEntry(`backup.${type}.status`);
 }

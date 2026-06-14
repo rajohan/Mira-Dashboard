@@ -1152,10 +1152,12 @@ test("uses registered action timeout for manual runs", async (t) => {
 
 test("stops manual runs when caller signal aborts", async () => {
     let aborted = false;
+    let releaseHandler: () => void = () => {};
     registerScheduledJobAction(
         "cache.refresh",
         (_job, signal) =>
-            new Promise<void>(() => {
+            new Promise<void>((resolve) => {
+                releaseHandler = resolve;
                 signal?.addEventListener("abort", () => {
                     aborted = true;
                 });
@@ -1175,17 +1177,21 @@ test("stops manual runs when caller signal aborts", async () => {
     await delay(0);
     controller.abort();
 
-    const result = await Promise.race([
+    const pendingResult = await Promise.race([
         runPromise,
         delay(50).then(() => "pending" as const),
     ]);
 
-    if (result === "pending") {
-        assert.fail("Scheduled run did not resolve when caller signal aborted");
-    }
+    assert.equal(pendingResult, "pending");
     assert.equal(aborted, true);
+    assert.equal(getScheduledJob("cache.weather")?.isRunning, true);
+    await assert.rejects(runScheduledJob("cache.weather", "manual"), /already running/u);
+
+    releaseHandler();
+    const result = await runPromise;
     assert.equal(result.status, "failed");
     assert.match(result.message ?? "", /aborted/u);
+    assert.equal(getScheduledJob("cache.weather")?.isRunning, false);
 });
 
 test("logs timeout persistence failures while releasing stalled jobs", async (t) => {
