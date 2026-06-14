@@ -63,14 +63,19 @@ function queueQuotaNotificationCheckAfterSeed(
     seedPromise = waitForLocalCacheSeed("quotas.summary"),
     notificationCheck = runQuotaNotificationCheck
 ): void {
-    void seedPromise
-        .then(() => notificationCheck())
-        .catch((error: unknown) => {
+    void seedPromise.then(
+        () => {
+            void notificationCheck().catch((error: unknown) => {
+                console.warn("[Backend] Startup quota notification check failed:", error);
+            });
+        },
+        (error: unknown) => {
             console.warn(
                 "[Backend] Skipping startup quota notification check after cache seed failure:",
                 error
             );
-        });
+        }
+    );
 }
 
 /** Starts Gateway and notification monitors after the HTTP server is listening. */

@@ -816,6 +816,14 @@ export const __testing = {
     getBackupJobCountForTest(): number {
         return backupJobs.size;
     },
+    hasRefreshedBackupStatusForTest(type: BackupJob["type"]): boolean {
+        for (const job of backupJobs.values()) {
+            if (job.type === type && job.statusRefreshed) {
+                return true;
+            }
+        }
+        return false;
+    },
     markActiveJobNeedsAttentionForTest(type: BackupJob["type"]): void {
         const job = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
         if (job) {

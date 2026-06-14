@@ -32,6 +32,10 @@ interface FakeBackupProcess extends ChildProcess {
     killedWithSignal?: NodeJS.Signals | number;
 }
 
+type ScheduledBackupPromise = ReturnType<typeof backupTesting.startScheduledBackup> & {
+    backupType?: "kopia" | "walg";
+};
+
 const originalDockerBin = process.env.MIRA_DOCKER_BIN;
 let lastFakeBackupProcess: FakeBackupProcess | null = null;
 let lastFakeHostPgrepProcess: FakeBackupProcess | null = null;
@@ -474,20 +478,38 @@ async function waitForCacheEntryAttempts(
     throw new Error(`Cache entry ${key} was not refreshed`);
 }
 
+async function waitForScheduledBackupStatusRefresh(
+    type: "kopia" | "walg",
+    timeoutMs = 2_000
+): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() <= deadline) {
+        if (backupTesting.hasRefreshedBackupStatusForTest(type)) {
+            return;
+        }
+        await new Promise((resolve) => setImmediate(resolve));
+    }
+    throw new Error(`${type} backup status refresh did not complete`);
+}
+
 async function assertScheduledBackupRejects(
-    promise: Promise<unknown>,
+    promise: ScheduledBackupPromise,
     pattern: RegExp
 ): Promise<void> {
     await assert.rejects(promise, (error) => {
         assert.match(error instanceof Error ? error.message : String(error), pattern);
         return true;
     });
+    if (promise.backupType && backupTesting.getBackupJobCountForTest() > 0) {
+        await waitForScheduledBackupStatusRefresh(promise.backupType);
+    }
 }
 
 function startTestScheduledBackup(
     ...args: Parameters<typeof backupTesting.startScheduledBackup>
-): ReturnType<typeof backupTesting.startScheduledBackup> {
-    const promise = backupTesting.startScheduledBackup(...args);
+): ScheduledBackupPromise {
+    const promise = backupTesting.startScheduledBackup(...args) as ScheduledBackupPromise;
+    promise.backupType = args[0];
     promise.catch(() => {
         // Expected failure paths are asserted later; observe them immediately.
     });
@@ -496,7 +518,7 @@ function startTestScheduledBackup(
 
 async function assertAbortedWalgRemainsRunningUntilTerminationConfirmed(
     server: TestServer,
-    runPromise: Promise<unknown>,
+    runPromise: ScheduledBackupPromise,
     stderrPattern: RegExp,
     release: () => void
 ): Promise<void> {

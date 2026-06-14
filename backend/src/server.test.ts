@@ -1054,6 +1054,23 @@ describe("server bootstrap", () => {
                 ),
                 true
             );
+            const quotaCheckError = new Error("quota check unavailable");
+            serverStartTesting.queueQuotaNotificationCheckAfterSeed(
+                Promise.resolve(),
+                async () => {
+                    throw quotaCheckError;
+                }
+            );
+            await new Promise((resolve) => setImmediate(resolve));
+            assert.equal(
+                warnings.some(
+                    (entry) =>
+                        String(entry[0]).includes(
+                            "Startup quota notification check failed"
+                        ) && entry[1] === quotaCheckError
+                ),
+                true
+            );
 
             server.listen = ((port: number, listener?: () => void) => {
                 listenedPort = port;
