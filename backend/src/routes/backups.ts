@@ -622,11 +622,19 @@ async function startKopiaBackupJob(signal?: AbortSignal) {
             statusCode: 409,
         });
     }
-    const hostJob = await assertNoHostBackupInProgress(
-        "kopia",
-        KOPIA_BACKUP_SCRIPT_PATTERN,
-        getCurrentKopiaJob
-    );
+    let hostJob: BackupJob | null;
+    try {
+        hostJob = await assertNoHostBackupInProgress(
+            "kopia",
+            KOPIA_BACKUP_SCRIPT_PATTERN,
+            getCurrentKopiaJob
+        );
+    } catch (error) {
+        await refreshCacheProducer(backupStatusCacheKey("kopia")).catch(() => {
+            // Preserve the original preflight failure for the API response.
+        });
+        throw error;
+    }
     if (hostJob) {
         return hostJob;
     }
