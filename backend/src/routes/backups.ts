@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 
 import express, { type RequestHandler } from "express";
 
+import { db } from "../db.js";
 import { asyncRoute } from "../lib/errors.js";
 import { refreshCacheProducer } from "../services/cacheRefresh.js";
 import {
@@ -723,21 +724,28 @@ export function registerBackupScheduledJobs(): void {
         },
         { timeoutMs: SCHEDULED_BACKUP_TIMEOUT_MS }
     );
-    removeScheduledJobsNotInAction(
-        "backup.run",
-        backupScheduledJobs.map((job) => job.id)
-    );
+    db.exec("BEGIN");
+    try {
+        removeScheduledJobsNotInAction(
+            "backup.run",
+            backupScheduledJobs.map((job) => job.id)
+        );
 
-    for (const job of backupScheduledJobs) {
-        const existing = getScheduledJob(job.id);
-        upsertScheduledJob({
-            ...job,
-            enabled: existing?.enabled ?? true,
-            scheduleType: existing?.scheduleType ?? job.scheduleType,
-            intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
-            timeOfDay: existing ? existing.timeOfDay : job.timeOfDay,
-            cronExpression: existing?.cronExpression ?? null,
-        });
+        for (const job of backupScheduledJobs) {
+            const existing = getScheduledJob(job.id);
+            upsertScheduledJob({
+                ...job,
+                enabled: existing?.enabled ?? true,
+                scheduleType: existing?.scheduleType ?? job.scheduleType,
+                intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
+                timeOfDay: existing ? existing.timeOfDay : job.timeOfDay,
+                cronExpression: existing?.cronExpression ?? null,
+            });
+        }
+        db.exec("COMMIT");
+    } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
     }
 }
 

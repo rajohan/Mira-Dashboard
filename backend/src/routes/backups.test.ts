@@ -39,6 +39,14 @@ let fakeBackupSpawnCalls = 0;
 let fakeHostPgrepCalls = 0;
 let fakeContainerPreStartPgrepCalls = 0;
 let fakeContainerPostStartPgrepCalls = 0;
+const fakeBackupHoldTimers = new Set<NodeJS.Timeout>();
+
+function clearFakeBackupHoldTimers(): void {
+    for (const timer of fakeBackupHoldTimers) {
+        clearInterval(timer);
+    }
+    fakeBackupHoldTimers.clear();
+}
 
 async function installFakeDocker(tempDir: string): Promise<string> {
     const dockerPath = path.join(tempDir, "docker");
@@ -132,192 +140,198 @@ function createFakeBackupProcess(): FakeBackupProcess {
     return child;
 }
 
-function createFakeBackupSpawn(): typeof spawn {
-    return ((file: string, args: readonly string[]) => {
-        const child = createFakeBackupProcess();
-        if (file === "pgrep") {
-            fakeHostPgrepCalls += 1;
-            const hostPgrepCall = fakeHostPgrepCalls;
-            queueMicrotask(() => {
-                if (process.env.FAKE_HOST_PGREP_ERROR === "1") {
-                    child.emit("error", new Error("host pgrep failed"));
-                    return;
-                }
-                if (process.env.FAKE_HOST_PGREP_NEVER_CLOSE === "1") {
-                    return;
-                }
-                if (process.env.FAKE_HOST_PGREP_STDERR) {
-                    child.stderr.write(process.env.FAKE_HOST_PGREP_STDERR);
-                }
-                const closePgrep = () => {
-                    let code = 1;
-                    if (process.env.FAKE_HOST_PGREP_SEQUENCE) {
-                        const codes = process.env.FAKE_HOST_PGREP_SEQUENCE.split(",");
-                        code = Number(codes[hostPgrepCall - 1] ?? codes.at(-1) ?? 1);
-                    } else if (process.env.FAKE_HOST_PGREP_CODE) {
-                        code = Number(process.env.FAKE_HOST_PGREP_CODE);
-                    }
-                    child.emit("close", code, null);
-                };
-                let delayMs = 0;
-                if (process.env.FAKE_HOST_PGREP_DELAY_SEQUENCE) {
-                    const delays = process.env.FAKE_HOST_PGREP_DELAY_SEQUENCE.split(",");
-                    delayMs = Number(delays[hostPgrepCall - 1] ?? delays.at(-1) ?? 0);
-                } else if (process.env.FAKE_HOST_PGREP_DELAY_MS) {
-                    delayMs = Number(process.env.FAKE_HOST_PGREP_DELAY_MS);
-                }
-                if (delayMs > 0) {
-                    setTimeout(closePgrep, delayMs);
-                    return;
-                }
-                closePgrep();
-            });
-            return child;
+function handleHostPgrepSpawn(child: FakeBackupProcess): FakeBackupProcess {
+    fakeHostPgrepCalls += 1;
+    const hostPgrepCall = fakeHostPgrepCalls;
+    queueMicrotask(() => {
+        if (process.env.FAKE_HOST_PGREP_ERROR === "1") {
+            child.emit("error", new Error("host pgrep failed"));
+            return;
         }
-        if (file === "docker") {
-            fakeDockerExecCalls.push([...args].map(String));
-            queueMicrotask(() => {
-                if (
-                    process.env.FAKE_DOCKER_EXEC_ERROR === "1" &&
-                    fakeBackupSpawnCalls > 0
+        if (process.env.FAKE_HOST_PGREP_NEVER_CLOSE === "1") {
+            return;
+        }
+        if (process.env.FAKE_HOST_PGREP_STDERR) {
+            child.stderr.write(process.env.FAKE_HOST_PGREP_STDERR);
+        }
+        const closePgrep = () => {
+            let code = 1;
+            if (process.env.FAKE_HOST_PGREP_SEQUENCE) {
+                const codes = process.env.FAKE_HOST_PGREP_SEQUENCE.split(",");
+                code = Number(codes[hostPgrepCall - 1] ?? codes.at(-1) ?? 1);
+            } else if (process.env.FAKE_HOST_PGREP_CODE) {
+                code = Number(process.env.FAKE_HOST_PGREP_CODE);
+            }
+            child.emit("close", code, null);
+        };
+        let delayMs = 0;
+        if (process.env.FAKE_HOST_PGREP_DELAY_SEQUENCE) {
+            const delays = process.env.FAKE_HOST_PGREP_DELAY_SEQUENCE.split(",");
+            delayMs = Number(delays[hostPgrepCall - 1] ?? delays.at(-1) ?? 0);
+        } else if (process.env.FAKE_HOST_PGREP_DELAY_MS) {
+            delayMs = Number(process.env.FAKE_HOST_PGREP_DELAY_MS);
+        }
+        if (delayMs > 0) {
+            setTimeout(closePgrep, delayMs);
+            return;
+        }
+        closePgrep();
+    });
+    return child;
+}
+
+function handleDockerExecSpawn(
+    child: FakeBackupProcess,
+    args: readonly string[]
+): FakeBackupProcess {
+    fakeDockerExecCalls.push([...args].map(String));
+    queueMicrotask(() => {
+        if (process.env.FAKE_DOCKER_EXEC_ERROR === "1" && fakeBackupSpawnCalls > 0) {
+            child.emit("error", new Error("docker exec failed"));
+            return;
+        }
+        if (
+            process.env.FAKE_DOCKER_EXEC_NEVER_CLOSE === "1" &&
+            fakeBackupSpawnCalls > 0
+        ) {
+            return;
+        }
+        if (process.env.FAKE_DOCKER_EXEC_STDOUT) {
+            child.stdout.write(process.env.FAKE_DOCKER_EXEC_STDOUT);
+        }
+        if (process.env.FAKE_DOCKER_EXEC_STDERR) {
+            child.stderr.write(process.env.FAKE_DOCKER_EXEC_STDERR);
+        }
+        if (args.includes("pgrep")) {
+            const preStartProbe = fakeBackupSpawnCalls === 0;
+            let preStartCall = 0;
+            if (preStartProbe) {
+                fakeContainerPreStartPgrepCalls += 1;
+                preStartCall = fakeContainerPreStartPgrepCalls;
+            }
+            if (!preStartProbe) {
+                fakeContainerPostStartPgrepCalls += 1;
+            }
+            const closePgrep = () => {
+                let code = 1;
+                if (preStartProbe && process.env.FAKE_CONTAINER_PGREP_PRESTART_SEQUENCE) {
+                    const codes =
+                        process.env.FAKE_CONTAINER_PGREP_PRESTART_SEQUENCE.split(",");
+                    code = Number(codes[preStartCall - 1] ?? codes.at(-1) ?? 1);
+                } else if (
+                    preStartProbe &&
+                    process.env.FAKE_CONTAINER_PGREP_PRESTART_CODE
                 ) {
-                    child.emit("error", new Error("docker exec failed"));
-                    return;
-                }
-                if (
-                    process.env.FAKE_DOCKER_EXEC_NEVER_CLOSE === "1" &&
-                    fakeBackupSpawnCalls > 0
+                    code = Number(process.env.FAKE_CONTAINER_PGREP_PRESTART_CODE);
+                } else if (
+                    preStartProbe &&
+                    !process.env.FAKE_CONTAINER_PGREP_PRESTART_CODE
                 ) {
-                    return;
-                }
-                if (process.env.FAKE_DOCKER_EXEC_STDOUT) {
-                    child.stdout.write(process.env.FAKE_DOCKER_EXEC_STDOUT);
-                }
-                if (process.env.FAKE_DOCKER_EXEC_STDERR) {
-                    child.stderr.write(process.env.FAKE_DOCKER_EXEC_STDERR);
-                }
-                if (args.includes("pgrep")) {
-                    const preStartProbe = fakeBackupSpawnCalls === 0;
-                    let preStartCall = 0;
-                    if (preStartProbe) {
-                        fakeContainerPreStartPgrepCalls += 1;
-                        preStartCall = fakeContainerPreStartPgrepCalls;
-                    }
-                    if (!preStartProbe) {
-                        fakeContainerPostStartPgrepCalls += 1;
-                    }
-                    const closePgrep = () => {
-                        let code = 1;
-                        if (
-                            preStartProbe &&
-                            process.env.FAKE_CONTAINER_PGREP_PRESTART_SEQUENCE
-                        ) {
-                            const codes =
-                                process.env.FAKE_CONTAINER_PGREP_PRESTART_SEQUENCE.split(
-                                    ","
-                                );
-                            code = Number(codes[preStartCall - 1] ?? codes.at(-1) ?? 1);
-                        } else if (
-                            preStartProbe &&
-                            process.env.FAKE_CONTAINER_PGREP_PRESTART_CODE
-                        ) {
-                            code = Number(process.env.FAKE_CONTAINER_PGREP_PRESTART_CODE);
-                        } else if (
-                            preStartProbe &&
-                            !process.env.FAKE_CONTAINER_PGREP_PRESTART_CODE
-                        ) {
-                            code = 1;
-                        } else if (process.env.FAKE_CONTAINER_PGREP_CODE) {
-                            code = Number(process.env.FAKE_CONTAINER_PGREP_CODE);
-                        } else if (
-                            process.env.FAKE_CONTAINER_PGREP_RUNNING === "1" ||
-                            (process.env.FAKE_CONTAINER_PGREP_RUNNING_ONCE === "1" &&
-                                fakeContainerPostStartPgrepCalls === 1)
-                        ) {
-                            code = 0;
-                        }
-                        child.emit(
-                            "close",
-                            process.env.FAKE_DOCKER_EXEC_NULL_CLOSE === "1" ? null : code,
-                            null
-                        );
-                    };
-                    let delayMs = 0;
-                    if (
-                        preStartProbe &&
-                        process.env.FAKE_CONTAINER_PGREP_PRESTART_DELAY_SEQUENCE
-                    ) {
-                        const delays =
-                            process.env.FAKE_CONTAINER_PGREP_PRESTART_DELAY_SEQUENCE.split(
-                                ","
-                            );
-                        delayMs = Number(delays[preStartCall - 1] ?? delays.at(-1) ?? 0);
-                    } else if (
-                        preStartProbe &&
-                        process.env.FAKE_CONTAINER_PGREP_PRESTART_DELAY_MS
-                    ) {
-                        delayMs = Number(
-                            process.env.FAKE_CONTAINER_PGREP_PRESTART_DELAY_MS
-                        );
-                    }
-                    if (delayMs > 0) {
-                        setTimeout(closePgrep, delayMs);
-                        return;
-                    }
-                    closePgrep();
-                    return;
-                }
-                let code = 0;
-                if (
-                    args.includes("-KILL") &&
-                    process.env.FAKE_CONTAINER_PKILL_KILL_CODE
+                    code = 1;
+                } else if (process.env.FAKE_CONTAINER_PGREP_CODE) {
+                    code = Number(process.env.FAKE_CONTAINER_PGREP_CODE);
+                } else if (
+                    process.env.FAKE_CONTAINER_PGREP_RUNNING === "1" ||
+                    (process.env.FAKE_CONTAINER_PGREP_RUNNING_ONCE === "1" &&
+                        fakeContainerPostStartPgrepCalls === 1)
                 ) {
-                    code = Number(process.env.FAKE_CONTAINER_PKILL_KILL_CODE);
-                } else if (process.env.FAKE_CONTAINER_PKILL_CODE) {
-                    code = Number(process.env.FAKE_CONTAINER_PKILL_CODE);
+                    code = 0;
                 }
                 child.emit(
                     "close",
                     process.env.FAKE_DOCKER_EXEC_NULL_CLOSE === "1" ? null : code,
                     null
                 );
-            });
-            return child;
+            };
+            let delayMs = 0;
+            if (
+                preStartProbe &&
+                process.env.FAKE_CONTAINER_PGREP_PRESTART_DELAY_SEQUENCE
+            ) {
+                const delays =
+                    process.env.FAKE_CONTAINER_PGREP_PRESTART_DELAY_SEQUENCE.split(",");
+                delayMs = Number(delays[preStartCall - 1] ?? delays.at(-1) ?? 0);
+            } else if (
+                preStartProbe &&
+                process.env.FAKE_CONTAINER_PGREP_PRESTART_DELAY_MS
+            ) {
+                delayMs = Number(process.env.FAKE_CONTAINER_PGREP_PRESTART_DELAY_MS);
+            }
+            if (delayMs > 0) {
+                setTimeout(closePgrep, delayMs);
+                return;
+            }
+            closePgrep();
+            return;
+        }
+        let code = 0;
+        if (args.includes("-KILL") && process.env.FAKE_CONTAINER_PKILL_KILL_CODE) {
+            code = Number(process.env.FAKE_CONTAINER_PKILL_KILL_CODE);
+        } else if (process.env.FAKE_CONTAINER_PKILL_CODE) {
+            code = Number(process.env.FAKE_CONTAINER_PKILL_CODE);
+        }
+        child.emit(
+            "close",
+            process.env.FAKE_DOCKER_EXEC_NULL_CLOSE === "1" ? null : code,
+            null
+        );
+    });
+    return child;
+}
+
+function handleBackupSpawn(
+    child: FakeBackupProcess,
+    args: readonly string[]
+): FakeBackupProcess {
+    lastFakeBackupProcess = child;
+    fakeBackupSpawnCalls += 1;
+    const command = String(args.at(-1) ?? "");
+    queueMicrotask(() => {
+        if (process.env.FAKE_BACKUP_SIGNAL === "1") {
+            child.emit("close", null, "SIGTERM");
+            return;
+        }
+        if (process.env.FAKE_BACKUP_NULL_CLOSE === "1") {
+            child.emit("close", null, null);
+            return;
+        }
+        if (process.env.FAKE_BACKUP_EMPTY_OUTPUT !== "1") {
+            child.stdout?.write(`started backup\n${command}\n`);
+            child.stderr?.write("backup warning\n");
+        }
+        if (process.env.FAKE_BACKUP_HOLD_UNTIL) {
+            const timer = setInterval(() => {
+                if (existsSync(process.env.FAKE_BACKUP_HOLD_UNTIL || "")) {
+                    clearInterval(timer);
+                    fakeBackupHoldTimers.delete(timer);
+                    child.emit("close", 0, null);
+                }
+            }, 10);
+            timer.unref();
+            fakeBackupHoldTimers.add(timer);
+            return;
+        }
+        if (process.env.FAKE_BACKUP_NEVER_CLOSE === "1") {
+            return;
+        }
+        setTimeout(() => {
+            child.emit("close", Number(process.env.FAKE_BACKUP_EXIT_CODE || 0), null);
+        }, 10);
+    });
+    return child;
+}
+
+function createFakeBackupSpawn(): typeof spawn {
+    return ((file: string, args: readonly string[]) => {
+        const child = createFakeBackupProcess();
+        if (file === "pgrep") {
+            return handleHostPgrepSpawn(child);
+        }
+        if (file === "docker") {
+            return handleDockerExecSpawn(child, args);
         }
 
-        lastFakeBackupProcess = child;
-        fakeBackupSpawnCalls += 1;
-        const command = String(args.at(-1) ?? "");
-        queueMicrotask(() => {
-            if (process.env.FAKE_BACKUP_SIGNAL === "1") {
-                child.emit("close", null, "SIGTERM");
-                return;
-            }
-            if (process.env.FAKE_BACKUP_NULL_CLOSE === "1") {
-                child.emit("close", null, null);
-                return;
-            }
-            if (process.env.FAKE_BACKUP_EMPTY_OUTPUT !== "1") {
-                child.stdout?.write(`started backup\n${command}\n`);
-                child.stderr?.write("backup warning\n");
-            }
-            if (process.env.FAKE_BACKUP_HOLD_UNTIL) {
-                const timer = setInterval(() => {
-                    if (existsSync(process.env.FAKE_BACKUP_HOLD_UNTIL || "")) {
-                        clearInterval(timer);
-                        child.emit("close", 0, null);
-                    }
-                }, 10);
-                return;
-            }
-            if (process.env.FAKE_BACKUP_NEVER_CLOSE === "1") {
-                return;
-            }
-            setTimeout(() => {
-                child.emit("close", Number(process.env.FAKE_BACKUP_EXIT_CODE || 0), null);
-            }, 10);
-        });
-        return child;
+        return handleBackupSpawn(child, args);
     }) as unknown as typeof spawn;
 }
 
@@ -507,6 +521,7 @@ describe("backup routes", () => {
     });
 
     beforeEach(() => {
+        clearFakeBackupHoldTimers();
         lastFakeBackupProcess = null;
         fakeDockerExecCalls.length = 0;
         fakeBackupSpawnCalls = 0;
@@ -526,6 +541,7 @@ describe("backup routes", () => {
     });
 
     after(async () => {
+        clearFakeBackupHoldTimers();
         await server.close();
         backupTesting.setSpawnBackupProcessForTest();
         backupTesting.setBackupAbortContainerTimeoutsForTest(30_000, 1_000);
@@ -779,6 +795,45 @@ describe("backup routes", () => {
         );
         const refreshedKopiaStatus = await waitForCacheEntry("backup.kopia.status");
         assert.equal(refreshedKopiaStatus.ok, true);
+    });
+
+    it("rolls back backup schedule pruning when schedule registration fails", (t) => {
+        upsertScheduledJob({
+            id: "backup.legacy",
+            name: "Legacy backup",
+            enabled: true,
+            scheduleType: "daily",
+            timeOfDay: "02:00",
+            actionKey: "backup.run",
+            actionPayload: { type: "walg" },
+        });
+
+        const prepare = db.prepare.bind(db);
+        let scheduleWriteCount = 0;
+        const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+            if (sql.includes("INSERT INTO scheduled_jobs")) {
+                const statement = prepare(sql);
+                return {
+                    run: (...args: Parameters<typeof statement.run>) => {
+                        scheduleWriteCount += 1;
+                        if (scheduleWriteCount === 2) {
+                            throw new Error("schedule write failed");
+                        }
+                        return statement.run(...args);
+                    },
+                } as unknown as ReturnType<typeof db.prepare>;
+            }
+            return prepare(sql);
+        });
+
+        try {
+            assert.throws(registerBackupScheduledJobs, /schedule write failed/u);
+        } finally {
+            prepareMock.mock.restore();
+        }
+
+        assert.notEqual(getScheduledJob("backup.legacy"), null);
+        assert.equal(getScheduledJob("backup.kopia"), null);
     });
 
     it("rejects invalid scheduled backup payloads", async () => {
