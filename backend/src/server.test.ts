@@ -1035,6 +1035,26 @@ describe("server bootstrap", () => {
             assert.equal(initializedToken, undefined);
             assert.match(String(warnings.at(-1)?.[0]), /No gateway token/u);
 
+            const quotaSeedError = new Error("quota seed unavailable");
+            let quotaCheckRan = false;
+            serverStartTesting.queueQuotaNotificationCheckAfterSeed(
+                Promise.reject(quotaSeedError),
+                async () => {
+                    quotaCheckRan = true;
+                }
+            );
+            await new Promise((resolve) => setImmediate(resolve));
+            assert.equal(quotaCheckRan, false);
+            assert.equal(
+                warnings.some(
+                    (entry) =>
+                        String(entry[0]).includes(
+                            "Skipping startup quota notification check"
+                        ) && entry[1] === quotaSeedError
+                ),
+                true
+            );
+
             server.listen = ((port: number, listener?: () => void) => {
                 listenedPort = port;
                 listener?.();

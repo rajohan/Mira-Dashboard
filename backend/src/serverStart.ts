@@ -59,6 +59,20 @@ function removeSchedulerCloseCleanup(): void {
     }
 }
 
+function queueQuotaNotificationCheckAfterSeed(
+    seedPromise = waitForLocalCacheSeed("quotas.summary"),
+    notificationCheck = runQuotaNotificationCheck
+): void {
+    void seedPromise
+        .then(() => notificationCheck())
+        .catch((error: unknown) => {
+            console.warn(
+                "[Backend] Skipping startup quota notification check after cache seed failure:",
+                error
+            );
+        });
+}
+
 /** Starts Gateway and notification monitors after the HTTP server is listening. */
 export function handleServerListening(): void {
     let gatewayStarted = false;
@@ -85,9 +99,7 @@ export function handleServerListening(): void {
         }
         startQuotaNotificationMonitor();
         quotaMonitorStarted = true;
-        void waitForLocalCacheSeed("quotas.summary").then(() =>
-            runQuotaNotificationCheck()
-        );
+        queueQuotaNotificationCheckAfterSeed();
         startOpenClawNotificationMonitor();
         openClawMonitorStarted = true;
         afterBackgroundServicesStartedForTest?.();
@@ -176,6 +188,7 @@ if (shouldStartOnImport()) {
 }
 
 export const __testing = {
+    queueQuotaNotificationCheckAfterSeed,
     setAfterBackgroundServicesStartedForTest(callback: (() => void) | undefined): void {
         afterBackgroundServicesStartedForTest = callback;
     },
