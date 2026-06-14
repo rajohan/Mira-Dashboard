@@ -121,7 +121,12 @@ export function useClearWalgBackupAttention() {
                 "/backups/walg/clear-needs-attention"
             ),
         onSuccess: async () => {
-            await queryClient.invalidateQueries({ queryKey: backupKeys.walg() });
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: backupKeys.walg() }),
+                queryClient.invalidateQueries({
+                    queryKey: cacheKeys.entry("backup.walg.status"),
+                }),
+            ]);
         },
     });
 }

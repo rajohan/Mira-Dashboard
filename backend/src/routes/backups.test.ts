@@ -1763,14 +1763,24 @@ describe("backup routes", () => {
                 MIRA_DOCKER_BIN: path.join(tempDir, "missing-docker"),
             },
             async () => {
-                const failed = await requestJson<{ error: string }>(
-                    server,
-                    "/api/backups/walg/run",
-                    { method: "POST" }
-                );
-                assert.equal(failed.status, 503);
-                assert.match(failed.body.error, /pgrep unavailable/u);
-                assert.equal(fakeBackupSpawnCalls, 0);
+                const warn = mock.method(console, "warn", () => {});
+                try {
+                    const failed = await requestJson<{ error: string }>(
+                        server,
+                        "/api/backups/walg/run",
+                        { method: "POST" }
+                    );
+                    assert.equal(failed.status, 503);
+                    assert.match(failed.body.error, /pgrep unavailable/u);
+                    assert.equal(fakeBackupSpawnCalls, 0);
+                    assert.equal(warn.mock.callCount(), 1);
+                    assert.match(
+                        String(warn.mock.calls[0]?.arguments[0]),
+                        /Failed to refresh WAL-G status after preflight failure/u
+                    );
+                } finally {
+                    warn.mock.restore();
+                }
             }
         );
     });

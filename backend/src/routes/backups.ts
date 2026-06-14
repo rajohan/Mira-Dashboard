@@ -664,7 +664,11 @@ async function startWalgBackupJob(signal?: AbortSignal) {
             getCurrentWalgJob
         );
     } catch (error) {
-        await refreshCacheProducer(backupStatusCacheKey("walg")).catch(() => {
+        await refreshCacheProducer(backupStatusCacheKey("walg")).catch((refreshError) => {
+            console.warn(
+                "[Backups] Failed to refresh WAL-G status after preflight failure:",
+                refreshError
+            );
             // Preserve the original preflight failure for the API response.
         });
         throw error;

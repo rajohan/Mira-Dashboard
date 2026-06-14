@@ -136,5 +136,8 @@ describe("backup hooks", () => {
             queryKey: cacheKeys.entry("backup.kopia.status"),
         });
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: backupKeys.walg() });
+        expect(invalidateSpy).toHaveBeenCalledWith({
+            queryKey: cacheKeys.entry("backup.walg.status"),
+        });
     });
 });
