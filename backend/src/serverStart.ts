@@ -65,9 +65,16 @@ function queueQuotaNotificationCheckAfterSeed(
 ): void {
     void seedPromise.then(
         () => {
-            void notificationCheck().catch((error: unknown) => {
+            try {
+                void notificationCheck().catch((error: unknown) => {
+                    console.warn(
+                        "[Backend] Startup quota notification check failed:",
+                        error
+                    );
+                });
+            } catch (error) {
                 console.warn("[Backend] Startup quota notification check failed:", error);
-            });
+            }
         },
         (error: unknown) => {
             console.warn(

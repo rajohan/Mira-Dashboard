@@ -289,6 +289,25 @@ function startBackupJob(
         await refreshBackupStatus(type, job);
     };
 
+    const markNeedsAttention = async () => {
+        finalizing = true;
+        if (hostAbortKillTimer) {
+            clearTimeout(hostAbortKillTimer);
+            hostAbortKillTimer = null;
+        }
+        if (containerAbortKillTimer) {
+            clearTimeout(containerAbortKillTimer);
+            containerAbortKillTimer = null;
+        }
+        job.status = "needs_attention";
+        job.code = 130;
+        job.endedAt = Date.now();
+        finalized = true;
+        signal?.removeEventListener("abort", abortBackup);
+        resolveCompleted(job);
+        await refreshBackupStatus(type, job);
+    };
+
     const abortBackup = () => {
         abortRequested = true;
         job.stderr = trimOutput(`${job.stderr}\nBackup aborted by scheduler`.trim());
@@ -325,6 +344,7 @@ function startBackupJob(
                             job.stderr = trimOutput(
                                 `${job.stderr}\nFailed to force terminate backup process: ${String(childKillError)}`.trim()
                             );
+                            void markNeedsAttention();
                         }
                     }
                 }, BACKUP_ABORT_SIGKILL_GRACE_MS);

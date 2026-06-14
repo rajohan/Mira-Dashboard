@@ -444,9 +444,14 @@ function assertValidActionTimeoutMs(timeoutMs: number | undefined): void {
     if (timeoutMs === undefined) {
         return;
     }
-    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    if (
+        !Number.isFinite(timeoutMs) ||
+        !Number.isInteger(timeoutMs) ||
+        timeoutMs < 1 ||
+        timeoutMs > 2_147_483_647
+    ) {
         throw new ScheduledJobValidationError(
-            "Scheduled job action timeout must be a positive finite number"
+            "Scheduled job action timeout must be an integer between 1 and 2147483647"
         );
     }
 }

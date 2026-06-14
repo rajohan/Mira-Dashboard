@@ -1071,6 +1071,23 @@ describe("server bootstrap", () => {
                 ),
                 true
             );
+            const syncQuotaCheckError = new Error("quota check crashed");
+            serverStartTesting.queueQuotaNotificationCheckAfterSeed(
+                Promise.resolve(),
+                () => {
+                    throw syncQuotaCheckError;
+                }
+            );
+            await new Promise((resolve) => setImmediate(resolve));
+            assert.equal(
+                warnings.some(
+                    (entry) =>
+                        String(entry[0]).includes(
+                            "Startup quota notification check failed"
+                        ) && entry[1] === syncQuotaCheckError
+                ),
+                true
+            );
 
             server.listen = ((port: number, listener?: () => void) => {
                 listenedPort = port;
