@@ -140,7 +140,7 @@ function evictCompletedBackupJobs(type: BackupJob["type"]) {
     }
 }
 
-function clearNeedsAttentionBackupJob(type: BackupJob["type"]) {
+async function clearNeedsAttentionBackupJob(type: BackupJob["type"]) {
     const job = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
     if (!job) {
         throw Object.assign(new Error(`${type.toUpperCase()} backup job not found`), {
@@ -160,6 +160,7 @@ function clearNeedsAttentionBackupJob(type: BackupJob["type"]) {
     if (type === "walg" && activeWalgJobId === job.id) {
         activeWalgJobId = null;
     }
+    await refreshBackupStatus(type, job);
     return job;
 }
 
@@ -884,7 +885,7 @@ export default function backupRoutes(
         "/api/backups/kopia/clear-needs-attention",
         asyncRoute(
             async (_req, res) => {
-                const job = clearNeedsAttentionBackupJob("kopia");
+                const job = await clearNeedsAttentionBackupJob("kopia");
                 res.json({ ok: true, cleared: mapJob(job) });
             },
             { fallback: "Failed to clear Kopia backup attention" }
@@ -910,7 +911,7 @@ export default function backupRoutes(
         "/api/backups/walg/clear-needs-attention",
         asyncRoute(
             async (_req, res) => {
-                const job = clearNeedsAttentionBackupJob("walg");
+                const job = await clearNeedsAttentionBackupJob("walg");
                 res.json({ ok: true, cleared: mapJob(job) });
             },
             { fallback: "Failed to clear WAL-G backup attention" }

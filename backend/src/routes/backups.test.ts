@@ -1864,6 +1864,9 @@ describe("backup routes", () => {
             assert.equal(blocked.status, 409);
             assert.match(blocked.body.error, /KOPIA backup needs attention/u);
 
+            db.prepare(
+                "DELETE FROM cache_entries WHERE key = 'backup.kopia.status'"
+            ).run();
             const cleared = await requestJson<{
                 ok: boolean;
                 cleared: { status: string };
@@ -1872,6 +1875,8 @@ describe("backup routes", () => {
             });
             assert.equal(cleared.status, 200);
             assert.equal(cleared.body.cleared.status, "needs_attention");
+            const refreshedStatus = await waitForCacheEntry("backup.kopia.status");
+            assert.ok(refreshedStatus.latest);
             await writeFile(releasePath, "ok");
             await closeLastFakeBackupProcessAndWaitForStatusRefresh("kopia");
         });
