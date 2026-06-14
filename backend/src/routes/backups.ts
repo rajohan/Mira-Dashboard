@@ -197,7 +197,8 @@ function startBackupJob(
     type: BackupJob["type"],
     command: string,
     signal?: AbortSignal,
-    abortConfig?: BackupAbortConfig
+    abortConfig?: BackupAbortConfig,
+    hostAbortPattern?: string
 ) {
     const existingJob = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
     if (existingJob?.status === "running") {
@@ -274,6 +275,12 @@ function startBackupJob(
         if (interrupted && abortConfig) {
             needsAttention = !(await waitForContainerProcessExitWithRetries(
                 abortConfig,
+                job
+            ));
+        }
+        if (interrupted && hostAbortPattern) {
+            needsAttention = !(await waitForHostProcessExitWithRetries(
+                hostAbortPattern,
                 job
             ));
         }
@@ -452,12 +459,24 @@ function shellSingleQuote(value: string): string {
     return `'${value.replaceAll("'", "'\"'\"'")}'`;
 }
 
+function pgrepFullCommandPattern(pattern: string): string {
+    const lastSlash = pattern.lastIndexOf("/");
+    const suffixOffset = lastSlash + 1;
+    const suffixMatch = /[A-Za-z0-9]/u.exec(pattern.slice(suffixOffset));
+    if (!suffixMatch) {
+        return pattern.replace(/[A-Za-z0-9]/u, (match) => `[${match}]`);
+    }
+    const index = suffixOffset + suffixMatch.index;
+    return `${pattern.slice(0, index)}[${pattern[index]}]${pattern.slice(index + 1)}`;
+}
+
 async function runContainerPgrep(config: BackupAbortConfig) {
+    const processPattern = pgrepFullCommandPattern(config.processPattern);
     return runDockerExec(config.container, [
         "sh",
         "-c",
         [
-            `pgrep -f -- ${shellSingleQuote(config.processPattern)} >/dev/null`,
+            `pgrep -f -- ${shellSingleQuote(processPattern)} >/dev/null`,
             "code=$?",
             String.raw`if [ "$code" -eq 1 ]; then printf '%s\n' ${shellSingleQuote(CONTAINER_PGREP_NO_MATCH_MARKER)}; fi`,
             'exit "$code"',
@@ -640,16 +659,59 @@ async function waitForContainerProcessExitWithRetries(
     return false;
 }
 
+async function waitForHostProcessExit(processPattern: string): Promise<void> {
+    const deadline = Date.now() + backupAbortContainerWaitMs;
+    while (Date.now() < deadline) {
+        const result = await runHostPgrep(processPattern);
+        if (result.code === 1) {
+            return;
+        }
+        if (result.code !== 0) {
+            throw new Error(result.stderr || `pgrep exited ${result.code}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, backupAbortContainerPollMs));
+    }
+    throw new Error(`Timed out waiting for ${processPattern} to exit`);
+}
+
+async function waitForHostProcessExitWithRetries(
+    processPattern: string,
+    job: BackupJob
+): Promise<boolean> {
+    for (let attempt = 1; attempt <= backupAbortContainerConfirmAttempts; attempt += 1) {
+        try {
+            await waitForHostProcessExit(processPattern);
+            return true;
+        } catch (error: unknown) {
+            job.stderr = trimOutput(
+                `${job.stderr}\nFailed to confirm backup process termination: ${String(error)}`.trim()
+            );
+            if (attempt >= backupAbortContainerConfirmAttempts) {
+                job.stderr = trimOutput(
+                    `${job.stderr}\nBackup termination needs attention after ${attempt} failed confirmation attempts`.trim()
+                );
+                return false;
+            }
+            await new Promise((resolve) =>
+                setTimeout(resolve, backupAbortContainerPollMs)
+            );
+        }
+    }
+    return false;
+}
+
 async function refreshBackupStatus(
     type: BackupJob["type"],
     job: BackupJob
 ): Promise<void> {
     const cacheKey = backupStatusCacheKey(type);
-    await refreshCacheProducer(cacheKey).catch((error: unknown) => {
-        job.stderr = trimOutput(
-            `${job.stderr}\nStatus refresh failed: ${String(error)}`.trim()
-        );
-    });
+    await refreshCacheProducer(cacheKey, undefined, { force: true }).catch(
+        (error: unknown) => {
+            job.stderr = trimOutput(
+                `${job.stderr}\nStatus refresh failed: ${String(error)}`.trim()
+            );
+        }
+    );
     job.statusRefreshed = true;
 }
 
@@ -680,7 +742,13 @@ async function startKopiaBackupJob(signal?: AbortSignal) {
     if (hostJob) {
         return hostJob;
     }
-    return startBackupJob("kopia", KOPIA_BACKUP_SCRIPT_PATTERN, signal);
+    return startBackupJob(
+        "kopia",
+        KOPIA_BACKUP_SCRIPT_PATTERN,
+        signal,
+        undefined,
+        KOPIA_BACKUP_SCRIPT_PATTERN
+    );
 }
 
 /** Performs start walg backup job. */
@@ -827,6 +895,7 @@ export const __testing = {
     getCurrentJob,
     mapJob,
     getScheduledBackupType,
+    pgrepFullCommandPattern,
     startScheduledBackup,
     startBackupJobForTest(
         type: BackupJob["type"],

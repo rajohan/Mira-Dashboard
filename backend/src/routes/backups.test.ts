@@ -60,11 +60,12 @@ async function installFakeDocker(tempDir: string): Promise<string> {
         `#!${process.execPath}
 const args = process.argv.slice(2).join(" ");
 if (args === "exec kopia kopia snapshot list --all --json-verbose --json") {
+    const firstSnapshotDescription = process.env.FAKE_KOPIA_SNAPSHOT_DESCRIPTION || "Docker snapshot";
     const writeSnapshots = () => process.stdout.write(JSON.stringify([
         {
             id: "kopia-1",
             source: { path: "/source/docker" },
-            description: "Docker snapshot",
+            description: firstSnapshotDescription,
             startTime: "2099-01-01T00:00:00.000Z",
             endTime: "2099-01-01T00:01:00.000Z",
             stats: { fileCount: 2, totalSize: 512, errorCount: 0, ignoredErrorCount: 0 },
@@ -466,7 +467,7 @@ async function waitForDoneWithRefreshFailure(
 }
 
 async function waitForCacheEntry(key: string): Promise<Record<string, unknown>> {
-    return waitForCacheEntryAttempts(key, 40);
+    return waitForCacheEntryAttempts(key, 150);
 }
 
 async function waitForCacheEntryAttempts(
@@ -483,6 +484,25 @@ async function waitForCacheEntryAttempts(
         await new Promise((resolve) => setTimeout(resolve, 10));
     }
     throw new Error(`Cache entry ${key} was not refreshed`);
+}
+
+async function waitForCacheEntryMatching(
+    key: string,
+    pattern: RegExp
+): Promise<Record<string, unknown>> {
+    for (let attempt = 0; attempt < 150; attempt += 1) {
+        const row = db
+            .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
+            .get(key) as { data_json: string | null } | undefined;
+        if (row?.data_json) {
+            const cache = JSON.parse(row.data_json) as Record<string, unknown>;
+            if (pattern.test(JSON.stringify(cache))) {
+                return cache;
+            }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(`Cache entry ${key} did not match ${pattern}`);
 }
 
 async function waitForScheduledBackupStatusRefresh(
@@ -1222,19 +1242,121 @@ describe("backup routes", () => {
                     fakeDockerExecCalls.some((args) =>
                         args
                             .join(" ")
-                            .includes("walg pkill -TERM -f /usr/local/bin/backup-push.sh")
-                    )
-                );
-                assert.ok(
-                    fakeDockerExecCalls.some((args) =>
-                        args
-                            .join(" ")
                             .includes(
-                                "walg sh -c pgrep -f -- '/usr/local/bin/backup-push.sh'"
+                                "walg sh -c pgrep -f -- '/usr/local/bin/[b]ackup-push.sh'"
                             )
                     )
                 );
                 assert.equal(fakeContainerPostStartPgrepCalls, 2);
+            }
+        );
+    });
+
+    it("marks aborted Kopia jobs needing attention when host process remains active", async () => {
+        registerBackupScheduledJobs();
+        backupTesting.setBackupAbortContainerTimeoutsForTest(1, 1);
+        backupTesting.setBackupAbortContainerConfirmAttemptsForTest(1);
+        await withEnv(
+            {
+                FAKE_BACKUP_NEVER_CLOSE: "1",
+                FAKE_HOST_PGREP_SEQUENCE: "1,0",
+            },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = startTestScheduledBackup("kopia", controller.signal);
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+                closeLastFakeBackupProcess();
+
+                await assertScheduledBackupRejects(
+                    runPromise,
+                    /needs attention[\s\S]*1 failed confirmation attempts/u
+                );
+                assert.equal(fakeHostPgrepCalls, 2);
+
+                const activeKopia = await requestJson<{
+                    job: { status: string } | null;
+                }>(server, "/api/backups/kopia");
+                assert.equal(activeKopia.status, 200);
+                assert.equal(activeKopia.body.job?.status, "needs_attention");
+            }
+        );
+    });
+
+    it("records aborted Kopia host lookup failures during termination confirmation", async () => {
+        registerBackupScheduledJobs();
+        backupTesting.setBackupAbortContainerTimeoutsForTest(1, 1);
+        backupTesting.setBackupAbortContainerConfirmAttemptsForTest(1);
+        await withEnv(
+            {
+                FAKE_BACKUP_NEVER_CLOSE: "1",
+                FAKE_HOST_PGREP_SEQUENCE: "1,2",
+                FAKE_HOST_PGREP_STDERR: "host pgrep unavailable",
+            },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = startTestScheduledBackup("kopia", controller.signal);
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+                closeLastFakeBackupProcess();
+
+                await assertScheduledBackupRejects(runPromise, /host pgrep unavailable/u);
+            }
+        );
+    });
+
+    it("retries aborted Kopia host termination confirmation after lookup failures", async () => {
+        registerBackupScheduledJobs();
+        backupTesting.setBackupAbortContainerTimeoutsForTest(1, 1);
+        backupTesting.setBackupAbortContainerConfirmAttemptsForTest(2);
+        await withEnv(
+            {
+                FAKE_BACKUP_NEVER_CLOSE: "1",
+                FAKE_HOST_PGREP_SEQUENCE: "1,2,1",
+            },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = startTestScheduledBackup("kopia", controller.signal);
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+                closeLastFakeBackupProcess();
+
+                await assertScheduledBackupRejects(
+                    runPromise,
+                    /Backup aborted by scheduler/u
+                );
+                assert.equal(fakeHostPgrepCalls, 3);
+            }
+        );
+    });
+
+    it("marks aborted Kopia jobs needing attention when confirmation attempts are exhausted", async () => {
+        registerBackupScheduledJobs();
+        backupTesting.setBackupAbortContainerConfirmAttemptsForTest(0);
+        await withEnv(
+            {
+                FAKE_BACKUP_NEVER_CLOSE: "1",
+                FAKE_HOST_PGREP_SEQUENCE: "1",
+            },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = startTestScheduledBackup("kopia", controller.signal);
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+                closeLastFakeBackupProcess();
+
+                await assertScheduledBackupRejects(
+                    runPromise,
+                    /Backup aborted by scheduler/u
+                );
+                const activeKopia = await requestJson<{
+                    job: { status: string } | null;
+                }>(server, "/api/backups/kopia");
+                assert.equal(activeKopia.body.job?.status, "needs_attention");
             }
         );
     });
@@ -2254,30 +2376,42 @@ describe("backup routes", () => {
     });
 
     it("marks successful backup jobs done before status refresh completes", async () => {
-        await withEnv({ FAKE_DOCKER_STATUS_DELAY_MS: "1000" }, async () => {
-            const started = await requestJson<{
-                ok: boolean;
-                job: { id: string; status: string };
-            }>(server, "/api/backups/kopia/run", { method: "POST" });
+        await withEnv(
+            {
+                FAKE_DOCKER_STATUS_DELAY_MS: "1000",
+                FAKE_KOPIA_SNAPSHOT_DESCRIPTION: "stale snapshot",
+            },
+            async () => {
+                const started = await requestJson<{
+                    ok: boolean;
+                    job: { id: string; status: string };
+                }>(server, "/api/backups/kopia/run", { method: "POST" });
 
-            assert.equal(started.status, 200);
-            assert.equal(started.body.ok, true);
+                assert.equal(started.status, 200);
+                assert.equal(started.body.ok, true);
 
-            const done = await waitForDone(server, "/api/backups/kopia");
-            assert.equal(done.status, "done");
-            assert.equal(done.code, 0);
+                const done = await waitForDone(server, "/api/backups/kopia");
+                assert.equal(done.status, "done");
+                assert.equal(done.code, 0);
 
-            process.env.FAKE_DOCKER_STATUS_DELAY_MS = "1";
-            const nextStarted = await requestJson<{
-                ok: boolean;
-                job: { id: string; status: string };
-            }>(server, "/api/backups/kopia/run", { method: "POST" });
-            assert.equal(nextStarted.status, 200);
-            assert.equal(nextStarted.body.ok, true);
-            assert.notEqual(nextStarted.body.job.id, started.body.job.id);
-            await waitForDone(server, "/api/backups/kopia");
-            await new Promise<void>((resolve) => setTimeout(resolve, 1100));
-        });
+                process.env.FAKE_DOCKER_STATUS_DELAY_MS = "1";
+                process.env.FAKE_KOPIA_SNAPSHOT_DESCRIPTION = "fresh snapshot";
+                const nextStarted = await requestJson<{
+                    ok: boolean;
+                    job: { id: string; status: string };
+                }>(server, "/api/backups/kopia/run", { method: "POST" });
+                assert.equal(nextStarted.status, 200);
+                assert.equal(nextStarted.body.ok, true);
+                assert.notEqual(nextStarted.body.job.id, started.body.job.id);
+                await waitForDone(server, "/api/backups/kopia");
+                const cache = await waitForCacheEntryMatching(
+                    "backup.kopia.status",
+                    /fresh snapshot/u
+                );
+                assert.match(JSON.stringify(cache), /fresh snapshot/u);
+                assert.doesNotMatch(JSON.stringify(cache), /stale snapshot/u);
+            }
+        );
     });
 
     it("resolves successful scheduled backups before status refresh completes", async () => {
@@ -2514,6 +2648,11 @@ describe("backup routes", () => {
         assert.equal(backupTesting.getScheduledBackupType("walg"), undefined);
         assert.equal(backupTesting.getScheduledBackupType({ type: "kopia" }), "kopia");
         assert.equal(backupTesting.trimOutput("x".repeat(100_001)).length, 100_000);
+        assert.equal(
+            backupTesting.pgrepFullCommandPattern("/usr/local/bin/backup-push.sh"),
+            "/usr/local/bin/[b]ackup-push.sh"
+        );
+        assert.equal(backupTesting.pgrepFullCommandPattern("---"), "---");
 
         await withEnv({ FAKE_BACKUP_NEVER_CLOSE: "1" }, async () => {
             const running = backupTesting.startBackupJobForTest(

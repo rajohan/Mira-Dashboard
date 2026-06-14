@@ -1910,7 +1910,11 @@ async function waitForExistingRefresh(
     }
 }
 
-export async function refreshCacheProducer(key: string, signal?: AbortSignal) {
+export async function refreshCacheProducer(
+    key: string,
+    signal?: AbortSignal,
+    options: { force?: boolean } = {}
+) {
     if (signal?.aborted) {
         throw abortError();
     }
@@ -1924,11 +1928,17 @@ export async function refreshCacheProducer(key: string, signal?: AbortSignal) {
                 inFlightKey === scopeKey || scopeKey.startsWith(`${inFlightKey}.`)
         )
         .sort(([left], [right]) => left.length - right.length)[0]?.[1];
-    if (existing !== undefined) {
+    if (!options.force && existing !== undefined) {
         return await waitForExistingRefresh(key, scopeKey, existing, signal);
     }
     const childRefreshes = inFlightEntries
-        .filter(([inFlightKey]) => inFlightKey.startsWith(`${scopeKey}.`))
+        .filter(([inFlightKey]) =>
+            options.force
+                ? inFlightKey === scopeKey ||
+                  inFlightKey.startsWith(`${scopeKey}.`) ||
+                  scopeKey.startsWith(`${inFlightKey}.`)
+                : inFlightKey.startsWith(`${scopeKey}.`)
+        )
         .map(([, refresh]) => refresh);
     const refresh =
         childRefreshes.length > 0
