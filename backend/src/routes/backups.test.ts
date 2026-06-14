@@ -541,6 +541,31 @@ describe("backup routes", () => {
         assert.equal(cache.tool, "wal-g");
     });
 
+    it("returns the active job when a WAL-G backup is already running", async () => {
+        const releasePath = path.join(tempDir, "release-walg");
+        await withEnv({ FAKE_BACKUP_HOLD_UNTIL: releasePath }, async () => {
+            const firstResp = await requestJson<{
+                ok: boolean;
+                job: { id: string; type: string; status: string };
+            }>(server, "/api/backups/walg/run", { method: "POST" });
+            const secondResp = await requestJson<{
+                ok: boolean;
+                job: { id: string; type: string; status: string };
+            }>(server, "/api/backups/walg/run", { method: "POST" });
+
+            assert.equal(firstResp.status, 200);
+            assert.equal(firstResp.body.ok, true);
+            assert.equal(firstResp.body.job.status, "running");
+            assert.equal(secondResp.status, 200);
+            assert.equal(secondResp.body.ok, true);
+            assert.equal(secondResp.body.job.id, firstResp.body.job.id);
+            assert.equal(secondResp.body.job.status, "running");
+
+            await writeFile(releasePath, "release", "utf8");
+            await waitForDone(server, "/api/backups/walg");
+        });
+    });
+
     it("registers nightly backup schedules and starts backup jobs from scheduler", async () => {
         upsertScheduledJob({
             id: "backup.legacy",
@@ -1288,9 +1313,47 @@ describe("backup routes", () => {
             assert.match(manual.body.error, /WALG backup needs attention/u);
             assert.equal(fakeBackupSpawnCalls, 0);
 
+            const active = await requestJson<{ job: { status: string; stderr: string } }>(
+                server,
+                "/api/backups/walg"
+            );
+            assert.equal(active.status, 200);
+            assert.equal(active.body.job.status, "needs_attention");
+            assert.match(active.body.job.stderr, /backup process is still running/u);
+
             const scheduled = await runScheduledJob("backup.walg", "manual");
             assert.equal(scheduled.status, "failed");
             assert.match(scheduled.message ?? "", /WALG backup needs attention/u);
+            assert.equal(fakeBackupSpawnCalls, 0);
+        });
+    });
+
+    it("reports WAL-G prestart container probe failures", async () => {
+        await withEnv(
+            {
+                FAKE_CONTAINER_PGREP_PRESTART_CODE: "2",
+                FAKE_DOCKER_EXEC_STDERR: "pgrep unavailable",
+            },
+            async () => {
+                const failed = await requestJson<{ error: string }>(
+                    server,
+                    "/api/backups/walg/run",
+                    { method: "POST" }
+                );
+                assert.equal(failed.status, 503);
+                assert.match(failed.body.error, /pgrep unavailable/u);
+                assert.equal(fakeBackupSpawnCalls, 0);
+            }
+        );
+
+        await withEnv({ FAKE_CONTAINER_PGREP_PRESTART_CODE: "2" }, async () => {
+            const failed = await requestJson<{ error: string }>(
+                server,
+                "/api/backups/walg/run",
+                { method: "POST" }
+            );
+            assert.equal(failed.status, 503);
+            assert.match(failed.body.error, /docker exec pgrep exited 2/u);
             assert.equal(fakeBackupSpawnCalls, 0);
         });
     });
@@ -1320,6 +1383,14 @@ describe("backup routes", () => {
         assert.match(active.body.error, /KOPIA backup does not need attention/u);
 
         backupTesting.markActiveJobNeedsAttentionForTest("kopia");
+        const blocked = await requestJson<{ error: string }>(
+            server,
+            "/api/backups/kopia/run",
+            { method: "POST" }
+        );
+        assert.equal(blocked.status, 409);
+        assert.match(blocked.body.error, /KOPIA backup needs attention/u);
+
         const cleared = await requestJson<{
             ok: boolean;
             cleared: { status: string };
@@ -1669,7 +1740,7 @@ describe("backup routes", () => {
         try {
             registerBackupScheduledJobs();
             const run = await runScheduledJob(
-                "backup.walg",
+                "backup.kopia",
                 "manual",
                 new AbortController().signal
             );
@@ -1748,7 +1819,21 @@ describe("backup routes", () => {
             );
             assert.equal(active.status, 200);
             assert.equal(active.body.job, null);
+        } finally {
+            backupTesting.setSpawnBackupProcessForTest(createFakeBackupSpawn());
+        }
 
+        backupTesting.setSpawnBackupProcessForTest(((file: string) => {
+            if (file === "docker") {
+                const child = createFakeBackupProcess();
+                queueMicrotask(() => {
+                    child.emit("close", 1, null);
+                });
+                return child;
+            }
+            throw new Error("spawn crashed");
+        }) as unknown as typeof spawn);
+        try {
             const failedWalg = await requestJson<{ error: string }>(
                 server,
                 "/api/backups/walg/run",

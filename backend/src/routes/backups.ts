@@ -161,6 +161,29 @@ function clearNeedsAttentionBackupJob(type: BackupJob["type"]) {
     return job;
 }
 
+function recordWalgNeedsAttention(stderr: string): BackupJob {
+    const jobId = randomUUID();
+    let resolveCompleted!: (job: BackupJob) => void;
+    const now = Date.now();
+    const job: BackupJob = {
+        id: jobId,
+        type: "walg",
+        status: "needs_attention",
+        code: 130,
+        stdout: "",
+        stderr,
+        startedAt: now,
+        endedAt: now,
+        completed: new Promise<BackupJob>((resolve) => {
+            resolveCompleted = resolve;
+        }),
+    };
+    backupJobs.set(jobId, job);
+    activeWalgJobId = jobId;
+    resolveCompleted(job);
+    return job;
+}
+
 /** Performs start backup job. */
 function startBackupJob(
     type: BackupJob["type"],
@@ -332,7 +355,9 @@ function startBackupJob(
         job.code = 1;
         job.stderr = trimOutput(`${job.stderr}\n${error.message}`.trim());
         job.endedAt = Date.now();
-        signal?.removeEventListener("abort", abortBackup);
+        if (signal) {
+            signal.removeEventListener("abort", abortBackup);
+        }
         resolveCompleted(job);
         await refreshBackupStatus(type, job);
     });
@@ -398,6 +423,9 @@ async function assertNoContainerBackupInProgress(
         return;
     }
     if (result.code === 0) {
+        recordWalgNeedsAttention(
+            "WALG backup needs attention: backup process is still running"
+        );
         throw Object.assign(
             new Error("WALG backup needs attention: backup process is still running"),
             { statusCode: 409 }
@@ -493,6 +521,15 @@ async function startWalgBackupJob(signal?: AbortSignal) {
         container: "walg",
         processPattern: WALG_BACKUP_SCRIPT_PATTERN,
     };
+    const existingJob = getCurrentWalgJob();
+    if (existingJob?.status === "running") {
+        return existingJob;
+    }
+    if (existingJob?.status === "needs_attention") {
+        throw Object.assign(new Error("WALG backup needs attention"), {
+            statusCode: 409,
+        });
+    }
     await assertNoContainerBackupInProgress(abortConfig);
     return startBackupJob(
         "walg",
