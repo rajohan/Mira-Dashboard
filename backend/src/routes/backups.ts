@@ -280,9 +280,7 @@ function startBackupJob(
         finalized = true;
         signal?.removeEventListener("abort", abortBackup);
         resolveCompleted(job);
-        if (!interrupted || completedCode !== 0) {
-            await refreshBackupStatus(type, job);
-        }
+        await refreshBackupStatus(type, job);
     };
 
     const abortBackup = () => {

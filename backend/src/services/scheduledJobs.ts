@@ -433,10 +433,22 @@ export function registerScheduledJobAction(
     options: ScheduledJobActionOptions = {}
 ): void {
     assertValidActionKey(actionKey);
+    assertValidActionTimeoutMs(options.timeoutMs);
     actionHandlers.set(actionKey, {
         handler,
         timeoutMs: options.timeoutMs,
     });
+}
+
+function assertValidActionTimeoutMs(timeoutMs: number | undefined): void {
+    if (timeoutMs === undefined) {
+        return;
+    }
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+        throw new ScheduledJobValidationError(
+            "Scheduled job action timeout must be a positive finite number"
+        );
+    }
 }
 
 export function upsertScheduledJob(definition: ScheduledJobDefinition): ScheduledJob {

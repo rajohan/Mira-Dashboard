@@ -1554,6 +1554,12 @@ test("ignores overlapping scheduler ticks", async () => {
 
 test("validates schedule definitions and exposes idempotent scheduler controls", () => {
     assert.throws(() => registerScheduledJobAction("Bad Key", () => {}), /action key/u);
+    for (const timeoutMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+        assert.throws(
+            () => registerScheduledJobAction("cache.refresh", () => {}, { timeoutMs }),
+            /timeout must be a positive finite number/u
+        );
+    }
     assert.throws(
         () =>
             upsertScheduledJob({
