@@ -17,6 +17,7 @@ const SCHEDULED_BACKUP_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const BACKUP_ABORT_SIGKILL_GRACE_MS = 10_000;
 const KOPIA_BACKUP_SCRIPT_PATTERN = "/opt/docker/apps/kopia/backup.sh";
 const WALG_BACKUP_SCRIPT_PATTERN = "/usr/local/bin/backup-push.sh";
+const CONTAINER_PGREP_NO_MATCH_MARKER = "__MIRA_CONTAINER_PGREP_NO_MATCH__";
 let spawnBackupProcess = spawn;
 let backupAbortContainerWaitMs = 30_000;
 let backupAbortContainerPollMs = 1_000;
@@ -447,17 +448,34 @@ function runDockerExec(
     });
 }
 
+function shellSingleQuote(value: string): string {
+    return `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+async function runContainerPgrep(config: BackupAbortConfig) {
+    return runDockerExec(config.container, [
+        "sh",
+        "-c",
+        [
+            `pgrep -f -- ${shellSingleQuote(config.processPattern)} >/dev/null`,
+            "code=$?",
+            String.raw`if [ "$code" -eq 1 ]; then printf '%s\n' ${shellSingleQuote(CONTAINER_PGREP_NO_MATCH_MARKER)}; fi`,
+            'exit "$code"',
+        ].join("; "),
+    ]);
+}
+
+function isContainerPgrepNoMatch(result: { code: number; stdout: string }): boolean {
+    return result.code === 1 && result.stdout.includes(CONTAINER_PGREP_NO_MATCH_MARKER);
+}
+
 async function assertNoContainerBackupInProgress(
     config: BackupAbortConfig,
     type: BackupJob["type"],
     getCurrent: () => BackupJob | null
 ): Promise<BackupJob | null> {
-    const result = await runDockerExec(config.container, [
-        "pgrep",
-        "-f",
-        config.processPattern,
-    ]);
-    if (result.code === 1) {
+    const result = await runContainerPgrep(config);
+    if (isContainerPgrepNoMatch(result)) {
         return null;
     }
     if (result.code === 0) {
@@ -584,15 +602,11 @@ async function terminateContainerProcess(
 async function waitForContainerProcessExit(config: BackupAbortConfig): Promise<void> {
     const deadline = Date.now() + backupAbortContainerWaitMs;
     while (Date.now() < deadline) {
-        const result = await runDockerExec(config.container, [
-            "pgrep",
-            "-f",
-            config.processPattern,
-        ]);
-        if (result.code === 1) {
+        const result = await runContainerPgrep(config);
+        if (isContainerPgrepNoMatch(result)) {
             return;
         }
-        if (result.code > 1) {
+        if (result.code !== 0) {
             throw new Error(result.stderr || `docker exec pgrep exited ${result.code}`);
         }
         await new Promise((resolve) => setTimeout(resolve, backupAbortContainerPollMs));

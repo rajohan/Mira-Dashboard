@@ -211,7 +211,7 @@ function handleDockerExecSpawn(
         if (process.env.FAKE_DOCKER_EXEC_STDERR) {
             child.stderr.write(process.env.FAKE_DOCKER_EXEC_STDERR);
         }
-        if (args.includes("pgrep")) {
+        if (args.some((arg) => String(arg).includes("pgrep"))) {
             const preStartProbe = fakeBackupSpawnCalls === 0;
             let preStartCall = 0;
             if (preStartProbe) {
@@ -245,6 +245,13 @@ function handleDockerExecSpawn(
                         fakeContainerPostStartPgrepCalls === 1)
                 ) {
                     code = 0;
+                }
+                if (
+                    code === 1 &&
+                    (preStartProbe ||
+                        process.env.FAKE_DOCKER_EXEC_PGREP_LAYER_FAILURE !== "1")
+                ) {
+                    child.stdout.write("__MIRA_CONTAINER_PGREP_NO_MATCH__\n");
                 }
                 child.emit(
                     "close",
@@ -1221,7 +1228,9 @@ describe("backup routes", () => {
                     fakeDockerExecCalls.some((args) =>
                         args
                             .join(" ")
-                            .includes("walg pgrep -f /usr/local/bin/backup-push.sh")
+                            .includes(
+                                "walg sh -c pgrep -f -- '/usr/local/bin/backup-push.sh'"
+                            )
                     )
                 );
                 assert.equal(fakeContainerPostStartPgrepCalls, 2);
@@ -1322,6 +1331,35 @@ describe("backup routes", () => {
                     /docker exec pgrep exited 2/u,
                     () => {
                         process.env.FAKE_CONTAINER_PGREP_CODE = "1";
+                    }
+                );
+            }
+        );
+    });
+
+    it("keeps aborted WAL-G jobs running when docker exec fails with pgrep status", async () => {
+        registerBackupScheduledJobs();
+        await withEnv(
+            {
+                FAKE_BACKUP_NEVER_CLOSE: "1",
+                FAKE_CONTAINER_PGREP_CODE: "1",
+                FAKE_DOCKER_EXEC_PGREP_LAYER_FAILURE: "1",
+                FAKE_DOCKER_EXEC_STDERR: "container paused",
+            },
+            async () => {
+                const controller = new AbortController();
+                const runPromise = startTestScheduledBackup("walg", controller.signal);
+
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                controller.abort();
+                closeLastFakeBackupProcess();
+
+                await assertAbortedWalgRemainsRunningUntilTerminationConfirmed(
+                    server,
+                    runPromise,
+                    /container paused/u,
+                    () => {
+                        delete process.env.FAKE_DOCKER_EXEC_PGREP_LAYER_FAILURE;
                     }
                 );
             }
@@ -2431,6 +2469,7 @@ describe("backup routes", () => {
             if (file === "docker") {
                 const child = createFakeBackupProcess();
                 queueMicrotask(() => {
+                    child.stdout.write("__MIRA_CONTAINER_PGREP_NO_MATCH__\n");
                     child.emit("close", 1, null);
                 });
                 return child;
