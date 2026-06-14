@@ -14,6 +14,7 @@ import {
 const MAX_OUTPUT_CHARS = 100_000;
 const SCHEDULED_BACKUP_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const BACKUP_ABORT_SIGKILL_GRACE_MS = 10_000;
+const KOPIA_BACKUP_SCRIPT_PATTERN = "/opt/docker/apps/kopia/backup.sh";
 const WALG_BACKUP_SCRIPT_PATTERN = "/usr/local/bin/backup-push.sh";
 let spawnBackupProcess = spawn;
 let backupAbortContainerWaitMs = 30_000;
@@ -161,13 +162,13 @@ function clearNeedsAttentionBackupJob(type: BackupJob["type"]) {
     return job;
 }
 
-function recordWalgNeedsAttention(stderr: string): BackupJob {
+function recordBackupNeedsAttention(type: BackupJob["type"], stderr: string): BackupJob {
     const jobId = randomUUID();
     let resolveCompleted!: (job: BackupJob) => void;
     const now = Date.now();
     const job: BackupJob = {
         id: jobId,
-        type: "walg",
+        type,
         status: "needs_attention",
         code: 130,
         stdout: "",
@@ -179,7 +180,11 @@ function recordWalgNeedsAttention(stderr: string): BackupJob {
         }),
     };
     backupJobs.set(jobId, job);
-    activeWalgJobId = jobId;
+    if (type === "kopia") {
+        activeKopiaJobId = jobId;
+    } else {
+        activeWalgJobId = jobId;
+    }
     resolveCompleted(job);
     return job;
 }
@@ -410,22 +415,39 @@ function runDockerExec(
 }
 
 async function assertNoContainerBackupInProgress(
-    config: BackupAbortConfig
-): Promise<void> {
+    config: BackupAbortConfig,
+    type: BackupJob["type"],
+    getCurrent: () => BackupJob | null
+): Promise<BackupJob | null> {
     const result = await runDockerExec(config.container, [
         "pgrep",
         "-f",
         config.processPattern,
     ]);
     if (result.code === 1) {
-        return;
+        return null;
     }
     if (result.code === 0) {
-        recordWalgNeedsAttention(
-            "WALG backup needs attention: backup process is still running"
+        const currentJob = getCurrent();
+        if (currentJob?.status === "running") {
+            return currentJob;
+        }
+        if (currentJob?.status === "needs_attention") {
+            throw Object.assign(
+                new Error(`${type.toUpperCase()} backup needs attention`),
+                {
+                    statusCode: 409,
+                }
+            );
+        }
+        recordBackupNeedsAttention(
+            type,
+            `${type.toUpperCase()} backup needs attention: backup process is still running`
         );
         throw Object.assign(
-            new Error("WALG backup needs attention: backup process is still running"),
+            new Error(
+                `${type.toUpperCase()} backup needs attention: backup process is still running`
+            ),
             { statusCode: 409 }
         );
     }
@@ -433,6 +455,78 @@ async function assertNoContainerBackupInProgress(
         new Error(result.stderr || `docker exec pgrep exited ${result.code}`),
         { statusCode: 503 }
     );
+}
+
+function runHostPgrep(pattern: string): Promise<{ code: number; stderr: string }> {
+    return new Promise((resolve, reject) => {
+        const child = spawnBackupProcess("pgrep", ["-f", pattern], {
+            detached: true,
+            env: process.env,
+        });
+        const timeout = setTimeout(() => {
+            try {
+                if (typeof child.pid === "number") {
+                    process.kill(-child.pid, "SIGKILL");
+                } else {
+                    child.kill("SIGKILL");
+                }
+            } catch {
+                // The timeout error below is still the actionable failure.
+            }
+            reject(new Error(`Timed out waiting for pgrep ${pattern}`));
+        }, backupAbortDockerExecTimeoutMs);
+        timeout.unref();
+        let stderr = "";
+        child.stderr?.on("data", (data) => {
+            stderr = trimOutput(stderr + String(data));
+        });
+        child.on("error", (error) => {
+            clearTimeout(timeout);
+            reject(error);
+        });
+        child.on("close", (code) => {
+            clearTimeout(timeout);
+            resolve({ code: code ?? 1, stderr });
+        });
+    });
+}
+
+async function assertNoHostBackupInProgress(
+    type: BackupJob["type"],
+    processPattern: string,
+    getCurrent: () => BackupJob | null
+): Promise<BackupJob | null> {
+    const result = await runHostPgrep(processPattern);
+    if (result.code === 1) {
+        return null;
+    }
+    if (result.code === 0) {
+        const currentJob = getCurrent();
+        if (currentJob?.status === "running") {
+            return currentJob;
+        }
+        if (currentJob?.status === "needs_attention") {
+            throw Object.assign(
+                new Error(`${type.toUpperCase()} backup needs attention`),
+                {
+                    statusCode: 409,
+                }
+            );
+        }
+        recordBackupNeedsAttention(
+            type,
+            `${type.toUpperCase()} backup needs attention: backup process is still running`
+        );
+        throw Object.assign(
+            new Error(
+                `${type.toUpperCase()} backup needs attention: backup process is still running`
+            ),
+            { statusCode: 409 }
+        );
+    }
+    throw Object.assign(new Error(result.stderr || `pgrep exited ${result.code}`), {
+        statusCode: 503,
+    });
 }
 
 async function terminateContainerProcess(
@@ -509,8 +603,25 @@ async function refreshBackupStatus(
 }
 
 /** Performs start kopia backup job. */
-function startKopiaBackupJob(signal?: AbortSignal) {
-    return startBackupJob("kopia", "/opt/docker/apps/kopia/backup.sh", signal);
+async function startKopiaBackupJob(signal?: AbortSignal) {
+    const existingJob = getCurrentKopiaJob();
+    if (existingJob?.status === "running") {
+        return existingJob;
+    }
+    if (existingJob?.status === "needs_attention") {
+        throw Object.assign(new Error("KOPIA backup needs attention"), {
+            statusCode: 409,
+        });
+    }
+    const hostJob = await assertNoHostBackupInProgress(
+        "kopia",
+        KOPIA_BACKUP_SCRIPT_PATTERN,
+        getCurrentKopiaJob
+    );
+    if (hostJob) {
+        return hostJob;
+    }
+    return startBackupJob("kopia", KOPIA_BACKUP_SCRIPT_PATTERN, signal);
 }
 
 /** Performs start walg backup job. */
@@ -528,7 +639,14 @@ async function startWalgBackupJob(signal?: AbortSignal) {
             statusCode: 409,
         });
     }
-    await assertNoContainerBackupInProgress(abortConfig);
+    const containerJob = await assertNoContainerBackupInProgress(
+        abortConfig,
+        "walg",
+        getCurrentWalgJob
+    );
+    if (containerJob) {
+        return containerJob;
+    }
     return startBackupJob(
         "walg",
         "docker exec walg /bin/sh /usr/local/bin/backup-push.sh",
@@ -552,7 +670,9 @@ async function startScheduledBackup(type: BackupJob["type"], signal?: AbortSigna
         );
     }
     const job =
-        type === "kopia" ? startKopiaBackupJob(signal) : await startWalgBackupJob(signal);
+        type === "kopia"
+            ? await startKopiaBackupJob(signal)
+            : await startWalgBackupJob(signal);
     const completedJob = await job.completed;
     if (completedJob.code !== 0) {
         const details = completedJob.stderr || completedJob.stdout;
@@ -627,6 +747,12 @@ export const __testing = {
     mapJob,
     getScheduledBackupType,
     startScheduledBackup,
+    startBackupJobForTest(type: BackupJob["type"], command: string): BackupJob {
+        return startBackupJob(type, command);
+    },
+    recordBackupNeedsAttentionForTest(type: BackupJob["type"]): BackupJob {
+        return recordBackupNeedsAttention(type, `${type.toUpperCase()} test attention`);
+    },
     setSpawnBackupProcessForTest(nextSpawn?: typeof spawn): void {
         spawnBackupProcess = nextSpawn ?? spawn;
     },
@@ -669,7 +795,7 @@ export default function backupRoutes(
         "/api/backups/kopia/run",
         asyncRoute(
             async (_req, res) => {
-                const job = startKopiaBackupJob();
+                const job = await startKopiaBackupJob();
                 res.json({ ok: true, job: mapJob(job) });
             },
             { fallback: "Failed to start Kopia backup" }
