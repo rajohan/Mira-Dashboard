@@ -22,6 +22,9 @@ const ARCHIVE_FAMILY_SUFFIX_RE =
     /(?:\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z|\.\d+)(?:\.gz)?$/u;
 const DEFAULT_LOCK_FILE = path.resolve(process.cwd(), "data/log-rotation.lock");
 const RECLAIM_DIR_STALE_MS = 5 * 60 * 1000;
+const LOCK_STALE_MS = 12 * 60 * 60 * 1000;
+const ELEVATED_LOG_ROTATION_TIMEOUT_MS = 5 * 60_000;
+const ELEVATED_LOG_ROTATION_MAX_BUFFER = 16 * 1024 * 1024;
 let logRotationLockFile = DEFAULT_LOCK_FILE;
 
 type ExecFileRunner = (
@@ -935,8 +938,20 @@ async function applyArchiveOnlyRetention(
             if (result.warning) warnings.push(result.warning);
         }
         for (const archive of deleteSet.values()) {
-            deleted.push(archive.path);
-            if (!dryRun) await unlinkVerified(archive.path, approvedRoots);
+            if (dryRun) {
+                deleted.push(archive.path);
+                continue;
+            }
+            try {
+                await archiveOnlyUnlinkVerified(archive.path, approvedRoots);
+                deleted.push(archive.path);
+            } catch (error) {
+                warnings.push(
+                    `Failed to delete archive-only path ${archive.path}: ${caughtMessage(
+                        error
+                    )}`
+                );
+            }
         }
     }
 
@@ -1485,8 +1500,8 @@ export async function runElevatedLogRotationService(options: {
         const output = await elevatedLogRotationExecFileRunner("sudo", args, {
             encoding: "utf8",
             env: elevatedLogRotationEnvironment(),
-            maxBuffer: 1024 * 1024,
-            timeout: 10 * 60_000,
+            maxBuffer: ELEVATED_LOG_ROTATION_MAX_BUFFER,
+            timeout: ELEVATED_LOG_ROTATION_TIMEOUT_MS,
         });
         stderr = output.stderr;
         stdout = output.stdout;

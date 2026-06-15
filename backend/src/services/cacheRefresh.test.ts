@@ -223,6 +223,23 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         assert.equal(typeof row.metadata.lastFailureAt, "string");
     });
 
+    it("falls back to inserting cache successes when preserve mode updates no rows", () => {
+        writeCacheSuccess({
+            key: "missing.preserve",
+            data: { ok: true },
+            source: "backend-test",
+            ttl: 5,
+            ttlUnit: "minutes",
+            metadata: { producer: "preserve-test" },
+            preserveExistingData: true,
+        });
+
+        const row = cacheRow("missing.preserve");
+        assert.equal(row.status, "fresh");
+        assert.deepEqual(row.data, { ok: true });
+        assert.equal(row.metadata.producer, "preserve-test");
+    });
+
     it("refreshes Moltbook home, feeds, profile, and own content caches", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             await withFetch(
@@ -3118,12 +3135,24 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
 
                 logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
                     stderr: "",
-                    stdout: JSON.stringify({ ok: false }),
+                    stdout: JSON.stringify({
+                        ok: false,
+                        errors: [
+                            {
+                                filePath: "/opt/docker/data/app/app.log",
+                                message: "EACCES",
+                            },
+                        ],
+                        groups: [{ name: "docker-file-logs", rotatedFiles: 0 }],
+                    }),
                 }));
                 const failedLogRotationRunFallback =
                     await runScheduledJob("ops.log-rotation");
                 assert.equal(failedLogRotationRunFallback.status, "failed");
-                assert.equal(failedLogRotationRunFallback.message, "Log rotation failed");
+                assert.match(
+                    failedLogRotationRunFallback.message ?? "",
+                    /Log rotation failed.*EACCES.*docker-file-logs/u
+                );
             } finally {
                 logRotationTesting.resetElevatedLogRotationExecFileRunner();
             }

@@ -2124,6 +2124,31 @@ export function seedMissingLocalCacheEntry(key: string): void {
         .catch(() => {});
 }
 
+function logRotationFailureMessage(logRotation: {
+    result?: Record<string, unknown>;
+    stderr?: string;
+}): string {
+    if (typeof logRotation.stderr === "string" && logRotation.stderr.trim()) {
+        return logRotation.stderr.trim();
+    }
+    const result = logRotation.result;
+    if (result) {
+        const details = {
+            errors: Array.isArray(result.errors) ? result.errors : [],
+            groups: Array.isArray(result.groups) ? result.groups : [],
+            warnings: Array.isArray(result.warnings) ? result.warnings : [],
+        };
+        if (
+            details.errors.length > 0 ||
+            details.warnings.length > 0 ||
+            details.groups.length > 0
+        ) {
+            return `Log rotation failed: ${JSON.stringify(details)}`;
+        }
+    }
+    return "Log rotation failed";
+}
+
 export function registerCacheRefreshScheduledJobs(): void {
     registerScheduledJobAction("cache.refresh", async (job, signal) => {
         const key = getScheduledCacheKey(job);
@@ -2133,11 +2158,7 @@ export function registerCacheRefreshScheduledJobs(): void {
     registerScheduledJobAction("ops.log-rotation", async () => {
         const logRotation = await runElevatedLogRotationService({ dryRun: false });
         if (logRotation.result?.ok !== true) {
-            const error =
-                typeof logRotation.stderr === "string" && logRotation.stderr.trim()
-                    ? logRotation.stderr.trim()
-                    : "Log rotation failed";
-            throw new Error(error);
+            throw new Error(logRotationFailureMessage(logRotation));
         }
         return { logRotation };
     });

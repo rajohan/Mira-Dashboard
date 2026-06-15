@@ -131,6 +131,28 @@ describe("log rotation service", { concurrency: false }, () => {
             await __testing.resolveGlob(path.join(numericArchiveDir, "*.log.[0-9]*")),
             [path.join(numericArchiveDir, "app.log.1")]
         );
+        const config = JSON.parse(
+            await readFile(__testing.defaultConfigPath, "utf8")
+        ) as {
+            groups: Array<{ name?: string; paths?: string[] }>;
+        };
+        const dockerFileLogs = config.groups.find(
+            (group) => group.name === "docker-file-logs"
+        );
+        assert.ok(dockerFileLogs?.paths);
+        const rootLevelPatterns = dockerFileLogs.paths.filter((pattern) =>
+            pattern.startsWith("/opt/docker/data/*/")
+        );
+        const appRoot = "/opt/docker/data/app";
+        const matches = (filePath: string) =>
+            rootLevelPatterns.some((pattern) =>
+                __testing.globToRegex(pattern).test(filePath)
+            );
+        assert.equal(matches(path.join(appRoot, "catalog.json")), false);
+        assert.equal(matches(path.join(appRoot, "app.log.json")), true);
+        assert.equal(matches(path.join(appRoot, "app-log.txt")), true);
+        assert.equal(matches(path.join(appRoot, "app_log.txt")), true);
+        assert.equal(matches(path.join(appRoot, "logfile.json")), true);
         assert.equal(
             __testing.mergePolicy({ keep: 1 }, { name: "g", paths: ["x"], keep: 2 }).keep,
             2
@@ -950,7 +972,8 @@ describe("log rotation service", { concurrency: false }, () => {
             ) => {
                 commands.push({ args: args ?? [], env: options.env, file });
                 assert.equal(options.encoding, "utf8");
-                assert.equal(options.timeout, 10 * 60_000);
+                assert.equal(options.maxBuffer, 16 * 1024 * 1024);
+                assert.equal(options.timeout, 5 * 60_000);
                 return {
                     stderr: "helper warning",
                     stdout: JSON.stringify({ ok: true }),
@@ -1618,6 +1641,117 @@ describe("log rotation service", { concurrency: false }, () => {
             );
         } finally {
             __testing.resetGzipPipeline();
+        }
+    });
+
+    it("skips archive-only paths that fail safety or stat checks", async () => {
+        const root = path.join(tempDir, "archive-only-list-warning");
+        const outside = path.join(tempDir, "archive-only-list-warning-outside");
+        await mkdir(root);
+        await mkdir(outside);
+        const retained = path.join(root, "app.log.2026-06-06T00-00-00.000Z");
+        const unsafeArchive = path.join(outside, "unsafe.log.2026-06-06T00-00-00.000Z");
+        await writeFile(retained, "retained", "utf8");
+        await writeFile(unsafeArchive, "unsafe", "utf8");
+        const oldTime = new Date("2020-01-01T00:00:00.000Z");
+        await Promise.all(
+            [retained, unsafeArchive].map((file) => utimes(file, oldTime, oldTime))
+        );
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [
+                {
+                    name: "archive-only",
+                    archiveOnly: true,
+                    archivePaths: [path.join(root, "*.log.*"), unsafeArchive],
+                    compress: false,
+                    keep: 2,
+                    paths: [path.join(root, "unused.log")],
+                },
+            ],
+        });
+
+        const summary = await runLogRotationService({ dryRun: false, config });
+
+        assert.equal(summary.ok, true);
+        assert.equal(summary.checkedFiles, 1);
+        assert.match(JSON.stringify(summary.warnings), /Skipping archive-only path/u);
+        assert.match(JSON.stringify(summary.warnings), /Unsafe path/u);
+    });
+
+    it("continues archive-only retention when per-archive actions fail", async () => {
+        const root = path.join(tempDir, "archive-only-action-warning");
+        await mkdir(root);
+        const retained = path.join(root, "app.log.2026-06-06T00-00-00.000Z");
+        const deleted = path.join(root, "app.log.2020-01-01T00-00-00.000Z");
+        await writeFile(retained, "retained", "utf8");
+        await writeFile(deleted, "deleted", "utf8");
+        const oldTime = new Date("2020-01-01T00:00:00.000Z");
+        await Promise.all(
+            [retained, deleted].map((file) => utimes(file, oldTime, oldTime))
+        );
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [
+                {
+                    name: "archive-only",
+                    archiveOnly: true,
+                    archivePaths: [path.join(root, "*.log.*")],
+                    compress: true,
+                    keep: 1,
+                    paths: [path.join(root, "unused.log")],
+                },
+            ],
+        });
+        __testing.setArchiveOnlyCompressArchiveIfNeededForTests(async (archive) => {
+            throw new Error(`compress failed for ${archive.path}`);
+        });
+        __testing.setArchiveOnlyUnlinkVerifiedForTests(async (filePath) => {
+            throw new Error(`delete failed for ${filePath}`);
+        });
+        try {
+            const summary = await runLogRotationService({ dryRun: false, config });
+
+            assert.equal(summary.ok, true);
+            assert.equal(summary.compressedFiles, 0);
+            assert.equal(summary.deletedArchives, 0);
+            assert.match(JSON.stringify(summary.warnings), /compress failed/u);
+            assert.match(JSON.stringify(summary.warnings), /delete failed/u);
+        } finally {
+            __testing.resetArchiveOnlyRetentionRunnersForTests();
+        }
+    });
+
+    it("records archive-only group errors when archive discovery fails", async () => {
+        const root = path.join(tempDir, "archive-only-discovery-error");
+        await mkdir(root);
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [
+                {
+                    name: "archive-only",
+                    archiveOnly: true,
+                    archivePaths: [path.join(root, "*.log")],
+                    keep: 1,
+                    paths: [path.join(root, "unused.log")],
+                },
+            ],
+        });
+
+        mock.method(fsPromises, "readdir", async () => {
+            throw new Error("archive discovery failed");
+        });
+        try {
+            const summary = await runLogRotationService({ dryRun: false, config });
+
+            assert.equal(summary.ok, false);
+            assert.match(JSON.stringify(summary.errors), /archive-only/u);
+            assert.match(JSON.stringify(summary.errors), /archive discovery failed/u);
+        } finally {
+            mock.restoreAll();
         }
     });
 
