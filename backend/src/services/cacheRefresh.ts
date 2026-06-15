@@ -1750,6 +1750,8 @@ async function refreshLogRotationStateCache() {
         } catch {
             data = { version: 1, files: {} };
         }
+    } else {
+        preserveExistingData = true;
     }
     writeCacheSuccess({
         key: LOG_ROTATION_STATE_KEY,
@@ -2172,17 +2174,21 @@ function persistLogRotationScheduledFailure(
     message: string
 ): void {
     const existingState = readLogRotationStateCacheForFailure();
+    const structuredLastRun = asRecord(logRotation.result);
     writeCacheSuccess({
         key: LOG_ROTATION_STATE_KEY,
         data: {
             ...existingState,
             version: 1,
             lastRun: {
+                ...structuredLastRun,
                 ok: false,
                 dryRun: false,
-                finishedAt: new Date().toISOString(),
+                finishedAt:
+                    typeof structuredLastRun.finishedAt === "string"
+                        ? structuredLastRun.finishedAt
+                        : new Date().toISOString(),
                 message,
-                result: logRotation.result,
                 stderr: logRotation.stderr,
             },
         },

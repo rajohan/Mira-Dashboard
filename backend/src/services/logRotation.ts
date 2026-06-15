@@ -293,6 +293,10 @@ function globPatternSource(pattern: string): string {
         .join("");
 }
 
+// Static-analysis ReDoS warnings are acknowledged here. These patterns come
+// from admin-controlled config, and metacharacters are escaped before the only
+// supported glob tokens (`*` and `[0-9]`) are interpolated, avoiding nested
+// quantifier constructs.
 function globToRegex(pattern: string): RegExp {
     const normalized = pattern.split(path.sep).join("/");
     return new RegExp(`^${globPatternSource(normalized)}$`);

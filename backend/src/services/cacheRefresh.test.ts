@@ -1455,6 +1455,48 @@ else if (command === "status --short") process.stdout.write("");
         assert.equal(row.metadata.producer, "refreshCacheProducer");
     });
 
+    it("does not overwrite log rotation state created during refresh", async (t) => {
+        const prepare = db.prepare.bind(db);
+        const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+            const statement = prepare(sql);
+            if (sql === "SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1") {
+                return {
+                    get: (key: string) => {
+                        const row = statement.get(key);
+                        writeCacheSuccess({
+                            key,
+                            data: {
+                                version: 1,
+                                files: { "/tmp/new.log": { lastSizeBytes: 56 } },
+                            },
+                            source: "log-rotation-test",
+                            ttl: 90 * 24,
+                            ttlUnit: "hours",
+                            metadata: { producer: "concurrent" },
+                        });
+                        return row;
+                    },
+                } as unknown as ReturnType<typeof db.prepare>;
+            }
+            return statement;
+        });
+
+        try {
+            assert.deepEqual(await refreshCacheProducer("log_rotation.state"), {
+                refreshed: ["log_rotation.state"],
+            });
+        } finally {
+            prepareMock.mock.restore();
+        }
+
+        const row = cacheRow("log_rotation.state");
+        assert.deepEqual(row.data, {
+            version: 1,
+            files: { "/tmp/new.log": { lastSizeBytes: 56 } },
+        });
+        assert.equal(row.metadata.producer, "refreshCacheProducer");
+    });
+
     it("refreshes system, quota, and producer-dispatch caches", async () => {
         const binDir = path.join(tempDir, "bin");
         await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
@@ -3210,7 +3252,6 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                     lastRun?: {
                         message?: string;
                         ok?: boolean;
-                        result?: { ok?: boolean };
                         stderr?: string;
                     };
                 };
@@ -3223,7 +3264,6 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                     failedLogRotationState.lastRun?.message,
                     "permission denied"
                 );
-                assert.deepEqual(failedLogRotationState.lastRun?.result, { ok: false });
                 assert.equal(failedLogRotationState.lastRun?.stderr, "permission denied");
 
                 db.prepare("UPDATE cache_entries SET data_json = ? WHERE key = ?").run(
@@ -3237,6 +3277,8 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                     stderr: "",
                     stdout: JSON.stringify({
                         ok: false,
+                        checkedFiles: 3,
+                        finishedAt: "2026-06-15T20:00:00.000Z",
                         errors: [
                             {
                                 filePath: "/opt/docker/data/app/app.log",
@@ -3260,6 +3302,35 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                         }
                     ).files,
                     { "/opt/docker/data/app/app.log": { lastSizeBytes: 42 } }
+                );
+                const failedStructuredState = cacheRow("log_rotation.state").data as {
+                    lastRun?: {
+                        checkedFiles?: number;
+                        errors?: unknown[];
+                        finishedAt?: string;
+                        groups?: unknown[];
+                        message?: string;
+                        ok?: boolean;
+                    };
+                };
+                assert.equal(failedStructuredState.lastRun?.ok, false);
+                assert.equal(failedStructuredState.lastRun?.checkedFiles, 3);
+                assert.equal(
+                    failedStructuredState.lastRun?.finishedAt,
+                    "2026-06-15T20:00:00.000Z"
+                );
+                assert.deepEqual(failedStructuredState.lastRun?.errors, [
+                    {
+                        filePath: "/opt/docker/data/app/app.log",
+                        message: "EACCES",
+                    },
+                ]);
+                assert.deepEqual(failedStructuredState.lastRun?.groups, [
+                    { name: "docker-file-logs", rotatedFiles: 0 },
+                ]);
+                assert.match(
+                    failedStructuredState.lastRun?.message ?? "",
+                    /Log rotation failed.*EACCES/u
                 );
 
                 db.prepare("UPDATE cache_entries SET data_json = ? WHERE key = ?").run(

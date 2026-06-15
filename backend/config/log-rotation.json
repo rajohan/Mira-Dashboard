@@ -49,8 +49,8 @@
       "keep": 3,
       "strategy": "copytruncate",
       "archivePaths": [
-        "/opt/docker/data/*/*/log.txt.*.txt",
-        "/opt/docker/data/*/*/log.txt.*.txt.gz"
+        "/opt/docker/data/*/*/log.txt.[0-9][0-9][0-9][0-9]-*",
+        "/opt/docker/data/*/*/log.txt.[0-9][0-9][0-9][0-9]-*.gz"
       ],
       "excludePaths": [
         "/opt/docker/data/kopia/logs/*/*.log*",
@@ -63,7 +63,8 @@
       "paths": [],
       "archiveOnly": true,
       "archivePaths": [
-        "/opt/docker/data/kopia/logs/*/*.log*"
+        "/opt/docker/data/kopia/logs/*/*.log.[0-9][0-9][0-9][0-9]-*",
+        "/opt/docker/data/kopia/logs/*/*.log.[0-9][0-9][0-9][0-9]-*.gz"
       ],
       "archiveRetentionScope": "directory",
       "archiveMinAgeMinutes": 60,
