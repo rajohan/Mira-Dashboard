@@ -384,16 +384,20 @@ describe("ops routes", () => {
         ]);
     });
 
-    it("runs dry-run log rotation without changing files or state", async () => {
+    it("runs dry-run log rotation through the elevated helper", async () => {
         const before = await readFile(logPath, "utf8");
         const statusBefore = await requestJson<unknown>(
             server,
             "/api/ops/log-rotation/status"
         );
         let elevatedCalls = 0;
-        server.opsTesting.setElevatedLogRotationRunner(async () => {
+        server.opsTesting.setElevatedLogRotationRunner(async (options) => {
             elevatedCalls += 1;
-            return { result: { ok: false }, stderr: "should not run" };
+            assert.deepEqual(options, { dryRun: true });
+            return {
+                result: { ok: true, dryRun: true, rotatedFiles: 1 },
+                stderr: "",
+            };
         });
         try {
             const response = await requestJson<{
@@ -407,7 +411,7 @@ describe("ops routes", () => {
             assert.equal(response.body.result.dryRun, true);
             assert.equal(response.body.result.rotatedFiles, 1);
             assert.equal(response.body.stderr, "");
-            assert.equal(elevatedCalls, 0);
+            assert.equal(elevatedCalls, 1);
             assert.equal(await readFile(logPath, "utf8"), before);
             const statusAfter = await requestJson<unknown>(
                 server,
