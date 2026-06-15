@@ -989,8 +989,15 @@ export const __testing = {
     trimOutput,
     getCurrentJob,
     mapJob,
+    backupFailureMessage,
     getScheduledBackupType,
     pgrepFullCommandPattern,
+    async startKopiaBackupJobForTest(signal?: AbortSignal): Promise<BackupJob> {
+        return startKopiaBackupJob(signal);
+    },
+    async startWalgBackupJobForTest(signal?: AbortSignal): Promise<BackupJob> {
+        return startWalgBackupJob(signal);
+    },
     startScheduledBackup,
     startBackupJobForTest(
         type: BackupJob["type"],

@@ -747,7 +747,20 @@ function finishRunOrReport(
 }
 
 export function createManualScheduledJobRun(jobId: string): ScheduledJobRun {
-    return createRun(jobId, "manual");
+    if (runningJobs.has(jobId)) {
+        const error = new Error("Scheduled job is already running") as Error & {
+            statusCode?: number;
+        };
+        error.statusCode = 409;
+        throw error;
+    }
+    runningJobs.add(jobId);
+    try {
+        return createRun(jobId, "manual");
+    } catch (error) {
+        runningJobs.delete(jobId);
+        throw error;
+    }
 }
 
 export function finishScheduledJobRun(
@@ -756,7 +769,11 @@ export function finishScheduledJobRun(
     message: string | null,
     output: Record<string, unknown>
 ): ScheduledJobRun {
-    return finishRunOrReport(run, status, message, output);
+    try {
+        return finishRunOrReport(run, status, message, output);
+    } finally {
+        runningJobs.delete(run.jobId);
+    }
 }
 
 export async function runScheduledJob(

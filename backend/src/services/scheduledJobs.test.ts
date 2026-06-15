@@ -13,6 +13,8 @@ const { db } = await import("../db.js");
 const {
     __testing,
     calculateNextRunAt,
+    createManualScheduledJobRun,
+    finishScheduledJobRun,
     getScheduledJob,
     listScheduledJobs,
     registerScheduledJobAction,
@@ -1192,6 +1194,57 @@ test("stops manual runs when caller signal aborts", async () => {
     assert.equal(result.status, "failed");
     assert.match(result.message ?? "", /aborted/u);
     assert.equal(getScheduledJob("cache.weather")?.isRunning, false);
+});
+
+test("tracks externally managed manual runs as active jobs", async () => {
+    registerScheduledJobAction("backup.run", () => ({ ok: true }));
+    upsertScheduledJob({
+        id: "backup.walg",
+        name: "WAL-G backup",
+        enabled: true,
+        scheduleType: "daily",
+        timeOfDay: "03:20",
+        actionKey: "backup.run",
+    });
+
+    const externalRun = createManualScheduledJobRun("backup.walg");
+
+    assert.equal(getScheduledJob("backup.walg")?.isRunning, true);
+    assert.throws(
+        () => createManualScheduledJobRun("backup.walg"),
+        /Scheduled job is already running/u
+    );
+    await assert.rejects(
+        runScheduledJob("backup.walg", "manual"),
+        /Scheduled job is already running/u
+    );
+
+    finishScheduledJobRun(externalRun, "success", null, { ok: true });
+
+    assert.equal(getScheduledJob("backup.walg")?.isRunning, false);
+    const nextRun = await runScheduledJob("backup.walg", "manual");
+    assert.equal(nextRun.status, "success");
+});
+
+test("releases active tracking when externally managed manual run creation fails", async (t) => {
+    upsertScheduledJob({
+        id: "backup.walg",
+        name: "WAL-G backup",
+        enabled: true,
+        scheduleType: "daily",
+        timeOfDay: "03:20",
+        actionKey: "backup.run",
+    });
+    const prepare = db.prepare.bind(db);
+    t.mock.method(db, "prepare", (sql: string) => {
+        if (sql.includes("INSERT INTO scheduled_job_runs")) {
+            throw new Error("insert failed");
+        }
+        return prepare(sql);
+    });
+
+    assert.throws(() => createManualScheduledJobRun("backup.walg"), /insert failed/u);
+    assert.equal(getScheduledJob("backup.walg")?.isRunning, false);
 });
 
 test("logs timeout persistence failures while releasing stalled jobs", async (t) => {
