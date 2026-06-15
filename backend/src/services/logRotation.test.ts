@@ -2010,17 +2010,17 @@ describe("log rotation service", { concurrency: false }, () => {
         const lockPath = testLockPath(tempDir);
         await mkdir(path.dirname(lockPath), { recursive: true });
         await writeFile(lockPath, "not-a-pid\n", "utf8");
-        const originalReadFile = fsPromises.readFile.bind(fsPromises);
-        const readFileMock = mock.method(
+        const originalOpen = fsPromises.open.bind(fsPromises);
+        const openMock = mock.method(
             fsPromises,
-            "readFile",
-            async (...args: Parameters<typeof fsPromises.readFile>) => {
-                if (String(args[0]) === lockPath) {
+            "open",
+            async (...args: Parameters<typeof fsPromises.open>) => {
+                if (String(args[0]) === lockPath && args[1] === "r") {
                     const error = new Error("lock read denied") as NodeJS.ErrnoException;
                     error.code = "EACCES";
                     throw error;
                 }
-                return originalReadFile(...args);
+                return originalOpen(...args);
             }
         );
         try {
@@ -2029,7 +2029,7 @@ describe("log rotation service", { concurrency: false }, () => {
                 /lock read denied/u
             );
         } finally {
-            readFileMock.mock.restore();
+            openMock.mock.restore();
             await rm(lockPath, { force: true });
         }
     });

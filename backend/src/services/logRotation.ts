@@ -1121,8 +1121,15 @@ async function reclaimStaleLogRotationLock(
     }
     try {
         let rawPid = "";
+        let lockStat: Awaited<ReturnType<typeof fs.stat>> | null = null;
         try {
-            rawPid = await fs.readFile(lockFile, "utf8");
+            const handle = await fs.open(lockFile, "r");
+            try {
+                lockStat = await handle.stat();
+                rawPid = await handle.readFile("utf8");
+            } finally {
+                await handle.close();
+            }
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                 throw error;
