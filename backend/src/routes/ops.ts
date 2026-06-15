@@ -5,6 +5,7 @@ import { asyncRoute as baseAsyncRoute } from "../lib/errors.js";
 import {
     __testing as logRotationTesting,
     runElevatedLogRotationService,
+    runLogRotationService,
 } from "../services/logRotation.js";
 
 const LOG_ROTATION_STATE_KEY = "log_rotation.state";
@@ -104,7 +105,16 @@ async function readLogRotationStatus() {
 export async function runLogRotation(options: {
     dryRun: boolean;
 }): Promise<LogRotationResult> {
-    return elevatedLogRotationRunner(options);
+    if (!options.dryRun) {
+        return elevatedLogRotationRunner(options);
+    }
+    return {
+        result: (await runLogRotationService(options)) as unknown as Record<
+            string,
+            unknown
+        >,
+        stderr: "",
+    };
 }
 
 let elevatedLogRotationRunner: LogRotationRunner = runElevatedLogRotationService;

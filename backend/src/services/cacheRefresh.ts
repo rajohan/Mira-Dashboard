@@ -40,6 +40,7 @@ const KOPIA_EXPECTED_SOURCE_PATHS = [
 ] as const;
 const BACKUP_STATUS_STALE_HOURS = 30;
 const BACKUP_STATUS_MAX_TTL_HOURS = 25;
+const LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS = 100_000;
 
 type JsonRecord = Record<string, unknown>;
 type CacheTtlUnit = "hours" | "minutes";
@@ -2154,6 +2155,16 @@ function logRotationFailureMessage(logRotation: {
     return "Log rotation failed";
 }
 
+function capLogRotationFailureOutput(value: unknown): string | undefined {
+    if (typeof value !== "string") {
+        return undefined;
+    }
+    if (value.length <= LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS) {
+        return value;
+    }
+    return value.slice(-LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS);
+}
+
 function readLogRotationStateCacheForFailure(): JsonRecord {
     const fallback = { version: 1, files: {} };
     const row = db
@@ -2184,12 +2195,13 @@ function persistLogRotationScheduledFailure(
                 ...structuredLastRun,
                 ok: false,
                 dryRun: false,
+                stdout: capLogRotationFailureOutput(structuredLastRun.stdout),
                 finishedAt:
                     typeof structuredLastRun.finishedAt === "string"
                         ? structuredLastRun.finishedAt
                         : new Date().toISOString(),
                 message,
-                stderr: logRotation.stderr,
+                stderr: capLogRotationFailureOutput(logRotation.stderr),
             },
         },
         source: "backend",

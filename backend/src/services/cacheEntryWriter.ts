@@ -38,6 +38,7 @@ export function writeCacheSuccess(options: CacheWriteOptions): void {
                 error_code = NULL,
                 error_message = NULL,
                 consecutive_failures = 0,
+                data_json = COALESCE(NULLIF(data_json, ''), ?),
                 metadata_json = ?
              WHERE key = ?`
             )
@@ -46,6 +47,7 @@ export function writeCacheSuccess(options: CacheWriteOptions): void {
                 timestamp,
                 timestamp,
                 expiresAt,
+                dataJson,
                 metadataJson,
                 options.key
             );

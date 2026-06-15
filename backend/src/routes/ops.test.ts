@@ -390,25 +390,37 @@ describe("ops routes", () => {
             server,
             "/api/ops/log-rotation/status"
         );
-        const response = await requestJson<{
-            success: boolean;
-            result: { ok: boolean; dryRun: boolean; rotatedFiles: number };
-            stderr: string;
-        }>(server, "/api/ops/log-rotation/dry-run", { method: "POST" });
+        let elevatedCalls = 0;
+        server.opsTesting.setElevatedLogRotationRunner(async () => {
+            elevatedCalls += 1;
+            return { result: { ok: false }, stderr: "should not run" };
+        });
+        try {
+            const response = await requestJson<{
+                success: boolean;
+                result: { ok: boolean; dryRun: boolean; rotatedFiles: number };
+                stderr: string;
+            }>(server, "/api/ops/log-rotation/dry-run", { method: "POST" });
 
-        assert.equal(response.status, 200);
-        assert.equal(response.body.success, true);
-        assert.equal(response.body.result.dryRun, true);
-        assert.equal(response.body.result.rotatedFiles, 1);
-        assert.equal(response.body.stderr, "");
-        assert.equal(await readFile(logPath, "utf8"), before);
-        const statusAfter = await requestJson<unknown>(
-            server,
-            "/api/ops/log-rotation/status"
-        );
-        assert.equal(statusBefore.status, 200);
-        assert.equal(statusAfter.status, 200);
-        assert.deepEqual(statusAfter.body, statusBefore.body);
+            assert.equal(response.status, 200);
+            assert.equal(response.body.success, true);
+            assert.equal(response.body.result.dryRun, true);
+            assert.equal(response.body.result.rotatedFiles, 1);
+            assert.equal(response.body.stderr, "");
+            assert.equal(elevatedCalls, 0);
+            assert.equal(await readFile(logPath, "utf8"), before);
+            const statusAfter = await requestJson<unknown>(
+                server,
+                "/api/ops/log-rotation/status"
+            );
+            assert.equal(statusBefore.status, 200);
+            assert.equal(statusAfter.status, 200);
+            assert.deepEqual(statusAfter.body, statusBefore.body);
+        } finally {
+            server.opsTesting.setElevatedLogRotationRunner(
+                server.defaultElevatedLogRotationRunner
+            );
+        }
     });
 
     it("requires explicit true log rotation results for route success", async () => {
@@ -417,17 +429,11 @@ describe("ops routes", () => {
             stderr: "",
         }));
         try {
-            const dryRun = await requestJson<{
-                success: boolean;
-                result: { ok: string };
-            }>(server, "/api/ops/log-rotation/dry-run", { method: "POST" });
             const run = await requestJson<{
                 success: boolean;
                 result: { ok: number };
             }>(server, "/api/ops/log-rotation/run", { method: "POST" });
 
-            assert.equal(dryRun.status, 200);
-            assert.equal(dryRun.body.success, false);
             assert.equal(run.status, 200);
             assert.equal(run.body.success, false);
         } finally {

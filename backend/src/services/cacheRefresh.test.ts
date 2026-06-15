@@ -257,6 +257,34 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         assert.deepEqual(updatedRow.data, { ok: true });
         assert.equal(updatedRow.source, "backend-test-updated");
         assert.equal(updatedRow.metadata.producer, "preserve-test-updated");
+
+        db.prepare("UPDATE cache_entries SET data_json = NULL WHERE key = ?").run(
+            "missing.preserve"
+        );
+        writeCacheSuccess({
+            key: "missing.preserve",
+            data: { version: 1, files: {} },
+            source: "backend-test-null",
+            ttl: 5,
+            ttlUnit: "minutes",
+            metadata: { producer: "preserve-test-null" },
+            preserveExistingData: true,
+        });
+        assert.deepEqual(cacheRow("missing.preserve").data, { version: 1, files: {} });
+
+        db.prepare("UPDATE cache_entries SET data_json = '' WHERE key = ?").run(
+            "missing.preserve"
+        );
+        writeCacheSuccess({
+            key: "missing.preserve",
+            data: { version: 1, files: {} },
+            source: "backend-test-empty",
+            ttl: 5,
+            ttlUnit: "minutes",
+            metadata: { producer: "preserve-test-empty" },
+            preserveExistingData: true,
+        });
+        assert.deepEqual(cacheRow("missing.preserve").data, { version: 1, files: {} });
     });
 
     it("refreshes Moltbook home, feeds, profile, and own content caches", async () => {
@@ -3218,10 +3246,25 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                 ).count,
                 2
             );
-            assert.ok(
-                db
-                    .prepare("SELECT 1 FROM scheduled_jobs WHERE id = 'ops.log-rotation'")
-                    .get()
+            const logRotationJob = db
+                .prepare(
+                    `SELECT schedule_type, time_of_day, action_key, action_payload_json
+                     FROM scheduled_jobs WHERE id = 'ops.log-rotation'`
+                )
+                .get() as
+                | {
+                      action_key: string;
+                      action_payload_json: string;
+                      schedule_type: string;
+                      time_of_day: string | null;
+                  }
+                | undefined;
+            assert.equal(logRotationJob?.schedule_type, "daily");
+            assert.equal(logRotationJob?.time_of_day, "02:10");
+            assert.equal(logRotationJob?.action_key, "ops.log-rotation");
+            assert.equal(
+                logRotationJob?.action_payload_json,
+                JSON.stringify({ key: "log_rotation.state" })
             );
             const logRotationModule = await import("./logRotation.js");
             const logRotationTesting = logRotationModule.__testing;
@@ -3265,6 +3308,22 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                     "permission denied"
                 );
                 assert.equal(failedLogRotationState.lastRun?.stderr, "permission denied");
+
+                const noisyOutput = "x".repeat(120_000);
+                const noisyError = "e".repeat(120_000);
+                logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
+                    stderr: noisyError,
+                    stdout: JSON.stringify({ ok: false, stdout: noisyOutput }),
+                }));
+                const noisyLogRotationRun = await runScheduledJob("ops.log-rotation");
+                assert.equal(noisyLogRotationRun.status, "failed");
+                const noisyLogRotationState = cacheRow("log_rotation.state").data as {
+                    lastRun?: { stderr?: string; stdout?: string };
+                };
+                assert.equal(noisyLogRotationState.lastRun?.stdout?.length, 100_000);
+                assert.equal(noisyLogRotationState.lastRun?.stderr?.length, 100_000);
+                assert.equal(noisyLogRotationState.lastRun?.stdout, "x".repeat(100_000));
+                assert.equal(noisyLogRotationState.lastRun?.stderr, "e".repeat(100_000));
 
                 db.prepare("UPDATE cache_entries SET data_json = ? WHERE key = ?").run(
                     JSON.stringify({
