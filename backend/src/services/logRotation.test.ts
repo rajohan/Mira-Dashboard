@@ -2117,6 +2117,57 @@ describe("log rotation service", { concurrency: false }, () => {
         }
     });
 
+    it("does not remove a replacement lock when releasing an older handle", async () => {
+        const lockPath = testLockPath(tempDir);
+        const lock = await __testing.acquireLogRotationLock(false);
+        assert.ok(lock);
+
+        await rm(lockPath, { force: true });
+        await writeFile(lockPath, "replacement\n", "utf8");
+
+        await __testing.releaseLogRotationLock(lock);
+
+        assert.equal(await readFile(lockPath, "utf8"), "replacement\n");
+    });
+
+    it("ignores missing lock paths when releasing a lock", async () => {
+        const lockPath = testLockPath(tempDir);
+        const lock = await __testing.acquireLogRotationLock(false);
+        assert.ok(lock);
+
+        await rm(lockPath, { force: true });
+
+        await __testing.releaseLogRotationLock(lock);
+    });
+
+    it("ignores unexpected lock stat failures during release", async () => {
+        const lockPath = testLockPath(tempDir);
+        const lock = await __testing.acquireLogRotationLock(false);
+        assert.ok(lock);
+        const originalStat = fsPromises.stat.bind(fsPromises);
+        const statMock = mock.method(
+            fsPromises,
+            "stat",
+            (target: Parameters<typeof fsPromises.stat>[0]) => {
+                if (String(target) === lockPath) {
+                    const error = new Error(
+                        "release stat denied"
+                    ) as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    return Promise.reject(error);
+                }
+                return originalStat(target);
+            }
+        );
+
+        try {
+            await __testing.releaseLogRotationLock(lock);
+        } finally {
+            statMock.mock.restore();
+            await rm(lockPath, { force: true });
+        }
+    });
+
     it("rethrows unexpected errors from stale lock reacquire", async () => {
         const lockPath = testLockPath(tempDir);
         await mkdir(path.dirname(lockPath), { recursive: true });

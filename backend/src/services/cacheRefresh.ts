@@ -1742,9 +1742,11 @@ async function refreshLogRotationStateCache() {
         .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
         .get(LOG_ROTATION_STATE_KEY) as { data_json?: string | null } | undefined;
     let data: unknown = { version: 1, files: {} };
+    let preserveExistingData = false;
     if (row?.data_json) {
         try {
             data = JSON.parse(row.data_json) as unknown;
+            preserveExistingData = true;
         } catch {
             data = { version: 1, files: {} };
         }
@@ -1759,6 +1761,7 @@ async function refreshLogRotationStateCache() {
             producer: "refreshCacheProducer",
             workflow: "Log Rotation - Foundation",
         },
+        preserveExistingData,
     });
     return { refreshed: [LOG_ROTATION_STATE_KEY] };
 }

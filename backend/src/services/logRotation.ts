@@ -1260,8 +1260,15 @@ function isProcessRunning(pid: number): boolean {
 async function releaseLogRotationLock(handle: fs.FileHandle | null) {
     if (!handle) return;
     const lockFile = logRotationLockFile;
-    await handle.close();
-    await fs.unlink(lockFile).catch(() => {});
+    try {
+        const heldStat = await handle.stat();
+        const pathStat = await fs.stat(lockFile).catch(() => null);
+        if (pathStat && pathStat.dev === heldStat.dev && pathStat.ino === heldStat.ino) {
+            await fs.unlink(lockFile).catch(() => {});
+        }
+    } finally {
+        await handle.close();
+    }
 }
 
 export async function runLogRotationService(

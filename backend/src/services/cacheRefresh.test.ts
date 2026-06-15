@@ -1403,6 +1403,58 @@ else if (command === "status --short") process.stdout.write("");
         assert.deepEqual(data.missingRepos, ["docker"]);
     });
 
+    it("does not overwrite parseable log rotation state changed during refresh", async (t) => {
+        writeCacheSuccess({
+            key: "log_rotation.state",
+            data: {
+                version: 1,
+                files: { "/tmp/old.log": { lastSizeBytes: 12 } },
+            },
+            source: "backend-test",
+            ttl: 5,
+            ttlUnit: "minutes",
+            metadata: { producer: "seed" },
+        });
+
+        const prepare = db.prepare.bind(db);
+        const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+            const statement = prepare(sql);
+            if (sql === "SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1") {
+                return {
+                    get: (key: string) => {
+                        const row = statement.get(key);
+                        db.prepare(
+                            "UPDATE cache_entries SET data_json = ? WHERE key = ?"
+                        ).run(
+                            JSON.stringify({
+                                version: 1,
+                                files: { "/tmp/new.log": { lastSizeBytes: 34 } },
+                            }),
+                            "log_rotation.state"
+                        );
+                        return row;
+                    },
+                } as unknown as ReturnType<typeof db.prepare>;
+            }
+            return statement;
+        });
+
+        try {
+            assert.deepEqual(await refreshCacheProducer("log_rotation.state"), {
+                refreshed: ["log_rotation.state"],
+            });
+        } finally {
+            prepareMock.mock.restore();
+        }
+
+        const row = cacheRow("log_rotation.state");
+        assert.deepEqual(row.data, {
+            version: 1,
+            files: { "/tmp/new.log": { lastSizeBytes: 34 } },
+        });
+        assert.equal(row.metadata.producer, "refreshCacheProducer");
+    });
+
     it("refreshes system, quota, and producer-dispatch caches", async () => {
         const binDir = path.join(tempDir, "bin");
         await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
