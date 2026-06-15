@@ -401,7 +401,18 @@ describe("log rotation service", { concurrency: false }, () => {
                         groups: [{ name: "fractional", paths: ["*.log"], keep: 1.5 }],
                     }),
                 }),
-            /Group fractional\.keep must be a non-negative integer/u
+            /Group fractional\.keep must be a positive integer/u
+        );
+        await assert.rejects(
+            async () =>
+                runLogRotationService({
+                    dryRun: true,
+                    config: await writeConfig(tempDir, {
+                        version: 1,
+                        groups: [{ name: "zero", paths: ["*.log"], keep: 0 }],
+                    }),
+                }),
+            /Group zero\.keep must be a positive integer/u
         );
         await assert.rejects(
             async () =>
@@ -1449,7 +1460,7 @@ describe("log rotation service", { concurrency: false }, () => {
                     skipEmpty: true,
                     archivePaths: [path.join(root, "daily.log.*")],
                     compress: true,
-                    keep: 0,
+                    keepDays: 0,
                 },
                 {
                     name: "daily",
@@ -1497,7 +1508,7 @@ describe("log rotation service", { concurrency: false }, () => {
                     paths: [logFile],
                     archivePaths: [path.join(root, "app.log.*")],
                     compress: true,
-                    keep: 0,
+                    keepDays: 0,
                     maxSizeMb: 100,
                 },
             ],
@@ -2395,7 +2406,7 @@ describe("log rotation service", { concurrency: false }, () => {
                     archiveOnly: true,
                     archivePaths: [path.join(outside, "*.log.*")],
                     archiveRetentionScope: "parent",
-                    keep: 0,
+                    keepDays: 0,
                 },
                 {
                     name: "file-errors",
@@ -2618,7 +2629,7 @@ describe("log rotation service", { concurrency: false }, () => {
                     name: "archive-race",
                     archiveOnly: true,
                     archivePaths: [archiveVanish],
-                    keep: 0,
+                    keepDays: 0,
                 },
                 {
                     name: "archive-pattern-only",

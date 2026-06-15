@@ -15,9 +15,14 @@ import { after, before, describe, it } from "node:test";
 
 import express from "express";
 
+type ElevatedLogRotationRunner = Parameters<
+    Awaited<typeof import("./ops.js")>["__testing"]["setElevatedLogRotationRunner"]
+>[0];
+
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
+    defaultElevatedLogRotationRunner: ElevatedLogRotationRunner;
     opsTesting: Awaited<typeof import("./ops.js")>["__testing"];
 }
 
@@ -25,16 +30,23 @@ let db: (typeof import("../db.js"))["db"];
 
 async function startServer(configPath: string): Promise<TestServer> {
     process.env.MIRA_LOG_ROTATION_CONFIG = configPath;
-    const { __testing, default: opsRoutes } = await import(`./ops.js?test=${Date.now()}`);
-    const { runLogRotationService } = await import(
-        `../services/logRotation.js?test=${Date.now()}`
+    const importSuffix = `${Date.now()}-${Math.random()}`;
+    const { __testing, default: opsRoutes } = await import(
+        `./ops.js?test=${importSuffix}`
     );
-    __testing.setElevatedLogRotationRunner(async (options: { dryRun: boolean }) => ({
+    const { runLogRotationService } = await import(
+        `../services/logRotation.js?test=${importSuffix}`
+    );
+    const defaultElevatedLogRotationRunner: ElevatedLogRotationRunner = async (
+        options
+    ) => ({
         result: (await runLogRotationService({
             dryRun: options.dryRun,
+            config: configPath,
         })) as unknown as Record<string, unknown>,
         stderr: "",
-    }));
+    });
+    __testing.setElevatedLogRotationRunner(defaultElevatedLogRotationRunner);
     const app = express();
     app.use(express.json());
     opsRoutes(app);
@@ -66,6 +78,7 @@ async function startServer(configPath: string): Promise<TestServer> {
             new Promise((resolve, reject) =>
                 server.close((error) => (error ? reject(error) : resolve()))
             ),
+        defaultElevatedLogRotationRunner,
         opsTesting: __testing,
     };
 }
@@ -319,17 +332,9 @@ describe("ops routes", () => {
             assert.equal(run.status, 200);
             assert.equal(run.body.success, false);
         } finally {
-            server.opsTesting.setElevatedLogRotationRunner(async (options) => {
-                const logRotation = await import(
-                    `../services/logRotation.js?reset=${Date.now()}`
-                );
-                return {
-                    result: (await logRotation.runLogRotationService({
-                        dryRun: options.dryRun,
-                    })) as unknown as Record<string, unknown>,
-                    stderr: "",
-                };
-            });
+            server.opsTesting.setElevatedLogRotationRunner(
+                server.defaultElevatedLogRotationRunner
+            );
         }
     });
 

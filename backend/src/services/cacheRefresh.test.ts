@@ -3132,6 +3132,21 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                 const failedLogRotationRun = await runScheduledJob("ops.log-rotation");
                 assert.equal(failedLogRotationRun.status, "failed");
                 assert.equal(failedLogRotationRun.message, "permission denied");
+                const failedLogRotationState = cacheRow("log_rotation.state").data as {
+                    lastRun?: {
+                        message?: string;
+                        ok?: boolean;
+                        result?: { ok?: boolean };
+                        stderr?: string;
+                    };
+                };
+                assert.equal(failedLogRotationState.lastRun?.ok, false);
+                assert.equal(
+                    failedLogRotationState.lastRun?.message,
+                    "permission denied"
+                );
+                assert.deepEqual(failedLogRotationState.lastRun?.result, { ok: false });
+                assert.equal(failedLogRotationState.lastRun?.stderr, "permission denied");
 
                 logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
                     stderr: "",

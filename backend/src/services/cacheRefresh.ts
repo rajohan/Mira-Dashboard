@@ -16,7 +16,10 @@ import { promisify } from "node:util";
 import { db } from "../db.js";
 import { nonEmptyEnvFallback } from "../lib/values.js";
 import { writeCacheSuccess } from "./cacheEntryWriter.js";
-import { runElevatedLogRotationService } from "./logRotation.js";
+import {
+    type ElevatedLogRotationResult,
+    runElevatedLogRotationService,
+} from "./logRotation.js";
 import {
     getScheduledJob,
     registerScheduledJobAction,
@@ -2027,8 +2030,6 @@ const cacheRefreshScheduledJobs = [
         actionKey: "cache.refresh",
         actionPayload: { key: "moltbook" },
     },
-<<<<<<< HEAD
-=======
     {
         id: "cache.backup.kopia",
         name: "Kopia backup status cache",
@@ -2057,7 +2058,6 @@ const cacheRefreshScheduledJobs = [
         actionKey: "ops.log-rotation",
         actionPayload: { key: LOG_ROTATION_STATE_KEY },
     },
->>>>>>> 5f3ac96 (Move log rotation into dashboard scheduler)
 ] as const;
 
 function getScheduledCacheKey(job: ScheduledJob): string {
@@ -2149,6 +2149,31 @@ function logRotationFailureMessage(logRotation: {
     return "Log rotation failed";
 }
 
+function persistLogRotationScheduledFailure(
+    logRotation: ElevatedLogRotationResult,
+    message: string
+): void {
+    writeCacheSuccess({
+        key: LOG_ROTATION_STATE_KEY,
+        data: {
+            version: 1,
+            files: {},
+            lastRun: {
+                ok: false,
+                dryRun: false,
+                finishedAt: new Date().toISOString(),
+                message,
+                result: logRotation.result,
+                stderr: logRotation.stderr,
+            },
+        },
+        source: "backend",
+        ttl: 90 * 24,
+        ttlUnit: "hours",
+        metadata: { workflow: "Log Rotation - Foundation" },
+    });
+}
+
 export function registerCacheRefreshScheduledJobs(): void {
     registerScheduledJobAction("cache.refresh", async (job, signal) => {
         const key = getScheduledCacheKey(job);
@@ -2158,7 +2183,9 @@ export function registerCacheRefreshScheduledJobs(): void {
     registerScheduledJobAction("ops.log-rotation", async () => {
         const logRotation = await runElevatedLogRotationService({ dryRun: false });
         if (logRotation.result?.ok !== true) {
-            throw new Error(logRotationFailureMessage(logRotation));
+            const message = logRotationFailureMessage(logRotation);
+            persistLogRotationScheduledFailure(logRotation, message);
+            throw new Error(message);
         }
         return { logRotation };
     });

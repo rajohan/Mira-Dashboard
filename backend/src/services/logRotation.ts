@@ -243,10 +243,10 @@ function validatePolicyTypes(policy: LogRotationPolicy | undefined, label: strin
     if (
         policy.keep !== undefined &&
         (typeof policy.keep !== "number" ||
-            policy.keep < 0 ||
+            policy.keep < 1 ||
             !Number.isInteger(policy.keep))
     ) {
-        throw new TypeError(`${label}.keep must be a non-negative integer`);
+        throw new TypeError(`${label}.keep must be a positive integer`);
     }
 }
 
