@@ -1193,7 +1193,7 @@ async function refreshKopiaBackupCache() {
         key: "backup.kopia.status",
         data: payload,
         source: "backend",
-        ttl: 1,
+        ttl: 25,
         ttlUnit: "hours",
         metadata: {
             workflow: "Cache Foundation - Kopia Backup Status",
@@ -1275,7 +1275,7 @@ async function refreshWalgBackupCache() {
         key: "backup.walg.status",
         data: payload,
         source: "backend",
-        ttl: 1,
+        ttl: 25,
         ttlUnit: "hours",
         metadata: {
             workflow: "Cache Foundation - WAL-G Base Backup Status",
