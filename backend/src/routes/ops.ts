@@ -16,6 +16,28 @@ interface LogRotationResult {
 
 type LogRotationRunner = (options: { dryRun: boolean }) => Promise<LogRotationResult>;
 
+function normalizeLastRunErrors(run: Record<string, unknown>): unknown[] {
+    if (Array.isArray(run.errors)) {
+        return run.errors;
+    }
+    const message =
+        typeof run.message === "string" && run.message.trim()
+            ? run.message.trim()
+            : typeof run.stderr === "string" && run.stderr.trim()
+              ? run.stderr.trim()
+              : "";
+    if (!message && run.result === undefined) {
+        return [];
+    }
+    return [
+        {
+            message: message || "Log rotation failed",
+            result: run.result ?? null,
+            stderr: typeof run.stderr === "string" ? run.stderr : "",
+        },
+    ];
+}
+
 function normalizeLastRun(value: unknown) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         return null;
@@ -45,7 +67,7 @@ function normalizeLastRun(value: unknown) {
             ? Number(run.skippedFiles)
             : 0,
         warnings: Array.isArray(run.warnings) ? run.warnings : [],
-        errors: Array.isArray(run.errors) ? run.errors : [],
+        errors: normalizeLastRunErrors(run),
         groups: Array.isArray(run.groups) ? run.groups : [],
     };
 }

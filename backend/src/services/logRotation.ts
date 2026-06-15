@@ -531,6 +531,8 @@ async function unlinkVerified(filePath: string, approvedRoots: string[]): Promis
     }
 }
 
+let archiveOnlyUnlinkVerified = unlinkVerified;
+
 async function createNoFollowFile(
     filePath: string,
     mode: number,
@@ -819,6 +821,8 @@ async function compressArchiveIfNeeded(
     }
 }
 
+let archiveOnlyCompressArchiveIfNeeded = compressArchiveIfNeeded;
+
 function retentionDeleteSet(archives: RetentionArchive[], policy: LogRotationPolicy) {
     const deleteSet = new Map<string, RetentionArchive>();
     if (Number.isInteger(policy.keep) && Number(policy.keep) >= 0) {
@@ -896,24 +900,39 @@ async function listArchiveOnlyArchives(
         string,
         { path: string; mtimeMs: number; compress: boolean }
     >();
+    const warnings: string[] = [];
 
     for (const pattern of policy.archivePaths as string[]) {
         for (const archivePath of await resolveGlob(pattern, {
             missingOk: Boolean(policy.missingOk),
         })) {
-            const safe = await assertSafePath(archivePath, approvedRoots);
-            if (!safe) continue;
-            const stat = await fs.stat(archivePath);
-            if (stat.mtimeMs > cutoff) continue;
-            archives.set(archivePath, {
-                path: archivePath,
-                mtimeMs: stat.mtimeMs,
-                compress: policy.compress !== false,
-            });
+            try {
+                const safe = await assertSafePath(archivePath, approvedRoots);
+                if (!safe) {
+                    warnings.push(
+                        `Skipping archive-only path ${archivePath}: Unsafe path outside approved roots`
+                    );
+                    continue;
+                }
+                const stat = await fs.stat(archivePath);
+                if (stat.mtimeMs > cutoff) continue;
+                archives.set(archivePath, {
+                    path: archivePath,
+                    mtimeMs: stat.mtimeMs,
+                    compress: policy.compress !== false,
+                });
+            } catch (error) {
+                warnings.push(
+                    `Skipping archive-only path ${archivePath}: ${caughtMessage(error)}`
+                );
+            }
         }
     }
 
-    return [...archives.values()].sort((a, b) => b.mtimeMs - a.mtimeMs);
+    return {
+        archives: [...archives.values()].sort((a, b) => b.mtimeMs - a.mtimeMs),
+        warnings,
+    };
 }
 
 async function applyArchiveOnlyRetention(
@@ -927,7 +946,10 @@ async function applyArchiveOnlyRetention(
     const warnings: string[] = [];
     let checked = 0;
 
-    for (const archive of await listArchiveOnlyArchives(policy, approvedRoots)) {
+    const listed = await listArchiveOnlyArchives(policy, approvedRoots);
+    warnings.push(...listed.warnings);
+
+    for (const archive of listed.archives) {
         checked += 1;
         const key = archiveRetentionKey(archive.path, policy);
         const scoped = archivesByScope.get(key) || [];
@@ -940,7 +962,21 @@ async function applyArchiveOnlyRetention(
         const deleteSet = retentionDeleteSet(archives, policy);
         for (const archive of archives) {
             if (deleteSet.has(archive.path)) continue;
-            const result = await compressArchiveIfNeeded(archive, dryRun, approvedRoots);
+            let result: Awaited<ReturnType<typeof archiveOnlyCompressArchiveIfNeeded>>;
+            try {
+                result = await archiveOnlyCompressArchiveIfNeeded(
+                    archive,
+                    dryRun,
+                    approvedRoots
+                );
+            } catch (error) {
+                warnings.push(
+                    `Failed to compress archive-only path ${archive.path}: ${caughtMessage(
+                        error
+                    )}`
+                );
+                continue;
+            }
             if (result.compressed) compressed.push(result.archive.path);
             if (result.warning) warnings.push(result.warning);
         }
@@ -1158,7 +1194,11 @@ async function reclaimStaleLogRotationLock(
             }
         }
         const pid = Number.parseInt(rawPid.trim(), 10);
-        if (Number.isFinite(pid) && isProcessRunning(pid)) {
+        let lockAgeMs = Number.POSITIVE_INFINITY;
+        if (lockStat) {
+            lockAgeMs = Date.now() - lockStat.mtimeMs;
+        }
+        if (Number.isFinite(pid) && isProcessRunning(pid) && lockAgeMs < LOCK_STALE_MS) {
             return null;
         }
         await fs.unlink(lockFile).catch((error: unknown) => {
@@ -1640,8 +1680,20 @@ export const __testing = {
     resetGzipPipeline() {
         gzipPipeline = pipeline;
     },
+    resetArchiveOnlyRetentionRunnersForTests() {
+        archiveOnlyCompressArchiveIfNeeded = compressArchiveIfNeeded;
+        archiveOnlyUnlinkVerified = unlinkVerified;
+    },
     resetWriteCacheSuccessForTests() {
         writeLogRotationCacheSuccess = writeCacheSuccess;
+    },
+    setArchiveOnlyCompressArchiveIfNeededForTests(
+        runner: typeof compressArchiveIfNeeded
+    ) {
+        archiveOnlyCompressArchiveIfNeeded = runner;
+    },
+    setArchiveOnlyUnlinkVerifiedForTests(runner: typeof unlinkVerified) {
+        archiveOnlyUnlinkVerified = runner;
     },
     setGzipPipelineForTests(runner: typeof pipeline) {
         gzipPipeline = runner;

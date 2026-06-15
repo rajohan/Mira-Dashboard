@@ -2149,15 +2149,31 @@ function logRotationFailureMessage(logRotation: {
     return "Log rotation failed";
 }
 
+function readLogRotationStateCacheForFailure(): JsonRecord {
+    const fallback = { version: 1, files: {} };
+    const row = db
+        .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
+        .get(LOG_ROTATION_STATE_KEY) as { data_json?: string | null } | undefined;
+    if (!row?.data_json) {
+        return fallback;
+    }
+    try {
+        return { ...fallback, ...asRecord(JSON.parse(row.data_json) as unknown) };
+    } catch {
+        return fallback;
+    }
+}
+
 function persistLogRotationScheduledFailure(
     logRotation: ElevatedLogRotationResult,
     message: string
 ): void {
+    const existingState = readLogRotationStateCacheForFailure();
     writeCacheSuccess({
         key: LOG_ROTATION_STATE_KEY,
         data: {
+            ...existingState,
             version: 1,
-            files: {},
             lastRun: {
                 ok: false,
                 dryRun: false,

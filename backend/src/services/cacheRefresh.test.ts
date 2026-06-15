@@ -54,7 +54,12 @@ function cacheRow(key: string) {
 }
 
 function seedFreshCacheEntries(keys: string[]): void {
-    for (const key of keys) {
+    const keysWithBackgroundDefaults = new Set([
+        ...keys,
+        "backup.kopia.status",
+        "backup.walg.status",
+    ]);
+    for (const key of keysWithBackgroundDefaults) {
         writeCacheSuccess({
             key,
             data: { seeded: true },
@@ -238,6 +243,20 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         assert.equal(row.status, "fresh");
         assert.deepEqual(row.data, { ok: true });
         assert.equal(row.metadata.producer, "preserve-test");
+
+        writeCacheSuccess({
+            key: "missing.preserve",
+            data: { ok: false },
+            source: "backend-test-updated",
+            ttl: 5,
+            ttlUnit: "minutes",
+            metadata: { producer: "preserve-test-updated" },
+            preserveExistingData: true,
+        });
+        const updatedRow = cacheRow("missing.preserve");
+        assert.deepEqual(updatedRow.data, { ok: true });
+        assert.equal(updatedRow.source, "backend-test-updated");
+        assert.equal(updatedRow.metadata.producer, "preserve-test-updated");
     });
 
     it("refreshes Moltbook home, feeds, profile, and own content caches", async () => {
@@ -3103,7 +3122,7 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                         )
                         .get() as { count: number }
                 ).count,
-                0
+                2
             );
             assert.ok(
                 db
@@ -3129,6 +3148,9 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                     stderr: "permission denied",
                     stdout: JSON.stringify({ ok: false }),
                 }));
+                db.prepare("DELETE FROM cache_entries WHERE key = ?").run(
+                    "log_rotation.state"
+                );
                 const failedLogRotationRun = await runScheduledJob("ops.log-rotation");
                 assert.equal(failedLogRotationRun.status, "failed");
                 assert.equal(failedLogRotationRun.message, "permission denied");
@@ -3141,6 +3163,10 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                     };
                 };
                 assert.equal(failedLogRotationState.lastRun?.ok, false);
+                assert.deepEqual(
+                    (failedLogRotationState as { files?: unknown }).files,
+                    {}
+                );
                 assert.equal(
                     failedLogRotationState.lastRun?.message,
                     "permission denied"
@@ -3148,6 +3174,13 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                 assert.deepEqual(failedLogRotationState.lastRun?.result, { ok: false });
                 assert.equal(failedLogRotationState.lastRun?.stderr, "permission denied");
 
+                db.prepare("UPDATE cache_entries SET data_json = ? WHERE key = ?").run(
+                    JSON.stringify({
+                        version: 1,
+                        files: { "/opt/docker/data/app/app.log": { lastSizeBytes: 42 } },
+                    }),
+                    "log_rotation.state"
+                );
                 logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
                     stderr: "",
                     stdout: JSON.stringify({
@@ -3168,7 +3201,19 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                     failedLogRotationRunFallback.message ?? "",
                     /Log rotation failed.*EACCES.*docker-file-logs/u
                 );
+                assert.deepEqual(
+                    (
+                        cacheRow("log_rotation.state").data as {
+                            files?: Record<string, unknown>;
+                        }
+                    ).files,
+                    { "/opt/docker/data/app/app.log": { lastSizeBytes: 42 } }
+                );
 
+                db.prepare("UPDATE cache_entries SET data_json = ? WHERE key = ?").run(
+                    "{not-json",
+                    "log_rotation.state"
+                );
                 logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
                     stderr: "",
                     stdout: JSON.stringify({
@@ -3183,6 +3228,10 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                 assert.match(
                     warningLogRotationRun.message ?? "",
                     /Log rotation failed.*retention warning/u
+                );
+                assert.deepEqual(
+                    (cacheRow("log_rotation.state").data as { files?: unknown }).files,
+                    {}
                 );
 
                 logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({

@@ -1139,6 +1139,31 @@ describe("log rotation service", { concurrency: false }, () => {
         }
     });
 
+    it("uses the default runtime config path when no config is passed", async () => {
+        const root = path.join(tempDir, "default-config");
+        await mkdir(root);
+        const logFile = path.join(root, "app.log");
+        await writeFile(logFile, "log", "utf8");
+        const runtimeConfig = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [{ name: "default", paths: [logFile], maxSizeMb: 100 }],
+        });
+        const originalConfig = process.env.MIRA_LOG_ROTATION_CONFIG;
+        try {
+            process.env.MIRA_LOG_ROTATION_CONFIG = runtimeConfig;
+            const summary = await runLogRotationService({ dryRun: true });
+            assert.equal(summary.ok, true);
+            assert.equal(summary.skippedFiles, 1);
+        } finally {
+            if (originalConfig === undefined) {
+                delete process.env.MIRA_LOG_ROTATION_CONFIG;
+            } else {
+                process.env.MIRA_LOG_ROTATION_CONFIG = originalConfig;
+            }
+        }
+    });
+
     it("runs the log rotation CLI entrypoint", async () => {
         const logPath = path.join(tempDir, "cli.log");
         await writeFile(logPath, "", "utf8");

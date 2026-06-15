@@ -283,6 +283,105 @@ describe("ops routes", () => {
             lastRun: { finishedAt: null };
         }>(server, "/api/ops/log-rotation/status");
         assert.equal(partialLastRun.body.lastRun.finishedAt, null);
+
+        db.prepare(
+            `INSERT OR REPLACE INTO cache_entries (
+                key, data_json, source, updated_at, last_attempt_at, expires_at,
+                status, consecutive_failures, metadata_json
+            ) VALUES (?, ?, 'backend', ?, ?, ?, 'fresh', 0, '{}')`
+        ).run(
+            "log_rotation.state",
+            JSON.stringify({
+                lastRun: {
+                    ok: false,
+                    message: "permission denied",
+                    result: { ok: false },
+                    stderr: "permission denied",
+                },
+            }),
+            "2026-05-11T01:00:00.000Z",
+            "2026-05-11T01:00:00.000Z",
+            "2026-08-11T01:00:00.000Z"
+        );
+        const failureLastRun = await requestJson<{
+            success: boolean;
+            lastRun: { errors: unknown[] };
+        }>(server, "/api/ops/log-rotation/status");
+        assert.deepEqual(failureLastRun.body.lastRun.errors, [
+            {
+                message: "permission denied",
+                result: { ok: false },
+                stderr: "permission denied",
+            },
+        ]);
+
+        db.prepare(
+            `INSERT OR REPLACE INTO cache_entries (
+                key, data_json, source, updated_at, last_attempt_at, expires_at,
+                status, consecutive_failures, metadata_json
+            ) VALUES (?, ?, 'backend', ?, ?, ?, 'fresh', 0, '{}')`
+        ).run(
+            "log_rotation.state",
+            JSON.stringify({ lastRun: { ok: false } }),
+            "2026-05-11T01:00:00.000Z",
+            "2026-05-11T01:00:00.000Z",
+            "2026-08-11T01:00:00.000Z"
+        );
+        const failureWithoutDetails = await requestJson<{
+            success: boolean;
+            lastRun: { errors: unknown[] };
+        }>(server, "/api/ops/log-rotation/status");
+        assert.deepEqual(failureWithoutDetails.body.lastRun.errors, []);
+
+        db.prepare(
+            `INSERT OR REPLACE INTO cache_entries (
+                key, data_json, source, updated_at, last_attempt_at, expires_at,
+                status, consecutive_failures, metadata_json
+            ) VALUES (?, ?, 'backend', ?, ?, ?, 'fresh', 0, '{}')`
+        ).run(
+            "log_rotation.state",
+            JSON.stringify({ lastRun: { ok: false, stderr: "sudo unavailable" } }),
+            "2026-05-11T01:00:00.000Z",
+            "2026-05-11T01:00:00.000Z",
+            "2026-08-11T01:00:00.000Z"
+        );
+        const failureWithStderr = await requestJson<{
+            success: boolean;
+            lastRun: { errors: unknown[] };
+        }>(server, "/api/ops/log-rotation/status");
+        assert.deepEqual(failureWithStderr.body.lastRun.errors, [
+            {
+                message: "sudo unavailable",
+                result: null,
+                stderr: "sudo unavailable",
+            },
+        ]);
+
+        db.prepare(
+            `INSERT OR REPLACE INTO cache_entries (
+                key, data_json, source, updated_at, last_attempt_at, expires_at,
+                status, consecutive_failures, metadata_json
+            ) VALUES (?, ?, 'backend', ?, ?, ?, 'fresh', 0, '{}')`
+        ).run(
+            "log_rotation.state",
+            JSON.stringify({
+                lastRun: { ok: false, result: { ok: false }, stderr: 123 },
+            }),
+            "2026-05-11T01:00:00.000Z",
+            "2026-05-11T01:00:00.000Z",
+            "2026-08-11T01:00:00.000Z"
+        );
+        const failureWithStructuredResult = await requestJson<{
+            success: boolean;
+            lastRun: { errors: unknown[] };
+        }>(server, "/api/ops/log-rotation/status");
+        assert.deepEqual(failureWithStructuredResult.body.lastRun.errors, [
+            {
+                message: "Log rotation failed",
+                result: { ok: false },
+                stderr: "",
+            },
+        ]);
     });
 
     it("runs dry-run log rotation without changing files or state", async () => {
