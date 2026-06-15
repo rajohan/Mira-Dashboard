@@ -6,13 +6,9 @@ import {
     getCacheEntry,
     parseJsonField,
 } from "../lib/cacheStore.js";
-import { errorMessage } from "../lib/errors.js";
+import { errorMessage, httpStatusCode } from "../lib/errors.js";
 import { stringFallback } from "../lib/values.js";
 import { refreshCacheProducer } from "../services/cacheRefresh.js";
-
-interface HttpStatusError extends Error {
-    statusCode?: number;
-}
 
 type CacheRefreshProducer = (key: string) => Promise<{ refreshed?: unknown } | void>;
 let cacheRefreshProducerForTests: CacheRefreshProducer | null = null;
@@ -109,7 +105,7 @@ export default function cacheRoutes(app: express.Application): void {
             const entry = await refreshCacheKey(key);
             res.json({ ok: true, entry });
         } catch (error) {
-            res.status((error as HttpStatusError).statusCode || 500).json({
+            res.status(httpStatusCode(error)).json({
                 error: errorMessage(error, "Cache refresh failed"),
             });
         }

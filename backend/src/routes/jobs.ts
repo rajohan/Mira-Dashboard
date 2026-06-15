@@ -1,6 +1,10 @@
 import express, { type ErrorRequestHandler, type RequestHandler } from "express";
 
-import { asyncRoute as baseAsyncRoute, errorMessage } from "../lib/errors.js";
+import {
+    asyncRoute as baseAsyncRoute,
+    errorMessage,
+    httpStatusCode,
+} from "../lib/errors.js";
 import {
     getScheduledJob,
     isScheduledJobValidationError,
@@ -33,25 +37,6 @@ const invalidJobsJsonHandler: ErrorRequestHandler = (error, _req, res, next) => 
     }
     next(error);
 };
-
-interface HttpStatusError extends Error {
-    statusCode?: number;
-}
-
-function httpStatusCode(error: unknown): number {
-    if (typeof error === "object" && error !== null) {
-        const statusCode = (error as HttpStatusError).statusCode;
-        if (
-            typeof statusCode === "number" &&
-            Number.isInteger(statusCode) &&
-            statusCode >= 400 &&
-            statusCode <= 599
-        ) {
-            return statusCode;
-        }
-    }
-    return 500;
-}
 
 function asyncRoute(handler: RequestHandler): RequestHandler {
     return baseAsyncRoute(handler, {

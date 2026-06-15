@@ -1,11 +1,30 @@
 import type { RequestHandler } from "express";
 
+export interface HttpStatusError extends Error {
+    statusCode?: number;
+}
+
 /** Returns a stable message for unknown caught values. */
 export function errorMessage(error: unknown, fallback: string): string {
     if (!(error instanceof Error)) {
         return fallback;
     }
     return error.message.trim() || fallback;
+}
+
+export function httpStatusCode(error: unknown): number {
+    if (typeof error === "object" && error !== null) {
+        const statusCode = (error as HttpStatusError).statusCode;
+        if (
+            typeof statusCode === "number" &&
+            Number.isInteger(statusCode) &&
+            statusCode >= 400 &&
+            statusCode <= 599
+        ) {
+            return statusCode;
+        }
+    }
+    return 500;
 }
 
 /** Wraps async Express handlers with consistent JSON error responses. */
@@ -24,7 +43,9 @@ export function asyncRoute(
                     next(error);
                     return;
                 }
-                res.status(500).json({ error: errorMessage(error, fallback) });
+                res.status(httpStatusCode(error)).json({
+                    error: errorMessage(error, fallback),
+                });
             });
     };
 }

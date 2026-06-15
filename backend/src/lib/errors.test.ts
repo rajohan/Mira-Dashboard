@@ -48,6 +48,46 @@ describe("error helpers", () => {
         assert.equal(response.statusCode, 500);
         assert.deepEqual(jsonCalls, [{ error: "fallback" }]);
 
+        jsonCalls.length = 0;
+        const statusHandler = asyncRoute(async () => {
+            throw Object.assign(new Error("conflict"), { statusCode: 409 });
+        });
+
+        await new Promise<void>((resolve) => {
+            statusHandler(
+                {} as never,
+                response as never,
+                (() => {
+                    throw new Error("next should not be called");
+                }) as never
+            );
+            setImmediate(resolve);
+        });
+
+        assert.equal(response.statusCode, 409);
+        assert.deepEqual(jsonCalls, [{ error: "conflict" }]);
+
+        for (const statusCode of [409.5, 200, 600, "409"]) {
+            jsonCalls.length = 0;
+            const invalidStatusHandler = asyncRoute(async () => {
+                throw Object.assign(new Error("invalid status"), { statusCode });
+            });
+
+            await new Promise<void>((resolve) => {
+                invalidStatusHandler(
+                    {} as never,
+                    response as never,
+                    (() => {
+                        throw new Error("next should not be called");
+                    }) as never
+                );
+                setImmediate(resolve);
+            });
+
+            assert.equal(response.statusCode, 500);
+            assert.deepEqual(jsonCalls, [{ error: "invalid status" }]);
+        }
+
         const forwarded: unknown[] = [];
         const forwardedJsonCalls: unknown[] = [];
         const forwardedResponse = {

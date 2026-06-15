@@ -16,6 +16,7 @@ const {
     getScheduledJob,
     listScheduledJobs,
     registerScheduledJobAction,
+    removeScheduledJobsNotInAction,
     runScheduledJob,
     startScheduledJobScheduler,
     stopScheduledJobScheduler,
@@ -77,6 +78,44 @@ test("creates, lists, updates, and schedules jobs", () => {
     assert.equal(updated?.scheduleType, "daily");
     assert.equal(updated?.timeOfDay, "04:30");
     assert.equal(updateScheduledJob("missing", { enabled: true }), null);
+});
+
+test("removes scheduled jobs for an action that are no longer registered", () => {
+    upsertScheduledJob({
+        id: "cache.weather",
+        name: "Weather cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+    upsertScheduledJob({
+        id: "cache.legacy",
+        name: "Legacy cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+    upsertScheduledJob({
+        id: "backup.walg",
+        name: "WAL-G backup",
+        enabled: true,
+        scheduleType: "daily",
+        timeOfDay: "03:20",
+        actionKey: "backup.run",
+    });
+
+    removeScheduledJobsNotInAction("cache.refresh", ["cache.weather"]);
+
+    assert.ok(getScheduledJob("cache.weather"));
+    assert.equal(getScheduledJob("cache.legacy"), null);
+    assert.ok(getScheduledJob("backup.walg"));
+
+    removeScheduledJobsNotInAction("cache.refresh", []);
+
+    assert.equal(getScheduledJob("cache.weather"), null);
+    assert.ok(getScheduledJob("backup.walg"));
 });
 
 test("calculates interval and daily next-run times", () => {
@@ -893,6 +932,7 @@ test("rechecks due job state before scheduled execution", async () => {
 
 test("continues due job loop after one scheduled run throws", async (t) => {
     const calls: string[] = [];
+    const warnMock = t.mock.method(console, "warn", () => {});
     registerScheduledJobAction("cache.refresh", (job) => {
         calls.push(job.id);
     });
@@ -916,7 +956,9 @@ test("continues due job loop after one scheduled run throws", async (t) => {
             insertFailures += 1;
             return {
                 run: () => {
-                    throw new Error("run insert failed");
+                    throw Object.assign(new Error("run insert failed"), {
+                        statusCode: 500,
+                    });
                 },
             } as unknown as ReturnType<typeof db.prepare>;
         }
@@ -927,9 +969,11 @@ test("continues due job loop after one scheduled run throws", async (t) => {
         await __testing.runDueJobsForTest();
     } finally {
         prepareMock.mock.restore();
+        warnMock.mock.restore();
     }
 
     assert.deepEqual(calls, ["cache.second"]);
+    assert.equal(warnMock.mock.callCount(), 1);
 });
 
 test("logs scheduler tick query failures without leaving ticks stuck", async (t) => {
@@ -1010,20 +1054,19 @@ test("releases scheduler ticks while a scheduled handler is stalled", async (t) 
         await delay(120);
         assert.equal(warnMock.mock.callCount(), 1);
         assert.equal(aborts, 1);
-        assert.equal(getScheduledJob("cache.stalled")?.lastRun?.status, "running");
-        assert.equal(getScheduledJob("cache.stalled")?.isRunning, true);
+        assert.equal(getScheduledJob("cache.stalled")?.lastRun?.status, "failed");
+        assert.equal(getScheduledJob("cache.stalled")?.isRunning, false);
         db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
             "2026-01-01T00:00:00.000Z",
             "cache.stalled"
         );
         __testing.runSchedulerTickForTest();
         await delay(0);
-        assert.deepEqual(calls, ["cache.stalled", "cache.fast"]);
+        assert.deepEqual(calls, ["cache.stalled", "cache.fast", "cache.stalled"]);
         for (const releaseStalledJob of releaseStalledJobs) {
             releaseStalledJob();
         }
         await delay(0);
-        assert.equal(getScheduledJob("cache.stalled")?.lastRun?.status, "failed");
         assert.equal(getScheduledJob("cache.stalled")?.isRunning, false);
     } finally {
         for (const releaseStalledJob of releaseStalledJobs) {
@@ -1031,6 +1074,124 @@ test("releases scheduler ticks while a scheduled handler is stalled", async (t) 
         }
         warnMock.mock.restore();
     }
+});
+
+test("uses registered action timeout for scheduled runs", async (t) => {
+    const warnMock = t.mock.method(console, "warn", () => {});
+    try {
+        __testing.setScheduledJobRunTimeoutMsForTest(25);
+        let aborted = false;
+        registerScheduledJobAction(
+            "backup.run",
+            (_job, signal) =>
+                new Promise<void>((resolve) => {
+                    signal?.addEventListener("abort", () => {
+                        aborted = true;
+                    });
+                    setTimeout(resolve, 60);
+                }),
+            { timeoutMs: 250 }
+        );
+        upsertScheduledJob({
+            id: "backup.walg",
+            name: "WAL-G backup",
+            enabled: true,
+            scheduleType: "daily",
+            timeOfDay: "03:20",
+            actionKey: "backup.run",
+        });
+        db.prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?").run(
+            "2026-01-01T00:00:00.000Z",
+            "backup.walg"
+        );
+
+        await __testing.runDueJobsForTest();
+
+        assert.equal(aborted, false);
+        assert.equal(warnMock.mock.callCount(), 0);
+        assert.equal(getScheduledJob("backup.walg")?.lastRun?.status, "success");
+    } finally {
+        warnMock.mock.restore();
+    }
+});
+
+test("uses registered action timeout for manual runs", async (t) => {
+    const warnMock = t.mock.method(console, "warn", () => {});
+    try {
+        __testing.setScheduledJobRunTimeoutMsForTest(25);
+        let aborted = false;
+        registerScheduledJobAction(
+            "backup.run",
+            (_job, signal) =>
+                new Promise<void>((resolve) => {
+                    signal?.addEventListener("abort", () => {
+                        aborted = true;
+                    });
+                    setTimeout(resolve, 60);
+                }),
+            { timeoutMs: 250 }
+        );
+        upsertScheduledJob({
+            id: "backup.walg",
+            name: "WAL-G backup",
+            enabled: true,
+            scheduleType: "daily",
+            timeOfDay: "03:20",
+            actionKey: "backup.run",
+        });
+
+        const run = await runScheduledJob("backup.walg", "manual");
+
+        assert.equal(aborted, false);
+        assert.equal(warnMock.mock.callCount(), 0);
+        assert.equal(run.status, "success");
+    } finally {
+        warnMock.mock.restore();
+    }
+});
+
+test("stops manual runs when caller signal aborts", async () => {
+    let aborted = false;
+    let releaseHandler: () => void = () => {};
+    registerScheduledJobAction(
+        "cache.refresh",
+        (_job, signal) =>
+            new Promise<void>((resolve) => {
+                releaseHandler = resolve;
+                signal?.addEventListener("abort", () => {
+                    aborted = true;
+                });
+            })
+    );
+    upsertScheduledJob({
+        id: "cache.weather",
+        name: "Weather cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+
+    const controller = new AbortController();
+    const runPromise = runScheduledJob("cache.weather", "manual", controller.signal);
+    await delay(0);
+    controller.abort();
+
+    const pendingResult = await Promise.race([
+        runPromise,
+        delay(50).then(() => "pending" as const),
+    ]);
+
+    assert.equal(pendingResult, "pending");
+    assert.equal(aborted, true);
+    assert.equal(getScheduledJob("cache.weather")?.isRunning, true);
+    await assert.rejects(runScheduledJob("cache.weather", "manual"), /already running/u);
+
+    releaseHandler();
+    const result = await runPromise;
+    assert.equal(result.status, "failed");
+    assert.match(result.message ?? "", /aborted/u);
+    assert.equal(getScheduledJob("cache.weather")?.isRunning, false);
 });
 
 test("logs timeout persistence failures while releasing stalled jobs", async (t) => {
@@ -1068,12 +1229,11 @@ test("logs timeout persistence failures while releasing stalled jobs", async (t)
         __testing.runSchedulerTickForTest();
         await delay(120);
 
-        assert.equal(warnMock.mock.callCount(), 1);
-        assert.equal(getScheduledJob("cache.stalled")?.isRunning, true);
+        assert.equal(warnMock.mock.callCount(), 2);
+        assert.equal(getScheduledJob("cache.stalled")?.isRunning, false);
     } finally {
         releaseHandler();
         await delay(0);
-        assert.equal(warnMock.mock.callCount(), 3);
         assert.equal(getScheduledJob("cache.stalled")?.isRunning, false);
         prepareMock.mock.restore();
         warnMock.mock.restore();
@@ -1438,6 +1598,19 @@ test("ignores overlapping scheduler ticks", async () => {
 
 test("validates schedule definitions and exposes idempotent scheduler controls", () => {
     assert.throws(() => registerScheduledJobAction("Bad Key", () => {}), /action key/u);
+    for (const timeoutMs of [
+        0,
+        0.5,
+        -1,
+        2_147_483_648,
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+    ]) {
+        assert.throws(
+            () => registerScheduledJobAction("cache.refresh", () => {}, { timeoutMs }),
+            /timeout must be an integer between 1 and 2147483647/u
+        );
+    }
     assert.throws(
         () =>
             upsertScheduledJob({

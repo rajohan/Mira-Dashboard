@@ -18,6 +18,7 @@ import { nonEmptyEnvFallback } from "../lib/values.js";
 import {
     getScheduledJob,
     registerScheduledJobAction,
+    removeScheduledJobsNotInAction,
     type ScheduledJob,
     upsertScheduledJob,
 } from "./scheduledJobs.js";
@@ -1909,7 +1910,11 @@ async function waitForExistingRefresh(
     }
 }
 
-export async function refreshCacheProducer(key: string, signal?: AbortSignal) {
+export async function refreshCacheProducer(
+    key: string,
+    signal?: AbortSignal,
+    options: { force?: boolean } = {}
+) {
     if (signal?.aborted) {
         throw abortError();
     }
@@ -1923,11 +1928,17 @@ export async function refreshCacheProducer(key: string, signal?: AbortSignal) {
                 inFlightKey === scopeKey || scopeKey.startsWith(`${inFlightKey}.`)
         )
         .sort(([left], [right]) => left.length - right.length)[0]?.[1];
-    if (existing !== undefined) {
+    if (!options.force && existing !== undefined) {
         return await waitForExistingRefresh(key, scopeKey, existing, signal);
     }
     const childRefreshes = inFlightEntries
-        .filter(([inFlightKey]) => inFlightKey.startsWith(`${scopeKey}.`))
+        .filter(([inFlightKey]) =>
+            options.force
+                ? inFlightKey === scopeKey ||
+                  inFlightKey.startsWith(`${scopeKey}.`) ||
+                  scopeKey.startsWith(`${inFlightKey}.`)
+                : inFlightKey.startsWith(`${scopeKey}.`)
+        )
         .map(([, refresh]) => refresh);
     const refresh =
         childRefreshes.length > 0
@@ -1994,24 +2005,6 @@ const cacheRefreshScheduledJobs = [
         actionKey: "cache.refresh",
         actionPayload: { key: "moltbook" },
     },
-    {
-        id: "cache.backup.kopia",
-        name: "Kopia backup status cache",
-        description: "Refresh Kopia backup status cache.",
-        scheduleType: "interval",
-        intervalSeconds: 60 * 60,
-        actionKey: "cache.refresh",
-        actionPayload: { key: "backup.kopia.status" },
-    },
-    {
-        id: "cache.backup.walg",
-        name: "WAL-G backup status cache",
-        description: "Refresh WAL-G backup status cache.",
-        scheduleType: "interval",
-        intervalSeconds: 60 * 60,
-        actionKey: "cache.refresh",
-        actionPayload: { key: "backup.walg.status" },
-    },
 ] as const;
 
 function getScheduledCacheKey(job: ScheduledJob): string {
@@ -2054,24 +2047,28 @@ export function waitForLocalCacheSeed(key: string): Promise<void> {
     return localCacheSeedPromises.get(key) ?? Promise.resolve();
 }
 
-function seedMissingLocalCacheEntry(key: string): void {
+export function seedMissingLocalCacheEntry(key: string): void {
     if (cacheEntryIsFresh(key)) {
         return;
     }
-    const seedPromise = refreshCacheProducer(key)
-        .catch((error: unknown) => {
+    const seedPromise = refreshCacheProducer(key).then(
+        () => {},
+        (error: unknown) => {
             console.warn(
                 `[CacheRefresh] Failed to seed missing cache entry ${key}:`,
                 error
             );
-        })
-        .then(() => {});
-    localCacheSeedPromises.set(key, seedPromise);
-    void seedPromise.finally(() => {
-        if (localCacheSeedPromises.get(key) === seedPromise) {
-            localCacheSeedPromises.delete(key);
+            throw error;
         }
-    });
+    );
+    localCacheSeedPromises.set(key, seedPromise);
+    void seedPromise
+        .finally(() => {
+            if (localCacheSeedPromises.get(key) === seedPromise) {
+                localCacheSeedPromises.delete(key);
+            }
+        })
+        .catch(() => {});
 }
 
 export function registerCacheRefreshScheduledJobs(): void {
@@ -2080,24 +2077,43 @@ export function registerCacheRefreshScheduledJobs(): void {
         const result = await refreshCacheProducer(key, signal);
         return { key, ...result };
     });
+    const seedKeys: string[] = [];
+    db.exec("BEGIN");
+    try {
+        removeScheduledJobsNotInAction(
+            "cache.refresh",
+            cacheRefreshScheduledJobs.map((job) => job.id)
+        );
 
-    for (const job of cacheRefreshScheduledJobs) {
-        const existing = getScheduledJob(job.id);
-        upsertScheduledJob({
-            ...job,
-            enabled: existing?.enabled ?? true,
-            scheduleType: existing?.scheduleType ?? job.scheduleType,
-            intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
-            timeOfDay: existing
-                ? existing.timeOfDay
-                : "timeOfDay" in job && typeof job.timeOfDay === "string"
-                  ? job.timeOfDay
-                  : null,
-            cronExpression: existing?.cronExpression ?? null,
-        });
-        if (existing?.enabled ?? true) {
-            seedMissingLocalCacheEntry(job.actionPayload.key);
+        for (const job of cacheRefreshScheduledJobs) {
+            const existing = getScheduledJob(job.id);
+            upsertScheduledJob({
+                ...job,
+                enabled: existing?.enabled ?? true,
+                scheduleType: existing?.scheduleType ?? job.scheduleType,
+                intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
+                timeOfDay: existing
+                    ? existing.timeOfDay
+                    : "timeOfDay" in job && typeof job.timeOfDay === "string"
+                      ? job.timeOfDay
+                      : null,
+                cronExpression: existing?.cronExpression ?? null,
+            });
+            if (existing?.enabled ?? true) {
+                seedKeys.push(job.actionPayload.key);
+            }
         }
+        db.exec("COMMIT");
+    } catch (error) {
+        try {
+            db.exec("ROLLBACK");
+        } catch {
+            // Preserve the original transaction failure.
+        }
+        throw error;
+    }
+    for (const key of seedKeys) {
+        seedMissingLocalCacheEntry(key);
     }
 }
 

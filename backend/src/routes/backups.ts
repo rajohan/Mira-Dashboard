@@ -3,27 +3,59 @@ import { randomUUID } from "node:crypto";
 
 import express, { type RequestHandler } from "express";
 
+import { db } from "../db.js";
 import { asyncRoute } from "../lib/errors.js";
 import { refreshCacheProducer } from "../services/cacheRefresh.js";
+import {
+    getScheduledJob,
+    registerScheduledJobAction,
+    removeScheduledJobsNotInAction,
+    upsertScheduledJob,
+} from "../services/scheduledJobs.js";
 const MAX_OUTPUT_CHARS = 100_000;
+const SCHEDULED_BACKUP_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+const BACKUP_ABORT_SIGKILL_GRACE_MS = 10_000;
+const KOPIA_BACKUP_SCRIPT_PATTERN = "/opt/docker/apps/kopia/backup.sh";
+const WALG_BACKUP_SCRIPT_PATTERN = "/usr/local/bin/backup-push.sh";
+const CONTAINER_PGREP_NO_MATCH_MARKER = "__MIRA_CONTAINER_PGREP_NO_MATCH__";
 let spawnBackupProcess = spawn;
+let backupAbortContainerWaitMs = 30_000;
+let backupAbortContainerPollMs = 1_000;
+let backupAbortContainerConfirmAttempts = 3;
+let backupAbortDockerExecTimeoutMs = 5_000;
+
+interface BackupAbortConfig {
+    container: string;
+    processPattern: string;
+}
 
 /** Represents backup job. */
 interface BackupJob {
     id: string;
     type: "kopia" | "walg";
-    status: "running" | "done";
+    status: "running" | "done" | "needs_attention";
     code: number | null;
     stdout: string;
     stderr: string;
     startedAt: number;
     endedAt: number | null;
+    completed: Promise<BackupJob>;
     process?: ChildProcess;
+    statusRefreshed?: boolean;
 }
 
 /** Represents the backup job API response. */
 interface BackupJobResponse {
-    job: BackupJob | null;
+    job: {
+        id: string;
+        type: BackupJob["type"];
+        status: BackupJob["status"];
+        code: number | null;
+        stdout: string;
+        stderr: string;
+        startedAt: number;
+        endedAt: number | null;
+    } | null;
 }
 
 const backupJobs = new Map<string, BackupJob>();
@@ -88,14 +120,102 @@ function mapJob(job: BackupJob | null) {
     };
 }
 
+/** Returns backup type from scheduled job payload. */
+function getScheduledBackupType(payload: unknown) {
+    if (typeof payload !== "object" || payload === null) {
+        return;
+    }
+
+    return (payload as { type?: unknown }).type;
+}
+
+function backupStatusCacheKey(type: BackupJob["type"]) {
+    return type === "kopia" ? "backup.kopia.status" : "backup.walg.status";
+}
+
+function evictCompletedBackupJobs(type: BackupJob["type"]) {
+    for (const [id, job] of backupJobs) {
+        if (job.type === type && job.status === "done") {
+            backupJobs.delete(id);
+        }
+    }
+}
+
+async function clearNeedsAttentionBackupJob(type: BackupJob["type"]) {
+    const job = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
+    if (!job) {
+        throw Object.assign(new Error(`${type.toUpperCase()} backup job not found`), {
+            statusCode: 404,
+        });
+    }
+    if (job.status !== "needs_attention") {
+        throw Object.assign(
+            new Error(`${type.toUpperCase()} backup does not need attention`),
+            { statusCode: 409 }
+        );
+    }
+    backupJobs.delete(job.id);
+    if (type === "kopia" && activeKopiaJobId === job.id) {
+        activeKopiaJobId = null;
+    }
+    if (type === "walg" && activeWalgJobId === job.id) {
+        activeWalgJobId = null;
+    }
+    await refreshBackupStatus(type, job);
+    return job;
+}
+
+function recordBackupNeedsAttention(type: BackupJob["type"], stderr: string): BackupJob {
+    const jobId = randomUUID();
+    let resolveCompleted!: (job: BackupJob) => void;
+    const now = Date.now();
+    const job: BackupJob = {
+        id: jobId,
+        type,
+        status: "needs_attention",
+        code: 130,
+        stdout: "",
+        stderr,
+        startedAt: now,
+        endedAt: now,
+        completed: new Promise<BackupJob>((resolve) => {
+            resolveCompleted = resolve;
+        }),
+    };
+    backupJobs.set(jobId, job);
+    if (type === "kopia") {
+        activeKopiaJobId = jobId;
+    } else {
+        activeWalgJobId = jobId;
+    }
+    resolveCompleted(job);
+    return job;
+}
+
 /** Performs start backup job. */
-function startBackupJob(type: BackupJob["type"], command: string) {
+function startBackupJob(
+    type: BackupJob["type"],
+    command: string,
+    signal?: AbortSignal,
+    abortConfig?: BackupAbortConfig,
+    hostAbortPattern?: string
+) {
     const existingJob = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
     if (existingJob?.status === "running") {
         return existingJob;
     }
+    if (existingJob?.status === "needs_attention") {
+        throw Object.assign(new Error(`${type.toUpperCase()} backup needs attention`), {
+            statusCode: 409,
+        });
+    }
+    if (signal?.aborted) {
+        throw new Error("Backup aborted by scheduler");
+    }
+    evictCompletedBackupJobs(type);
 
     const jobId = randomUUID();
+    let resolveCompleted!: (job: BackupJob) => void;
     const job: BackupJob = {
         id: jobId,
         type,
@@ -105,6 +225,9 @@ function startBackupJob(type: BackupJob["type"], command: string) {
         stderr: "",
         startedAt: Date.now(),
         endedAt: null,
+        completed: new Promise<BackupJob>((resolve) => {
+            resolveCompleted = resolve;
+        }),
     };
 
     backupJobs.set(jobId, job);
@@ -117,6 +240,7 @@ function startBackupJob(type: BackupJob["type"], command: string) {
     let child: ReturnType<typeof spawn>;
     try {
         child = spawnBackupProcess("bash", ["-lc", command], {
+            detached: true,
             env: process.env,
         });
     } catch (error) {
@@ -133,6 +257,125 @@ function startBackupJob(type: BackupJob["type"], command: string) {
     job.process = child;
     let finalized = false;
     let finalizing = false;
+    let abortRequested = false;
+    let hostAbortKillTimer: NodeJS.Timeout | null = null;
+    let containerAbortKillTimer: NodeJS.Timeout | null = null;
+
+    const finalizeJob = async (code: number, signalName: NodeJS.Signals | null) => {
+        if (finalized || finalizing) {
+            return;
+        }
+        finalizing = true;
+        if (hostAbortKillTimer) {
+            clearTimeout(hostAbortKillTimer);
+            hostAbortKillTimer = null;
+        }
+        const interrupted = abortRequested || signalName !== null;
+        let needsAttention = false;
+        if (interrupted && abortConfig) {
+            needsAttention = !(await waitForContainerProcessExitWithRetries(
+                abortConfig,
+                job
+            ));
+        }
+        if (interrupted && hostAbortPattern) {
+            needsAttention = !(await waitForHostProcessExitWithRetries(
+                hostAbortPattern,
+                job
+            ));
+        }
+        if (containerAbortKillTimer) {
+            clearTimeout(containerAbortKillTimer);
+            containerAbortKillTimer = null;
+        }
+        const completedCode = interrupted ? 130 : code;
+        job.status = needsAttention ? "needs_attention" : "done";
+        job.code = completedCode;
+        job.endedAt = Date.now();
+        finalized = true;
+        signal?.removeEventListener("abort", abortBackup);
+        resolveCompleted(job);
+        await refreshBackupStatus(type, job);
+    };
+
+    const markNeedsAttention = async () => {
+        if (finalized || finalizing) {
+            return;
+        }
+        finalizing = true;
+        if (hostAbortKillTimer) {
+            clearTimeout(hostAbortKillTimer);
+            hostAbortKillTimer = null;
+        }
+        if (containerAbortKillTimer) {
+            clearTimeout(containerAbortKillTimer);
+            containerAbortKillTimer = null;
+        }
+        job.status = "needs_attention";
+        job.code = 130;
+        job.endedAt = Date.now();
+        finalized = true;
+        signal?.removeEventListener("abort", abortBackup);
+        resolveCompleted(job);
+        await refreshBackupStatus(type, job);
+    };
+
+    const abortBackup = () => {
+        abortRequested = true;
+        job.stderr = trimOutput(`${job.stderr}\nBackup aborted by scheduler`.trim());
+        if (abortConfig) {
+            terminateContainerProcess(abortConfig, "TERM").catch((error: unknown) => {
+                job.stderr = trimOutput(
+                    `${job.stderr}\nFailed to terminate container backup process: ${String(error)}`.trim()
+                );
+            });
+            containerAbortKillTimer = setTimeout(() => {
+                terminateContainerProcess(abortConfig, "KILL").catch((error: unknown) => {
+                    job.stderr = trimOutput(
+                        `${job.stderr}\nFailed to force terminate container backup process: ${String(error)}`.trim()
+                    );
+                });
+            }, BACKUP_ABORT_SIGKILL_GRACE_MS);
+            containerAbortKillTimer.unref();
+        }
+        try {
+            if (typeof child.pid === "number") {
+                const childPid = child.pid;
+                const processGroupId = -childPid;
+                process.kill(processGroupId, "SIGTERM");
+                hostAbortKillTimer = setTimeout(() => {
+                    try {
+                        process.kill(processGroupId, "SIGKILL");
+                    } catch (error) {
+                        job.stderr = trimOutput(
+                            `${job.stderr}\nFailed to force terminate backup process group: ${String(error)}`.trim()
+                        );
+                        try {
+                            process.kill(childPid, "SIGKILL");
+                        } catch (childKillError) {
+                            job.stderr = trimOutput(
+                                `${job.stderr}\nFailed to force terminate backup process: ${String(childKillError)}`.trim()
+                            );
+                            void markNeedsAttention();
+                        }
+                    }
+                }, BACKUP_ABORT_SIGKILL_GRACE_MS);
+                hostAbortKillTimer.unref();
+            } else if (!child.kill("SIGTERM")) {
+                job.stderr = trimOutput(
+                    `${job.stderr}\nFailed to terminate backup process`.trim()
+                );
+                void finalizeJob(130, "SIGTERM");
+            }
+        } catch (error) {
+            job.stderr = trimOutput(
+                `${job.stderr}\nFailed to terminate backup process: ${String(error)}`.trim()
+            );
+            void finalizeJob(130, "SIGTERM");
+        }
+    };
+
+    signal?.addEventListener("abort", abortBackup, { once: true });
 
     child.stdout?.on("data", (data) => {
         job.stdout = trimOutput(job.stdout + String(data));
@@ -143,65 +386,569 @@ function startBackupJob(type: BackupJob["type"], command: string) {
     });
 
     child.on("close", async (code, signal) => {
-        if (finalized || finalizing) {
-            return;
-        }
-        finalizing = true;
-        job.status = "done";
-        job.code = signal ? 130 : code;
-        job.endedAt = Date.now();
-        finalized = true;
-        if (!signal && code === 0) {
-            await refreshBackupStatus(type, job);
-        }
+        await finalizeJob(signal ? 130 : (code ?? 1), signal);
     });
 
-    child.on("error", (error) => {
+    child.on("error", async (error) => {
         if (finalized || finalizing) {
             return;
         }
         finalizing = true;
+        if (hostAbortKillTimer) {
+            clearTimeout(hostAbortKillTimer);
+            hostAbortKillTimer = null;
+        }
+        if (containerAbortKillTimer) {
+            clearTimeout(containerAbortKillTimer);
+            containerAbortKillTimer = null;
+        }
         finalized = true;
         job.status = "done";
         job.code = 1;
         job.stderr = trimOutput(`${job.stderr}\n${error.message}`.trim());
         job.endedAt = Date.now();
+        if (signal) {
+            signal.removeEventListener("abort", abortBackup);
+        }
+        resolveCompleted(job);
+        await refreshBackupStatus(type, job);
     });
 
     return job;
+}
+
+function runDockerExec(
+    container: string,
+    args: readonly string[]
+): Promise<{ code: number; stdout: string; stderr: string }> {
+    return new Promise((resolve, reject) => {
+        const child = spawnBackupProcess("docker", ["exec", container, ...args], {
+            detached: true,
+            env: process.env,
+        });
+        const timeout = setTimeout(() => {
+            try {
+                if (typeof child.pid === "number") {
+                    process.kill(-child.pid, "SIGKILL");
+                    reject(new Error(`Timed out waiting for docker exec ${args[0]}`));
+                    return;
+                }
+            } catch {
+                // Fall back to the direct child handle when process-group kill fails.
+            }
+            try {
+                child.kill("SIGKILL");
+            } catch {
+                // The timeout error below is still the actionable failure.
+            }
+            reject(new Error(`Timed out waiting for docker exec ${args[0]}`));
+        }, backupAbortDockerExecTimeoutMs);
+        timeout.unref();
+        let stdout = "";
+        let stderr = "";
+        child.stdout?.on("data", (data) => {
+            stdout = trimOutput(stdout + String(data));
+        });
+        child.stderr?.on("data", (data) => {
+            stderr = trimOutput(stderr + String(data));
+        });
+        child.on("error", (error) => {
+            clearTimeout(timeout);
+            reject(error);
+        });
+        child.on("close", (code) => {
+            clearTimeout(timeout);
+            resolve({ code: code ?? 1, stdout, stderr });
+        });
+    });
+}
+
+function shellSingleQuote(value: string): string {
+    return `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function pgrepFullCommandPattern(pattern: string): string {
+    const lastSlash = pattern.lastIndexOf("/");
+    const suffixOffset = lastSlash + 1;
+    const suffixMatch = /[A-Za-z0-9]/u.exec(pattern.slice(suffixOffset));
+    if (!suffixMatch) {
+        return pattern.replace(/[A-Za-z0-9]/u, (match) => `[${match}]`);
+    }
+    const index = suffixOffset + suffixMatch.index;
+    return `${pattern.slice(0, index)}[${pattern[index]}]${pattern.slice(index + 1)}`;
+}
+
+async function runContainerPgrep(config: BackupAbortConfig) {
+    const processPattern = pgrepFullCommandPattern(config.processPattern);
+    return runDockerExec(config.container, [
+        "sh",
+        "-c",
+        [
+            `pgrep -f -- ${shellSingleQuote(processPattern)} >/dev/null`,
+            "code=$?",
+            String.raw`if [ "$code" -eq 1 ]; then printf '%s\n' ${shellSingleQuote(CONTAINER_PGREP_NO_MATCH_MARKER)}; fi`,
+            'exit "$code"',
+        ].join("; "),
+    ]);
+}
+
+function isContainerPgrepNoMatch(result: { code: number; stdout: string }): boolean {
+    return result.code === 1 && result.stdout.includes(CONTAINER_PGREP_NO_MATCH_MARKER);
+}
+
+async function assertNoContainerBackupInProgress(
+    config: BackupAbortConfig,
+    type: BackupJob["type"],
+    getCurrent: () => BackupJob | null
+): Promise<BackupJob | null> {
+    const result = await runContainerPgrep(config);
+    if (isContainerPgrepNoMatch(result)) {
+        return null;
+    }
+    if (result.code === 0) {
+        const currentJob = getCurrent();
+        if (currentJob?.status === "running") {
+            return currentJob;
+        }
+        if (currentJob?.status === "needs_attention") {
+            throw Object.assign(
+                new Error(`${type.toUpperCase()} backup needs attention`),
+                {
+                    statusCode: 409,
+                }
+            );
+        }
+        recordBackupNeedsAttention(
+            type,
+            `${type.toUpperCase()} backup needs attention: backup process is still running`
+        );
+        throw Object.assign(
+            new Error(
+                `${type.toUpperCase()} backup needs attention: backup process is still running`
+            ),
+            { statusCode: 409 }
+        );
+    }
+    throw Object.assign(
+        new Error(result.stderr || `docker exec pgrep exited ${result.code}`),
+        { statusCode: 503 }
+    );
+}
+
+function runHostPgrep(pattern: string): Promise<{ code: number; stderr: string }> {
+    return new Promise((resolve, reject) => {
+        const child = spawnBackupProcess("pgrep", ["-f", pattern], {
+            detached: true,
+            env: process.env,
+        });
+        const timeout = setTimeout(() => {
+            try {
+                if (typeof child.pid === "number") {
+                    process.kill(-child.pid, "SIGKILL");
+                } else {
+                    child.kill("SIGKILL");
+                }
+            } catch {
+                try {
+                    child.kill("SIGKILL");
+                } catch {
+                    // The timeout error below is still the actionable failure.
+                }
+            }
+            reject(new Error(`Timed out waiting for pgrep ${pattern}`));
+        }, backupAbortDockerExecTimeoutMs);
+        timeout.unref();
+        let stderr = "";
+        child.stderr?.on("data", (data) => {
+            stderr = trimOutput(stderr + String(data));
+        });
+        child.on("error", (error) => {
+            clearTimeout(timeout);
+            reject(error);
+        });
+        child.on("close", (code) => {
+            clearTimeout(timeout);
+            resolve({ code: code ?? 1, stderr });
+        });
+    });
+}
+
+async function assertNoHostBackupInProgress(
+    type: BackupJob["type"],
+    processPattern: string,
+    getCurrent: () => BackupJob | null
+): Promise<BackupJob | null> {
+    const result = await runHostPgrep(processPattern);
+    if (result.code === 1) {
+        return null;
+    }
+    if (result.code === 0) {
+        const currentJob = getCurrent();
+        if (currentJob?.status === "running") {
+            return currentJob;
+        }
+        if (currentJob?.status === "needs_attention") {
+            throw Object.assign(
+                new Error(`${type.toUpperCase()} backup needs attention`),
+                {
+                    statusCode: 409,
+                }
+            );
+        }
+        recordBackupNeedsAttention(
+            type,
+            `${type.toUpperCase()} backup needs attention: backup process is still running`
+        );
+        throw Object.assign(
+            new Error(
+                `${type.toUpperCase()} backup needs attention: backup process is still running`
+            ),
+            { statusCode: 409 }
+        );
+    }
+    throw Object.assign(new Error(result.stderr || `pgrep exited ${result.code}`), {
+        statusCode: 503,
+    });
+}
+
+async function terminateContainerProcess(
+    config: BackupAbortConfig,
+    signalName: "TERM" | "KILL"
+): Promise<void> {
+    const result = await runDockerExec(config.container, [
+        "pkill",
+        `-${signalName}`,
+        "-f",
+        config.processPattern,
+    ]);
+    if (result.code > 1) {
+        throw new Error(result.stderr || `docker exec pkill exited ${result.code}`);
+    }
+}
+
+async function waitForContainerProcessExit(config: BackupAbortConfig): Promise<void> {
+    const deadline = Date.now() + backupAbortContainerWaitMs;
+    while (Date.now() < deadline) {
+        const result = await runContainerPgrep(config);
+        if (isContainerPgrepNoMatch(result)) {
+            return;
+        }
+        if (result.code !== 0) {
+            throw new Error(result.stderr || `docker exec pgrep exited ${result.code}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, backupAbortContainerPollMs));
+    }
+    throw new Error(`Timed out waiting for ${config.processPattern} to exit`);
+}
+
+async function waitForContainerProcessExitWithRetries(
+    config: BackupAbortConfig,
+    job: BackupJob
+): Promise<boolean> {
+    for (let attempt = 1; attempt <= backupAbortContainerConfirmAttempts; attempt += 1) {
+        try {
+            await waitForContainerProcessExit(config);
+            return true;
+        } catch (error: unknown) {
+            job.stderr = trimOutput(
+                `${job.stderr}\nFailed to confirm backup process termination: ${String(error)}`.trim()
+            );
+            if (attempt >= backupAbortContainerConfirmAttempts) {
+                job.stderr = trimOutput(
+                    `${job.stderr}\nBackup termination needs attention after ${attempt} failed confirmation attempts`.trim()
+                );
+                return false;
+            }
+            await new Promise((resolve) =>
+                setTimeout(resolve, backupAbortContainerPollMs)
+            );
+        }
+    }
+    return false;
+}
+
+async function waitForHostProcessExit(processPattern: string): Promise<void> {
+    const deadline = Date.now() + backupAbortContainerWaitMs;
+    while (Date.now() < deadline) {
+        const result = await runHostPgrep(processPattern);
+        if (result.code === 1) {
+            return;
+        }
+        if (result.code !== 0) {
+            throw new Error(result.stderr || `pgrep exited ${result.code}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, backupAbortContainerPollMs));
+    }
+    throw new Error(`Timed out waiting for ${processPattern} to exit`);
+}
+
+async function waitForHostProcessExitWithRetries(
+    processPattern: string,
+    job: BackupJob
+): Promise<boolean> {
+    for (let attempt = 1; attempt <= backupAbortContainerConfirmAttempts; attempt += 1) {
+        try {
+            await waitForHostProcessExit(processPattern);
+            return true;
+        } catch (error: unknown) {
+            job.stderr = trimOutput(
+                `${job.stderr}\nFailed to confirm backup process termination: ${String(error)}`.trim()
+            );
+            if (attempt >= backupAbortContainerConfirmAttempts) {
+                job.stderr = trimOutput(
+                    `${job.stderr}\nBackup termination needs attention after ${attempt} failed confirmation attempts`.trim()
+                );
+                return false;
+            }
+            await new Promise((resolve) =>
+                setTimeout(resolve, backupAbortContainerPollMs)
+            );
+        }
+    }
+    return false;
 }
 
 async function refreshBackupStatus(
     type: BackupJob["type"],
     job: BackupJob
 ): Promise<void> {
-    const cacheKey = type === "kopia" ? "backup.kopia.status" : "backup.walg.status";
-    await refreshCacheProducer(cacheKey).catch((error: unknown) => {
-        job.stderr = trimOutput(
-            `${job.stderr}\nStatus refresh failed: ${String(error)}`.trim()
-        );
-    });
+    const cacheKey = backupStatusCacheKey(type);
+    await refreshCacheProducer(cacheKey, undefined, { force: true }).catch(
+        (error: unknown) => {
+            job.stderr = trimOutput(
+                `${job.stderr}\nStatus refresh failed: ${String(error)}`.trim()
+            );
+        }
+    );
+    job.statusRefreshed = true;
 }
 
 /** Performs start kopia backup job. */
-function startKopiaBackupJob() {
-    return startBackupJob("kopia", "/opt/docker/apps/kopia/backup.sh");
+async function startKopiaBackupJob(signal?: AbortSignal) {
+    const existingJob = getCurrentKopiaJob();
+    if (existingJob?.status === "running") {
+        return existingJob;
+    }
+    if (existingJob?.status === "needs_attention") {
+        throw Object.assign(new Error("KOPIA backup needs attention"), {
+            statusCode: 409,
+        });
+    }
+    let hostJob: BackupJob | null;
+    try {
+        hostJob = await assertNoHostBackupInProgress(
+            "kopia",
+            KOPIA_BACKUP_SCRIPT_PATTERN,
+            getCurrentKopiaJob
+        );
+    } catch (error) {
+        await refreshCacheProducer(backupStatusCacheKey("kopia")).catch(() => {
+            // Preserve the original preflight failure for the API response.
+        });
+        throw error;
+    }
+    if (hostJob) {
+        return hostJob;
+    }
+    return startBackupJob(
+        "kopia",
+        KOPIA_BACKUP_SCRIPT_PATTERN,
+        signal,
+        undefined,
+        KOPIA_BACKUP_SCRIPT_PATTERN
+    );
 }
 
 /** Performs start walg backup job. */
-function startWalgBackupJob() {
+async function startWalgBackupJob(signal?: AbortSignal) {
+    const abortConfig = {
+        container: "walg",
+        processPattern: WALG_BACKUP_SCRIPT_PATTERN,
+    };
+    const existingJob = getCurrentWalgJob();
+    if (existingJob?.status === "running") {
+        return existingJob;
+    }
+    if (existingJob?.status === "needs_attention") {
+        throw Object.assign(new Error("WALG backup needs attention"), {
+            statusCode: 409,
+        });
+    }
+    let containerJob: BackupJob | null;
+    try {
+        containerJob = await assertNoContainerBackupInProgress(
+            abortConfig,
+            "walg",
+            getCurrentWalgJob
+        );
+    } catch (error) {
+        await refreshCacheProducer(backupStatusCacheKey("walg")).catch((refreshError) => {
+            console.warn(
+                "[Backups] Failed to refresh WAL-G status after preflight failure:",
+                refreshError
+            );
+            // Preserve the original preflight failure for the API response.
+        });
+        throw error;
+    }
+    if (containerJob) {
+        return containerJob;
+    }
     return startBackupJob(
         "walg",
-        "docker exec walg /bin/sh /usr/local/bin/backup-push.sh"
+        "docker exec walg /bin/sh /usr/local/bin/backup-push.sh",
+        signal,
+        abortConfig
     );
+}
+
+async function startScheduledBackup(type: BackupJob["type"], signal?: AbortSignal) {
+    if (signal?.aborted) {
+        throw new Error("Backup aborted by scheduler");
+    }
+    const currentJob = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
+    if (currentJob?.status === "running" || currentJob?.status === "needs_attention") {
+        throw Object.assign(
+            new Error(
+                currentJob.status === "needs_attention"
+                    ? `${type.toUpperCase()} backup needs attention`
+                    : `${type.toUpperCase()} backup is already running`
+            ),
+            {
+                statusCode: 409,
+            }
+        );
+    }
+    const job =
+        type === "kopia"
+            ? await startKopiaBackupJob(signal)
+            : await startWalgBackupJob(signal);
+    const completedJob = await job.completed;
+    if (completedJob.code !== 0) {
+        const details = completedJob.stderr || completedJob.stdout;
+        throw new Error(
+            `${type.toUpperCase()} backup failed with code ${completedJob.code}${
+                details ? `: ${details}` : ""
+            }`
+        );
+    }
+    return { backup: mapJob(completedJob) };
+}
+
+const backupScheduledJobs = [
+    {
+        id: "backup.walg",
+        name: "WAL-G nightly backup",
+        description: "Run the nightly WAL-G PostgreSQL base backup.",
+        scheduleType: "daily",
+        intervalSeconds: 24 * 60 * 60,
+        timeOfDay: "03:20",
+        actionKey: "backup.run",
+        actionPayload: { type: "walg" },
+    },
+    {
+        id: "backup.kopia",
+        name: "Kopia nightly backup",
+        description: "Run the nightly Kopia filesystem backup.",
+        scheduleType: "daily",
+        intervalSeconds: 24 * 60 * 60,
+        timeOfDay: "03:50",
+        actionKey: "backup.run",
+        actionPayload: { type: "kopia" },
+    },
+] as const;
+
+export function registerBackupScheduledJobs(): void {
+    registerScheduledJobAction(
+        "backup.run",
+        (job, signal) => {
+            const type = getScheduledBackupType(job.actionPayload);
+            if (type !== "kopia" && type !== "walg") {
+                throw Object.assign(
+                    new Error(`Scheduled backup job ${job.id} has invalid backup type`),
+                    { statusCode: 400 }
+                );
+            }
+            return startScheduledBackup(type, signal);
+        },
+        { timeoutMs: SCHEDULED_BACKUP_TIMEOUT_MS }
+    );
+    db.exec("BEGIN");
+    try {
+        removeScheduledJobsNotInAction(
+            "backup.run",
+            backupScheduledJobs.map((job) => job.id)
+        );
+
+        for (const job of backupScheduledJobs) {
+            const existing = getScheduledJob(job.id);
+            upsertScheduledJob({
+                ...job,
+                enabled: existing?.enabled ?? true,
+                scheduleType: existing?.scheduleType ?? job.scheduleType,
+                intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
+                timeOfDay: existing ? existing.timeOfDay : job.timeOfDay,
+                cronExpression: existing?.cronExpression ?? null,
+            });
+        }
+        db.exec("COMMIT");
+    } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+    }
 }
 
 export const __testing = {
     trimOutput,
     getCurrentJob,
     mapJob,
+    getScheduledBackupType,
+    pgrepFullCommandPattern,
+    startScheduledBackup,
+    startBackupJobForTest(
+        type: BackupJob["type"],
+        command: string,
+        signal?: AbortSignal
+    ): BackupJob {
+        return startBackupJob(type, command, signal);
+    },
+    recordBackupNeedsAttentionForTest(type: BackupJob["type"]): BackupJob {
+        return recordBackupNeedsAttention(type, `${type.toUpperCase()} test attention`);
+    },
     setSpawnBackupProcessForTest(nextSpawn?: typeof spawn): void {
         spawnBackupProcess = nextSpawn ?? spawn;
+    },
+    setBackupAbortContainerTimeoutsForTest(waitMs: number, pollMs: number): void {
+        backupAbortContainerWaitMs = waitMs;
+        backupAbortContainerPollMs = pollMs;
+    },
+    setBackupAbortContainerConfirmAttemptsForTest(attempts: number): void {
+        backupAbortContainerConfirmAttempts = attempts;
+    },
+    setBackupAbortDockerExecTimeoutForTest(timeoutMs: number): void {
+        backupAbortDockerExecTimeoutMs = timeoutMs;
+    },
+    getBackupJobCountForTest(): number {
+        return backupJobs.size;
+    },
+    hasRefreshedBackupStatusForTest(type: BackupJob["type"]): boolean {
+        for (const job of backupJobs.values()) {
+            if (job.type === type && job.statusRefreshed) {
+                return true;
+            }
+        }
+        return false;
+    },
+    markActiveJobNeedsAttentionForTest(type: BackupJob["type"]): void {
+        const job = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
+        if (job) {
+            job.status = "needs_attention";
+        }
+    },
+    resetJobsForTest(): void {
+        backupJobs.clear();
+        activeKopiaJobId = null;
+        activeWalgJobId = null;
     },
 };
 
@@ -218,10 +965,21 @@ export default function backupRoutes(
         "/api/backups/kopia/run",
         asyncRoute(
             async (_req, res) => {
-                const job = startKopiaBackupJob();
+                const job = await startKopiaBackupJob();
                 res.json({ ok: true, job: mapJob(job) });
             },
             { fallback: "Failed to start Kopia backup" }
+        )
+    );
+
+    app.post(
+        "/api/backups/kopia/clear-needs-attention",
+        asyncRoute(
+            async (_req, res) => {
+                const job = await clearNeedsAttentionBackupJob("kopia");
+                res.json({ ok: true, cleared: mapJob(job) });
+            },
+            { fallback: "Failed to clear Kopia backup attention" }
         )
     );
 
@@ -233,10 +991,21 @@ export default function backupRoutes(
         "/api/backups/walg/run",
         asyncRoute(
             async (_req, res) => {
-                const job = startWalgBackupJob();
+                const job = await startWalgBackupJob();
                 res.json({ ok: true, job: mapJob(job) });
             },
             { fallback: "Failed to start WAL-G backup" }
+        )
+    );
+
+    app.post(
+        "/api/backups/walg/clear-needs-attention",
+        asyncRoute(
+            async (_req, res) => {
+                const job = await clearNeedsAttentionBackupJob("walg");
+                res.json({ ok: true, cleared: mapJob(job) });
+            },
+            { fallback: "Failed to clear WAL-G backup attention" }
         )
     );
 }

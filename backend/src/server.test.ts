@@ -1035,6 +1035,60 @@ describe("server bootstrap", () => {
             assert.equal(initializedToken, undefined);
             assert.match(String(warnings.at(-1)?.[0]), /No gateway token/u);
 
+            const quotaSeedError = new Error("quota seed unavailable");
+            let quotaCheckRan = false;
+            serverStartTesting.queueQuotaNotificationCheckAfterSeed(
+                Promise.reject(quotaSeedError),
+                async () => {
+                    quotaCheckRan = true;
+                }
+            );
+            await new Promise((resolve) => setImmediate(resolve));
+            assert.equal(quotaCheckRan, false);
+            assert.equal(
+                warnings.some(
+                    (entry) =>
+                        String(entry[0]).includes(
+                            "Skipping startup quota notification check"
+                        ) && entry[1] === quotaSeedError
+                ),
+                true
+            );
+            const quotaCheckError = new Error("quota check unavailable");
+            serverStartTesting.queueQuotaNotificationCheckAfterSeed(
+                Promise.resolve(),
+                async () => {
+                    throw quotaCheckError;
+                }
+            );
+            await new Promise((resolve) => setImmediate(resolve));
+            assert.equal(
+                warnings.some(
+                    (entry) =>
+                        String(entry[0]).includes(
+                            "Startup quota notification check failed"
+                        ) && entry[1] === quotaCheckError
+                ),
+                true
+            );
+            const syncQuotaCheckError = new Error("quota check crashed");
+            serverStartTesting.queueQuotaNotificationCheckAfterSeed(
+                Promise.resolve(),
+                () => {
+                    throw syncQuotaCheckError;
+                }
+            );
+            await new Promise((resolve) => setImmediate(resolve));
+            assert.equal(
+                warnings.some(
+                    (entry) =>
+                        String(entry[0]).includes(
+                            "Startup quota notification check failed"
+                        ) && entry[1] === syncQuotaCheckError
+                ),
+                true
+            );
+
             server.listen = ((port: number, listener?: () => void) => {
                 listenedPort = port;
                 listener?.();

@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 
 import { getPersistedGatewayToken } from "./auth.js";
 import gateway from "./gateway.js";
+import { registerBackupScheduledJobs } from "./routes/backups.js";
 import { resolveListenPort, server } from "./server.js";
 import {
     registerCacheRefreshScheduledJobs,
@@ -58,6 +59,32 @@ function removeSchedulerCloseCleanup(): void {
     }
 }
 
+function queueQuotaNotificationCheckAfterSeed(
+    seedPromise = waitForLocalCacheSeed("quotas.summary"),
+    notificationCheck = runQuotaNotificationCheck
+): void {
+    void seedPromise.then(
+        () => {
+            try {
+                void notificationCheck().catch((error: unknown) => {
+                    console.warn(
+                        "[Backend] Startup quota notification check failed:",
+                        error
+                    );
+                });
+            } catch (error) {
+                console.warn("[Backend] Startup quota notification check failed:", error);
+            }
+        },
+        (error: unknown) => {
+            console.warn(
+                "[Backend] Skipping startup quota notification check after cache seed failure:",
+                error
+            );
+        }
+    );
+}
+
 /** Starts Gateway and notification monitors after the HTTP server is listening. */
 export function handleServerListening(): void {
     let gatewayStarted = false;
@@ -76,6 +103,7 @@ export function handleServerListening(): void {
         }
 
         if (shouldStartScheduledJobs()) {
+            registerBackupScheduledJobs();
             registerCacheRefreshScheduledJobs();
             startScheduledJobScheduler();
             scheduledJobSchedulerStarted = true;
@@ -83,9 +111,7 @@ export function handleServerListening(): void {
         }
         startQuotaNotificationMonitor();
         quotaMonitorStarted = true;
-        void waitForLocalCacheSeed("quotas.summary").then(() =>
-            runQuotaNotificationCheck()
-        );
+        queueQuotaNotificationCheckAfterSeed();
         startOpenClawNotificationMonitor();
         openClawMonitorStarted = true;
         afterBackgroundServicesStartedForTest?.();
@@ -174,6 +200,7 @@ if (shouldStartOnImport()) {
 }
 
 export const __testing = {
+    queueQuotaNotificationCheckAfterSeed,
     setAfterBackgroundServicesStartedForTest(callback: (() => void) | undefined): void {
         afterBackgroundServicesStartedForTest = callback;
     },

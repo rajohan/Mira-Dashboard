@@ -20,6 +20,10 @@ let refreshMoltbookCache: Awaited<
 let registerCacheRefreshScheduledJobs: Awaited<
     typeof import("./cacheRefresh.js")
 >["registerCacheRefreshScheduledJobs"];
+let waitForLocalCacheSeed: Awaited<
+    typeof import("./cacheRefresh.js")
+>["waitForLocalCacheSeed"];
+let getScheduledJob: Awaited<typeof import("./scheduledJobs.js")>["getScheduledJob"];
 let runScheduledJob: Awaited<typeof import("./scheduledJobs.js")>["runScheduledJob"];
 let scheduledJobsTesting: Awaited<typeof import("./scheduledJobs.js")>["__testing"];
 let writeCacheFailure: Awaited<typeof import("./cacheRefresh.js")>["writeCacheFailure"];
@@ -138,11 +142,15 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
             refreshCacheProducer,
             refreshMoltbookCache,
             registerCacheRefreshScheduledJobs,
+            waitForLocalCacheSeed,
             writeCacheFailure,
             writeCacheSuccess,
         } = await import("./cacheRefresh.js"));
-        ({ __testing: scheduledJobsTesting, runScheduledJob } =
-            await import("./scheduledJobs.js"));
+        ({
+            __testing: scheduledJobsTesting,
+            getScheduledJob,
+            runScheduledJob,
+        } = await import("./scheduledJobs.js"));
     });
 
     beforeEach(async () => {
@@ -3000,24 +3008,42 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
+        db.prepare(
+            `INSERT INTO scheduled_jobs (
+                id, name, description, enabled, schedule_type, interval_seconds,
+                time_of_day, cron_expression, action_key, action_payload_json, next_run_at, created_at, updated_at
+            ) VALUES (?, ?, '', 1, 'interval', 3600, NULL, NULL, 'cache.refresh', ?, NULL, ?, ?)`
+        ).run(
+            "cache.backup.kopia",
+            "Legacy Kopia cache refresh",
+            JSON.stringify({ key: "backup.kopia.status" }),
+            new Date().toISOString(),
+            new Date().toISOString()
+        );
+        db.prepare(
+            `INSERT INTO scheduled_jobs (
+                id, name, description, enabled, schedule_type, interval_seconds,
+                time_of_day, cron_expression, action_key, action_payload_json, next_run_at, created_at, updated_at
+            ) VALUES (?, ?, '', 1, 'interval', 3600, NULL, NULL, 'cache.refresh', ?, NULL, ?, ?)`
+        ).run(
+            "cache.backup.walg",
+            "Legacy WAL-G cache refresh",
+            JSON.stringify({ key: "backup.walg.status" }),
+            new Date().toISOString(),
+            new Date().toISOString()
+        );
         try {
             registerCacheRefreshScheduledJobs();
-            assert.ok(
-                db
-                    .prepare(
-                        "SELECT 1 FROM scheduled_jobs WHERE id = 'cache.backup.kopia'"
-                    )
-                    .get()
-            );
-            assert.ok(
-                db
-                    .prepare(
-                        "SELECT 1 FROM scheduled_jobs WHERE id = 'cache.backup.walg'"
-                    )
-                    .get()
+            assert.equal(
+                (
+                    db
+                        .prepare(
+                            "SELECT COUNT(*) AS count FROM scheduled_jobs WHERE id IN ('cache.backup.kopia', 'cache.backup.walg')"
+                        )
+                        .get() as { count: number }
+                ).count,
+                0
             );
             await withFetch(
                 (url) => {
@@ -3073,8 +3099,6 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
         try {
             registerCacheRefreshScheduledJobs();
@@ -3119,6 +3143,83 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
         }
     });
 
+    it("rolls back cache refresh job pruning when registration fails", (t) => {
+        scheduledJobsTesting.clearActionHandlers();
+        scheduledJobsTesting.resetSchedulerState();
+        const timestamp = new Date().toISOString();
+        db.prepare(
+            `INSERT INTO scheduled_jobs (
+                id, name, description, enabled, schedule_type, interval_seconds,
+                time_of_day, cron_expression, action_key, action_payload_json, next_run_at, created_at, updated_at
+            ) VALUES (?, ?, '', 1, 'interval', 3600, NULL, NULL, 'cache.refresh', ?, NULL, ?, ?)`
+        ).run(
+            "cache.obsolete",
+            "Obsolete cache refresh",
+            JSON.stringify({ key: "obsolete.cache" }),
+            timestamp,
+            timestamp
+        );
+
+        const prepare = db.prepare.bind(db);
+        const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+            if (sql.includes("INSERT INTO scheduled_jobs")) {
+                return {
+                    run: () => {
+                        throw new Error("upsert failed");
+                    },
+                } as unknown as ReturnType<typeof db.prepare>;
+            }
+            return prepare(sql);
+        });
+
+        try {
+            assert.throws(() => registerCacheRefreshScheduledJobs(), /upsert failed/u);
+        } finally {
+            prepareMock.mock.restore();
+            scheduledJobsTesting.clearActionHandlers();
+            scheduledJobsTesting.resetSchedulerState();
+        }
+
+        assert.ok(getScheduledJob("cache.obsolete"));
+    });
+
+    it("preserves cache refresh registration errors when rollback fails", (t) => {
+        scheduledJobsTesting.clearActionHandlers();
+        scheduledJobsTesting.resetSchedulerState();
+        const exec = db.exec.bind(db);
+        const prepare = db.prepare.bind(db);
+        const execMock = t.mock.method(db, "exec", (sql: string) => {
+            if (sql === "ROLLBACK") {
+                throw new Error("rollback failed");
+            }
+            return exec(sql);
+        });
+        const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+            if (sql.includes("INSERT INTO scheduled_jobs")) {
+                return {
+                    run: () => {
+                        throw new Error("upsert failed");
+                    },
+                } as unknown as ReturnType<typeof db.prepare>;
+            }
+            return prepare(sql);
+        });
+
+        try {
+            assert.throws(() => registerCacheRefreshScheduledJobs(), /upsert failed/u);
+        } finally {
+            execMock.mock.restore();
+            prepareMock.mock.restore();
+            scheduledJobsTesting.clearActionHandlers();
+            scheduledJobsTesting.resetSchedulerState();
+            try {
+                db.exec("ROLLBACK");
+            } catch {
+                // The transaction may already be unwound depending on the failure path.
+            }
+        }
+    });
+
     it("seeds missing enabled cache entries when scheduled jobs are registered", async () => {
         const binDir = path.join(tempDir, "registration-seed-bin");
         await mkdir(binDir);
@@ -3158,8 +3259,6 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
         scheduledJobsTesting.clearActionHandlers();
         scheduledJobsTesting.resetSchedulerState();
@@ -3216,8 +3315,6 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
         scheduledJobsTesting.clearActionHandlers();
         scheduledJobsTesting.resetSchedulerState();
@@ -3271,8 +3368,6 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
         db.prepare("UPDATE cache_entries SET expires_at = '' WHERE key = ?").run(
             "weather.spydeberg"
@@ -3327,8 +3422,6 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
         scheduledJobsTesting.clearActionHandlers();
         scheduledJobsTesting.resetSchedulerState();
@@ -3340,9 +3433,13 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
                 },
                 async () => {
                     registerCacheRefreshScheduledJobs();
-                    await waitFor(() => warnMock.mock.callCount() > 0);
+                    await assert.rejects(
+                        waitForLocalCacheSeed("weather.spydeberg"),
+                        /weather unavailable/u
+                    );
                 }
             );
+            assert.equal(warnMock.mock.callCount(), 1);
             assert.match(
                 String(warnMock.mock.calls[0]?.arguments[0] ?? ""),
                 /Failed to seed missing cache entry weather\.spydeberg/u
@@ -3368,8 +3465,6 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
         registerCacheRefreshScheduledJobs();
         db.prepare("UPDATE scheduled_jobs SET enabled = 0 WHERE id = ?").run(
@@ -3386,8 +3481,6 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
         try {
             registerCacheRefreshScheduledJobs();
@@ -3416,8 +3509,6 @@ process.stdout.write("Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/
             "moltbook.feed.new",
             "moltbook.profile",
             "moltbook.my-content",
-            "backup.kopia.status",
-            "backup.walg.status",
         ]);
         scheduledJobsTesting.clearActionHandlers();
         scheduledJobsTesting.resetSchedulerState();
