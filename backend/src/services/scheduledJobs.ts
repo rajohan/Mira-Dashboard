@@ -746,6 +746,19 @@ function finishRunOrReport(
     }
 }
 
+export function createManualScheduledJobRun(jobId: string): ScheduledJobRun {
+    return createRun(jobId, "manual");
+}
+
+export function finishScheduledJobRun(
+    run: ScheduledJobRun,
+    status: Exclude<ScheduledJobRunStatus, "running">,
+    message: string | null,
+    output: Record<string, unknown>
+): ScheduledJobRun {
+    return finishRunOrReport(run, status, message, output);
+}
+
 export async function runScheduledJob(
     id: string,
     triggerType: ScheduledJobTriggerType = "manual",

@@ -36,6 +36,34 @@ type ScheduledBackupPromise = ReturnType<typeof backupTesting.startScheduledBack
     backupType?: "kopia" | "walg";
 };
 
+function scheduledRunCount(jobId: string): number {
+    return (
+        db
+            .prepare("SELECT COUNT(*) AS count FROM scheduled_job_runs WHERE job_id = ?")
+            .get(jobId) as { count: number }
+    ).count;
+}
+
+function latestScheduledRun(jobId: string) {
+    return db
+        .prepare(
+            `SELECT job_id, status, trigger_type, message, output_json
+             FROM scheduled_job_runs
+             WHERE job_id = ?
+             ORDER BY id DESC
+             LIMIT 1`
+        )
+        .get(jobId) as
+        | {
+              job_id: string;
+              status: string;
+              trigger_type: string;
+              message: string | null;
+              output_json: string;
+          }
+        | undefined;
+}
+
 const originalDockerBin = process.env.MIRA_DOCKER_BIN;
 let lastFakeBackupProcess: FakeBackupProcess | null = null;
 let lastFakeHostPgrepProcess: FakeBackupProcess | null = null;
@@ -667,6 +695,32 @@ describe("backup routes", () => {
         assert.equal(cache.tool, "kopia");
     });
 
+    it("records Kopia backup button runs as manual scheduled job runs", async () => {
+        registerBackupScheduledJobs();
+        const started = await requestJson<{
+            ok: boolean;
+            job: { id: string; type: string; status: string };
+        }>(server, "/api/backups/kopia/run", { method: "POST" });
+
+        assert.equal(started.status, 200);
+        assert.equal(started.body.ok, true);
+
+        const done = await waitForDone(server, "/api/backups/kopia");
+        assert.equal(done.status, "done");
+        assert.equal(done.code, 0);
+
+        const run = latestScheduledRun("backup.kopia");
+        assert.ok(run);
+        assert.equal(run.job_id, "backup.kopia");
+        assert.equal(run.status, "success");
+        assert.equal(run.trigger_type, "manual");
+        assert.equal(run.message, null);
+        assert.equal(
+            (JSON.parse(run.output_json) as { backup: { id: string } }).backup.id,
+            started.body.job.id
+        );
+    });
+
     it("evicts older completed backup jobs before starting the next run", async () => {
         const first = await requestJson<{
             ok: boolean;
@@ -689,6 +743,7 @@ describe("backup routes", () => {
     });
 
     it("returns the active job when a Kopia backup is already running", async () => {
+        registerBackupScheduledJobs();
         const releasePath = path.join(tempDir, "release-kopia");
         await withEnv({ FAKE_BACKUP_HOLD_UNTIL: releasePath }, async () => {
             const firstResp = await requestJson<{
@@ -710,6 +765,7 @@ describe("backup routes", () => {
 
             await writeFile(releasePath, "release", "utf8");
             await waitForDone(server, "/api/backups/kopia");
+            assert.equal(scheduledRunCount("backup.kopia"), 1);
         });
     });
 
@@ -736,7 +792,34 @@ describe("backup routes", () => {
         assert.equal(cache.tool, "wal-g");
     });
 
+    it("records WAL-G backup button runs as manual scheduled job runs", async () => {
+        registerBackupScheduledJobs();
+        const started = await requestJson<{
+            ok: boolean;
+            job: { id: string; type: string; status: string };
+        }>(server, "/api/backups/walg/run", { method: "POST" });
+
+        assert.equal(started.status, 200);
+        assert.equal(started.body.ok, true);
+
+        const done = await waitForDone(server, "/api/backups/walg");
+        assert.equal(done.status, "done");
+        assert.equal(done.code, 0);
+
+        const run = latestScheduledRun("backup.walg");
+        assert.ok(run);
+        assert.equal(run.job_id, "backup.walg");
+        assert.equal(run.status, "success");
+        assert.equal(run.trigger_type, "manual");
+        assert.equal(run.message, null);
+        assert.equal(
+            (JSON.parse(run.output_json) as { backup: { id: string } }).backup.id,
+            started.body.job.id
+        );
+    });
+
     it("returns the active job when a WAL-G backup is already running", async () => {
+        registerBackupScheduledJobs();
         const releasePath = path.join(tempDir, "release-walg");
         await withEnv({ FAKE_BACKUP_HOLD_UNTIL: releasePath }, async () => {
             const firstResp = await requestJson<{
@@ -758,10 +841,12 @@ describe("backup routes", () => {
 
             await writeFile(releasePath, "release", "utf8");
             await waitForDone(server, "/api/backups/walg");
+            assert.equal(scheduledRunCount("backup.walg"), 1);
         });
     });
 
     it("returns the active WAL-G job when overlapping prestart probes see the new process", async () => {
+        registerBackupScheduledJobs();
         const releasePath = path.join(tempDir, "release-walg-race");
         await withEnv(
             {
@@ -789,10 +874,11 @@ describe("backup routes", () => {
                 assert.equal(first.body.job.status, "running");
                 assert.equal(second.body.job.status, "running");
                 assert.equal(fakeBackupSpawnCalls, 1);
-                assert.equal(fakeContainerPreStartPgrepCalls, 2);
+                assert.equal(fakeContainerPreStartPgrepCalls, 1);
 
                 await writeFile(releasePath, "ok");
                 await waitForDone(server, "/api/backups/walg");
+                assert.equal(scheduledRunCount("backup.walg"), 1);
             }
         );
     });

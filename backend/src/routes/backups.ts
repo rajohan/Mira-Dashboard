@@ -4,12 +4,15 @@ import { randomUUID } from "node:crypto";
 import express, { type RequestHandler } from "express";
 
 import { db } from "../db.js";
-import { asyncRoute } from "../lib/errors.js";
+import { asyncRoute, errorMessage } from "../lib/errors.js";
 import { refreshCacheProducer } from "../services/cacheRefresh.js";
 import {
+    createManualScheduledJobRun,
+    finishScheduledJobRun,
     getScheduledJob,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
+    type ScheduledJobRun,
     upsertScheduledJob,
 } from "../services/scheduledJobs.js";
 const MAX_OUTPUT_CHARS = 100_000;
@@ -42,6 +45,7 @@ interface BackupJob {
     completed: Promise<BackupJob>;
     process?: ChildProcess;
     statusRefreshed?: boolean;
+    manualScheduledRun?: ScheduledJobRun;
 }
 
 /** Represents the backup job API response. */
@@ -835,6 +839,89 @@ async function startScheduledBackup(type: BackupJob["type"], signal?: AbortSigna
     return { backup: mapJob(completedJob) };
 }
 
+function scheduledBackupJobId(type: BackupJob["type"]) {
+    return type === "kopia" ? "backup.kopia" : "backup.walg";
+}
+
+function createBackupManualScheduledRun(type: BackupJob["type"]) {
+    const jobId = scheduledBackupJobId(type);
+    if (!getScheduledJob(jobId)) {
+        return null;
+    }
+    return createManualScheduledJobRun(jobId);
+}
+
+function backupFailureMessage(job: BackupJob) {
+    if (job.status === "needs_attention") {
+        return `${job.type.toUpperCase()} backup needs attention`;
+    }
+    if (job.code === 0) {
+        return null;
+    }
+    const details = job.stderr || job.stdout;
+    return `${job.type.toUpperCase()} backup failed with code ${job.code ?? 1}${
+        details ? `: ${details}` : ""
+    }`;
+}
+
+function attachManualScheduledRun(job: BackupJob): void {
+    if (job.manualScheduledRun || job.status !== "running") {
+        return;
+    }
+    let run: ScheduledJobRun;
+    try {
+        const scheduledRun = createBackupManualScheduledRun(job.type);
+        if (!scheduledRun) {
+            return;
+        }
+        run = scheduledRun;
+    } catch (error) {
+        console.warn("[Backups] Failed to record manual backup run:", error);
+        return;
+    }
+    job.manualScheduledRun = run;
+    void job.completed.then((completedJob) => {
+        const success = completedJob.status === "done" && completedJob.code === 0;
+        finishScheduledJobRun(
+            run,
+            success ? "success" : "failed",
+            success ? null : backupFailureMessage(completedJob),
+            { backup: mapJob(completedJob) }
+        );
+    });
+}
+
+async function startManualBackup(type: BackupJob["type"]) {
+    const existingJob = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
+    if (existingJob?.status === "running") {
+        return existingJob;
+    }
+    try {
+        const job =
+            type === "kopia" ? await startKopiaBackupJob() : await startWalgBackupJob();
+        attachManualScheduledRun(job);
+        return job;
+    } catch (error) {
+        try {
+            const failedRun = createBackupManualScheduledRun(type);
+            if (failedRun) {
+                finishScheduledJobRun(
+                    failedRun,
+                    "failed",
+                    errorMessage(error, `${type.toUpperCase()} backup failed to start`),
+                    {}
+                );
+            }
+        } catch (runError) {
+            console.warn(
+                "[Backups] Failed to record failed manual backup run:",
+                runError
+            );
+        }
+        throw error;
+    }
+}
+
 const backupScheduledJobs = [
     {
         id: "backup.walg",
@@ -965,7 +1052,7 @@ export default function backupRoutes(
         "/api/backups/kopia/run",
         asyncRoute(
             async (_req, res) => {
-                const job = await startKopiaBackupJob();
+                const job = await startManualBackup("kopia");
                 res.json({ ok: true, job: mapJob(job) });
             },
             { fallback: "Failed to start Kopia backup" }
@@ -991,7 +1078,7 @@ export default function backupRoutes(
         "/api/backups/walg/run",
         asyncRoute(
             async (_req, res) => {
-                const job = await startWalgBackupJob();
+                const job = await startManualBackup("walg");
                 res.json({ ok: true, job: mapJob(job) });
             },
             { fallback: "Failed to start WAL-G backup" }
