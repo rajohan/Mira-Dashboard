@@ -36,6 +36,34 @@ type ScheduledBackupPromise = ReturnType<typeof backupTesting.startScheduledBack
     backupType?: "kopia" | "walg";
 };
 
+function scheduledRunCount(jobId: string): number {
+    return (
+        db
+            .prepare("SELECT COUNT(*) AS count FROM scheduled_job_runs WHERE job_id = ?")
+            .get(jobId) as { count: number }
+    ).count;
+}
+
+function latestScheduledRun(jobId: string) {
+    return db
+        .prepare(
+            `SELECT job_id, status, trigger_type, message, output_json
+             FROM scheduled_job_runs
+             WHERE job_id = ?
+             ORDER BY id DESC
+             LIMIT 1`
+        )
+        .get(jobId) as
+        | {
+              job_id: string;
+              status: string;
+              trigger_type: string;
+              message: string | null;
+              output_json: string;
+          }
+        | undefined;
+}
+
 const originalDockerBin = process.env.MIRA_DOCKER_BIN;
 let lastFakeBackupProcess: FakeBackupProcess | null = null;
 let lastFakeHostPgrepProcess: FakeBackupProcess | null = null;
@@ -667,6 +695,87 @@ describe("backup routes", () => {
         assert.equal(cache.tool, "kopia");
     });
 
+    it("records Kopia backup button runs as manual scheduled job runs", async () => {
+        registerBackupScheduledJobs();
+        const started = await requestJson<{
+            ok: boolean;
+            job: { id: string; type: string; status: string };
+        }>(server, "/api/backups/kopia/run", { method: "POST" });
+
+        assert.equal(started.status, 200);
+        assert.equal(started.body.ok, true);
+
+        const done = await waitForDone(server, "/api/backups/kopia");
+        assert.equal(done.status, "done");
+        assert.equal(done.code, 0);
+
+        const run = latestScheduledRun("backup.kopia");
+        assert.ok(run);
+        assert.equal(run.job_id, "backup.kopia");
+        assert.equal(run.status, "success");
+        assert.equal(run.trigger_type, "manual");
+        assert.equal(run.message, null);
+        assert.equal(
+            (JSON.parse(run.output_json) as { backup: { id: string } }).backup.id,
+            started.body.job.id
+        );
+    });
+
+    it("keeps backup starts working when manual run history cannot be recorded", async (t) => {
+        registerBackupScheduledJobs();
+        const warn = t.mock.method(console, "warn", () => {});
+        const prepare = db.prepare.bind(db);
+        t.mock.method(db, "prepare", (sql: string) => {
+            if (sql.includes("INSERT INTO scheduled_job_runs")) {
+                throw new Error("manual run insert failed");
+            }
+            return prepare(sql);
+        });
+
+        const started = await requestJson<{
+            ok: boolean;
+            job: { id: string; status: string };
+        }>(server, "/api/backups/kopia/run", { method: "POST" });
+
+        assert.equal(started.status, 200);
+        assert.equal(started.body.ok, true);
+        assert.equal(started.body.job.status, "running");
+        await waitForDone(server, "/api/backups/kopia");
+        assert.equal(warn.mock.callCount(), 1);
+        assert.match(
+            String(warn.mock.calls[0]?.arguments[0]),
+            /Failed to record manual backup run/u
+        );
+    });
+
+    it("keeps backup start failures visible when failed run history cannot be recorded", async (t) => {
+        registerBackupScheduledJobs();
+        const warn = t.mock.method(console, "warn", () => {});
+        const prepare = db.prepare.bind(db);
+        t.mock.method(db, "prepare", (sql: string) => {
+            if (sql.includes("INSERT INTO scheduled_job_runs")) {
+                throw new Error("failed manual run insert failed");
+            }
+            return prepare(sql);
+        });
+
+        await withEnv({ FAKE_HOST_PGREP_ERROR: "1" }, async () => {
+            const failed = await requestJson<{ error: string }>(
+                server,
+                "/api/backups/kopia/run",
+                { method: "POST" }
+            );
+
+            assert.equal(failed.status, 500);
+            assert.match(failed.body.error, /host pgrep failed/u);
+        });
+        assert.equal(warn.mock.callCount(), 1);
+        assert.match(
+            String(warn.mock.calls[0]?.arguments[0]),
+            /Failed to record failed manual backup run/u
+        );
+    });
+
     it("evicts older completed backup jobs before starting the next run", async () => {
         const first = await requestJson<{
             ok: boolean;
@@ -689,6 +798,7 @@ describe("backup routes", () => {
     });
 
     it("returns the active job when a Kopia backup is already running", async () => {
+        registerBackupScheduledJobs();
         const releasePath = path.join(tempDir, "release-kopia");
         await withEnv({ FAKE_BACKUP_HOLD_UNTIL: releasePath }, async () => {
             const firstResp = await requestJson<{
@@ -710,6 +820,7 @@ describe("backup routes", () => {
 
             await writeFile(releasePath, "release", "utf8");
             await waitForDone(server, "/api/backups/kopia");
+            assert.equal(scheduledRunCount("backup.kopia"), 1);
         });
     });
 
@@ -736,7 +847,34 @@ describe("backup routes", () => {
         assert.equal(cache.tool, "wal-g");
     });
 
+    it("records WAL-G backup button runs as manual scheduled job runs", async () => {
+        registerBackupScheduledJobs();
+        const started = await requestJson<{
+            ok: boolean;
+            job: { id: string; type: string; status: string };
+        }>(server, "/api/backups/walg/run", { method: "POST" });
+
+        assert.equal(started.status, 200);
+        assert.equal(started.body.ok, true);
+
+        const done = await waitForDone(server, "/api/backups/walg");
+        assert.equal(done.status, "done");
+        assert.equal(done.code, 0);
+
+        const run = latestScheduledRun("backup.walg");
+        assert.ok(run);
+        assert.equal(run.job_id, "backup.walg");
+        assert.equal(run.status, "success");
+        assert.equal(run.trigger_type, "manual");
+        assert.equal(run.message, null);
+        assert.equal(
+            (JSON.parse(run.output_json) as { backup: { id: string } }).backup.id,
+            started.body.job.id
+        );
+    });
+
     it("returns the active job when a WAL-G backup is already running", async () => {
+        registerBackupScheduledJobs();
         const releasePath = path.join(tempDir, "release-walg");
         await withEnv({ FAKE_BACKUP_HOLD_UNTIL: releasePath }, async () => {
             const firstResp = await requestJson<{
@@ -758,30 +896,31 @@ describe("backup routes", () => {
 
             await writeFile(releasePath, "release", "utf8");
             await waitForDone(server, "/api/backups/walg");
+            assert.equal(scheduledRunCount("backup.walg"), 1);
         });
     });
 
     it("returns the active WAL-G job when overlapping prestart probes see the new process", async () => {
+        registerBackupScheduledJobs();
         const releasePath = path.join(tempDir, "release-walg-race");
         await withEnv(
             {
                 FAKE_BACKUP_HOLD_UNTIL: releasePath,
-                FAKE_CONTAINER_PGREP_PRESTART_DELAY_SEQUENCE: "10,20",
+                FAKE_CONTAINER_PGREP_PRESTART_DELAY_SEQUENCE: "50,100",
                 FAKE_CONTAINER_PGREP_PRESTART_SEQUENCE: "1,0",
             },
             async () => {
-                const [first, second] = await Promise.all([
-                    requestJson<{ job: { id: string; status: string } }>(
-                        server,
-                        "/api/backups/walg/run",
-                        { method: "POST" }
-                    ),
-                    requestJson<{ job: { id: string; status: string } }>(
-                        server,
-                        "/api/backups/walg/run",
-                        { method: "POST" }
-                    ),
-                ]);
+                const firstRequest = requestJson<{
+                    job: { id: string; status: string };
+                }>(server, "/api/backups/walg/run", { method: "POST" });
+                await waitForCondition(
+                    () => fakeContainerPreStartPgrepCalls === 1,
+                    "First WAL-G prestart probe did not start"
+                );
+                const secondRequest = requestJson<{
+                    job: { id: string; status: string };
+                }>(server, "/api/backups/walg/run", { method: "POST" });
+                const [first, second] = await Promise.all([firstRequest, secondRequest]);
 
                 assert.equal(first.status, 200);
                 assert.equal(second.status, 200);
@@ -793,6 +932,7 @@ describe("backup routes", () => {
 
                 await writeFile(releasePath, "ok");
                 await waitForDone(server, "/api/backups/walg");
+                assert.equal(scheduledRunCount("backup.walg"), 1);
             }
         );
     });
@@ -2712,6 +2852,97 @@ describe("backup routes", () => {
             );
             await closeLastFakeBackupProcessAndWaitForStatusRefresh("kopia");
         });
+
+        await withEnv({ FAKE_BACKUP_NEVER_CLOSE: "1" }, async () => {
+            const running = await backupTesting.startKopiaBackupJobForTest();
+            assert.equal(await backupTesting.startKopiaBackupJobForTest(), running);
+            await closeLastFakeBackupProcessAndWaitForStatusRefresh("kopia");
+        });
+
+        await withEnv({ FAKE_BACKUP_NEVER_CLOSE: "1" }, async () => {
+            const running = await backupTesting.startWalgBackupJobForTest();
+            assert.equal(await backupTesting.startWalgBackupJobForTest(), running);
+            await closeLastFakeBackupProcessAndWaitForStatusRefresh("walg");
+        });
+
+        backupTesting.resetJobsForTest();
+        await withEnv({ FAKE_HOST_PGREP_CODE: "0" }, async () => {
+            await assert.rejects(
+                backupTesting.startKopiaBackupJobForTest(),
+                /KOPIA backup needs attention/u
+            );
+        });
+
+        assert.equal(
+            backupTesting.backupFailureMessage({
+                id: "attention",
+                type: "kopia",
+                status: "needs_attention",
+                code: 130,
+                stdout: "",
+                stderr: "",
+                startedAt: 1,
+                endedAt: 2,
+                completed: Promise.resolve({} as never),
+            }),
+            "KOPIA backup needs attention"
+        );
+        assert.equal(
+            backupTesting.backupFailureMessage({
+                id: "success",
+                type: "walg",
+                status: "done",
+                code: 0,
+                stdout: "",
+                stderr: "",
+                startedAt: 1,
+                endedAt: 2,
+                completed: Promise.resolve({} as never),
+            }),
+            null
+        );
+        assert.equal(
+            backupTesting.backupFailureMessage({
+                id: "stderr-failure",
+                type: "walg",
+                status: "done",
+                code: 2,
+                stdout: "stdout detail",
+                stderr: "stderr detail",
+                startedAt: 1,
+                endedAt: 2,
+                completed: Promise.resolve({} as never),
+            }),
+            "WALG backup failed with code 2: stderr detail"
+        );
+        assert.equal(
+            backupTesting.backupFailureMessage({
+                id: "stdout-failure",
+                type: "kopia",
+                status: "done",
+                code: null,
+                stdout: "stdout detail",
+                stderr: "",
+                startedAt: 1,
+                endedAt: 2,
+                completed: Promise.resolve({} as never),
+            }),
+            "KOPIA backup failed with code 1: stdout detail"
+        );
+        assert.equal(
+            backupTesting.backupFailureMessage({
+                id: "empty-failure",
+                type: "kopia",
+                status: "done",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: 1,
+                endedAt: 2,
+                completed: Promise.resolve({} as never),
+            }),
+            "KOPIA backup failed with code 1"
+        );
 
         backupTesting.resetJobsForTest();
         backupTesting.recordBackupNeedsAttentionForTest("kopia");

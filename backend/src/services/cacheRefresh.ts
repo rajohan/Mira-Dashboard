@@ -33,6 +33,8 @@ const KOPIA_EXPECTED_SOURCE_PATHS = [
     "/source/projects",
     "/source/openclaw",
 ] as const;
+const BACKUP_STATUS_STALE_HOURS = 30;
+const BACKUP_STATUS_MAX_TTL_HOURS = 25;
 
 type CacheTtlUnit = "hours" | "minutes";
 type JsonRecord = Record<string, unknown>;
@@ -111,6 +113,24 @@ function nowIso(): string {
 function ttlDate(ttl: number, unit: CacheTtlUnit): string {
     const multiplier = unit === "hours" ? 60 * 60 * 1000 : 60 * 1000;
     return new Date(Date.now() + ttl * multiplier).toISOString();
+}
+
+function backupStatusTtlHours(timestamps: Array<string | null | undefined>): number {
+    let ttl = BACKUP_STATUS_MAX_TTL_HOURS;
+    const now = Date.now();
+    for (const timestamp of timestamps) {
+        if (!timestamp) {
+            continue;
+        }
+        const timeMs = new Date(timestamp).getTime();
+        if (!Number.isFinite(timeMs)) {
+            continue;
+        }
+        const remainingHours =
+            BACKUP_STATUS_STALE_HOURS - Math.max(0, (now - timeMs) / 36e5);
+        ttl = Math.min(ttl, Math.max(0, remainingHours));
+    }
+    return ttl;
 }
 
 function errorMessage(error: unknown): string {
@@ -1172,7 +1192,7 @@ async function refreshKopiaBackupCache() {
                 return true;
             }
             const ageHours = (Date.now() - endTimeMs) / 36e5;
-            return ageHours > 30;
+            return ageHours > BACKUP_STATUS_STALE_HOURS;
         })
         .map((snapshot) => ({ path: snapshot.path, endTime: snapshot.endTime }));
     const missingSources = KOPIA_EXPECTED_SOURCE_PATHS.filter(
@@ -1193,7 +1213,9 @@ async function refreshKopiaBackupCache() {
         key: "backup.kopia.status",
         data: payload,
         source: "backend",
-        ttl: 1,
+        ttl: payload.ok
+            ? backupStatusTtlHours(payload.latest.map((snapshot) => snapshot.endTime))
+            : BACKUP_STATUS_MAX_TTL_HOURS,
         ttlUnit: "hours",
         metadata: {
             workflow: "Cache Foundation - Kopia Backup Status",
@@ -1259,7 +1281,8 @@ async function refreshWalgBackupCache() {
     const latestAgeHours = Number.isFinite(latestFreshnessMs)
         ? (Date.now() - latestFreshnessMs) / 36e5
         : null;
-    const stale = !latest || latestAgeHours === null || latestAgeHours > 30;
+    const stale =
+        !latest || latestAgeHours === null || latestAgeHours > BACKUP_STATUS_STALE_HOURS;
     const payload = {
         checkedAt: nowIso(),
         tool: "wal-g",
@@ -1275,7 +1298,9 @@ async function refreshWalgBackupCache() {
         key: "backup.walg.status",
         data: payload,
         source: "backend",
-        ttl: 1,
+        ttl: payload.ok
+            ? backupStatusTtlHours([payload.latest?.freshnessTime])
+            : BACKUP_STATUS_MAX_TTL_HOURS,
         ttlUnit: "hours",
         metadata: {
             workflow: "Cache Foundation - WAL-G Base Backup Status",
@@ -2124,6 +2149,7 @@ export const __testing = {
     checkSyntheticQuota,
     buildFallbackHostSummary,
     buildQuotaMissingProviders,
+    backupStatusTtlHours,
     cleanPanelText,
     codexTrustConfigLocks,
     acquireCodexTrustConfigLock,

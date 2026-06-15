@@ -746,6 +746,36 @@ function finishRunOrReport(
     }
 }
 
+export function createManualScheduledJobRun(jobId: string): ScheduledJobRun {
+    if (runningJobs.has(jobId)) {
+        const error = new Error("Scheduled job is already running") as Error & {
+            statusCode?: number;
+        };
+        error.statusCode = 409;
+        throw error;
+    }
+    runningJobs.add(jobId);
+    try {
+        return createRun(jobId, "manual");
+    } catch (error) {
+        runningJobs.delete(jobId);
+        throw error;
+    }
+}
+
+export function finishScheduledJobRun(
+    run: ScheduledJobRun,
+    status: Exclude<ScheduledJobRunStatus, "running">,
+    message: string | null,
+    output: Record<string, unknown>
+): ScheduledJobRun {
+    try {
+        return finishRunOrReport(run, status, message, output);
+    } finally {
+        runningJobs.delete(run.jobId);
+    }
+}
+
 export async function runScheduledJob(
     id: string,
     triggerType: ScheduledJobTriggerType = "manual",

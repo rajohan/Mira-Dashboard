@@ -39,6 +39,7 @@ function cacheRow(key: string) {
               source: string;
               status: string;
               updated_at: string | null;
+              expires_at: string;
               error_message: string | null;
               consecutive_failures: number;
               metadata_json: string;
@@ -3657,6 +3658,43 @@ if (args === "exec kopia kopia snapshot list --all --json-verbose --json") {
             (cacheRow("backup.walg.status").data as { latest: unknown }).latest,
             null
         );
+    });
+
+    it("caps healthy backup status cache TTL at the stale deadline", async () => {
+        assert.equal(__testing.backupStatusTtlHours([null, undefined, "bad"]), 25);
+        const binDir = path.join(tempDir, "backup-ttl-bin");
+        const backupTime = new Date(Date.now() - 29 * 60 * 60 * 1000).toISOString();
+        await mkdir(binDir);
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            `#!/usr/bin/env node
+const args = process.argv.slice(2).join(" ");
+const backupTime = ${JSON.stringify(backupTime)};
+if (args === "exec kopia kopia snapshot list --all --json-verbose --json") {
+  process.stdout.write(JSON.stringify([
+    { id: "docker", source: { path: "/source/docker" }, endTime: backupTime, stats: {}, retentionReason: ["latest"] },
+    { id: "projects", source: { path: "/source/projects" }, endTime: backupTime, stats: {}, retentionReason: ["latest"] },
+    { id: "openclaw", source: { path: "/source/openclaw" }, endTime: backupTime, stats: {}, retentionReason: ["latest"] }
+  ]));
+} else if (args === "exec walg wal-g backup-list --detail --json") {
+  process.stdout.write(JSON.stringify([
+    { backup_name: "near-stale", finish_time: backupTime }
+  ]));
+} else {
+  process.stderr.write("unexpected " + args);
+  process.exit(1);
+}
+`
+        );
+
+        await withEnv({ MIRA_DOCKER_BIN: path.join(binDir, "docker") }, async () => {
+            await refreshCacheProducer("backup.kopia.status");
+            await refreshCacheProducer("backup.walg.status");
+        });
+
+        const maxExpiresAt = Date.now() + 65 * 60 * 1000;
+        assert.ok(Date.parse(cacheRow("backup.kopia.status").expires_at) <= maxExpiresAt);
+        assert.ok(Date.parse(cacheRow("backup.walg.status").expires_at) <= maxExpiresAt);
     });
 
     it("covers additional producer fallback branches", async () => {
