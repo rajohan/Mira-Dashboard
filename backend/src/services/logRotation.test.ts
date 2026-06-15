@@ -1373,6 +1373,59 @@ describe("log rotation service", { concurrency: false }, () => {
         );
     });
 
+    it("does not restore over a log recreated during rename rotation", async () => {
+        const root = path.join(tempDir, "rename-recreated-target");
+        await mkdir(root);
+        const logFile = path.join(root, "app.log");
+        await writeFile(logFile, "active log", "utf8");
+        const open = fsPromises.open.bind(fsPromises);
+        mock.method(
+            fsPromises,
+            "open",
+            async (
+                filePath: Parameters<typeof fsPromises.open>[0],
+                flags: Parameters<typeof fsPromises.open>[1],
+                mode?: Parameters<typeof fsPromises.open>[2]
+            ) => {
+                if (
+                    String(filePath) === logFile &&
+                    typeof flags === "number" &&
+                    (flags & constants.O_CREAT) !== 0
+                ) {
+                    await writeFile(logFile, "new logger line", "utf8");
+                    throw Object.assign(new Error("file already exists"), {
+                        code: "EEXIST",
+                    });
+                }
+                return open(filePath, flags, mode);
+            }
+        );
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [
+                {
+                    name: "rename",
+                    paths: [logFile],
+                    strategy: "rename",
+                    compress: false,
+                    maxSizeMb: 0.000001,
+                },
+            ],
+        });
+
+        const summary = await runLogRotationService({ dryRun: false, config });
+
+        assert.equal(summary.ok, true);
+        assert.equal(summary.rotatedFiles, 1);
+        assert.equal(await readFile(logFile, "utf8"), "new logger line");
+        const archiveNames = await fsPromises.readdir(root);
+        assert.equal(
+            archiveNames.filter((name) => name.startsWith("app.log.")).length,
+            1
+        );
+    });
+
     it("handles dry-run, empty files, not-due cadence, retention compression, and invalid state", async () => {
         const root = path.join(tempDir, "logs");
         await mkdir(root);

@@ -3153,6 +3153,51 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                     failedLogRotationRunFallback.message ?? "",
                     /Log rotation failed.*EACCES.*docker-file-logs/u
                 );
+
+                logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
+                    stderr: "",
+                    stdout: JSON.stringify({
+                        ok: false,
+                        errors: [],
+                        groups: [],
+                        warnings: [{ message: "retention warning" }],
+                    }),
+                }));
+                const warningLogRotationRun = await runScheduledJob("ops.log-rotation");
+                assert.equal(warningLogRotationRun.status, "failed");
+                assert.match(
+                    warningLogRotationRun.message ?? "",
+                    /Log rotation failed.*retention warning/u
+                );
+
+                logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
+                    stderr: "",
+                    stdout: JSON.stringify({
+                        ok: false,
+                        errors: [],
+                        groups: [{ name: "archive-only" }],
+                        warnings: [],
+                    }),
+                }));
+                const groupLogRotationRun = await runScheduledJob("ops.log-rotation");
+                assert.equal(groupLogRotationRun.status, "failed");
+                assert.match(
+                    groupLogRotationRun.message ?? "",
+                    /Log rotation failed.*archive-only/u
+                );
+
+                logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
+                    stderr: "",
+                    stdout: JSON.stringify({
+                        ok: false,
+                        errors: "bad-errors",
+                        groups: "bad-groups",
+                        warnings: "bad-warnings",
+                    }),
+                }));
+                const malformedLogRotationRun = await runScheduledJob("ops.log-rotation");
+                assert.equal(malformedLogRotationRun.status, "failed");
+                assert.equal(malformedLogRotationRun.message, "Log rotation failed");
             } finally {
                 logRotationTesting.resetElevatedLogRotationExecFileRunner();
             }

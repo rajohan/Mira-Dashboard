@@ -310,6 +310,10 @@ function isMissingPathError(error: unknown): boolean {
     );
 }
 
+function isPathExistsError(error: unknown): boolean {
+    return error instanceof Error && "code" in error && String(error.code) === "EEXIST";
+}
+
 function hasGlobMeta(pattern: string): boolean {
     return /\*|\[0-9\]/u.test(pattern);
 }
@@ -691,6 +695,9 @@ async function rotateRename(
         });
         await replacement.close();
     } catch (error) {
+        if (isPathExistsError(error)) {
+            return compressRotatedArchive(archivePath, compress, approvedRoots);
+        }
         await fs.rename(archivePath, filePath).catch(() => {});
         throw error;
     }
