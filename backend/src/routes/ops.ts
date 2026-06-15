@@ -1,22 +1,77 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
 import express, { type RequestHandler } from "express";
 
+import { db } from "../db.js";
 import { asyncRoute as baseAsyncRoute } from "../lib/errors.js";
-import { envFallback, nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
+import {
+    __testing as logRotationTesting,
+    runElevatedLogRotationService,
+    runLogRotationService,
+} from "../services/logRotation.js";
 
-const execFileAsync = promisify(execFile);
-const EXEC_FILE_OPTIONS = {
-    killSignal: "SIGTERM" as const,
-    timeout: 30_000,
-};
-const N8N_ROOT = nonEmptyEnvFallback("MIRA_N8N_ROOT", "/home/ubuntu/projects/n8n");
-const N8N_DATABASE = "n8n";
-const dockerBin = nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
-const LOG_ROTATION_SCRIPT = `${N8N_ROOT}/scripts/log-rotation.mjs`;
-const LOG_ROTATION_CONFIG = `${N8N_ROOT}/config/log-rotation.json`;
 const LOG_ROTATION_STATE_KEY = "log_rotation.state";
+
+interface LogRotationResult {
+    result: Record<string, unknown>;
+    stderr: string;
+}
+
+type LogRotationRunner = (options: { dryRun: boolean }) => Promise<LogRotationResult>;
+
+function normalizeLastRunErrors(run: Record<string, unknown>): unknown[] {
+    if (Array.isArray(run.errors)) {
+        return run.errors;
+    }
+    const message =
+        typeof run.message === "string" && run.message.trim()
+            ? run.message.trim()
+            : typeof run.stderr === "string" && run.stderr.trim()
+              ? run.stderr.trim()
+              : "";
+    if (!message && run.result === undefined) {
+        return [];
+    }
+    return [
+        {
+            message: message || "Log rotation failed",
+            result: run.result ?? null,
+            stderr: typeof run.stderr === "string" ? run.stderr : "",
+        },
+    ];
+}
+
+function normalizeLastRun(value: unknown) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return null;
+    }
+    const run = value as Record<string, unknown>;
+    return {
+        ok: run.ok === true,
+        dryRun: run.dryRun === true,
+        startedAt: typeof run.startedAt === "string" ? run.startedAt : null,
+        finishedAt: typeof run.finishedAt === "string" ? run.finishedAt : null,
+        checkedGroups: Number.isFinite(Number(run.checkedGroups))
+            ? Number(run.checkedGroups)
+            : 0,
+        checkedFiles: Number.isFinite(Number(run.checkedFiles))
+            ? Number(run.checkedFiles)
+            : 0,
+        rotatedFiles: Number.isFinite(Number(run.rotatedFiles))
+            ? Number(run.rotatedFiles)
+            : 0,
+        compressedFiles: Number.isFinite(Number(run.compressedFiles))
+            ? Number(run.compressedFiles)
+            : 0,
+        deletedArchives: Number.isFinite(Number(run.deletedArchives))
+            ? Number(run.deletedArchives)
+            : 0,
+        skippedFiles: Number.isFinite(Number(run.skippedFiles))
+            ? Number(run.skippedFiles)
+            : 0,
+        warnings: Array.isArray(run.warnings) ? run.warnings : [],
+        errors: normalizeLastRunErrors(run),
+        groups: Array.isArray(run.groups) ? run.groups : [],
+    };
+}
 
 /** Performs async route. */
 function asyncRoute(handler: RequestHandler): RequestHandler {
@@ -26,84 +81,43 @@ function asyncRoute(handler: RequestHandler): RequestHandler {
     });
 }
 
-/** Builds n8n script env. */
-function buildN8nScriptEnv() {
-    return {
-        ...process.env,
-        DB_POSTGRESDB_HOST: "127.0.0.1",
-        DB_POSTGRESDB_PORT: "6432",
-        DB_POSTGRESDB_DATABASE: N8N_DATABASE,
-        DB_POSTGRESDB_USER:
-            process.env.DB_POSTGRESDB_USER ??
-            envFallback("DATABASE_USERNAME", "postgres"),
-        DB_POSTGRESDB_PASSWORD:
-            process.env.DB_POSTGRESDB_PASSWORD ??
-            envFallback("DATABASE_PASSWORD", "postgres"),
-    };
-}
-
-/** Builds PostgreSQL uri. */
-function buildPostgresUri(database = N8N_DATABASE) {
-    const username =
-        process.env.DB_POSTGRESDB_USER ?? envFallback("DATABASE_USERNAME", "postgres");
-    const password =
-        process.env.DB_POSTGRESDB_PASSWORD ??
-        envFallback("DATABASE_PASSWORD", "postgres");
-    const host = nonEmptyEnvFallback("DATABASE_HOST", "postgres");
-    const port = nonEmptyEnvFallback("DATABASE_PORT", "5432");
-    return `postgresql://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}`;
-}
-
 /** Performs read log rotation status. */
 async function readLogRotationStatus() {
-    const sql = `SELECT COALESCE(data->'lastRun', 'null'::jsonb)::text FROM cache_entries WHERE key = '${LOG_ROTATION_STATE_KEY}'`;
-    const { stdout } = await execFileAsync(
-        dockerBin,
-        ["exec", "postgres", "psql", buildPostgresUri(), "-t", "-A", "-c", sql],
-        {
-            ...EXEC_FILE_OPTIONS,
-            env: process.env,
-            maxBuffer: 10 * 1024 * 1024,
+    const row = db
+        .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
+        .get(LOG_ROTATION_STATE_KEY) as { data_json?: string | null } | undefined;
+    const raw = row?.data_json ?? "";
+    let data: { lastRun?: unknown } | null = null;
+    if (raw) {
+        try {
+            data = JSON.parse(raw) as { lastRun?: unknown };
+        } catch (error) {
+            console.warn("[opsRoutes] Ignoring malformed log rotation state", error);
         }
-    );
-    const raw = stringFallback(stdout).trim();
+    }
     return {
         success: true,
-        lastRun: raw ? JSON.parse(raw) : null,
+        lastRun: normalizeLastRun(data?.lastRun),
     };
 }
 
 /** Performs run log rotation. */
-async function runLogRotation(options: { dryRun: boolean }) {
-    const args = [LOG_ROTATION_SCRIPT, "--config", LOG_ROTATION_CONFIG, "--json"];
-
-    if (options.dryRun) {
-        args.push("--dry-run");
+export async function runLogRotation(options: {
+    dryRun: boolean;
+}): Promise<LogRotationResult> {
+    if (!options.dryRun) {
+        return elevatedLogRotationRunner(options);
     }
-
-    const { stdout, stderr } = await execFileAsync(
-        options.dryRun ? "node" : "sudo",
-        options.dryRun
-            ? args
-            : [
-                  "-n",
-                  "--preserve-env=DB_POSTGRESDB_HOST,DB_POSTGRESDB_PORT,DB_POSTGRESDB_DATABASE,DB_POSTGRESDB_USER,DB_POSTGRESDB_PASSWORD",
-                  "node",
-                  ...args,
-              ],
-        {
-            ...EXEC_FILE_OPTIONS,
-            cwd: N8N_ROOT,
-            env: buildN8nScriptEnv(),
-            maxBuffer: 20 * 1024 * 1024,
-        }
-    );
-
     return {
-        result: JSON.parse(stringFallback(stdout).trim() || "{}"),
-        stderr: stringFallback(stderr),
+        result: (await runLogRotationService(options)) as unknown as Record<
+            string,
+            unknown
+        >,
+        stderr: "",
     };
 }
+
+let elevatedLogRotationRunner: LogRotationRunner = runElevatedLogRotationService;
 
 /** Registers ops API routes. */
 export default function opsRoutes(app: express.Application): void {
@@ -120,7 +134,7 @@ export default function opsRoutes(app: express.Application): void {
         asyncRoute(async (_req, res) => {
             const { result, stderr } = await runLogRotation({ dryRun: true });
             res.json({
-                success: Boolean(result?.ok),
+                success: result?.ok === true,
                 result,
                 stderr,
             });
@@ -133,7 +147,7 @@ export default function opsRoutes(app: express.Application): void {
         asyncRoute(async (_req, res) => {
             const { result, stderr } = await runLogRotation({ dryRun: false });
             res.json({
-                success: Boolean(result?.ok),
+                success: result?.ok === true,
                 result,
                 stderr,
             });
@@ -142,6 +156,12 @@ export default function opsRoutes(app: express.Application): void {
 }
 
 export const __testing = {
-    buildN8nScriptEnv,
-    buildPostgresUri,
+    resetLogRotationRunner() {
+        elevatedLogRotationRunner = runElevatedLogRotationService;
+        logRotationTesting.resetElevatedLogRotationExecFileRunner();
+    },
+    setElevatedLogRotationRunner(runner: LogRotationRunner) {
+        elevatedLogRotationRunner = runner;
+    },
+    setLogRotationExecFileRunner: logRotationTesting.setElevatedLogRotationExecFileRunner,
 };

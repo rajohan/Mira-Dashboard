@@ -54,7 +54,12 @@ function cacheRow(key: string) {
 }
 
 function seedFreshCacheEntries(keys: string[]): void {
-    for (const key of keys) {
+    const keysWithBackgroundDefaults = new Set([
+        ...keys,
+        "backup.kopia.status",
+        "backup.walg.status",
+    ]);
+    for (const key of keysWithBackgroundDefaults) {
         writeCacheSuccess({
             key,
             data: { seeded: true },
@@ -221,6 +226,65 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         assert.equal(row.consecutive_failures, 2);
         assert.equal(row.metadata.producer, "weather");
         assert.equal(typeof row.metadata.lastFailureAt, "string");
+    });
+
+    it("falls back to inserting cache successes when preserve mode updates no rows", () => {
+        writeCacheSuccess({
+            key: "missing.preserve",
+            data: { ok: true },
+            source: "backend-test",
+            ttl: 5,
+            ttlUnit: "minutes",
+            metadata: { producer: "preserve-test" },
+            preserveExistingData: true,
+        });
+
+        const row = cacheRow("missing.preserve");
+        assert.equal(row.status, "fresh");
+        assert.deepEqual(row.data, { ok: true });
+        assert.equal(row.metadata.producer, "preserve-test");
+
+        writeCacheSuccess({
+            key: "missing.preserve",
+            data: { ok: false },
+            source: "backend-test-updated",
+            ttl: 5,
+            ttlUnit: "minutes",
+            metadata: { producer: "preserve-test-updated" },
+            preserveExistingData: true,
+        });
+        const updatedRow = cacheRow("missing.preserve");
+        assert.deepEqual(updatedRow.data, { ok: true });
+        assert.equal(updatedRow.source, "backend-test-updated");
+        assert.equal(updatedRow.metadata.producer, "preserve-test-updated");
+
+        db.prepare("UPDATE cache_entries SET data_json = NULL WHERE key = ?").run(
+            "missing.preserve"
+        );
+        writeCacheSuccess({
+            key: "missing.preserve",
+            data: { version: 1, files: {} },
+            source: "backend-test-null",
+            ttl: 5,
+            ttlUnit: "minutes",
+            metadata: { producer: "preserve-test-null" },
+            preserveExistingData: true,
+        });
+        assert.deepEqual(cacheRow("missing.preserve").data, { version: 1, files: {} });
+
+        db.prepare("UPDATE cache_entries SET data_json = '' WHERE key = ?").run(
+            "missing.preserve"
+        );
+        writeCacheSuccess({
+            key: "missing.preserve",
+            data: { version: 1, files: {} },
+            source: "backend-test-empty",
+            ttl: 5,
+            ttlUnit: "minutes",
+            metadata: { producer: "preserve-test-empty" },
+            preserveExistingData: true,
+        });
+        assert.deepEqual(cacheRow("missing.preserve").data, { version: 1, files: {} });
     });
 
     it("refreshes Moltbook home, feeds, profile, and own content caches", async () => {
@@ -1367,6 +1431,100 @@ else if (command === "status --short") process.stdout.write("");
         assert.deepEqual(data.missingRepos, ["docker"]);
     });
 
+    it("does not overwrite parseable log rotation state changed during refresh", async (t) => {
+        writeCacheSuccess({
+            key: "log_rotation.state",
+            data: {
+                version: 1,
+                files: { "/tmp/old.log": { lastSizeBytes: 12 } },
+            },
+            source: "backend-test",
+            ttl: 5,
+            ttlUnit: "minutes",
+            metadata: { producer: "seed" },
+        });
+
+        const prepare = db.prepare.bind(db);
+        const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+            const statement = prepare(sql);
+            if (sql === "SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1") {
+                return {
+                    get: (key: string) => {
+                        const row = statement.get(key);
+                        db.prepare(
+                            "UPDATE cache_entries SET data_json = ? WHERE key = ?"
+                        ).run(
+                            JSON.stringify({
+                                version: 1,
+                                files: { "/tmp/new.log": { lastSizeBytes: 34 } },
+                            }),
+                            "log_rotation.state"
+                        );
+                        return row;
+                    },
+                } as unknown as ReturnType<typeof db.prepare>;
+            }
+            return statement;
+        });
+
+        try {
+            assert.deepEqual(await refreshCacheProducer("log_rotation.state"), {
+                refreshed: ["log_rotation.state"],
+            });
+        } finally {
+            prepareMock.mock.restore();
+        }
+
+        const row = cacheRow("log_rotation.state");
+        assert.deepEqual(row.data, {
+            version: 1,
+            files: { "/tmp/new.log": { lastSizeBytes: 34 } },
+        });
+        assert.equal(row.metadata.producer, "refreshCacheProducer");
+    });
+
+    it("does not overwrite log rotation state created during refresh", async (t) => {
+        const prepare = db.prepare.bind(db);
+        const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
+            const statement = prepare(sql);
+            if (sql === "SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1") {
+                return {
+                    get: (key: string) => {
+                        const row = statement.get(key);
+                        writeCacheSuccess({
+                            key,
+                            data: {
+                                version: 1,
+                                files: { "/tmp/new.log": { lastSizeBytes: 56 } },
+                            },
+                            source: "log-rotation-test",
+                            ttl: 90 * 24,
+                            ttlUnit: "hours",
+                            metadata: { producer: "concurrent" },
+                        });
+                        return row;
+                    },
+                } as unknown as ReturnType<typeof db.prepare>;
+            }
+            return statement;
+        });
+
+        try {
+            assert.deepEqual(await refreshCacheProducer("log_rotation.state"), {
+                refreshed: ["log_rotation.state"],
+            });
+        } finally {
+            prepareMock.mock.restore();
+        }
+
+        const row = cacheRow("log_rotation.state");
+        assert.deepEqual(row.data, {
+            version: 1,
+            files: { "/tmp/new.log": { lastSizeBytes: 56 } },
+        });
+        assert.equal(row.metadata.producer, "refreshCacheProducer");
+    });
+
     it("refreshes system, quota, and producer-dispatch caches", async () => {
         const binDir = path.join(tempDir, "bin");
         await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
@@ -1460,6 +1618,48 @@ if (args.includes("capture-pane")) {
                         });
                         assert.deepEqual(await refreshCacheProducer("quotas.summary"), {
                             refreshed: ["quotas.summary"],
+                        });
+                        assert.deepEqual(
+                            await refreshCacheProducer("log_rotation.state"),
+                            {
+                                refreshed: ["log_rotation.state"],
+                            }
+                        );
+                        assert.deepEqual(cacheRow("log_rotation.state").data, {
+                            version: 1,
+                            files: {},
+                        });
+                        db.prepare(
+                            "UPDATE cache_entries SET data_json = ? WHERE key = ?"
+                        ).run(
+                            JSON.stringify({
+                                version: 1,
+                                files: { "/tmp/app.log": { lastSizeBytes: 12 } },
+                            }),
+                            "log_rotation.state"
+                        );
+                        assert.deepEqual(
+                            await refreshCacheProducer("log_rotation.state"),
+                            {
+                                refreshed: ["log_rotation.state"],
+                            }
+                        );
+                        assert.deepEqual(cacheRow("log_rotation.state").data, {
+                            version: 1,
+                            files: { "/tmp/app.log": { lastSizeBytes: 12 } },
+                        });
+                        db.prepare(
+                            "UPDATE cache_entries SET data_json = ? WHERE key = ?"
+                        ).run("{not-json", "log_rotation.state");
+                        assert.deepEqual(
+                            await refreshCacheProducer("log_rotation.state"),
+                            {
+                                refreshed: ["log_rotation.state"],
+                            }
+                        );
+                        assert.deepEqual(cacheRow("log_rotation.state").data, {
+                            version: 1,
+                            files: {},
                         });
                     }
                 );
@@ -3044,8 +3244,209 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                         )
                         .get() as { count: number }
                 ).count,
-                0
+                2
             );
+            const logRotationJob = db
+                .prepare(
+                    `SELECT schedule_type, time_of_day, action_key, action_payload_json
+                     FROM scheduled_jobs WHERE id = 'ops.log-rotation'`
+                )
+                .get() as
+                | {
+                      action_key: string;
+                      action_payload_json: string;
+                      schedule_type: string;
+                      time_of_day: string | null;
+                  }
+                | undefined;
+            assert.equal(logRotationJob?.schedule_type, "daily");
+            assert.equal(logRotationJob?.time_of_day, "02:10");
+            assert.equal(logRotationJob?.action_key, "ops.log-rotation");
+            assert.equal(
+                logRotationJob?.action_payload_json,
+                JSON.stringify({ key: "log_rotation.state" })
+            );
+            const logRotationModule = await import("./logRotation.js");
+            const logRotationTesting = logRotationModule.__testing;
+            logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
+                stderr: "",
+                stdout: JSON.stringify({ ok: true, dryRun: false }),
+            }));
+            try {
+                const logRotationRun = await runScheduledJob("ops.log-rotation");
+                assert.deepEqual(logRotationRun.output, {
+                    logRotation: {
+                        result: { ok: true, dryRun: false },
+                        stderr: "",
+                    },
+                });
+
+                logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
+                    stderr: "permission denied",
+                    stdout: JSON.stringify({ ok: false }),
+                }));
+                db.prepare("DELETE FROM cache_entries WHERE key = ?").run(
+                    "log_rotation.state"
+                );
+                const failedLogRotationRun = await runScheduledJob("ops.log-rotation");
+                assert.equal(failedLogRotationRun.status, "failed");
+                assert.equal(failedLogRotationRun.message, "permission denied");
+                const failedLogRotationState = cacheRow("log_rotation.state").data as {
+                    lastRun?: {
+                        message?: string;
+                        ok?: boolean;
+                        stderr?: string;
+                    };
+                };
+                assert.equal(failedLogRotationState.lastRun?.ok, false);
+                assert.deepEqual(
+                    (failedLogRotationState as { files?: unknown }).files,
+                    {}
+                );
+                assert.equal(
+                    failedLogRotationState.lastRun?.message,
+                    "permission denied"
+                );
+                assert.equal(failedLogRotationState.lastRun?.stderr, "permission denied");
+
+                const noisyOutput = "x".repeat(120_000);
+                const noisyError = "e".repeat(120_000);
+                logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
+                    stderr: noisyError,
+                    stdout: JSON.stringify({ ok: false, stdout: noisyOutput }),
+                }));
+                const noisyLogRotationRun = await runScheduledJob("ops.log-rotation");
+                assert.equal(noisyLogRotationRun.status, "failed");
+                const noisyLogRotationState = cacheRow("log_rotation.state").data as {
+                    lastRun?: { stderr?: string; stdout?: string };
+                };
+                assert.equal(noisyLogRotationState.lastRun?.stdout?.length, 100_000);
+                assert.equal(noisyLogRotationState.lastRun?.stderr?.length, 100_000);
+                assert.equal(noisyLogRotationState.lastRun?.stdout, "x".repeat(100_000));
+                assert.equal(noisyLogRotationState.lastRun?.stderr, "e".repeat(100_000));
+
+                db.prepare("UPDATE cache_entries SET data_json = ? WHERE key = ?").run(
+                    JSON.stringify({
+                        version: 1,
+                        files: { "/opt/docker/data/app/app.log": { lastSizeBytes: 42 } },
+                    }),
+                    "log_rotation.state"
+                );
+                logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
+                    stderr: "",
+                    stdout: JSON.stringify({
+                        ok: false,
+                        checkedFiles: 3,
+                        finishedAt: "2026-06-15T20:00:00.000Z",
+                        errors: [
+                            {
+                                filePath: "/opt/docker/data/app/app.log",
+                                message: "EACCES",
+                            },
+                        ],
+                        groups: [{ name: "docker-file-logs", rotatedFiles: 0 }],
+                    }),
+                }));
+                const failedLogRotationRunFallback =
+                    await runScheduledJob("ops.log-rotation");
+                assert.equal(failedLogRotationRunFallback.status, "failed");
+                assert.match(
+                    failedLogRotationRunFallback.message ?? "",
+                    /Log rotation failed.*EACCES.*docker-file-logs/u
+                );
+                assert.deepEqual(
+                    (
+                        cacheRow("log_rotation.state").data as {
+                            files?: Record<string, unknown>;
+                        }
+                    ).files,
+                    { "/opt/docker/data/app/app.log": { lastSizeBytes: 42 } }
+                );
+                const failedStructuredState = cacheRow("log_rotation.state").data as {
+                    lastRun?: {
+                        checkedFiles?: number;
+                        errors?: unknown[];
+                        finishedAt?: string;
+                        groups?: unknown[];
+                        message?: string;
+                        ok?: boolean;
+                    };
+                };
+                assert.equal(failedStructuredState.lastRun?.ok, false);
+                assert.equal(failedStructuredState.lastRun?.checkedFiles, 3);
+                assert.equal(
+                    failedStructuredState.lastRun?.finishedAt,
+                    "2026-06-15T20:00:00.000Z"
+                );
+                assert.deepEqual(failedStructuredState.lastRun?.errors, [
+                    {
+                        filePath: "/opt/docker/data/app/app.log",
+                        message: "EACCES",
+                    },
+                ]);
+                assert.deepEqual(failedStructuredState.lastRun?.groups, [
+                    { name: "docker-file-logs", rotatedFiles: 0 },
+                ]);
+                assert.match(
+                    failedStructuredState.lastRun?.message ?? "",
+                    /Log rotation failed.*EACCES/u
+                );
+
+                db.prepare("UPDATE cache_entries SET data_json = ? WHERE key = ?").run(
+                    "{not-json",
+                    "log_rotation.state"
+                );
+                logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
+                    stderr: "",
+                    stdout: JSON.stringify({
+                        ok: false,
+                        errors: [],
+                        groups: [],
+                        warnings: [{ message: "retention warning" }],
+                    }),
+                }));
+                const warningLogRotationRun = await runScheduledJob("ops.log-rotation");
+                assert.equal(warningLogRotationRun.status, "failed");
+                assert.match(
+                    warningLogRotationRun.message ?? "",
+                    /Log rotation failed.*retention warning/u
+                );
+                assert.deepEqual(
+                    (cacheRow("log_rotation.state").data as { files?: unknown }).files,
+                    {}
+                );
+
+                logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
+                    stderr: "",
+                    stdout: JSON.stringify({
+                        ok: false,
+                        errors: [],
+                        groups: [{ name: "archive-only" }],
+                        warnings: [],
+                    }),
+                }));
+                const groupLogRotationRun = await runScheduledJob("ops.log-rotation");
+                assert.equal(groupLogRotationRun.status, "failed");
+                assert.match(
+                    groupLogRotationRun.message ?? "",
+                    /Log rotation failed.*archive-only/u
+                );
+
+                logRotationTesting.setElevatedLogRotationExecFileRunner(async () => ({
+                    stderr: "",
+                    stdout: JSON.stringify({
+                        ok: false,
+                        errors: "bad-errors",
+                        groups: "bad-groups",
+                        warnings: "bad-warnings",
+                    }),
+                }));
+                const malformedLogRotationRun = await runScheduledJob("ops.log-rotation");
+                assert.equal(malformedLogRotationRun.status, "failed");
+                assert.equal(malformedLogRotationRun.message, "Log rotation failed");
+            } finally {
+                logRotationTesting.resetElevatedLogRotationExecFileRunner();
+            }
             await withFetch(
                 (url) => {
                     assert.ok(url.includes("wttr.in"));

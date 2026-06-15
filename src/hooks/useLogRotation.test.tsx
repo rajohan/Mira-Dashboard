@@ -3,6 +3,7 @@ import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
+import { cacheKeys } from "./useCache";
 import {
     logRotationKeys,
     useLogRotationStatus,
@@ -64,5 +65,11 @@ describe("log rotation hooks", () => {
             expect.objectContaining({ method: "POST" })
         );
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: logRotationKeys.status });
+        expect(invalidateSpy).toHaveBeenCalledWith({
+            queryKey: cacheKeys.heartbeat(),
+        });
+        expect(invalidateSpy).toHaveBeenCalledWith({
+            queryKey: cacheKeys.entry("log_rotation.state"),
+        });
     });
 });
