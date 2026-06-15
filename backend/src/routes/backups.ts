@@ -394,6 +394,14 @@ function startBackupJob(
             return;
         }
         finalizing = true;
+        if (hostAbortKillTimer) {
+            clearTimeout(hostAbortKillTimer);
+            hostAbortKillTimer = null;
+        }
+        if (containerAbortKillTimer) {
+            clearTimeout(containerAbortKillTimer);
+            containerAbortKillTimer = null;
+        }
         finalized = true;
         job.status = "done";
         job.code = 1;

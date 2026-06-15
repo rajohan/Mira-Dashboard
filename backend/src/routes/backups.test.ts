@@ -1208,6 +1208,50 @@ describe("backup routes", () => {
         }
     });
 
+    it("clears abort timers when the backup process emits an error", async () => {
+        registerBackupScheduledJobs();
+        const originalKill = process.kill;
+        const signals: Array<[number, NodeJS.Signals | number | undefined]> = [];
+        process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+            signals.push([pid, signal]);
+            return true;
+        }) as typeof process.kill;
+
+        try {
+            mock.timers.enable({ apis: ["setTimeout"] });
+            await withEnv(
+                { FAKE_BACKUP_NEVER_CLOSE: "1", FAKE_BACKUP_PID: "4321" },
+                async () => {
+                    const controller = new AbortController();
+                    const runPromise = startTestScheduledBackup(
+                        "walg",
+                        controller.signal
+                    );
+
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+                    controller.abort();
+                    lastFakeBackupProcess?.emit("error", new Error("spawn failed"));
+
+                    await assertScheduledBackupRejects(runPromise, /spawn failed/u);
+                    mock.timers.tick(10_000);
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+
+                    assert.deepEqual(
+                        signals.filter(([pid]) => pid === -4321),
+                        [[-4321, "SIGTERM"]]
+                    );
+                    assert.equal(
+                        fakeDockerExecCalls.some((args) => args.includes("-KILL")),
+                        false
+                    );
+                }
+            );
+        } finally {
+            mock.timers.reset();
+            process.kill = originalKill;
+        }
+    });
+
     it("waits for in-container WAL-G process exit after aborting scheduled backups", async () => {
         registerBackupScheduledJobs();
         await withEnv(
