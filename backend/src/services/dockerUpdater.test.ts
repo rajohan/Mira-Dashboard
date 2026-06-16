@@ -2427,6 +2427,38 @@ setTimeout(() => process.exit(0), 30);
                 );
             }
         );
+        const helperEnvRoot = path.join(tempDir, "helper-env-root");
+        await mkdir(helperEnvRoot, { recursive: true });
+        await writeFile(
+            path.join(helperEnvRoot, ".env"),
+            "APP_COMPOSE=apps/env-app\nFROM_DOTENV=base\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(helperEnvRoot, "compose.env"),
+            "FROM_DOTENV=override\nFROM_ENV_FILE=value\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(helperEnvRoot, "absolute.env"),
+            "FROM_ABSOLUTE_ENV=absolute\n",
+            "utf8"
+        );
+        assert.deepEqual(
+            updater.__testing.loadComposeProjectEnv(helperEnvRoot, [
+                "compose.env",
+                path.join(helperEnvRoot, "absolute.env"),
+            ]),
+            {
+                APP_COMPOSE: "apps/env-app",
+                FROM_ABSOLUTE_ENV: "absolute",
+                FROM_DOTENV: "override",
+                FROM_ENV_FILE: "value",
+            }
+        );
+        const brokenEnvRoot = path.join(tempDir, "broken-helper-env-root");
+        await mkdir(path.join(brokenEnvRoot, ".env"), { recursive: true });
+        assert.deepEqual(updater.__testing.loadComposeProjectEnv(brokenEnvRoot), {});
         assert.equal(
             updater.__testing.stripRegistry("docker.io/library/redis"),
             "library/redis"
@@ -2521,6 +2553,69 @@ setTimeout(() => process.exit(0), 30);
                         "web"
                     ).cwd,
                     interpolatedIncludeRoot
+                );
+            }
+        );
+        const envIncludeRoot = path.join(tempDir, "env-include-root");
+        const envIncludeComposePath = path.join(
+            envIncludeRoot,
+            "apps",
+            "env-app",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(envIncludeComposePath), { recursive: true });
+        await writeFile(
+            path.join(envIncludeRoot, ".env"),
+            "APP_COMPOSE=apps/env-app\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(envIncludeRoot, "compose.yaml"),
+            "include:\n- ${APP_COMPOSE}/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(envIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                APP_COMPOSE: undefined,
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(envIncludeComposePath, "web").cwd,
+                    envIncludeRoot
+                );
+            }
+        );
+        const envFileIncludeRoot = path.join(tempDir, "env-file-include-root");
+        const envFileIncludeComposePath = path.join(
+            envFileIncludeRoot,
+            "apps",
+            "env-file-app",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(envFileIncludeComposePath), { recursive: true });
+        await writeFile(
+            path.join(envFileIncludeRoot, "include.env"),
+            "APP_COMPOSE=apps/env-file-app\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(envFileIncludeRoot, "compose.yaml"),
+            "include:\n- path: ${APP_COMPOSE}/compose.yaml\n  env_file: include.env\n",
+            "utf8"
+        );
+        await writeFile(envFileIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                APP_COMPOSE: undefined,
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(envFileIncludeComposePath, "web")
+                        .cwd,
+                    envFileIncludeRoot
                 );
             }
         );

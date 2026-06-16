@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { parse as parseDotenv } from "dotenv";
 import safeRegex from "safe-regex2";
 import YAML from "yaml";
 
@@ -90,11 +91,55 @@ function getDockerAppsRoot(): string {
     return nonEmptyEnvFallback("MIRA_DOCKER_APPS_ROOT", "/opt/docker/apps");
 }
 
-function interpolateComposePath(value: string): string {
+type ComposeEnv = Record<string, string>;
+
+function readComposeEnvFile(envPath: string): ComposeEnv {
+    try {
+        if (!fs.existsSync(envPath)) return {};
+        return parseDotenv(fs.readFileSync(envPath));
+    } catch {
+        return {};
+    }
+}
+
+function composeEnvFilePaths(projectDirectory: string, envFileValue: unknown): string[] {
+    return (Array.isArray(envFileValue) ? envFileValue : [envFileValue])
+        .filter((item): item is string => typeof item === "string")
+        .map((envFilePath) =>
+            path.isAbsolute(envFilePath)
+                ? envFilePath
+                : path.resolve(projectDirectory, envFilePath)
+        );
+}
+
+function loadComposeEnvFiles(
+    projectDirectory: string,
+    envFileValue: unknown
+): ComposeEnv {
+    return Object.assign(
+        {},
+        ...composeEnvFilePaths(projectDirectory, envFileValue).map((envPath) =>
+            readComposeEnvFile(envPath)
+        )
+    ) as ComposeEnv;
+}
+
+function loadComposeProjectEnv(
+    projectDirectory: string,
+    envFileValue?: unknown
+): ComposeEnv {
+    return {
+        ...readComposeEnvFile(path.join(projectDirectory, ".env")),
+        ...loadComposeEnvFiles(projectDirectory, envFileValue),
+    };
+}
+
+function interpolateComposePath(value: string, composeEnv: ComposeEnv = {}): string {
     return value.replaceAll(
         /\$\{([^}:?+-]+)(?:(:?[-?+])([^}]*))?\}/gu,
         (match, name, op, fallback) => {
-            const envValue = process.env[String(name)];
+            const envName = String(name);
+            const envValue = process.env[envName] ?? composeEnv[envName];
             if (!op) return envValue ?? match;
             const hasValue = envValue !== undefined && envValue !== "";
             if (op === ":-" || op === "-") {
@@ -112,8 +157,12 @@ function interpolateComposePath(value: string): string {
     );
 }
 
-function resolveComposeRelativePath(baseDir: string, includePath: string): string {
-    const interpolatedPath = interpolateComposePath(includePath);
+function resolveComposeRelativePath(
+    baseDir: string,
+    includePath: string,
+    composeEnv: ComposeEnv = {}
+): string {
+    const interpolatedPath = interpolateComposePath(includePath, composeEnv);
     return path.isAbsolute(interpolatedPath)
         ? interpolatedPath
         : path.resolve(baseDir, interpolatedPath);
@@ -122,9 +171,14 @@ function resolveComposeRelativePath(baseDir: string, includePath: string): strin
 function includePathMatchesCompose(
     baseDir: string,
     includePath: string,
-    composePath: string
+    composePath: string,
+    composeEnv: ComposeEnv
 ): boolean {
-    const resolvedIncludePath = resolveComposeRelativePath(baseDir, includePath);
+    const resolvedIncludePath = resolveComposeRelativePath(
+        baseDir,
+        includePath,
+        composeEnv
+    );
     const resolvedComposePath = path.resolve(composePath);
     if (resolvedIncludePath === resolvedComposePath) {
         return true;
@@ -140,7 +194,8 @@ function projectComposeIncludesCompose(
     projectComposePath: string,
     composePath: string,
     seen = new Set<string>(),
-    projectDirectory = path.dirname(projectComposePath)
+    projectDirectory = path.dirname(projectComposePath),
+    composeEnv = loadComposeProjectEnv(projectDirectory)
 ): boolean {
     const realProjectComposePath = fs.realpathSync(projectComposePath);
     if (seen.has(realProjectComposePath)) {
@@ -156,20 +211,40 @@ function projectComposeIncludesCompose(
             const includePaths = (
                 Array.isArray(includeValue) ? includeValue : [includeValue]
             ).filter((item): item is string => typeof item === "string");
+            const entryComposeEnv = {
+                ...composeEnv,
+                ...loadComposeEnvFiles(projectDirectory, entryRecord.env_file),
+            };
             const rawProjectDirectory = entryRecord.project_directory;
             const nestedProjectDirectory =
                 typeof rawProjectDirectory === "string"
-                    ? resolveComposeRelativePath(projectDirectory, rawProjectDirectory)
+                    ? resolveComposeRelativePath(
+                          projectDirectory,
+                          rawProjectDirectory,
+                          entryComposeEnv
+                      )
                     : null;
             for (const includePath of includePaths) {
                 if (
-                    includePathMatchesCompose(projectDirectory, includePath, composePath)
+                    includePathMatchesCompose(
+                        projectDirectory,
+                        includePath,
+                        composePath,
+                        entryComposeEnv
+                    )
                 ) {
                     return true;
                 }
                 const resolvedIncludePath = resolveComposeRelativePath(
                     projectDirectory,
-                    includePath
+                    includePath,
+                    entryComposeEnv
+                );
+                const resolvedProjectDirectory =
+                    nestedProjectDirectory ?? path.dirname(resolvedIncludePath);
+                const nestedComposeEnv = loadComposeProjectEnv(
+                    resolvedProjectDirectory,
+                    entryRecord.env_file
                 );
                 if (
                     fs.existsSync(resolvedIncludePath) &&
@@ -177,7 +252,8 @@ function projectComposeIncludesCompose(
                         resolvedIncludePath,
                         composePath,
                         seen,
-                        nestedProjectDirectory ?? path.dirname(resolvedIncludePath)
+                        resolvedProjectDirectory,
+                        nestedComposeEnv
                     )
                 ) {
                     return true;
@@ -1897,6 +1973,7 @@ export const __testing = {
     imageMatchesPlatform,
     hasUpdate,
     interpolateComposePath,
+    loadComposeProjectEnv,
     listComposeFiles,
     lookupDockerHub,
     lookupGhcr,
