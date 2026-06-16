@@ -234,6 +234,53 @@ CREATE TABLE IF NOT EXISTS scheduled_job_runs (
 
 CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_job_started
     ON scheduled_job_runs(job_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS docker_managed_services (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_slug TEXT NOT NULL,
+    service_name TEXT NOT NULL,
+    compose_path TEXT NOT NULL,
+    image_repo TEXT NOT NULL,
+    compose_image_ref TEXT,
+    compose_image_field TEXT,
+    current_tag TEXT,
+    current_digest TEXT,
+    latest_tag TEXT,
+    latest_digest TEXT,
+    policy TEXT NOT NULL DEFAULT 'notify',
+    pin_mode TEXT NOT NULL DEFAULT 'tag',
+    tag_match_type TEXT NOT NULL DEFAULT 'exact',
+    tag_match_pattern TEXT,
+    version_group TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    last_checked_at TEXT,
+    last_updated_at TEXT,
+    last_status TEXT,
+    UNIQUE(app_slug, service_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_docker_managed_services_enabled
+    ON docker_managed_services(enabled);
+
+CREATE TABLE IF NOT EXISTS docker_update_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    managed_service_id INTEGER,
+    app_slug TEXT NOT NULL DEFAULT '',
+    service_name TEXT NOT NULL DEFAULT '',
+    event_type TEXT NOT NULL,
+    from_tag TEXT,
+    to_tag TEXT,
+    from_digest TEXT,
+    to_digest TEXT,
+    message TEXT,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(managed_service_id) REFERENCES docker_managed_services(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_docker_update_events_created_at
+    ON docker_update_events(created_at DESC);
 `;
 
 /** Ensures older task databases have the automation column. */

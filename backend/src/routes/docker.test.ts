@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, it, mock } from "node:test";
 
 import express from "express";
+
+import { db } from "../db.js";
 
 interface TestServer {
     baseUrl: string;
@@ -19,12 +21,6 @@ const originalDockerRoot = process.env.MIRA_DOCKER_ROOT;
 const originalDockerBin = process.env.MIRA_DOCKER_BIN;
 const fakeEnvKeys = [
     "MIRA_DOCKER_COMPOSE_WRAPPER",
-    "MIRA_UPDATER_NODE_BIN",
-    "MIRA_UPDATER_CWD",
-    "MIRA_FAKE_UPDATER_FAIL_STEP",
-    "MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP",
-    "MIRA_FAKE_UPDATER_MALFORMED_STDOUT_STEP",
-    "MIRA_FAKE_UPDATER_STDERR",
     "MIRA_FAKE_DOCKER_EMPTY",
     "MIRA_FAKE_DOCKER_SPARSE",
     "MIRA_FAKE_DOCKER_NON_ARRAY_INSPECT",
@@ -42,12 +38,10 @@ const fakeEnvKeys = [
     "MIRA_FAKE_DOCKER_COALESCED_EXEC_MARKER",
     "MIRA_FAKE_DOCKER_DUPLICATE_EXEC_MARKER",
     "MIRA_FAKE_DOCKER_NO_SETSID",
-    "MIRA_FAKE_DOCKER_SPARSE_EVENTS",
 ] as const;
 const originalFakeEnv = new Map(
     fakeEnvKeys.map((key) => [key, process.env[key]] as const)
 );
-let fakeUpdaterNodeBin: string;
 
 function createMockChildProcess(
     overrides: Pick<ChildProcess, "killed" | "kill"> & Partial<ChildProcess>
@@ -340,87 +334,12 @@ else if (args[0] === "exec" && args[1] === "app" && args[2] === "sh") {
   process.stderr.write("exec stderr\n");
   process.exit(0);
 }
-if (args[0] === "exec" && args[1] === "postgres" && args[2] === "psql") {
-  const sql = args.join(" ");
-  if (sql.includes("docker_managed_services")) {
-    const header = "id\tapp_slug\tservice_name\tcompose_image_ref\timage_repo\tcurrent_tag\tcurrent_digest\tlatest_tag\tlatest_digest\tpolicy\tpin_mode\tenabled\tlast_checked_at\tlast_updated_at\tlast_status\tmetadata\n";
-    const rows = [
-      "1\tmedia\tapp\trepo/app:1.0.0\trepo/app\t1.0.0\tsha256:old\t1.0.1\tsha256:new\tauto\tdigest\ttrue\t2026-05-11\t\t\t{\"owner\":\"mira\"}",
-      "2\tmedia\tdisabled\trepo/disabled:1\trepo/disabled\t1\t\t2\t\tnotify\ttag\tfalse\t\t\t\t{}",
-      "3\tmedia\tcurrent\trepo/current:1\trepo/current\t1\t\t1\t\tnotify\ttag\ttrue\t\t\t\tnot-json"
-    ];
-    const whereMatch = sql.match(/WHERE id = (\d+)/);
-    if (whereMatch) {
-      const row = rows.find((entry) => entry.startsWith(whereMatch[1] + "\t"));
-      process.stdout.write(header + (row ? row + "\n" : ""));
-    } else {
-      process.stdout.write(header + rows.join("\n") + "\n");
-    }
-    process.exit(0);
-  }
-  process.exit(0);
-}
-if (args[0] === "exec" && args[1] === "postgres" && args[2] === "cat") {
-  if (process.env.MIRA_FAKE_DOCKER_SPARSE_EVENTS === "1") {
-    process.stdout.write("8\t1\tmedia\n");
-    process.exit(0);
-  }
-  process.stdout.write("7\t1\tmedia\tapp\tupdated\t1.0.0\t1.0.1\tsha256:old\tsha256:new\t2026-05-11 12:00:00\n");
-  process.exit(0);
-}
-if (args[0] === "exec" && args[1] === "postgres" && args[2] === "rm") {
-  process.exit(0);
-}
 process.stderr.write("unexpected docker args: " + command);
 process.exit(1);
 `,
         "utf8"
     );
     await chmod(dockerPath, 0o755);
-    const nodePath = path.join(binDir, "node");
-    await writeFile(
-        nodePath,
-        String.raw`#!${process.execPath}
-const script = process.argv[2] || "";
-const scriptName = script.split(/[\\/]/u).at(-1);
-const stepByScript = {
-  "docker-register-services.mjs": "register",
-  "docker-registry-poll.mjs": "poll",
-  "docker-auto-update.mjs": process.argv.includes("--mode") ? "manual-update" : "auto-update",
-  "docker-notify-updates.mjs": "notify",
-  "docker-send-discord-newversion.mjs": "discord"
-};
-const step = stepByScript[scriptName] || "unknown";
-if (process.env.MIRA_FAKE_UPDATER_ENV_PATH) {
-  require("node:fs").writeFileSync(process.env.MIRA_FAKE_UPDATER_ENV_PATH, JSON.stringify({
-    user: process.env.DB_POSTGRESDB_USER,
-    password: process.env.DB_POSTGRESDB_PASSWORD
-  }));
-}
-if (process.env.MIRA_FAKE_UPDATER_FAIL_STEP === step) {
-  if (process.env.MIRA_FAKE_UPDATER_MALFORMED_STDOUT_STEP === step) {
-    process.stdout.write("not-json\n");
-  } else if (process.env.MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP !== step) {
-    process.stdout.write(JSON.stringify({ step, ok: false }) + "\n");
-  }
-  process.stderr.write(step + " failed\n");
-  process.exit(1);
-}
-if (process.env.MIRA_FAKE_UPDATER_MALFORMED_STDOUT_STEP === step) {
-  process.stdout.write("not-json\n");
-  process.exit(0);
-}
-if (process.env.MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP !== step) {
-  process.stdout.write("log before json\n" + JSON.stringify({ step, ok: true }) + "\n");
-}
-process.stderr.write(process.env.MIRA_FAKE_UPDATER_STDERR || "");
-`,
-        "utf8"
-    );
-    await chmod(nodePath, 0o755);
-    fakeUpdaterNodeBin = nodePath;
-    process.env.MIRA_UPDATER_NODE_BIN = nodePath;
-    process.env.MIRA_UPDATER_CWD = tempDir;
     const composePath = path.join(binDir, "docker-compose-doppler");
     await writeFile(
         composePath,
@@ -435,10 +354,113 @@ process.stdout.write("compose " + process.argv.slice(2).join(" ") + "\n");
     process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
 }
 
-async function startServer(updaterCwd: string): Promise<TestServer> {
+function resetDockerUpdaterFixtures(): void {
+    db.exec(
+        "DELETE FROM docker_update_events; DELETE FROM docker_managed_services; DELETE FROM notifications WHERE source = 'docker-updater';"
+    );
+    const insertService = db.prepare(
+        `INSERT INTO docker_managed_services (
+            id, app_slug, service_name, compose_path, image_repo, compose_image_ref,
+            current_tag, current_digest, latest_tag, latest_digest, policy, pin_mode,
+            enabled, last_checked_at, last_status, metadata_json
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertService.run(
+        1,
+        "media",
+        "app",
+        "/opt/docker/apps/media/compose.yaml",
+        "repo/app",
+        "repo/app:1.0.0",
+        "1.0.0",
+        "sha256:old",
+        "1.0.1",
+        "sha256:new",
+        "auto",
+        "digest",
+        1,
+        "2026-05-11",
+        "update_available",
+        JSON.stringify({ owner: "mira" })
+    );
+    insertService.run(
+        2,
+        "media",
+        "disabled",
+        "/opt/docker/apps/media/compose.yaml",
+        "repo/disabled",
+        "repo/disabled:1",
+        "1",
+        null,
+        "2",
+        null,
+        "notify",
+        "tag",
+        0,
+        null,
+        null,
+        "{}"
+    );
+    insertService.run(
+        3,
+        "media",
+        "current",
+        "/opt/docker/apps/media/compose.yaml",
+        "repo/current",
+        "repo/current:1",
+        "1",
+        null,
+        "1",
+        null,
+        "notify",
+        "tag",
+        1,
+        null,
+        null,
+        "not-json"
+    );
+    db.prepare(
+        `INSERT INTO docker_update_events (
+            id, managed_service_id, app_slug, service_name, event_type, from_tag,
+            to_tag, from_digest, to_digest, message, details_json, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+        7,
+        1,
+        "media",
+        "app",
+        "updated",
+        "1.0.0",
+        "1.0.1",
+        "sha256:old",
+        "sha256:new",
+        "Updated",
+        "{}",
+        "2026-05-11 12:00:00"
+    );
+    db.prepare(
+        `INSERT INTO docker_update_events (
+            id, managed_service_id, app_slug, service_name, event_type, from_tag,
+            to_tag, from_digest, to_digest, message, details_json, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+        8,
+        null,
+        "",
+        "",
+        "registration_failed",
+        null,
+        null,
+        null,
+        null,
+        "Registration failed",
+        "{}",
+        "2026-05-11 11:00:00"
+    );
+}
+
+async function startServer(): Promise<TestServer> {
     const { default: dockerRoutes, __testing } = await import("./docker.js");
-    __testing.setUpdaterNodeBinForTests(fakeUpdaterNodeBin);
-    __testing.setUpdaterCwdForTests(updaterCwd);
     __testing.setDockerExecPidWaitTimeoutForTests(100);
     const app = express();
     dockerRoutes(app);
@@ -495,27 +517,6 @@ async function requestJson<T>(
     };
 }
 
-async function withFakeUpdaterFailStep<T>(
-    value: string | undefined,
-    callback: () => Promise<T>
-): Promise<T> {
-    const previous = process.env.MIRA_FAKE_UPDATER_FAIL_STEP;
-    try {
-        if (value === undefined) {
-            delete process.env.MIRA_FAKE_UPDATER_FAIL_STEP;
-        } else {
-            process.env.MIRA_FAKE_UPDATER_FAIL_STEP = value;
-        }
-        return await callback();
-    } finally {
-        if (previous === undefined) {
-            delete process.env.MIRA_FAKE_UPDATER_FAIL_STEP;
-        } else {
-            process.env.MIRA_FAKE_UPDATER_FAIL_STEP = previous;
-        }
-    }
-}
-
 async function withEnvValue<T>(
     key: string,
     value: string | undefined,
@@ -546,7 +547,8 @@ describe("docker routes", { concurrency: false }, () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-docker-routes-"));
         await installFakeDocker(tempDir);
         process.env.MIRA_DOCKER_ROOT = tempDir;
-        server = await startServer(tempDir);
+        resetDockerUpdaterFixtures();
+        server = await startServer();
     });
 
     after(async () => {
@@ -585,8 +587,7 @@ describe("docker routes", { concurrency: false }, () => {
             process.env.MIRA_DOCKER_BIN = originalDockerBin;
         }
         __testing.setDockerBinForTests(originalDockerBin);
-        __testing.setUpdaterNodeBinForTests(originalFakeEnv.get("MIRA_UPDATER_NODE_BIN"));
-        __testing.setUpdaterCwdForTests(originalFakeEnv.get("MIRA_UPDATER_CWD"));
+        __testing.setRunDockerUpdaterServiceForTests(undefined);
         __testing.setDockerExecPidWaitTimeoutForTests();
         if (tempDir) {
             await rm(tempDir, { recursive: true, force: true });
@@ -635,15 +636,30 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(
             __testing.hasUpdaterCandidate({
                 pin_mode: "tag",
+                current_tag: "1.0.0",
+                latest_tag: "1.0.0",
+                latest_digest: "sha256:new",
+            } as never),
+            true
+        );
+        assert.equal(
+            __testing.hasUpdaterCandidate({
+                pin_mode: "tag",
+                current_tag: "1.0.0",
+                latest_tag: "1.0.0",
+                current_digest: "sha256:old",
+                latest_digest: "sha256:new",
+            } as never),
+            true
+        );
+        assert.equal(
+            __testing.hasUpdaterCandidate({
+                pin_mode: "tag",
                 current_tag: "",
                 latest_tag: "1.0.1",
             } as never),
             false
         );
-        assert.deepEqual(__testing.extractTrailingJson('noise\n{"ok":true}'), {
-            ok: true,
-        });
-        assert.deepEqual(__testing.extractTrailingJson('{"ok":true}'), { ok: true });
         assert.deepEqual(__testing.parseLabels(), {});
         assert.deepEqual(__testing.parseLabels("plain, key=value ,empty="), {
             plain: "",
@@ -674,90 +690,6 @@ describe("docker routes", { concurrency: false }, () => {
         );
         assert.equal(__testing.resolveManualUpdateServiceId("", {}), null);
         assert.deepEqual(await __testing.getContainerInspectMap([]), new Map());
-        __testing.setUpdaterNodeBinForTests(process.execPath);
-        try {
-            assert.equal(
-                __testing.buildPostgresUri(),
-                "postgresql://postgres:postgres@postgres:5432/n8n"
-            );
-            const emptyStderrFailure = await __testing.runUpdaterCommand("empty-stderr", [
-                "-e",
-                "process.exit(7)",
-            ]);
-            assert.equal(emptyStderrFailure.ok, false);
-            assert.match(emptyStderrFailure.stderr, /Command failed/u);
-        } finally {
-            __testing.setUpdaterNodeBinForTests(fakeUpdaterNodeBin);
-        }
-
-        const originalEnv = {
-            DATABASE_USERNAME: process.env.DATABASE_USERNAME,
-            DATABASE_PASSWORD: process.env.DATABASE_PASSWORD,
-            DATABASE_HOST: process.env.DATABASE_HOST,
-            DATABASE_PORT: process.env.DATABASE_PORT,
-            DB_POSTGRESDB_USER: process.env.DB_POSTGRESDB_USER,
-            DB_POSTGRESDB_PASSWORD: process.env.DB_POSTGRESDB_PASSWORD,
-            DB_POSTGRESDB_HOST: process.env.DB_POSTGRESDB_HOST,
-            DB_POSTGRESDB_PORT: process.env.DB_POSTGRESDB_PORT,
-        };
-        delete process.env.DB_POSTGRESDB_USER;
-        delete process.env.DB_POSTGRESDB_PASSWORD;
-        process.env.DATABASE_USERNAME = "user@name";
-        process.env.DATABASE_PASSWORD = "p:a/ss#";
-        process.env.DATABASE_HOST = "db";
-        process.env.DATABASE_PORT = "6543";
-        try {
-            assert.equal(
-                __testing.buildPostgresUri("custom"),
-                "postgresql://user%40name:p%3Aa%2Fss%23@db:6543/custom"
-            );
-            assert.equal(
-                __testing.buildPostgresUri("custom db/#1"),
-                "postgresql://user%40name:p%3Aa%2Fss%23@db:6543/custom%20db%2F%231"
-            );
-            process.env.DB_POSTGRESDB_USER = "native-user";
-            process.env.DB_POSTGRESDB_PASSWORD = "native-password";
-            assert.equal(
-                __testing.buildPostgresUri("custom"),
-                "postgresql://native-user:native-password@db:6543/custom"
-            );
-            process.env.DB_POSTGRESDB_USER = " native-user ";
-            process.env.DB_POSTGRESDB_PASSWORD = " native-password ";
-            assert.equal(
-                __testing.buildPostgresUri("custom"),
-                "postgresql://native-user:native-password@db:6543/custom"
-            );
-            process.env.DB_POSTGRESDB_USER = "";
-            process.env.DB_POSTGRESDB_PASSWORD = "";
-            assert.equal(
-                __testing.buildPostgresUri("custom"),
-                "postgresql://user%40name:p%3Aa%2Fss%23@db:6543/custom"
-            );
-            delete process.env.DB_POSTGRESDB_USER;
-            delete process.env.DB_POSTGRESDB_PASSWORD;
-            process.env.DATABASE_USERNAME = "";
-            process.env.DATABASE_PASSWORD = "";
-            process.env.DATABASE_HOST = "";
-            process.env.DATABASE_PORT = "";
-            assert.equal(
-                __testing.buildPostgresUri(),
-                "postgresql://postgres:postgres@postgres:5432/n8n"
-            );
-            delete process.env.DATABASE_USERNAME;
-            delete process.env.DATABASE_PASSWORD;
-            assert.equal(
-                __testing.buildPostgresUri(),
-                "postgresql://postgres:postgres@postgres:5432/n8n"
-            );
-        } finally {
-            for (const [key, value] of Object.entries(originalEnv)) {
-                if (value === undefined) {
-                    delete process.env[key];
-                } else {
-                    process.env[key] = value;
-                }
-            }
-        }
 
         let nextCalled = false;
         const handler = __testing.asyncRoute(async () => {
@@ -1416,7 +1348,7 @@ describe("docker routes", { concurrency: false }, () => {
                 "/api/docker/updater/events"
             );
             assert.equal(events.status, 200);
-            assert.equal(events.body.events.length, 1);
+            assert.equal(events.body.events.length, 2);
         });
 
         await withEnvValue("MIRA_FAKE_DOCKER_MOUNT_SOURCE_MATCH", "1", async () => {
@@ -1858,33 +1790,20 @@ describe("docker routes", { concurrency: false }, () => {
                 message: null,
                 createdAt: "2026-05-11 12:00:00",
             },
+            {
+                id: 8,
+                managedServiceId: null,
+                appSlug: "",
+                serviceName: "",
+                eventType: "registration_failed",
+                fromTag: null,
+                toTag: null,
+                fromDigest: null,
+                toDigest: null,
+                message: null,
+                createdAt: "2026-05-11 11:00:00",
+            },
         ]);
-
-        await withEnvValue("MIRA_FAKE_DOCKER_SPARSE_EVENTS", "1", async () => {
-            const sparseEvents = await requestJson<{
-                events: Array<{
-                    id: number;
-                    serviceName: string;
-                    message: string | null;
-                }>;
-            }>(server, "/api/docker/updater/events");
-            assert.equal(sparseEvents.status, 200);
-            assert.deepEqual(sparseEvents.body.events, [
-                {
-                    id: 8,
-                    managedServiceId: 1,
-                    appSlug: "media",
-                    serviceName: "",
-                    eventType: "",
-                    fromTag: null,
-                    toTag: null,
-                    fromDigest: null,
-                    toDigest: null,
-                    message: null,
-                    createdAt: "",
-                },
-            ]);
-        });
 
         const invalid = await requestJson<{ error: string }>(
             server,
@@ -1918,17 +1837,85 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(disabled.status, 400);
         assert.equal(disabled.body.error, "Updater service is disabled");
 
-        const noUpdate = await requestJson<{ error: string }>(
-            server,
-            "/api/docker/updater/services/3/update",
-            { method: "POST", body: {} }
-        );
-        assert.equal(noUpdate.status, 400);
-        assert.equal(noUpdate.body.error, "No update available for this service");
+        const { __testing } = await import("./docker.js");
+        __testing.setRunDockerUpdaterServiceForTests(async () => [
+            {
+                step: "manual-update-skipped:media/current",
+                ok: false,
+                code: "CONFLICT",
+                stdout: "",
+                stderr: "No update available",
+            },
+        ]);
+        try {
+            const noUpdate = await requestJson<{ error: string }>(
+                server,
+                "/api/docker/updater/services/3/update",
+                { method: "POST", body: {} }
+            );
+            assert.equal(noUpdate.status, 409);
+            assert.equal(noUpdate.body.error, "No update available");
+        } finally {
+            __testing.setRunDockerUpdaterServiceForTests(undefined);
+        }
+
+        __testing.setRunDockerUpdaterServiceForTests(async () => [
+            {
+                step: "poll",
+                ok: false,
+                code: "UNSUPPORTED_REGISTRY",
+                stdout: "",
+                stderr: "",
+            },
+        ]);
+        try {
+            const unsupported = await requestJson<{ error: string }>(
+                server,
+                "/api/docker/updater/services/1/update",
+                { method: "POST", body: {} }
+            );
+            assert.equal(unsupported.status, 422);
+            assert.equal(unsupported.body.error, "Unsupported image registry");
+        } finally {
+            __testing.setRunDockerUpdaterServiceForTests(undefined);
+        }
+
+        for (const [code, status, error] of [
+            ["NOT_FOUND", 404, "Updater service not found"],
+            ["DISABLED", 400, "Updater service is disabled"],
+            ["CONFLICT", 409, "No update available"],
+        ] as const) {
+            __testing.setRunDockerUpdaterServiceForTests(async () => [
+                {
+                    step: "manual-update:media/app",
+                    ok: false,
+                    code,
+                    stdout: "",
+                    stderr: "",
+                },
+            ]);
+            try {
+                const response = await requestJson<{ error: string }>(
+                    server,
+                    "/api/docker/updater/services/1/update",
+                    { method: "POST", body: {} }
+                );
+                assert.equal(response.status, status);
+                assert.equal(response.body.error, error);
+            } finally {
+                __testing.setRunDockerUpdaterServiceForTests(undefined);
+            }
+        }
     });
 
-    it("runs updater pipelines and reports step failures", async () => {
-        await withFakeUpdaterFailStep(undefined, async () => {
+    it("runs updater pipelines through the dashboard service", async () => {
+        const { __testing } = await import("./docker.js");
+        __testing.setRunDockerUpdaterServiceForTests(async () => [
+            { step: "register-services", ok: true, stdout: "registered", stderr: "" },
+            { step: "poll", ok: true, stdout: "checked", stderr: "" },
+            { step: "auto-update:media/app", ok: true, stdout: "updated", stderr: "" },
+        ]);
+        try {
             const run = await requestJson<{
                 success: boolean;
                 steps: Array<{ step: string; ok: boolean }>;
@@ -1937,115 +1924,61 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(run.body.success, true);
             assert.deepEqual(
                 run.body.steps.map((step) => step.step),
-                ["register", "poll", "auto-update", "notify", "discord"]
+                ["register-services", "poll", "auto-update:media/app"]
             );
-        });
-
-        const originalPostgresUser = process.env.DB_POSTGRESDB_USER;
-        const originalPostgresPassword = process.env.DB_POSTGRESDB_PASSWORD;
-        const originalDatabaseUser = process.env.DATABASE_USERNAME;
-        const originalDatabasePassword = process.env.DATABASE_PASSWORD;
-        const originalEnvPath = process.env.MIRA_FAKE_UPDATER_ENV_PATH;
-        const envPath = path.join(tempDir, "updater-env.json");
-        try {
-            process.env.DB_POSTGRESDB_USER = "native-user";
-            process.env.DB_POSTGRESDB_PASSWORD = "native-password";
-            process.env.MIRA_FAKE_UPDATER_ENV_PATH = envPath;
-            const run = await requestJson<{ success: boolean }>(
-                server,
-                "/api/docker/updater/run",
-                { method: "POST", body: {} }
-            );
-            assert.equal(run.status, 200);
-            assert.equal(run.body.success, true);
-            assert.deepEqual(JSON.parse(await readFile(envPath, "utf8")), {
-                user: "native-user",
-                password: "native-password",
-            });
-
-            process.env.DB_POSTGRESDB_USER = "";
-            process.env.DB_POSTGRESDB_PASSWORD = "";
-            const blankRun = await requestJson<{ success: boolean }>(
-                server,
-                "/api/docker/updater/run",
-                { method: "POST", body: {} }
-            );
-            assert.equal(blankRun.status, 200);
-            assert.equal(blankRun.body.success, true);
-            assert.deepEqual(JSON.parse(await readFile(envPath, "utf8")), {
-                user: "postgres",
-                password: "postgres",
-            });
-
-            delete process.env.DB_POSTGRESDB_USER;
-            delete process.env.DB_POSTGRESDB_PASSWORD;
-            delete process.env.DATABASE_USERNAME;
-            delete process.env.DATABASE_PASSWORD;
-            const defaultRun = await requestJson<{ success: boolean }>(
-                server,
-                "/api/docker/updater/run",
-                { method: "POST", body: {} }
-            );
-            assert.equal(defaultRun.status, 200);
-            assert.equal(defaultRun.body.success, true);
-            assert.deepEqual(JSON.parse(await readFile(envPath, "utf8")), {
-                user: "postgres",
-                password: "postgres",
-            });
         } finally {
-            if (originalPostgresUser === undefined) delete process.env.DB_POSTGRESDB_USER;
-            else process.env.DB_POSTGRESDB_USER = originalPostgresUser;
-            if (originalPostgresPassword === undefined) {
-                delete process.env.DB_POSTGRESDB_PASSWORD;
-            } else {
-                process.env.DB_POSTGRESDB_PASSWORD = originalPostgresPassword;
-            }
-            if (originalDatabaseUser === undefined) delete process.env.DATABASE_USERNAME;
-            else process.env.DATABASE_USERNAME = originalDatabaseUser;
-            if (originalDatabasePassword === undefined) {
-                delete process.env.DATABASE_PASSWORD;
-            } else {
-                process.env.DATABASE_PASSWORD = originalDatabasePassword;
-            }
-            if (originalEnvPath === undefined) {
-                delete process.env.MIRA_FAKE_UPDATER_ENV_PATH;
-            } else {
-                process.env.MIRA_FAKE_UPDATER_ENV_PATH = originalEnvPath;
-            }
+            __testing.setRunDockerUpdaterServiceForTests(undefined);
         }
 
-        await withFakeUpdaterFailStep("poll", async () => {
+        __testing.setRunDockerUpdaterServiceForTests(async () => [
+            { step: "register-services", ok: true, stdout: "", stderr: "" },
+            { step: "poll", ok: false, stdout: "", stderr: "poll failed" },
+        ]);
+        try {
             const failedRun = await requestJson<{
                 success: boolean;
                 steps: Array<{ step: string; ok: boolean; stderr: string }>;
             }>(server, "/api/docker/updater/run", { method: "POST", body: {} });
             assert.equal(failedRun.status, 200);
             assert.equal(failedRun.body.success, false);
-            assert.deepEqual(
-                failedRun.body.steps.map((step) => step.step),
-                ["register", "poll"]
-            );
-            assert.equal(failedRun.body.steps[1]?.stderr, "poll failed\n");
-        });
-
-        for (const step of ["register", "auto-update", "notify"]) {
-            await withFakeUpdaterFailStep(step, async () => {
-                const stepFailure = await requestJson<{
-                    success: boolean;
-                    steps: Array<{ step: string; ok: boolean }>;
-                }>(server, "/api/docker/updater/run", { method: "POST", body: {} });
-                assert.equal(stepFailure.status, 200);
-                assert.equal(stepFailure.body.success, false);
-                assert.equal(stepFailure.body.steps.at(-1)?.step, step);
-            });
+            assert.equal(failedRun.body.steps[1]?.stderr, "poll failed");
+        } finally {
+            __testing.setRunDockerUpdaterServiceForTests(undefined);
         }
     });
 
-    it("runs manual updater notification steps and keeps partial failure details", async () => {
-        await withFakeUpdaterFailStep(undefined, async () => {
+    it("runs manual updater through the dashboard service and maps route errors", async () => {
+        resetDockerUpdaterFixtures();
+        const { __testing } = await import("./docker.js");
+        __testing.setRunDockerUpdaterServiceForTests(async (serviceId?: number) => {
+            db.prepare(
+                `UPDATE docker_managed_services
+                 SET current_tag = '1.0.1', current_digest = 'sha256:new',
+                     latest_tag = '1.0.1', latest_digest = 'sha256:new',
+                     last_status = 'updated'
+                 WHERE id = ?`
+            ).run(serviceId ?? -1);
+            return [
+                { step: "register-services", ok: true, stdout: "", stderr: "" },
+                { step: "poll", ok: true, stdout: "", stderr: "" },
+                {
+                    step: `manual-update:media/app:${serviceId ?? "none"}`,
+                    ok: true,
+                    stdout: "updated",
+                    stderr: "",
+                },
+            ];
+        });
+        try {
             const success = await requestJson<{
+                service: {
+                    currentDigest: string | null;
+                    currentTag: string | null;
+                    lastStatus: string | null;
+                    updateAvailable: boolean;
+                };
                 success: boolean;
-                result: { step: string; ok: boolean };
+                result: { summary: { updated: number; failed: number } };
                 stderr: string;
             }>(server, "/api/docker/updater/services/1/update", {
                 method: "POST",
@@ -2053,144 +1986,63 @@ describe("docker routes", { concurrency: false }, () => {
             });
             assert.equal(success.status, 200);
             assert.equal(success.body.success, true);
-            assert.deepEqual(success.body.result, { step: "manual-update", ok: true });
-        });
+            assert.deepEqual(success.body.result.summary, { updated: 1, failed: 0 });
+            assert.equal(success.body.service.currentTag, "1.0.1");
+            assert.equal(success.body.service.currentDigest, "sha256:new");
+            assert.equal(success.body.service.lastStatus, "updated");
+            assert.equal(success.body.service.updateAvailable, false);
+            assert.equal(success.body.stderr, "");
+        } finally {
+            __testing.setRunDockerUpdaterServiceForTests(undefined);
+        }
 
-        await withFakeUpdaterFailStep("notify", async () => {
-            const notifyFailure = await requestJson<{
-                success: boolean;
-                result: { step: string; ok: boolean };
-                stderr: string;
-            }>(server, "/api/docker/updater/services/1/update", {
-                method: "POST",
-                body: {},
-            });
-            assert.equal(notifyFailure.status, 200);
-            assert.equal(notifyFailure.body.success, false);
-            assert.deepEqual(notifyFailure.body.result, {
-                step: "manual-update",
-                ok: true,
-            });
-            assert.equal(notifyFailure.body.stderr, "notify failed\n");
-        });
-
-        await withFakeUpdaterFailStep("manual-update", async () => {
-            const manualFailure = await requestJson<{
-                success: boolean;
-                result: { step: string; ok: boolean };
-                stderr: string;
-            }>(server, "/api/docker/updater/services/1/update", {
-                method: "POST",
-                body: {},
-            });
-            assert.equal(manualFailure.status, 200);
-            assert.equal(manualFailure.body.success, false);
-            assert.deepEqual(manualFailure.body.result, {
-                step: "manual-update",
+        __testing.setRunDockerUpdaterServiceForTests(async () => [
+            { step: "register-services", ok: true, stdout: "", stderr: "" },
+            { step: "poll", ok: true, stdout: "", stderr: "" },
+            {
+                step: "manual-update:media/app",
                 ok: false,
+                stdout: "",
+                stderr: "apply failed",
+            },
+        ]);
+        try {
+            const failed = await requestJson<{
+                success: boolean;
+                result: { summary: { updated: number; failed: number } };
+            }>(server, "/api/docker/updater/services/1/update", {
+                method: "POST",
+                body: {},
             });
-            assert.equal(manualFailure.body.stderr, "manual-update failed\n");
-        });
+            assert.equal(failed.status, 200);
+            assert.equal(failed.body.success, false);
+            assert.deepEqual(failed.body.result.summary, { updated: 0, failed: 1 });
+        } finally {
+            __testing.setRunDockerUpdaterServiceForTests(undefined);
+        }
 
-        await withEnvValue(
-            "MIRA_FAKE_UPDATER_BLANK_STDOUT_STEP",
-            "manual-update",
-            async () => {
-                await withFakeUpdaterFailStep(undefined, async () => {
-                    const blankSuccess = await requestJson<{
-                        success: boolean;
-                        result: Record<string, never>;
-                        stderr: string;
-                    }>(server, "/api/docker/updater/services/1/update", {
-                        method: "POST",
-                        body: {},
-                    });
-                    assert.equal(blankSuccess.status, 200);
-                    assert.equal(blankSuccess.body.success, false);
-                    assert.deepEqual(blankSuccess.body.result, {});
-                    assert.match(
-                        blankSuccess.body.stderr,
-                        /Invalid manual updater output/u
-                    );
-                });
-
-                await withFakeUpdaterFailStep("manual-update", async () => {
-                    const blankManualFailure = await requestJson<{
-                        success: boolean;
-                        result: Record<string, never>;
-                        stderr: string;
-                    }>(server, "/api/docker/updater/services/1/update", {
-                        method: "POST",
-                        body: {},
-                    });
-                    assert.equal(blankManualFailure.status, 200);
-                    assert.equal(blankManualFailure.body.success, false);
-                    assert.deepEqual(blankManualFailure.body.result, {});
-                    assert.equal(
-                        blankManualFailure.body.stderr,
-                        "manual-update failed\n"
-                    );
-                });
-
-                await withFakeUpdaterFailStep("notify", async () => {
-                    const blankNotifyFailure = await requestJson<{
-                        success: boolean;
-                        result: Record<string, never>;
-                        stderr: string;
-                    }>(server, "/api/docker/updater/services/1/update", {
-                        method: "POST",
-                        body: {},
-                    });
-                    assert.equal(blankNotifyFailure.status, 200);
-                    assert.equal(blankNotifyFailure.body.success, false);
-                    assert.deepEqual(blankNotifyFailure.body.result, {});
-                    assert.match(
-                        blankNotifyFailure.body.stderr,
-                        /Invalid manual updater output/u
-                    );
-                });
-            }
-        );
-
-        await withEnvValue(
-            "MIRA_FAKE_UPDATER_MALFORMED_STDOUT_STEP",
-            "manual-update",
-            async () => {
-                const malformedSuccess = await requestJson<{
-                    success: boolean;
-                    result: Record<string, never>;
-                    stderr: string;
-                }>(server, "/api/docker/updater/services/1/update", {
-                    method: "POST",
-                    body: {},
-                });
-                assert.equal(malformedSuccess.status, 200);
-                assert.equal(malformedSuccess.body.success, false);
-                assert.deepEqual(malformedSuccess.body.result, {});
-                assert.match(
-                    malformedSuccess.body.stderr,
-                    /Invalid manual updater output/u
-                );
-
-                await withFakeUpdaterFailStep("manual-update", async () => {
-                    const malformedManualFailure = await requestJson<{
-                        success: boolean;
-                        result: Record<string, never>;
-                        stderr: string;
-                    }>(server, "/api/docker/updater/services/1/update", {
-                        method: "POST",
-                        body: {},
-                    });
-                    assert.equal(malformedManualFailure.status, 200);
-                    assert.equal(malformedManualFailure.body.success, false);
-                    assert.deepEqual(malformedManualFailure.body.result, {});
-                    assert.equal(
-                        malformedManualFailure.body.stderr,
-                        "manual-update failed\n"
-                    );
-                });
-            }
-        );
+        __testing.setRunDockerUpdaterServiceForTests(async () => [
+            { step: "register-services", ok: true, stdout: "", stderr: "" },
+            { step: "poll", ok: true, stdout: "", stderr: "" },
+            {
+                step: "manual-update:media/app",
+                ok: false,
+                code: "CONFLICT",
+                stdout: "",
+                stderr: "No update available",
+            },
+        ]);
+        try {
+            const conflict = await requestJson<{ error: string }>(
+                server,
+                "/api/docker/updater/services/1/update",
+                { method: "POST", body: {} }
+            );
+            assert.equal(conflict.status, 409);
+            assert.equal(conflict.body.error, "No update available");
+        } finally {
+            __testing.setRunDockerUpdaterServiceForTests(undefined);
+        }
     });
 
     it("starts and reads docker exec jobs", async () => {

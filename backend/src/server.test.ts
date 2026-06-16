@@ -959,11 +959,22 @@ describe("server bootstrap", () => {
             process.env.NODE_ENV = "production";
             server.emit("close");
             const closeListenersBeforeScheduler = server.listenerCount("close");
+            db.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run("docker.updater");
             handleServerListening();
             const closeListenersAfterScheduler = server.listenerCount("close");
             handleServerListening();
             assert.equal(server.listenerCount("close"), closeListenersAfterScheduler);
             assert.equal(closeListenersAfterScheduler, closeListenersBeforeScheduler + 1);
+            assert.equal(
+                (
+                    db
+                        .prepare(
+                            "SELECT COUNT(*) AS count FROM scheduled_jobs WHERE id = 'docker.updater'"
+                        )
+                        .get() as { count: number }
+                ).count,
+                1
+            );
             server.emit("close");
             stopQuotaNotificationMonitor();
             stopOpenClawNotificationMonitor();
