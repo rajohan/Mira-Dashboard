@@ -2386,6 +2386,14 @@ setTimeout(() => process.exit(0), 30);
                     "apps/app/compose.yaml"
                 );
                 assert.equal(
+                    updater.__testing.interpolateComposePath("$COMPOSE_SET"),
+                    "apps/app/compose.yaml"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath("$COMPOSE_MISSING"),
+                    "$COMPOSE_MISSING"
+                );
+                assert.equal(
                     updater.__testing.interpolateComposePath("${COMPOSE_MISSING}"),
                     "${COMPOSE_MISSING}"
                 );
@@ -2587,6 +2595,40 @@ setTimeout(() => process.exit(0), 30);
                 );
             }
         );
+        const unbracedEnvIncludeRoot = path.join(tempDir, "unbraced-env-include-root");
+        const unbracedEnvIncludeComposePath = path.join(
+            unbracedEnvIncludeRoot,
+            "apps",
+            "env-app",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(unbracedEnvIncludeComposePath), { recursive: true });
+        await writeFile(
+            path.join(unbracedEnvIncludeRoot, ".env"),
+            "APP_COMPOSE=apps/env-app\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(unbracedEnvIncludeRoot, "compose.yaml"),
+            "include:\n- $APP_COMPOSE/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(unbracedEnvIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                APP_COMPOSE: undefined,
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(
+                        unbracedEnvIncludeComposePath,
+                        "web"
+                    ).cwd,
+                    unbracedEnvIncludeRoot
+                );
+            }
+        );
         const envFileIncludeRoot = path.join(tempDir, "env-file-include-root");
         const envFileIncludeComposePath = path.join(
             envFileIncludeRoot,
@@ -2616,6 +2658,48 @@ setTimeout(() => process.exit(0), 30);
                     updater.__testing.getComposeCommand(envFileIncludeComposePath, "web")
                         .cwd,
                     envFileIncludeRoot
+                );
+            }
+        );
+        const nestedEnvFileRoot = path.join(tempDir, "nested-env-file-root");
+        const nestedEnvFileComposePath = path.join(
+            nestedEnvFileRoot,
+            "apps",
+            "leaf",
+            "compose.yaml"
+        );
+        const nestedEnvFileIntermediatePath = path.join(
+            nestedEnvFileRoot,
+            "apps",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(nestedEnvFileComposePath), { recursive: true });
+        await writeFile(
+            path.join(nestedEnvFileRoot, "apps", "include.env"),
+            "APP=leaf\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(nestedEnvFileRoot, "compose.yaml"),
+            "include:\n- path: apps/compose.yaml\n  env_file: apps/include.env\n",
+            "utf8"
+        );
+        await writeFile(
+            nestedEnvFileIntermediatePath,
+            "include:\n- ${APP}/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(nestedEnvFileComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                APP: undefined,
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(nestedEnvFileComposePath, "web")
+                        .cwd,
+                    nestedEnvFileRoot
                 );
             }
         );
@@ -2957,6 +3041,76 @@ setTimeout(() => process.exit(0), 30);
                         .getComposeCommand(overrideComposePath, "web")
                         .args.slice(0, 4),
                     ["-f", overrideProjectComposePath, "-f", overrideProjectOverridePath]
+                );
+            }
+        );
+        const overrideOnlyIncludeRoot = path.join(tempDir, "override-only-include-root");
+        const overrideOnlyIncludeComposePath = path.join(
+            overrideOnlyIncludeRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        const overrideOnlyProjectComposePath = path.join(
+            overrideOnlyIncludeRoot,
+            "compose.yaml"
+        );
+        const overrideOnlyProjectOverridePath = path.join(
+            overrideOnlyIncludeRoot,
+            "compose.override.yaml"
+        );
+        await mkdir(path.dirname(overrideOnlyIncludeComposePath), { recursive: true });
+        await writeFile(overrideOnlyProjectComposePath, "services: {}\n", "utf8");
+        await writeFile(
+            overrideOnlyProjectOverridePath,
+            "include:\n- apps/app/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(overrideOnlyIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing
+                        .getComposeCommand(overrideOnlyIncludeComposePath, "web")
+                        .args.slice(0, 4),
+                    [
+                        "-f",
+                        overrideOnlyProjectComposePath,
+                        "-f",
+                        overrideOnlyProjectOverridePath,
+                    ]
+                );
+            }
+        );
+        const standaloneOverrideRoot = path.join(tempDir, "standalone-override-root");
+        const standaloneOverrideComposePath = path.join(
+            standaloneOverrideRoot,
+            "compose.yaml"
+        );
+        const standaloneOverridePath = path.join(
+            standaloneOverrideRoot,
+            "compose.override.yaml"
+        );
+        await mkdir(standaloneOverrideRoot, { recursive: true });
+        await writeFile(standaloneOverrideComposePath, "services: {}\n", "utf8");
+        await writeFile(
+            standaloneOverridePath,
+            "services:\n  web:\n    image: nginx:override\n",
+            "utf8"
+        );
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing
+                        .getComposeCommand(standaloneOverrideComposePath, "web")
+                        .args.slice(0, 2),
+                    ["-f", standaloneOverrideComposePath]
                 );
             }
         );

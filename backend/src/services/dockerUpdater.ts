@@ -134,12 +134,19 @@ function loadComposeProjectEnv(
     };
 }
 
+function resolveComposeEnvValue(
+    name: string,
+    composeEnv: ComposeEnv
+): string | undefined {
+    return process.env[name] ?? composeEnv[name];
+}
+
 function interpolateComposePath(value: string, composeEnv: ComposeEnv = {}): string {
-    return value.replaceAll(
+    const braced = value.replaceAll(
         /\$\{([^}:?+-]+)(?:(:?[-?+])([^}]*))?\}/gu,
-        (match, name, op, fallback) => {
-            const envName = String(name);
-            const envValue = process.env[envName] ?? composeEnv[envName];
+        (match, rawName, op, fallback) => {
+            const envName = String(rawName);
+            const envValue = resolveComposeEnvValue(envName, composeEnv);
             if (!op) return envValue ?? match;
             const hasValue = envValue !== undefined && envValue !== "";
             if (op === ":-" || op === "-") {
@@ -155,6 +162,10 @@ function interpolateComposePath(value: string, composeEnv: ComposeEnv = {}): str
             return hasValue ? envValue : match;
         }
     );
+    return braced.replaceAll(/\$([_a-z]\w*)/giu, (match, rawName) => {
+        const envValue = resolveComposeEnvValue(String(rawName), composeEnv);
+        return envValue ?? match;
+    });
 }
 
 function resolveComposeRelativePath(
@@ -242,10 +253,10 @@ function projectComposeIncludesCompose(
                 );
                 const resolvedProjectDirectory =
                     nestedProjectDirectory ?? path.dirname(resolvedIncludePath);
-                const nestedComposeEnv = loadComposeProjectEnv(
-                    resolvedProjectDirectory,
-                    entryRecord.env_file
-                );
+                const nestedComposeEnv = {
+                    ...loadComposeProjectEnv(resolvedProjectDirectory),
+                    ...entryComposeEnv,
+                };
                 if (
                     fs.existsSync(resolvedIncludePath) &&
                     projectComposeIncludesCompose(
@@ -266,6 +277,28 @@ function projectComposeIncludesCompose(
     }
 }
 
+function defaultComposeOverridePaths(composePath: string): string[] {
+    const composeDir = path.dirname(composePath);
+    const composeName = path.basename(composePath);
+    const overrideNames =
+        composeName === "docker-compose.yaml" || composeName === "docker-compose.yml"
+            ? ["docker-compose.override.yaml", "docker-compose.override.yml"]
+            : ["compose.override.yaml", "compose.override.yml"];
+    return overrideNames
+        .map((overrideName) => path.join(composeDir, overrideName))
+        .filter((overridePath) => fs.existsSync(overridePath))
+        .map((overridePath) => fs.realpathSync(overridePath));
+}
+
+function projectComposeOrOverrideIncludesCompose(
+    projectComposePath: string,
+    configuredComposePath: string
+): boolean {
+    return [projectComposePath, ...defaultComposeOverridePaths(projectComposePath)].some(
+        (composePath) => projectComposeIncludesCompose(composePath, configuredComposePath)
+    );
+}
+
 function findIncludedComposeInDirectory(
     currentDir: string,
     configuredComposePath: string
@@ -275,7 +308,7 @@ function findIncludedComposeInDirectory(
         if (
             candidate !== configuredComposePath &&
             fs.existsSync(candidate) &&
-            projectComposeIncludesCompose(candidate, configuredComposePath)
+            projectComposeOrOverrideIncludesCompose(candidate, configuredComposePath)
         ) {
             return fs.realpathSync(candidate);
         }
@@ -313,19 +346,13 @@ function composeCommandPath(configuredComposePath: string): string {
     }
 }
 
-function composeFilesForCommand(composePath: string): string[] {
-    const composeDir = path.dirname(composePath);
-    const composeName = path.basename(composePath);
+function composeFilesForCommand(
+    composePath: string,
+    includeDefaultOverrides: boolean
+): string[] {
     const files = [composePath];
-    const overrideNames =
-        composeName === "docker-compose.yaml" || composeName === "docker-compose.yml"
-            ? ["docker-compose.override.yaml", "docker-compose.override.yml"]
-            : ["compose.override.yaml", "compose.override.yml"];
-    for (const overrideName of overrideNames) {
-        const overridePath = path.join(composeDir, overrideName);
-        if (fs.existsSync(overridePath)) {
-            files.push(fs.realpathSync(overridePath));
-        }
+    if (includeDefaultOverrides) {
+        files.push(...defaultComposeOverridePaths(composePath));
     }
     return files;
 }
@@ -338,7 +365,12 @@ function getComposeCommand(configuredComposePath: string, serviceName: string) {
     const dockerRoot = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
     const wrapper = getDockerComposeWrapper();
     const projectComposePath = composeCommandPath(configuredComposePath);
-    const composePaths = composeFilesForCommand(projectComposePath);
+    const includeDefaultOverrides =
+        path.resolve(projectComposePath) !== path.resolve(configuredComposePath);
+    const composePaths = composeFilesForCommand(
+        projectComposePath,
+        includeDefaultOverrides
+    );
     const isManagedDockerPath = path
         .resolve(projectComposePath)
         .startsWith(`${path.resolve(dockerRoot)}${path.sep}`);
