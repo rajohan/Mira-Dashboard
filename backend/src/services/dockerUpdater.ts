@@ -90,14 +90,41 @@ function getDockerAppsRoot(): string {
     return nonEmptyEnvFallback("MIRA_DOCKER_APPS_ROOT", "/opt/docker/apps");
 }
 
+function interpolateComposePath(value: string): string {
+    return value.replaceAll(
+        /\$\{([^}:?+-]+)(?:(:?[-?+])([^}]*))?\}/gu,
+        (match, name, op, fallback) => {
+            const envValue = process.env[String(name)];
+            if (!op) return envValue ?? match;
+            const hasValue = envValue !== undefined && envValue !== "";
+            if (op === ":-" || op === "-") {
+                return hasValue || (op === "-" && envValue !== undefined)
+                    ? envValue
+                    : String(fallback);
+            }
+            if (op === ":+" || op === "+") {
+                return hasValue || (op === "+" && envValue !== undefined)
+                    ? String(fallback)
+                    : "";
+            }
+            return hasValue ? envValue : match;
+        }
+    );
+}
+
+function resolveComposeRelativePath(baseDir: string, includePath: string): string {
+    const interpolatedPath = interpolateComposePath(includePath);
+    return path.isAbsolute(interpolatedPath)
+        ? interpolatedPath
+        : path.resolve(baseDir, interpolatedPath);
+}
+
 function includePathMatchesCompose(
-    projectComposePath: string,
+    baseDir: string,
     includePath: string,
     composePath: string
 ): boolean {
-    const resolvedIncludePath = path.isAbsolute(includePath)
-        ? includePath
-        : path.resolve(path.dirname(projectComposePath), includePath);
+    const resolvedIncludePath = resolveComposeRelativePath(baseDir, includePath);
     const resolvedComposePath = path.resolve(composePath);
     if (resolvedIncludePath === resolvedComposePath) {
         return true;
@@ -112,7 +139,8 @@ function includePathMatchesCompose(
 function projectComposeIncludesCompose(
     projectComposePath: string,
     composePath: string,
-    seen = new Set<string>()
+    seen = new Set<string>(),
+    projectDirectory = path.dirname(projectComposePath)
 ): boolean {
     const realProjectComposePath = fs.realpathSync(projectComposePath);
     if (seen.has(realProjectComposePath)) {
@@ -123,26 +151,34 @@ function projectComposeIncludesCompose(
         const doc = YAML.parse(fs.readFileSync(projectComposePath, "utf8")) as JsonRecord;
         const includes = Array.isArray(doc.include) ? doc.include : [];
         return includes.some((entry) => {
-            const includeValue = typeof entry === "string" ? entry : asRecord(entry).path;
+            const entryRecord = asRecord(entry);
+            const includeValue = typeof entry === "string" ? entry : entryRecord.path;
             const includePaths = (
                 Array.isArray(includeValue) ? includeValue : [includeValue]
             ).filter((item): item is string => typeof item === "string");
+            const rawProjectDirectory = entryRecord.project_directory;
+            const nestedProjectDirectory =
+                typeof rawProjectDirectory === "string"
+                    ? resolveComposeRelativePath(projectDirectory, rawProjectDirectory)
+                    : null;
             for (const includePath of includePaths) {
                 if (
-                    includePathMatchesCompose(
-                        projectComposePath,
-                        includePath,
-                        composePath
-                    )
+                    includePathMatchesCompose(projectDirectory, includePath, composePath)
                 ) {
                     return true;
                 }
-                const resolvedIncludePath = path.isAbsolute(includePath)
-                    ? includePath
-                    : path.resolve(path.dirname(projectComposePath), includePath);
+                const resolvedIncludePath = resolveComposeRelativePath(
+                    projectDirectory,
+                    includePath
+                );
                 if (
                     fs.existsSync(resolvedIncludePath) &&
-                    projectComposeIncludesCompose(resolvedIncludePath, composePath, seen)
+                    projectComposeIncludesCompose(
+                        resolvedIncludePath,
+                        composePath,
+                        seen,
+                        nestedProjectDirectory ?? path.dirname(resolvedIncludePath)
+                    )
                 ) {
                     return true;
                 }
@@ -154,19 +190,33 @@ function projectComposeIncludesCompose(
     }
 }
 
+function findIncludedComposeInDirectory(
+    currentDir: string,
+    configuredComposePath: string
+): string | null {
+    for (const filename of COMPOSE_FILENAMES) {
+        const candidate = path.join(currentDir, filename);
+        if (
+            candidate !== configuredComposePath &&
+            fs.existsSync(candidate) &&
+            projectComposeIncludesCompose(candidate, configuredComposePath)
+        ) {
+            return fs.realpathSync(candidate);
+        }
+    }
+    return null;
+}
+
 function findProjectComposePath(configuredComposePath: string): string {
     let currentDir = path.dirname(configuredComposePath);
     let projectComposePath = configuredComposePath;
     while (true) {
-        for (const filename of COMPOSE_FILENAMES) {
-            const candidate = path.join(currentDir, filename);
-            if (
-                candidate !== configuredComposePath &&
-                fs.existsSync(candidate) &&
-                projectComposeIncludesCompose(candidate, configuredComposePath)
-            ) {
-                projectComposePath = fs.realpathSync(candidate);
-            }
+        const candidate = findIncludedComposeInDirectory(
+            currentDir,
+            configuredComposePath
+        );
+        if (candidate) {
+            projectComposePath = candidate;
         }
         const parent = path.dirname(currentDir);
         if (parent === currentDir) break;
@@ -175,10 +225,44 @@ function findProjectComposePath(configuredComposePath: string): string {
     return projectComposePath;
 }
 
+function composeCommandPath(configuredComposePath: string): string {
+    const projectComposePath = findProjectComposePath(configuredComposePath);
+    if (projectComposePath !== configuredComposePath) {
+        return projectComposePath;
+    }
+    try {
+        return fs.realpathSync(configuredComposePath);
+    } catch {
+        return configuredComposePath;
+    }
+}
+
+function composeFilesForCommand(composePath: string): string[] {
+    const composeDir = path.dirname(composePath);
+    const composeName = path.basename(composePath);
+    const files = [composePath];
+    const overrideNames =
+        composeName === "docker-compose.yaml" || composeName === "docker-compose.yml"
+            ? ["docker-compose.override.yaml", "docker-compose.override.yml"]
+            : ["compose.override.yaml", "compose.override.yml"];
+    for (const overrideName of overrideNames) {
+        const overridePath = path.join(composeDir, overrideName);
+        if (fs.existsSync(overridePath)) {
+            files.push(fs.realpathSync(overridePath));
+        }
+    }
+    return files;
+}
+
+function composeFileArgs(composePaths: string[]): string[] {
+    return composePaths.flatMap((composePath) => ["-f", composePath]);
+}
+
 function getComposeCommand(configuredComposePath: string, serviceName: string) {
     const dockerRoot = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
     const wrapper = getDockerComposeWrapper();
-    const projectComposePath = findProjectComposePath(configuredComposePath);
+    const projectComposePath = composeCommandPath(configuredComposePath);
+    const composePaths = composeFilesForCommand(projectComposePath);
     const isManagedDockerPath = path
         .resolve(projectComposePath)
         .startsWith(`${path.resolve(dockerRoot)}${path.sep}`);
@@ -188,7 +272,14 @@ function getComposeCommand(configuredComposePath: string, serviceName: string) {
     ) {
         return {
             file: wrapper,
-            args: ["-f", projectComposePath, "up", "-d", "--pull", "always", serviceName],
+            args: [
+                ...composeFileArgs(composePaths),
+                "up",
+                "-d",
+                "--pull",
+                "always",
+                serviceName,
+            ],
             cwd: path.dirname(projectComposePath),
         };
     }
@@ -196,8 +287,7 @@ function getComposeCommand(configuredComposePath: string, serviceName: string) {
         file: getDockerBin(),
         args: [
             "compose",
-            "-f",
-            projectComposePath,
+            ...composeFileArgs(composePaths),
             "up",
             "-d",
             "--pull",
@@ -1806,6 +1896,7 @@ export const __testing = {
     imageRegistry,
     imageMatchesPlatform,
     hasUpdate,
+    interpolateComposePath,
     listComposeFiles,
     lookupDockerHub,
     lookupGhcr,

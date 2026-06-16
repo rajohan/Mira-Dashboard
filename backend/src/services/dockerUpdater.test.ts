@@ -2375,6 +2375,58 @@ setTimeout(() => process.exit(0), 30);
             ),
             { realm: "https://ghcr.io/token", service: "ghcr.io" }
         );
+        await withEnv(
+            {
+                COMPOSE_EMPTY: "",
+                COMPOSE_SET: "apps/app/compose.yaml",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.interpolateComposePath("${COMPOSE_SET}"),
+                    "apps/app/compose.yaml"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath("${COMPOSE_MISSING}"),
+                    "${COMPOSE_MISSING}"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath(
+                        "${COMPOSE_MISSING:-fallback.yaml}"
+                    ),
+                    "fallback.yaml"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath(
+                        "${COMPOSE_EMPTY-default.yaml}"
+                    ),
+                    ""
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath("${COMPOSE_SET:+alt.yaml}"),
+                    "alt.yaml"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath(
+                        "${COMPOSE_EMPTY:+alt.yaml}"
+                    ),
+                    ""
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath("${COMPOSE_EMPTY+alt.yaml}"),
+                    "alt.yaml"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath("${COMPOSE_SET:?required}"),
+                    "apps/app/compose.yaml"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath(
+                        "${COMPOSE_MISSING:?required}"
+                    ),
+                    "${COMPOSE_MISSING:?required}"
+                );
+            }
+        );
         assert.equal(
             updater.__testing.stripRegistry("docker.io/library/redis"),
             "library/redis"
@@ -2444,6 +2496,34 @@ setTimeout(() => process.exit(0), 30);
                 );
             }
         );
+        const interpolatedIncludeRoot = path.join(tempDir, "interpolated-include-root");
+        const interpolatedIncludeComposePath = path.join(
+            interpolatedIncludeRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(interpolatedIncludeComposePath), { recursive: true });
+        await writeFile(
+            path.join(interpolatedIncludeRoot, "compose.yaml"),
+            "include:\n- ${APP_COMPOSE_PATH:-apps/app/compose.yaml}\n",
+            "utf8"
+        );
+        await writeFile(interpolatedIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(
+                        interpolatedIncludeComposePath,
+                        "web"
+                    ).cwd,
+                    interpolatedIncludeRoot
+                );
+            }
+        );
         const objectIncludeRoot = path.join(tempDir, "object-include-root");
         const objectIncludeComposePath = path.join(
             objectIncludeRoot,
@@ -2497,6 +2577,13 @@ setTimeout(() => process.exit(0), 30);
             "utf8"
         );
         await writeFile(listIncludeComposePath, "services: {}\n", "utf8");
+        const listOverrideComposePath = path.join(
+            listIncludeRoot,
+            "apps",
+            "app",
+            "override.yaml"
+        );
+        await writeFile(listOverrideComposePath, "services: {}\n", "utf8");
         await withEnv(
             {
                 MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
@@ -2506,6 +2593,46 @@ setTimeout(() => process.exit(0), 30);
                     updater.__testing.getComposeCommand(listIncludeComposePath, "web")
                         .cwd,
                     listIncludeRoot
+                );
+                assert.equal(
+                    updater.__testing.getComposeCommand(listOverrideComposePath, "web")
+                        .cwd,
+                    listIncludeRoot
+                );
+            }
+        );
+        const projectDirectoryRoot = path.join(tempDir, "project-directory-root");
+        const projectDirectoryComposePath = path.join(
+            projectDirectoryRoot,
+            "apps",
+            "web",
+            "compose.yaml"
+        );
+        const sharedComposePath = path.join(
+            projectDirectoryRoot,
+            "shared",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(projectDirectoryComposePath), { recursive: true });
+        await mkdir(path.dirname(sharedComposePath), { recursive: true });
+        await writeFile(
+            path.join(projectDirectoryRoot, "compose.yaml"),
+            "include:\n- path: shared/compose.yaml\n  project_directory: apps\n",
+            "utf8"
+        );
+        await writeFile(sharedComposePath, "include:\n- web/compose.yaml\n", "utf8");
+        await writeFile(projectDirectoryComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(
+                        projectDirectoryComposePath,
+                        "web"
+                    ).cwd,
+                    projectDirectoryRoot
                 );
             }
         );
@@ -2666,6 +2793,75 @@ setTimeout(() => process.exit(0), 30);
                         ],
                         cwd: alternateFilenameRoot,
                     }
+                );
+            }
+        );
+        const filenamePrecedenceRoot = path.join(tempDir, "filename-precedence-root");
+        const filenamePrecedenceComposePath = path.join(
+            filenamePrecedenceRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        const canonicalProjectComposePath = path.join(
+            filenamePrecedenceRoot,
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(filenamePrecedenceComposePath), { recursive: true });
+        await writeFile(
+            canonicalProjectComposePath,
+            "include:\n- apps/app/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(filenamePrecedenceRoot, "docker-compose.yml"),
+            "include:\n- apps/app/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(filenamePrecedenceComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing
+                        .getComposeCommand(filenamePrecedenceComposePath, "web")
+                        .args.slice(0, 2),
+                    ["-f", canonicalProjectComposePath]
+                );
+            }
+        );
+        const overrideRoot = path.join(tempDir, "override-root");
+        const overrideComposePath = path.join(
+            overrideRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        const overrideProjectComposePath = path.join(overrideRoot, "compose.yaml");
+        const overrideProjectOverridePath = path.join(
+            overrideRoot,
+            "compose.override.yaml"
+        );
+        await mkdir(path.dirname(overrideComposePath), { recursive: true });
+        await writeFile(
+            overrideProjectComposePath,
+            "include:\n- apps/app/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(overrideProjectOverridePath, "services: {}\n", "utf8");
+        await writeFile(overrideComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing
+                        .getComposeCommand(overrideComposePath, "web")
+                        .args.slice(0, 4),
+                    ["-f", overrideProjectComposePath, "-f", overrideProjectOverridePath]
                 );
             }
         );
@@ -4580,6 +4776,78 @@ process.exit(0);
         const composeCalls = await readFile(callLogPath, "utf8");
         assert.equal(composeCalls.includes(projectComposePath), true);
         assert.equal(composeCalls.includes(composeTargetPath), false);
+        assert.equal(composeCalls.includes(composeLinkPath), false);
+    });
+
+    it("runs standalone symlinked compose updates from the real target path", async () => {
+        const linkDir = path.join(tempDir, "standalone-symlink-link");
+        const targetDir = path.join(tempDir, "standalone-symlink-target");
+        const binDir = path.join(tempDir, "standalone-symlink-bin");
+        await mkdir(linkDir, { recursive: true });
+        await mkdir(targetDir, { recursive: true });
+        await mkdir(binDir);
+        const composeTargetPath = path.join(targetDir, "compose.yaml");
+        const composeLinkPath = path.join(linkDir, "compose.yaml");
+        const callLogPath = path.join(tempDir, "standalone-symlink-calls.log");
+        await writeFile(
+            composeTargetPath,
+            "services:\n  web:\n    image: nginx:1\n",
+            "utf8"
+        );
+        await symlink(composeTargetPath, composeLinkPath);
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            String.raw`#!/usr/bin/env node
+const fs = require("node:fs");
+fs.appendFileSync(${JSON.stringify(callLogPath)}, process.argv.slice(2).join(" ") + "\n");
+process.exit(0);
+`
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(
+            `./dockerUpdater.js?standalone-symlink-compose=${Date.now()}`
+        );
+        const service = {
+            id: 1,
+            app_slug: "standalone-symlink",
+            service_name: "web",
+            compose_path: composeLinkPath,
+            image_repo: "nginx",
+            compose_image_ref: "nginx:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+            )
+            .run(service);
+
+        const result = await updater.__testing.applyServiceUpdate(service, "manual");
+
+        assert.equal(result.ok, true);
+        assert.equal(fs.lstatSync(composeLinkPath).isSymbolicLink(), true);
+        assert.match(await readFile(composeTargetPath, "utf8"), /nginx:2/u);
+        const composeCalls = await readFile(callLogPath, "utf8");
+        assert.equal(composeCalls.includes(composeTargetPath), true);
         assert.equal(composeCalls.includes(composeLinkPath), false);
     });
 
