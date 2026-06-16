@@ -149,10 +149,14 @@ describe("log rotation service", { concurrency: false }, () => {
                 __testing.globToRegex(pattern).test(filePath)
             );
         assert.equal(matches(path.join(appRoot, "catalog.json")), false);
-        assert.equal(matches(path.join(appRoot, "app.log.json")), true);
-        assert.equal(matches(path.join(appRoot, "app-log.txt")), true);
-        assert.equal(matches(path.join(appRoot, "app_log.txt")), true);
-        assert.equal(matches(path.join(appRoot, "logfile.json")), true);
+        assert.equal(matches(path.join(appRoot, "app.log")), true);
+        assert.equal(matches(path.join(appRoot, "log.txt")), true);
+        assert.equal(matches(path.join(appRoot, "app.log.json")), false);
+        assert.equal(matches(path.join(appRoot, "app-log.txt")), false);
+        assert.equal(matches(path.join(appRoot, "app_log.txt")), false);
+        assert.equal(matches(path.join(appRoot, "logfile.json")), false);
+        assert.equal(matches(path.join(appRoot, "logs", "worker.log")), true);
+        assert.equal(matches(path.join(appRoot, "logs", "worker.txt")), true);
         assert.equal(
             __testing.mergePolicy({ keep: 1 }, { name: "g", paths: ["x"], keep: 2 }).keep,
             2
@@ -1493,7 +1497,7 @@ describe("log rotation service", { concurrency: false }, () => {
                     daily: true,
                     maxSizeMb: 100,
                     keepDays: 0,
-                    compress: false,
+                    compress: true,
                 },
             ],
         });
@@ -1501,7 +1505,7 @@ describe("log rotation service", { concurrency: false }, () => {
         const dryRun = await runLogRotationService({ dryRun: true, config });
         assert.equal(dryRun.skippedFiles, 1);
         assert.equal(dryRun.rotatedFiles, 1);
-        assert.equal(dryRun.compressedFiles, 0);
+        assert.equal(dryRun.compressedFiles, 1);
         assert.equal(dryRun.deletedArchives, 3);
         assert.equal(await readFile(daily, "utf8"), "small");
 
@@ -2505,6 +2509,39 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.ok(
             summary.errors.some((error) => JSON.stringify(error).includes("Unsafe path"))
         );
+    });
+
+    it("reports archive-only dry-run compression and deletion without mutating files", async () => {
+        const root = path.join(tempDir, "archive-only-dry-run");
+        await mkdir(root);
+        const retained = path.join(root, "app.log.2026-06-06T00-00-00.000Z");
+        const deleted = path.join(root, "app.log.2020-01-01T00-00-00.000Z");
+        await writeFile(retained, "retained", "utf8");
+        await writeFile(deleted, "deleted", "utf8");
+        const oldTime = new Date("2020-01-01T00:00:00.000Z");
+        await utimes(deleted, oldTime, oldTime);
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [
+                {
+                    name: "archive-only",
+                    archiveOnly: true,
+                    archivePaths: [path.join(root, "*.log.*")],
+                    compress: true,
+                    keep: 1,
+                },
+            ],
+        });
+
+        const summary = await runLogRotationService({ dryRun: true, config });
+
+        assert.equal(summary.ok, true);
+        assert.equal(summary.compressedFiles, 1);
+        assert.equal(summary.deletedArchives, 1);
+        assert.ok(await fsPromises.stat(retained));
+        assert.ok(await fsPromises.stat(deleted));
+        await assert.rejects(() => fsPromises.stat(`${retained}.gz`), /ENOENT/u);
     });
 
     it("reports missing literal paths when missingOk is false", async () => {

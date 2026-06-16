@@ -16,46 +16,16 @@
       "name": "docker-file-logs",
       "enabled": true,
       "paths": [
-        "/opt/docker/data/*/log/*.log",
-        "/opt/docker/data/*/log/*.txt",
-        "/opt/docker/data/*/log/*.json",
         "/opt/docker/data/*/logs/*.log",
         "/opt/docker/data/*/logs/*.txt",
-        "/opt/docker/data/*/logs/*.json",
-        "/opt/docker/data/*/logs/*/*.log",
-        "/opt/docker/data/*/logs/*/*.txt",
-        "/opt/docker/data/*/logs/*/*.json",
         "/opt/docker/data/*/*.log",
-        "/opt/docker/data/*/log.json",
-        "/opt/docker/data/*/logs.json",
-        "/opt/docker/data/*/*.log.json",
-        "/opt/docker/data/*/*-log.json",
-        "/opt/docker/data/*/*_log.json",
-        "/opt/docker/data/*/*logfile*.json",
-        "/opt/docker/data/*/*log-file*.json",
-        "/opt/docker/data/*/*log_file*.json",
         "/opt/docker/data/*/log.txt",
-        "/opt/docker/data/*/logs.txt",
-        "/opt/docker/data/*/*.log.txt",
-        "/opt/docker/data/*/*-log.txt",
-        "/opt/docker/data/*/*_log.txt",
-        "/opt/docker/data/*/*logfile*.txt",
-        "/opt/docker/data/*/*log-file*.txt",
-        "/opt/docker/data/*/*log_file*.txt",
         "/opt/docker/data/*/*/log.txt"
       ],
       "daily": true,
       "maxSizeMb": 10,
       "keep": 3,
-      "strategy": "copytruncate",
-      "archivePaths": [
-        "/opt/docker/data/*/*/log.txt.[0-9][0-9][0-9][0-9]-*",
-        "/opt/docker/data/*/*/log.txt.[0-9][0-9][0-9][0-9]-*.gz"
-      ],
-      "excludePaths": [
-        "/opt/docker/data/kopia/logs/*/*.log*",
-        "/opt/docker/data/crowdsec/*.txt*"
-      ]
+      "strategy": "copytruncate"
     },
     {
       "name": "kopia-generated-logs",
@@ -63,8 +33,7 @@
       "paths": [],
       "archiveOnly": true,
       "archivePaths": [
-        "/opt/docker/data/kopia/logs/*/*.log.[0-9][0-9][0-9][0-9]-*",
-        "/opt/docker/data/kopia/logs/*/*.log.[0-9][0-9][0-9][0-9]-*.gz"
+        "/opt/docker/data/kopia/logs/*/*.log*"
       ],
       "archiveRetentionScope": "directory",
       "archiveMinAgeMinutes": 60,
