@@ -36,6 +36,7 @@ export default defineConfig({
     build: {
         outDir: "dist",
         emptyOutDir: true,
+        target: ["chrome140", "firefox133", "safari18.2"],
         chunkSizeWarningLimit: 1500,
         rolldownOptions: {
             checks: {
