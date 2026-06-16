@@ -39,8 +39,11 @@ interface ScheduledJobActionRegistration {
 }
 
 class ScheduledJobAbortError extends Error {
-    constructor(readonly handlerSettled: Promise<unknown>) {
+    readonly handlerSettled: Promise<unknown>;
+
+    constructor(handlerSettled: Promise<unknown>) {
         super("Scheduled job aborted");
+        this.handlerSettled = handlerSettled;
     }
 }
 
@@ -122,11 +125,12 @@ interface ScheduledJobRunRow {
 }
 
 export class ScheduledJobValidationError extends Error {
-    statusCode = 400;
+    statusCode: number;
 
     constructor(message: string) {
         super(message);
         this.name = "ScheduledJobValidationError";
+        this.statusCode = 400;
     }
 }
 
