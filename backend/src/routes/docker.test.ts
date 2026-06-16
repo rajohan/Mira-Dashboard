@@ -549,7 +549,8 @@ describe("docker routes", { concurrency: false }, () => {
         await server?.close();
         const { __testing } = await import("./docker.js");
         await Promise.all(
-            [...__testing.dockerExecJobs.values()]
+            __testing.dockerExecJobs
+                .values()
                 .map((job) => job.process)
                 .filter(Boolean)
                 .map((child) => child as ChildProcess)
@@ -1184,6 +1185,28 @@ describe("docker routes", { concurrency: false }, () => {
             assert.match(
                 __testing.dockerExecJobs.get("primitive-fail")?.stderr || "",
                 /plain failure/u
+            );
+
+            __testing.dockerExecJobs.set("settled-fail", {
+                id: "settled-fail",
+                containerId: "app",
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: Date.now(),
+                endedAt: null,
+            });
+            __testing.setDockerBinForTests("/path/that/does/not/exist");
+            try {
+                await __testing.settleDockerExecJob("app", "echo hi", "settled-fail");
+            } finally {
+                __testing.setDockerBinForTests(undefined);
+            }
+            assert.equal(__testing.dockerExecJobs.get("settled-fail")?.code, 1);
+            assert.match(
+                __testing.dockerExecJobs.get("settled-fail")?.stderr || "",
+                /ENOENT/u
             );
 
             __testing.dockerExecJobs.clear();

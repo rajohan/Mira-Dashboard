@@ -37,8 +37,6 @@ import tasksRoutes from "./routes/tasks.js";
 import terminalRoutes from "./routes/terminal.js";
 import ttsRoutes from "./routes/tts.js";
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -67,7 +65,7 @@ export function parseTrustProxy(value?: string): boolean | number | string {
     if (normalized === "false") return false;
 
     if (/^\d+$/u.test(normalized)) {
-        const parsed = Number.parseInt(normalized, 10);
+        const parsed = Number(normalized);
         if (Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= 255) {
             return parsed;
         }
@@ -77,15 +75,6 @@ export function parseTrustProxy(value?: string): boolean | number | string {
     return normalized;
 }
 
-app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
-app.use((request, response, next) => {
-    if (shouldSkipGlobalJsonParser(request)) {
-        next();
-        return;
-    }
-
-    globalJsonParser(request, response, next);
-});
 export const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
@@ -96,7 +85,7 @@ type ExecSyncCommand = (
     options: Parameters<typeof execSync>[1]
 ) => Buffer | string;
 
-/** Resolves the current backend git commit for health responses. */
+/** Resolves the current backend Git commit for health responses. */
 export function resolveBackendCommit(
     repoRoot = path.join(__dirname, "..", ".."),
     execCommand: ExecSyncCommand = execSync
@@ -145,9 +134,6 @@ export function isAuthRoute(pathname: string): boolean {
     return pathname === "/auth" || pathname.startsWith("/auth/");
 }
 
-app.get("/health", healthHandler);
-app.get("/api/health", healthHandler);
-
 // Rate limiting: general API (600 req/min per IP). This intentionally stays
 // above normal dashboard polling (terminal jobs poll every 500ms) while still
 // bounding abusive request bursts.
@@ -169,10 +155,6 @@ const authLimiter = rateLimit({
     message: { error: "Too many authentication attempts, please try again later" },
 });
 
-// Apply rate limiting before auth middleware
-app.use("/api/auth", authLimiter);
-app.use("/api", apiLimiter);
-
 /** Returns dashboard sessions for authenticated requests. */
 export const sessionsHandler: express.RequestHandler = (request, response) => {
     const user = getAuthUserFromRequest(request);
@@ -184,9 +166,6 @@ export const sessionsHandler: express.RequestHandler = (request, response) => {
     response.json(gateway.getSessions());
 };
 
-app.get("/api/sessions", sessionsHandler);
-
-authRoutes(app);
 /** Applies API auth while leaving auth bootstrap/login routes public. */
 export const apiAuthMiddleware: express.RequestHandler = (request, response, next) => {
     if (isAuthRoute(request.path)) {
@@ -195,37 +174,6 @@ export const apiAuthMiddleware: express.RequestHandler = (request, response, nex
     }
     requireAuth(request, response, next);
 };
-
-app.use("/api", apiAuthMiddleware);
-
-// Route modules
-filesRoutes(app, express);
-configFilesRoutes(app, express);
-cacheRoutes(app);
-backupRoutes(app, express);
-agentsRoutes(app);
-logsRoutes(app);
-cronRoutes(app);
-databaseRoutes(app);
-dockerRoutes(app);
-execRoutes(app, express);
-jobsRoutes(app);
-openClawConfigRoutes(app);
-mediaRoutes(app);
-metricsRoutes(app);
-moltbookRoutes(app);
-settingsRoutes(app, express, gateway.getStatus);
-sessionsRoutes(app);
-sttRoutes(app, express);
-tasksRoutes(app, express);
-ttsRoutes(app, express);
-notificationsRoutes(app);
-opsRoutes(app);
-pullRequestsRoutes(app);
-terminalRoutes(app);
-
-// Static files & SPA (must be last)
-staticRoutes(app, frontendPath);
 
 // =====================
 // WebSocket
@@ -244,4 +192,60 @@ export function handleWebSocketConnection(
     gateway.handleClient(ws);
 }
 
-wss.on("connection", handleWebSocketConnection);
+function configureServerModule(): true {
+    dotenv.config();
+    app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
+    app.use((request, response, next) => {
+        if (shouldSkipGlobalJsonParser(request)) {
+            next();
+            return;
+        }
+
+        globalJsonParser(request, response, next);
+    });
+
+    app.get("/health", healthHandler);
+    app.get("/api/health", healthHandler);
+
+    // Apply rate limiting before auth middleware
+    app.use("/api/auth", authLimiter);
+    app.use("/api", apiLimiter);
+    app.get("/api/sessions", sessionsHandler);
+
+    authRoutes(app);
+    app.use("/api", apiAuthMiddleware);
+
+    // Route modules
+    filesRoutes(app, express);
+    configFilesRoutes(app, express);
+    cacheRoutes(app);
+    backupRoutes(app, express);
+    agentsRoutes(app);
+    logsRoutes(app);
+    cronRoutes(app);
+    databaseRoutes(app);
+    dockerRoutes(app);
+    execRoutes(app, express);
+    jobsRoutes(app);
+    openClawConfigRoutes(app);
+    mediaRoutes(app);
+    metricsRoutes(app);
+    moltbookRoutes(app);
+    settingsRoutes(app, express, gateway.getStatus);
+    sessionsRoutes(app);
+    sttRoutes(app, express);
+    tasksRoutes(app, express);
+    ttsRoutes(app, express);
+    notificationsRoutes(app);
+    opsRoutes(app);
+    pullRequestsRoutes(app);
+    terminalRoutes(app);
+
+    // Static files & SPA (must be last)
+    staticRoutes(app, frontendPath);
+
+    wss.on("connection", handleWebSocketConnection);
+    return true;
+}
+
+export const serverModuleConfigured = configureServerModule();

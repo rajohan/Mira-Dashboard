@@ -169,9 +169,7 @@ describe("exec routes", () => {
                 callback?.();
                 return fakeServer;
             },
-            listenerCount(event: string) {
-                return listeners.has(event) ? 1 : 0;
-            },
+            listenerCount: (event: string) => (listeners.has(event) ? 1 : 0),
         } as unknown as http.Server;
 
         await assert.rejects(() => startServer(() => fakeServer), /listen failed/u);

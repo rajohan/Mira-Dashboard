@@ -1,4 +1,4 @@
-/* global Buffer, fetch, process */
+/* global fetch, process */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -6,6 +6,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import test, { after, before } from "node:test";
+
+function compareStrings(left, right) {
+    return left === right ? 0 : left > right ? 1 : -1;
+}
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const serverEntry = path.join(repoRoot, "dist/serverStart.js");
@@ -19,7 +23,7 @@ async function request(pathname, options = {}) {
     const response = await fetch(`${baseUrl}${pathname}`, {
         ...options,
         headers: {
-            ...(options.body ? { "content-type": "application/json" } : {}),
+            ...(options.body && { "content-type": "application/json" }),
             ...options.headers,
         },
     });
@@ -119,9 +123,8 @@ async function startServer() {
     await writeFile(path.join(workspaceRoot, ".secret"), "hidden\n", "utf8");
     await writeFile(
         path.join(workspaceRoot, "assets", "pixel.png"),
-        Buffer.from(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
-            "base64"
+        Uint8Array.fromBase64(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
         )
     );
     await writeFile(path.join(mediaRoot, "hello.txt"), "hello media", "utf8");
@@ -213,8 +216,8 @@ test("task lifecycle API supports create, update, move, progress, and delete", a
     assert.equal(created.response.status, 201);
     assert.equal(created.body.title, "Smoke test task");
     assert.deepEqual(
-        created.body.labels.map((label) => label.name).toSorted(),
-        ["priority-high", "todo"].toSorted()
+        created.body.labels.map((label) => label.name).toSorted(compareStrings),
+        ["priority-high", "todo"].toSorted(compareStrings)
     );
 
     const taskId = created.body.number;
@@ -332,8 +335,8 @@ test("config-files API is whitelist constrained and creates backups on write", a
     assert.equal(listed.response.status, 200);
     assert.equal(listed.body.root, roots.openClawHome);
     assert.deepEqual(
-        listed.body.files.map((file) => file.relPath).toSorted(),
-        ["hooks/transforms/agentmail.ts", "openclaw.json"].toSorted()
+        listed.body.files.map((file) => file.relPath).toSorted(compareStrings),
+        ["hooks/transforms/agentmail.ts", "openclaw.json"].toSorted(compareStrings)
     );
 
     const original = await request("/api/config-files/openclaw.json");

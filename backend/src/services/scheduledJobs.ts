@@ -1,6 +1,14 @@
 import { db } from "../db.js";
 import { errorMessage } from "../lib/errors.js";
 
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
+function patchValue<T>(value: T | undefined, existing: T): T {
+    return value === undefined ? existing : value;
+}
+
 const schedulerTickMs = 30_000;
 const defaultScheduledJobRunTimeoutMs = 5 * 60 * 1000;
 const minimumIntervalSeconds = 60;
@@ -129,7 +137,7 @@ export function isScheduledJobValidationError(
 }
 
 function nowIso(): string {
-    return new Date().toISOString();
+    return dateToISOString(new Date());
 }
 
 function parseJsonObject(value: string): Record<string, unknown> {
@@ -163,7 +171,7 @@ function assertValidSchedule(
 ): void {
     if (scheduleType === "interval") {
         if (
-            !Number.isInteger(intervalSeconds) ||
+            !Number.isSafeInteger(intervalSeconds) ||
             intervalSeconds < minimumIntervalSeconds
         ) {
             throw new ScheduledJobValidationError(
@@ -201,7 +209,7 @@ function parseCronField(
         }
         const [rangePart = "", stepPart] = stepPieces;
         const step = stepPart === undefined ? 1 : Number(stepPart);
-        if (!Number.isInteger(step) || step < 1) {
+        if (!Number.isSafeInteger(step) || step < 1) {
             return null;
         }
         const rangePieces = rangePart.split("-");
@@ -218,8 +226,8 @@ function parseCronField(
                         stepPart === undefined ? Number(rangePart) : maximum,
                     ];
         if (
-            !Number.isInteger(start) ||
-            !Number.isInteger(end) ||
+            !Number.isSafeInteger(start) ||
+            !Number.isSafeInteger(end) ||
             start < minimum ||
             end > maximum ||
             start > end
@@ -246,7 +254,7 @@ function cronFieldIsWildcard(
     return true;
 }
 
-function parseCronExpression(expression: string): {
+function parseCronExpression(expression: string): null | {
     minutes: Set<number>;
     hours: Set<number>;
     daysOfMonth: Set<number>;
@@ -254,7 +262,7 @@ function parseCronExpression(expression: string): {
     daysOfWeek: Set<number>;
     dayOfMonthWildcard: boolean;
     dayOfWeekWildcard: boolean;
-} | null {
+} {
     const fields = expression.trim().split(/\s+/u);
     if (fields.length !== 5) {
         return null;
@@ -354,7 +362,7 @@ export function calculateNextRunAt(
     if (job.scheduleType === "cron" && job.cronExpression) {
         return nextCronRun(from, job.cronExpression).toISOString();
     }
-    return new Date(from.getTime() + job.intervalSeconds * 1000).toISOString();
+    return dateToISOString(new Date(from.getTime() + job.intervalSeconds * 1000));
 }
 
 function mapRun(row: ScheduledJobRunRow | undefined): ScheduledJobRun | null {
@@ -452,7 +460,7 @@ function assertValidActionTimeoutMs(timeoutMs: number | undefined): void {
     }
     if (
         !Number.isFinite(timeoutMs) ||
-        !Number.isInteger(timeoutMs) ||
+        !Number.isSafeInteger(timeoutMs) ||
         timeoutMs < 1 ||
         timeoutMs > 2_147_483_647
     ) {
@@ -576,11 +584,8 @@ export function updateScheduledJob(
         enabled: patch.enabled ?? existing.enabled,
         scheduleType: patch.scheduleType ?? existing.scheduleType,
         intervalSeconds: patch.intervalSeconds ?? existing.intervalSeconds,
-        timeOfDay: patch.timeOfDay === undefined ? existing.timeOfDay : patch.timeOfDay,
-        cronExpression:
-            patch.cronExpression === undefined
-                ? existing.cronExpression
-                : patch.cronExpression,
+        timeOfDay: patchValue(patch.timeOfDay, existing.timeOfDay),
+        cronExpression: patchValue(patch.cronExpression, existing.cronExpression),
     };
     assertValidSchedule(
         next.scheduleType,
@@ -797,12 +802,12 @@ export async function runScheduledJob(
         throw error;
     }
     const action = actionHandlers.get(job.actionKey);
-    const timeoutMs = action?.timeoutMs ?? scheduledJobRunTimeoutMs;
     if (!action && triggerType === "manual") {
         throw new ScheduledJobValidationError(
             `No scheduled job action registered for ${job.actionKey}`
         );
     }
+    const timeoutMs = action?.timeoutMs ?? scheduledJobRunTimeoutMs;
 
     const run =
         triggerType === "schedule" ? claimScheduledRun(job) : createRun(id, triggerType);
@@ -875,10 +880,8 @@ async function runActionWithTimeout(
         });
         timeout?.unref();
         const handlerPromise = Promise.resolve(action.handler(job, controller.signal));
-        handlerSettled = handlerPromise.catch(() => {});
-        handlerPromise.catch(() => {
-            // The race below reports handler failures unless the timeout already won.
-        });
+        handlerSettled = observeHandlerSettlement(handlerPromise);
+        void observeHandlerFailure(handlerPromise);
         const output =
             (await Promise.race([handlerPromise, timeoutPromise, abortPromise])) ?? {};
         return output;
@@ -897,9 +900,31 @@ async function runActionWithTimeout(
 
 function trackScheduledRun(run: Promise<void>): void {
     scheduledJobRuns.add(run);
-    void run.finally(() => {
+    void untrackScheduledRun(run);
+}
+
+async function observeHandlerSettlement(handlerPromise: Promise<unknown>): Promise<void> {
+    try {
+        await handlerPromise;
+    } catch {
+        // The race reports handler failures unless the timeout already won.
+    }
+}
+
+async function observeHandlerFailure(handlerPromise: Promise<unknown>): Promise<void> {
+    try {
+        await handlerPromise;
+    } catch {
+        // The race reports handler failures unless the timeout already won.
+    }
+}
+
+async function untrackScheduledRun(run: Promise<void>): Promise<void> {
+    try {
+        await run;
+    } finally {
         scheduledJobRuns.delete(run);
-    });
+    }
 }
 
 function isStaleScheduledRunError(error: unknown): boolean {
@@ -908,6 +933,16 @@ function isStaleScheduledRunError(error: unknown): boolean {
         "statusCode" in error &&
         (error as { statusCode?: unknown }).statusCode === 409
     );
+}
+
+async function observeScheduledRun(id: string): Promise<void> {
+    try {
+        await runScheduledJob(id, "schedule");
+    } catch (error) {
+        if (!isStaleScheduledRunError(error)) {
+            console.warn("[ScheduledJobs] Scheduled run failed unexpectedly:", error);
+        }
+    }
 }
 
 async function runDueJobs(): Promise<void> {
@@ -930,16 +965,7 @@ async function runDueJobs(): Promise<void> {
                 ) {
                     continue;
                 }
-                const run = runScheduledJob(row.id, "schedule")
-                    .then(() => {})
-                    .catch((error: unknown) => {
-                        if (!isStaleScheduledRunError(error)) {
-                            console.warn(
-                                "[ScheduledJobs] Scheduled run failed unexpectedly:",
-                                error
-                            );
-                        }
-                    });
+                const run = observeScheduledRun(row.id);
                 trackScheduledRun(run);
             } catch (error) {
                 console.warn(
@@ -957,13 +983,15 @@ function scheduleTick(): void {
         return;
     }
     schedulerTickRunning = true;
-    void runDueJobs()
-        .catch((error) => {
+    void (async () => {
+        try {
+            await runDueJobs();
+        } catch (error) {
             console.warn("[ScheduledJobs] Scheduler tick failed:", error);
-        })
-        .finally(() => {
+        } finally {
             schedulerTickRunning = false;
-        });
+        }
+    })();
 }
 
 export function startScheduledJobScheduler(): void {
@@ -999,9 +1027,7 @@ export const __testing = {
         await runDueJobs();
         await Promise.allSettled(scheduledJobRuns);
     },
-    mapRunForTest(row?: ScheduledJobRunRow): ScheduledJobRun | null {
-        return mapRun(row);
-    },
+    mapRunForTest: (row?: ScheduledJobRunRow): ScheduledJobRun | null => mapRun(row),
     runSchedulerTickForTest(): void {
         scheduleTick();
     },

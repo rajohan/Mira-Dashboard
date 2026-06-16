@@ -183,18 +183,18 @@ export default function authRoutes(
 
     app.post("/api/auth/register-first-user", (request, response) => {
         const username = validateUsername(request.body?.username);
-        const password = validatePassword(request.body?.password);
-        const rawGatewayToken = request.body?.gatewayToken;
         if (!username) {
             response.status(400).json({
                 error: "Username must be 3-32 chars: letters, numbers, dot, dash, underscore",
             });
             return;
         }
+        const password = validatePassword(request.body?.password);
         if (!password) {
             response.status(400).json({ error: "Password must be 8-256 characters" });
             return;
         }
+        const rawGatewayToken = request.body?.gatewayToken;
         if (typeof rawGatewayToken !== "string" || !rawGatewayToken.trim()) {
             response
                 .status(400)

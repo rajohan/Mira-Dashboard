@@ -78,8 +78,9 @@ describe("auth helpers", () => {
         const sessionId = createSession(user.id);
         assert.equal(getAuthUserFromSessionId(sessionId)?.username, "raymond");
 
+        const expiredAt = new Date(Date.now() - 1000);
         db.prepare("UPDATE auth_sessions SET expires_at = ? WHERE id = ?").run(
-            new Date(Date.now() - 1000).toISOString(),
+            expiredAt.toISOString(),
             sessionId
         );
         assert.equal(getAuthUserFromSessionId(sessionId), null);

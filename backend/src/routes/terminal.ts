@@ -11,13 +11,13 @@ interface CompletionRequest {
     cwd?: string;
 }
 
-/** Represents cd request. */
+/** Represents CD request. */
 interface CdRequest {
     path: string;
     cwd: string;
 }
 
-/** Represents the cd API response. */
+/** Represents the CD API response. */
 interface CdResponse {
     success: boolean;
     newCwd: string;

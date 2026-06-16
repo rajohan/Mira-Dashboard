@@ -53,36 +53,33 @@ function installSchedulerCloseCleanup(): void {
 }
 
 function removeSchedulerCloseCleanup(): void {
-    if (stopSchedulerOnServerClose) {
-        server.removeListener("close", stopSchedulerOnServerClose);
-        stopSchedulerOnServerClose = undefined;
+    if (!stopSchedulerOnServerClose) {
+        return;
     }
+
+    server.removeListener("close", stopSchedulerOnServerClose);
+    stopSchedulerOnServerClose = undefined;
 }
 
 function queueQuotaNotificationCheckAfterSeed(
     seedPromise = waitForLocalCacheSeed("quotas.summary"),
     notificationCheck = runQuotaNotificationCheck
 ): void {
-    void seedPromise.then(
-        () => {
+    void (async () => {
+        try {
+            await seedPromise;
             try {
-                void notificationCheck().catch((error: unknown) => {
-                    console.warn(
-                        "[Backend] Startup quota notification check failed:",
-                        error
-                    );
-                });
+                await notificationCheck();
             } catch (error) {
                 console.warn("[Backend] Startup quota notification check failed:", error);
             }
-        },
-        (error: unknown) => {
+        } catch (error) {
             console.warn(
                 "[Backend] Skipping startup quota notification check after cache seed failure:",
                 error
             );
         }
-    );
+    })();
 }
 
 /** Starts Gateway and notification monitors after the HTTP server is listening. */
@@ -201,6 +198,7 @@ if (shouldStartOnImport()) {
 
 export const __testing = {
     queueQuotaNotificationCheckAfterSeed,
+    removeSchedulerCloseCleanup,
     setAfterBackgroundServicesStartedForTest(callback: (() => void) | undefined): void {
         afterBackgroundServicesStartedForTest = callback;
     },

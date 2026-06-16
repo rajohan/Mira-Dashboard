@@ -6,13 +6,6 @@ const configuredDbPath = process.env.MIRA_DASHBOARD_DB_PATH?.trim();
 export const miraDbPath = configuredDbPath
     ? path.resolve(configuredDbPath)
     : path.join(process.cwd(), "data", "mira-dashboard.db");
-const dataDir = path.dirname(miraDbPath);
-fs.mkdirSync(dataDir, { recursive: true });
-
-/** Defines db. */
-export const db = new DatabaseSync(miraDbPath);
-db.exec("PRAGMA foreign_keys = ON");
-db.exec("PRAGMA busy_timeout = 5000");
 
 interface MigrationDatabase {
     exec(sql: string): unknown;
@@ -46,12 +39,11 @@ function columnExists(
 
 function isDuplicateColumnError(error: unknown, columnName: string): boolean {
     const escapedName = columnName.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
-    return (
-        error instanceof Error &&
-        new RegExp(String.raw`duplicate column name:\s*${escapedName}`, "u").test(
-            error.message
-        )
+    const duplicateColumnPattern = new RegExp(
+        String.raw`duplicate column name:\s*${escapedName}`,
+        "u"
     );
+    return error instanceof Error && duplicateColumnPattern.test(error.message);
 }
 
 function isTransientSqliteLock(error: unknown): boolean {
@@ -70,7 +62,7 @@ async function sleep(milliseconds: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-db.exec(`
+const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
@@ -242,7 +234,7 @@ CREATE TABLE IF NOT EXISTS scheduled_job_runs (
 
 CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_job_started
     ON scheduled_job_runs(job_id, started_at DESC);
-`);
+`;
 
 /** Ensures older task databases have the automation column. */
 export async function ensureTaskAutomationColumn(
@@ -300,8 +292,6 @@ export async function ensureTaskAutomationColumn(
 
     throw lastError;
 }
-
-await ensureTaskAutomationColumn(db);
 
 /** Ensures older scheduled job databases have the cron expression column. */
 export async function ensureScheduledJobCronExpressionColumn(
@@ -363,4 +353,20 @@ export async function ensureScheduledJobCronExpressionColumn(
     throw lastError;
 }
 
-await ensureScheduledJobCronExpressionColumn(db);
+async function initializeDatabase(): Promise<DatabaseSync> {
+    const dataDirectory = path.dirname(miraDbPath);
+    fs.mkdirSync(dataDirectory, { recursive: true });
+
+    const initializedDb = new DatabaseSync(miraDbPath);
+    initializedDb.exec("PRAGMA foreign_keys = ON");
+    initializedDb.exec("PRAGMA busy_timeout = 5000");
+    initializedDb.exec(SCHEMA_SQL);
+
+    await ensureTaskAutomationColumn(initializedDb);
+    await ensureScheduledJobCronExpressionColumn(initializedDb);
+
+    return initializedDb;
+}
+
+/** Defines db. */
+export const db = await initializeDatabase();

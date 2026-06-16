@@ -7,6 +7,10 @@ import express from "express";
 import { db } from "../db.js";
 import notificationsRoutes from "./notifications.js";
 
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
@@ -126,7 +130,7 @@ describe("notifications routes", () => {
         notificationIdToCleanup = missingDescription.body.id;
         const createdWithoutDescription = db
             .prepare("SELECT description FROM notifications WHERE id = ?")
-            .get(missingDescription.body.id) as { description: string } | undefined;
+            .get(missingDescription.body.id) as undefined | { description: string };
         assert.equal(createdWithoutDescription?.description, "");
 
         const invalidTitle = await requestJson<{ error: string }>(
@@ -229,7 +233,7 @@ describe("notifications routes", () => {
         assert.equal(typeof defaultType.body.id, "number");
         const createdDefaultType = db
             .prepare("SELECT type FROM notifications WHERE id = ?")
-            .get(defaultType.body.id) as { type: string } | undefined;
+            .get(defaultType.body.id) as undefined | { type: string };
         assert.equal(createdDefaultType?.type, "info");
 
         const noSource = await requestJson<{ ok: true; id: number | null }>(
@@ -427,7 +431,9 @@ describe("notifications routes", () => {
         `);
 
         for (let index = 0; index < 100; index += 1) {
-            const timestamp = new Date(Date.UTC(2099, 0, 1, 0, 0, index)).toISOString();
+            const timestamp = dateToISOString(
+                new Date(Date.UTC(2099, 0, 1, 0, 0, index))
+            );
             insert.run(
                 `Older valid ${index}`,
                 "Valid occurred_at row",

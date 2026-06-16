@@ -36,6 +36,23 @@ type ScheduledBackupPromise = ReturnType<typeof backupTesting.startScheduledBack
     backupType?: "kopia" | "walg";
 };
 
+async function ignoreRejection(promise: Promise<unknown>): Promise<void> {
+    try {
+        await promise;
+    } catch {
+        // Expected failure paths are asserted later; observe them immediately.
+    }
+}
+
+async function settledMarker(promise: Promise<unknown>): Promise<"settled"> {
+    try {
+        await promise;
+    } catch {
+        // Both resolved and rejected states count as settled in these races.
+    }
+    return "settled";
+}
+
 function scheduledRunCount(jobId: string): number {
     return (
         db
@@ -54,14 +71,14 @@ function latestScheduledRun(jobId: string) {
              LIMIT 1`
         )
         .get(jobId) as
+        | undefined
         | {
               job_id: string;
               status: string;
               trigger_type: string;
               message: string | null;
               output_json: string;
-          }
-        | undefined;
+          };
 }
 
 const originalDockerBin = process.env.MIRA_DOCKER_BIN;
@@ -346,11 +363,13 @@ function handleBackupSpawn(
         }
         if (process.env.FAKE_BACKUP_HOLD_UNTIL) {
             const timer = setInterval(() => {
-                if (existsSync(process.env.FAKE_BACKUP_HOLD_UNTIL || "")) {
-                    clearInterval(timer);
-                    fakeBackupHoldTimers.delete(timer);
-                    child.emit("close", 0, null);
+                if (!existsSync(process.env.FAKE_BACKUP_HOLD_UNTIL || "")) {
+                    return;
                 }
+
+                clearInterval(timer);
+                fakeBackupHoldTimers.delete(timer);
+                child.emit("close", 0, null);
             }, 10);
             timer.unref();
             fakeBackupHoldTimers.add(timer);
@@ -449,7 +468,7 @@ async function waitForDone(
 ): Promise<{ status: string; code: number; stdout: string; stderr: string }> {
     for (let attempt = 0; attempt < 20; attempt += 1) {
         const response = await requestJson<{
-            job: { status: string; code: number; stdout: string; stderr: string } | null;
+            job: null | { status: string; code: number; stdout: string; stderr: string };
         }>(server, pathName);
         if (response.body.job?.status === "done") {
             return response.body.job;
@@ -487,7 +506,7 @@ async function waitForDoneWithRefreshFailure(
         }
         await new Promise((resolve) => setTimeout(resolve, 50));
         const response = await requestJson<{
-            job: { status: string; code: number; stdout: string; stderr: string } | null;
+            job: null | { status: string; code: number; stdout: string; stderr: string };
         }>(server, pathName);
         latest = response.body.job ?? latest;
     }
@@ -505,7 +524,7 @@ async function waitForCacheEntryAttempts(
     for (let attempt = 0; attempt < attempts; attempt += 1) {
         const row = db
             .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
-            .get(key) as { data_json: string | null } | undefined;
+            .get(key) as undefined | { data_json: string | null };
         if (row?.data_json) {
             return JSON.parse(row.data_json) as Record<string, unknown>;
         }
@@ -521,7 +540,7 @@ async function waitForCacheEntryMatching(
     for (let attempt = 0; attempt < 150; attempt += 1) {
         const row = db
             .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
-            .get(key) as { data_json: string | null } | undefined;
+            .get(key) as undefined | { data_json: string | null };
         if (row?.data_json) {
             const cache = JSON.parse(row.data_json) as Record<string, unknown>;
             if (pattern.test(JSON.stringify(cache))) {
@@ -565,9 +584,7 @@ function startTestScheduledBackup(
 ): ScheduledBackupPromise {
     const promise = backupTesting.startScheduledBackup(...args) as ScheduledBackupPromise;
     promise.backupType = args[0];
-    promise.catch(() => {
-        // Expected failure paths are asserted later; observe them immediately.
-    });
+    void ignoreRejection(promise);
     return promise;
 }
 
@@ -578,16 +595,13 @@ async function assertAbortedWalgRemainsRunningUntilTerminationConfirmed(
     release: () => void
 ): Promise<void> {
     const result = await Promise.race([
-        runPromise.then(
-            () => "settled",
-            () => "settled"
-        ),
+        settledMarker(runPromise),
         new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 20)),
     ]);
     assert.equal(result, "pending");
 
     const activeWalg = await requestJson<{
-        job: { status: string; stderr: string } | null;
+        job: null | { status: string; stderr: string };
     }>(server, "/api/backups/walg");
     assert.equal(activeWalg.status, 200);
     assert.equal(activeWalg.body.job?.status, "running");
@@ -1190,10 +1204,7 @@ describe("backup routes", () => {
                 controller.abort();
 
                 const earlyResult = await Promise.race([
-                    runPromise.then(
-                        () => "settled",
-                        () => "settled"
-                    ),
+                    settledMarker(runPromise),
                     new Promise<"pending">((resolve) => {
                         setTimeout(() => resolve("pending"), 20);
                     }),
@@ -1208,7 +1219,7 @@ describe("backup routes", () => {
                 assert.equal(lastFakeBackupProcess?.killedWithSignal, "SIGTERM");
 
                 const current = await requestJson<{
-                    job: { status: string; code: number; stderr: string } | null;
+                    job: null | { status: string; code: number; stderr: string };
                 }>(server, "/api/backups/walg");
                 assert.equal(current.body.job?.status, "done");
                 assert.equal(current.body.job?.code, 130);
@@ -1239,7 +1250,7 @@ describe("backup routes", () => {
                 );
 
                 const current = await requestJson<{
-                    job: { status: string; code: number; stderr: string } | null;
+                    job: null | { status: string; code: number; stderr: string };
                 }>(server, "/api/backups/kopia");
                 assert.equal(current.body.job?.status, "done");
                 assert.equal(current.body.job?.code, 130);
@@ -1276,10 +1287,7 @@ describe("backup routes", () => {
                     controller.abort();
 
                     const earlyResult = await Promise.race([
-                        runPromise.then(
-                            () => "settled",
-                            () => "settled"
-                        ),
+                        settledMarker(runPromise),
                         new Promise<"pending">((resolve) => {
                             setTimeout(() => resolve("pending"), 20);
                         }),
@@ -1408,10 +1416,7 @@ describe("backup routes", () => {
                 closeLastFakeBackupProcess();
 
                 const earlyResult = await Promise.race([
-                    runPromise.then(
-                        () => "settled",
-                        () => "settled"
-                    ),
+                    settledMarker(runPromise),
                     new Promise<"pending">((resolve) => {
                         setTimeout(() => resolve("pending"), 20);
                     }),
@@ -1460,7 +1465,7 @@ describe("backup routes", () => {
                 assert.equal(fakeHostPgrepCalls, 2);
 
                 const activeKopia = await requestJson<{
-                    job: { status: string } | null;
+                    job: null | { status: string };
                 }>(server, "/api/backups/kopia");
                 assert.equal(activeKopia.status, 200);
                 assert.equal(activeKopia.body.job?.status, "needs_attention");
@@ -1538,7 +1543,7 @@ describe("backup routes", () => {
                     /Backup aborted by scheduler/u
                 );
                 const activeKopia = await requestJson<{
-                    job: { status: string } | null;
+                    job: null | { status: string };
                 }>(server, "/api/backups/kopia");
                 assert.equal(activeKopia.body.job?.status, "needs_attention");
             }
@@ -1799,7 +1804,7 @@ describe("backup routes", () => {
                     /needs attention[\s\S]*2 failed confirmation attempts/u
                 );
                 const activeWalg = await requestJson<{
-                    job: { status: string } | null;
+                    job: null | { status: string };
                 }>(server, "/api/backups/walg");
                 assert.equal(activeWalg.body.job?.status, "needs_attention");
 
@@ -2516,7 +2521,7 @@ describe("backup routes", () => {
                 assert.equal(fakeContainerPreStartPgrepCalls, 0);
                 assert.equal(lastFakeBackupProcess, null);
                 const activeWalg = await requestJson<{
-                    job: { status: string } | null;
+                    job: null | { status: string };
                 }>(server, "/api/backups/walg");
                 assert.equal(activeWalg.body.job, null);
             }
@@ -2602,7 +2607,7 @@ describe("backup routes", () => {
         await withEnv({ FAKE_DOCKER_STATUS_DELAY_MS: "1000" }, async () => {
             const scheduledRun = startTestScheduledBackup("kopia");
             const result = await Promise.race([
-                scheduledRun.then(() => "settled"),
+                settledMarker(scheduledRun),
                 new Promise<"pending">((resolve) =>
                     setTimeout(() => resolve("pending"), 100)
                 ),
@@ -2692,10 +2697,11 @@ describe("backup routes", () => {
         }) as unknown as typeof spawn);
         try {
             registerBackupScheduledJobs();
+            const controller = new AbortController();
             const run = await runScheduledJob(
                 "backup.kopia",
                 "manual",
-                new AbortController().signal
+                controller.signal
             );
             assert.equal(run.status, "failed");
             assert.match(run.message ?? "", /spawn failed/u);

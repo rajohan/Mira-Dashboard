@@ -100,7 +100,7 @@ async function transcribeWithElevenLabs(
         });
 
         if (!response.ok) {
-            const errorText = await response.text().catch(() => "");
+            const errorText = await readResponseTextFallback(response);
             throw new Error(
                 `ElevenLabs STT failed (${response.status}): ${errorText || response.statusText}`
             );
@@ -109,6 +109,14 @@ async function transcribeWithElevenLabs(
         return transcriptTextFromElevenLabs(await response.json());
     } finally {
         clearTimeout(timer);
+    }
+}
+
+async function readResponseTextFallback(response: Response): Promise<string> {
+    try {
+        return await response.text();
+    } catch {
+        return "";
     }
 }
 
@@ -160,6 +168,7 @@ export default function sttRoutes(app: express.Express, expressModule: typeof ex
 
 export const __testing = {
     audioExtension,
+    readResponseTextFallback,
     transcribeWithElevenLabs,
     transcriptTextFromElevenLabs,
 };

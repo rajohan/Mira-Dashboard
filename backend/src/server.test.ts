@@ -21,11 +21,26 @@ import gateway from "./gateway.js";
 import { stopOpenClawNotificationMonitor } from "./services/openclawNotifications.js";
 import { stopQuotaNotificationMonitor } from "./services/quotaNotifications.js";
 
+function setGlobalProperty<Key extends keyof typeof globalThis>(
+    key: Key,
+    value: (typeof globalThis)[Key]
+): void {
+    Object.defineProperty(globalThis, key, {
+        configurable: true,
+        writable: true,
+        value,
+    });
+}
+
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
 let originalPort: string | undefined;
 let originalTrustProxy: string | undefined;
 let originalOpenClawHome: string | undefined;
 let originalDashboardOpenClawHome: string | undefined;
-let originalGatewayToken: { value: string } | undefined;
+let originalGatewayToken: undefined | { value: string };
 let openclawHome: string | undefined;
 const ENTRYPOINT_SHUTDOWN_TIMEOUT_MS = 3_000;
 const ENTRYPOINT_START_TIMEOUT_MS = 5_000;
@@ -120,11 +135,15 @@ async function stopChild(child: ReturnType<typeof spawn>): Promise<void> {
     if (!exited) {
         const exitPromise = new Promise((resolve) => child.once("exit", resolve));
         child.kill("SIGTERM");
-        exited =
-            (await Promise.race([
-                exitPromise.then(() => true),
-                delay(ENTRYPOINT_SHUTDOWN_TIMEOUT_MS).then(() => false),
-            ])) === true;
+        const exitSucceeded = async (): Promise<boolean> => {
+            await exitPromise;
+            return true;
+        };
+        const exitTimedOut = async (): Promise<boolean> => {
+            await delay(ENTRYPOINT_SHUTDOWN_TIMEOUT_MS);
+            return false;
+        };
+        exited = (await Promise.race([exitSucceeded(), exitTimedOut()])) === true;
     }
     exited ||= child.exitCode !== null || child.signalCode !== null;
     if (!exited) {
@@ -211,7 +230,7 @@ async function restoreBootstrapState(): Promise<void> {
     if (originalGatewayToken) {
         db.prepare(
             "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?)"
-        ).run(originalGatewayToken.value, new Date().toISOString());
+        ).run(originalGatewayToken.value, dateToISOString(new Date()));
     }
 }
 
@@ -223,7 +242,7 @@ describe("server bootstrap", () => {
         originalDashboardOpenClawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
         originalGatewayToken = db
             .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
-            .get() as { value: string } | undefined;
+            .get() as undefined | { value: string };
 
         try {
             process.env.PORT = "0";
@@ -369,7 +388,9 @@ describe("server bootstrap", () => {
     it("covers database migration and commit fallback helpers", async () => {
         const executedSql: string[] = [];
         await ensureTaskAutomationColumn({
-            exec: (sql) => executedSql.push(sql),
+            exec: (sql) => {
+                executedSql.push(sql);
+            },
             prepare: () => ({
                 all: () => [{ name: "id" }],
             }),
@@ -379,7 +400,9 @@ describe("server bootstrap", () => {
         executedSql.length = 0;
         let initialLockedPrepareCalls = 0;
         await ensureTaskAutomationColumn({
-            exec: (sql) => executedSql.push(sql),
+            exec: (sql) => {
+                executedSql.push(sql);
+            },
             prepare: () => ({
                 all: () => {
                     initialLockedPrepareCalls += 1;
@@ -396,7 +419,9 @@ describe("server bootstrap", () => {
         executedSql.length = 0;
         let tableLockedPrepareCalls = 0;
         await ensureTaskAutomationColumn({
-            exec: (sql) => executedSql.push(sql),
+            exec: (sql) => {
+                executedSql.push(sql);
+            },
             prepare: () => ({
                 all: () => {
                     tableLockedPrepareCalls += 1;
@@ -426,7 +451,9 @@ describe("server bootstrap", () => {
 
         executedSql.length = 0;
         await ensureTaskAutomationColumn({
-            exec: (sql) => executedSql.push(sql),
+            exec: (sql) => {
+                executedSql.push(sql);
+            },
             prepare: () => ({
                 all: () => [{ name: "automation_json" }],
             }),
@@ -597,7 +624,9 @@ describe("server bootstrap", () => {
 
         const scheduledJobMigrationSql: string[] = [];
         await ensureScheduledJobCronExpressionColumn({
-            exec: (sql) => scheduledJobMigrationSql.push(sql),
+            exec: (sql) => {
+                scheduledJobMigrationSql.push(sql);
+            },
             prepare: () => ({
                 all: () => [{ name: "id" }],
             }),
@@ -608,7 +637,9 @@ describe("server bootstrap", () => {
 
         scheduledJobMigrationSql.length = 0;
         await ensureScheduledJobCronExpressionColumn({
-            exec: (sql) => scheduledJobMigrationSql.push(sql),
+            exec: (sql) => {
+                scheduledJobMigrationSql.push(sql);
+            },
             prepare: () => ({
                 all: () => [{ name: "cron_expression" }],
             }),
@@ -902,7 +933,7 @@ describe("server bootstrap", () => {
         const originalStartOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT;
         const originalConsoleWarn = console.warn;
         const originalConsoleError = console.error;
-        const originalSetInterval = globalThis.setInterval;
+        const originalSetInterval = setInterval;
         const originalShutdown = gateway.shutdown;
         let initializedToken: string | undefined;
         let listenedPort: number | undefined;
@@ -971,13 +1002,15 @@ describe("server bootstrap", () => {
                 shutdownCalled = true;
             };
             let intervalCalls = 0;
-            globalThis.setInterval = ((...args: Parameters<typeof setInterval>) => {
+            setGlobalProperty("setInterval", ((
+                ...args: Parameters<typeof setInterval>
+            ) => {
                 intervalCalls += 1;
                 if (intervalCalls === 2) {
                     throw new Error("monitor failed");
                 }
                 return originalSetInterval(...args);
-            }) as typeof setInterval;
+            }) as typeof setInterval);
             server.close = (() => {
                 closeCalled = true;
                 return server;
@@ -987,7 +1020,7 @@ describe("server bootstrap", () => {
             assert.equal(shutdownCalled, true);
             stopQuotaNotificationMonitor();
             stopOpenClawNotificationMonitor();
-            globalThis.setInterval = originalSetInterval;
+            setGlobalProperty("setInterval", originalSetInterval);
             closeCalled = false;
             shutdownCalled = false;
             serverStartTesting.setAfterBackgroundServicesStartedForTest(() => {
@@ -1034,6 +1067,8 @@ describe("server bootstrap", () => {
             handleServerListening();
             assert.equal(initializedToken, undefined);
             assert.match(String(warnings.at(-1)?.[0]), /No gateway token/u);
+
+            serverStartTesting.removeSchedulerCloseCleanup();
 
             const quotaSeedError = new Error("quota seed unavailable");
             let quotaCheckRan = false;
@@ -1236,7 +1271,7 @@ describe("server bootstrap", () => {
             server.listen = originalListen;
             server.address = originalAddress;
             server.close = originalClose;
-            globalThis.setInterval = originalSetInterval;
+            setGlobalProperty("setInterval", originalSetInterval);
             gateway.shutdown = originalShutdown;
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
             stopQuotaNotificationMonitor();

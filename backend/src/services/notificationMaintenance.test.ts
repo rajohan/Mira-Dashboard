@@ -4,13 +4,17 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { db } from "../db.js";
 import { pruneReadNotifications } from "./notificationMaintenance.js";
 
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
 function insertNotification(options: {
     title: string;
     source: string;
     isRead: boolean;
     occurredAt: string;
 }) {
-    const now = new Date().toISOString();
+    const now = dateToISOString(new Date());
     db.prepare(
         `INSERT INTO notifications (
             title,
@@ -59,8 +63,8 @@ describe("notification maintenance", () => {
     });
 
     it("removes stale read notifications while preserving unread items", () => {
-        const oldDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-        const recentDate = new Date(Date.now() + 60_000).toISOString();
+        const oldDate = dateToISOString(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+        const recentDate = dateToISOString(new Date(Date.now() + 60_000));
 
         insertNotification({
             source,
@@ -97,7 +101,7 @@ describe("notification maintenance", () => {
                 source,
                 title: `read-${String(index).padStart(3, "0")}`,
                 isRead: true,
-                occurredAt: new Date(baseTime + index * 1000).toISOString(),
+                occurredAt: dateToISOString(new Date(baseTime + index * 1000)),
             });
         }
 

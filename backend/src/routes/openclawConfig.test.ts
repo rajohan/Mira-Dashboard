@@ -11,6 +11,10 @@ import express from "express";
 import gateway from "../gateway.js";
 import openClawConfigRoutes, { __testing } from "./openclawConfig.js";
 
+function compareStrings(left: string, right: string): number {
+    return left === right ? 0 : left > right ? 1 : -1;
+}
+
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
@@ -360,6 +364,7 @@ describe("OpenClaw config routes", () => {
             const describedSkill = path.join(tempDir, "described-skill");
             await mkdir(fallbackSkill, { recursive: true });
             await mkdir(describedSkill, { recursive: true });
+            await writeFile(path.join(tempDir, "README.md"), "Not a skill\n", "utf8");
             await writeFile(path.join(fallbackSkill, "SKILL.md"), "Fallback\n", "utf8");
             await writeFile(path.join(describedSkill, "SKILL.md"), "Described\n", "utf8");
 
@@ -367,7 +372,7 @@ describe("OpenClaw config routes", () => {
                 __testing
                     .collectSkillDirectories(tempDir)
                     .map((skillPath) => path.basename(skillPath))
-                    .sort(),
+                    .sort(compareStrings),
                 ["described-skill", "fallback-skill"]
             );
             assert.deepEqual(
@@ -382,6 +387,12 @@ describe("OpenClaw config routes", () => {
             const extensionSkill = path.join(
                 packageRoot,
                 "dist/extensions/example/skills/extra-skill"
+            );
+            await mkdir(path.join(packageRoot, "dist/extensions"), { recursive: true });
+            await writeFile(
+                path.join(packageRoot, "dist/extensions/README.md"),
+                "Not an extension\n",
+                "utf8"
             );
             await mkdir(extensionSkill, { recursive: true });
             await writeFile(
@@ -483,7 +494,7 @@ describe("OpenClaw config routes", () => {
                         },
                     },
                 });
-                assert.deepEqual(Object.keys(entries).sort(), [
+                assert.deepEqual(Object.keys(entries).sort(compareStrings), [
                     "configured-only",
                     "fallback-skill",
                 ]);
@@ -735,11 +746,13 @@ throw new Error("restart failed");
 
             process.env.OPENCLAW_PACKAGE_ROOT = " ".repeat(3);
             process.env.OPENCLAW_BIN = " ".repeat(3);
+            const defaultOpenClawPackageRoot = path.join(
+                os.homedir(),
+                ".npm-global/lib/node_modules/openclaw"
+            );
             assert.equal(
                 __testing.getOpenClawPackageRootForTest(),
-                path.resolve(
-                    path.join(os.homedir(), ".npm-global/lib/node_modules/openclaw")
-                )
+                path.resolve(defaultOpenClawPackageRoot)
             );
             assert.equal(
                 __testing.getOpenClawBinForTest(),

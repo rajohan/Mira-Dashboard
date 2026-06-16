@@ -9,6 +9,10 @@ import { db } from "../db.js";
 import { __testing as gatewayTesting } from "../gateway.js";
 import authRoutes, { __testing as authTesting } from "./auth.js";
 
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
 const bootstrapGatewayToken = `bootstrap-token-${Date.now()}`;
 
 interface TestServer {
@@ -66,8 +70,8 @@ async function requestJson<T>(
 
 function cleanupUser(username: string): void {
     const user = db.prepare("SELECT id FROM users WHERE username = ?").get(username) as
-        | { id: number }
-        | undefined;
+        | undefined
+        | { id: number };
     if (!user) {
         return;
     }
@@ -196,7 +200,7 @@ describe("auth first-user bootstrap routes", () => {
         cleanupBootstrapRows(username);
         const fallbackUsername = "bootstrap-fallback-user";
         cleanupBootstrapRows(fallbackUsername);
-        let createdWith: { username: string; password: string } | null = null;
+        let createdWith: null | { username: string; password: string } = null;
         const fallbackDependencies = {
             createUser: (newUsername, newPassword) => {
                 createdWith = { username: newUsername, password: newPassword };
@@ -296,7 +300,7 @@ describe("auth first-user bootstrap routes", () => {
         let previousGatewayToken: string | null = null;
         db.prepare(
             "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
-        ).run("preexisting-token", new Date().toISOString());
+        ).run("preexisting-token", dateToISOString(new Date()));
         let sideEffectServer: TestServer | undefined;
         let retryServer: TestServer | undefined;
         try {
@@ -656,7 +660,7 @@ describe("auth first-user bootstrap routes", () => {
         cleanupBootstrapRows(username);
         db.prepare(
             "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
-        ).run("shutdown-throws-token", new Date().toISOString());
+        ).run("shutdown-throws-token", dateToISOString(new Date()));
         let restoreAttempted = false;
         let throwingShutdownServer: TestServer | null = null;
         try {
@@ -697,7 +701,7 @@ describe("auth first-user bootstrap routes", () => {
         cleanupBootstrapRows(username);
         db.prepare(
             "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
-        ).run("restore-fails-token", new Date().toISOString());
+        ).run("restore-fails-token", dateToISOString(new Date()));
         let restoreAttempted = false;
         let restoreServer: TestServer | null = null;
         try {
@@ -706,10 +710,12 @@ describe("auth first-user bootstrap routes", () => {
                     throw new Error("session unavailable");
                 },
                 initGateway: (token) => {
-                    if (token === "restore-fails-token") {
-                        restoreAttempted = true;
-                        throw new Error("restore unavailable");
+                    if (token !== "restore-fails-token") {
+                        return;
                     }
+
+                    restoreAttempted = true;
+                    throw new Error("restore unavailable");
                 },
             });
             const registered = await requestJson<{ error: string }>(

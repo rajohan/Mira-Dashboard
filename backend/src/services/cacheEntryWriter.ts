@@ -1,5 +1,9 @@
 import { db } from "../db.js";
 
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
 type CacheTtlUnit = "hours" | "minutes";
 
 export interface CacheWriteOptions {
@@ -13,12 +17,12 @@ export interface CacheWriteOptions {
 }
 
 function nowIso(): string {
-    return new Date().toISOString();
+    return dateToISOString(new Date());
 }
 
 function ttlDate(ttl: number, unit: CacheTtlUnit): string {
-    const multiplier = unit === "hours" ? 60 * 60 * 1000 : 60 * 1000;
-    return new Date(Date.now() + ttl * multiplier).toISOString();
+    const multiplier = 60 * 1000 * (unit === "hours" ? 60 : 1);
+    return dateToISOString(new Date(Date.now() + ttl * multiplier));
 }
 
 export function writeCacheSuccess(options: CacheWriteOptions): void {

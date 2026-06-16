@@ -10,7 +10,7 @@ test("uses process cwd data directory when no explicit db path is configured", a
     const originalCwd = process.cwd();
     const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-db-default-"));
-    let db: { close(): void } | undefined;
+    let db: undefined | { close(): void };
 
     try {
         delete process.env.MIRA_DASHBOARD_DB_PATH;
@@ -43,7 +43,7 @@ test("uses configured db path when provided", async () => {
     const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-db-configured-"));
     const configuredPath = path.join(tempDir, "nested", "configured.db");
-    let db: { close(): void } | undefined;
+    let db: undefined | { close(): void };
 
     try {
         process.env.MIRA_DASHBOARD_DB_PATH = configuredPath;

@@ -5,13 +5,11 @@ import path from "path";
 
 import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
-const OPENCLAW_HOME = nonEmptyEnvFallback(
-    "OPENCLAW_HOME",
-    nonEmptyEnvFallback(
-        "MIRA_DASHBOARD_OPENCLAW_HOME",
-        path.join(os.homedir(), ".openclaw")
-    )
+const fallbackOpenClawHome = nonEmptyEnvFallback(
+    "MIRA_DASHBOARD_OPENCLAW_HOME",
+    path.join(os.homedir(), ".openclaw")
 );
+const OPENCLAW_HOME = nonEmptyEnvFallback("OPENCLAW_HOME", fallbackOpenClawHome);
 const MEDIA_ROOT = path.resolve(OPENCLAW_HOME, "media");
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
 let cachedRealMediaRoot: string | undefined;
@@ -35,7 +33,7 @@ const MIME_TYPES: Record<string, string> = {
     ".txt": "text/plain; charset=utf-8",
 };
 
-/** Performs mime type from path. */
+/** Performs MIME type from path. */
 function mimeTypeFromPath(filePath: string): string {
     return MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream";
 }

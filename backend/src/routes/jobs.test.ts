@@ -279,9 +279,12 @@ test("maps malformed patch JSON when mounted behind global parser skip", async (
             error: "Invalid scheduled job patch",
         });
 
+        const jobsJsonLimitBytes = Number(
+            jobsRouteTesting.JOBS_JSON_LIMIT.replace(/b$/u, "")
+        );
         const oversized = await requestRaw(testServer, "/api/jobs/cache.weather", {
             method: "PATCH",
-            body: "x".repeat(Number.parseInt(jobsRouteTesting.JOBS_JSON_LIMIT, 10) + 1),
+            body: "x".repeat(jobsJsonLimitBytes + 1),
         });
 
         assert.equal(oversized.status, 413);
@@ -292,9 +295,7 @@ test("maps malformed patch JSON when mounted behind global parser skip", async (
             "/api/jobs/cache.weather/",
             {
                 method: "PATCH",
-                body: "x".repeat(
-                    Number.parseInt(jobsRouteTesting.JOBS_JSON_LIMIT, 10) + 1
-                ),
+                body: "x".repeat(jobsJsonLimitBytes + 1),
             }
         );
 
@@ -348,7 +349,9 @@ test("covers route helper edge cases", () => {
         },
     };
     const nextCalls: unknown[] = [];
-    const next = (error: unknown) => nextCalls.push(error);
+    const next = (error: unknown) => {
+        nextCalls.push(error);
+    };
 
     jobsRouteTesting.invalidJobsJsonHandler(
         Object.assign(new Error("too large"), { status: 413 }),
@@ -377,12 +380,8 @@ test("covers route helper edge cases", () => {
     ]);
     assert.deepEqual(nextCalls, [unexpectedError]);
     assert.equal(jobsRouteTesting.httpStatusCode(new Error("x")), 500);
-    assert.equal(
-        jobsRouteTesting.httpStatusCode(
-            Object.assign(new Error("x"), { statusCode: 409 })
-        ),
-        409
-    );
+    const conflictError = Object.assign(new Error("x"), { statusCode: 409 });
+    assert.equal(jobsRouteTesting.httpStatusCode(conflictError), 409);
     assert.equal(jobsRouteTesting.invalidPatchField({ enabled: "yes" }), "enabled");
     assert.equal(
         jobsRouteTesting.invalidPatchField({ scheduleType: "weekly" }),

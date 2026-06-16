@@ -520,11 +520,11 @@ export default function configFilesRoutes(
         express.json({ limit: `${CONFIG_WRITE_JSON_LIMIT}b` }),
         asyncRoute(
             async (req, res) => {
-                const filePath = req.params[0];
                 if (!req.body || typeof req.body !== "object") {
                     res.status(400).json({ error: "Content required" });
                     return;
                 }
+                const filePath = req.params[0];
                 const { content } = req.body as { content?: unknown };
 
                 if (content === undefined) {
@@ -678,33 +678,32 @@ export default function configFilesRoutes(
                     }
                 }
 
-                const stat = await withRootedParentPath(
-                    safeFullPath,
-                    openclawRoot,
-                    async (rootedFullPath) => {
-                        await writeTextNoFollowGuarded(
-                            guardedPath(rootedFullPath),
-                            content
-                        );
-                        return statGuarded(guardedPath(rootedFullPath));
-                    }
-                ).catch((error: NodeJS.ErrnoException) => {
-                    if (error.code === "EACCES") {
+                let stat;
+                try {
+                    stat = await withRootedParentPath(
+                        safeFullPath,
+                        openclawRoot,
+                        async (rootedFullPath) => {
+                            await writeTextNoFollowGuarded(
+                                guardedPath(rootedFullPath),
+                                content
+                            );
+                            return statGuarded(guardedPath(rootedFullPath));
+                        }
+                    );
+                } catch (error) {
+                    const fileError = error as NodeJS.ErrnoException;
+                    if (fileError.code === "EACCES") {
                         res.status(403).json({ error: "Access denied" });
-                        return null;
-                    }
-                    if (error.code === "EMLINK") {
+                    } else if (fileError.code === "EMLINK") {
                         res.status(403).json({
                             error: "Hard-linked files are not allowed",
                         });
-                        return null;
+                    } else {
+                        throw error;
                     }
-                    throw error;
-                });
-                if (!stat) {
                     return;
                 }
-
                 res.json({
                     success: true,
                     path: "config:" + filePath,

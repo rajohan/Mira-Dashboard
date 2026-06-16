@@ -30,10 +30,15 @@ function defaultOpenClawHome(): string {
         : Path.join(process.cwd(), "data", "openclaw");
 }
 
+const DEFAULT_DASHBOARD_OPENCLAW_HOME = Path.join(
+    process.cwd(),
+    "data",
+    "openclaw-client"
+);
 const DASHBOARD_OPENCLAW_HOME = validateOpenClawRoot(
     nonEmptyEnvFallback(
         "MIRA_DASHBOARD_OPENCLAW_HOME",
-        Path.join(process.cwd(), "data", "openclaw-client")
+        DEFAULT_DASHBOARD_OPENCLAW_HOME
     ).trim(),
     "MIRA_DASHBOARD_OPENCLAW_HOME"
 );
@@ -227,8 +232,9 @@ function transformSession(session: GatewaySession): Session {
     if (key.includes(":hook:")) {
         type = "HOOK";
         const hookIndex = keyParts.indexOf("hook");
-        if (hookIndex !== -1 && keyParts[hookIndex + 1]) {
-            hookName = stringFallback(keyParts[hookIndex + 1]);
+        const nextHookPart = keyParts.at(hookIndex + 1);
+        if (hookIndex !== -1 && nextHookPart) {
+            hookName = stringFallback(nextHookPart);
         }
     } else if (key.includes(":cron:")) {
         type = "CRON";
@@ -248,6 +254,9 @@ function transformSession(session: GatewaySession): Session {
         displayLabel = agentType.charAt(0).toUpperCase() + agentType.slice(1);
     }
 
+    const createdAtDate = session.updatedAt ? new Date(session.updatedAt) : null;
+    const createdAt = createdAtDate ? createdAtDate.toISOString() : null;
+
     return {
         id: session.sessionId || session.key || "unknown",
         key: session.key || "",
@@ -258,7 +267,7 @@ function transformSession(session: GatewaySession): Session {
         model: session.model || "Unknown",
         tokenCount: session.totalTokens || 0,
         maxTokens: session.contextTokens || 200000,
-        createdAt: session.updatedAt ? new Date(session.updatedAt).toISOString() : null,
+        createdAt,
         updatedAt: session.updatedAt,
         displayName: session.displayName || "",
         label: session.label || "",
@@ -435,12 +444,11 @@ function getTranscriptPath(sessionKey: string, sessionId?: string): string | nul
     const agentsSessionsRoot = Path.resolve(agentDir, "sessions");
     const transcriptPath = Path.resolve(agentsSessionsRoot, `${sessionId}.jsonl`);
     let realOpenClawRoot: string;
-    let realAgentDir: string;
     let realAgentsSessionsRoot: string;
     let realTranscriptPath: string;
     try {
         realOpenClawRoot = fs.realpathSync(openClawRoot);
-        realAgentDir = fs.realpathSync(agentDir);
+        const realAgentDir = fs.realpathSync(agentDir);
         if (realAgentDir !== Path.resolve(realOpenClawRoot, "agents", agentId)) {
             return null;
         }
@@ -638,41 +646,42 @@ async function refreshSessions(
         return;
     }
 
-    const payload = asRecord(await expectedClient.request("sessions.list", {}));
-    if (!isGatewayConnected || !isCurrentGatewayClient(expectedClient)) {
-        return;
-    }
-    const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
-    sessionList = sessions
-        .map((entry) => asRecord(entry))
-        .filter(
-            (entry): entry is Record<string, unknown> =>
-                entry !== null &&
-                (entry.sessionId === undefined || typeof entry.sessionId === "string") &&
-                (entry.key === undefined || typeof entry.key === "string") &&
-                (entry.updatedAt === undefined ||
-                    entry.updatedAt === null ||
-                    (typeof entry.updatedAt === "number" &&
-                        Number.isFinite(entry.updatedAt)) ||
-                    (typeof entry.updatedAt === "string" &&
-                        !Number.isNaN(Date.parse(entry.updatedAt)))) &&
-                (stringFallback(entry.sessionId).trim() ||
-                    stringFallback(entry.key).trim()) !== ""
-        )
-        .map((entry) => {
-            const updatedAt =
-                typeof entry.updatedAt === "string"
-                    ? Date.parse(entry.updatedAt)
-                    : entry.updatedAt;
-            return transformSession({
-                ...(entry as GatewaySession),
-                updatedAt:
-                    typeof updatedAt === "number" && Number.isFinite(updatedAt)
-                        ? updatedAt
-                        : undefined,
+    const response = await expectedClient.request("sessions.list", {});
+    if (isGatewayConnected && isCurrentGatewayClient(expectedClient)) {
+        const payload = asRecord(response);
+        const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
+        sessionList = sessions
+            .map((entry) => asRecord(entry))
+            .filter(
+                (entry): entry is Record<string, unknown> =>
+                    entry !== null &&
+                    (entry.sessionId === undefined ||
+                        typeof entry.sessionId === "string") &&
+                    (entry.key === undefined || typeof entry.key === "string") &&
+                    (entry.updatedAt === undefined ||
+                        entry.updatedAt === null ||
+                        (typeof entry.updatedAt === "number" &&
+                            Number.isFinite(entry.updatedAt)) ||
+                        (typeof entry.updatedAt === "string" &&
+                            !Number.isNaN(Date.parse(entry.updatedAt)))) &&
+                    (stringFallback(entry.sessionId).trim() ||
+                        stringFallback(entry.key).trim()) !== ""
+            )
+            .map((entry) => {
+                const updatedAt =
+                    typeof entry.updatedAt === "string"
+                        ? Date.parse(entry.updatedAt)
+                        : entry.updatedAt;
+                return transformSession({
+                    ...(entry as GatewaySession),
+                    updatedAt:
+                        typeof updatedAt === "number" && Number.isFinite(updatedAt)
+                            ? updatedAt
+                            : undefined,
+                });
             });
-        });
-    broadcast({ type: "sessions", sessions: sessionList });
+        broadcast({ type: "sessions", sessions: sessionList });
+    }
 }
 
 /** Performs init. */
@@ -737,12 +746,7 @@ function init(token: string): void {
             }
         }
         void subscribeToSessionIndexEvents();
-        void refreshSessions(activeClient).catch((error) => {
-            console.error(
-                "[Gateway] Failed to refresh sessions:",
-                errorMessage(error, String(error))
-            );
-        });
+        void refreshGatewaySessions(activeClient);
     }
     /** Broadcasts one Gateway runtime event and refreshes session metadata when needed. */
     function handleGatewayEvent(evt: { event?: unknown; payload?: unknown }): void {
@@ -756,12 +760,20 @@ function init(token: string): void {
             payload: enrichRuntimeEventPayload(evt.event, evt.payload),
         });
         if (typeof evt.event === "string" && evt.event.startsWith("sessions.")) {
-            void refreshSessions(activeClient).catch((error) => {
-                console.error(
-                    "[Gateway] Failed to refresh sessions:",
-                    errorMessage(error, String(error))
-                );
-            });
+            void refreshGatewaySessions(activeClient);
+        }
+    }
+    /** Refreshes Gateway sessions and logs failures from event callbacks. */
+    async function refreshGatewaySessions(
+        activeClient: OpenClawGatewayClientInstance
+    ): Promise<void> {
+        try {
+            await refreshSessions(activeClient);
+        } catch (error) {
+            console.error(
+                "[Gateway] Failed to refresh sessions:",
+                errorMessage(error, String(error))
+            );
         }
     }
     /** Logs Gateway connection failures. */
@@ -879,7 +891,7 @@ function handleClient(ws: WebSocket): void {
     const cleanupClient = () => {
         subscribers.delete(ws);
         logsUnsubscribe(ws);
-        for (const [id, pending] of pendingRequests.entries()) {
+        for (const [id, pending] of pendingRequests) {
             if (pending.clientWs === ws) {
                 pendingRequests.delete(id);
             }
@@ -1105,9 +1117,7 @@ export const __testing = {
     sessionHasRunIdentifier,
     refreshSessions,
     forwardRequest,
-    pendingRequestCountForTest(): number {
-        return pendingRequests.size;
-    },
+    pendingRequestCountForTest: (): number => pendingRequests.size,
     /** Replaces the in-memory session list for focused gateway tests. */
     setSessionListForTest(sessions: Session[]): void {
         sessionList = sessions;

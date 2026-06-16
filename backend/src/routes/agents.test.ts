@@ -34,6 +34,11 @@ const originalGateway = {
 };
 const agentId = `test-agent-${Date.now()}`;
 
+function dateToIso(timestamp = Date.now()): string {
+    const date = new Date(timestamp);
+    return date.toISOString();
+}
+
 async function startServer(homeDir: string): Promise<TestServer> {
     process.env.HOME = homeDir;
     const { default: agentsRoutes } = await import("./agents.js");
@@ -970,7 +975,12 @@ describe("agents routes", () => {
             errorMock.mock.restore();
         }
 
-        const originalMetadataStats = await lstat(metadataPath).catch(() => null);
+        let originalMetadataStats: Awaited<ReturnType<typeof lstat>> | null;
+        try {
+            originalMetadataStats = await lstat(metadataPath);
+        } catch {
+            originalMetadataStats = null;
+        }
         const originalMetadataContent =
             originalMetadataStats?.isFile() === true
                 ? await readFile(metadataPath, "utf8")
@@ -1076,13 +1086,11 @@ describe("agents routes", () => {
             };
             assert.equal(responseBody.currentTask, "blocked");
             assert.equal(typeof responseBody.updatedAt, "string");
-            assert.equal(
-                await readFile(
-                    path.join(outsideAgents, "main", "sessions", "metadata.json"),
-                    "utf8"
-                ).then((content) => JSON.parse(content).currentTask),
-                "blocked"
+            const metadataContent = await readFile(
+                path.join(outsideAgents, "main", "sessions", "metadata.json"),
+                "utf8"
             );
+            assert.equal(JSON.parse(metadataContent).currentTask, "blocked");
         } finally {
             if (symlinkServer) {
                 await new Promise<void>((resolve, reject) =>
@@ -1533,7 +1541,7 @@ describe("agents routes", () => {
             "utf8"
         );
 
-        const gatewayUpdatedAt = new Date(Date.now() + 60_000).toISOString();
+        const gatewayUpdatedAt = dateToIso(Date.now() + 60_000);
         const previousGatewayRequest = gateway.request;
         try {
             gateway.request = async (method: string) => {
@@ -1956,7 +1964,7 @@ describe("agents routes", () => {
                                 key: "agent:alias-agent:main",
                                 model: "openai-codex/gpt-5.5",
                                 status: "running",
-                                updatedAt: new Date(now).toISOString(),
+                                updatedAt: dateToIso(now),
                             },
                         ],
                     };
@@ -2043,7 +2051,7 @@ describe("agents routes", () => {
                                 key: "agent:alias-agent:main",
                                 model: "openai-codex/gpt-5.5",
                                 status: "running",
-                                updatedAt: new Date(now).toISOString(),
+                                updatedAt: dateToIso(now),
                             },
                         ],
                     };
@@ -2149,7 +2157,7 @@ describe("agents routes", () => {
                                 key: "agent:alias-agent:main",
                                 model: "openai-codex/gpt-5.5",
                                 status: "running",
-                                updatedAt: new Date(now).toISOString(),
+                                updatedAt: dateToIso(now),
                             },
                         ],
                     };
@@ -2280,7 +2288,7 @@ describe("agents routes", () => {
                                 key: "agent:alias-agent:main",
                                 model: "openai-codex/gpt-5.5",
                                 status: "running",
-                                updatedAt: new Date(now).toISOString(),
+                                updatedAt: dateToIso(now),
                             },
                         ],
                     };
@@ -2304,7 +2312,11 @@ describe("agents routes", () => {
             assert.equal(response.body.currentActivity, "terminal output");
         } finally {
             gateway.request = previousGatewayRequest;
-            await chmod(unreadableCodexDir, 0o700).catch(() => {});
+            try {
+                await chmod(unreadableCodexDir, 0o700);
+            } catch {
+                // Best-effort cleanup for permission-sensitive fixtures.
+            }
             await rm(aliasAgentDir, { recursive: true, force: true });
         }
     });
@@ -2346,7 +2358,7 @@ describe("agents routes", () => {
                                 key: "agent:alias-agent:main",
                                 model: "openai-codex/gpt-5.5",
                                 status: "running",
-                                updatedAt: new Date(now).toISOString(),
+                                updatedAt: dateToIso(now),
                             },
                         ],
                     };
@@ -2363,7 +2375,11 @@ describe("agents routes", () => {
             assert.equal(response.body.currentActivity, "exec npm run readable");
         } finally {
             gateway.request = previousGatewayRequest;
-            await chmod(unreadablePath, 0o600).catch(() => {});
+            try {
+                await chmod(unreadablePath, 0o600);
+            } catch {
+                // Best-effort cleanup for permission-sensitive fixtures.
+            }
             await rm(aliasAgentDir, { recursive: true, force: true });
         }
     });
@@ -2962,12 +2978,12 @@ describe("agents routes", () => {
                 {
                     key: "agent:alias-agent:side",
                     model: "side",
-                    updatedAt: Number.NaN,
+                    updatedAt: NaN,
                 },
                 {
                     key: "agent:alias-agent:main",
                     model: "main",
-                    updatedAt: Number.NaN,
+                    updatedAt: NaN,
                 },
             ])?.key,
             "agent:alias-agent:main"

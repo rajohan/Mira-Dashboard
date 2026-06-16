@@ -149,12 +149,12 @@ function normalizePostgresHost(value: string | undefined, fallback: string): str
     const host = trimmedEnvValue(value) ?? fallback;
     const validIpv4 =
         /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/u.test(host);
-    const validIpv6 =
-        host.startsWith("[") && host.endsWith("]") && isIP(host.slice(1, -1)) === 6;
-    const rawIpv6 = isIP(host) === 6;
     if (/^(?:\d+\.){3}\d+$/u.test(host) && !validIpv4) {
         throw Object.assign(new Error("Invalid PostgreSQL host"), { code: "EINVAL" });
     }
+    const validIpv6 =
+        host.startsWith("[") && host.endsWith("]") && isIP(host.slice(1, -1)) === 6;
+    const rawIpv6 = isIP(host) === 6;
     if (
         !/^(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)(?:\.(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?))*$/u.test(
             host
@@ -272,10 +272,10 @@ async function queryAllUserDatabases<T extends object>(sql: string): Promise<T[]
 }
 
 const TORRENT_COUNT_TTL = 60 * 60 * 1000; // 1 hour
-let torrentCountCache: {
+let torrentCountCache: null | {
     data: { comet: number; bitmagnet: number };
     timestamp: number;
-} | null = null;
+} = null;
 
 /** Returns cached torrent counts for Comet and Bitmagnet, refreshing at most once per hour. */
 async function getTorrentCounts() {
@@ -463,7 +463,7 @@ async function getDatabaseOverview() {
     };
 }
 
-/** Registers GET /api/database/overview for aggregated PostgreSQL and PgBouncer monitoring data. */
+/** Registers GET /API/database/overview for aggregated PostgreSQL and PgBouncer monitoring data. */
 export default function databaseRoutes(app: express.Application): void {
     app.get("/api/database/overview", (async (_req, res) => {
         try {

@@ -9,6 +9,10 @@ import { db } from "../db.js";
 import gateway from "../gateway.js";
 import { objectFallback } from "../lib/values.js";
 
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
 /** Defines status. */
 type Status = "todo" | "in-progress" | "blocked" | "done";
 
@@ -342,7 +346,7 @@ function recordEvent(taskId: number, eventType: string, payload: unknown) {
         taskId,
         eventType,
         serializeTaskEventPayload(payload),
-        new Date().toISOString()
+        dateToISOString(new Date())
     );
 }
 
@@ -379,7 +383,7 @@ export default function tasksRoutes(
 
     app.get("/api/tasks/:id", (async (req, res) => {
         const id = Number(req.params.id);
-        if (!Number.isInteger(id)) {
+        if (!Number.isSafeInteger(id)) {
             res.status(400).json({ error: "Invalid id" });
             return;
         }
@@ -419,7 +423,7 @@ export default function tasksRoutes(
             return;
         }
 
-        const now = new Date().toISOString();
+        const now = dateToISOString(new Date());
         const labelList = Array.isArray(labels) ? labels : [];
         const safeAssignee = assignee;
         const status = normalizeStatus(
@@ -473,7 +477,7 @@ export default function tasksRoutes(
 
     app.patch("/api/tasks/:id", express.json(), (async (req, res) => {
         const id = Number(req.params.id);
-        if (!Number.isInteger(id)) {
+        if (!Number.isSafeInteger(id)) {
             res.status(400).json({ error: "Invalid id" });
             return;
         }
@@ -514,7 +518,7 @@ export default function tasksRoutes(
             updates.automation === undefined
                 ? existing.automation_json
                 : normalizeAutomationInput(updates.automation);
-        const updatedAt = new Date().toISOString();
+        const updatedAt = dateToISOString(new Date());
 
         db.prepare(
             `UPDATE tasks
@@ -554,7 +558,7 @@ export default function tasksRoutes(
     app.post("/api/tasks/:id/assign", express.json(), (async (req, res) => {
         const id = Number(req.params.id);
         const { assignee } = req.body as { assignee?: string | null };
-        if (!Number.isInteger(id)) {
+        if (!Number.isSafeInteger(id)) {
             res.status(400).json({ error: "Invalid id" });
             return;
         }
@@ -577,7 +581,7 @@ export default function tasksRoutes(
         }
 
         const safeAssignee = assignee;
-        const updatedAt = new Date().toISOString();
+        const updatedAt = dateToISOString(new Date());
         db.prepare(`UPDATE tasks SET assignee = ?, updated_at = ? WHERE id = ?`).run(
             safeAssignee,
             updatedAt,
@@ -601,7 +605,7 @@ export default function tasksRoutes(
 
     app.delete("/api/tasks/:id", (req, res) => {
         const id = Number(req.params.id);
-        if (!Number.isInteger(id)) {
+        if (!Number.isSafeInteger(id)) {
             res.status(400).json({ error: "Invalid id" });
             return;
         }
@@ -609,8 +613,8 @@ export default function tasksRoutes(
         const existing = db
             .prepare("SELECT id, title, assignee FROM tasks WHERE id = ?")
             .get(id) as unknown as
-            | { id: number; title: string; assignee?: string }
-            | undefined;
+            | undefined
+            | { id: number; title: string; assignee?: string };
 
         if (!existing) {
             res.status(404).json({ error: "Task not found" });
@@ -628,7 +632,7 @@ export default function tasksRoutes(
 
     app.get("/api/tasks/:id/updates", (req, res) => {
         const id = Number(req.params.id);
-        if (!Number.isInteger(id)) {
+        if (!Number.isSafeInteger(id)) {
             res.status(400).json({ error: "Invalid id" });
             return;
         }
@@ -652,7 +656,7 @@ export default function tasksRoutes(
             messageMd?: string;
         };
 
-        if (!Number.isInteger(id) || !isValidAssignee(author) || !messageMd?.trim()) {
+        if (!Number.isSafeInteger(id) || !isValidAssignee(author) || !messageMd?.trim()) {
             res.status(400).json({ error: "Invalid update payload" });
             return;
         }
@@ -663,7 +667,7 @@ export default function tasksRoutes(
             return;
         }
 
-        const createdAt = new Date().toISOString();
+        const createdAt = dateToISOString(new Date());
         const result = db
             .prepare(
                 `INSERT INTO task_updates (task_id, author, message_md, created_at)
@@ -701,8 +705,8 @@ export default function tasksRoutes(
         };
 
         if (
-            !Number.isInteger(id) ||
-            !Number.isInteger(updateId) ||
+            !Number.isSafeInteger(id) ||
+            !Number.isSafeInteger(updateId) ||
             !isValidAssignee(author) ||
             !messageMd?.trim()
         ) {
@@ -719,7 +723,7 @@ export default function tasksRoutes(
             return;
         }
 
-        const updatedAt = new Date().toISOString();
+        const updatedAt = dateToISOString(new Date());
         db.prepare(
             `UPDATE task_updates
              SET author = ?, message_md = ?
@@ -741,7 +745,7 @@ export default function tasksRoutes(
     app.delete("/api/tasks/:id/updates/:updateId", (req, res) => {
         const id = Number(req.params.id);
         const updateId = Number(req.params.updateId);
-        if (!Number.isInteger(id) || !Number.isInteger(updateId)) {
+        if (!Number.isSafeInteger(id) || !Number.isSafeInteger(updateId)) {
             res.status(400).json({ error: "Invalid id" });
             return;
         }
@@ -759,7 +763,7 @@ export default function tasksRoutes(
             id
         );
         db.prepare("UPDATE tasks SET updated_at = ? WHERE id = ?").run(
-            new Date().toISOString(),
+            dateToISOString(new Date()),
             id
         );
 
@@ -770,7 +774,7 @@ export default function tasksRoutes(
         const id = Number(req.params.id);
         const { columnLabel } = req.body as { columnLabel?: string };
 
-        if (!Number.isInteger(id) || !columnLabel) {
+        if (!Number.isSafeInteger(id) || !columnLabel) {
             res.status(400).json({ error: "Invalid request" });
             return;
         }
@@ -795,7 +799,7 @@ export default function tasksRoutes(
             status,
         ];
 
-        const updatedAt = new Date().toISOString();
+        const updatedAt = dateToISOString(new Date());
 
         db.prepare(
             `UPDATE tasks

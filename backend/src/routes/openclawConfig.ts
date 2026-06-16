@@ -10,6 +10,10 @@ import gateway from "../gateway.js";
 import { errorMessage } from "../lib/errors.js";
 import { objectFallback, stringFallback } from "../lib/values.js";
 
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
 /** Represents the config get API response. */
 interface ConfigGetResponse {
     parsed?: Record<string, unknown>;
@@ -118,9 +122,12 @@ function collectExtraSkillDirectories(): string[] {
     try {
         return fs
             .readdirSync(extensionsRoot, { withFileTypes: true })
-            .filter((entry) => entry.isDirectory())
             .flatMap((entry) =>
-                collectSkillDirectories(path.join(extensionsRoot, entry.name, "skills"))
+                entry.isDirectory()
+                    ? collectSkillDirectories(
+                          path.join(extensionsRoot, entry.name, "skills")
+                      )
+                    : []
             );
     } catch {
         return [];
@@ -199,9 +206,10 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
         });
     }
 
-    return [...skillsByName.values()].sort(
-        (a, b) => a.source.localeCompare(b.source) || a.name.localeCompare(b.name)
-    );
+    return skillsByName
+        .values()
+        .toArray()
+        .sort((a, b) => a.source.localeCompare(b.source) || a.name.localeCompare(b.name));
 }
 
 /** Returns whether a discovered or configured skill key is safe to patch. */
@@ -258,7 +266,7 @@ export default function openClawConfigRoutes(app: express.Application): void {
         try {
             const snapshot = await getConfigSnapshot();
             res.json({
-                createdAt: new Date().toISOString(),
+                createdAt: dateToISOString(new Date()),
                 hash: snapshot.hash,
                 config: snapshot.parsed || {},
             });
@@ -285,12 +293,12 @@ export default function openClawConfigRoutes(app: express.Application): void {
     app.post("/api/skills/:name", express.json(), (async (req, res) => {
         try {
             const name = stringFallback(req.params.name).trim();
-            const body = req.body as { enabled?: unknown } | null;
-            const enabled = body && typeof body === "object" ? body.enabled : undefined;
             if (!isValidSkillName(name)) {
                 res.status(400).json({ error: "Invalid skill name" });
                 return;
             }
+            const body = req.body as null | { enabled?: unknown };
+            const enabled = body && typeof body === "object" ? body.enabled : undefined;
             if (typeof enabled !== "boolean") {
                 res.status(400).json({ error: "Invalid enabled value" });
                 return;

@@ -1,13 +1,25 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, afterEach, before, beforeEach, describe, it, mock } from "node:test";
 
 import { withEnv } from "../testUtils/env.js";
 
-const originalFetch = globalThis.fetch;
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
+const originalFetch = fetch;
 const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
+
+function setFetch(nextFetch: typeof fetch): void {
+    Object.defineProperty(globalThis, "fetch", {
+        configurable: true,
+        value: nextFetch,
+        writable: true,
+    });
+}
 
 let db: Awaited<typeof import("../db.js")>["db"];
 let __testing: Awaited<typeof import("./cacheRefresh.js")>["__testing"];
@@ -33,6 +45,7 @@ function cacheRow(key: string) {
     const row = db
         .prepare("SELECT * FROM cache_entries WHERE key = ? LIMIT 1")
         .get(key) as
+        | undefined
         | {
               key: string;
               data_json: string | null;
@@ -43,8 +56,7 @@ function cacheRow(key: string) {
               error_message: string | null;
               consecutive_failures: number;
               metadata_json: string;
-          }
-        | undefined;
+          };
     assert.ok(row);
     return {
         ...row,
@@ -75,7 +87,7 @@ async function withFetch(
     handler: (url: string, init: RequestInit | undefined) => unknown,
     callback: () => Promise<void>
 ) {
-    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    setFetch((async (input: string | URL | Request, init?: RequestInit) => {
         const url =
             input instanceof Request
                 ? input.url
@@ -92,11 +104,11 @@ async function withFetch(
             headers: new Headers({ "docker-content-digest": "sha256:ghcr-latest" }),
             json: async () => body,
         } as Response;
-    }) as typeof fetch;
+    }) as typeof fetch);
     try {
         await callback();
     } finally {
-        globalThis.fetch = originalFetch;
+        setFetch(originalFetch);
     }
 }
 
@@ -168,7 +180,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
     });
 
     afterEach(async () => {
-        globalThis.fetch = originalFetch;
+        setFetch(originalFetch);
         if (originalPath === undefined) {
             delete process.env.PATH;
         } else {
@@ -794,7 +806,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         const fetchGate = new Promise<void>((resolve) => {
             releaseFetch = resolve;
         });
-        globalThis.fetch = (async () => {
+        setFetch((async () => {
             fetches += 1;
             await fetchGate;
             return {
@@ -813,7 +825,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                     weather: [],
                 }),
             } as Response;
-        }) as typeof fetch;
+        }) as typeof fetch);
 
         const first = refreshCacheProducer("weather.spydeberg");
         const second = refreshCacheProducer("weather.spydeberg");
@@ -831,7 +843,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
             let hotFetches = 0;
             let profileFetches = 0;
             const releases: Array<() => void> = [];
-            globalThis.fetch = (async (input: string | URL | Request) => {
+            setFetch((async (input: string | URL | Request) => {
                 const url = input instanceof Request ? input.url : String(input);
                 await new Promise<void>((resolve) => {
                     releases.push(resolve);
@@ -859,7 +871,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                     } as Response;
                 }
                 throw new Error(`Unexpected Moltbook URL: ${url}`);
-            }) as typeof fetch;
+            }) as typeof fetch);
 
             const hot = refreshCacheProducer("moltbook.feed.hot");
             const profile = refreshCacheProducer("moltbook.profile");
@@ -880,7 +892,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
     it("reuses an in-flight full Moltbook refresh for subkey requests", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             let releaseHome: (() => void) | undefined;
-            globalThis.fetch = (async (input: string | URL | Request) => {
+            setFetch((async (input: string | URL | Request) => {
                 const url = input instanceof Request ? input.url : String(input);
                 if (url.includes("/home")) {
                     await new Promise<void>((resolve) => {
@@ -922,7 +934,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                     } as Response;
                 }
                 throw new Error(`Unexpected Moltbook URL: ${url}`);
-            }) as typeof fetch;
+            }) as typeof fetch);
 
             const fullRefresh = refreshCacheProducer("moltbook");
             await waitFor(() => Boolean(releaseHome));
@@ -949,7 +961,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
     it("resolves reused Moltbook subkey refreshes when unrelated full refresh keys fail", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             let releaseHome: (() => void) | undefined;
-            globalThis.fetch = (async (input: string | URL | Request) => {
+            setFetch((async (input: string | URL | Request) => {
                 const url = input instanceof Request ? input.url : String(input);
                 if (url.includes("/home")) {
                     await new Promise<void>((resolve) => {
@@ -991,7 +1003,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                     } as Response;
                 }
                 throw new Error(`Unexpected Moltbook URL: ${url}`);
-            }) as typeof fetch;
+            }) as typeof fetch);
 
             const fullRefresh = refreshCacheProducer("moltbook");
             await waitFor(() => Boolean(releaseHome));
@@ -1014,7 +1026,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
     it("rejects reused Moltbook subkey refreshes when that subkey fails", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             let releaseHome: (() => void) | undefined;
-            globalThis.fetch = (async (input: string | URL | Request) => {
+            setFetch((async (input: string | URL | Request) => {
                 const url = input instanceof Request ? input.url : String(input);
                 if (url.includes("/home")) {
                     await new Promise<void>((resolve) => {
@@ -1056,7 +1068,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                     } as Response;
                 }
                 throw new Error(`Unexpected Moltbook URL: ${url}`);
-            }) as typeof fetch;
+            }) as typeof fetch);
 
             const fullRefresh = refreshCacheProducer("moltbook");
             await waitFor(() => Boolean(releaseHome));
@@ -1081,7 +1093,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             let homeFetches = 0;
             const releases: Array<() => void> = [];
-            globalThis.fetch = (async (input: string | URL | Request) => {
+            setFetch((async (input: string | URL | Request) => {
                 const url = input instanceof Request ? input.url : String(input);
                 if (url.includes("/home")) {
                     homeFetches += 1;
@@ -1126,7 +1138,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                     } as Response;
                 }
                 throw new Error(`Unexpected Moltbook URL: ${url}`);
-            }) as typeof fetch;
+            }) as typeof fetch);
 
             const homeRefresh = refreshCacheProducer("moltbook.home");
             await waitFor(() => releases.length > 0);
@@ -1158,7 +1170,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             let hotFetches = 0;
             const hotReleases: Array<() => void> = [];
-            globalThis.fetch = (async (input: string | URL | Request) => {
+            setFetch((async (input: string | URL | Request) => {
                 const url = input instanceof Request ? input.url : String(input);
                 if (url.includes("/home")) {
                     return {
@@ -1203,7 +1215,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                     } as Response;
                 }
                 throw new Error(`Unexpected Moltbook URL: ${url}`);
-            }) as typeof fetch;
+            }) as typeof fetch);
 
             const hotRefresh = refreshCacheProducer("moltbook.feed.hot");
             await waitFor(() => hotReleases.length > 0);
@@ -1231,7 +1243,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
     it("rejects unsupported Moltbook subkeys while a full refresh is in flight", async () => {
         await withEnv({ MOLTBOOK_API_KEY: "test-key" }, async () => {
             let releaseHome: (() => void) | undefined;
-            globalThis.fetch = (async (input: string | URL | Request) => {
+            setFetch((async (input: string | URL | Request) => {
                 const url = input instanceof Request ? input.url : String(input);
                 if (url.includes("/home")) {
                     await new Promise<void>((resolve) => {
@@ -1265,7 +1277,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
                     } as Response;
                 }
                 throw new Error(`Unexpected Moltbook URL: ${url}`);
-            }) as typeof fetch;
+            }) as typeof fetch);
 
             const fullRefresh = refreshCacheProducer("moltbook");
             await waitFor(() => Boolean(releaseHome));
@@ -1285,7 +1297,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
 
     it("refreshes git workspace status with dirty, clean, and missing repos", async () => {
         const binDir = path.join(tempDir, "bin");
-        await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
+        await mkdir(binDir);
         await writeExecutable(
             path.join(binDir, "git"),
             String.raw`#!/usr/bin/env node
@@ -1362,7 +1374,7 @@ else if (command === "status --short") {
 
     it("covers git workspace command fallback fields", async () => {
         const binDir = path.join(tempDir, "git-fallback-bin");
-        await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
+        await mkdir(binDir);
         await writeExecutable(
             path.join(binDir, "git"),
             String.raw`#!/usr/bin/env node
@@ -1527,7 +1539,7 @@ else if (command === "status --short") process.stdout.write("");
 
     it("refreshes system, quota, and producer-dispatch caches", async () => {
         const binDir = path.join(tempDir, "bin");
-        await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
+        await mkdir(binDir);
         await writeExecutable(
             path.join(binDir, "openclaw"),
             String.raw`#!/usr/bin/env node
@@ -1814,7 +1826,7 @@ if (args.includes("capture-pane")) {
 
     it("covers cache refresh normalizer fallback branches directly", async () => {
         assert.equal(__testing.toCurrencyNumber(12), 12);
-        assert.equal(__testing.toCurrencyNumber(Number.NaN), null);
+        assert.equal(__testing.toCurrencyNumber(NaN), null);
         assert.equal(__testing.toCurrencyNumber("USD 1,234.50"), 1234.5);
         assert.equal(__testing.toCurrencyNumber("USD nope"), null);
         assert.equal(__testing.toCurrencyNumber("USD -"), null);
@@ -2080,7 +2092,7 @@ if (args.includes("capture-pane")) {
         );
 
         const codexHome = path.join(tempDir, "codex-home-existing");
-        await import("node:fs/promises").then((fs) => fs.mkdir(codexHome));
+        await mkdir(codexHome);
         const configPath = path.join(codexHome, "config.toml");
         await writeFile(
             configPath,
@@ -2088,15 +2100,10 @@ if (args.includes("capture-pane")) {
             "utf8"
         );
         await __testing.ensureCodexTrustConfig(codexHome);
-        assert.match(
-            await import("node:fs/promises").then((fs) =>
-                fs.readFile(configPath, "utf8")
-            ),
-            /trust_level/u
-        );
+        assert.match(await readFile(configPath, "utf8"), /trust_level/u);
 
         const codexHomeUntrusted = path.join(tempDir, "codex-home-untrusted");
-        await import("node:fs/promises").then((fs) => fs.mkdir(codexHomeUntrusted));
+        await mkdir(codexHomeUntrusted);
         const untrustedConfigPath = path.join(codexHomeUntrusted, "config.toml");
         await writeFile(
             untrustedConfigPath,
@@ -2115,9 +2122,7 @@ if (args.includes("capture-pane")) {
             "utf8"
         );
         await __testing.ensureCodexTrustConfig(codexHomeUntrusted);
-        const normalizedTrustConfig = await import("node:fs/promises").then((fs) =>
-            fs.readFile(untrustedConfigPath, "utf8")
-        );
+        const normalizedTrustConfig = await readFile(untrustedConfigPath, "utf8");
         assert.match(
             normalizedTrustConfig,
             /\[projects\."\/home\/ubuntu\/\.openclaw"\]\ntrust_level = "trusted"\nextra = true/u
@@ -2136,20 +2141,16 @@ if (args.includes("capture-pane")) {
         );
 
         const codexHomeNoNewline = path.join(tempDir, "codex-home-no-newline");
-        await import("node:fs/promises").then((fs) => fs.mkdir(codexHomeNoNewline));
+        await mkdir(codexHomeNoNewline);
         const noNewlineConfigPath = path.join(codexHomeNoNewline, "config.toml");
         await writeFile(noNewlineConfigPath, '[profile]\nmodel = "codex"', "utf8");
         await __testing.ensureCodexTrustConfig(codexHomeNoNewline);
         assert.match(
-            await import("node:fs/promises").then((fs) =>
-                fs.readFile(noNewlineConfigPath, "utf8")
-            ),
+            await readFile(noNewlineConfigPath, "utf8"),
             /model = "codex"\n\n\[projects/u
         );
         await __testing.ensureCodexTrustConfig(codexHomeNoNewline);
-        const noNewlineUpdatedConfig = await import("node:fs/promises").then((fs) =>
-            fs.readFile(noNewlineConfigPath, "utf8")
-        );
+        const noNewlineUpdatedConfig = await readFile(noNewlineConfigPath, "utf8");
         assert.equal(noNewlineUpdatedConfig.match(/\[projects\./gu)?.length, 3);
         let unlocked = false;
         const locked = new Promise<void>((resolve) => {
@@ -2280,7 +2281,7 @@ if (args.includes("capture-pane")) {
             assert.equal(quota.status, "error");
         });
         const pathCodexBin = path.join(tempDir, "path-codex-bin");
-        await import("node:fs/promises").then((fs) => fs.mkdir(pathCodexBin));
+        await mkdir(pathCodexBin);
         await writeExecutable(path.join(pathCodexBin, "codex"), "#!/usr/bin/env node\n");
         const tmuxCaptureState = path.join(tempDir, "path-codex-tmux-captures");
         await writeExecutable(
@@ -2951,7 +2952,7 @@ if (args.includes("capture-pane")) {
         );
 
         const binDir = path.join(tempDir, "remaining-bin");
-        await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
+        await mkdir(binDir);
         await writeExecutable(
             path.join(binDir, "tmux"),
             "#!/usr/bin/env node\nif (process.argv.includes('capture-pane')) process.stdout.write('__ERR__:codex_not_found\\n');\n"
@@ -2992,7 +2993,7 @@ if (args.includes("capture-pane")) {
 
     it("covers system and Codex default fallbacks", async () => {
         const binDir = path.join(tempDir, "system-fallback-bin");
-        await import("node:fs/promises").then((fs) => fs.mkdir(binDir));
+        await mkdir(binDir);
         await writeExecutable(
             path.join(binDir, "openclaw"),
             String.raw`#!/usr/bin/env node
@@ -3083,9 +3084,14 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
     });
 
     it("records cache producer failures before rethrowing", async () => {
-        globalThis.fetch = (async () => {
-            throw Object.assign(new Error("aborted"), { name: "AbortError" });
-        }) as typeof fetch;
+        setFetch((async () => {
+            const error = new Error("aborted");
+            Object.defineProperty(error, "name", {
+                configurable: true,
+                value: "AbortError",
+            });
+            throw error;
+        }) as typeof fetch);
 
         await assert.rejects(
             () => refreshCacheProducer("weather.spydeberg"),
@@ -3108,7 +3114,7 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
 
         let abortChecks = 0;
         let resolveRaceFetch: (() => void) | undefined;
-        globalThis.fetch = (async () => {
+        setFetch((async () => {
             return await new Promise<Response>((resolve) => {
                 resolveRaceFetch = () =>
                     resolve({
@@ -3129,7 +3135,7 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                         }),
                     } as Response);
             });
-        }) as typeof fetch;
+        }) as typeof fetch);
         const racingAbortSignal = {
             get aborted() {
                 abortChecks += 1;
@@ -3149,7 +3155,7 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
         const inFlightAbort = new AbortController();
         let fetchCalls = 0;
         let resolveFetch: (() => void) | undefined;
-        globalThis.fetch = (async () => {
+        setFetch((async () => {
             fetchCalls += 1;
             return await new Promise<Response>((resolve) => {
                 resolveFetch = () =>
@@ -3171,7 +3177,7 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                         }),
                     } as Response);
             });
-        }) as typeof fetch;
+        }) as typeof fetch);
         try {
             const refresh = refreshCacheProducer(
                 "weather.spydeberg",
@@ -3186,11 +3192,12 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
             await secondRefresh;
             assert.equal(fetchCalls, 1);
         } finally {
-            globalThis.fetch = originalFetch;
+            setFetch(originalFetch);
         }
 
+        const controller = new AbortController();
         await assert.rejects(
-            () => refreshCacheProducer("unsupported.cache", new AbortController().signal),
+            () => refreshCacheProducer("unsupported.cache", controller.signal),
             /No backend refresh producer configured/u
         );
     });
@@ -3219,8 +3226,8 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
             "cache.backup.kopia",
             "Legacy Kopia cache refresh",
             JSON.stringify({ key: "backup.kopia.status" }),
-            new Date().toISOString(),
-            new Date().toISOString()
+            dateToISOString(new Date()),
+            dateToISOString(new Date())
         );
         db.prepare(
             `INSERT INTO scheduled_jobs (
@@ -3231,8 +3238,8 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
             "cache.backup.walg",
             "Legacy WAL-G cache refresh",
             JSON.stringify({ key: "backup.walg.status" }),
-            new Date().toISOString(),
-            new Date().toISOString()
+            dateToISOString(new Date()),
+            dateToISOString(new Date())
         );
         try {
             registerCacheRefreshScheduledJobs();
@@ -3252,13 +3259,13 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
                      FROM scheduled_jobs WHERE id = 'ops.log-rotation'`
                 )
                 .get() as
+                | undefined
                 | {
                       action_key: string;
                       action_payload_json: string;
                       schedule_type: string;
                       time_of_day: string | null;
-                  }
-                | undefined;
+                  };
             assert.equal(logRotationJob?.schedule_type, "daily");
             assert.equal(logRotationJob?.time_of_day, "02:10");
             assert.equal(logRotationJob?.action_key, "ops.log-rotation");
@@ -3548,7 +3555,7 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
     it("rolls back cache refresh job pruning when registration fails", (t) => {
         scheduledJobsTesting.clearActionHandlers();
         scheduledJobsTesting.resetSchedulerState();
-        const timestamp = new Date().toISOString();
+        const timestamp = dateToISOString(new Date());
         db.prepare(
             `INSERT INTO scheduled_jobs (
                 id, name, description, enabled, schedule_type, interval_seconds,
@@ -4064,7 +4071,7 @@ if (args === "exec kopia kopia snapshot list --all --json-verbose --json") {
     it("caps healthy backup status cache TTL at the stale deadline", async () => {
         assert.equal(__testing.backupStatusTtlHours([null, undefined, "bad"]), 25);
         const binDir = path.join(tempDir, "backup-ttl-bin");
-        const backupTime = new Date(Date.now() - 29 * 60 * 60 * 1000).toISOString();
+        const backupTime = dateToISOString(new Date(Date.now() - 29 * 60 * 60 * 1000));
         await mkdir(binDir);
         await writeExecutable(
             path.join(binDir, "docker"),

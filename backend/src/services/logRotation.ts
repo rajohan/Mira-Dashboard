@@ -11,6 +11,50 @@ import { db } from "../db.js";
 import { nonEmptyEnvFallback } from "../lib/values.js";
 import { writeCacheSuccess } from "./cacheEntryWriter.js";
 
+function compareStrings(left: string, right: string): number {
+    return left.localeCompare(right);
+}
+
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
+async function ignoreRejection(promise: Promise<unknown> | undefined): Promise<void> {
+    try {
+        await promise;
+    } catch {
+        // Best-effort cleanup.
+    }
+}
+
+async function ignoreMissingPath(
+    promise: Promise<unknown>,
+    onOtherError?: (error: unknown) => void
+): Promise<void> {
+    try {
+        await promise;
+    } catch (error) {
+        if (isMissingPathError(error)) {
+            return;
+        }
+        if (onOtherError) {
+            onOtherError(error);
+            return;
+        }
+        throw error;
+    }
+}
+
+async function statOrNull(
+    filePath: string
+): Promise<Awaited<ReturnType<typeof fs.stat>> | null> {
+    try {
+        return await fs.stat(filePath);
+    } catch {
+        return null;
+    }
+}
+
 const STATE_CACHE_KEY = "log_rotation.state";
 const execFileAsync = promisify(execFile);
 const BUNDLED_CONFIG_PATH = fileURLToPath(
@@ -189,16 +233,16 @@ function validateConfig(config: LogRotationConfig): void {
         );
         validatePolicyTypes(group, `Group ${group.name}`);
         const effectivePolicy = mergePolicy(config.defaults ?? {}, group);
-        const hasPaths =
-            Array.isArray(effectivePolicy.paths) && effectivePolicy.paths.length > 0;
-        const hasArchivePaths =
-            Array.isArray(effectivePolicy.archivePaths) &&
-            effectivePolicy.archivePaths.length > 0;
         if (effectivePolicy.daily === true && effectivePolicy.weekly === true) {
             throw new Error(
                 `Group ${group.name} cannot set both daily and weekly rotation`
             );
         }
+        const hasPaths =
+            Array.isArray(effectivePolicy.paths) && effectivePolicy.paths.length > 0;
+        const hasArchivePaths =
+            Array.isArray(effectivePolicy.archivePaths) &&
+            effectivePolicy.archivePaths.length > 0;
         if (effectivePolicy.archiveOnly === true && !hasArchivePaths) {
             throw new Error(
                 `Archive-only group ${group.name} needs at least one archivePaths pattern`
@@ -244,7 +288,7 @@ function validatePolicyTypes(policy: LogRotationPolicy | undefined, label: strin
         policy.keep !== undefined &&
         (typeof policy.keep !== "number" ||
             policy.keep < 1 ||
-            !Number.isInteger(policy.keep))
+            !Number.isSafeInteger(policy.keep))
     ) {
         throw new TypeError(`${label}.keep must be a positive integer`);
     }
@@ -337,23 +381,15 @@ async function resolveGlob(
         const nextCandidates: string[] = [];
 
         for (const candidate of candidates) {
-            if (!hasWildcard) {
+            if (hasWildcard) {
+                await appendGlobWildcardCandidates({
+                    candidate,
+                    isLastSegment,
+                    nextCandidates,
+                    regex,
+                });
+            } else {
                 nextCandidates.push(path.join(candidate, segment));
-                continue;
-            }
-            let entries: Array<import("node:fs").Dirent>;
-            try {
-                entries = await fs.readdir(candidate, { withFileTypes: true });
-            } catch (error) {
-                if (isMissingPathError(error)) {
-                    continue;
-                }
-                throw error;
-            }
-            for (const entry of entries) {
-                if (entry.isSymbolicLink() || !regex?.test(entry.name)) continue;
-                if (!isLastSegment && !entry.isDirectory()) continue;
-                nextCandidates.push(path.join(candidate, entry.name));
             }
         }
         candidates = nextCandidates;
@@ -384,6 +420,32 @@ async function resolveGlob(
         throw new Error(`Log rotation path does not exist: ${pattern}`);
     }
     return matchedFiles;
+}
+
+async function appendGlobWildcardCandidates(options: {
+    candidate: string;
+    isLastSegment: boolean;
+    nextCandidates: string[];
+    regex: RegExp | null;
+}): Promise<void> {
+    let entries: Array<import("node:fs").Dirent>;
+    try {
+        entries = await fs.readdir(options.candidate, { withFileTypes: true });
+    } catch (error) {
+        if (isMissingPathError(error)) {
+            return;
+        }
+        throw error;
+    }
+    for (const entry of entries) {
+        if (
+            !entry.isSymbolicLink() &&
+            options.regex?.test(entry.name) &&
+            (options.isLastSegment || entry.isDirectory())
+        ) {
+            options.nextCandidates.push(path.join(options.candidate, entry.name));
+        }
+    }
 }
 
 function isUnderRoot(filePath: string, root: string): boolean {
@@ -420,7 +482,7 @@ async function assertSafePath(
     if (realRoots.length === 0) {
         throw new Error(`No approved roots exist: ${approvedRoots.join(", ")}`);
     }
-    if (!realRoots.some((root) => isUnderRoot(realFilePath, root))) {
+    if (realRoots.every((root) => !isUnderRoot(realFilePath, root))) {
         throw new Error(`Unsafe path outside approved roots: ${filePath}`);
     }
     const lstat = await fs.lstat(filePath);
@@ -447,7 +509,7 @@ async function assertSafeNewFileParent(
     if (realRoots.length === 0) {
         throw new Error(`No approved roots exist: ${approvedRoots.join(", ")}`);
     }
-    if (!realRoots.some((root) => isUnderRoot(parent, root))) {
+    if (realRoots.every((root) => !isUnderRoot(parent, root))) {
         throw new Error(`Unsafe path outside approved roots: ${filePath}`);
     }
 }
@@ -487,7 +549,7 @@ async function openVerifiedFile(
         if (realRoots.length === 0) {
             throw new Error(`No approved roots exist: ${approvedRoots.join(", ")}`);
         }
-        if (!realRoots.some((root) => isUnderRoot(realFilePath, root))) {
+        if (realRoots.every((root) => !isUnderRoot(realFilePath, root))) {
             throw new Error(`Unsafe path outside approved roots: ${filePath}`);
         }
         await assertFileIdentity(filePath, stat, approvedRoots);
@@ -528,7 +590,7 @@ async function unlinkVerified(filePath: string, approvedRoots: string[]): Promis
         await assertFileIdentity(tombstonePath, file.stat, approvedRoots);
         await fs.unlink(tombstonePath);
     } catch (error) {
-        await fs.rename(tombstonePath, filePath).catch(() => {});
+        await ignoreRejection(fs.rename(tombstonePath, filePath));
         throw error;
     } finally {
         await file.handle.close();
@@ -557,8 +619,8 @@ async function createNoFollowFile(
         }
         return handle;
     } catch (error) {
-        await handle.close().catch(() => {});
-        await fs.unlink(filePath).catch(() => {});
+        await ignoreRejection(handle.close());
+        await ignoreRejection(fs.unlink(filePath));
         throw error;
     }
 }
@@ -596,8 +658,8 @@ async function gzipFile(filePath: string, approvedRoots: string[]): Promise<stri
         await source.handle.close();
         return gzPath;
     } catch (error) {
-        await destination?.close().catch(() => {});
-        await source.handle.close().catch(() => {});
+        await ignoreRejection(destination?.close());
+        await ignoreRejection(source.handle.close());
         if (
             !sourceRemoved &&
             !(
@@ -606,11 +668,7 @@ async function gzipFile(filePath: string, approvedRoots: string[]): Promise<stri
                 String(error.code) === "EEXIST"
             )
         ) {
-            await fs.unlink(gzPath).catch((unlinkError: unknown) => {
-                if (!isMissingPathError(unlinkError)) {
-                    throw unlinkError;
-                }
-            });
+            await ignoreMissingPath(fs.unlink(gzPath));
         }
         throw error;
     }
@@ -669,18 +727,16 @@ async function rotateCopyTruncate(
         return compressRotatedArchive(archivePath, compress, approvedRoots);
     } catch (error) {
         if (!committed) {
-            await fs.unlink(archivePath).catch((unlinkError: unknown) => {
-                if (!isMissingPathError(unlinkError)) {
-                    console.warn(
-                        "[LogRotation] Failed to remove incomplete archive:",
-                        unlinkError
-                    );
-                }
+            await ignoreMissingPath(fs.unlink(archivePath), (unlinkError) => {
+                console.warn(
+                    "[LogRotation] Failed to remove incomplete archive:",
+                    unlinkError
+                );
             });
         }
         throw error;
     } finally {
-        await destination.close().catch(() => {});
+        await ignoreRejection(destination.close());
     }
 }
 
@@ -704,7 +760,7 @@ async function rotateRename(
         if (isPathExistsError(error)) {
             return compressRotatedArchive(archivePath, compress, approvedRoots);
         }
-        await fs.rename(archivePath, filePath).catch(() => {});
+        await ignoreRejection(fs.rename(archivePath, filePath));
         throw error;
     }
     return compressRotatedArchive(archivePath, compress, approvedRoots);
@@ -765,29 +821,32 @@ async function listArchives(
     const managedRegex = managedArchiveRegexFor(filePath);
     const archives: RetentionArchive[] = [...simulatedArchives];
     for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
-        if (!entry.isFile() || !managedRegex.test(entry.name)) continue;
-        const fullPath = path.join(dir, entry.name);
-        const stat = await fs.stat(fullPath);
-        archives.push({
-            path: fullPath,
-            mtimeMs: stat.mtimeMs,
-            compress: policy.compress !== false && !isGzipArchivePath(fullPath),
-        });
+        if (entry.isFile() && managedRegex.test(entry.name)) {
+            const fullPath = path.join(dir, entry.name);
+            const stat = await fs.stat(fullPath);
+            archives.push({
+                path: fullPath,
+                mtimeMs: stat.mtimeMs,
+                compress: policy.compress !== false && !isGzipArchivePath(fullPath),
+            });
+        }
     }
     for (const pattern of policy.archivePaths ?? []) {
         for (const archivePath of await resolveGlob(pattern, {
             missingOk: Boolean(policy.missingOk),
         })) {
-            if (!archiveMatchesRetentionScope(filePath, archivePath, policy)) continue;
-            const safe = await assertSafePath(archivePath, approvedRoots);
-            if (!safe) continue;
-            if (await isSameResolvedPath(archivePath, filePath)) continue;
-            const stat = await fs.stat(archivePath);
-            archives.push({
-                path: archivePath,
-                mtimeMs: stat.mtimeMs,
-                compress: policy.compress !== false,
-            });
+            if (
+                archiveMatchesRetentionScope(filePath, archivePath, policy) &&
+                (await assertSafePath(archivePath, approvedRoots)) &&
+                !(await isSameResolvedPath(archivePath, filePath))
+            ) {
+                const stat = await fs.stat(archivePath);
+                archives.push({
+                    path: archivePath,
+                    mtimeMs: stat.mtimeMs,
+                    compress: policy.compress !== false,
+                });
+            }
         }
     }
     const uniqueArchives = new Map<string, RetentionArchive>();
@@ -796,7 +855,10 @@ async function listArchives(
             uniqueArchives.set(archive.path, archive);
         }
     }
-    return [...uniqueArchives.values()].sort((a, b) => b.mtimeMs - a.mtimeMs);
+    return uniqueArchives
+        .values()
+        .toArray()
+        .sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
 async function compressArchiveIfNeeded(
@@ -829,7 +891,7 @@ let archiveOnlyCompressArchiveIfNeeded = compressArchiveIfNeeded;
 
 function retentionDeleteSet(archives: RetentionArchive[], policy: LogRotationPolicy) {
     const deleteSet = new Map<string, RetentionArchive>();
-    if (Number.isInteger(policy.keep) && Number(policy.keep) >= 0) {
+    if (Number.isSafeInteger(policy.keep) && Number(policy.keep) >= 0) {
         for (const archive of archives.slice(Number(policy.keep))) {
             deleteSet.set(archive.path, archive);
         }
@@ -912,19 +974,20 @@ async function listArchiveOnlyArchives(
         })) {
             try {
                 const safe = await assertSafePath(archivePath, approvedRoots);
-                if (!safe) {
+                if (safe) {
+                    const stat = await fs.stat(archivePath);
+                    if (stat.mtimeMs <= cutoff) {
+                        archives.set(archivePath, {
+                            path: archivePath,
+                            mtimeMs: stat.mtimeMs,
+                            compress: policy.compress !== false,
+                        });
+                    }
+                } else {
                     warnings.push(
                         `Skipping archive-only path ${archivePath}: Unsafe path outside approved roots`
                     );
-                    continue;
                 }
-                const stat = await fs.stat(archivePath);
-                if (stat.mtimeMs > cutoff) continue;
-                archives.set(archivePath, {
-                    path: archivePath,
-                    mtimeMs: stat.mtimeMs,
-                    compress: policy.compress !== false,
-                });
             } catch (error) {
                 warnings.push(
                     `Skipping archive-only path ${archivePath}: ${caughtMessage(error)}`
@@ -934,7 +997,10 @@ async function listArchiveOnlyArchives(
     }
 
     return {
-        archives: [...archives.values()].sort((a, b) => b.mtimeMs - a.mtimeMs),
+        archives: archives
+            .values()
+            .toArray()
+            .sort((a, b) => b.mtimeMs - a.mtimeMs),
         warnings,
     };
 }
@@ -965,39 +1031,38 @@ async function applyArchiveOnlyRetention(
         archives.sort((a, b) => b.mtimeMs - a.mtimeMs);
         const deleteSet = retentionDeleteSet(archives, policy);
         for (const archive of archives) {
-            if (deleteSet.has(archive.path)) continue;
-            let result: Awaited<ReturnType<typeof archiveOnlyCompressArchiveIfNeeded>>;
-            try {
-                result = await archiveOnlyCompressArchiveIfNeeded(
-                    archive,
-                    dryRun,
-                    approvedRoots
-                );
-            } catch (error) {
-                warnings.push(
-                    `Failed to compress archive-only path ${archive.path}: ${caughtMessage(
-                        error
-                    )}`
-                );
-                continue;
+            if (!deleteSet.has(archive.path)) {
+                try {
+                    const result = await archiveOnlyCompressArchiveIfNeeded(
+                        archive,
+                        dryRun,
+                        approvedRoots
+                    );
+                    if (result.compressed) compressed.push(result.archive.path);
+                    if (result.warning) warnings.push(result.warning);
+                } catch (error) {
+                    warnings.push(
+                        `Failed to compress archive-only path ${archive.path}: ${caughtMessage(
+                            error
+                        )}`
+                    );
+                }
             }
-            if (result.compressed) compressed.push(result.archive.path);
-            if (result.warning) warnings.push(result.warning);
         }
         for (const archive of deleteSet.values()) {
             if (dryRun) {
                 deleted.push(archive.path);
-                continue;
-            }
-            try {
-                await archiveOnlyUnlinkVerified(archive.path, approvedRoots);
-                deleted.push(archive.path);
-            } catch (error) {
-                warnings.push(
-                    `Failed to delete archive-only path ${archive.path}: ${caughtMessage(
-                        error
-                    )}`
-                );
+            } else {
+                try {
+                    await archiveOnlyUnlinkVerified(archive.path, approvedRoots);
+                    deleted.push(archive.path);
+                } catch (error) {
+                    warnings.push(
+                        `Failed to delete archive-only path ${archive.path}: ${caughtMessage(
+                            error
+                        )}`
+                    );
+                }
             }
         }
     }
@@ -1006,7 +1071,7 @@ async function applyArchiveOnlyRetention(
 }
 
 function hasRotatedInCadence(
-    stateEntry: { lastRotatedAt?: string } | undefined,
+    stateEntry: undefined | { lastRotatedAt?: string },
     cadence: "daily" | "weekly" | null
 ): boolean {
     if (!cadence || !stateEntry?.lastRotatedAt) return false;
@@ -1032,7 +1097,7 @@ function shouldRotate({
 }: {
     stat: { size: number };
     policy: LogRotationPolicy;
-    stateEntry: { lastRotatedAt?: string } | undefined;
+    stateEntry: undefined | { lastRotatedAt?: string };
 }) {
     const maxBytes = byteLimitFromMb(policy.maxSizeMb);
     const overSize = maxBytes !== null && stat.size >= maxBytes;
@@ -1051,7 +1116,7 @@ function emptyState(): LogRotationState {
 function readLogRotationState(): LogRotationState {
     const row = db
         .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
-        .get(STATE_CACHE_KEY) as { data_json?: string | null } | undefined;
+        .get(STATE_CACHE_KEY) as undefined | { data_json?: string | null };
     if (!row?.data_json) {
         return emptyState();
     }
@@ -1065,9 +1130,10 @@ function readLogRotationState(): LogRotationState {
                 !Array.isArray(parsed.files)
                     ? parsed.files
                     : {},
-            ...(parsed.lastRun && typeof parsed.lastRun === "object"
-                ? { lastRun: parsed.lastRun as Record<string, unknown> }
-                : {}),
+            ...(parsed.lastRun &&
+                typeof parsed.lastRun === "object" && {
+                    lastRun: parsed.lastRun as Record<string, unknown>,
+                }),
         };
     } catch {
         return emptyState();
@@ -1096,6 +1162,21 @@ function appendRetentionWarnings(
             message: warning,
         });
     }
+}
+
+function applySkippedRetention(
+    summary: LogRotationSummary,
+    groupSummary: ReturnType<typeof summarizeGroup>,
+    retained: Awaited<ReturnType<typeof applyRetention>>,
+    filePath: string
+): void {
+    groupSummary.deletedArchives += retained.deleted.length;
+    summary.deletedArchives += retained.deleted.length;
+    groupSummary.compressedFiles += retained.compressed.length;
+    summary.compressedFiles += retained.compressed.length;
+    appendRetentionWarnings(summary, retained.warnings, { filePath });
+    groupSummary.skippedFiles += 1;
+    summary.skippedFiles += 1;
 }
 
 export interface LogRotationSummary {
@@ -1130,8 +1211,8 @@ async function acquireLogRotationLock(dryRun: boolean) {
             await handle.writeFile(`${process.pid}\n`);
             return handle;
         } catch (error) {
-            await handle.close().catch(() => {});
-            await fs.unlink(lockFile).catch(() => {});
+            await ignoreRejection(handle.close());
+            await ignoreRejection(fs.unlink(lockFile));
             throw error;
         }
     };
@@ -1197,25 +1278,12 @@ async function reclaimStaleLogRotationLock(
                 throw error;
             }
         }
-        const pid = Number.parseInt(rawPid.trim(), 10);
-        let lockAgeMs = Number.POSITIVE_INFINITY;
-        if (lockStat) {
-            lockAgeMs = Date.now() - lockStat.mtimeMs;
-        }
+        const pid = Number(rawPid.trim());
+        const lockAgeMs = lockStat ? Date.now() - lockStat.mtimeMs : Infinity;
         if (Number.isFinite(pid) && isProcessRunning(pid) && lockAgeMs < LOCK_STALE_MS) {
             return null;
         }
-        await fs.unlink(lockFile).catch((error: unknown) => {
-            if (
-                !(
-                    error instanceof Error &&
-                    "code" in error &&
-                    (error as NodeJS.ErrnoException).code === "ENOENT"
-                )
-            ) {
-                throw error;
-            }
-        });
+        await ignoreMissingPath(fs.unlink(lockFile));
         try {
             return await openLock();
         } catch (error) {
@@ -1229,7 +1297,7 @@ async function reclaimStaleLogRotationLock(
             throw error;
         }
     } finally {
-        await fs.rmdir(reclaimDir).catch(() => {});
+        await ignoreRejection(fs.rmdir(reclaimDir));
     }
 }
 
@@ -1266,9 +1334,9 @@ async function releaseLogRotationLock(handle: fs.FileHandle | null) {
     const lockFile = logRotationLockFile;
     try {
         const heldStat = await handle.stat();
-        const pathStat = await fs.stat(lockFile).catch(() => null);
+        const pathStat = await statOrNull(lockFile);
         if (pathStat && pathStat.dev === heldStat.dev && pathStat.ino === heldStat.ino) {
-            await fs.unlink(lockFile).catch(() => {});
+            await ignoreRejection(fs.unlink(lockFile));
         }
     } finally {
         await handle.close();
@@ -1300,13 +1368,13 @@ export async function runLogRotationService(
         warnings: [],
         errors: [],
         groups: [],
-        ...(options.verbose ? { files: [] } : {}),
+        ...(options.verbose && { files: [] }),
     };
     const lock = await acquireLogRotationLock(options.dryRun);
     if (!options.dryRun && !lock) {
         summary.ok = false;
         summary.errors.push({ message: "Log rotation is already running" });
-        summary.finishedAt = new Date().toISOString();
+        summary.finishedAt = dateToISOString(new Date());
         return summary;
     }
     try {
@@ -1365,139 +1433,131 @@ export async function runLogRotationService(
                         excluded.add(file);
                     }
                 }
-                for (const filePath of [...matched].sort()) {
+                for (const filePath of [...matched].sort(compareStrings)) {
                     if (
-                        seenFiles.has(filePath) ||
-                        excluded.has(filePath) ||
-                        ROTATED_SUFFIX_RE.test(filePath)
+                        !seenFiles.has(filePath) &&
+                        !excluded.has(filePath) &&
+                        !ROTATED_SUFFIX_RE.test(filePath)
                     ) {
-                        continue;
-                    }
-                    seenFiles.add(filePath);
-                    groupSummary.checkedFiles += 1;
-                    summary.checkedFiles += 1;
-                    try {
-                        const safe = await assertSafePath(
-                            filePath,
-                            effectiveApprovedRoots
-                        );
-                        if (!safe) continue;
-                        const stat = await fs.stat(filePath);
-                        const retention = async (
-                            simulatedArchives: RetentionArchive[] = []
-                        ) =>
-                            applyRetention(
-                                filePath,
-                                policy,
-                                effectiveApprovedRoots,
-                                options.dryRun,
-                                simulatedArchives
-                            );
-                        if (policy.skipEmpty && stat.size === 0) {
-                            const retained = await retention();
-                            groupSummary.deletedArchives += retained.deleted.length;
-                            summary.deletedArchives += retained.deleted.length;
-                            groupSummary.compressedFiles += retained.compressed.length;
-                            summary.compressedFiles += retained.compressed.length;
-                            appendRetentionWarnings(summary, retained.warnings, {
-                                filePath,
-                            });
-                            groupSummary.skippedFiles += 1;
-                            summary.skippedFiles += 1;
-                            continue;
-                        }
-                        const decision = shouldRotate({
-                            stat,
-                            policy,
-                            stateEntry: state.files[filePath],
-                        });
-                        if (!decision.rotate) {
-                            const retained = await retention();
-                            groupSummary.deletedArchives += retained.deleted.length;
-                            summary.deletedArchives += retained.deleted.length;
-                            groupSummary.compressedFiles += retained.compressed.length;
-                            summary.compressedFiles += retained.compressed.length;
-                            appendRetentionWarnings(summary, retained.warnings, {
-                                filePath,
-                            });
-                            groupSummary.skippedFiles += 1;
-                            summary.skippedFiles += 1;
-                            continue;
-                        }
-                        const archivePath = archiveBasePath(filePath, now);
-                        let rotation: RotationResult;
-                        if (options.dryRun) {
-                            const compressed = policy.compress !== false;
-                            rotation = {
-                                archivePath: compressed
-                                    ? `${archivePath}.gz`
-                                    : archivePath,
-                                compressed,
-                            };
-                        } else {
-                            const verified = await openVerifiedLogFile(
+                        seenFiles.add(filePath);
+                        groupSummary.checkedFiles += 1;
+                        summary.checkedFiles += 1;
+                        try {
+                            const safe = await assertSafePath(
                                 filePath,
                                 effectiveApprovedRoots
                             );
-                            try {
-                                rotation =
-                                    policy.strategy === "rename"
-                                        ? await rotateRename(
-                                              filePath,
-                                              verified,
-                                              archivePath,
-                                              policy.compress !== false,
-                                              effectiveApprovedRoots
-                                          )
-                                        : await rotateCopyTruncate(
-                                              filePath,
-                                              verified,
-                                              archivePath,
-                                              policy.compress !== false,
-                                              effectiveApprovedRoots
-                                          );
-                            } finally {
-                                await verified.handle.close();
+                            if (safe) {
+                                const stat = await fs.stat(filePath);
+                                const retention = async (
+                                    simulatedArchives: RetentionArchive[] = []
+                                ) =>
+                                    applyRetention(
+                                        filePath,
+                                        policy,
+                                        effectiveApprovedRoots,
+                                        options.dryRun,
+                                        simulatedArchives
+                                    );
+                                const decision = shouldRotate({
+                                    stat,
+                                    policy,
+                                    stateEntry: state.files[filePath],
+                                });
+                                if (policy.skipEmpty && stat.size === 0) {
+                                    applySkippedRetention(
+                                        summary,
+                                        groupSummary,
+                                        await retention(),
+                                        filePath
+                                    );
+                                } else if (decision.rotate) {
+                                    const archivePath = archiveBasePath(filePath, now);
+                                    let rotation: RotationResult;
+                                    if (options.dryRun) {
+                                        const compressed = policy.compress !== false;
+                                        rotation = {
+                                            archivePath: compressed
+                                                ? `${archivePath}.gz`
+                                                : archivePath,
+                                            compressed,
+                                        };
+                                    } else {
+                                        const verified = await openVerifiedLogFile(
+                                            filePath,
+                                            effectiveApprovedRoots
+                                        );
+                                        try {
+                                            rotation =
+                                                policy.strategy === "rename"
+                                                    ? await rotateRename(
+                                                          filePath,
+                                                          verified,
+                                                          archivePath,
+                                                          policy.compress !== false,
+                                                          effectiveApprovedRoots
+                                                      )
+                                                    : await rotateCopyTruncate(
+                                                          filePath,
+                                                          verified,
+                                                          archivePath,
+                                                          policy.compress !== false,
+                                                          effectiveApprovedRoots
+                                                      );
+                                        } finally {
+                                            await verified.handle.close();
+                                        }
+                                        state.files[filePath] = {
+                                            lastRotatedAt: now.toISOString(),
+                                            lastSizeBytes: stat.size,
+                                            lastArchive: rotation.archivePath,
+                                        };
+                                    }
+                                    groupSummary.rotatedFiles += 1;
+                                    summary.rotatedFiles += 1;
+                                    if (rotation.compressed) {
+                                        groupSummary.compressedFiles += 1;
+                                        summary.compressedFiles += 1;
+                                    }
+                                    if (rotation.warning) {
+                                        summary.warnings.push({
+                                            filePath,
+                                            message: rotation.warning,
+                                        });
+                                    }
+                                    const simulatedArchives = [
+                                        {
+                                            path: rotation.archivePath,
+                                            mtimeMs: now.getTime(),
+                                            compress: false,
+                                        },
+                                    ];
+                                    const retained = await retention(simulatedArchives);
+                                    groupSummary.deletedArchives +=
+                                        retained.deleted.length;
+                                    summary.deletedArchives += retained.deleted.length;
+                                    groupSummary.compressedFiles +=
+                                        retained.compressed.length;
+                                    summary.compressedFiles += retained.compressed.length;
+                                    appendRetentionWarnings(summary, retained.warnings, {
+                                        filePath,
+                                    });
+                                } else {
+                                    applySkippedRetention(
+                                        summary,
+                                        groupSummary,
+                                        await retention(),
+                                        filePath
+                                    );
+                                }
                             }
-                            state.files[filePath] = {
-                                lastRotatedAt: now.toISOString(),
-                                lastSizeBytes: stat.size,
-                                lastArchive: rotation.archivePath,
-                            };
-                        }
-                        groupSummary.rotatedFiles += 1;
-                        summary.rotatedFiles += 1;
-                        if (rotation.compressed) {
-                            groupSummary.compressedFiles += 1;
-                            summary.compressedFiles += 1;
-                        }
-                        if (rotation.warning) {
-                            summary.warnings.push({
+                        } catch (error) {
+                            summary.ok = false;
+                            summary.errors.push({
                                 filePath,
-                                message: rotation.warning,
+                                message: caughtMessage(error),
                             });
                         }
-                        const simulatedArchives = [
-                            {
-                                path: rotation.archivePath,
-                                mtimeMs: now.getTime(),
-                                compress: false,
-                            },
-                        ];
-                        const retained = await retention(simulatedArchives);
-                        groupSummary.deletedArchives += retained.deleted.length;
-                        summary.deletedArchives += retained.deleted.length;
-                        groupSummary.compressedFiles += retained.compressed.length;
-                        summary.compressedFiles += retained.compressed.length;
-                        appendRetentionWarnings(summary, retained.warnings, {
-                            filePath,
-                        });
-                    } catch (error) {
-                        summary.ok = false;
-                        summary.errors.push({
-                            filePath,
-                            message: caughtMessage(error),
-                        });
                     }
                 }
             } catch (error) {
@@ -1508,7 +1568,7 @@ export async function runLogRotationService(
                 });
             }
         }
-        summary.finishedAt = new Date().toISOString();
+        summary.finishedAt = dateToISOString(new Date());
         if (!options.dryRun) {
             state.lastRun = {
                 ok: summary.ok,

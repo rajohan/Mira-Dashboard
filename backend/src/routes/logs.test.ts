@@ -10,6 +10,10 @@ import express from "express";
 
 import logsRoutes, { __testing, subscribeToLogs, unsubscribeFromLogs } from "./logs.js";
 
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
@@ -314,27 +318,31 @@ describe("logs routes", () => {
             await rm(directoryPath, { recursive: true, force: true });
         }
 
-        const mockedToday = new RealDate("2099-12-31T12:00:00.000Z")
-            .toISOString()
-            .split("T", 1)[0];
+        const mockedDate = new RealDate("2099-12-31T12:00:00.000Z");
+        const mockedToday = mockedDate.toISOString().split("T", 1)[0];
         const todayFile = `openclaw-${mockedToday}.log`;
         await rm(path.join(logsDir, todayFile), { force: true });
 
         try {
-            const frozenNow = new RealDate("2099-12-31T12:00:00.000Z").getTime();
-            globalThis.Date = class extends RealDate {
-                constructor(...args: unknown[]) {
-                    if (args.length === 0) {
-                        super("2099-12-31T12:00:00.000Z");
-                        return;
+            const frozenDate = new RealDate("2099-12-31T12:00:00.000Z");
+            const frozenNow = frozenDate.getTime();
+            Object.defineProperty(globalThis, "Date", {
+                configurable: true,
+                writable: true,
+                value: class extends RealDate {
+                    constructor(...args: unknown[]) {
+                        if (args.length === 0) {
+                            super("2099-12-31T12:00:00.000Z");
+                            return;
+                        }
+                        super(...(args as [string | number | Date]));
                     }
-                    super(...(args as [string | number | Date]));
-                }
 
-                static now() {
-                    return frozenNow;
-                }
-            } as DateConstructor;
+                    static now() {
+                        return frozenNow;
+                    }
+                } as DateConstructor,
+            });
 
             const defaultMissing = await fetch(`${server.baseUrl}/api/logs/content`);
             assert.equal(defaultMissing.status, 404);
@@ -342,7 +350,11 @@ describe("logs routes", () => {
                 error: "Log file not found",
             });
         } finally {
-            globalThis.Date = RealDate;
+            Object.defineProperty(globalThis, "Date", {
+                configurable: true,
+                writable: true,
+                value: RealDate,
+            });
         }
     });
 
@@ -588,7 +600,7 @@ describe("logs routes", () => {
     });
 
     it("sends log history to WebSocket subscribers and tracks unsubscribe", async () => {
-        const today = new Date().toISOString().split("T", 1)[0];
+        const today = dateToISOString(new Date()).split("T", 1)[0];
         const todayFile = `openclaw-${today}.log`;
         await writeFile(
             path.join(logsDir, todayFile),
@@ -633,7 +645,7 @@ describe("logs routes", () => {
     });
 
     it("stops sending log history after unsubscribe", async () => {
-        const today = new Date().toISOString().split("T", 1)[0];
+        const today = dateToISOString(new Date()).split("T", 1)[0];
         const todayFile = `openclaw-${today}.log`;
         await writeFile(path.join(logsDir, todayFile), "one\ntwo\n", "utf8");
 
@@ -663,7 +675,7 @@ describe("logs routes", () => {
     });
 
     it("sends empty log history when today's log is missing", async () => {
-        const today = new Date().toISOString().split("T", 1)[0];
+        const today = dateToISOString(new Date()).split("T", 1)[0];
         const todayFile = `openclaw-${today}.log`;
         const todayPath = path.join(logsDir, todayFile);
         await rm(todayPath, { force: true });
@@ -702,7 +714,7 @@ describe("logs routes", () => {
     });
 
     it("ignores missing log files during direct polling", async () => {
-        const today = new Date().toISOString().split("T", 1)[0];
+        const today = dateToISOString(new Date()).split("T", 1)[0];
         const todayFile = `openclaw-${today}.log`;
         await rm(path.join(logsDir, todayFile), { force: true });
         const ws = new FakeWebSocket();
@@ -723,7 +735,7 @@ describe("logs routes", () => {
     });
 
     it("sends empty log history when history read fails", async () => {
-        const today = new Date().toISOString().split("T", 1)[0];
+        const today = dateToISOString(new Date()).split("T", 1)[0];
         const todayFile = `openclaw-${today}.log`;
         const todayPath = path.join(logsDir, todayFile);
         const originalOpen = fs.promises.open;
@@ -762,7 +774,7 @@ describe("logs routes", () => {
     });
 
     it("polls appended log lines for subscribers and tolerates closed sockets", async () => {
-        const today = new Date().toISOString().split("T", 1)[0];
+        const today = dateToISOString(new Date()).split("T", 1)[0];
         const todayFile = `openclaw-${today}.log`;
         const todayPath = path.join(logsDir, todayFile);
         await writeFile(todayPath, "initial\n", "utf8");
@@ -820,18 +832,23 @@ describe("logs routes", () => {
             errors.push(args);
         };
 
-        const today = new Date().toISOString().split("T", 1)[0];
+        const today = dateToISOString(new Date()).split("T", 1)[0];
         const todayPath = path.join(logsDir, `openclaw-${today}.log`);
         await rm(todayPath, { force: true });
         await symlink("openclaw-missing-target.log", todayPath);
 
         try {
+            await __testing.pollLogFileAndLogErrorsForTest(async () => {});
+            await __testing.pollLogFileAndLogErrorsForTest(async () => {
+                throw new Error("direct poll failure");
+            });
             __testing.runLogWatcherTickForTest();
             __testing.runLogWatcherTickForTest();
-            await waitFor(() => errors.length === 1, "log watcher error");
+            await waitFor(() => errors.length === 2, "log watcher error");
 
-            assert.equal(errors.length, 1);
+            assert.equal(errors.length, 2);
             assert.equal(errors[0]?.[0], "[LogWatcher] Error:");
+            assert.equal(errors[1]?.[0], "[LogWatcher] Error:");
         } finally {
             console.error = originalError;
             await rm(todayPath, { force: true });
@@ -866,7 +883,7 @@ describe("logs routes", () => {
 
     it("propagates unexpected polling errors", async () => {
         const originalRealpathSync = fs.realpathSync;
-        const today = new Date().toISOString().split("T", 1)[0];
+        const today = dateToISOString(new Date()).split("T", 1)[0];
         const todayPath = path.join(logsDir, `openclaw-${today}.log`);
         await rm(todayPath, { force: true });
         await symlink("openclaw-missing-target.log", todayPath);

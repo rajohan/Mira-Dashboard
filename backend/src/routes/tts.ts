@@ -8,6 +8,14 @@ const ELEVENLABS_TTS_VOICE_ID =
     "q7O4dHCU5KzDbUYNsckR";
 const MAX_TTS_TEXT_LENGTH = 4_000;
 
+async function readResponseTextFallback(response: Response): Promise<string> {
+    try {
+        return await response.text();
+    } catch {
+        return "";
+    }
+}
+
 /** Represents tts request body. */
 interface TtsRequestBody {
     text?: unknown;
@@ -68,7 +76,7 @@ export default function ttsRoutes(app: express.Express, expressModule: typeof ex
             );
 
             if (!elevenLabsResponse.ok) {
-                const errorText = await elevenLabsResponse.text().catch(() => "");
+                const errorText = await readResponseTextFallback(elevenLabsResponse);
                 response.status(elevenLabsResponse.status).json({
                     error:
                         errorText ||
