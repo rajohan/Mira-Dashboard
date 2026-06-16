@@ -395,9 +395,8 @@ function parseJsonField<T>(value: string | undefined): T | null {
 /** Returns whether updater candIDate is present. */
 function hasUpdaterCandidate(service: DockerUpdaterServiceRow): boolean {
     const hasDigestDrift = Boolean(
-        service.current_digest &&
         service.latest_digest &&
-        service.current_digest !== service.latest_digest
+        (!service.current_digest || service.current_digest !== service.latest_digest)
     );
     if (service.pin_mode === "digest") {
         return hasDigestDrift;

@@ -64,6 +64,14 @@ function shouldBlockGlobalUpdateForDiscoveryFailure(
     return !register.ok && failedDiscoveryAppSlugs(register).has("*");
 }
 
+function isNonblockingRegistrationFailure(step: DockerUpdaterStepResult): boolean {
+    return (
+        step.step === "register-services" &&
+        !step.ok &&
+        failedDiscoveryAppSlugs(step).size === 0
+    );
+}
+
 function getDockerComposeWrapper(): string {
     const dockerRoot = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
     return nonEmptyEnvFallback(
@@ -1628,7 +1636,7 @@ export async function runDockerUpdaterService(
                 poll,
                 {
                     step: `manual-update-skipped:${serviceLabel(refreshedService)}`,
-                    ok: true,
+                    ok: false,
                     code: "CONFLICT",
                     stdout: "No update available after registry poll",
                     stderr: "",
@@ -1679,7 +1687,9 @@ export function registerDockerUpdaterScheduledJobs(): void {
         "docker.updater",
         async () => {
             const steps = await runDockerUpdaterService();
-            const failed = steps.filter((step) => !step.ok);
+            const failed = steps.filter(
+                (step) => !step.ok && !isNonblockingRegistrationFailure(step)
+            );
             if (failed.length > 0) {
                 throw new Error(
                     failed.map((step) => `${step.step}: ${step.stderr}`).join("\n")

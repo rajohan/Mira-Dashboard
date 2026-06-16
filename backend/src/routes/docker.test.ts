@@ -638,6 +638,15 @@ describe("docker routes", { concurrency: false }, () => {
                 pin_mode: "tag",
                 current_tag: "1.0.0",
                 latest_tag: "1.0.0",
+                latest_digest: "sha256:new",
+            } as never),
+            true
+        );
+        assert.equal(
+            __testing.hasUpdaterCandidate({
+                pin_mode: "tag",
+                current_tag: "1.0.0",
+                latest_tag: "1.0.0",
                 current_digest: "sha256:old",
                 latest_digest: "sha256:new",
             } as never),

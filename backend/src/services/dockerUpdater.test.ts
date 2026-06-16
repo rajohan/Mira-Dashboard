@@ -1740,6 +1740,7 @@ setTimeout(() => process.exit(0), 30);
                     "manual-update-skipped:manual-current/target",
                 ]
             );
+            assert.equal(steps.at(-1)?.ok, false);
             assert.equal(steps.at(-1)?.code, "CONFLICT");
             const row = dbHandle
                 .prepare(
@@ -2022,6 +2023,35 @@ setTimeout(() => process.exit(0), 30);
                 (run.output.steps as StepResult[]).map((step) => step.step),
                 ["register-services", "poll"]
             );
+
+            const partialAppDir = path.join(appsRoot, "partial");
+            await mkdir(partialAppDir);
+            await writeFile(
+                path.join(partialAppDir, "compose.yaml"),
+                `services:
+  valid-disabled:
+    image: repo/valid:1
+    labels:
+      mira.updater.enabled: "false"
+  invalidRegex:
+    image: repo/invalid:stable
+    labels:
+      mira.updater.tagPattern: "["
+      mira.updater.tagPatternIsRegex: "true"
+`,
+                "utf8"
+            );
+
+            const partialRun = await scheduledJobs.runScheduledJob(
+                "docker.updater",
+                "manual"
+            );
+            assert.equal(partialRun.status, "success");
+            const partialSteps = partialRun.output.steps as StepResult[];
+            assert.equal(partialSteps[0]?.step, "register-services");
+            assert.equal(partialSteps[0]?.ok, false);
+            assert.equal(partialSteps[1]?.step, "poll");
+            assert.equal(partialSteps[1]?.ok, true);
 
             await rm(appsRoot, { recursive: true, force: true });
             const failedRun = await scheduledJobs.runScheduledJob(
