@@ -7,6 +7,10 @@ export function currentIsoString(): string {
 /** Returns an ISO string for a timestamp-like value. */
 export function isoStringFromDate(value: number | string | Date): string {
     const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        throw new RangeError("Invalid date value");
+    }
+
     return date.toISOString();
 }
 

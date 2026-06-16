@@ -339,7 +339,10 @@ function PullRequestDescription({ body }: { body: string }) {
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeRaw, rehypeSanitize]}
                     components={{
-                        a: (props) => <a {...props} target="_blank" rel="noreferrer" />,
+                        a: ({ node, ...props }) => {
+                            void node;
+                            return <a {...props} target="_blank" rel="noreferrer" />;
+                        },
                     }}
                 >
                     {normalizedBody}

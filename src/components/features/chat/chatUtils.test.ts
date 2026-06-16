@@ -34,6 +34,7 @@ describe("chat utils", () => {
         expect(dataUrlToBase64("raw-base64")).toBe("raw-base64");
         expect(base64ToText("aGVsbG8=")).toBe("hello");
         expect(base64ToText("QQ==")).toBe("A");
+        expect(base64ToText("not valid base64 🚫")).toBeUndefined();
         expect(chatErrorMessage(new Error("Specific failure"), "Fallback")).toBe(
             "Specific failure"
         );

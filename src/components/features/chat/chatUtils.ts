@@ -34,10 +34,14 @@ export function dataUrlToBase64(dataUrl: string): string {
 }
 
 /** Performs base64 to text. */
-export function base64ToText(base64: string): string {
-    const bytes = Uint8Array.fromBase64(base64);
-    const decoder = new TextDecoder();
-    return decoder.decode(bytes);
+export function base64ToText(base64: string): string | undefined {
+    try {
+        const bytes = Uint8Array.fromBase64(base64);
+        const decoder = new TextDecoder();
+        return decoder.decode(bytes);
+    } catch {
+        return undefined;
+    }
 }
 
 /** Returns a diagnostic identity for tool/thinking rows without primary text. */

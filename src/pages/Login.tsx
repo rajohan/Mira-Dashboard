@@ -84,12 +84,16 @@ export function Login() {
                 } catch {
                     // Bootstrap reload below handles stale auth state.
                 }
-                const bootstrapResponse = await fetch("/api/auth/bootstrap", {
-                    credentials: "include",
-                });
-                const nextBootstrap =
-                    (await bootstrapResponse.json()) as BootstrapResponse;
-                setBootstrapState(nextBootstrap);
+                try {
+                    const bootstrapResponse = await fetch("/api/auth/bootstrap", {
+                        credentials: "include",
+                    });
+                    const nextBootstrap =
+                        (await bootstrapResponse.json()) as BootstrapResponse;
+                    setBootstrapState(nextBootstrap);
+                } catch {
+                    // Keep the primary authentication error visible.
+                }
             } finally {
                 setIsSubmitting(false);
             }
