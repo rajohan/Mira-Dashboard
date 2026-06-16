@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -627,6 +627,9 @@ process.exit(1);
     await writeExecutable(
         path.join(binDir, "npm"),
         String.raw`#!${process.execPath}
+if (process.env.FAKE_NPM_LOG_FILE) {
+  require("node:fs").appendFileSync(process.env.FAKE_NPM_LOG_FILE, process.argv.slice(2).join(" ") + "\n");
+}
 process.stdout.write("npm " + process.argv.slice(2).join(" ") + "\n");
 `
     );
@@ -2018,6 +2021,11 @@ describe("pull request routes", () => {
     });
 
     it("approves, rejects, and deploys Mira pull requests", async () => {
+        const npmLogFile = path.join(tempDir, "npm-commands.log");
+        const restoreNpmEnv = saveEnv(["FAKE_NPM_LOG_FILE"]);
+        process.env.FAKE_NPM_LOG_FILE = npmLogFile;
+        await rm(npmLogFile, { force: true });
+
         const approve = await requestJson<{
             ok: boolean;
             message: string;
@@ -2067,6 +2075,14 @@ describe("pull request routes", () => {
             finishedDeploy.note,
             "Build passed; restart + health check scheduled"
         );
+        const npmCommands = await readFile(npmLogFile, "utf8");
+        assert.deepEqual(npmCommands.trim().split("\n"), [
+            "ci --legacy-peer-deps",
+            "run build",
+            "--prefix backend ci",
+            "--prefix backend run build",
+        ]);
+        restoreNpmEnv();
         releaseDeploymentLockInDb(deploy.body.deployment.id, tempDir);
         await waitForDeploymentLockReleased(tempDir);
 
