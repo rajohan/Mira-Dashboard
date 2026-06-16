@@ -16,7 +16,12 @@ import {
     upsertScheduledJob,
 } from "./scheduledJobs.js";
 
-const COMPOSE_FILENAME = "compose.yaml";
+const COMPOSE_FILENAMES = [
+    "compose.yaml",
+    "compose.yml",
+    "docker-compose.yaml",
+    "docker-compose.yml",
+];
 const execFileAsync = promisify(execFile);
 const SUPPORTED_REGISTRIES = new Set(["docker.io", "ghcr.io", "lscr.io"]);
 const MAX_REGISTRY_TAG_PAGES = 50;
@@ -84,11 +89,97 @@ function getDockerAppsRoot(): string {
     return nonEmptyEnvFallback("MIRA_DOCKER_APPS_ROOT", "/opt/docker/apps");
 }
 
-function getComposeCommand(composePath: string, serviceName: string) {
+function includePathMatchesCompose(
+    projectComposePath: string,
+    includePath: string,
+    composePath: string
+): boolean {
+    const resolvedIncludePath = path.isAbsolute(includePath)
+        ? includePath
+        : path.resolve(path.dirname(projectComposePath), includePath);
+    const resolvedComposePath = path.resolve(composePath);
+    if (resolvedIncludePath === resolvedComposePath) {
+        return true;
+    }
+    try {
+        return fs.realpathSync(resolvedIncludePath) === fs.realpathSync(composePath);
+    } catch {
+        return false;
+    }
+}
+
+function projectComposeIncludesCompose(
+    projectComposePath: string,
+    composePath: string,
+    seen = new Set<string>()
+): boolean {
+    const realProjectComposePath = fs.realpathSync(projectComposePath);
+    if (seen.has(realProjectComposePath)) {
+        return false;
+    }
+    seen.add(realProjectComposePath);
+    try {
+        const doc = YAML.parse(fs.readFileSync(projectComposePath, "utf8")) as JsonRecord;
+        const includes = Array.isArray(doc.include) ? doc.include : [];
+        return includes.some((entry) => {
+            const includeValue = typeof entry === "string" ? entry : asRecord(entry).path;
+            const includePaths = (
+                Array.isArray(includeValue) ? includeValue : [includeValue]
+            ).filter((item): item is string => typeof item === "string");
+            for (const includePath of includePaths) {
+                if (
+                    includePathMatchesCompose(
+                        projectComposePath,
+                        includePath,
+                        composePath
+                    )
+                ) {
+                    return true;
+                }
+                const resolvedIncludePath = path.isAbsolute(includePath)
+                    ? includePath
+                    : path.resolve(path.dirname(projectComposePath), includePath);
+                if (
+                    fs.existsSync(resolvedIncludePath) &&
+                    projectComposeIncludesCompose(resolvedIncludePath, composePath, seen)
+                ) {
+                    return true;
+                }
+            }
+            return false;
+        });
+    } catch {
+        return false;
+    }
+}
+
+function findProjectComposePath(configuredComposePath: string): string {
+    let currentDir = path.dirname(configuredComposePath);
+    let projectComposePath = configuredComposePath;
+    while (true) {
+        for (const filename of COMPOSE_FILENAMES) {
+            const candidate = path.join(currentDir, filename);
+            if (
+                candidate !== configuredComposePath &&
+                fs.existsSync(candidate) &&
+                projectComposeIncludesCompose(candidate, configuredComposePath)
+            ) {
+                projectComposePath = fs.realpathSync(candidate);
+            }
+        }
+        const parent = path.dirname(currentDir);
+        if (parent === currentDir) break;
+        currentDir = parent;
+    }
+    return projectComposePath;
+}
+
+function getComposeCommand(configuredComposePath: string, serviceName: string) {
     const dockerRoot = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
     const wrapper = getDockerComposeWrapper();
+    const projectComposePath = findProjectComposePath(configuredComposePath);
     const isManagedDockerPath = path
-        .resolve(composePath)
+        .resolve(projectComposePath)
         .startsWith(`${path.resolve(dockerRoot)}${path.sep}`);
     if (
         process.env.MIRA_DOCKER_COMPOSE_WRAPPER ||
@@ -96,12 +187,23 @@ function getComposeCommand(composePath: string, serviceName: string) {
     ) {
         return {
             file: wrapper,
-            args: ["-f", composePath, "up", "-d", "--pull", "always", serviceName],
+            args: ["-f", projectComposePath, "up", "-d", "--pull", "always", serviceName],
+            cwd: path.dirname(projectComposePath),
         };
     }
     return {
         file: getDockerBin(),
-        args: ["compose", "-f", composePath, "up", "-d", "--pull", "always", serviceName],
+        args: [
+            "compose",
+            "-f",
+            projectComposePath,
+            "up",
+            "-d",
+            "--pull",
+            "always",
+            serviceName,
+        ],
+        cwd: path.dirname(projectComposePath),
     };
 }
 
@@ -863,10 +965,10 @@ async function applyComposeUpdateUnlocked(
         writeFileWithMetadata(rollbackTempPath, raw, originalStats);
         writeFileWithMetadata(tempPath, YAML.stringify(doc), originalStats);
         fs.renameSync(tempPath, composePath);
-        const command = getComposeCommand(composePath, service.service_name);
+        const command = getComposeCommand(configuredComposePath, service.service_name);
         composeStarted = true;
         const { stdout, stderr } = await execFileAsync(command.file, command.args, {
-            cwd: path.dirname(composePath),
+            cwd: command.cwd,
             env: process.env,
             maxBuffer: 10 * 1024 * 1024,
             timeout: 180_000,
@@ -897,9 +999,12 @@ async function applyComposeUpdateUnlocked(
         }
         if (restored && composeStarted) {
             try {
-                const command = getComposeCommand(composePath, service.service_name);
+                const command = getComposeCommand(
+                    configuredComposePath,
+                    service.service_name
+                );
                 await execFileAsync(command.file, command.args, {
-                    cwd: path.dirname(composePath),
+                    cwd: command.cwd,
                     env: process.env,
                     maxBuffer: 10 * 1024 * 1024,
                     timeout: 180_000,
@@ -928,8 +1033,13 @@ function listComposeFiles(root = getDockerAppsRoot()): string[] {
     return fs
         .readdirSync(root, { withFileTypes: true })
         .filter((entry) => entry.isDirectory())
-        .map((entry) => path.join(root, entry.name, COMPOSE_FILENAME))
-        .filter((file) => fs.existsSync(file));
+        .flatMap((entry) => {
+            const appRoot = path.join(root, entry.name);
+            const composePath = COMPOSE_FILENAMES.map((filename) =>
+                path.join(appRoot, filename)
+            ).find((file) => fs.existsSync(file));
+            return composePath ? [composePath] : [];
+        });
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -1348,11 +1458,12 @@ export async function pollDockerUpdaterRegistries(
             "docker:updater:updates-available"
         );
     }
+    const ok = failures.length === 0 || (serviceId === undefined && checked.length > 0);
     return {
         step: "poll",
-        ok: failures.length === 0,
+        ok,
         stdout: JSON.stringify({
-            ok: failures.length === 0,
+            ok,
             checkedAt: timestamp,
             checked,
             skipped,
