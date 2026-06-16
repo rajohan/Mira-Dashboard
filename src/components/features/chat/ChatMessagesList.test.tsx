@@ -277,9 +277,20 @@ describe("ChatMessagesList", () => {
         );
         rows[1]!.message.images?.push(
             {
-                source: { data: toBase64("source image"), media_type: "image/jpeg" },
+                source: {
+                    data: toBase64("source image"),
+                    media_type: "image/jpeg",
+                },
                 type: "image",
             },
+            {
+                mimeType: "image/webp",
+                source: {
+                    data: toBase64("source image without media type"),
+                },
+                type: "image",
+            },
+            { data: toBase64("default mime image"), type: "image" },
             { type: "image" }
         );
         rows[2]!.message.text = "";

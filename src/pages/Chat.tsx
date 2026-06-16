@@ -527,10 +527,6 @@ export function Chat() {
             setIsLoadingHistory(true);
             setSendError(null);
 
-            if (cancelled) {
-                return;
-            }
-
             try {
                 const result = (await request("chat.history", {
                     sessionKey: selectedSessionKey,
@@ -608,10 +604,6 @@ export function Chat() {
         /** Performs refresh history. */
         const refreshHistory = async () => {
             const refreshVisibleHistory = async () => {
-                if (cancelled || abortController.signal.aborted) {
-                    return;
-                }
-
                 try {
                     const result = (await request("chat.history", {
                         sessionKey: requestSessionKey,
@@ -718,11 +710,6 @@ export function Chat() {
             }
 
             refreshInFlight = true;
-
-            if (cancelled) {
-                refreshInFlight = false;
-                return;
-            }
 
             try {
                 const result = (await request("chat.history", {
