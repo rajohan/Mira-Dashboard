@@ -8,6 +8,7 @@ import {
     registerCacheRefreshScheduledJobs,
     waitForLocalCacheSeed,
 } from "./services/cacheRefresh.js";
+import { registerDockerUpdaterScheduledJobs } from "./services/dockerUpdater.js";
 import {
     startOpenClawNotificationMonitor,
     stopOpenClawNotificationMonitor,
@@ -102,6 +103,7 @@ export function handleServerListening(): void {
         if (shouldStartScheduledJobs()) {
             registerBackupScheduledJobs();
             registerCacheRefreshScheduledJobs();
+            registerDockerUpdaterScheduledJobs();
             startScheduledJobScheduler();
             scheduledJobSchedulerStarted = true;
             installSchedulerCloseCleanup();

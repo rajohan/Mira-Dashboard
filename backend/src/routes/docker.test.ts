@@ -636,6 +636,16 @@ describe("docker routes", { concurrency: false }, () => {
         assert.equal(
             __testing.hasUpdaterCandidate({
                 pin_mode: "tag",
+                current_tag: "1.0.0",
+                latest_tag: "1.0.0",
+                current_digest: "sha256:old",
+                latest_digest: "sha256:new",
+            } as never),
+            true
+        );
+        assert.equal(
+            __testing.hasUpdaterCandidate({
+                pin_mode: "tag",
                 current_tag: "",
                 latest_tag: "1.0.1",
             } as never),
@@ -1954,6 +1964,31 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(success.body.success, true);
             assert.deepEqual(success.body.result.summary, { updated: 1, failed: 0 });
             assert.equal(success.body.stderr, "");
+        } finally {
+            __testing.setRunDockerUpdaterServiceForTests(undefined);
+        }
+
+        __testing.setRunDockerUpdaterServiceForTests(async () => [
+            { step: "register-services", ok: true, stdout: "", stderr: "" },
+            { step: "poll", ok: true, stdout: "", stderr: "" },
+            {
+                step: "manual-update:media/app",
+                ok: false,
+                stdout: "",
+                stderr: "apply failed",
+            },
+        ]);
+        try {
+            const failed = await requestJson<{
+                success: boolean;
+                result: { summary: { updated: number; failed: number } };
+            }>(server, "/api/docker/updater/services/1/update", {
+                method: "POST",
+                body: {},
+            });
+            assert.equal(failed.status, 200);
+            assert.equal(failed.body.success, false);
+            assert.deepEqual(failed.body.result.summary, { updated: 0, failed: 1 });
         } finally {
             __testing.setRunDockerUpdaterServiceForTests(undefined);
         }

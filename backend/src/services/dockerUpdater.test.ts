@@ -85,7 +85,7 @@ describe("docker updater service", { concurrency: false }, () => {
         tempDir = await mkdtemp(path.join(os.tmpdir(), "mira-docker-updater-"));
         originalPath = process.env.PATH;
         dbHandle.exec(
-            "DELETE FROM docker_update_events; DELETE FROM docker_managed_services; DELETE FROM notifications;"
+            "DELETE FROM scheduled_job_runs; DELETE FROM scheduled_jobs; DELETE FROM docker_update_events; DELETE FROM docker_managed_services; DELETE FROM notifications;"
         );
     });
 
@@ -97,7 +97,7 @@ describe("docker updater service", { concurrency: false }, () => {
             process.env.PATH = originalPath;
         }
         dbHandle.exec(
-            "DELETE FROM docker_update_events; DELETE FROM docker_managed_services; DELETE FROM notifications;"
+            "DELETE FROM scheduled_job_runs; DELETE FROM scheduled_jobs; DELETE FROM docker_update_events; DELETE FROM docker_managed_services; DELETE FROM notifications;"
         );
         await rm(tempDir, { recursive: true, force: true });
     });
@@ -490,6 +490,36 @@ process.stdout.write("updated\n");
                         (service: { serviceName: string }) => service.serviceName
                     ),
                     ["valid"]
+                );
+                const partialAppDir = path.join(appsRoot, "partial");
+                await mkdir(partialAppDir, { recursive: true });
+                await writeFile(
+                    path.join(partialAppDir, "compose.yaml"),
+                    `services:
+  valid:
+    image: repo/valid:1
+  invalidRegex:
+    image: repo/invalid:stable
+    labels:
+      mira.updater.tagPattern: "["
+      mira.updater.tagPatternIsRegex: "true"
+`,
+                    "utf8"
+                );
+                const partialRegister = await updater.registerDockerUpdaterServices();
+                assert.equal(partialRegister.ok, false);
+                assert.deepEqual(
+                    serviceRows()
+                        .filter((service) => service.app_slug === "partial")
+                        .map((service) => service.service_name),
+                    ["valid"]
+                );
+                assert.equal(
+                    updater.__testing.shouldBlockManualUpdateForDiscoveryFailure(
+                        partialRegister,
+                        "partial"
+                    ),
+                    false
                 );
                 const unsafeRegexCompose = path.join(tempDir, "unsafe-regex.yaml");
                 await writeFile(
@@ -1369,7 +1399,12 @@ setTimeout(() => process.exit(0), 30);
                 [
                     ...updater.__testing.failedDiscoveryAppSlugs({
                         stderr: JSON.stringify({
-                            failed: [{ appSlug: "selected" }, { appSlug: 123 }, {}],
+                            failed: [
+                                { appSlug: "selected" },
+                                { appSlug: "partial", blocking: false },
+                                { appSlug: 123 },
+                                {},
+                            ],
                         }),
                     }),
                 ],
@@ -1705,6 +1740,7 @@ setTimeout(() => process.exit(0), 30);
                     "manual-update-skipped:manual-current/target",
                 ]
             );
+            assert.equal(steps.at(-1)?.code, "CONFLICT");
             const row = dbHandle
                 .prepare(
                     `SELECT last_status, latest_tag, latest_digest, current_tag
@@ -1949,6 +1985,70 @@ setTimeout(() => process.exit(0), 30);
         });
     });
 
+    it("registers the scheduled Docker updater job", async () => {
+        const updater = await import(`./dockerUpdater.js?schedule=${Date.now()}`);
+        const scheduledJobs = await import("./scheduledJobs.js");
+        scheduledJobs.__testing.clearActionHandlers();
+        const appsRoot = path.join(tempDir, "scheduled-apps");
+        await mkdir(appsRoot);
+
+        await withEnv({ MIRA_DOCKER_APPS_ROOT: appsRoot }, async () => {
+            updater.registerDockerUpdaterScheduledJobs();
+
+            const row = dbHandle
+                .prepare(
+                    `SELECT id, enabled, schedule_type, interval_seconds, action_key
+                 FROM scheduled_jobs WHERE id = 'docker.updater'`
+                )
+                .get() as
+                | undefined
+                | {
+                      action_key: string;
+                      enabled: number;
+                      id: string;
+                      interval_seconds: number;
+                      schedule_type: string;
+                  };
+            assert.ok(row);
+            assert.equal(row.id, "docker.updater");
+            assert.equal(row.enabled, 1);
+            assert.equal(row.schedule_type, "interval");
+            assert.equal(row.interval_seconds, 3600);
+            assert.equal(row.action_key, "docker.updater");
+
+            const run = await scheduledJobs.runScheduledJob("docker.updater", "manual");
+            assert.equal(run.status, "success");
+            assert.deepEqual(
+                (run.output.steps as StepResult[]).map((step) => step.step),
+                ["register-services", "poll"]
+            );
+
+            await rm(appsRoot, { recursive: true, force: true });
+            const failedRun = await scheduledJobs.runScheduledJob(
+                "docker.updater",
+                "manual"
+            );
+            assert.equal(failedRun.status, "failed");
+            assert.match(failedRun.message ?? "", /Compose apps root not found/u);
+        });
+
+        const originalPrepare = dbHandle.prepare.bind(dbHandle);
+        const prepareMock = mock.method(dbHandle, "prepare", (sql: string) => {
+            if (sql.startsWith("DELETE FROM scheduled_jobs")) {
+                throw new Error("prune failed");
+            }
+            return originalPrepare(sql);
+        });
+        try {
+            assert.throws(
+                () => updater.registerDockerUpdaterScheduledJobs(),
+                /prune failed/u
+            );
+        } finally {
+            prepareMock.mock.restore();
+        }
+    });
+
     it("covers updater helper fallback branches directly", async () => {
         const updater = await import(`./dockerUpdater.js?helpers=${Date.now()}`);
         assert.equal(
@@ -1993,6 +2093,10 @@ setTimeout(() => process.exit(0), 30);
             "library/redis"
         );
         assert.equal(updater.__testing.stripRegistry("ghcr.io/owner/app"), "owner/app");
+        assert.equal(
+            updater.__testing.stripRegistry("lscr.io/linuxserver/swag"),
+            "linuxserver/swag"
+        );
         await withEnv(
             {
                 MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",

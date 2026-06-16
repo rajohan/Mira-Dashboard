@@ -9,12 +9,18 @@ import YAML from "yaml";
 
 import { db } from "../db.js";
 import { nonEmptyEnvFallback } from "../lib/values.js";
+import {
+    getScheduledJob,
+    registerScheduledJobAction,
+    removeScheduledJobsNotInAction,
+    upsertScheduledJob,
+} from "./scheduledJobs.js";
 
 const COMPOSE_FILENAME = "compose.yaml";
 const execFileAsync = promisify(execFile);
 const SUPPORTED_REGISTRIES = new Set(["docker.io", "ghcr.io", "lscr.io"]);
 const MAX_REGISTRY_TAG_PAGES = 50;
-const composeUpdateLocks = new Map<string, Promise<void>>();
+const composeUpdateLocks = new Map<string, { promise: Promise<void> }>();
 const drainedRegistryResponses = new WeakSet<Response>();
 
 function getDockerBin(): string {
@@ -27,11 +33,13 @@ function failedDiscoveryAppSlugs(register: DockerUpdaterStepResult): Set<string>
     }
     try {
         const parsed = JSON.parse(register.stderr) as {
-            failed?: Array<{ appSlug?: unknown }>;
+            failed?: Array<{ appSlug?: unknown; blocking?: unknown }>;
         };
         return new Set(
             (parsed.failed ?? []).flatMap((failure) =>
-                typeof failure.appSlug === "string" ? [failure.appSlug] : []
+                typeof failure.appSlug === "string" && failure.blocking !== false
+                    ? [failure.appSlug]
+                    : []
             )
         );
     } catch {
@@ -380,6 +388,9 @@ function imageRegistry(repo: string): string {
 function stripRegistry(repo: string) {
     if (isGhcrRepo(repo)) {
         return repo.replace(/^ghcr\.io\//u, "");
+    }
+    if (repo.startsWith("lscr.io/")) {
+        return repo.replace(/^lscr\.io\//u, "");
     }
     if (repo.startsWith("docker.io/") || repo.startsWith("index.docker.io/")) {
         return repo.replace(/^(?:index\.)?docker\.io\//u, "");
@@ -786,7 +797,7 @@ async function withComposeUpdateLock<T>(
     action: () => Promise<T>
 ): Promise<T> {
     const key = composeUpdateLockKey(service);
-    const previous = composeUpdateLocks.get(key) ?? Promise.resolve();
+    const previous = composeUpdateLocks.get(key)?.promise ?? Promise.resolve();
     let release!: () => void;
     const current = new Promise<void>((resolve) => {
         release = resolve;
@@ -795,7 +806,7 @@ async function withComposeUpdateLock<T>(
         await previous;
         await current;
     }
-    const next = waitForCurrent();
+    const next = { promise: waitForCurrent() };
     composeUpdateLocks.set(key, next);
     await previous;
     try {
@@ -1092,8 +1103,12 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
     }
     const discoveries = composeFiles.map(servicesFromCompose);
     const failedDiscoveries = discoveries.filter((discovery) => !discovery.ok);
-    const successfulDiscoveries = discoveries.filter((discovery) => discovery.ok);
-    const services = successfulDiscoveries.flatMap((discovery) => discovery.services);
+    const successfulOrPartialDiscoveries = discoveries.filter(
+        (discovery) => discovery.ok || discovery.services.length > 0
+    );
+    const services = successfulOrPartialDiscoveries.flatMap(
+        (discovery) => discovery.services
+    );
     const timestamp = nowIso();
     const upsert = db.prepare(
         `INSERT INTO docker_managed_services (
@@ -1128,7 +1143,7 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
         db.exec("BEGIN");
         txnStarted = true;
         for (const appSlug of new Set(
-            successfulDiscoveries.map((item) => item.appSlug)
+            successfulOrPartialDiscoveries.map((item) => item.appSlug)
         )) {
             const serviceNames = new Set(
                 services
@@ -1148,7 +1163,7 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
             }
         }
         const discoveredAppSlugs = new Set(
-            successfulDiscoveries.map((discovery) => discovery.appSlug)
+            successfulOrPartialDiscoveries.map((discovery) => discovery.appSlug)
         );
         const failedAppSlugs = new Set(
             failedDiscoveries.map((discovery) => discovery.appSlug)
@@ -1221,6 +1236,7 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
                 : JSON.stringify({
                       failed: failedDiscoveries.map((discovery) => ({
                           appSlug: discovery.appSlug,
+                          blocking: discovery.services.length === 0,
                           error: discovery.error,
                       })),
                   }),
@@ -1613,6 +1629,7 @@ export async function runDockerUpdaterService(
                 {
                     step: `manual-update-skipped:${serviceLabel(refreshedService)}`,
                     ok: true,
+                    code: "CONFLICT",
                     stdout: "No update available after registry poll",
                     stderr: "",
                 },
@@ -1646,6 +1663,49 @@ export async function runDockerUpdaterService(
         await pruneDanglingImagesBestEffort();
     }
     return [register, poll, ...applyResults];
+}
+
+export function registerDockerUpdaterScheduledJobs(): void {
+    const job = {
+        id: "docker.updater",
+        name: "Docker updater",
+        description: "Poll Docker registries and apply approved automatic updates.",
+        scheduleType: "interval",
+        intervalSeconds: 60 * 60,
+        actionKey: "docker.updater",
+        actionPayload: {},
+    } as const;
+    registerScheduledJobAction(
+        "docker.updater",
+        async () => {
+            const steps = await runDockerUpdaterService();
+            const failed = steps.filter((step) => !step.ok);
+            if (failed.length > 0) {
+                throw new Error(
+                    failed.map((step) => `${step.step}: ${step.stderr}`).join("\n")
+                );
+            }
+            return { steps };
+        },
+        { timeoutMs: 30 * 60 * 1000 }
+    );
+    db.exec("BEGIN");
+    try {
+        removeScheduledJobsNotInAction("docker.updater", [job.id]);
+        const existing = getScheduledJob(job.id);
+        upsertScheduledJob({
+            ...job,
+            enabled: existing?.enabled ?? true,
+            scheduleType: existing?.scheduleType ?? job.scheduleType,
+            intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
+            timeOfDay: existing?.timeOfDay ?? null,
+            cronExpression: existing?.cronExpression ?? null,
+        });
+        db.exec("COMMIT");
+    } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+    }
 }
 
 export const __testing = {

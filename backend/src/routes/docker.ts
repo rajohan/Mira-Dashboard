@@ -394,18 +394,20 @@ function parseJsonField<T>(value: string | undefined): T | null {
 
 /** Returns whether updater candIDate is present. */
 function hasUpdaterCandidate(service: DockerUpdaterServiceRow): boolean {
+    const hasDigestDrift = Boolean(
+        service.current_digest &&
+        service.latest_digest &&
+        service.current_digest !== service.latest_digest
+    );
     if (service.pin_mode === "digest") {
-        return Boolean(
-            service.current_digest &&
-            service.latest_digest &&
-            service.current_digest !== service.latest_digest
-        );
+        return hasDigestDrift;
     }
 
     return Boolean(
-        service.current_tag &&
-        service.latest_tag &&
-        service.current_tag !== service.latest_tag
+        (service.current_tag &&
+            service.latest_tag &&
+            service.current_tag !== service.latest_tag) ||
+        hasDigestDrift
     );
 }
 
@@ -764,7 +766,9 @@ async function runManualUpdaterForService(service: DockerUpdaterService) {
         .map((step) => step.stderr)
         .filter(Boolean)
         .join("\n");
-    const updated = steps.some((step) => step.step.startsWith("manual-update:"))
+    const updated = steps.some(
+        (step) => step.step.startsWith("manual-update:") && !failedSteps.includes(step)
+    )
         ? [service.id]
         : [];
 
