@@ -162,6 +162,10 @@ function nowIso(): string {
     return now.toISOString();
 }
 
+function normalizeComposeLabelValue(value: unknown): string {
+    return String(value ?? "").replaceAll("$$", "$");
+}
+
 function normalizeLabels(rawLabels: unknown): Map<string, string> {
     if (Array.isArray(rawLabels)) {
         return new Map(
@@ -170,7 +174,10 @@ function normalizeLabels(rawLabels: unknown): Map<string, string> {
                 const index = text.indexOf("=");
                 return index === -1
                     ? [text, ""]
-                    : [text.slice(0, index), text.slice(index + 1)];
+                    : [
+                          text.slice(0, index),
+                          normalizeComposeLabelValue(text.slice(index + 1)),
+                      ];
             })
         );
     }
@@ -178,7 +185,7 @@ function normalizeLabels(rawLabels: unknown): Map<string, string> {
         return new Map(
             Object.entries(rawLabels).map(([key, value]) => [
                 String(key),
-                String(value ?? ""),
+                normalizeComposeLabelValue(value),
             ])
         );
     }
@@ -986,7 +993,7 @@ function servicesFromCompose(composePath: string):
             const tagPattern = labels.get("mira.updater.tagPattern") || null;
             const tagPatternIsRegex = booleanLabel(
                 labels.get("mira.updater.tagPatternIsRegex"),
-                false
+                true
             );
             const currentTag = image.tag ?? (image.digest ? null : "latest");
             const pinMode: "digest" | "tag" =

@@ -420,8 +420,7 @@ process.stdout.write("updated\n");
   safeRegex:
     image: repo/safe:v1
     labels:
-      mira.updater.tagPattern: "^v[0-9]+$"
-      mira.updater.tagPatternIsRegex: "true"
+      mira.updater.tagPattern: "^v[0-9]+$$"
 `,
             "utf8"
         );
@@ -447,6 +446,22 @@ process.stdout.write("updated\n");
                 assert.equal(services.services[1].metadata.platform, "linux/amd64");
                 assert.equal(services.services[2].tagMatchType, "regex");
                 assert.equal(services.services[2].tagMatchPattern, "^v[0-9]+$");
+                const exactCompose = path.join(tempDir, "exact-pattern.yaml");
+                await writeFile(
+                    exactCompose,
+                    `services:
+  exact:
+    image: repo/exact:stable
+    labels:
+      mira.updater.tagPattern: latest
+      mira.updater.tagPatternIsRegex: "false"
+`,
+                    "utf8"
+                );
+                const exactServices = updater.__testing.servicesFromCompose(exactCompose);
+                assert.equal(exactServices.ok, true);
+                assert.equal(exactServices.services[0].tagMatchType, "exact");
+                assert.equal(exactServices.services[0].tagMatchPattern, "latest");
                 const invalidRegexCompose = path.join(tempDir, "invalid-regex.yaml");
                 await writeFile(
                     invalidRegexCompose,
