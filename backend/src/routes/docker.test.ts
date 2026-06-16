@@ -1950,18 +1950,33 @@ describe("docker routes", { concurrency: false }, () => {
     it("runs manual updater through the dashboard service and maps route errors", async () => {
         resetDockerUpdaterFixtures();
         const { __testing } = await import("./docker.js");
-        __testing.setRunDockerUpdaterServiceForTests(async (serviceId?: number) => [
-            { step: "register-services", ok: true, stdout: "", stderr: "" },
-            { step: "poll", ok: true, stdout: "", stderr: "" },
-            {
-                step: `manual-update:media/app:${serviceId ?? "none"}`,
-                ok: true,
-                stdout: "updated",
-                stderr: "",
-            },
-        ]);
+        __testing.setRunDockerUpdaterServiceForTests(async (serviceId?: number) => {
+            db.prepare(
+                `UPDATE docker_managed_services
+                 SET current_tag = '1.0.1', current_digest = 'sha256:new',
+                     latest_tag = '1.0.1', latest_digest = 'sha256:new',
+                     last_status = 'updated'
+                 WHERE id = ?`
+            ).run(serviceId ?? -1);
+            return [
+                { step: "register-services", ok: true, stdout: "", stderr: "" },
+                { step: "poll", ok: true, stdout: "", stderr: "" },
+                {
+                    step: `manual-update:media/app:${serviceId ?? "none"}`,
+                    ok: true,
+                    stdout: "updated",
+                    stderr: "",
+                },
+            ];
+        });
         try {
             const success = await requestJson<{
+                service: {
+                    currentDigest: string | null;
+                    currentTag: string | null;
+                    lastStatus: string | null;
+                    updateAvailable: boolean;
+                };
                 success: boolean;
                 result: { summary: { updated: number; failed: number } };
                 stderr: string;
@@ -1972,6 +1987,10 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(success.status, 200);
             assert.equal(success.body.success, true);
             assert.deepEqual(success.body.result.summary, { updated: 1, failed: 0 });
+            assert.equal(success.body.service.currentTag, "1.0.1");
+            assert.equal(success.body.service.currentDigest, "sha256:new");
+            assert.equal(success.body.service.lastStatus, "updated");
+            assert.equal(success.body.service.updateAvailable, false);
             assert.equal(success.body.stderr, "");
         } finally {
             __testing.setRunDockerUpdaterServiceForTests(undefined);

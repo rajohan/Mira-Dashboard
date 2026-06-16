@@ -959,6 +959,7 @@ describe("server bootstrap", () => {
             process.env.NODE_ENV = "production";
             server.emit("close");
             const closeListenersBeforeScheduler = server.listenerCount("close");
+            db.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run("docker.updater");
             handleServerListening();
             const closeListenersAfterScheduler = server.listenerCount("close");
             handleServerListening();

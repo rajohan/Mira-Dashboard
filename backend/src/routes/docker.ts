@@ -1250,9 +1250,10 @@ export default function dockerRoutes(app: express.Application): void {
                 });
                 return;
             }
+            const updatedService = await getDockerUpdaterServiceById(serviceId);
             res.json({
                 success: result.success,
-                service,
+                service: updatedService,
                 result: result.output,
                 stderr: result.stderr,
             });
