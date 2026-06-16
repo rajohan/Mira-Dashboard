@@ -12,8 +12,8 @@ import { __testing as logsTesting } from "./routes/logs.js";
 
 /** Provides a minimal WebSocket stand-in for gateway client tests. */
 class FakeWebSocket {
-    readonly sent: string[] = [];
     private readonly listeners = new Map<string, Array<(...args: unknown[]) => void>>();
+    readonly sent: string[] = [];
     closed = false;
     readyState: number = WebSocket.OPEN;
 
@@ -293,30 +293,38 @@ describe("gateway state and helper utilities", () => {
 
     it("covers Gateway init warning fallback branches", async () => {
         const warn = mock.method(console, "warn", () => {});
-        const originalSetTimeout = globalThis.setTimeout;
-        const originalClearTimeout = globalThis.clearTimeout;
+        const originalSetTimeout = setTimeout;
+        const originalClearTimeout = clearTimeout;
         const scheduledDelays: number[] = [];
         const cancelledTimers = new Set<number>();
         let nextTimerId = 0;
         CapturingGatewayClient.instances = [];
         __testing.setGatewayClientConstructorForTest(CapturingGatewayClient);
 
-        globalThis.setTimeout = ((callback: () => void, delay?: number) => {
-            scheduledDelays.push(delay ?? 0);
-            nextTimerId += 1;
-            const timerId = nextTimerId;
-            queueMicrotask(() => {
-                if (!cancelledTimers.has(timerId)) {
-                    callback();
-                }
-            });
-            return { id: timerId, unref: () => {} } as unknown as NodeJS.Timeout;
-        }) as typeof setTimeout;
-        globalThis.clearTimeout = ((timeout?: NodeJS.Timeout | number) => {
-            if (typeof timeout === "object" && timeout && "id" in timeout) {
-                cancelledTimers.add(Number(timeout.id));
-            }
-        }) as typeof clearTimeout;
+        Object.defineProperties(globalThis, {
+            clearTimeout: {
+                configurable: true,
+                value: ((timeout?: NodeJS.Timeout | number) => {
+                    if (typeof timeout === "object" && timeout && "id" in timeout) {
+                        cancelledTimers.add(Number(timeout.id));
+                    }
+                }) as typeof clearTimeout,
+            },
+            setTimeout: {
+                configurable: true,
+                value: ((callback: () => void, delay?: number) => {
+                    scheduledDelays.push(delay ?? 0);
+                    nextTimerId += 1;
+                    const timerId = nextTimerId;
+                    queueMicrotask(() => {
+                        if (!cancelledTimers.has(timerId)) {
+                            callback();
+                        }
+                    });
+                    return { id: timerId, unref: () => {} } as unknown as NodeJS.Timeout;
+                }) as typeof setTimeout,
+            },
+        });
 
         try {
             assert.ok(openclawHome);
@@ -348,8 +356,16 @@ describe("gateway state and helper utilities", () => {
                 true
             );
         } finally {
-            globalThis.setTimeout = originalSetTimeout;
-            globalThis.clearTimeout = originalClearTimeout;
+            Object.defineProperties(globalThis, {
+                clearTimeout: {
+                    configurable: true,
+                    value: originalClearTimeout,
+                },
+                setTimeout: {
+                    configurable: true,
+                    value: originalSetTimeout,
+                },
+            });
             __testing.resetGatewayStateForTest();
             warn.mock.restore();
         }
@@ -1086,7 +1102,7 @@ describe("gateway state and helper utilities", () => {
         client.responses.set("sessions.list", {
             sessions: [
                 { key: "agent:invalid-date:main", updatedAt: "not a date" },
-                { key: "agent:invalid-number:main", updatedAt: Number.NaN },
+                { key: "agent:invalid-number:main", updatedAt: NaN },
                 { key: "agent:valid-string:main", updatedAt: "2026-05-16T13:00:00.000Z" },
                 { key: "agent:valid-null:main", updatedAt: null },
             ],

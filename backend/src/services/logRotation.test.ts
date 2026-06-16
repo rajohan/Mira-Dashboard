@@ -21,6 +21,18 @@ import { promisify } from "node:util";
 
 import { withEnv } from "../testUtils/env.js";
 
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
+async function ignoreRejection(promise: Promise<unknown> | undefined): Promise<void> {
+    try {
+        await promise;
+    } catch {
+        // Best-effort test cleanup.
+    }
+}
+
 const execFileAsync = promisify(execFile);
 const modulePath = fileURLToPath(new URL("logRotation.ts", import.meta.url));
 const suiteDbDir = await mkdtemp(path.join(os.tmpdir(), "mira-log-rotation-db-"));
@@ -41,7 +53,7 @@ async function writeConfig(root: string, config: unknown) {
 }
 
 function seedState(data: unknown) {
-    const timestamp = new Date().toISOString();
+    const timestamp = dateToISOString(new Date());
     db.prepare(
         `INSERT OR REPLACE INTO cache_entries (
             key, data_json, source, updated_at, last_attempt_at, expires_at,
@@ -495,13 +507,8 @@ describe("log rotation service", { concurrency: false }, () => {
             __testing.hasRotatedInCadence({ lastRotatedAt: "not-a-date" }, "daily"),
             false
         );
-        assert.equal(
-            __testing.hasRotatedInCadence(
-                { lastRotatedAt: new Date().toISOString() },
-                "weekly"
-            ),
-            true
-        );
+        const lastRotatedAt = dateToISOString(new Date());
+        assert.equal(__testing.hasRotatedInCadence({ lastRotatedAt }, "weekly"), true);
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
         assert.equal(
@@ -1511,7 +1518,7 @@ describe("log rotation service", { concurrency: false }, () => {
 
         seedState({
             version: 1,
-            files: { [daily]: { lastRotatedAt: new Date().toISOString() } },
+            files: { [daily]: { lastRotatedAt: dateToISOString(new Date()) } },
             lastRun: { ok: true },
         });
         const notDue = await runLogRotationService({ dryRun: false, config });
@@ -1866,10 +1873,34 @@ describe("log rotation service", { concurrency: false }, () => {
 
             assert.equal(summary.ok, false);
             assert.match(
-                (summary.errors[0] as { message?: string } | undefined)?.message ?? "",
+                (summary.errors[0] as undefined | { message?: string })?.message ?? "",
                 /already running/u
             );
             assert.equal(await readFile(file, "utf8"), "log");
+        } finally {
+            await rm(lockPath, { force: true });
+        }
+    });
+
+    it("recovers from whitespace-only non-dry-run rotation locks", async () => {
+        const root = path.join(tempDir, "empty-lock-logs");
+        await mkdir(root);
+        const file = path.join(root, "app.log");
+        await writeFile(file, "log", "utf8");
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [{ name: "empty-lock", paths: [file], maxSizeMb: 0 }],
+        });
+        const lockPath = testLockPath(tempDir);
+        await mkdir(path.dirname(lockPath), { recursive: true });
+        await writeFile(lockPath, " \n", "utf8");
+
+        try {
+            const summary = await runLogRotationService({ dryRun: false, config });
+
+            assert.equal(summary.ok, true);
+            assert.doesNotMatch(JSON.stringify(summary.errors), /already running/u);
         } finally {
             await rm(lockPath, { force: true });
         }
@@ -1899,6 +1930,37 @@ describe("log rotation service", { concurrency: false }, () => {
         }
     });
 
+    it("recovers when a stale lock disappears before it can be read", async () => {
+        const lockPath = testLockPath(tempDir);
+        await mkdir(path.dirname(lockPath), { recursive: true });
+        await writeFile(lockPath, "not-a-pid\n", "utf8");
+        const originalOpen = fsPromises.open;
+        let racedRead = false;
+        const openMock = mock.method(
+            fsPromises,
+            "open",
+            (target: PathLike, flags: string | number, mode?: number) => {
+                if (String(target) === lockPath && flags === "r" && !racedRead) {
+                    racedRead = true;
+                    const error = new Error("lock disappeared") as NodeJS.ErrnoException;
+                    error.code = "ENOENT";
+                    throw error;
+                }
+                return originalOpen.call(fsPromises, target, flags, mode);
+            }
+        );
+
+        try {
+            const lock = await __testing.acquireLogRotationLock(false);
+            assert.ok(lock);
+            assert.equal(racedRead, true);
+            await lock.close();
+        } finally {
+            openMock.mock.restore();
+            await rm(lockPath, { force: true });
+        }
+    });
+
     it("allows only one concurrent caller to reclaim a stale lock", async () => {
         const lockPath = testLockPath(tempDir);
         await mkdir(path.dirname(lockPath), { recursive: true });
@@ -1918,12 +1980,8 @@ describe("log rotation service", { concurrency: false }, () => {
             assert.equal(acquired.length, 1);
             assert.equal(locks.filter((handle) => handle === null).length, 1);
         } finally {
-            await Promise.all(
-                locks.map((handle) =>
-                    handle ? handle.close().catch(() => {}) : Promise.resolve()
-                )
-            );
-            await rm(lockPath, { force: true }).catch(() => {});
+            await Promise.all(locks.map((handle) => ignoreRejection(handle?.close())));
+            await ignoreRejection(rm(lockPath, { force: true }));
         }
     });
 
@@ -1940,9 +1998,9 @@ describe("log rotation service", { concurrency: false }, () => {
         try {
             assert.ok(lock);
         } finally {
-            await lock?.close().catch(() => {});
-            await rm(lockPath, { force: true }).catch(() => {});
-            await rm(reclaimPath, { force: true, recursive: true }).catch(() => {});
+            await ignoreRejection(lock?.close());
+            await ignoreRejection(rm(lockPath, { force: true }));
+            await ignoreRejection(rm(reclaimPath, { force: true, recursive: true }));
         }
     });
 
@@ -2134,17 +2192,19 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(await readFile(lockPath, "utf8"), "replacement\n");
     });
 
-    it("ignores missing lock paths when releasing a lock", async () => {
+    it("surfaces missing lock paths when releasing a lock", async () => {
         const lockPath = testLockPath(tempDir);
         const lock = await __testing.acquireLogRotationLock(false);
         assert.ok(lock);
 
         await rm(lockPath, { force: true });
 
-        await __testing.releaseLogRotationLock(lock);
+        await assert.rejects(__testing.releaseLogRotationLock(lock), {
+            code: "ENOENT",
+        });
     });
 
-    it("ignores unexpected lock stat failures during release", async () => {
+    it("surfaces unexpected lock stat failures during release", async () => {
         const lockPath = testLockPath(tempDir);
         const lock = await __testing.acquireLogRotationLock(false);
         assert.ok(lock);
@@ -2165,9 +2225,41 @@ describe("log rotation service", { concurrency: false }, () => {
         );
 
         try {
-            await __testing.releaseLogRotationLock(lock);
+            await assert.rejects(__testing.releaseLogRotationLock(lock), {
+                message: /release stat denied/u,
+            });
         } finally {
             statMock.mock.restore();
+            await rm(lockPath, { force: true });
+        }
+    });
+
+    it("surfaces lock unlink failures during release", async () => {
+        const lockPath = testLockPath(tempDir);
+        const lock = await __testing.acquireLogRotationLock(false);
+        assert.ok(lock);
+        const originalUnlink = fsPromises.unlink.bind(fsPromises);
+        const unlinkMock = mock.method(
+            fsPromises,
+            "unlink",
+            (target: Parameters<typeof fsPromises.unlink>[0]) => {
+                if (String(target) === lockPath) {
+                    const error = new Error(
+                        "release unlink denied"
+                    ) as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    return Promise.reject(error);
+                }
+                return originalUnlink(target);
+            }
+        );
+
+        try {
+            await assert.rejects(__testing.releaseLogRotationLock(lock), {
+                message: /release unlink denied/u,
+            });
+        } finally {
+            unlinkMock.mock.restore();
             await rm(lockPath, { force: true });
         }
     });
@@ -2638,7 +2730,7 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(summary.groups[0]?.name, "target");
         assert.equal(summary.ok, false);
         assert.match(
-            (summary.errors[0] as { message?: string } | undefined)?.message ?? "",
+            (summary.errors[0] as undefined | { message?: string })?.message ?? "",
             /No approved roots exist|Unsafe path/u
         );
     });
@@ -2883,7 +2975,8 @@ describe("log rotation service", { concurrency: false }, () => {
             /Refusing non-file path/u
         );
         (fsPromises.open as unknown as { mock: { restore(): void } }).mock.restore();
-        assert.equal(await realOpen(file).then((handle) => handle.close()), undefined);
+        const handle = await realOpen(file);
+        assert.equal(await handle.close(), undefined);
         await assert.rejects(
             () =>
                 __testing.openVerifiedLogFile(file, [path.join(tempDir, "missing-root")]),

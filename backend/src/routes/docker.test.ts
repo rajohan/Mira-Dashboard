@@ -245,6 +245,10 @@ if (command === "volume ls --format {{json .}}") {
   process.exit(0);
 }
 if (args[0] === "logs") {
+  if (args[2]?.includes(".")) {
+    process.stderr.write("invalid tail\n");
+    process.exit(125);
+  }
   process.stdout.write("stdout log\n");
   process.stderr.write("stderr log\n");
   process.exit(0);
@@ -549,7 +553,8 @@ describe("docker routes", { concurrency: false }, () => {
         await server?.close();
         const { __testing } = await import("./docker.js");
         await Promise.all(
-            [...__testing.dockerExecJobs.values()]
+            __testing.dockerExecJobs
+                .values()
                 .map((job) => job.process)
                 .filter(Boolean)
                 .map((child) => child as ChildProcess)
@@ -1186,6 +1191,28 @@ describe("docker routes", { concurrency: false }, () => {
                 /plain failure/u
             );
 
+            __testing.dockerExecJobs.set("settled-fail", {
+                id: "settled-fail",
+                containerId: "app",
+                status: "running",
+                code: null,
+                stdout: "",
+                stderr: "",
+                startedAt: Date.now(),
+                endedAt: null,
+            });
+            __testing.setDockerBinForTests("/path/that/does/not/exist");
+            try {
+                await __testing.settleDockerExecJob("app", "echo hi", "settled-fail");
+            } finally {
+                __testing.setDockerBinForTests(undefined);
+            }
+            assert.equal(__testing.dockerExecJobs.get("settled-fail")?.code, 1);
+            assert.match(
+                __testing.dockerExecJobs.get("settled-fail")?.stderr || "",
+                /ENOENT/u
+            );
+
             __testing.dockerExecJobs.clear();
             const directRun = await __testing.runDockerExecCommand(
                 "app",
@@ -1603,6 +1630,13 @@ describe("docker routes", { concurrency: false }, () => {
         );
         assert.equal(logsWithDefaultTail.status, 200);
         assert.equal(logsWithDefaultTail.body.content, "stdout log\n\nstderr log");
+
+        const logsWithFractionalTail = await requestJson<{ content: string }>(
+            server,
+            "/api/docker/containers/abc123/logs?tail=10.9"
+        );
+        assert.equal(logsWithFractionalTail.status, 200);
+        assert.equal(logsWithFractionalTail.body.content, "stdout log\n\nstderr log");
 
         const invalidDetails = await requestJson<{ error: string }>(
             server,

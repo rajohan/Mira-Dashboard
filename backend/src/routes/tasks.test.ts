@@ -9,6 +9,10 @@ import { db } from "../db.js";
 import gateway from "../gateway.js";
 import tasksRoutes, { __testing } from "./tasks.js";
 
+function compareStrings(left: string, right: string): number {
+    return left === right ? 0 : left > right ? 1 : -1;
+}
+
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
@@ -211,8 +215,8 @@ describe("tasks routes", () => {
         assert.equal(frontend.state, "OPEN");
         assert.deepEqual(frontend.assignees, []);
         assert.deepEqual(
-            frontend.labels.map((label) => label.name).sort(),
-            ["custom", "priority-medium", "todo"].sort()
+            frontend.labels.map((label) => label.name).sort(compareStrings),
+            ["custom", "priority-medium", "todo"].sort(compareStrings)
         );
 
         const nonArrayLabels = __testing.labelsFromTask({
@@ -221,7 +225,10 @@ describe("tasks routes", () => {
             status: "done",
             priority: "high",
         } as never);
-        assert.deepEqual(nonArrayLabels.sort(), ["done", "priority-high"].sort());
+        assert.deepEqual(
+            nonArrayLabels.sort(compareStrings),
+            ["done", "priority-high"].sort(compareStrings)
+        );
 
         const invalidLabels = __testing.labelsFromTask({
             ...baseTask,
@@ -229,7 +236,10 @@ describe("tasks routes", () => {
             status: "blocked",
             priority: "low",
         } as never);
-        assert.deepEqual(invalidLabels.sort(), ["blocked", "priority-low"].sort());
+        assert.deepEqual(
+            invalidLabels.sort(compareStrings),
+            ["blocked", "priority-low"].sort(compareStrings)
+        );
     });
 
     it("lists tasks with cron automation details from the gateway", async () => {
@@ -359,8 +369,8 @@ describe("tasks routes", () => {
                 (item) => item.number === malformedCreated.body.number
             );
             assert.deepEqual(
-                malformedTask?.labels.map((label) => label.name).sort(),
-                ["priority-medium", "todo"].sort()
+                malformedTask?.labels.map((label) => label.name).sort(compareStrings),
+                ["priority-medium", "todo"].sort(compareStrings)
             );
             assert.equal(malformedTask?.automation, undefined);
 
@@ -427,8 +437,8 @@ describe("tasks routes", () => {
         });
         assert.equal(defaultCreated.status, 201);
         assert.deepEqual(
-            defaultCreated.body.labels.map((label) => label.name).sort(),
-            ["todo", "priority-medium"].sort()
+            defaultCreated.body.labels.map((label) => label.name).sort(compareStrings),
+            ["todo", "priority-medium"].sort(compareStrings)
         );
     });
 
@@ -455,8 +465,8 @@ describe("tasks routes", () => {
         assert.equal(created.body.body, "Initial body");
         assert.equal(created.body.state, "OPEN");
         assert.deepEqual(
-            created.body.labels.map((label) => label.name).sort(),
-            ["backend", "in-progress", "priority-high"].sort()
+            created.body.labels.map((label) => label.name).sort(compareStrings),
+            ["backend", "in-progress", "priority-high"].sort(compareStrings)
         );
         assert.deepEqual(created.body.assignees, [
             { login: TASK_ASSIGNEES.raymond.id, name: TASK_ASSIGNEES.raymond.id },
@@ -510,8 +520,8 @@ describe("tasks routes", () => {
         assert.equal(patched.body.state, "CLOSED");
         assert.equal(patched.body.automation, undefined);
         assert.deepEqual(
-            patched.body.labels.map((label) => label.name).sort(),
-            ["done", "priority-low"].sort()
+            patched.body.labels.map((label) => label.name).sort(compareStrings),
+            ["done", "priority-low"].sort(compareStrings)
         );
 
         const moved = await requestJson<FrontendTask>(
@@ -523,8 +533,8 @@ describe("tasks routes", () => {
         assert.equal(moved.status, 200);
         assert.equal(moved.body.state, "OPEN");
         assert.deepEqual(
-            moved.body.labels.map((label) => label.name).sort(),
-            ["blocked", "priority-low"].sort()
+            moved.body.labels.map((label) => label.name).sort(compareStrings),
+            ["blocked", "priority-low"].sort(compareStrings)
         );
 
         const patchedInProgress = await requestJson<FrontendTask>(
@@ -537,8 +547,8 @@ describe("tasks routes", () => {
         );
         assert.equal(patchedInProgress.status, 200);
         assert.deepEqual(
-            patchedInProgress.body.labels.map((label) => label.name).sort(),
-            ["in-progress", "priority-low"].sort()
+            patchedInProgress.body.labels.map((label) => label.name).sort(compareStrings),
+            ["in-progress", "priority-low"].sort(compareStrings)
         );
 
         const patchedBlocked = await requestJson<FrontendTask>(
@@ -551,8 +561,8 @@ describe("tasks routes", () => {
         );
         assert.equal(patchedBlocked.status, 200);
         assert.deepEqual(
-            patchedBlocked.body.labels.map((label) => label.name).sort(),
-            ["blocked", "priority-low"].sort()
+            patchedBlocked.body.labels.map((label) => label.name).sort(compareStrings),
+            ["blocked", "priority-low"].sort(compareStrings)
         );
 
         const patchedTodo = await requestJson<FrontendTask>(
@@ -565,8 +575,8 @@ describe("tasks routes", () => {
         );
         assert.equal(patchedTodo.status, 200);
         assert.deepEqual(
-            patchedTodo.body.labels.map((label) => label.name).sort(),
-            ["priority-low", "todo"].sort()
+            patchedTodo.body.labels.map((label) => label.name).sort(compareStrings),
+            ["priority-low", "todo"].sort(compareStrings)
         );
 
         const patchedWithoutLabels = await requestJson<FrontendTask>(
@@ -579,8 +589,10 @@ describe("tasks routes", () => {
         );
         assert.equal(patchedWithoutLabels.status, 200);
         assert.deepEqual(
-            patchedWithoutLabels.body.labels.map((label) => label.name).sort(),
-            ["priority-low", "todo"].sort()
+            patchedWithoutLabels.body.labels
+                .map((label) => label.name)
+                .sort(compareStrings),
+            ["priority-low", "todo"].sort(compareStrings)
         );
 
         const assigned = await requestJson<FrontendTask>(

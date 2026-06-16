@@ -37,11 +37,11 @@ export default function sessionsRoutes(app: express.Application): void {
 
     app.post("/api/sessions/:id/action", (async (req, res) => {
         const sessionKey = stringFallback(req.params.id).trim();
-        const action = stringFallback(req.body?.action).trim().toLowerCase();
         if (!isValidSessionKey(sessionKey)) {
             res.status(400).json({ error: "Invalid session id" });
             return;
         }
+        const action = stringFallback(req.body?.action).trim().toLowerCase();
 
         try {
             if (action === "stop") {

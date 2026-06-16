@@ -347,7 +347,10 @@ function cleanupJobs(): void {
     if (jobs.size < MAX_JOBS) {
         return;
     }
-    const entries = [...jobs.values()].sort((a, b) => a.startedAt - b.startedAt);
+    const entries = jobs
+        .values()
+        .toArray()
+        .sort((a, b) => a.startedAt - b.startedAt);
     let overflow = entries.length - (MAX_JOBS - 1);
 
     for (const job of entries) {
@@ -507,9 +510,14 @@ export default function execRoutes(
             return;
         }
 
-        void runPromise
-            .then((result) => completeExecJob(jobId, result))
-            .catch((error) => failExecJob(jobId, error));
+        void (async () => {
+            try {
+                const result = await runPromise;
+                completeExecJob(jobId, result);
+            } catch (error) {
+                failExecJob(jobId, error);
+            }
+        })();
 
         res.json({ jobId } satisfies ExecStartResponse);
     }) as RequestHandler);
@@ -548,27 +556,29 @@ export default function execRoutes(
 
             // Force kill after 3 seconds if still running
             setTimeout(() => {
-                if (job.process && job.status === "signaled") {
-                    const processId = job.process.pid;
-                    try {
-                        if (typeof processId === "number") {
-                            process.kill(-processId, "SIGKILL");
+                if (!job.process || job.status !== "signaled") {
+                    return;
+                }
+
+                const processId = job.process.pid;
+                try {
+                    if (typeof processId === "number") {
+                        process.kill(-processId, "SIGKILL");
+                        markExecJobForcedKilled(job);
+                    }
+                } catch (groupKillError) {
+                    if (isProcessGoneError(groupKillError)) {
+                        return;
+                    }
+                    if (typeof processId === "number") {
+                        try {
+                            process.kill(processId, "SIGKILL");
                             markExecJobForcedKilled(job);
-                        }
-                    } catch (groupKillError) {
-                        if (isProcessGoneError(groupKillError)) {
-                            return;
-                        }
-                        if (typeof processId === "number") {
-                            try {
-                                process.kill(processId, "SIGKILL");
-                                markExecJobForcedKilled(job);
-                            } catch (processKillError) {
-                                if (isProcessGoneError(processKillError)) {
-                                    return;
-                                }
+                        } catch (processKillError) {
+                            if (isProcessGoneError(processKillError)) {
                                 return;
                             }
+                            return;
                         }
                     }
                 }

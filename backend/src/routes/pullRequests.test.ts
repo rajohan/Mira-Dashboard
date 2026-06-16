@@ -10,6 +10,10 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import express from "express";
 
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
@@ -129,7 +133,7 @@ function readDeploymentLockFromDb(tempDir: string): string | undefined {
     return withDeploymentDb(tempDir, (deploymentDb) => {
         const row = deploymentDb
             .prepare("SELECT job_id FROM deployment_lock WHERE id = 1")
-            .get() as { job_id: string } | undefined;
+            .get() as undefined | { job_id: string };
         return row?.job_id;
     });
 }
@@ -1039,7 +1043,9 @@ describe("pull request routes", () => {
                 forceTimer,
                 {},
                 false,
-                (timer: NodeJS.Timeout) => clearCalls.push(timer)
+                (timer: NodeJS.Timeout) => {
+                    clearCalls.push(timer);
+                }
             ),
             null
         );
@@ -1343,7 +1349,7 @@ describe("pull request routes", () => {
     it("covers deployment lock lifecycle helper edge cases", async () => {
         const { __testing } = await import(`./pullRequests.js?locks=${randomUUID()}`);
         const { db: deploymentDb } = await import("../db.js");
-        const freshTimestamp = new Date().toISOString();
+        const freshTimestamp = dateToISOString(new Date());
         clearDeploymentState(tempDir);
 
         try {
@@ -1527,6 +1533,25 @@ describe("pull request routes", () => {
             assert.equal(failedJob.status, "failed");
             assert.match(failedJob.note, /pull failed/u);
             assert.equal(__testing.readDeploymentLock(), undefined);
+
+            const originalReportedConsoleError = console.error;
+            const reportedErrors: unknown[][] = [];
+            console.error = (...args: unknown[]) => {
+                reportedErrors.push(args);
+            };
+            try {
+                await __testing.runDeploymentJobAndReportErrors(job, async () => {
+                    throw new Error("background deploy failed");
+                });
+            } finally {
+                console.error = originalReportedConsoleError;
+            }
+            assert.deepEqual(reportedErrors, [
+                [
+                    "[pullRequestsRoutes] Background deploy failed:",
+                    "background deploy failed",
+                ],
+            ]);
 
             const startJob = __testing.startDeployLatest();
             assert.equal(startJob.status, "building");
@@ -2180,7 +2205,7 @@ describe("pull request routes", () => {
         const { __testing } = await import(
             `./pullRequests.js?merge-active=${randomUUID()}`
         );
-        const activeUpdatedAt = new Date().toISOString();
+        const activeUpdatedAt = dateToISOString(new Date());
         __testing.writeDeploymentJob({
             id: "merge-active-job",
             status: "building",
@@ -2449,7 +2474,7 @@ describe("pull request routes", () => {
             const { __testing } = await import(
                 `./pullRequests.js?active-deploy=${randomUUID()}`
             );
-            const activeUpdatedAt = new Date().toISOString();
+            const activeUpdatedAt = dateToISOString(new Date());
             __testing.writeDeploymentJob({
                 id: "active-job",
                 status: "building",

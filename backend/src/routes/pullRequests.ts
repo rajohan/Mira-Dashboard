@@ -9,6 +9,10 @@ import { db, miraDbPath } from "../db.js";
 import { asyncRoute as baseAsyncRoute, errorMessage } from "../lib/errors.js";
 import { nonEmptyEnvFallback } from "../lib/values.js";
 
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
 const execFileAsync = promisify(execFile);
 
 function resolveConfiguredRoot(envName: string, fallback: string): string {
@@ -128,7 +132,7 @@ interface ProductionCheckoutStatus {
     statusShort?: string;
 }
 
-/** Represents git worktree. */
+/** Represents Git worktree. */
 interface GitWorktree {
     path: string;
     branch?: string;
@@ -321,7 +325,7 @@ function acquireDeploymentLock(jobId: string): void {
     try {
         db.prepare(
             "INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)"
-        ).run(jobId, new Date().toISOString());
+        ).run(jobId, dateToISOString(new Date()));
     } catch (error) {
         if (error instanceof Error && /constraint/i.test(error.message)) {
             throw new Error("Dashboard deploy already in progress", { cause: error });
@@ -332,7 +336,7 @@ function acquireDeploymentLock(jobId: string): void {
 
 /** Refreshes the active deploy heartbeat while long-running work continues. */
 function refreshDeploymentHeartbeat(job: DeploymentJob): DeploymentJob {
-    const updatedJob = { ...job, updatedAt: new Date().toISOString() };
+    const updatedJob = { ...job, updatedAt: dateToISOString(new Date()) };
     writeDeploymentJob(updatedJob);
     db.prepare(
         "UPDATE deployment_lock SET updated_at = ? WHERE id = 1 AND job_id = ?"
@@ -552,10 +556,12 @@ async function runGhJsonLines<T>(
         let forceKillTimer: NodeJS.Timeout | null = null;
         let preserveForceKillTimer = false;
         const armForceKillTimer = () => {
-            if (!forceKillTimer) {
-                forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
-                forceKillTimer.unref();
+            if (forceKillTimer) {
+                return;
             }
+
+            forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+            forceKillTimer.unref();
         };
         const timeout = setTimeout(() => {
             child.kill("SIGTERM");
@@ -788,13 +794,13 @@ function validatePrNumber(value: unknown): number {
         throw new Error("Invalid pull request number");
     }
     const number = Number(value);
-    if (!Number.isInteger(number) || number <= 0) {
+    if (!Number.isSafeInteger(number) || number <= 0) {
         throw new Error("Invalid pull request number");
     }
     return number;
 }
 
-/** Parses git worktrees. */
+/** Parses Git worktrees. */
 function parseGitWorktrees(output: string): GitWorktree[] {
     return output
         .trim()
@@ -1129,13 +1135,13 @@ async function scheduleRestartHealthCheck(job: DeploymentJob): Promise<CommandRe
     const okJob: DeploymentJob = {
         ...job,
         status: "ok",
-        updatedAt: new Date().toISOString(),
+        updatedAt: dateToISOString(new Date()),
         note: "Restarted service and health check passed",
     };
     const failedJob: DeploymentJob = {
         ...job,
         status: "failed",
-        updatedAt: new Date().toISOString(),
+        updatedAt: dateToISOString(new Date()),
         note: "Restart was triggered, but health check failed",
     };
 
@@ -1191,7 +1197,7 @@ async function runDeploymentJob(job: DeploymentJob): Promise<void> {
         const restartScheduled: DeploymentJob = {
             ...currentJob,
             status: "restart-scheduled",
-            updatedAt: new Date().toISOString(),
+            updatedAt: dateToISOString(new Date()),
             commit: commit.trim(),
             note: "Build passed; restart + health check scheduled",
         };
@@ -1201,7 +1207,7 @@ async function runDeploymentJob(job: DeploymentJob): Promise<void> {
         const failed: DeploymentJob = {
             ...currentJob,
             status: "failed",
-            updatedAt: new Date().toISOString(),
+            updatedAt: dateToISOString(new Date()),
             note: errorMessage(error, "Deploy failed"),
         };
         try {
@@ -1220,9 +1226,20 @@ function reportBackgroundDeploymentError(error: unknown): void {
     );
 }
 
+async function runDeploymentJobAndReportErrors(
+    job: DeploymentJob,
+    runner = runDeploymentJob
+): Promise<void> {
+    try {
+        await runner(job);
+    } catch (error) {
+        reportBackgroundDeploymentError(error);
+    }
+}
+
 /** Starts deploy latest in the background. */
 function startDeployLatest(lockHeldBy?: string): DeploymentJob {
-    const now = new Date().toISOString();
+    const now = dateToISOString(new Date());
     const job: DeploymentJob = {
         id: randomUUID(),
         status: "building",
@@ -1244,7 +1261,7 @@ function startDeployLatest(lockHeldBy?: string): DeploymentJob {
     }
     try {
         writeDeploymentJob(job);
-        void runDeploymentJob(job).catch(reportBackgroundDeploymentError);
+        void runDeploymentJobAndReportErrors(job);
         return job;
     } catch (error) {
         releaseDeploymentLock(job.id);
@@ -1462,6 +1479,7 @@ export const __testing = {
     readDeploymentLock,
     readDeploymentJob,
     reportBackgroundDeploymentError,
+    runDeploymentJobAndReportErrors,
     releaseDeploymentLock,
     runDeploymentJob,
     isPathInsideRoot,

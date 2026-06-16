@@ -267,15 +267,11 @@ describe("settings routes", () => {
                 }
             );
             assert.equal(alternateUpdate.status, 200);
-            assert.equal(
-                JSON.parse(
-                    await readFile(
-                        path.join(alternateHome, ".openclaw", "dashboard-settings.json"),
-                        "utf8"
-                    )
-                ).theme,
-                "light"
+            const alternateSettingsJson = await readFile(
+                path.join(alternateHome, ".openclaw", "dashboard-settings.json"),
+                "utf8"
             );
+            assert.equal(JSON.parse(alternateSettingsJson).theme, "light");
         } finally {
             if (originalHome === undefined) {
                 delete process.env.HOME;
@@ -462,7 +458,11 @@ describe("settings routes", () => {
         } finally {
             fs.promises.open = originalOpen;
             console.error = originalError;
-            await chmod(settingsPath, 0o644).catch(() => {});
+            try {
+                await chmod(settingsPath, 0o644);
+            } catch {
+                // Best-effort cleanup.
+            }
             await rm(settingsPath, { recursive: true, force: true });
             await rm(failingHomeDir, { recursive: true, force: true });
         }

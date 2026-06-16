@@ -1439,11 +1439,13 @@ describe("config files routes", () => {
             await rm(rejectedParent, { recursive: true, force: true });
         }
 
+        const siblingPath = path.join(
+            path.parse(openclawRoot).root,
+            "elsewhere",
+            "file.txt"
+        );
         assert.equal(
-            parentPathTesting.hasSymlinkedAncestor(
-                path.join(path.parse(openclawRoot).root, "elsewhere", "file.txt"),
-                openclawRoot
-            ),
+            parentPathTesting.hasSymlinkedAncestor(siblingPath, openclawRoot),
             true
         );
 

@@ -10,7 +10,11 @@ import { errorMessage, httpStatusCode } from "../lib/errors.js";
 import { stringFallback } from "../lib/values.js";
 import { refreshCacheProducer } from "../services/cacheRefresh.js";
 
-type CacheRefreshProducer = (key: string) => Promise<{ refreshed?: unknown } | void>;
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
+type CacheRefreshProducer = (key: string) => Promise<void | { refreshed?: unknown }>;
 let cacheRefreshProducerForTests: CacheRefreshProducer | null = null;
 
 function setCacheRefreshProducerForTests(producer: CacheRefreshProducer | null): void {
@@ -88,7 +92,7 @@ export default function cacheRoutes(app: express.Application): void {
         const cacheEntries = await getAllCacheEntries();
         const mapped = cacheEntries.map(mapCacheRowForResponse);
         res.json({
-            generatedAt: new Date().toISOString(),
+            generatedAt: dateToISOString(new Date()),
             count: mapped.length,
             entries: mapped,
         });

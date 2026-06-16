@@ -58,7 +58,7 @@ function redactEnvValue(value: unknown): string {
     return `${key}=***`;
 }
 
-/** Represents one docker updater service row. */
+/** Represents one Docker updater service row. */
 interface DockerUpdaterServiceRow {
     id: string;
     app_slug: string;
@@ -78,12 +78,12 @@ interface DockerUpdaterServiceRow {
     metadata: string;
 }
 
-/** Represents docker manual update request. */
+/** Represents Docker manual update request. */
 interface DockerManualUpdateRequest {
     serviceId?: number;
 }
 
-/** Represents docker updater run result. */
+/** Represents Docker updater run result. */
 interface DockerUpdaterRunResult {
     step: string;
     ok: boolean;
@@ -91,7 +91,7 @@ interface DockerUpdaterRunResult {
     stderr: string;
 }
 
-/** Represents one docker ps row. */
+/** Represents one Docker ps row. */
 interface DockerPsRow {
     Command: string;
     CreatedAt: string;
@@ -109,7 +109,7 @@ interface DockerPsRow {
     Status: string;
 }
 
-/** Represents one docker stats row. */
+/** Represents one Docker stats row. */
 interface DockerStatsRow {
     BlockIO: string;
     CPUPerc: string;
@@ -122,7 +122,7 @@ interface DockerStatsRow {
     PIDs: string;
 }
 
-/** Represents one docker image row. */
+/** Represents one Docker image row. */
 interface DockerImageRow {
     ID: string;
     ContainerName?: string;
@@ -140,7 +140,7 @@ interface DockerImageRow {
     UniqueSize?: string;
 }
 
-/** Represents one docker volume row. */
+/** Represents one Docker volume row. */
 interface DockerVolumeRow {
     Driver: string;
     Labels: string;
@@ -151,7 +151,7 @@ interface DockerVolumeRow {
     Size: string;
 }
 
-/** Represents docker inspect mount. */
+/** Represents Docker inspect mount. */
 interface DockerInspectMount {
     Type?: string;
     Source?: string;
@@ -161,7 +161,7 @@ interface DockerInspectMount {
     Name?: string;
 }
 
-/** Represents one docker inspect row. */
+/** Represents one Docker inspect row. */
 interface DockerInspectRow {
     Id?: string;
     Image?: string;
@@ -185,7 +185,7 @@ interface DockerInspectRow {
     Mounts?: DockerInspectMount[];
 }
 
-/** Represents docker container summary. */
+/** Represents Docker container summary. */
 interface DockerContainerSummary {
     id: string;
     name: string;
@@ -212,17 +212,17 @@ interface DockerContainerSummary {
         readOnly: boolean;
         name?: string;
     }>;
-    stats: {
+    stats: null | {
         cpu: string;
         memory: string;
         memoryPercent: string;
         netIO: string;
         blockIO: string;
         pids: string;
-    } | null;
+    };
 }
 
-/** Represents docker container details. */
+/** Represents Docker container details. */
 interface DockerContainerDetails extends DockerContainerSummary {
     env: string[];
     labels: Record<string, string>;
@@ -234,7 +234,7 @@ interface DockerContainerDetails extends DockerContainerSummary {
     }>;
 }
 
-/** Represents docker image summary. */
+/** Represents Docker image summary. */
 interface DockerImageSummary {
     id: string;
     repository: string;
@@ -247,7 +247,7 @@ interface DockerImageSummary {
     inUseBy: string[];
 }
 
-/** Represents docker volume summary. */
+/** Represents Docker volume summary. */
 interface DockerVolumeSummary {
     name: string;
     driver: string;
@@ -258,29 +258,29 @@ interface DockerVolumeSummary {
     usedBy: string[];
 }
 
-/** Represents docker action request. */
+/** Represents Docker action request. */
 interface DockerActionRequest {
     action: "start" | "stop" | "restart";
 }
 
-/** Represents docker stack action request. */
+/** Represents Docker stack action request. */
 interface DockerStackActionRequest {
     action: "restart";
     service?: string;
 }
 
-/** Represents docker prune request. */
+/** Represents Docker prune request. */
 interface DockerPruneRequest {
     target: "images" | "volumes";
 }
 
-/** Represents docker exec start request. */
+/** Represents Docker exec start request. */
 interface DockerExecStartRequest {
     containerId: string;
     command: string;
 }
 
-/** Represents docker exec job. */
+/** Represents Docker exec job. */
 interface DockerExecJob {
     id: string;
     containerId: string;
@@ -302,7 +302,7 @@ type DockerExecResult = {
 
 const dockerExecJobs = new Map<string, DockerExecJob>();
 
-/** Wraps docker routes with consistent route logging. */
+/** Wraps Docker routes with consistent route logging. */
 function asyncRoute(handler: RequestHandler): RequestHandler {
     return baseAsyncRoute(handler, {
         fallback: "Docker route failed",
@@ -365,7 +365,7 @@ function nonEmptyEnvValueOrFallback(
     return trimmed || nonEmptyEnvFallback(fallbackName, fallback);
 }
 
-/** Builds PostgreSQL uri. */
+/** Builds PostgreSQL URI. */
 function buildPostgresUri(database = N8N_DATABASE) {
     const username = encodeURIComponent(
         nonEmptyEnvValueOrFallback(
@@ -422,7 +422,7 @@ async function queryN8n(sql: string): Promise<string> {
     return String(stdout);
 }
 
-/** Performs query n8n tsv rows. */
+/** Performs query n8n TSV rows. */
 async function queryN8nTsvRows<T extends object>(
     sql: string,
     columns: string[]
@@ -534,7 +534,7 @@ function parsePorts(portsRaw: string | undefined): string[] {
         .filter(Boolean);
 }
 
-/** Parses docker size to bytes. */
+/** Parses Docker size to bytes. */
 function parseDockerSizeToBytes(sizeRaw: string | undefined): number {
     if (!sizeRaw) {
         return 0;
@@ -544,7 +544,7 @@ function parseDockerSizeToBytes(sizeRaw: string | undefined): number {
     if (!match) {
         return 0;
     }
-    const value = Number.parseFloat(stringFallback(match[1], "0"));
+    const value = Number(stringFallback(match[1], "0"));
     const unit = stringFallback(match[2], "B").toUpperCase();
     const multipliers: Record<string, number> = {
         B: 1,
@@ -561,7 +561,7 @@ function parseDockerSizeToBytes(sizeRaw: string | undefined): number {
     return Math.round(value * multiplier);
 }
 
-/** Performs run docker. */
+/** Performs run Docker. */
 async function runDocker(args: string[]): Promise<string> {
     const { stdout } = await execFileAsync(dockerBin, args, {
         cwd: DOCKER_ROOT,
@@ -779,7 +779,7 @@ async function getVolumes(): Promise<DockerVolumeSummary[]> {
     }));
 }
 
-/** Returns docker updater services. */
+/** Returns Docker updater services. */
 async function getDockerUpdaterServices() {
     const rows = parseTable<DockerUpdaterServiceRow>(
         await queryN8n(`
@@ -826,7 +826,7 @@ async function getDockerUpdaterServices() {
     }));
 }
 
-/** Returns docker updater service by ID. */
+/** Returns Docker updater service by ID. */
 async function getDockerUpdaterServiceById(serviceId: number) {
     const rows = parseTable<DockerUpdaterServiceRow>(
         await queryN8n(`
@@ -989,7 +989,7 @@ async function runUpdaterCommand(
     }
 }
 
-/** Performs run docker updater now. */
+/** Performs run Docker updater now. */
 async function runDockerUpdaterNow() {
     const register = await runUpdaterCommand("register", [
         updaterScriptPath("docker-register-services.mjs"),
@@ -1018,7 +1018,7 @@ async function runDockerUpdaterNow() {
     return [register, poll, autoUpdate, notify, discord];
 }
 
-/** Represents one docker updater event row. */
+/** Represents one Docker updater event row. */
 interface DockerUpdaterEventRow {
     id: string;
     managed_service_id: string;
@@ -1032,7 +1032,7 @@ interface DockerUpdaterEventRow {
     created_at: string;
 }
 
-/** Returns docker updater events. */
+/** Returns Docker updater events. */
 async function getDockerUpdaterEvents(limit: number) {
     const boundedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
     const columns = [
@@ -1109,7 +1109,7 @@ async function runStackAction(request: DockerStackActionRequest) {
     };
 }
 
-/** Performs run docker exec command. */
+/** Performs run Docker exec command. */
 async function runDockerExecCommand(
     containerId: string,
     command: string,
@@ -1151,9 +1151,8 @@ async function runDockerExecCommand(
             if (markerIndex > 0) {
                 stdout = trimOutput(stdout + line.slice(0, markerIndex));
             }
-            const parsedPid = Number.parseInt(
-                line.slice(markerIndex + DOCKER_EXEC_PID_MARKER.length),
-                10
+            const parsedPid = Number(
+                line.slice(markerIndex + DOCKER_EXEC_PID_MARKER.length)
             );
             const currentJob = dockerExecJobs.get(jobId);
             if (
@@ -1261,13 +1260,15 @@ function stopDockerExecHostProcess(childProcess: ChildProcess): void {
     }
 }
 
-/** Performs cleanup docker exec jobs. */
+/** Performs cleanup Docker exec jobs. */
 function cleanupDockerExecJobs() {
     if (dockerExecJobs.size <= MAX_JOBS) {
         return;
     }
-    const entries = [...dockerExecJobs.values()]
+    const entries = dockerExecJobs
+        .values()
         .filter((job) => job.status === "done")
+        .toArray()
         .sort((a, b) => a.startedAt - b.startedAt);
     const overflow = Math.min(entries.length, dockerExecJobs.size - MAX_JOBS);
     for (let index = 0; index < overflow; index += 1) {
@@ -1277,7 +1278,10 @@ function cleanupDockerExecJobs() {
 }
 
 function activeDockerExecJobCount(): number {
-    return [...dockerExecJobs.values()].filter((job) => job.status !== "done").length;
+    return dockerExecJobs
+        .values()
+        .filter((job) => job.status !== "done")
+        .toArray().length;
 }
 
 function updateDockerExecJobOutput(jobId: string, stdout: string, stderr: string): void {
@@ -1317,6 +1321,24 @@ function failDockerExecJob(jobId: string, error: unknown): void {
     current.endedAt = Date.now();
     current.process = undefined;
     cleanupDockerExecJobs();
+}
+
+async function settleDockerExecJob(
+    containerId: string,
+    command: string,
+    jobId: string
+): Promise<void> {
+    try {
+        const result = await runDockerExecCommand(
+            containerId,
+            command,
+            jobId,
+            (stdout, stderr) => updateDockerExecJobOutput(jobId, stdout, stderr)
+        );
+        completeDockerExecJob(jobId, result);
+    } catch (error) {
+        failDockerExecJob(jobId, error);
+    }
 }
 
 function resolveManualUpdateServiceId(
@@ -1370,6 +1392,7 @@ export const __testing = {
     updateDockerExecJobOutput,
     completeDockerExecJob,
     failDockerExecJob,
+    settleDockerExecJob,
     parseLabels,
     parsePorts,
     parseDockerSizeToBytes,
@@ -1377,7 +1400,7 @@ export const __testing = {
     resolveManualUpdateServiceId,
 };
 
-/** Registers docker API routes. */
+/** Registers Docker API routes. */
 export default function dockerRoutes(app: express.Application): void {
     app.get(
         "/api/docker/updater/services",
@@ -1496,13 +1519,10 @@ export default function dockerRoutes(app: express.Application): void {
                 sendInvalidDockerIdentifier(res, "containerId");
                 return;
             }
-            const tail = Math.min(
-                MAX_LOG_TAIL,
-                Math.max(
-                    MIN_LOG_TAIL,
-                    Number.parseInt(stringFallback(req.query.tail, "200"), 10) || 200
-                )
-            );
+            const requestedTail =
+                Math.trunc(Number(stringFallback(req.query.tail, "200"))) || 200;
+            const boundedTail = Math.max(MIN_LOG_TAIL, requestedTail);
+            const tail = Math.min(MAX_LOG_TAIL, boundedTail);
             const { stdout, stderr } = await execFileAsync(
                 dockerBin,
                 ["logs", "--tail", String(tail), containerId],
@@ -1682,14 +1702,7 @@ export default function dockerRoutes(app: express.Application): void {
                 endedAt: null,
             });
 
-            void runDockerExecCommand(
-                containerId,
-                payload.command,
-                jobId,
-                (stdout, stderr) => updateDockerExecJobOutput(jobId, stdout, stderr)
-            )
-                .then((result) => completeDockerExecJob(jobId, result))
-                .catch((error) => failDockerExecJob(jobId, error));
+            void settleDockerExecJob(containerId, payload.command, jobId);
 
             res.json({ jobId });
         })

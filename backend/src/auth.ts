@@ -58,7 +58,8 @@ function getSessionIdFromCookieHeader(cookieHeader?: string): string | null {
 
 /** Performs now iso. */
 function nowIso(): string {
-    return new Date().toISOString();
+    const now = new Date();
+    return now.toISOString();
 }
 
 /** Normalizes username. */
@@ -216,14 +217,15 @@ export function persistGatewayToken(token: string): void {
 export function getPersistedGatewayToken(): string | null {
     const row = db
         .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
-        .get() as { value: string } | undefined;
+        .get() as undefined | { value: string };
     return row?.value || null;
 }
 
 /** Creates session. */
 export function createSession(userId: number): string {
     const sessionId = crypto.randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
+    const expiresAtDate = new Date(Date.now() + SESSION_TTL_MS);
+    const expiresAt = expiresAtDate.toISOString();
     const createdAt = nowIso();
 
     db.prepare(

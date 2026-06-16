@@ -84,9 +84,9 @@ function asyncRoute(handler: RequestHandler): RequestHandler {
 async function readLogRotationStatus() {
     const row = db
         .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
-        .get(LOG_ROTATION_STATE_KEY) as { data_json?: string | null } | undefined;
+        .get(LOG_ROTATION_STATE_KEY) as undefined | { data_json?: string | null };
     const raw = row?.data_json ?? "";
-    let data: { lastRun?: unknown } | null = null;
+    let data: null | { lastRun?: unknown } = null;
     if (raw) {
         try {
             data = JSON.parse(raw) as { lastRun?: unknown };

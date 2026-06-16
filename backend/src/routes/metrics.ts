@@ -6,7 +6,7 @@ import os from "os";
 import gateway from "../gateway.js";
 import { stringFallback } from "../lib/values.js";
 
-/** Represents cpu metrics. */
+/** Represents CPU metrics. */
 interface CpuMetrics {
     count: number;
     model: string;
@@ -74,11 +74,11 @@ interface MetricsResponse extends SystemMetricsResponse {
     tokens: TokenMetrics;
 }
 
-let previousNetworkSample: {
+let previousNetworkSample: null | {
     timestamp: number;
     downloadBytes: number;
     uploadBytes: number;
-} | null = null;
+} = null;
 
 const metricsDeps = {
     execSync,
@@ -116,13 +116,11 @@ function getNetworkMetrics(): NetworkMetrics {
 
         for (const name of interfaces) {
             const basePath = `/sys/class/net/${name}/statistics`;
-            const rxBytes = Number.parseInt(
-                metricsDeps.readFileSync(`${basePath}/rx_bytes`, "utf8").trim(),
-                10
+            const rxBytes = Number(
+                metricsDeps.readFileSync(`${basePath}/rx_bytes`, "utf8").trim()
             );
-            const txBytes = Number.parseInt(
-                metricsDeps.readFileSync(`${basePath}/tx_bytes`, "utf8").trim(),
-                10
+            const txBytes = Number(
+                metricsDeps.readFileSync(`${basePath}/tx_bytes`, "utf8").trim()
             );
 
             if (!Number.isNaN(rxBytes)) {
@@ -195,9 +193,9 @@ function getSystemMetrics(): SystemMetricsResponse {
         });
         const parts = dfOutput.trim().split(/\s+/);
         if (parts.length >= 5) {
-            diskTotal = Number.parseInt(parts[1], 10);
-            diskUsed = Number.parseInt(parts[2], 10);
-            diskPercent = Number.parseInt(parts[4], 10);
+            diskTotal = Number(parts[1]);
+            diskUsed = Number(parts[2]);
+            diskPercent = Number(parts[4].replace(/%$/u, ""));
         }
     } catch (error) {
         console.error("[Metrics] df error:", (error as Error).message);

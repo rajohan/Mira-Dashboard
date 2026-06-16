@@ -28,6 +28,14 @@ import {
     upsertScheduledJob,
 } from "./scheduledJobs.js";
 
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
+function dateGetTime(date: Date): number {
+    return date.getTime();
+}
+
 const execFileAsync = promisify(execFile);
 const codexTrustConfigLocks = new Map<string, Promise<void>>();
 const CODEX_TRUST_LOCK_TIMEOUT_MS = 5_000;
@@ -105,12 +113,12 @@ const gitRepos = [
 ];
 
 function nowIso(): string {
-    return new Date().toISOString();
+    return dateToISOString(new Date());
 }
 
 function ttlDate(ttl: number, unit: CacheTtlUnit): string {
-    const multiplier = unit === "hours" ? 60 * 60 * 1000 : 60 * 1000;
-    return new Date(Date.now() + ttl * multiplier).toISOString();
+    const multiplier = 60 * 1000 * (unit === "hours" ? 60 : 1);
+    return dateToISOString(new Date(Date.now() + ttl * multiplier));
 }
 
 function backupStatusTtlHours(timestamps: Array<string | null | undefined>): number {
@@ -120,7 +128,7 @@ function backupStatusTtlHours(timestamps: Array<string | null | undefined>): num
         if (!timestamp) {
             continue;
         }
-        const timeMs = new Date(timestamp).getTime();
+        const timeMs = dateGetTime(new Date(timestamp));
         if (!Number.isFinite(timeMs)) {
             continue;
         }
@@ -837,7 +845,7 @@ function sanitizeRemoteUrl(value: string | null): string | null {
         url.password = "";
         url.search = "";
         url.hash = "";
-        return url.toString();
+        return url.href;
     } catch {
         const withoutQuery = value.replace(/\?.*$/u, "");
         const scpStyleMatch = withoutQuery.match(/^([^@\s]+)@([^:\s]+:.+)$/u);
@@ -897,7 +905,7 @@ export async function refreshGitCache() {
             statusSummary,
             statusShort: porcelain.slice(0, 25),
             statusTruncated: porcelain.length > 25,
-            ...(statusShort.ok ? {} : { statusError: statusShort.output }),
+            ...(!statusShort.ok && { statusError: statusShort.output }),
             checkedAt: nowIso(),
         });
     }
@@ -1081,7 +1089,7 @@ function firstValidTimestamp(value: string | null): number {
     if (!value) {
         return 0;
     }
-    const parsed = new Date(value).getTime();
+    const parsed = dateGetTime(new Date(value));
     return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -1138,7 +1146,7 @@ async function refreshKopiaBackupCache() {
         byPath.set(summarized.path, grouped);
     }
 
-    const snapshotsByPath = [...byPath.entries()]
+    const snapshotsByPath = [...byPath]
         .sort(([pathA], [pathB]) => pathA.localeCompare(pathB))
         .map(([pathName, groupedSnapshots]) => {
             const sortedSnapshots = groupedSnapshots.sort(
@@ -1158,7 +1166,7 @@ async function refreshKopiaBackupCache() {
             if (!snapshot.endTime) {
                 return true;
             }
-            const endTimeMs = new Date(snapshot.endTime).getTime();
+            const endTimeMs = dateGetTime(new Date(snapshot.endTime));
             if (!Number.isFinite(endTimeMs)) {
                 return true;
             }
@@ -1247,8 +1255,8 @@ async function refreshWalgBackupCache() {
 
     const latest = backups[0] ?? null;
     const latestFreshnessMs = latest?.freshnessTime
-        ? new Date(latest.freshnessTime).getTime()
-        : Number.NaN;
+        ? dateGetTime(new Date(latest.freshnessTime))
+        : NaN;
     const latestAgeHours = Number.isFinite(latestFreshnessMs)
         ? (Date.now() - latestFreshnessMs) / 36e5
         : null;
@@ -1334,9 +1342,9 @@ async function checkElevenLabsQuota() {
         percentUsed: total > 0 ? Math.round((used / total) * 100) : null,
         resetAt:
             resetMsCandidate !== null && resetMsCandidate > 0
-                ? new Date(resetMsCandidate).toISOString()
+                ? dateToISOString(new Date(resetMsCandidate))
                 : resetSecCandidate !== null && resetSecCandidate > 0
-                  ? new Date(resetSecCandidate * 1000).toISOString()
+                  ? dateToISOString(new Date(resetSecCandidate * 1000))
                   : null,
     };
 }
@@ -1693,21 +1701,25 @@ function buildQuotaMissingProviders(
     ].filter(Boolean);
 }
 
+async function checkQuotaWithErrorStatus<T>(
+    checkQuota: () => Promise<T>
+): Promise<T | { status: "error"; note: string }> {
+    try {
+        return await checkQuota();
+    } catch (error) {
+        return {
+            status: "error",
+            note: errorMessage(error),
+        };
+    }
+}
+
 async function refreshQuotasCache() {
     const checkedAt = Date.now();
     const [openrouter, elevenlabs, synthetic, openai] = await Promise.all([
-        checkOpenRouterQuota().catch((error) => ({
-            status: "error",
-            note: errorMessage(error),
-        })),
-        checkElevenLabsQuota().catch((error) => ({
-            status: "error",
-            note: errorMessage(error),
-        })),
-        checkSyntheticQuota().catch((error) => ({
-            status: "error",
-            note: errorMessage(error),
-        })),
+        checkQuotaWithErrorStatus(checkOpenRouterQuota),
+        checkQuotaWithErrorStatus(checkElevenLabsQuota),
+        checkQuotaWithErrorStatus(checkSyntheticQuota),
         checkOpenAiQuota(),
     ]);
     const payload = {
@@ -1741,7 +1753,7 @@ async function refreshQuotasCache() {
 async function refreshLogRotationStateCache() {
     const row = db
         .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
-        .get(LOG_ROTATION_STATE_KEY) as { data_json?: string | null } | undefined;
+        .get(LOG_ROTATION_STATE_KEY) as undefined | { data_json?: string | null };
     let data: unknown = { version: 1, files: {} };
     let preserveExistingData = false;
     if (row?.data_json) {
@@ -1894,7 +1906,12 @@ async function refreshCacheProducerUnlocked(key: string) {
 }
 
 function abortError(): Error {
-    return Object.assign(new Error("Cache refresh aborted"), { name: "AbortError" });
+    const error = new Error("Cache refresh aborted");
+    Object.defineProperty(error, "name", {
+        configurable: true,
+        value: "AbortError",
+    });
+    return error;
 }
 
 async function waitForRefreshWithSignal<T>(
@@ -1912,9 +1929,15 @@ async function waitForRefreshWithSignal<T>(
         new Promise<never>((_resolve, reject) => {
             const onAbort = () => reject(abortError());
             signal.addEventListener("abort", onAbort, { once: true });
-            void refresh
-                .finally(() => signal.removeEventListener("abort", onAbort))
-                .catch(() => {});
+            void (async () => {
+                try {
+                    await refresh;
+                } catch {
+                    // The refresh result is observed by the race winner.
+                } finally {
+                    signal.removeEventListener("abort", onAbort);
+                }
+            })();
         }),
     ]);
 }
@@ -1951,7 +1974,7 @@ export async function refreshCacheProducer(
     }
     const scopeKey = cacheRefreshScopeKey(key);
     const inFlightEntries = isSupportedCacheProducerKey(key)
-        ? [...inFlightCacheRefreshes.entries()]
+        ? [...inFlightCacheRefreshes]
         : [];
     const existing = inFlightEntries
         .filter(
@@ -1973,19 +1996,29 @@ export async function refreshCacheProducer(
         .map(([, refresh]) => refresh);
     const refresh =
         childRefreshes.length > 0
-            ? Promise.allSettled(childRefreshes).then(() =>
-                  refreshCacheProducerUnlocked(key)
-              )
+            ? refreshAfterChildRefreshes(childRefreshes, key)
             : refreshCacheProducerUnlocked(key);
     inFlightCacheRefreshes.set(scopeKey, refresh);
-    void refresh
-        .finally(() => {
+    void (async () => {
+        try {
+            await refresh;
+        } catch {
+            // The caller observes refresh failures.
+        } finally {
             if (inFlightCacheRefreshes.get(scopeKey) === refresh) {
                 inFlightCacheRefreshes.delete(scopeKey);
             }
-        })
-        .catch(() => {});
+        }
+    })();
     return await waitForRefreshWithSignal(refresh, signal);
+}
+
+async function refreshAfterChildRefreshes(
+    childRefreshes: Array<Promise<{ refreshed: string[] }>>,
+    key: string
+): Promise<{ refreshed: string[] }> {
+    await Promise.allSettled(childRefreshes);
+    return await refreshCacheProducerUnlocked(key);
 }
 
 const cacheRefreshScheduledJobs = [
@@ -2089,13 +2122,12 @@ function cacheEntryIsFresh(key: string): boolean {
     );
     return keys.every((cacheKey) => {
         const row = statement.get(cacheKey) as
-            | { status: string; expires_at: string }
-            | undefined;
+            | undefined
+            | { status: string; expires_at: string };
         if (!row || row.status !== "fresh") {
             return false;
         }
-        const expiresAtMs =
-            row.expires_at === "" ? Number.NaN : Date.parse(row.expires_at);
+        const expiresAtMs = row.expires_at === "" ? NaN : Date.parse(row.expires_at);
         return Number.isFinite(expiresAtMs) && expiresAtMs > Date.now();
     });
 }
@@ -2110,24 +2142,29 @@ export function seedMissingLocalCacheEntry(key: string): void {
     if (cacheEntryIsFresh(key)) {
         return;
     }
-    const seedPromise = refreshCacheProducer(key).then(
-        () => {},
-        (error: unknown) => {
+    const seedPromise = (async () => {
+        try {
+            await refreshCacheProducer(key);
+        } catch (error) {
             console.warn(
                 `[CacheRefresh] Failed to seed missing cache entry ${key}:`,
                 error
             );
             throw error;
         }
-    );
+    })();
     localCacheSeedPromises.set(key, seedPromise);
-    void seedPromise
-        .finally(() => {
+    void (async () => {
+        try {
+            await seedPromise;
+        } catch {
+            // Cache seeding is best-effort for callers that do not await it.
+        } finally {
             if (localCacheSeedPromises.get(key) === seedPromise) {
                 localCacheSeedPromises.delete(key);
             }
-        })
-        .catch(() => {});
+        }
+    })();
 }
 
 function logRotationFailureMessage(logRotation: {
@@ -2169,7 +2206,7 @@ function readLogRotationStateCacheForFailure(): JsonRecord {
     const fallback = { version: 1, files: {} };
     const row = db
         .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
-        .get(LOG_ROTATION_STATE_KEY) as { data_json?: string | null } | undefined;
+        .get(LOG_ROTATION_STATE_KEY) as undefined | { data_json?: string | null };
     if (!row?.data_json) {
         return fallback;
     }
@@ -2199,7 +2236,7 @@ function persistLogRotationScheduledFailure(
                 finishedAt:
                     typeof structuredLastRun.finishedAt === "string"
                         ? structuredLastRun.finishedAt
-                        : new Date().toISOString(),
+                        : dateToISOString(new Date()),
                 message,
                 stderr: capLogRotationFailureOutput(logRotation.stderr),
             },

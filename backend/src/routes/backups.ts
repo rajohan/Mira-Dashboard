@@ -50,7 +50,7 @@ interface BackupJob {
 
 /** Represents the backup job API response. */
 interface BackupJobResponse {
-    job: {
+    job: null | {
         id: string;
         type: BackupJob["type"];
         status: BackupJob["status"];
@@ -59,7 +59,7 @@ interface BackupJobResponse {
         stderr: string;
         startedAt: number;
         endedAt: number | null;
-    } | null;
+    };
 }
 
 const backupJobs = new Map<string, BackupJob>();
@@ -146,7 +146,7 @@ function evictCompletedBackupJobs(type: BackupJob["type"]) {
 }
 
 async function clearNeedsAttentionBackupJob(type: BackupJob["type"]) {
-    const job = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
+    const job = getCurrentBackupJob(type);
     if (!job) {
         throw Object.assign(new Error(`${type.toUpperCase()} backup job not found`), {
             statusCode: 404,
@@ -204,7 +204,7 @@ function startBackupJob(
     abortConfig?: BackupAbortConfig,
     hostAbortPattern?: string
 ) {
-    const existingJob = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
+    const existingJob = getCurrentBackupJob(type);
     if (existingJob?.status === "running") {
         return existingJob;
     }
@@ -275,13 +275,10 @@ function startBackupJob(
             hostAbortKillTimer = null;
         }
         const interrupted = abortRequested || signalName !== null;
-        let needsAttention = false;
-        if (interrupted && abortConfig) {
-            needsAttention = !(await waitForContainerProcessExitWithRetries(
-                abortConfig,
-                job
-            ));
-        }
+        let needsAttention =
+            interrupted && abortConfig
+                ? !(await waitForContainerProcessExitWithRetries(abortConfig, job))
+                : false;
         if (interrupted && hostAbortPattern) {
             needsAttention = !(await waitForHostProcessExitWithRetries(
                 hostAbortPattern,
@@ -328,17 +325,9 @@ function startBackupJob(
         abortRequested = true;
         job.stderr = trimOutput(`${job.stderr}\nBackup aborted by scheduler`.trim());
         if (abortConfig) {
-            terminateContainerProcess(abortConfig, "TERM").catch((error: unknown) => {
-                job.stderr = trimOutput(
-                    `${job.stderr}\nFailed to terminate container backup process: ${String(error)}`.trim()
-                );
-            });
+            void terminateContainerProcessSafely(abortConfig, "SIGTERM", job);
             containerAbortKillTimer = setTimeout(() => {
-                terminateContainerProcess(abortConfig, "KILL").catch((error: unknown) => {
-                    job.stderr = trimOutput(
-                        `${job.stderr}\nFailed to force terminate container backup process: ${String(error)}`.trim()
-                    );
-                });
+                void terminateContainerProcessSafely(abortConfig, "SIGKILL", job);
             }, BACKUP_ABORT_SIGKILL_GRACE_MS);
             containerAbortKillTimer.unref();
         }
@@ -617,11 +606,12 @@ async function assertNoHostBackupInProgress(
 
 async function terminateContainerProcess(
     config: BackupAbortConfig,
-    signalName: "TERM" | "KILL"
+    signalName: NodeJS.Signals
 ): Promise<void> {
+    const pkillSignalName = signalName.replace(/^SIG/u, "");
     const result = await runDockerExec(config.container, [
         "pkill",
-        `-${signalName}`,
+        `-${pkillSignalName}`,
         "-f",
         config.processPattern,
     ]);
@@ -717,13 +707,13 @@ async function refreshBackupStatus(
     job: BackupJob
 ): Promise<void> {
     const cacheKey = backupStatusCacheKey(type);
-    await refreshCacheProducer(cacheKey, undefined, { force: true }).catch(
-        (error: unknown) => {
-            job.stderr = trimOutput(
-                `${job.stderr}\nStatus refresh failed: ${String(error)}`.trim()
-            );
-        }
-    );
+    try {
+        await refreshCacheProducer(cacheKey, undefined, { force: true });
+    } catch (error) {
+        job.stderr = trimOutput(
+            `${job.stderr}\nStatus refresh failed: ${String(error)}`.trim()
+        );
+    }
     job.statusRefreshed = true;
 }
 
@@ -746,9 +736,11 @@ async function startKopiaBackupJob(signal?: AbortSignal) {
             getCurrentKopiaJob
         );
     } catch (error) {
-        await refreshCacheProducer(backupStatusCacheKey("kopia")).catch(() => {
+        try {
+            await refreshCacheProducer(backupStatusCacheKey("kopia"));
+        } catch {
             // Preserve the original preflight failure for the API response.
-        });
+        }
         throw error;
     }
     if (hostJob) {
@@ -786,13 +778,15 @@ async function startWalgBackupJob(signal?: AbortSignal) {
             getCurrentWalgJob
         );
     } catch (error) {
-        await refreshCacheProducer(backupStatusCacheKey("walg")).catch((refreshError) => {
+        try {
+            await refreshCacheProducer(backupStatusCacheKey("walg"));
+        } catch (refreshError) {
             console.warn(
                 "[Backups] Failed to refresh WAL-G status after preflight failure:",
                 refreshError
             );
             // Preserve the original preflight failure for the API response.
-        });
+        }
         throw error;
     }
     if (containerJob) {
@@ -810,7 +804,7 @@ async function startScheduledBackup(type: BackupJob["type"], signal?: AbortSigna
     if (signal?.aborted) {
         throw new Error("Backup aborted by scheduler");
     }
-    const currentJob = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
+    const currentJob = getCurrentBackupJob(type);
     if (currentJob?.status === "running" || currentJob?.status === "needs_attention") {
         throw Object.assign(
             new Error(
@@ -880,7 +874,15 @@ function attachManualScheduledRun(job: BackupJob): void {
         return;
     }
     job.manualScheduledRun = run;
-    void job.completed.then((completedJob) => {
+    void finishManualScheduledRunWhenComplete(job, run);
+}
+
+async function finishManualScheduledRunWhenComplete(
+    job: BackupJob,
+    run: ScheduledJobRun
+): Promise<void> {
+    try {
+        const completedJob = await job.completed;
         const success = completedJob.status === "done" && completedJob.code === 0;
         finishScheduledJobRun(
             run,
@@ -888,11 +890,33 @@ function attachManualScheduledRun(job: BackupJob): void {
             success ? null : backupFailureMessage(completedJob),
             { backup: mapJob(completedJob) }
         );
-    });
+    } catch (error) {
+        console.warn("[Backups] Failed to finish manual backup run:", error);
+    }
+}
+
+function getCurrentBackupJob(type: BackupJob["type"]): BackupJob | null {
+    return (type === "kopia" ? getCurrentKopiaJob : getCurrentWalgJob)();
+}
+
+async function terminateContainerProcessSafely(
+    abortConfig: BackupAbortConfig,
+    signal: NodeJS.Signals,
+    job: BackupJob
+): Promise<void> {
+    try {
+        await terminateContainerProcess(abortConfig, signal);
+    } catch (error) {
+        const message =
+            signal === "SIGTERM"
+                ? "Failed to terminate container backup process"
+                : "Failed to force terminate container backup process";
+        job.stderr = trimOutput(`${job.stderr}\n${message}: ${String(error)}`.trim());
+    }
 }
 
 async function startManualBackup(type: BackupJob["type"]) {
-    const existingJob = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
+    const existingJob = getCurrentBackupJob(type);
     if (existingJob?.status === "running") {
         return existingJob;
     }
@@ -974,7 +998,7 @@ export function registerBackupScheduledJobs(): void {
                 enabled: existing?.enabled ?? true,
                 scheduleType: existing?.scheduleType ?? job.scheduleType,
                 intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
-                timeOfDay: existing ? existing.timeOfDay : job.timeOfDay,
+                timeOfDay: existing?.timeOfDay ?? job.timeOfDay,
                 cronExpression: existing?.cronExpression ?? null,
             });
         }
@@ -992,23 +1016,19 @@ export const __testing = {
     backupFailureMessage,
     getScheduledBackupType,
     pgrepFullCommandPattern,
-    async startKopiaBackupJobForTest(signal?: AbortSignal): Promise<BackupJob> {
-        return startKopiaBackupJob(signal);
-    },
-    async startWalgBackupJobForTest(signal?: AbortSignal): Promise<BackupJob> {
-        return startWalgBackupJob(signal);
-    },
+    startKopiaBackupJobForTest: async (signal?: AbortSignal): Promise<BackupJob> =>
+        startKopiaBackupJob(signal),
+    startWalgBackupJobForTest: async (signal?: AbortSignal): Promise<BackupJob> =>
+        startWalgBackupJob(signal),
     startScheduledBackup,
-    startBackupJobForTest(
+    startBackupJobForTest: (
         type: BackupJob["type"],
         command: string,
         signal?: AbortSignal
-    ): BackupJob {
-        return startBackupJob(type, command, signal);
-    },
-    recordBackupNeedsAttentionForTest(type: BackupJob["type"]): BackupJob {
-        return recordBackupNeedsAttention(type, `${type.toUpperCase()} test attention`);
-    },
+    ): BackupJob => startBackupJob(type, command, signal),
+    finishManualScheduledRunWhenCompleteForTest: finishManualScheduledRunWhenComplete,
+    recordBackupNeedsAttentionForTest: (type: BackupJob["type"]): BackupJob =>
+        recordBackupNeedsAttention(type, `${type.toUpperCase()} test attention`),
     setSpawnBackupProcessForTest(nextSpawn?: typeof spawn): void {
         spawnBackupProcess = nextSpawn ?? spawn;
     },
@@ -1022,9 +1042,7 @@ export const __testing = {
     setBackupAbortDockerExecTimeoutForTest(timeoutMs: number): void {
         backupAbortDockerExecTimeoutMs = timeoutMs;
     },
-    getBackupJobCountForTest(): number {
-        return backupJobs.size;
-    },
+    getBackupJobCountForTest: (): number => backupJobs.size,
     hasRefreshedBackupStatusForTest(type: BackupJob["type"]): boolean {
         for (const job of backupJobs.values()) {
             if (job.type === type && job.statusRefreshed) {
@@ -1034,7 +1052,7 @@ export const __testing = {
         return false;
     },
     markActiveJobNeedsAttentionForTest(type: BackupJob["type"]): void {
-        const job = type === "kopia" ? getCurrentKopiaJob() : getCurrentWalgJob();
+        const job = getCurrentBackupJob(type);
         if (job) {
             job.status = "needs_attention";
         }

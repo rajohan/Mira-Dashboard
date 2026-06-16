@@ -28,10 +28,12 @@ export default function staticRoutes(
             const indexPath = path.join(frontendPath, "index.html");
             res.setHeader("Cache-Control", "no-store");
             res.sendFile(indexPath, (err) => {
-                if (err) {
-                    console.error("[Static] Error serving index.html:", err.message);
-                    res.status(500).send("Error loading application");
+                if (!err) {
+                    return;
                 }
+
+                console.error("[Static] Error serving index.html:", err.message);
+                res.status(500).send("Error loading application");
             });
         });
     } else {

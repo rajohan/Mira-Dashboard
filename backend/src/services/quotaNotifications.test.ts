@@ -4,8 +4,20 @@ import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { db } from "../db.js";
 import { insertCacheEntry } from "../testUtils/cacheFixtures.js";
 
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
 const originalPercent = process.env.FAKE_OPENROUTER_PERCENT;
 const originalQuotasJson = process.env.FAKE_QUOTAS_JSON;
+
+function setGlobalSetInterval(nextSetInterval: typeof setInterval): void {
+    Object.defineProperty(globalThis, "setInterval", {
+        configurable: true,
+        value: nextSetInterval,
+        writable: true,
+    });
+}
 
 function quotaNotifications(): Array<{
     title: string;
@@ -194,7 +206,7 @@ describe("quota notifications", () => {
         assert.ok(titles.includes("ElevenLabs usage high (80%)"));
         assert.ok(titles.includes("Synthetic.new usage high (90%)"));
         assert.ok(titles.includes("OpenAI / Codex usage high (95%)"));
-        assert.ok(!titles.some((title) => title.includes("OpenRouter")));
+        assert.ok(titles.every((title) => !title.includes("OpenRouter")));
     });
 
     it("handles concurrent checks, cache failures, and monitor interval fallbacks", async () => {
@@ -217,13 +229,13 @@ describe("quota notifications", () => {
                 checkedAt: 1_800_000_000_000,
                 cacheAgeMs: 0,
             });
-            const originalSetInterval = globalThis.setInterval;
+            const originalSetInterval = setInterval;
             const scheduled: number[] = [];
-            globalThis.setInterval = ((_callback: () => void, intervalMs?: number) => {
+            setGlobalSetInterval(((_callback: () => void, intervalMs?: number) => {
                 _callback();
                 scheduled.push(intervalMs ?? 0);
                 return { unref: () => {} } as unknown as NodeJS.Timeout;
-            }) as typeof setInterval;
+            }) as typeof setInterval);
             try {
                 startQuotaNotificationMonitor(1);
                 startQuotaNotificationMonitor(60_000);
@@ -231,7 +243,7 @@ describe("quota notifications", () => {
                 await new Promise((resolve) => setTimeout(resolve, 100));
             } finally {
                 stopQuotaNotificationMonitor();
-                globalThis.setInterval = originalSetInterval;
+                setGlobalSetInterval(originalSetInterval);
             }
             for (
                 let attempt = 0;
@@ -334,7 +346,7 @@ describe("quota notifications", () => {
                 80,
                 90,
                 quotas,
-                new Date(quotas.checkedAt).toISOString()
+                dateToISOString(new Date(quotas.checkedAt))
             );
         } finally {
             console.warn = originalWarn;

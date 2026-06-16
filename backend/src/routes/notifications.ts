@@ -4,6 +4,10 @@ import { db } from "../db.js";
 import { nullableString, objectFallback, stringFallback } from "../lib/values.js";
 import { pruneReadNotifications } from "../services/notificationMaintenance.js";
 
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
 /** Defines notification type. */
 type NotificationType = "info" | "warning" | "error" | "success";
 
@@ -97,16 +101,11 @@ export default function notificationsRoutes(app: express.Application): void {
 
     app.post("/api/notifications", express.json(), ((req, res) => {
         const rawTitle = req.body?.title;
-        const rawDescription = req.body?.description;
-        const rawType = req.body?.type;
-        const type = rawType === undefined ? "info" : rawType;
-        const rawSource = req.body?.source;
-        const rawDedupeKey = req.body?.dedupeKey;
-        const rawOccurredAt = req.body?.occurredAt;
         if (rawTitle !== undefined && rawTitle !== null && typeof rawTitle !== "string") {
             res.status(400).json({ error: "title must be a string" });
             return;
         }
+        const rawDescription = req.body?.description;
         if (
             rawDescription !== undefined &&
             rawDescription !== null &&
@@ -115,6 +114,7 @@ export default function notificationsRoutes(app: express.Application): void {
             res.status(400).json({ error: "description must be a string" });
             return;
         }
+        const rawSource = req.body?.source;
         if (
             rawSource !== undefined &&
             rawSource !== null &&
@@ -123,6 +123,7 @@ export default function notificationsRoutes(app: express.Application): void {
             res.status(400).json({ error: "source must be a string" });
             return;
         }
+        const rawDedupeKey = req.body?.dedupeKey;
         if (
             rawDedupeKey !== undefined &&
             rawDedupeKey !== null &&
@@ -131,22 +132,25 @@ export default function notificationsRoutes(app: express.Application): void {
             res.status(400).json({ error: "dedupeKey must be a string" });
             return;
         }
+        const rawType = req.body?.type;
+        if (rawType !== undefined && typeof rawType !== "string") {
+            res.status(400).json({ error: "invalid notification type" });
+            return;
+        }
         const title = nullableString((rawTitle ?? "").trim());
         const description = stringFallback(rawDescription).trim();
         const source = nullableString((rawSource ?? "").trim());
         const dedupeKey = nullableString((rawDedupeKey ?? "").trim());
+        const type = rawType === undefined ? "info" : rawType;
         const metadata =
             req.body?.metadata &&
             typeof req.body.metadata === "object" &&
             !Array.isArray(req.body.metadata)
                 ? objectFallback(req.body.metadata)
                 : {};
-        if (rawType !== undefined && typeof rawType !== "string") {
-            res.status(400).json({ error: "invalid notification type" });
-            return;
-        }
+        const rawOccurredAt = req.body?.occurredAt;
         const occurredAt =
-            rawOccurredAt === undefined ? new Date().toISOString() : rawOccurredAt;
+            rawOccurredAt === undefined ? dateToISOString(new Date()) : rawOccurredAt;
         if (typeof occurredAt !== "string" || Number.isNaN(Date.parse(occurredAt))) {
             res.status(400).json({ error: "invalid occurredAt" });
             return;
@@ -162,7 +166,7 @@ export default function notificationsRoutes(app: express.Application): void {
             return;
         }
 
-        const now = new Date().toISOString();
+        const now = dateToISOString(new Date());
 
         const insert = db.prepare(`
             INSERT INTO notifications (
@@ -190,7 +194,7 @@ export default function notificationsRoutes(app: express.Application): void {
             now,
             occurredAt
         );
-        const id = (row as { id?: unknown } | null | undefined)?.id;
+        const id = (row as null | undefined | { id?: unknown })?.id;
         if (typeof id !== "number") {
             console.error("[Notifications] Failed to create notification:", row);
             res.status(500).json({
@@ -207,7 +211,7 @@ export default function notificationsRoutes(app: express.Application): void {
     app.post("/api/notifications/mark-all-read", ((_, res) => {
         db.prepare(
             "UPDATE notifications SET is_read = 1, updated_at = ? WHERE is_read = 0"
-        ).run(new Date().toISOString());
+        ).run(dateToISOString(new Date()));
         res.json({ ok: true });
     }) as RequestHandler);
 
@@ -239,7 +243,7 @@ export default function notificationsRoutes(app: express.Application): void {
 
         db.prepare(
             "UPDATE notifications SET is_read = 1, updated_at = ? WHERE id = ?"
-        ).run(new Date().toISOString(), id);
+        ).run(dateToISOString(new Date()), id);
 
         res.json({ ok: true });
     }) as RequestHandler);

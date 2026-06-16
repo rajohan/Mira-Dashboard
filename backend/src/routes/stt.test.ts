@@ -6,12 +6,23 @@ import express from "express";
 
 import { __testing } from "./stt.js";
 
+function setGlobalProperty<Key extends keyof typeof globalThis>(
+    key: Key,
+    value: (typeof globalThis)[Key]
+): void {
+    Object.defineProperty(globalThis, key, {
+        configurable: true,
+        writable: true,
+        value,
+    });
+}
+
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
 }
 
-const originalFetch = globalThis.fetch;
+const originalFetch = fetch;
 const originalApiKey = process.env.ELEVENLABS_API_KEY;
 
 async function startServer(): Promise<TestServer> {
@@ -51,7 +62,7 @@ describe("STT routes", () => {
     });
 
     afterEach(() => {
-        globalThis.fetch = originalFetch;
+        setGlobalProperty("fetch", originalFetch);
         if (originalApiKey === undefined) {
             delete process.env.ELEVENLABS_API_KEY;
         } else {
@@ -61,7 +72,7 @@ describe("STT routes", () => {
 
     after(async () => {
         await server.close();
-        globalThis.fetch = originalFetch;
+        setGlobalProperty("fetch", originalFetch);
     });
 
     it("requires an audio payload and ElevenLabs configuration", async () => {
@@ -87,10 +98,10 @@ describe("STT routes", () => {
     it("returns transcript text from ElevenLabs text responses", async () => {
         process.env.ELEVENLABS_API_KEY = "test-key";
         fetchCalls.length = 0;
-        globalThis.fetch = async (url, init) => {
+        setGlobalProperty("fetch", async (url, init) => {
             fetchCalls.push({ url: String(url), init: init || {} });
             return Response.json({ text: "  hei Raymond  " });
-        };
+        });
 
         const response = await transcribe(server, Buffer.from([1, 2, 3]), "audio/mp4");
         const body = (await response.json()) as { provider: string; text: string };
@@ -108,10 +119,11 @@ describe("STT routes", () => {
 
     it("falls back to word-level transcripts and surfaces provider errors", async () => {
         process.env.ELEVENLABS_API_KEY = "test-key";
-        globalThis.fetch = async () =>
+        setGlobalProperty("fetch", async () =>
             Response.json({
                 words: [{ text: "hei" }, null, { text: 123 }, { text: "der" }],
-            });
+            })
+        );
 
         const words = await transcribe(server, Buffer.from([1, 2, 3]));
         assert.equal(words.status, 200);
@@ -120,23 +132,26 @@ describe("STT routes", () => {
             text: "hei der",
         });
 
-        globalThis.fetch = async () => new Response("bad audio", { status: 400 });
+        setGlobalProperty(
+            "fetch",
+            async () => new Response("bad audio", { status: 400 })
+        );
         const error = await transcribe(server, Buffer.from([1, 2, 3]));
         assert.equal(error.status, 500);
         assert.deepEqual(await error.json(), {
             error: "ElevenLabs STT failed (400): bad audio",
         });
 
-        globalThis.fetch = async () => {
+        setGlobalProperty("fetch", async () => {
             throw "network unavailable";
-        };
+        });
         const stringError = await transcribe(server, Buffer.from([1, 2, 3]));
         assert.equal(stringError.status, 500);
         assert.deepEqual(await stringError.json(), { error: "network unavailable" });
 
-        globalThis.fetch = async () => {
+        setGlobalProperty("fetch", async () => {
             throw null;
-        };
+        });
         const unknownError = await transcribe(server, Buffer.from([1, 2, 3]));
         assert.equal(unknownError.status, 500);
         assert.deepEqual(await unknownError.json(), {
@@ -155,14 +170,14 @@ describe("STT routes", () => {
         const blockedFetch = new Promise<Response>((resolve) => {
             releaseFetch = () => resolve(Response.json(null));
         });
-        globalThis.fetch = async (_url, init) => {
+        setGlobalProperty("fetch", async (_url, init) => {
             resolveStarted();
             const body = init?.body;
             assert.equal(body instanceof FormData, true);
             const file = (body as FormData).get("file") as File;
             fileNames.push(file.name);
             return blockedFetch;
-        };
+        });
 
         const first = transcribe(server, Buffer.from([1, 2, 3]), "audio/mpeg");
         await started;
@@ -177,10 +192,10 @@ describe("STT routes", () => {
         assert.deepEqual(await empty.json(), { provider: "elevenlabs", text: "" });
         assert.deepEqual(fileNames, ["recording.mp3"]);
 
-        globalThis.fetch = async (_url, init) => {
+        setGlobalProperty("fetch", async (_url, init) => {
             const file = ((init?.body as FormData).get("file") as File).name;
             return Response.json({ text: file });
-        };
+        });
 
         const m4a = await transcribe(server, Buffer.from([1]), "audio/m4a");
         assert.deepEqual(await m4a.json(), {
@@ -207,10 +222,10 @@ describe("STT routes", () => {
             text: "recording.wav",
         });
 
-        globalThis.fetch = async (_url, init) => {
+        setGlobalProperty("fetch", async (_url, init) => {
             const file = (init?.body as FormData).get("file") as File;
             return Response.json({ text: `${file.name}:${file.type}` });
-        };
+        });
         assert.equal(
             await __testing.transcribeWithElevenLabs(Buffer.from([1]), " ".repeat(3)),
             "recording.webm:application/octet-stream"
@@ -223,7 +238,7 @@ describe("STT routes", () => {
             "recording.wav:audio/wav"
         );
 
-        globalThis.fetch = async () => Response.json({});
+        setGlobalProperty("fetch", async () => Response.json({}));
         const missingWords = await transcribe(server, Buffer.from([1]));
         assert.deepEqual(await missingWords.json(), { provider: "elevenlabs", text: "" });
 
@@ -231,9 +246,19 @@ describe("STT routes", () => {
         assert.equal(__testing.audioExtension("application/octet-stream"), ".webm");
         assert.equal(__testing.audioExtension("audio/wav"), ".wav");
         assert.equal(__testing.transcriptTextFromElevenLabs({}), "");
+        assert.equal(
+            await __testing.readResponseTextFallback({
+                text: async () => {
+                    throw new Error("body unavailable");
+                },
+            } as unknown as Response),
+            ""
+        );
 
-        globalThis.fetch = async () =>
-            new Response("", { status: 502, statusText: "Bad Gateway" });
+        setGlobalProperty(
+            "fetch",
+            async () => new Response("", { status: 502, statusText: "Bad Gateway" })
+        );
         const statusOnlyError = await transcribe(server, Buffer.from([1]));
         assert.equal(statusOnlyError.status, 500);
         assert.deepEqual(await statusOnlyError.json(), {

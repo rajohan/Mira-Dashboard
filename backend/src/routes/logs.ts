@@ -6,6 +6,10 @@ import type WebSocket from "ws";
 import { errorMessage } from "../lib/errors.js";
 import { guardedPath, openReadNoFollowGuarded } from "../lib/guardedOps.js";
 
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
 let logsDir = "/tmp/openclaw";
 let logWatcher: NodeJS.Timeout | null = null;
 let logPollInFlight = false;
@@ -44,7 +48,7 @@ function resolveRealLogsDir(): string {
 
 /** Returns today log file. */
 function getTodayLogFile(root = resolveRealLogsDir()): string {
-    const today = new Date().toISOString().split("T", 1)[0];
+    const today = dateToISOString(new Date()).split("T", 1)[0];
     return path.join(root, "openclaw-" + today + ".log");
 }
 
@@ -56,7 +60,7 @@ function parsePositiveLineCount(value: unknown): number | null {
     if (!/^\d+$/u.test(trimmed)) {
         return null;
     }
-    const parsed = Number.parseInt(trimmed, 10);
+    const parsed = Number(trimmed);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
@@ -167,16 +171,22 @@ async function pollLogFile(): Promise<void> {
 }
 
 /** Performs a single tick of the log watcher. */
+async function pollLogFileAndLogErrors(poller = pollLogFile): Promise<void> {
+    try {
+        await poller();
+    } catch (error) {
+        console.error("[LogWatcher] Error:", errorMessage(error, "Log polling failed"));
+    }
+}
+
+/** Performs a single tick of the log watcher. */
 function runLogWatcherTick(): void {
     if (logPollInFlight) return;
     logPollInFlight = true;
-    void pollLogFile()
-        .catch((error: unknown) => {
-            console.error("[LogWatcher] Error:", errorMessage(error, String(error)));
-        })
-        .finally(() => {
-            logPollInFlight = false;
-        });
+    void (async () => {
+        await pollLogFileAndLogErrors();
+        logPollInFlight = false;
+    })();
 }
 
 /** Performs start log watcher. */
@@ -260,6 +270,7 @@ export function unsubscribeFromLogs(ws: WebSocket): void {
 /** Defines testing. */
 export const __testing = {
     sendLogHistoryForTest: sendLogHistory,
+    pollLogFileAndLogErrorsForTest: pollLogFileAndLogErrors,
     pollLogFileForTest: pollLogFile,
     runLogWatcherTickForTest: runLogWatcherTick,
     resetLogWatcherForTest(): void {
@@ -272,9 +283,7 @@ export const __testing = {
         lastLogFile = "";
         logSubscribers.clear();
     },
-    subscriberCount(): number {
-        return logSubscribers.size;
-    },
+    subscriberCount: (): number => logSubscribers.size,
     setLogsDirForTest(nextLogsDir: string): void {
         __testing.resetLogWatcherForTest();
         const resolvedLogsDir = path.resolve(nextLogsDir);
@@ -348,7 +357,7 @@ export default function logsRoutes(app: express.Application): void {
 
         // If no file specified, use today's log
         if (!logFile) {
-            const today = new Date().toISOString().split("T", 1)[0];
+            const today = dateToISOString(new Date()).split("T", 1)[0];
             logFile = "openclaw-" + today + ".log";
         }
 

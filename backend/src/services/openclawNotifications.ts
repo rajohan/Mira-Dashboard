@@ -2,6 +2,10 @@ import { db } from "../db.js";
 import { fetchCachedSystemHost } from "../lib/systemCache.js";
 import { pruneReadNotifications } from "./notificationMaintenance.js";
 
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
 const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
 const MAX_TIMER_MS = 2_147_483_647;
 
@@ -32,12 +36,12 @@ function setState(state: AlertState): void {
             is_armed = excluded.is_armed,
             last_latest = excluded.last_latest,
             updated_at = excluded.updated_at`
-    ).run(state.is_armed, state.last_latest, new Date().toISOString());
+    ).run(state.is_armed, state.last_latest, dateToISOString(new Date()));
 }
 
 /** Performs insert update available notification. */
 function insertUpdateAvailableNotification(current: string, latest: string): void {
-    const now = new Date().toISOString();
+    const now = dateToISOString(new Date());
     const dedupeKey = `openclaw:update:${latest}`;
 
     db.prepare(

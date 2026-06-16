@@ -559,7 +559,7 @@ describe("files routes", () => {
         assert.equal(image.body.mimeType, "image/png");
         assert.equal(
             image.body.content,
-            Buffer.from("89504e470d0a1a0a", "hex").toString("base64")
+            Uint8Array.fromHex("89504e470d0a1a0a").toBase64()
         );
 
         const binary = await requestJson<{ content: string; isBinary: boolean }>(

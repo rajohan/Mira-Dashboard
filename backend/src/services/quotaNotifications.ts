@@ -6,6 +6,10 @@ import {
 } from "../lib/quotasCache.js";
 import { pruneReadNotifications } from "./notificationMaintenance.js";
 
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
 /** Defines provider key. */
 type ProviderKey = "openrouter" | "elevenlabs" | "synthetic" | "openai";
 
@@ -109,7 +113,7 @@ function ensureStateRow(provider: ProviderKey, bucket: number): void {
         `INSERT INTO quota_alert_state (provider, bucket, is_armed, updated_at)
          VALUES (?, ?, 1, ?)
          ON CONFLICT(provider, bucket) DO NOTHING`
-    ).run(provider, bucket, new Date().toISOString());
+    ).run(provider, bucket, dateToISOString(new Date()));
 }
 
 /** Returns state. */
@@ -118,7 +122,7 @@ function getState(provider: ProviderKey, bucket: number): { is_armed: number } {
         .prepare(
             "SELECT is_armed FROM quota_alert_state WHERE provider = ? AND bucket = ?"
         )
-        .get(provider, bucket) as { is_armed?: number } | undefined;
+        .get(provider, bucket) as undefined | { is_armed?: number };
 
     return {
         is_armed: state?.is_armed ?? 1,
@@ -131,7 +135,7 @@ function setState(provider: ProviderKey, bucket: number, isArmed: number): void 
         `UPDATE quota_alert_state
          SET is_armed = ?, updated_at = ?
          WHERE provider = ? AND bucket = ?`
-    ).run(isArmed, new Date().toISOString(), provider, bucket);
+    ).run(isArmed, dateToISOString(new Date()), provider, bucket);
 }
 
 /** Performs insert notification. */
@@ -143,7 +147,7 @@ function insertNotification(
     title: string,
     description: string
 ): void {
-    const now = new Date().toISOString();
+    const now = dateToISOString(new Date());
     const dedupeKey = `quota:${provider}:${bucket}`;
 
     db.prepare(
@@ -215,7 +219,7 @@ export async function runQuotaNotificationCheck(): Promise<void> {
 
     try {
         const quotas = await fetchCachedQuotas();
-        const occurredAt = new Date(quotas.checkedAt).toISOString();
+        const occurredAt = dateToISOString(new Date(quotas.checkedAt));
         const providers: ProviderKey[] = [
             "openrouter",
             "elevenlabs",

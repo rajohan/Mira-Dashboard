@@ -7,10 +7,11 @@ describe("error helpers", () => {
     it("returns Error messages and stable fallbacks for unknown caught values", () => {
         const blankError = new Error("placeholder");
         blankError.message = "";
+        const whitespaceError = new Error(" ".repeat(3));
 
         assert.equal(errorMessage(new Error("boom"), "fallback"), "boom");
         assert.equal(errorMessage(blankError, "fallback"), "fallback");
-        assert.equal(errorMessage(new Error(" ".repeat(3)), "fallback"), "fallback");
+        assert.equal(errorMessage(whitespaceError, "fallback"), "fallback");
         assert.equal(errorMessage("boom", "fallback"), "fallback");
     });
 
@@ -109,7 +110,9 @@ describe("error helpers", () => {
         forwardHandler(
             {} as never,
             forwardedResponse as never,
-            ((error: unknown) => forwarded.push(error)) as never
+            ((error: unknown) => {
+                forwarded.push(error);
+            }) as never
         );
         await new Promise((resolve) => setImmediate(resolve));
 

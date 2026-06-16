@@ -117,7 +117,7 @@ function isImageFile(filename: string): boolean {
     return imageExts.includes(stringFallback(ext));
 }
 
-/** Returns image mime type. */
+/** Returns image MIME type. */
 function getImageMimeType(filename: string): string {
     const ext = filename.split(".").pop()?.toLowerCase();
     const mimeTypes: Record<string, string> = {
@@ -470,7 +470,7 @@ export default function filesRoutes(
                         }
 
                         const buffer = await file.readFile();
-                        const base64 = buffer.toString("base64");
+                        const base64 = buffer.toBase64();
                         const mimeType = getImageMimeType(filename);
 
                         res.json({
@@ -625,21 +625,21 @@ export default function filesRoutes(
                                 }
                                 existingMode = existingStat.mode & 0o777;
                                 if (existingStat.size > MAX_BACKUP_COPY_BYTES) {
-                                    await fs.promises
-                                        .unlink(
+                                    try {
+                                        await fs.promises.unlink(
                                             path.join(
                                                 path.dirname(rootedFullPath),
                                                 path.basename(safeBackupPath)
                                             )
-                                        )
-                                        .catch((error) => {
-                                            if (
-                                                (error as NodeJS.ErrnoException).code !==
-                                                "ENOENT"
-                                            ) {
-                                                throw error;
-                                            }
-                                        });
+                                        );
+                                    } catch (error) {
+                                        if (
+                                            (error as NodeJS.ErrnoException).code !==
+                                            "ENOENT"
+                                        ) {
+                                            throw error;
+                                        }
+                                    }
                                     shouldCopyBackup = false;
                                 } else {
                                     shouldCopyBackup = true;

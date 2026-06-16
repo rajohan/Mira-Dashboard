@@ -17,7 +17,7 @@ export function httpStatusCode(error: unknown): number {
         const statusCode = (error as HttpStatusError).statusCode;
         if (
             typeof statusCode === "number" &&
-            Number.isInteger(statusCode) &&
+            Number.isSafeInteger(statusCode) &&
             statusCode >= 400 &&
             statusCode <= 599
         ) {
@@ -32,20 +32,20 @@ export function asyncRoute(
     handler: RequestHandler,
     { fallback = "Route failed", logLabel }: { fallback?: string; logLabel?: string } = {}
 ): RequestHandler {
-    return (req, res, next) => {
-        Promise.resolve()
-            .then(() => handler(req, res, next))
-            .catch((error: unknown) => {
-                if (logLabel) {
-                    console.error(logLabel, error);
-                }
-                if (res.headersSent) {
-                    next(error);
-                    return;
-                }
-                res.status(httpStatusCode(error)).json({
-                    error: errorMessage(error, fallback),
-                });
+    return async (req, res, next) => {
+        try {
+            await handler(req, res, next);
+        } catch (error) {
+            if (logLabel) {
+                console.error(logLabel, error);
+            }
+            if (res.headersSent) {
+                next(error);
+                return;
+            }
+            res.status(httpStatusCode(error)).json({
+                error: errorMessage(error, fallback),
             });
+        }
     };
 }

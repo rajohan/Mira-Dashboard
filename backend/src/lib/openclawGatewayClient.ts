@@ -88,11 +88,8 @@ export type OpenClawGatewayClientInstance = {
 
 /** Performs base64 URL encode. */
 function base64UrlEncode(buffer: Buffer): string {
-    return buffer
-        .toString("base64")
-        .replaceAll("+", "-")
-        .replaceAll("/", "_")
-        .replace(/=+$/u, "");
+    const bytes = buffer as unknown as Uint8Array & { toBase64: () => string };
+    return bytes.toBase64().replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 }
 
 /** Clamps timer durations from Gateway policy before they reach setInterval/setTimeout. */
@@ -258,21 +255,24 @@ export const __testing = {
 
 /** Implements open claw gateway client. */
 export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
-    private readonly opts: OpenClawGatewayClientOptions;
-    private ws: WebSocket | null = null;
-    private requestId: number = 0;
-    private readonly pending: Map<string, PendingRequestEntry>;
     private static readonly MAX_PENDING_REQUESTS = 1000;
-    private closed: boolean;
-    private reconnectTimer: NodeJS.Timeout | null;
-    private connectChallengeTimer: NodeJS.Timeout | null;
-    private backoffMs: number;
-    private tickTimer: NodeJS.Timeout | null;
-    private tickIntervalMs: number;
-    private lastTickAt: number;
+    declare private readonly opts: OpenClawGatewayClientOptions;
+    declare private ws: WebSocket | null;
+    declare private requestId: number;
+    declare private readonly pending: Map<string, PendingRequestEntry>;
+    declare private closed: boolean;
+    declare private reconnectTimer: NodeJS.Timeout | null;
+    declare private connectChallengeTimer: NodeJS.Timeout | null;
+    declare private backoffMs: number;
+    declare private tickTimer: NodeJS.Timeout | null;
+    declare private tickIntervalMs: number;
+    declare private lastTickAt: number;
 
+    /* eslint-disable unicorn/prefer-class-fields -- Constructor assignments avoid emitted class-field coverage counters. */
     constructor(opts: OpenClawGatewayClientOptions) {
+        this.requestId = 0;
         this.pending = new Map();
+        this.ws = null;
         this.closed = false;
         this.reconnectTimer = null;
         this.connectChallengeTimer = null;
@@ -292,6 +292,245 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             platform: process.platform,
             ...opts,
         };
+    }
+    /* eslint-enable unicorn/prefer-class-fields */
+
+    private armConnectChallengeTimeout(): void {
+        this.clearConnectChallengeTimeout();
+        this.connectChallengeTimer = setTimeout(() => {
+            if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                return;
+            }
+            this.opts.onConnectError?.(new Error("gateway connect challenge timeout"));
+            this.ws.close(1008, "connect challenge timeout");
+        }, DEFAULT_CONNECT_CHALLENGE_TIMEOUT_MS);
+    }
+
+    private clearConnectChallengeTimeout(): void {
+        if (!this.connectChallengeTimer) {
+            return;
+        }
+
+        clearTimeout(this.connectChallengeTimer);
+        this.connectChallengeTimer = null;
+    }
+
+    private scheduleReconnect(): void {
+        if (this.reconnectTimer || this.closed) {
+            return;
+        }
+        const delay = this.backoffMs;
+        this.backoffMs = Math.min(this.backoffMs * 2, 30_000);
+        this.reconnectTimer = setTimeout(() => {
+            this.reconnectTimer = null;
+            this.start();
+        }, delay);
+    }
+
+    private startTickWatch(): void {
+        this.stopTickWatch();
+        // Keep the timer cadence fixed; Gateway policy only controls the clamped
+        // silence threshold below, not how frequently this process wakes up.
+        this.tickTimer = setInterval(() => {
+            if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                return;
+            }
+            const now = Date.now();
+            const maxSilenceMs = this.tickIntervalMs * 3;
+            if (this.lastTickAt && now - this.lastTickAt > maxSilenceMs) {
+                this.opts.onConnectError?.(new Error("gateway tick timeout"));
+                this.ws.close(1011, "tick timeout");
+            }
+        }, TICK_WATCH_POLL_INTERVAL_MS);
+    }
+
+    private stopTickWatch(): void {
+        if (!this.tickTimer) {
+            return;
+        }
+
+        clearInterval(this.tickTimer);
+        this.tickTimer = null;
+    }
+
+    private rejectAllPending(error: Error): void {
+        for (const [id, pending] of this.pending.entries()) {
+            clearTimeout(pending.timeout);
+            pending.reject(error);
+            this.pending.delete(id);
+        }
+    }
+
+    private handleMessage(raw: string): void {
+        let parsed: unknown;
+
+        try {
+            parsed = JSON.parse(raw);
+        } catch (error) {
+            console.error("[Gateway] Failed to parse message:", error);
+            return;
+        }
+
+        if (
+            typeof parsed === "object" &&
+            parsed !== null &&
+            (parsed as { type?: string }).type === "event"
+        ) {
+            const eventMessage = parsed as GatewayEvent;
+
+            if (eventMessage.event === "connect.challenge") {
+                this.clearConnectChallengeTimeout();
+                void this.respondToConnectChallenge(
+                    eventMessage.payload as undefined | { nonce?: string }
+                );
+                return;
+            }
+
+            if (eventMessage.event === "tick") {
+                this.lastTickAt = Date.now();
+            }
+
+            this.opts.onEvent?.(eventMessage);
+            return;
+        }
+
+        if (
+            typeof parsed !== "object" ||
+            parsed === null ||
+            (parsed as { type?: string }).type !== "res"
+        ) {
+            return;
+        }
+
+        const response = parsed as GatewayResponse;
+        if (typeof response.id !== "string") {
+            return;
+        }
+
+        const pending = this.pending.get(response.id);
+        if (!pending) {
+            return;
+        }
+
+        clearTimeout(pending.timeout);
+        this.pending.delete(response.id);
+
+        if (response.ok) {
+            const payload = response.payload;
+            if (
+                payload &&
+                typeof payload === "object" &&
+                (payload as GatewayHelloOk).type === "hello-ok"
+            ) {
+                this.backoffMs = 1_000;
+                this.lastTickAt = Date.now();
+                this.tickIntervalMs = sanitizeTimerDurationMs(
+                    (payload as GatewayHelloOk).policy?.tickIntervalMs,
+                    DEFAULT_TICK_INTERVAL_MS
+                );
+                this.startTickWatch();
+                this.opts.onHelloOk?.(payload as GatewayHelloOk);
+            }
+            pending.resolve(payload);
+            return;
+        }
+
+        const errorMessage =
+            response.error?.message ||
+            response.error?.code ||
+            "Unknown gateway request error";
+        pending.reject(new Error(errorMessage));
+    }
+
+    private async respondToConnectChallenge(challengePayload?: {
+        nonce?: string;
+    }): Promise<void> {
+        try {
+            await this.sendConnect(challengePayload);
+        } catch (error) {
+            this.handleSendConnectError(error);
+        }
+    }
+
+    private handleSendConnectError(error: unknown): void {
+        console.error("[Gateway] Failed to send connect response:", error);
+        const normalizedError = asError(error);
+        this.opts.onConnectError?.(normalizedError);
+        this.ws?.close(1008, normalizedError.message);
+    }
+
+    private async sendConnect(challengePayload?: { nonce?: string }): Promise<void> {
+        const nonce = challengePayload?.nonce;
+        if (!nonce || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            this.opts.onConnectError?.(
+                new Error("gateway connect challenge missing nonce")
+            );
+            this.ws?.close(1008, "connect challenge missing nonce");
+            return;
+        }
+
+        const signedAtMs = Date.now();
+        const role = this.opts.role || "operator";
+        const scopes = this.opts.scopes || ["operator.admin"];
+        const clientName = this.opts.clientName || "gateway-client";
+        const mode = this.opts.mode || "backend";
+        const platform = this.opts.platform || process.platform;
+        const token = this.opts.token?.trim() || undefined;
+
+        const device = this.opts.deviceIdentity
+            ? (() => {
+                  const payload = buildDeviceAuthPayloadV3({
+                      deviceId: this.opts.deviceIdentity.deviceId,
+                      clientId: clientName,
+                      clientMode: mode,
+                      role,
+                      scopes,
+                      signedAtMs,
+                      token: token || null,
+                      nonce,
+                      platform,
+                      deviceFamily: this.opts.deviceFamily,
+                  });
+
+                  return {
+                      id: this.opts.deviceIdentity.deviceId,
+                      publicKey: publicKeyRawBase64UrlFromPem(
+                          this.opts.deviceIdentity.publicKeyPem
+                      ),
+                      signature: signDevicePayload(
+                          this.opts.deviceIdentity.privateKeyPem,
+                          payload
+                      ),
+                      signedAt: signedAtMs,
+                      nonce,
+                  };
+              })()
+            : undefined;
+
+        try {
+            await this.request("connect", {
+                minProtocol: 3,
+                maxProtocol: 4,
+                client: {
+                    id: clientName,
+                    displayName: this.opts.clientDisplayName,
+                    version: this.opts.clientVersion || "1.0.0",
+                    platform,
+                    deviceFamily: this.opts.deviceFamily,
+                    mode,
+                },
+                caps: Array.isArray(this.opts.caps) ? this.opts.caps : [],
+                role,
+                scopes,
+                auth: token ? { token } : undefined,
+                device,
+            });
+        } catch (error) {
+            this.opts.onConnectError?.(
+                error instanceof Error ? error : new Error(String(error))
+            );
+            this.ws?.close(1008, error instanceof Error ? error.message : String(error));
+        }
     }
 
     start(): void {
@@ -397,219 +636,6 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
                 clearTimeout(timeout);
                 reject(error);
             }
-        });
-    }
-
-    private armConnectChallengeTimeout(): void {
-        this.clearConnectChallengeTimeout();
-        this.connectChallengeTimer = setTimeout(() => {
-            if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-                return;
-            }
-            this.opts.onConnectError?.(new Error("gateway connect challenge timeout"));
-            this.ws.close(1008, "connect challenge timeout");
-        }, DEFAULT_CONNECT_CHALLENGE_TIMEOUT_MS);
-    }
-
-    private clearConnectChallengeTimeout(): void {
-        if (this.connectChallengeTimer) {
-            clearTimeout(this.connectChallengeTimer);
-            this.connectChallengeTimer = null;
-        }
-    }
-
-    private scheduleReconnect(): void {
-        if (this.reconnectTimer || this.closed) {
-            return;
-        }
-        const delay = this.backoffMs;
-        this.backoffMs = Math.min(this.backoffMs * 2, 30_000);
-        this.reconnectTimer = setTimeout(() => {
-            this.reconnectTimer = null;
-            this.start();
-        }, delay);
-    }
-
-    private startTickWatch(): void {
-        this.stopTickWatch();
-        // Keep the timer cadence fixed; Gateway policy only controls the clamped
-        // silence threshold below, not how frequently this process wakes up.
-        this.tickTimer = setInterval(() => {
-            if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-                return;
-            }
-            const now = Date.now();
-            const maxSilenceMs = this.tickIntervalMs * 3;
-            if (this.lastTickAt && now - this.lastTickAt > maxSilenceMs) {
-                this.opts.onConnectError?.(new Error("gateway tick timeout"));
-                this.ws.close(1011, "tick timeout");
-            }
-        }, TICK_WATCH_POLL_INTERVAL_MS);
-    }
-
-    private stopTickWatch(): void {
-        if (this.tickTimer) {
-            clearInterval(this.tickTimer);
-            this.tickTimer = null;
-        }
-    }
-
-    private rejectAllPending(error: Error): void {
-        for (const [id, pending] of this.pending.entries()) {
-            clearTimeout(pending.timeout);
-            pending.reject(error);
-            this.pending.delete(id);
-        }
-    }
-
-    private handleMessage(raw: string): void {
-        let parsed: unknown;
-
-        try {
-            parsed = JSON.parse(raw);
-        } catch (error) {
-            console.error("[Gateway] Failed to parse message:", error);
-            return;
-        }
-
-        if (
-            typeof parsed === "object" &&
-            parsed !== null &&
-            (parsed as { type?: string }).type === "event"
-        ) {
-            const eventMessage = parsed as GatewayEvent;
-
-            if (eventMessage.event === "connect.challenge") {
-                this.clearConnectChallengeTimeout();
-                this.sendConnect(eventMessage.payload as { nonce?: string } | undefined);
-                return;
-            }
-
-            if (eventMessage.event === "tick") {
-                this.lastTickAt = Date.now();
-            }
-
-            this.opts.onEvent?.(eventMessage);
-            return;
-        }
-
-        if (
-            typeof parsed !== "object" ||
-            parsed === null ||
-            (parsed as { type?: string }).type !== "res"
-        ) {
-            return;
-        }
-
-        const response = parsed as GatewayResponse;
-        if (typeof response.id !== "string") {
-            return;
-        }
-
-        const pending = this.pending.get(response.id);
-        if (!pending) {
-            return;
-        }
-
-        clearTimeout(pending.timeout);
-        this.pending.delete(response.id);
-
-        if (response.ok) {
-            const payload = response.payload;
-            if (
-                payload &&
-                typeof payload === "object" &&
-                (payload as GatewayHelloOk).type === "hello-ok"
-            ) {
-                this.backoffMs = 1_000;
-                this.lastTickAt = Date.now();
-                this.tickIntervalMs = sanitizeTimerDurationMs(
-                    (payload as GatewayHelloOk).policy?.tickIntervalMs,
-                    DEFAULT_TICK_INTERVAL_MS
-                );
-                this.startTickWatch();
-                this.opts.onHelloOk?.(payload as GatewayHelloOk);
-            }
-            pending.resolve(payload);
-            return;
-        }
-
-        const errorMessage =
-            response.error?.message ||
-            response.error?.code ||
-            "Unknown gateway request error";
-        pending.reject(new Error(errorMessage));
-    }
-
-    private sendConnect(challengePayload?: { nonce?: string }): void {
-        const nonce = challengePayload?.nonce;
-        if (!nonce || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            this.opts.onConnectError?.(
-                new Error("gateway connect challenge missing nonce")
-            );
-            this.ws?.close(1008, "connect challenge missing nonce");
-            return;
-        }
-
-        const signedAtMs = Date.now();
-        const role = this.opts.role || "operator";
-        const scopes = this.opts.scopes || ["operator.admin"];
-        const clientName = this.opts.clientName || "gateway-client";
-        const mode = this.opts.mode || "backend";
-        const platform = this.opts.platform || process.platform;
-        const token = this.opts.token?.trim() || undefined;
-
-        const device = this.opts.deviceIdentity
-            ? (() => {
-                  const payload = buildDeviceAuthPayloadV3({
-                      deviceId: this.opts.deviceIdentity.deviceId,
-                      clientId: clientName,
-                      clientMode: mode,
-                      role,
-                      scopes,
-                      signedAtMs,
-                      token: token || null,
-                      nonce,
-                      platform,
-                      deviceFamily: this.opts.deviceFamily,
-                  });
-
-                  return {
-                      id: this.opts.deviceIdentity.deviceId,
-                      publicKey: publicKeyRawBase64UrlFromPem(
-                          this.opts.deviceIdentity.publicKeyPem
-                      ),
-                      signature: signDevicePayload(
-                          this.opts.deviceIdentity.privateKeyPem,
-                          payload
-                      ),
-                      signedAt: signedAtMs,
-                      nonce,
-                  };
-              })()
-            : undefined;
-
-        void this.request("connect", {
-            minProtocol: 3,
-            maxProtocol: 4,
-            client: {
-                id: clientName,
-                displayName: this.opts.clientDisplayName,
-                version: this.opts.clientVersion || "1.0.0",
-                platform,
-                deviceFamily: this.opts.deviceFamily,
-                mode,
-            },
-            caps: Array.isArray(this.opts.caps) ? this.opts.caps : [],
-            role,
-            scopes,
-            auth: token ? { token } : undefined,
-            device,
-        }).catch((error) => {
-            this.opts.onConnectError?.(
-                error instanceof Error ? error : new Error(String(error))
-            );
-            this.ws?.close(1008, error instanceof Error ? error.message : String(error));
         });
     }
 }

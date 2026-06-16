@@ -8,6 +8,14 @@ const originalUpdateAvailable = process.env.FAKE_OPENCLAW_UPDATE_AVAILABLE;
 const originalLatest = process.env.FAKE_OPENCLAW_LATEST;
 const originalMissingVersion = process.env.FAKE_OPENCLAW_MISSING_VERSION;
 
+function setGlobalSetInterval(nextSetInterval: typeof setInterval): void {
+    Object.defineProperty(globalThis, "setInterval", {
+        configurable: true,
+        value: nextSetInterval,
+        writable: true,
+    });
+}
+
 function openClawNotifications(): Array<{
     title: string;
     description: string;
@@ -176,16 +184,16 @@ describe("OpenClaw update notifications", () => {
     });
 
     it("starts the monitor with a safe interval fallback", async () => {
-        const originalSetInterval = globalThis.setInterval;
+        const originalSetInterval = setInterval;
         let scheduledInterval = 0;
         let callbackRuns = 0;
-        globalThis.setInterval = ((callback: () => void, intervalMs?: number) => {
+        setGlobalSetInterval(((callback: () => void, intervalMs?: number) => {
             scheduledInterval = intervalMs ?? 0;
             callback();
             callbackRuns += 1;
             const timer = { unref: () => timer } as unknown as NodeJS.Timeout;
             return timer;
-        }) as typeof setInterval;
+        }) as typeof setInterval);
         try {
             startOpenClawNotificationMonitor(Number.MAX_SAFE_INTEGER);
             assert.equal(scheduledInterval, 2_147_483_647);
@@ -198,7 +206,7 @@ describe("OpenClaw update notifications", () => {
         } finally {
             stopOpenClawNotificationMonitorForTest();
             stopOpenClawNotificationMonitorForTest();
-            globalThis.setInterval = originalSetInterval;
+            setGlobalSetInterval(originalSetInterval);
         }
     });
 });

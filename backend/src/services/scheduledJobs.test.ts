@@ -5,6 +5,15 @@ import path from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
+function dateGetTime(date: Date): number {
+    return date.getTime();
+}
+
+async function delayedPendingResult(): Promise<"pending"> {
+    await delay(50);
+    return "pending";
+}
+
 const originalDbPath = process.env.MIRA_DASHBOARD_DB_PATH;
 const tempDbDir = mkdtempSync(path.join(os.tmpdir(), "scheduled-jobs-test-"));
 process.env.MIRA_DASHBOARD_DB_PATH = path.join(tempDbDir, "mira-dashboard.db");
@@ -679,7 +688,6 @@ test("reports handler failures even when failure persistence fails", async (t) =
     });
     const prepare = db.prepare.bind(db);
     const prepareMock = t.mock.method(db, "prepare", (sql: string) => {
-        const statement = prepare(sql);
         if (sql.includes("UPDATE scheduled_job_runs")) {
             return {
                 run: () => {
@@ -687,6 +695,7 @@ test("reports handler failures even when failure persistence fails", async (t) =
                 },
             } as unknown as ReturnType<typeof db.prepare>;
         }
+        const statement = prepare(sql);
         return statement;
     });
 
@@ -1179,10 +1188,7 @@ test("stops manual runs when caller signal aborts", async () => {
     await delay(0);
     controller.abort();
 
-    const pendingResult = await Promise.race([
-        runPromise,
-        delay(50).then(() => "pending" as const),
-    ]);
+    const pendingResult = await Promise.race([runPromise, delayedPendingResult()]);
 
     assert.equal(pendingResult, "pending");
     assert.equal(aborted, true);
@@ -1356,7 +1362,7 @@ test("preserves no-op patch due times and uses fresh schedule after running", as
 
     const nextRunAt = getScheduledJob("cache.weather")?.nextRunAt;
     assert.ok(nextRunAt);
-    assert.ok(new Date(nextRunAt).getTime() - Date.now() > 3_000_000);
+    assert.ok(dateGetTime(new Date(nextRunAt)) - Date.now() > 3_000_000);
 });
 
 test("does not run handlers when scheduled claim fails", async (t) => {
@@ -1651,14 +1657,7 @@ test("ignores overlapping scheduler ticks", async () => {
 
 test("validates schedule definitions and exposes idempotent scheduler controls", () => {
     assert.throws(() => registerScheduledJobAction("Bad Key", () => {}), /action key/u);
-    for (const timeoutMs of [
-        0,
-        0.5,
-        -1,
-        2_147_483_648,
-        Number.NaN,
-        Number.POSITIVE_INFINITY,
-    ]) {
+    for (const timeoutMs of [0, 0.5, -1, 2_147_483_648, NaN, Infinity]) {
         assert.throws(
             () => registerScheduledJobAction("cache.refresh", () => {}, { timeoutMs }),
             /timeout must be an integer between 1 and 2147483647/u

@@ -4,12 +4,23 @@ import { after, before, describe, it } from "node:test";
 
 import express from "express";
 
+function setGlobalProperty<Key extends keyof typeof globalThis>(
+    key: Key,
+    value: (typeof globalThis)[Key]
+): void {
+    Object.defineProperty(globalThis, key, {
+        configurable: true,
+        writable: true,
+        value,
+    });
+}
+
 interface TestServer {
     baseUrl: string;
     close: () => Promise<void>;
 }
 
-const originalFetch = globalThis.fetch;
+const originalFetch = fetch;
 const originalApiKey = process.env.ELEVENLABS_API_KEY;
 
 async function startServer(): Promise<TestServer> {
@@ -57,7 +68,7 @@ describe("TTS routes", () => {
 
     after(async () => {
         await server.close();
-        globalThis.fetch = originalFetch;
+        setGlobalProperty("fetch", originalFetch);
         if (originalApiKey === undefined) {
             delete process.env.ELEVENLABS_API_KEY;
         } else {
@@ -94,10 +105,10 @@ describe("TTS routes", () => {
         process.env.ELEVENLABS_API_KEY = "test-key";
         fetchCalls.length = 0;
         try {
-            globalThis.fetch = async (url, init) => {
+            setGlobalProperty("fetch", async (url, init) => {
                 fetchCalls.push({ url: String(url), init: init || {} });
                 return new Response(Buffer.from([1, 2, 3]), { status: 200 });
-            };
+            });
 
             const response = await originalFetch(`${server.baseUrl}/api/tts/speak`, {
                 method: "POST",
@@ -124,54 +135,59 @@ describe("TTS routes", () => {
                 voice_settings: { stability: 0.5, similarity_boost: 0.75 },
             });
         } finally {
-            globalThis.fetch = originalFetch;
+            setGlobalProperty("fetch", originalFetch);
         }
     });
 
     it("forwards ElevenLabs error responses", async () => {
         process.env.ELEVENLABS_API_KEY = "test-key";
         try {
-            globalThis.fetch = async () =>
-                new Response("quota exceeded", { status: 429 });
+            setGlobalProperty(
+                "fetch",
+                async () => new Response("quota exceeded", { status: 429 })
+            );
 
             const response = await postJson<{ error: string }>(server, { text: "hello" });
 
             assert.equal(response.status, 429);
             assert.equal(response.body.error, "quota exceeded");
 
-            globalThis.fetch = async () =>
-                ({
-                    ok: false,
-                    status: 502,
-                    text: async () => {
-                        throw new Error("body unavailable");
-                    },
-                }) as unknown as Response;
+            setGlobalProperty(
+                "fetch",
+                async () =>
+                    ({
+                        ok: false,
+                        status: 502,
+                        text: async () => {
+                            throw new Error("body unavailable");
+                        },
+                    }) as unknown as Response
+            );
             const fallback = await postJson<{ error: string }>(server, {
                 text: "hello",
             });
             assert.equal(fallback.status, 502);
             assert.equal(fallback.body.error, "ElevenLabs TTS failed (502)");
         } finally {
-            globalThis.fetch = originalFetch;
+            setGlobalProperty("fetch", originalFetch);
         }
     });
 
     it("surfaces speech generation exceptions", async () => {
         process.env.ELEVENLABS_API_KEY = "test-key";
         try {
-            globalThis.fetch = async () => {
+            setGlobalProperty("fetch", async () => {
                 throw new Error("network down");
-            };
+            });
 
             const response = await postJson<{ error: string }>(server, { text: "hello" });
 
             assert.equal(response.status, 500);
             assert.equal(response.body.error, "network down");
 
-            globalThis.fetch = async () => {
+            setGlobalProperty("fetch", async () => {
                 throw "";
-            };
+            });
 
             const fallback = await postJson<{ error: string }>(server, {
                 text: "hello",
@@ -179,7 +195,7 @@ describe("TTS routes", () => {
             assert.equal(fallback.status, 500);
             assert.equal(fallback.body.error, "Failed to generate speech");
         } finally {
-            globalThis.fetch = originalFetch;
+            setGlobalProperty("fetch", originalFetch);
         }
     });
 });
