@@ -288,7 +288,8 @@ describe("Settings helpers", () => {
         expect(errorMessage(new Error("Specific failure"), "Fallback")).toBe(
             "Specific failure"
         );
-        expect(errorMessage(new Error(" ".repeat(3)), "Fallback")).toBe("Fallback");
+        const blankError = new Error(" ".repeat(3));
+        expect(errorMessage(blankError, "Fallback")).toBe("Fallback");
         expect(errorMessage("bad", "Fallback")).toBe("Fallback");
         expect(optionalFormValue("value")).toBe("value");
         expect(optionalFormValue("  value  ")).toBe("value");
@@ -411,8 +412,8 @@ describe("Settings page", () => {
         const user = userEvent.setup();
         const originalLocation = window.location;
         const reload = vi.fn();
-        let setTimeoutSpy: { mockRestore: () => void } | undefined;
-        let clearTimeoutSpy: { mockRestore: () => void } | undefined;
+        let setTimeoutSpy: undefined | { mockRestore: () => void };
+        let clearTimeoutSpy: undefined | { mockRestore: () => void };
         Object.defineProperty(window, "location", {
             configurable: true,
             value: { reload },

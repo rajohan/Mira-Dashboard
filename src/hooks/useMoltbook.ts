@@ -22,13 +22,13 @@ export interface MoltbookHome {
     unreadMessageCount: number;
     activityOnYourPostsCount: number;
     activityOnYourPosts: unknown[];
-    latestAnnouncement: {
+    latestAnnouncement: null | {
         postId: string | null;
         title: string | null;
         authorName: string | null;
         createdAt: string | null;
         preview: string | null;
-    } | null;
+    };
     postsFromAccountsYouFollowCount: number | null;
     exploreCount: number | null;
     nextActions: string[];

@@ -91,7 +91,7 @@ export async function getCompletions(
     return apiPostRequired("/terminal/complete", { partial, cwd });
 }
 
-/** Represents the cd API response. */
+/** Represents the CD API response. */
 export interface CdResponse {
     success: boolean;
     newCwd: string;

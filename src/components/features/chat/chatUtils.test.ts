@@ -33,11 +33,8 @@ describe("chat utils", () => {
         expect(dataUrlToBase64("data:text/plain;base64,aGVsbG8=")).toBe("aGVsbG8=");
         expect(dataUrlToBase64("raw-base64")).toBe("raw-base64");
         expect(base64ToText("aGVsbG8=")).toBe("hello");
-        const codePointAtSpy = vi
-            .spyOn(String.prototype, "codePointAt")
-            .mockImplementationOnce(() => void 0);
-        expect(base64ToText("QQ==")).toBe("\u0000");
-        codePointAtSpy.mockRestore();
+        expect(base64ToText("QQ==")).toBe("A");
+        expect(base64ToText("not valid base64 🚫")).toBeUndefined();
         expect(chatErrorMessage(new Error("Specific failure"), "Fallback")).toBe(
             "Specific failure"
         );
@@ -257,9 +254,7 @@ describe("chat utils", () => {
     });
 
     it("covers merge edge cases and timestamp ordering", () => {
-        vi.spyOn(Date, "now").mockReturnValue(
-            new Date("2026-05-10T10:02:00.000Z").getTime()
-        );
+        vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
 
         const previous = [
             message({ role: "assistant", text: "" }),
@@ -293,9 +288,7 @@ describe("chat utils", () => {
     });
 
     it("retains recent optimistic and local messages missing from refreshed history", () => {
-        vi.spyOn(Date, "now").mockReturnValue(
-            new Date("2026-05-10T10:02:00.000Z").getTime()
-        );
+        vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
 
         const previous = [
             message({
@@ -324,9 +317,7 @@ describe("chat utils", () => {
     });
 
     it("retains empty local diagnostics during history merges", () => {
-        vi.spyOn(Date, "now").mockReturnValue(
-            new Date("2026-05-10T10:02:00.000Z").getTime()
-        );
+        vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
 
         const previous = [
             message({
@@ -362,9 +353,7 @@ describe("chat utils", () => {
     });
 
     it("does not retain optimistic assistant text recovered in refreshed history", () => {
-        vi.spyOn(Date, "now").mockReturnValue(
-            new Date("2026-05-10T10:02:00.000Z").getTime()
-        );
+        vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
 
         const previous = [
             message({
@@ -394,9 +383,7 @@ describe("chat utils", () => {
     });
 
     it("drops exact assistant text recovered in refreshed history", () => {
-        vi.spyOn(Date, "now").mockReturnValue(
-            new Date("2026-05-10T10:02:00.000Z").getTime()
-        );
+        vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
 
         const previous = [
             message({
@@ -411,9 +398,7 @@ describe("chat utils", () => {
     });
 
     it("orders missing messages with invalid timestamps after dated insertions", () => {
-        vi.spyOn(Date, "now").mockReturnValue(
-            new Date("2026-05-10T10:02:00.000Z").getTime()
-        );
+        vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
 
         const previous = [
             message({
@@ -447,9 +432,7 @@ describe("chat utils", () => {
     });
 
     it("drops old optimistic messages with invalid timestamps", () => {
-        vi.spyOn(Date, "now").mockReturnValue(
-            new Date("2026-05-10T10:02:00.000Z").getTime()
-        );
+        vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
 
         const previous = [
             message({
@@ -471,7 +454,7 @@ describe("chat utils", () => {
     });
 
     it("rejects unreadable file results", async () => {
-        const OriginalFileReader = globalThis.FileReader;
+        const OriginalFileReader = FileReader;
         try {
             class NonStringFileReader extends EventTarget {
                 result: ArrayBuffer | null = new ArrayBuffer(0);

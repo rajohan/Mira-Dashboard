@@ -50,6 +50,7 @@ import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { useAgentsStatus } from "../hooks/useAgents";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import type { Session } from "../types/session";
+import { currentIsoString, timestampFromDateString } from "../utils/date";
 import { formatSize } from "../utils/format";
 import { formatSessionType, sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
 
@@ -154,8 +155,7 @@ export function sessionTimestampMs(value: unknown): number | null {
     }
 
     if (typeof value === "string") {
-        const timestamp = new Date(value).getTime();
-        return Number.isFinite(timestamp) ? timestamp : null;
+        return timestampFromDateString(value);
     }
 
     return null;
@@ -257,7 +257,7 @@ export function writeStoredChatDiagnosticVisibility(
     }
 }
 
-/** Performs supported audio recording mime type. */
+/** Performs supported audio recording MIME type. */
 export function supportedAudioRecordingMimeType(): string | undefined {
     if (window.MediaRecorder === undefined) {
         return undefined;
@@ -289,6 +289,7 @@ export function Chat() {
     const recordingChunksReference = useRef<Blob[]>([]);
     const voiceFileInputReference = useRef<HTMLInputElement | null>(null);
     const loadedHistorySessionReference = useRef("");
+    const selectedSessionKeyReference = useRef("");
     const previousChatRowsLengthReference = useRef(0);
     const previousSelectedSessionKeyReference = useRef("");
     const previousSelectedStreamTextReference = useRef("");
@@ -352,6 +353,7 @@ export function Chat() {
     const selectedSession = selectedSessionKey
         ? sessionMap.get(selectedSessionKey) || null
         : null;
+    selectedSessionKeyReference.current = selectedSessionKey;
     const selectedAgentId = selectedSession ? getChatAgentId(selectedSession) : "";
     const sessionsForSelectedAgent = selectedAgentId
         ? sortedSessions.filter((session) => getChatAgentId(session) === selectedAgentId)
@@ -532,8 +534,10 @@ export function Chat() {
                 })) as {
                     messages?: RawChatHistoryMessage[];
                 };
-
-                if (cancelled) {
+                const shouldApplyResult =
+                    !cancelled &&
+                    selectedSessionKeyReference.current === selectedSessionKey;
+                if (!shouldApplyResult) {
                     return;
                 }
 
@@ -607,8 +611,11 @@ export function Chat() {
                     })) as {
                         messages?: RawChatHistoryMessage[];
                     };
-
-                    if (cancelled || abortController.signal.aborted) {
+                    const shouldApplyResult =
+                        !cancelled &&
+                        !abortController.signal.aborted &&
+                        selectedSessionKeyReference.current === requestSessionKey;
+                    if (!shouldApplyResult) {
                         return;
                     }
 
@@ -711,8 +718,10 @@ export function Chat() {
                 })) as {
                     messages?: RawChatHistoryMessage[];
                 };
-
-                if (cancelled) {
+                const shouldApplyResult =
+                    !cancelled &&
+                    selectedSessionKeyReference.current === selectedSessionKey;
+                if (!shouldApplyResult) {
                     return;
                 }
 
@@ -896,7 +905,7 @@ export function Chat() {
         agentSessionCounts.set(agentId, (agentSessionCounts.get(agentId) || 0) + 1);
     }
 
-    const agentOptions = [...agentSessionCounts.entries()].map(([agentId, count]) => {
+    const agentOptions = [...agentSessionCounts].map(([agentId, count]) => {
         const agent = agents.find((entry) => normalizeChatAgentId(entry.id) === agentId);
         return {
             value: agentId,
@@ -1057,11 +1066,12 @@ export function Chat() {
             });
 
             if (!response.ok) {
-                const error = (await response
-                    .json()
-                    .catch(() => ({ error: "Failed to transcribe audio" }))) as {
-                    error?: string;
-                };
+                let error: { error?: string };
+                try {
+                    error = (await response.json()) as { error?: string };
+                } catch {
+                    error = { error: "Failed to transcribe audio" };
+                }
                 throw new Error(error.error || `HTTP ${response.status}`);
             }
 
@@ -1208,7 +1218,7 @@ export function Chat() {
     /** Returns whether the current in-flight sends should block this draft. */
     const isBlockedByInFlightSend = (text: string) => {
         const isSlashCommand = text.startsWith("/") && attachments.length === 0;
-        const hasActiveSelectedStream = Boolean(activeStreams[selectedSessionKey]);
+        const hasActiveSelectedStream = Object.hasOwn(activeStreams, selectedSessionKey);
         return (
             sendInFlightCountReference.current > 0 &&
             !(isSlashCommand && hasActiveSelectedStream)
@@ -1217,11 +1227,11 @@ export function Chat() {
 
     /** Responds to send events. */
     const handleSend = async () => {
-        const text = draft.trim();
-
         if (!selectedSessionKey) {
             return;
         }
+
+        const text = draft.trim();
 
         if (isBlockedByInFlightSend(text)) {
             return;
@@ -1259,7 +1269,7 @@ export function Chat() {
             text: messageText,
             images: [],
             attachments: optimisticAttachmentDisplay(sendAttachments),
-            timestamp: new Date().toISOString(),
+            timestamp: currentIsoString(),
         };
 
         if (shouldAppendOptimisticMessage) {
@@ -1284,7 +1294,7 @@ export function Chat() {
                     aliases: [idempotencyKey],
                     text: "",
                     statusText: "Thinking",
-                    updatedAt: new Date().toISOString(),
+                    updatedAt: currentIsoString(),
                 },
             }));
         }
@@ -1315,7 +1325,7 @@ export function Chat() {
                 message: messageText,
                 attachments: gatewayAttachments(sendAttachments),
                 idempotencyKey,
-            })) as { runId?: string } | undefined;
+            })) as undefined | { runId?: string };
 
             if (isResetCommand) {
                 setMessages([]);
@@ -1324,29 +1334,28 @@ export function Chat() {
                     delete next[selectedSessionKey];
                     return next;
                 });
-                return;
-            }
+            } else {
+                const acknowledgedRunId = result?.runId;
+                if (acknowledgedRunId) {
+                    updateActiveStreams((previous) => {
+                        const existing = previous[selectedSessionKey];
+                        if (!existing) {
+                            return previous;
+                        }
 
-            const acknowledgedRunId = result?.runId;
-            if (acknowledgedRunId) {
-                updateActiveStreams((previous) => {
-                    const existing = previous[selectedSessionKey];
-                    if (!existing) {
-                        return previous;
-                    }
-
-                    return {
-                        ...previous,
-                        [selectedSessionKey]: {
-                            ...existing,
-                            runId: acknowledgedRunId,
-                            aliases: uniqueStrings([
-                                ...existing.aliases,
-                                acknowledgedRunId,
-                            ]),
-                        },
-                    };
-                });
+                        return {
+                            ...previous,
+                            [selectedSessionKey]: {
+                                ...existing,
+                                runId: acknowledgedRunId,
+                                aliases: uniqueStrings([
+                                    ...existing.aliases,
+                                    acknowledgedRunId,
+                                ]),
+                            },
+                        };
+                    });
+                }
             }
         } catch (error_) {
             setSendError(chatErrorMessage(error_, "Failed to send message"));

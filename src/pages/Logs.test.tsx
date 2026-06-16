@@ -246,7 +246,7 @@ describe("Logs page", () => {
 
     it("exports live logs when no file is selected", () => {
         const anchor = document.createElement("a");
-        let createElementSpy: { mockRestore: () => void } | undefined;
+        let createElementSpy: undefined | { mockRestore: () => void };
         mocks.useLogFiles.mockReturnValue({ data: [] });
 
         try {
@@ -352,7 +352,7 @@ describe("Logs page", () => {
     it("exports filtered logs", async () => {
         const user = userEvent.setup();
         const anchor = document.createElement("a");
-        let createElementSpy: { mockRestore: () => void } | undefined;
+        let createElementSpy: undefined | { mockRestore: () => void };
 
         try {
             render(<Logs />);
@@ -377,7 +377,7 @@ describe("Logs page", () => {
 
     it("exports message-only logs after clearing the selected file", async () => {
         const anchor = document.createElement("a");
-        let createElementSpy: { mockRestore: () => void } | undefined;
+        let createElementSpy: undefined | { mockRestore: () => void };
         mocks.liveLogs = [
             {
                 id: "msg-only",

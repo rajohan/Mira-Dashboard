@@ -67,10 +67,14 @@ export function formatDuration(updatedAt: number | null | undefined): string {
 /** Formats uptime seconds as days, hours, or minutes. */
 export function formatUptime(seconds: number): string {
     const days = Math.floor(seconds / 86_400);
-    const hours = Math.floor((seconds % 86_400) / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
 
-    if (days > 0) return days + "d " + hours + "h";
+    if (days > 0) {
+        const hours = Math.floor((seconds % 86_400) / 3600);
+        return days + "d " + hours + "h";
+    }
+
+    const mins = Math.floor((seconds % 3600) / 60);
+    const hours = Math.floor((seconds % 86_400) / 3600);
     if (hours > 0) return hours + "h " + mins + "m";
     return mins + "m";
 }

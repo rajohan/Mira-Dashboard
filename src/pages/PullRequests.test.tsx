@@ -233,7 +233,7 @@ describe("PullRequests page", () => {
         await user.click(screen.getByRole("button", { name: "Merge only" }));
         expect(screen.getByTestId("confirm-modal")).toHaveTextContent("Merge PR #10");
         await user.click(
-            screen.getByTestId("confirm-modal").querySelector("button:last-child")!
+            screen.getByTestId("confirm-modal").querySelector(":scope button:last-child")!
         );
         await waitFor(() => {
             expect(hooks.approve).toHaveBeenCalledWith({ number: 10, deploy: false });
@@ -243,7 +243,7 @@ describe("PullRequests page", () => {
 
         await user.click(screen.getByRole("button", { name: "Merge + deploy" }));
         await user.click(
-            screen.getByTestId("confirm-modal").querySelector("button:last-child")!
+            screen.getByTestId("confirm-modal").querySelector(":scope button:last-child")!
         );
         expect(hooks.approve).toHaveBeenCalledWith({ number: 10, deploy: true });
         expect(screen.getByText(/Deploy scheduled/)).toBeInTheDocument();
@@ -251,7 +251,7 @@ describe("PullRequests page", () => {
         await user.click(screen.getByRole("button", { name: "Reject" }));
         expect(screen.getByTestId("confirm-modal")).toHaveTextContent("Reject PR #10");
         await user.click(
-            screen.getByTestId("confirm-modal").querySelector("button:last-child")!
+            screen.getByTestId("confirm-modal").querySelector(":scope button:last-child")!
         );
         expect(hooks.reject).toHaveBeenCalledWith({ number: 10 });
         expect(screen.getByText(/PR rejected/)).toBeInTheDocument();
@@ -261,7 +261,7 @@ describe("PullRequests page", () => {
             "Deploy latest main"
         );
         await user.click(
-            screen.getByTestId("confirm-modal").querySelector("button:last-child")!
+            screen.getByTestId("confirm-modal").querySelector(":scope button:last-child")!
         );
         expect(hooks.deploy).toHaveBeenCalledTimes(1);
         expect(screen.getByText(/Main deploy scheduled/)).toBeInTheDocument();
@@ -440,7 +440,7 @@ describe("PullRequests page", () => {
         await user.click(screen.getByRole("button", { name: "Approve PR" }));
         expect(screen.getByTestId("confirm-modal")).toHaveTextContent("Approve PR #10");
         await user.click(
-            screen.getByTestId("confirm-modal").querySelector("button:last-child")!
+            screen.getByTestId("confirm-modal").querySelector(":scope button:last-child")!
         );
 
         await waitFor(() => {
@@ -675,7 +675,7 @@ describe("PullRequests page", () => {
 
         await user.click(screen.getByRole("button", { name: "Merge only" }));
         await user.click(
-            screen.getByTestId("confirm-modal").querySelector("button:last-child")!
+            screen.getByTestId("confirm-modal").querySelector(":scope button:last-child")!
         );
         expect(await screen.findByText("Merge failed")).toBeInTheDocument();
     });
@@ -922,7 +922,7 @@ describe("PullRequests page", () => {
 
         await user.click(screen.getByRole("button", { name: "Reject" }));
         await user.click(
-            screen.getByTestId("confirm-modal").querySelector("button:last-child")!
+            screen.getByTestId("confirm-modal").querySelector(":scope button:last-child")!
         );
         expect(await screen.findByText("Action failed")).toBeInTheDocument();
     });
@@ -947,13 +947,13 @@ describe("PullRequests page", () => {
 
         await user.click(screen.getByRole("button", { name: "Merge only" }));
         await user.click(
-            screen.getByTestId("confirm-modal").querySelector("button:last-child")!
+            screen.getByTestId("confirm-modal").querySelector(":scope button:last-child")!
         );
         expect(await screen.findByText("Merged without cleanup")).toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: "Merge + deploy" }));
         await user.click(
-            screen.getByTestId("confirm-modal").querySelector("button:last-child")!
+            screen.getByTestId("confirm-modal").querySelector(":scope button:last-child")!
         );
         expect(
             await screen.findByText(
@@ -963,13 +963,13 @@ describe("PullRequests page", () => {
 
         await user.click(screen.getByRole("button", { name: "Deploy latest main" }));
         await user.click(
-            screen.getByTestId("confirm-modal").querySelector("button:last-child")!
+            screen.getByTestId("confirm-modal").querySelector(":scope button:last-child")!
         );
         expect(await screen.findByText("Deploy scheduled")).toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: "Merge + deploy" }));
         await user.click(
-            screen.getByTestId("confirm-modal").querySelector("button:last-child")!
+            screen.getByTestId("confirm-modal").querySelector(":scope button:last-child")!
         );
         expect(await screen.findByText("Merged and deploy started")).toBeInTheDocument();
     });

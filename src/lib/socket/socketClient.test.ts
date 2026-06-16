@@ -21,6 +21,12 @@ class MockWebSocket {
         mockSocketInstances.push(this);
     }
 
+    private emit(type: string, event: Event | MessageEvent) {
+        for (const listener of this.listeners.get(type) || []) {
+            listener(event);
+        }
+    }
+
     addEventListener(type: string, listener: Listener) {
         this.listeners.set(type, [...(this.listeners.get(type) || []), listener]);
     }
@@ -54,12 +60,6 @@ class MockWebSocket {
 
     emitError() {
         this.emit("error", new Event("error"));
-    }
-
-    private emit(type: string, event: Event | MessageEvent) {
-        for (const listener of this.listeners.get(type) || []) {
-            listener(event);
-        }
     }
 }
 

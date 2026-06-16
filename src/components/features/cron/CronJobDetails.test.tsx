@@ -13,8 +13,8 @@ const job = {
     payload: { kind: "agentTurn", message: "Improve the dashboard" },
     delivery: { mode: "none" },
     state: {
-        lastRunAtMs: new Date("2026-05-10T07:30:00.000Z").getTime(),
-        nextRunAtMs: new Date("2026-05-10T16:30:00.000Z").getTime(),
+        lastRunAtMs: Date.parse("2026-05-10T07:30:00.000Z"),
+        nextRunAtMs: Date.parse("2026-05-10T16:30:00.000Z"),
         lastRunStatus: "success",
     },
 } satisfies CronJob;
@@ -45,7 +45,10 @@ function renderDetails(
         hasInvalidJson: false,
         editError: null,
         onSave: vi.fn(),
-        formatDate: (value: number) => new Date(value).toISOString(),
+        formatDate: (value: number) => {
+            const date = new Date(value);
+            return date.toISOString();
+        },
         ...overrides,
     } satisfies React.ComponentProps<typeof CronJobDetails>;
 
@@ -58,7 +61,7 @@ function renderDetails(
 describe("CronJobDetails", () => {
     it("renders controls, run state, and read-only JSON config", () => {
         renderDetails({
-            lastTriggeredAt: new Date("2026-05-10T12:00:00.000Z").getTime(),
+            lastTriggeredAt: Date.parse("2026-05-10T12:00:00.000Z"),
         });
 
         expect(screen.getByText("Dashboard autopilot")).toBeInTheDocument();

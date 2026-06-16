@@ -7,7 +7,11 @@ import { AgentAccessSection } from "./AgentAccessSection";
 
 const agents: AgentConfig[] = [
     { id: "main", name: "Mira", tools: { deny: ["exec"] } },
-    { id: "researcher", name: "Researcher", tools: { allow: ["web_search"] } },
+    {
+        id: "researcher",
+        name: "Researcher",
+        tools: { allow: ["exec", "web_search"] },
+    },
 ];
 
 describe("AgentAccessSection", () => {
@@ -23,7 +27,7 @@ describe("AgentAccessSection", () => {
             "21/22 tools"
         );
         expect(screen.getByRole("button", { name: /Researcher/u })).toHaveTextContent(
-            "1/22 tools"
+            "2/22 tools"
         );
         expect(screen.getByRole("button", { name: /Mira/u })).toHaveAttribute(
             "aria-pressed",
@@ -86,7 +90,7 @@ describe("AgentAccessSection", () => {
             {
                 id: "researcher",
                 name: "Researcher",
-                tools: { allow: [], deny: [] },
+                tools: { allow: ["exec", "web_fetch"], deny: [] },
             },
         ]);
 
@@ -108,7 +112,13 @@ describe("AgentAccessSection", () => {
 
         render(
             <AgentAccessSection
-                agents={[{ id: "main", name: "Mira", tools: { deny: [] } }]}
+                agents={[
+                    {
+                        id: "main",
+                        name: "Mira",
+                        tools: { deny: ["web_search"] },
+                    },
+                ]}
                 onSave={onSave}
                 saving={false}
             />
@@ -123,7 +133,11 @@ describe("AgentAccessSection", () => {
         await user.click(screen.getByRole("button", { name: "Save access control" }));
 
         expect(onSave).toHaveBeenCalledWith([
-            { id: "main", name: "Mira", tools: { deny: ["exec"] } },
+            {
+                id: "main",
+                name: "Mira",
+                tools: { deny: ["exec", "web_search"] },
+            },
         ]);
     });
 

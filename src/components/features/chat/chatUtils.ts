@@ -1,3 +1,4 @@
+import { timestampFromDateString } from "../../../utils/date";
 import { type ChatHistoryMessage, TOOL_ROLE_VARIANTS } from "./chatTypes";
 
 /** Defines max attachment bytes. */
@@ -33,10 +34,14 @@ export function dataUrlToBase64(dataUrl: string): string {
 }
 
 /** Performs base64 to text. */
-export function base64ToText(base64: string): string {
-    const binary = window.atob(base64);
-    const bytes = Uint8Array.from(binary, (character) => character.codePointAt(0) ?? 0);
-    return new TextDecoder().decode(bytes);
+export function base64ToText(base64: string): string | undefined {
+    try {
+        const bytes = Uint8Array.fromBase64(base64);
+        const decoder = new TextDecoder();
+        return decoder.decode(bytes);
+    } catch {
+        return undefined;
+    }
 }
 
 /** Returns a diagnostic identity for tool/thinking rows without primary text. */
@@ -146,10 +151,7 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
 
 /** Performs message timestamp milliseconds. */
 function messageTimestampMs(message: ChatHistoryMessage): number | null {
-    const timestamp = message.timestamp
-        ? new Date(message.timestamp).getTime()
-        : Number.NaN;
-    return Number.isFinite(timestamp) ? timestamp : null;
+    return message.timestamp ? timestampFromDateString(message.timestamp) : null;
 }
 
 /** Performs insert messages by timestamp. */
@@ -256,11 +258,10 @@ export function mergeWithRecentOptimisticMessages(
             return true;
         }
 
-        const timestamp = message.timestamp ? new Date(message.timestamp).getTime() : 0;
-        return (
-            Number.isFinite(timestamp) &&
-            now - timestamp < OPTIMISTIC_MESSAGE_RETENTION_MS
-        );
+        const timestamp = message.timestamp
+            ? timestampFromDateString(message.timestamp)
+            : null;
+        return timestamp !== null && now - timestamp < OPTIMISTIC_MESSAGE_RETENTION_MS;
     });
 
     return dedupeMessages(insertMessagesByTimestamp(nextMessages, recentMissingMessages));
@@ -285,7 +286,7 @@ export function readFileAsDataUrl(file: File): Promise<string> {
     });
 }
 
-/** Performs display mime type. */
+/** Performs display MIME type. */
 export function displayMimeType(file: File): string {
     return file.type || "application/octet-stream";
 }

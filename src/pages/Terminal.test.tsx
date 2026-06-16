@@ -281,7 +281,7 @@ describe("Terminal page", () => {
         const user = userEvent.setup();
         const { container } = render(<Terminal />);
         const input = screen.getByPlaceholderText("Enter command...");
-        const output = container.querySelector(".overflow-auto") as HTMLDivElement;
+        const output = container.querySelector(":scope .overflow-auto") as HTMLDivElement;
 
         await user.click(input);
         await user.keyboard("{Tab}{ArrowUp}{ArrowDown}");
@@ -305,7 +305,7 @@ describe("Terminal page", () => {
     it("keeps the follow control hidden when already at the bottom", async () => {
         const user = userEvent.setup();
         const { container } = render(<Terminal />);
-        const output = container.querySelector(".overflow-auto") as HTMLDivElement;
+        const output = container.querySelector(":scope .overflow-auto") as HTMLDivElement;
 
         Object.defineProperties(output, {
             clientHeight: { configurable: true, value: 100 },

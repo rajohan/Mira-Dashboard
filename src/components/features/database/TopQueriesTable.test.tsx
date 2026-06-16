@@ -49,7 +49,7 @@ describe("TopQueriesTable", () => {
 
     it("opens query details and copies the selected query", async () => {
         const user = userEvent.setup();
-        let setTimeoutSpy: { mockRestore: () => void } | undefined;
+        let setTimeoutSpy: undefined | { mockRestore: () => void };
         let resetCopied: (() => void) | undefined;
         const writeText = vi.fn().mockImplementation(async () => {});
         const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");

@@ -47,8 +47,10 @@ function updateTool(agent: AgentConfig, toolId: string, enabled: boolean): Agent
         ...agent,
         tools: {
             ...agent.tools,
-            allow: allow ? [...allow].sort() : agent.tools?.allow,
-            deny: [...deny].sort(),
+            allow: allow
+                ? [...allow].sort((left, right) => left.localeCompare(right))
+                : agent.tools?.allow,
+            deny: [...deny].sort((left, right) => left.localeCompare(right)),
         },
     };
 }

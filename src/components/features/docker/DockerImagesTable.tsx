@@ -17,7 +17,7 @@ import { formatBytes } from "./dockerFormatters";
 
 const columnHelper = createColumnHelper<DockerImage>();
 
-/** Provides props for docker images table. */
+/** Provides props for Docker images table. */
 interface DockerImagesTableProps {
     images: DockerImage[];
     onDelete: (imageId: string, label: string) => void;
@@ -25,7 +25,7 @@ interface DockerImagesTableProps {
     isPruning?: boolean;
 }
 
-/** Renders the docker images table UI. */
+/** Renders the Docker images table UI. */
 export function DockerImagesTable({
     images,
     onDelete,
@@ -105,18 +105,14 @@ export function DockerImagesTable({
 
     const unusedCount = images.filter((image) => image.inUseBy.length === 0).length;
 
-    if (images.length === 0) {
-        return (
-            <Card className="overflow-hidden">
-                <div className="border-primary-700 border-b px-3 py-3 text-lg font-semibold sm:px-4">
-                    Images
-                </div>
-                <EmptyState message="No images found." />
-            </Card>
-        );
-    }
-
-    return (
+    return images.length === 0 ? (
+        <Card className="overflow-hidden">
+            <div className="border-primary-700 border-b px-3 py-3 text-lg font-semibold sm:px-4">
+                Images
+            </div>
+            <EmptyState message="No images found." />
+        </Card>
+    ) : (
         <Card className="overflow-hidden">
             <div className="border-primary-700 flex flex-col gap-3 border-b px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
                 <div className="text-lg font-semibold">Images</div>

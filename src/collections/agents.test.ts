@@ -28,7 +28,11 @@ vi.mock("../lib/queryClient", () => ({
     queryClient: {},
 }));
 
-import { agentsCollection, writeAgentsFromWebSocket } from "./agents";
+import {
+    agentsCollection,
+    preloadAgentsCollection,
+    writeAgentsFromWebSocket,
+} from "./agents";
 
 describe("agents collection", () => {
     beforeEach(() => {
@@ -41,10 +45,11 @@ describe("agents collection", () => {
         expect(mocks.queryCollectionOptions).toHaveBeenCalledWith(
             expect.objectContaining({
                 queryKey: ["agents"],
-                staleTime: Number.POSITIVE_INFINITY,
+                staleTime: Infinity,
             })
         );
         expect(mocks.createCollection).toHaveBeenCalled();
+        preloadAgentsCollection();
         expect(agentsCollection.preload).toHaveBeenCalled();
     });
 

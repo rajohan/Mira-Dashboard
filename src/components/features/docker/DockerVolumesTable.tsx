@@ -27,7 +27,7 @@ function truncateMiddle(value: string, maxLength = 48): string {
     return `${value.slice(0, startLength)}...${value.slice(-endLength)}`;
 }
 
-/** Provides props for docker volumes table. */
+/** Provides props for Docker volumes table. */
 interface DockerVolumesTableProps {
     volumes: DockerVolume[];
     onDelete: (volumeName: string) => void;
@@ -35,7 +35,7 @@ interface DockerVolumesTableProps {
     isPruning?: boolean;
 }
 
-/** Renders the docker volumes table UI. */
+/** Renders the Docker volumes table UI. */
 export function DockerVolumesTable({
     volumes,
     onDelete,
@@ -114,18 +114,14 @@ export function DockerVolumesTable({
 
     const unusedCount = volumes.filter((volume) => volume.usedBy.length === 0).length;
 
-    if (volumes.length === 0) {
-        return (
-            <Card className="overflow-hidden">
-                <div className="border-primary-700 border-b px-3 py-3 text-lg font-semibold sm:px-4">
-                    Volumes
-                </div>
-                <EmptyState message="No volumes found." />
-            </Card>
-        );
-    }
-
-    return (
+    return volumes.length === 0 ? (
+        <Card className="overflow-hidden">
+            <div className="border-primary-700 border-b px-3 py-3 text-lg font-semibold sm:px-4">
+                Volumes
+            </div>
+            <EmptyState message="No volumes found." />
+        </Card>
+    ) : (
         <Card className="overflow-hidden">
             <div className="border-primary-700 flex flex-col gap-3 border-b px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
                 <div className="text-lg font-semibold">Volumes</div>

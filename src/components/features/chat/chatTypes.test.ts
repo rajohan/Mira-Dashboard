@@ -14,6 +14,11 @@ import {
     optimisticAttachmentDisplay,
 } from "./chatTypes";
 
+function toBase64(text: string): string {
+    const encoder = new TextEncoder();
+    return encoder.encode(text).toBase64();
+}
+
 function sendAttachment(overrides: Partial<ChatSendAttachment> = {}): ChatSendAttachment {
     return {
         id: "att-1",
@@ -134,7 +139,7 @@ describe("chat type normalizers", () => {
                 fileName: "note.txt",
                 mimeType: "text/plain",
                 sizeBytes: 5,
-                contentBase64: window.btoa("hello"),
+                contentBase64: toBase64("hello"),
                 dataUrl: undefined,
                 kind: "text",
             },
@@ -143,8 +148,8 @@ describe("chat type normalizers", () => {
                 fileName: "photo.svg",
                 mimeType: "image/svg+xml",
                 sizeBytes: 7,
-                contentBase64: window.btoa("<svg />"),
-                dataUrl: `data:image/svg+xml;base64,${window.btoa("<svg />")}`,
+                contentBase64: toBase64("<svg />"),
+                dataUrl: `data:image/svg+xml;base64,${toBase64("<svg />")}`,
                 kind: "image",
             },
         ]);

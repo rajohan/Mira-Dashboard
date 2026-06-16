@@ -20,6 +20,7 @@ import {
     formatCronTimestamp,
     getCronStatusVariant,
 } from "../../../utils/cronUtils";
+import { timestampFromDateString } from "../../../utils/date";
 import { formatDate, formatDuration } from "../../../utils/format";
 import { getColumnId, getPriority, PRIORITY_COLORS } from "../../../utils/taskUtils";
 import { Badge } from "../../ui/Badge";
@@ -398,7 +399,7 @@ export function TaskDetailModal({
                     )}
                     <span>Created {formatDate(task.createdAt)}</span>
                     <span>
-                        Updated {formatDuration(new Date(task.updatedAt).getTime())}
+                        Updated {formatDuration(timestampFromDateString(task.updatedAt))}
                     </span>
                 </div>
 
@@ -519,9 +520,11 @@ export function TaskDetailModal({
                         ) : (
                             updates.map((update) => {
                                 const authorMeta =
-                                    update.author === TASK_ASSIGNEES.mira.id
-                                        ? TASK_ASSIGNEES.mira
-                                        : TASK_ASSIGNEES.raymond;
+                                    TASK_ASSIGNEES[
+                                        update.author === TASK_ASSIGNEES.mira.id
+                                            ? "mira"
+                                            : "raymond"
+                                    ];
                                 const isEditingThis = editingUpdateId === update.id;
 
                                 return (

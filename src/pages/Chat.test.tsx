@@ -38,6 +38,7 @@ type ChatVirtualizerInstance = Parameters<
 
 interface ChatTestMocks {
     agentsStatus:
+        | undefined
         | {
               agents: Array<{
                   currentTask: string;
@@ -45,28 +46,27 @@ interface ChatTestMocks {
                   sessionKey: string;
                   status: string;
               }>;
-          }
-        | undefined;
-    confirmModalHandlers: {
+          };
+    confirmModalHandlers: null | {
         isOpen: boolean;
         onCancel: () => void;
         onConfirm: () => void;
-    } | null;
+    };
     isConnected: boolean;
     liveSessions: MockLiveSession[] | undefined;
     request: ReturnType<typeof vi.fn>;
-    runtimeEventsOptions: {
+    runtimeEventsOptions: null | {
         connectionId: number;
         isConnected: boolean;
         liveHistoryRefreshTimerReference: { current: number | null };
         updateActiveStreams: (
             updater: (previous: Record<string, unknown>) => Record<string, unknown>
         ) => void;
-    } | null;
+    };
     skipComposerFileInputRef: boolean;
     skipMessagesContainerRef: boolean;
     slashCommand: ReturnType<typeof vi.fn>;
-    slashCommandOptions: { confirmResetSession: () => Promise<boolean> } | null;
+    slashCommandOptions: null | { confirmResetSession: () => Promise<boolean> };
     socketError: string | null;
     subscribe: ReturnType<typeof vi.fn>;
     virtualizerOptions: ChatVirtualizerOptions | null;
@@ -208,7 +208,7 @@ vi.mock("../components/features/chat/AttachmentPreviewModal", () => ({
         previewItem,
         onClose,
     }: {
-        previewItem: { title: string } | null;
+        previewItem: null | { title: string };
         onClose: () => void;
     }) =>
         previewItem ? (
@@ -633,7 +633,7 @@ describe("Chat helpers", () => {
 
     it("normalizes timestamps and detects recovered assistant history", () => {
         expect(sessionTimestampMs(42)).toBe(42);
-        expect(sessionTimestampMs(Number.NaN)).toBeNull();
+        expect(sessionTimestampMs(NaN)).toBeNull();
         expect(sessionTimestampMs("2026-05-11T00:00:00.000Z")).toBe(
             Date.parse("2026-05-11T00:00:00.000Z")
         );
@@ -2071,7 +2071,7 @@ describe("Chat", () => {
         const verbosePatchCallsBeforeSteer = mocks.request.mock.calls.filter(
             ([method, params]) =>
                 method === "sessions.patch" &&
-                (params as { verboseLevel?: string } | undefined)?.verboseLevel === "full"
+                (params as undefined | { verboseLevel?: string })?.verboseLevel === "full"
         ).length;
 
         await user.type(screen.getByLabelText("Draft"), "/steer keep the patch small");
@@ -2092,7 +2092,7 @@ describe("Chat", () => {
             mocks.request.mock.calls.filter(
                 ([method, params]) =>
                     method === "sessions.patch" &&
-                    (params as { verboseLevel?: string } | undefined)?.verboseLevel ===
+                    (params as undefined | { verboseLevel?: string })?.verboseLevel ===
                         "full"
             )
         ).toHaveLength(verbosePatchCallsBeforeSteer);
@@ -2712,11 +2712,11 @@ describe("Chat", () => {
             json: async () => ({ text: "recorded text" }),
             ok: true,
         } as Response);
-        let recorder: {
+        let recorder: null | {
             listeners: Record<string, Array<(event?: { data: Blob }) => void>>;
             mimeType: string;
             stop: () => void;
-        } | null = null;
+        } = null;
         const MediaRecorderMock = vi.fn(function (this: typeof recorder) {
             recorder = {
                 listeners: {},
@@ -2796,11 +2796,11 @@ describe("Chat", () => {
             json: async () => ({ text: "non-empty chunk" }),
             ok: true,
         } as Response);
-        let recorder: {
+        let recorder: null | {
             listeners: Record<string, Array<(event?: { data: Blob }) => void>>;
             mimeType: string;
             stop: () => void;
-        } | null = null;
+        } = null;
         const MediaRecorderMock = vi.fn(function (this: typeof recorder) {
             recorder = {
                 listeners: {},

@@ -6,11 +6,11 @@ import { Docker } from "./Docker";
 
 const docker = vi.hoisted(() => ({
     action: vi.fn(),
-    confirmModalHandlers: null as {
+    confirmModalHandlers: null as null | {
         isOpen: boolean;
         onConfirm: () => void;
         title: string;
-    } | null,
+    },
     deleteImage: vi.fn(),
     deleteVolume: vi.fn(),
     manualUpdate: vi.fn(),

@@ -1,3 +1,4 @@
+import { currentIsoString } from "../../../utils/date";
 import {
     type ChatHistoryMessage,
     type ChatStreamEventMessage,
@@ -125,7 +126,7 @@ export function finalMessageFromPayload(
 ): ChatHistoryMessage {
     return {
         ...normalizeAssistantPayload(payload.message ?? payload.content ?? payload.text),
-        timestamp: new Date().toISOString(),
+        timestamp: currentIsoString(),
         runId: payload.runId,
     };
 }
@@ -148,7 +149,7 @@ export function mergeStreamMessage(
         thinking: next.thinking?.length ? next.thinking : previous?.thinking,
         toolCalls: next.toolCalls?.length ? next.toolCalls : previous?.toolCalls,
         toolResult: next.toolResult || previous?.toolResult,
-        timestamp: new Date().toISOString(),
+        timestamp: currentIsoString(),
         runId,
     };
 }
@@ -176,7 +177,7 @@ export function createLocalSystemMessage(text: string): ChatHistoryMessage {
         text,
         images: [],
         attachments: [],
-        timestamp: new Date().toISOString(),
+        timestamp: currentIsoString(),
         local: true,
     };
 }

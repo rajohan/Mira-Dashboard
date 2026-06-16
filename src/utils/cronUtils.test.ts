@@ -52,11 +52,10 @@ describe("cron utils", () => {
 
     it("formats timestamps and statuses", () => {
         expect(formatCronTimestamp("bad")).toBe("—");
-        expect(formatCronTimestamp(Number.NaN)).toBe("—");
+        expect(formatCronTimestamp(NaN)).toBe("—");
         expect(formatCronTimestamp(Infinity)).toBe("—");
-        expect(formatCronTimestamp(new Date(2026, 4, 10, 6, 7).getTime())).toBe(
-            "10.05.2026, 06:07"
-        );
+        const date = new Date(2026, 4, 10, 6, 7);
+        expect(formatCronTimestamp(date.getTime())).toBe("10.05.2026, 06:07");
         const missingStatus: string | undefined = undefined;
         expect(formatCronLastStatus(missingStatus)).toBe("UNKNOWN");
         expect(formatCronLastStatus("")).toBe("UNKNOWN");

@@ -3,6 +3,14 @@
     "private": true,
     "version": "0.0.0",
     "type": "module",
+    "engines": {
+        "node": ">=25.0.0"
+    },
+    "browserslist": [
+        "Chrome >= 140",
+        "Firefox >= 133",
+        "Safari >= 18.2"
+    ],
     "scripts": {
         "dev": "vite",
         "build": "tsc -b && vite build",
@@ -78,7 +86,7 @@
         "eslint-plugin-react-hooks": "^7.1.1",
         "eslint-plugin-react-refresh": "^0.5.3",
         "eslint-plugin-simple-import-sort": "^13.0.0",
-        "eslint-plugin-unicorn": "^65.0.1",
+        "eslint-plugin-unicorn": "^66.0.0",
         "globals": "^17.6.0",
         "jsdom": "^29.1.1",
         "postcss": "^8.5.15",

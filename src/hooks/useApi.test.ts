@@ -80,7 +80,8 @@ describe("apiFetch", () => {
     });
 
     it("requires response bodies for required helpers", async () => {
-        const emptyResponse = new Map<string, unknown>().get("missing");
+        const responses = new Map<string, unknown>();
+        const emptyResponse = responses.get("missing");
         expect(requireApiResponse({ ok: true })).toEqual({ ok: true });
         expect(() => requireApiResponse(emptyResponse)).toThrow(
             "API response body was empty"

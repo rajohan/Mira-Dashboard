@@ -352,7 +352,7 @@ describe("DockerContainersTable", () => {
         const onDetails = vi.fn();
         const { container } = renderTable(containers, { onDetails });
 
-        fireEvent.click(container.querySelector("tbody tr")!);
+        fireEvent.click(container.querySelector(":scope tbody tr")!);
 
         expect(onDetails).toHaveBeenCalledWith("container-1");
     });

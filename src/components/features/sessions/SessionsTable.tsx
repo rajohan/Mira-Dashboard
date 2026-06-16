@@ -135,15 +135,11 @@ export function SessionsTable({
         getFilteredRowModel: getFilteredRowModel(),
     });
 
-    if (tableSessions.length === 0) {
-        return (
-            <Card className="py-8 text-center">
-                <p className="text-primary-400">No sessions found</p>
-            </Card>
-        );
-    }
-
-    return (
+    return tableSessions.length === 0 ? (
+        <Card className="py-8 text-center">
+            <p className="text-primary-400">No sessions found</p>
+        </Card>
+    ) : (
         <Card>
             <div className="space-y-3 md:hidden">
                 {table.getRowModel().rows.map((row) => {

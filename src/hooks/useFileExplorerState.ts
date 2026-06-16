@@ -43,15 +43,17 @@ export function useFileExplorerState() {
     }, [rootFiles]);
 
     useEffect(() => {
-        if (fileContent) {
-            setEditedContent(fileContent.content || "");
-            setHasChanges(false);
-            setLargeFileWarning(fileContent.size > MAX_PREVIEW_SIZE);
-            setMarkdownPreview(true);
-            setJsonPreview(true);
-            setCodeEditMode(false);
-            setError(null);
+        if (!fileContent) {
+            return;
         }
+
+        setEditedContent(fileContent.content || "");
+        setHasChanges(false);
+        setLargeFileWarning(fileContent.size > MAX_PREVIEW_SIZE);
+        setMarkdownPreview(true);
+        setJsonPreview(true);
+        setCodeEditMode(false);
+        setError(null);
     }, [fileContent]);
 
     /** Responds to toggle events. */
@@ -66,7 +68,11 @@ export function useFileExplorerState() {
             return;
         }
 
-        setExpandedPaths((prev) => new Set(prev).add(path));
+        setExpandedPaths((prev) => {
+            const next = new Set(prev);
+            next.add(path);
+            return next;
+        });
 
         /** Performs find node. */
         const findNode = (nodes: FileNode[]): FileNode | undefined => {

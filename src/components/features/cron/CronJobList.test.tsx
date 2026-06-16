@@ -11,8 +11,8 @@ const jobs = [
         name: "Morning dashboard autopilot",
         enabled: true,
         state: {
-            lastRunAtMs: new Date("2026-05-10T07:30:00.000Z").getTime(),
-            nextRunAtMs: new Date("2026-05-10T16:30:00.000Z").getTime(),
+            lastRunAtMs: Date.parse("2026-05-10T07:30:00.000Z"),
+            nextRunAtMs: Date.parse("2026-05-10T16:30:00.000Z"),
         },
     },
     {

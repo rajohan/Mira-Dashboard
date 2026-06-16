@@ -33,7 +33,7 @@ vi.mock("../components/features/files", () => ({
         selectedPath,
         syntaxClass,
     }: {
-        fileContent: { path: string } | null;
+        fileContent: null | { path: string };
         isEditable: boolean;
         onCodePreviewChange: (preview: boolean) => void;
         onContentChange: (content: string) => void;

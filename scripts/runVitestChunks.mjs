@@ -7,16 +7,16 @@ const ROOT = process.cwd();
 const DEFAULT_CHUNK_SIZE = 30;
 
 const passthroughArgs = [];
-let chunkLimit = Number.POSITIVE_INFINITY;
+let chunkLimit = Infinity;
 let chunkSize = DEFAULT_CHUNK_SIZE;
 
 for (const arg of process.argv.slice(2)) {
     if (arg.startsWith("--chunk-size=")) {
         const value = Number(arg.slice("--chunk-size=".length));
-        if (Number.isInteger(value) && value > 0) chunkSize = value;
+        if (Number.isSafeInteger(value) && value > 0) chunkSize = value;
     } else if (arg.startsWith("--limit-chunks=")) {
         const value = Number(arg.slice("--limit-chunks=".length));
-        if (Number.isInteger(value) && value > 0) chunkLimit = value;
+        if (Number.isSafeInteger(value) && value > 0) chunkLimit = value;
     } else {
         passthroughArgs.push(arg);
     }
@@ -62,7 +62,9 @@ function hasCoverageEnabled(args) {
     );
 }
 
-const testFiles = collectTests(path.join(ROOT, "src")).sort();
+const testFiles = collectTests(path.join(ROOT, "src")).sort((left, right) =>
+    left.localeCompare(right)
+);
 
 if (testFiles.length === 0) {
     console.log("No frontend test files found.");

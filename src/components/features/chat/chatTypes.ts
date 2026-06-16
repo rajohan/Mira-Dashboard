@@ -1,3 +1,5 @@
+import { isoStringFromDate } from "../../../utils/date";
+
 /** Defines normalized role variants that represent tool result rows. */
 export const TOOL_ROLE_VARIANTS: readonly string[] = [
     "tool",
@@ -262,7 +264,7 @@ function fileNameFromPath(path: string): string {
     return fileName || path;
 }
 
-/** Performs mime type from path. */
+/** Performs MIME type from path. */
 function mimeTypeFromPath(path: string): string {
     const extension = path.split(".").pop()!.toLowerCase();
     const mimeTypes: Record<string, string> = {
@@ -317,13 +319,8 @@ function extractMediaDirectiveAttachments(text: string): ChatAttachmentDisplay[]
 
 /** Performs text to base64. */
 function textToBase64(text: string): string {
-    const bytes = new TextEncoder().encode(text);
-    let binary = "";
-    for (const byte of bytes) {
-        binary += String.fromCodePoint(byte);
-    }
-
-    return window.btoa(binary);
+    const encoder = new TextEncoder();
+    return encoder.encode(text).toBase64();
 }
 
 /** Extracts inline file attachments. */
@@ -342,7 +339,8 @@ function extractInlineFileAttachments(text: string): ChatAttachmentDisplay[] {
             /<<<EXTERNAL_UNTRUSTED_CONTENT[^>]*>>>[\s\S]*?\n---\n([\s\S]*?)<<<END_EXTERNAL_UNTRUSTED_CONTENT[^>]*>>>/
         );
         const content = (externalContentMatch?.[1] ?? body).trim();
-        const contentBytes = new TextEncoder().encode(content);
+        const encoder = new TextEncoder();
+        const contentBytes = encoder.encode(content);
         const contentBase64 = textToBase64(content);
         const kind = attachmentKind(mimeType);
 
@@ -492,7 +490,7 @@ export function normalizeChatHistoryMessage(
         toolResult,
         timestamp:
             typeof message.timestamp === "number"
-                ? new Date(message.timestamp).toISOString()
+                ? isoStringFromDate(message.timestamp)
                 : message.timestamp,
     };
 }
@@ -575,7 +573,8 @@ export function normalizeVisibleChatHistoryMessages(
     const visibleMessages: ChatHistoryMessage[] = [];
     let pendingHiddenToolMedia: ChatAttachmentDisplay[] = [];
 
-    for (const message of messages.map(normalizeChatHistoryMessage)) {
+    for (const rawMessage of messages) {
+        const message = normalizeChatHistoryMessage(rawMessage);
         const isToolMessage = isToolRole(message.role);
         const hiddenToolMedia =
             isToolMessage && !visibility.showTools && message.attachments!.length > 0;

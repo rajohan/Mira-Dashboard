@@ -7,7 +7,7 @@ import { QuotaOverviewCard } from "./QuotaOverviewCard";
 
 const quotas: QuotasResponse = {
     cacheAgeMs: 1000,
-    checkedAt: new Date("2026-05-10T10:00:00.000Z").getTime(),
+    checkedAt: Date.parse("2026-05-10T10:00:00.000Z"),
     elevenlabs: {
         percentUsed: 75,
         remaining: 25,
@@ -317,7 +317,7 @@ describe("QuotaOverviewCard", () => {
         const RealDate = Date;
         const MockDate = function (this: Date, ...args: unknown[]) {
             if (args.length === 7) {
-                return new RealDate(Number.NaN);
+                return new RealDate(NaN);
             }
 
             if (new.target) {
@@ -349,7 +349,8 @@ describe("QuotaOverviewCard", () => {
     });
 
     it("formats OpenAI-style weekly reset dates when present", () => {
-        const currentYear = new Date().getFullYear();
+        const now = new Date();
+        const currentYear = now.getFullYear();
         const expectedWeeklyReset = formatDate(new Date(currentYear, 4, 10, 13, 45));
 
         render(

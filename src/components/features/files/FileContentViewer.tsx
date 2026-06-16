@@ -11,17 +11,20 @@ import {
 } from "../../../utils/fileUtils";
 import { Textarea } from "../../ui/Textarea";
 
-const MarkdownPreview = lazy(() =>
-    import("./viewers/MarkdownPreview").then((module) => ({
+const MarkdownPreview = lazy(async () => {
+    const module = await import("./viewers/MarkdownPreview");
+    return {
         default: module.MarkdownPreview,
-    }))
-);
-const JsonPreview = lazy(() =>
-    import("./viewers/JsonPreview").then((module) => ({ default: module.JsonPreview }))
-);
-const CodePreview = lazy(() =>
-    import("./viewers/CodePreview").then((module) => ({ default: module.CodePreview }))
-);
+    };
+});
+const JsonPreview = lazy(async () => {
+    const module = await import("./viewers/JsonPreview");
+    return { default: module.JsonPreview };
+});
+const CodePreview = lazy(async () => {
+    const module = await import("./viewers/CodePreview");
+    return { default: module.CodePreview };
+});
 
 /** Provides props for file content viewer. */
 interface FileContentViewerProps {

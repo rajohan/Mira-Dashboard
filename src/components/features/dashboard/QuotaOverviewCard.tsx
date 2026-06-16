@@ -119,7 +119,7 @@ function formatResetTime(value: string | null | undefined): string {
 
 /** Formats a percent value without noisy trailing decimals. */
 function formatPercent(value: number): string {
-    return Number.isInteger(value) ? String(value) : value.toFixed(1);
+    return Number.isSafeInteger(value) ? String(value) : value.toFixed(1);
 }
 
 /** Converts Synthetic.new fractional tick values into display percentages. */

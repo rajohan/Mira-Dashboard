@@ -4,6 +4,7 @@ import { GripVertical } from "lucide-react";
 
 import type { Task } from "../../../types/task";
 import { formatCronLastStatus, getCronStatusVariant } from "../../../utils/cronUtils";
+import { timestampFromDateString } from "../../../utils/date";
 import { formatDuration } from "../../../utils/format";
 import { getPriority, PRIORITY_COLORS } from "../../../utils/taskUtils";
 import { Badge } from "../../ui/Badge";
@@ -122,7 +123,7 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
 
                 <span className="flex items-center justify-between gap-2">
                     <span className="text-primary-500 truncate text-xs">
-                        {formatDuration(new Date(task.updatedAt).getTime())}
+                        {formatDuration(timestampFromDateString(task.updatedAt))}
                     </span>
                     {assignee && (
                         <span className="flex items-center gap-1">

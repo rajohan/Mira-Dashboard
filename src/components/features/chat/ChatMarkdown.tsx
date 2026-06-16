@@ -12,16 +12,28 @@ const JSON_LANGUAGES = new Set(["json", "json5", "jsonc"]);
 
 /** Performs children to text. */
 export function childrenToText(children: ReactNode): string {
-    if (typeof children === "string" || typeof children === "number") {
-        return String(children);
+    const childStack = [children];
+    let text = "";
+
+    while (childStack.length > 0) {
+        const child = childStack.shift();
+
+        if (typeof child === "string" || typeof child === "number") {
+            text += String(child);
+            continue;
+        }
+
+        if (Array.isArray(child)) {
+            childStack.unshift(...child);
+            continue;
+        }
+
+        if (isValidElement<{ children?: ReactNode }>(child)) {
+            childStack.unshift(child.props.children);
+        }
     }
-    if (Array.isArray(children)) {
-        return children.map(childrenToText).join("");
-    }
-    if (isValidElement<{ children?: ReactNode }>(children)) {
-        return childrenToText(children.props.children);
-    }
-    return "";
+
+    return text;
 }
 
 /** Performs code language from class name. */
@@ -72,7 +84,7 @@ function parseJsonBlock(code: string): object | null {
 /** Returns pre code block. */
 export function getPreCodeBlock(
     children: ReactNode
-): { code: string; language: string } | null {
+): null | { code: string; language: string } {
     const child = Children.toArray(children)[0];
     if (!isValidElement<{ className?: string; children?: ReactNode }>(child)) {
         return null;
