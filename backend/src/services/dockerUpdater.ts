@@ -24,7 +24,8 @@ const COMPOSE_FILENAMES = [
 ];
 const execFileAsync = promisify(execFile);
 const SUPPORTED_REGISTRIES = new Set(["docker.io", "ghcr.io", "lscr.io"]);
-const MAX_REGISTRY_TAG_PAGES = 50;
+const REGISTRY_TAG_PAGE_SIZE = 1000;
+const MAX_REGISTRY_TAG_PAGES = 100;
 const composeUpdateLocks = new Map<string, { promise: Promise<void> }>();
 const drainedRegistryResponses = new WeakSet<Response>();
 
@@ -594,62 +595,24 @@ function manifestDigestForPlatform(body: JsonRecord, platform: string): string |
 }
 
 async function lookupDockerHub(service: ManagedServiceRow) {
-    const repo = normalizeDockerHubRepo(stripRegistry(service.image_repo));
-    let latestTag = service.current_tag;
-    if (service.tag_match_type === "regex") {
-        if (needsFullTagScan(service)) {
-            const tags: unknown[] = [];
-            let tagsUrl: string | null =
-                `https://hub.docker.com/v2/repositories/${repo}/tags?page_size=100`;
-            let tagPageCount = 0;
-            while (tagsUrl) {
-                tagPageCount += 1;
-                if (tagPageCount > MAX_REGISTRY_TAG_PAGES) {
-                    throw new Error(
-                        `Docker Hub tag pagination exceeded ${MAX_REGISTRY_TAG_PAGES} pages for ${repo}`
-                    );
-                }
-                const tagsData = await fetchJson(tagsUrl);
-                if (Array.isArray(tagsData.results)) {
-                    tags.push(...tagsData.results);
-                }
-                const next = typeof tagsData.next === "string" ? tagsData.next : "";
-                tagsUrl = next || null;
-            }
-            const candidates = tags
-                .map((item) => String(asRecord(item).name || ""))
-                .filter((tag: string) => tag && tagMatches(service, tag))
-                .sort(compareTags);
-            latestTag = candidates.at(-1) || service.current_tag;
-        }
-    } else if (service.tag_match_pattern) {
-        latestTag = service.tag_match_pattern;
-    }
-    let latestDigest: string | null = null;
-    if (latestTag) {
-        const tagData = await fetchJson(
-            `https://hub.docker.com/v2/repositories/${repo}/tags/${encodeURIComponent(latestTag)}`
-        );
-        const platform = servicePlatform(service);
-        const image = (Array.isArray(tagData.images) ? tagData.images : []).find(
-            (candidate) => imageMatchesPlatform(asRecord(candidate), platform)
-        );
-        const digest = asRecord(image).digest ?? tagData.digest;
-        latestDigest = typeof digest === "string" ? digest : null;
-    }
-    return { latestTag, latestDigest };
+    return lookupRegistryV2(service);
 }
 
 async function lookupRegistryV2(service: ManagedServiceRow) {
     const registry = imageRegistry(service.image_repo);
-    const repo = stripRegistry(service.image_repo);
+    const registryHost = registry === "docker.io" ? "registry-1.docker.io" : registry;
+    const repo =
+        registry === "docker.io"
+            ? normalizeDockerHubRepo(stripRegistry(service.image_repo))
+            : stripRegistry(service.image_repo);
     let tag =
         service.tag_match_type === "exact"
             ? (service.tag_match_pattern ?? service.current_tag)
             : service.current_tag;
     if (needsFullTagScan(service)) {
         const tags: string[] = [];
-        let tagsUrl: string | null = `https://${registry}/v2/${repo}/tags/list`;
+        let tagsUrl: string | null =
+            `https://${registryHost}/v2/${repo}/tags/list?n=${REGISTRY_TAG_PAGE_SIZE}`;
         let tagPageCount = 0;
         while (tagsUrl) {
             tagPageCount += 1;
@@ -675,7 +638,7 @@ async function lookupRegistryV2(service: ManagedServiceRow) {
         return { latestTag: null, latestDigest: null };
     }
     const { body, headers } = await fetchRegistryJsonWithHeaders(
-        `https://${registry}/v2/${repo}/manifests/${tag}`,
+        `https://${registryHost}/v2/${repo}/manifests/${tag}`,
         {
             accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json",
         }
@@ -707,10 +670,7 @@ async function lookupLatest(service: ManagedServiceRow) {
             unsupported: true,
         };
     }
-    if (registry === "ghcr.io" || registry === "lscr.io") {
-        return lookupRegistryV2(service);
-    }
-    return lookupDockerHub(service);
+    return lookupRegistryV2(service);
 }
 
 function hasUpdate(service: ManagedServiceRow): boolean {

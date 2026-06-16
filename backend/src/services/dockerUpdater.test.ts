@@ -152,33 +152,30 @@ process.stdout.write("updated\n");
         mockFetch(async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();
             fetchUrls.push(url);
-            if (url.includes("hub.docker.com") && url.includes("/tags/1.2.1")) {
+            if (url.includes("/manifests/1.2.1")) {
                 return {
                     ok: true,
                     headers: new Headers(),
                     json: async () => ({
-                        images: [
-                            { architecture: "amd64", digest: "sha256:amd" },
+                        manifests: [
                             {
-                                architecture: "arm64",
-                                variant: null,
+                                digest: "sha256:amd",
+                                platform: { architecture: "amd64" },
+                            },
+                            {
                                 digest: "sha256:new",
+                                platform: { architecture: "arm64", variant: null },
                             },
                         ],
                     }),
                 } as Response;
             }
-            if (url.includes("hub.docker.com")) {
+            if (url.includes("/tags/list?n=1000")) {
                 return {
                     ok: true,
                     headers: new Headers(),
                     json: async () => ({
-                        results: [
-                            { name: "1.1.9" },
-                            { name: "1.2.0" },
-                            { name: "1.2.1" },
-                            { name: "2.0.0" },
-                        ],
+                        tags: ["1.1.9", "1.2.0", "1.2.1", "2.0.0"],
                     }),
                 } as Response;
             }
@@ -260,7 +257,9 @@ process.stdout.write("updated\n");
             false
         );
         assert.ok(
-            fetchUrls.some((url) => url.includes("repositories/library/nginx/tags"))
+            fetchUrls.some((url) =>
+                url.includes("registry-1.docker.io/v2/library/nginx/tags/list?n=1000")
+            )
         );
         assert.ok(
             fetchUrls.some((url) => url.includes("ghcr.io/v2/owner/app/manifests/stable"))
@@ -309,7 +308,7 @@ process.stdout.write("updated\n");
                 ok: !url.includes("busybox"),
                 status: 500,
                 headers: new Headers(),
-                json: async () => ({ results: [{ name: "3" }] }),
+                json: async () => ({ tags: ["3"] }),
             } as Response;
         });
 
@@ -1279,9 +1278,16 @@ setTimeout(() => process.exit(0), 30);
                 ok: true,
                 headers: new Headers(),
                 json: async () =>
-                    url.endsWith("/tags/3")
-                        ? { images: [{ architecture: "arm64", digest: "sha256:new" }] }
-                        : { results: [{ name: "1" }, { name: "2" }, { name: "3" }] },
+                    url.endsWith("/manifests/3")
+                        ? {
+                              manifests: [
+                                  {
+                                      digest: "sha256:new",
+                                      platform: { architecture: "arm64" },
+                                  },
+                              ],
+                          }
+                        : { tags: ["1", "2", "3"] },
             } as Response;
         });
 
@@ -1339,7 +1345,7 @@ setTimeout(() => process.exit(0), 30);
                 return {
                     ok: true,
                     headers: new Headers(),
-                    json: async () => ({ results: [{ name: "3" }] }),
+                    json: async () => ({ tags: ["3"] }),
                 } as Response;
             });
             const missingAfterPoll = await updater.runDockerUpdaterService(service.id);
@@ -1367,7 +1373,7 @@ setTimeout(() => process.exit(0), 30);
                 return {
                     ok: true,
                     headers: new Headers(),
-                    json: async () => ({ results: [{ name: "3" }] }),
+                    json: async () => ({ tags: ["3"] }),
                 } as Response;
             });
             const disabledAfterPoll = await updater.runDockerUpdaterService(
@@ -1465,12 +1471,17 @@ setTimeout(() => process.exit(0), 30);
         });
         mockFetch(async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();
-            if (url.includes("/library/nginx/tags/2")) {
+            if (url.includes("/library/nginx/manifests/2")) {
                 return {
                     ok: true,
                     headers: new Headers(),
                     json: async () => ({
-                        images: [{ architecture: "amd64", digest: "sha256:new" }],
+                        manifests: [
+                            {
+                                digest: "sha256:new",
+                                platform: { architecture: "amd64" },
+                            },
+                        ],
                     }),
                 } as Response;
             }
@@ -1608,9 +1619,16 @@ setTimeout(() => process.exit(0), 30);
                 ok: true,
                 headers: new Headers(),
                 json: async () =>
-                    url.endsWith("/tags/2")
-                        ? { images: [{ architecture: "arm64", digest: "sha256:new" }] }
-                        : { results: [{ name: "1" }, { name: "2" }] },
+                    url.endsWith("/manifests/2")
+                        ? {
+                              manifests: [
+                                  {
+                                      digest: "sha256:new",
+                                      platform: { architecture: "arm64" },
+                                  },
+                              ],
+                          }
+                        : { tags: ["1", "2"] },
             } as Response;
         });
 
@@ -1728,9 +1746,16 @@ setTimeout(() => process.exit(0), 30);
                 ok: true,
                 headers: new Headers(),
                 json: async () =>
-                    url.endsWith("/tags/2")
-                        ? { images: [{ architecture: "amd64", digest: "sha256:new" }] }
-                        : { results: [{ name: "1" }, { name: "2" }] },
+                    url.endsWith("/manifests/2")
+                        ? {
+                              manifests: [
+                                  {
+                                      digest: "sha256:new",
+                                      platform: { architecture: "amd64" },
+                                  },
+                              ],
+                          }
+                        : { tags: ["1", "2"] },
             } as Response;
         });
 
@@ -1928,9 +1953,9 @@ setTimeout(() => process.exit(0), 30);
                 ok: true,
                 headers: new Headers(),
                 json: async () =>
-                    url.endsWith("/tags/1")
+                    url.endsWith("/manifests/1")
                         ? { digest: "sha256:same-tag" }
-                        : { results: [{ name: "1" }] },
+                        : { tags: ["1"] },
             } as Response;
         });
 
@@ -2038,9 +2063,9 @@ setTimeout(() => process.exit(0), 30);
                     ok: true,
                     headers: new Headers(),
                     json: async () =>
-                        url.endsWith("/tags/2")
+                        url.endsWith("/manifests/2")
                             ? { digest: "sha256:new" }
-                            : { results: [{ name: "1" }, { name: "2" }] },
+                            : { tags: ["1", "2"] },
                 } as Response;
             });
 
@@ -2087,18 +2112,22 @@ setTimeout(() => process.exit(0), 30);
                 ok: true,
                 headers: new Headers(),
                 json: async () =>
-                    url.endsWith("/tags/2")
+                    url.endsWith("/manifests/2")
                         ? {
-                              images: [
+                              manifests: [
                                   {
-                                      architecture:
-                                          process.arch === "x64" ? "amd64" : process.arch,
                                       digest: "sha256:new",
-                                      os: "linux",
+                                      platform: {
+                                          architecture:
+                                              process.arch === "x64"
+                                                  ? "amd64"
+                                                  : process.arch,
+                                          os: "linux",
+                                      },
                                   },
                               ],
                           }
-                        : { results: [{ name: "1" }, { name: "2" }] },
+                        : { tags: ["1", "2"] },
             } as Response;
         });
 
@@ -2173,9 +2202,16 @@ setTimeout(() => process.exit(0), 30);
                 ok: true,
                 headers: new Headers(),
                 json: async () =>
-                    url.endsWith("/tags/2")
-                        ? { images: [{ architecture: "amd64", digest: "sha256:new" }] }
-                        : { results: [{ name: "1" }, { name: "2" }] },
+                    url.endsWith("/manifests/2")
+                        ? {
+                              manifests: [
+                                  {
+                                      digest: "sha256:new",
+                                      platform: { architecture: "amd64" },
+                                  },
+                              ],
+                          }
+                        : { tags: ["1", "2"] },
             } as Response;
         });
 
@@ -3257,6 +3293,44 @@ setTimeout(() => process.exit(0), 30);
             () => updater.__testing.fetchJson("https://hub.docker.com/timeout"),
             /Request timeout/u
         );
+        mockFetch(
+            async () =>
+                ({
+                    ok: false,
+                    status: 500,
+                    headers: new Headers(),
+                    json: async () => ({}),
+                }) as Response
+        );
+        await assert.rejects(
+            () => updater.__testing.fetchJson("https://hub.docker.com/fail"),
+            /HTTP 500/u
+        );
+        mockFetch(
+            async () =>
+                ({
+                    ok: true,
+                    headers: new Headers(),
+                    json: async () => ({ ok: true }),
+                }) as Response
+        );
+        assert.deepEqual(await updater.__testing.fetchJson("https://hub.docker.com/ok"), {
+            ok: true,
+        });
+        mockFetch(
+            async () =>
+                ({
+                    ok: true,
+                    headers: new Headers(),
+                    json: async () => {
+                        throw new Error("bad json");
+                    },
+                }) as unknown as Response
+        );
+        await assert.rejects(
+            () => updater.__testing.fetchJson("https://hub.docker.com/bad-json"),
+            /bad json/u
+        );
         mockFetch(async () => {
             throw new Error("network down");
         });
@@ -3379,33 +3453,35 @@ setTimeout(() => process.exit(0), 30);
 
         mockFetch(async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();
-            if (url.endsWith("/tags?page_size=100")) {
+            if (url.endsWith("/tags/list?n=1000")) {
                 return {
                     ok: true,
-                    headers: new Headers(),
-                    json: async () => ({
-                        results: [{}, { name: "1" }, { name: "2" }],
-                        next: "https://hub.docker.com/v2/repositories/library/nginx/tags?page=2",
+                    headers: new Headers({
+                        link: '</v2/repo/app/tags/list?n=1000&last=2>; rel="next"',
                     }),
+                    json: async () => ({ tags: ["1", "2"] }),
                 } as Response;
             }
-            if (url.endsWith("/tags?page=2")) {
+            if (url.endsWith("/tags/list?n=1000&last=2")) {
                 return {
                     ok: true,
                     headers: new Headers(),
-                    json: async () => ({
-                        results: [{ name: "3" }],
-                        next: null,
-                    }),
+                    json: async () => ({ tags: ["3"] }),
                 } as Response;
             }
             return {
                 ok: true,
                 headers: new Headers(),
                 json: async () => ({
-                    images: [
-                        { architecture: "arm64", variant: "v7", digest: "sha256:v7" },
-                        { architecture: "arm64", variant: "v8", digest: "sha256:v8" },
+                    manifests: [
+                        {
+                            digest: "sha256:v7",
+                            platform: { architecture: "arm64", variant: "v7" },
+                        },
+                        {
+                            digest: "sha256:v8",
+                            platform: { architecture: "arm64", variant: "v8" },
+                        },
                     ],
                 }),
             } as Response;
@@ -3427,11 +3503,10 @@ setTimeout(() => process.exit(0), 30);
             const url = typeof input === "string" ? input : input.toString();
             return {
                 ok: true,
-                headers: new Headers(),
-                json: async () => ({
-                    results: [{ name: "1" }],
-                    next: url,
+                headers: new Headers({
+                    link: `<${url}>; rel="next"`,
                 }),
+                json: async () => ({ tags: ["1"] }),
             } as Response;
         });
         await assert.rejects(
@@ -3441,28 +3516,31 @@ setTimeout(() => process.exit(0), 30);
                     tag_match_type: "regex",
                     tag_match_pattern: String.raw`^v\d$`,
                 }),
-            /Docker Hub tag pagination exceeded 50 pages/u
+            /docker\.io tag pagination exceeded 100 pages/u
         );
 
         mockFetch(async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();
-            if (url.includes("/tags?page_size=100")) {
+            if (url.includes("/tags/list?n=1000")) {
                 return {
                     ok: true,
                     headers: new Headers(),
-                    json: async () => ({
-                        results: [{ name: "3" }],
-                        next: null,
-                    }),
+                    json: async () => ({ tags: ["3"] }),
                 } as Response;
             }
             return {
                 ok: true,
                 headers: new Headers(),
                 json: async () => ({
-                    images: [
-                        { architecture: "arm64", variant: "v8", digest: "sha256:v8" },
-                        { os: "linux", architecture: "amd64", digest: "sha256:amd64" },
+                    manifests: [
+                        {
+                            digest: "sha256:v8",
+                            platform: { architecture: "arm64", variant: "v8" },
+                        },
+                        {
+                            digest: "sha256:amd64",
+                            platform: { os: "linux", architecture: "amd64" },
+                        },
                     ],
                 }),
             } as Response;
@@ -3599,16 +3677,16 @@ setTimeout(() => process.exit(0), 30);
 
         mockFetch(async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();
-            if (url.endsWith("/tags/list")) {
+            if (url.endsWith("/tags/list?n=1000")) {
                 return {
                     ok: true,
                     headers: new Headers({
-                        link: '<https://ghcr.io/v2/owner/app/tags/list?n=100&last=1.0.0>; rel="next"',
+                        link: '<https://ghcr.io/v2/owner/app/tags/list?n=1000&last=1.0.0>; rel="next"',
                     }),
                     json: async () => ({ tags: ["1.0.0", "dev"] }),
                 } as Response;
             }
-            if (url.includes("/tags/list?n=100&last=1.0.0")) {
+            if (url.includes("/tags/list?n=1000&last=1.0.0")) {
                 return {
                     ok: true,
                     headers: new Headers(),
@@ -3680,7 +3758,7 @@ setTimeout(() => process.exit(0), 30);
                     tag_match_type: "regex",
                     tag_match_pattern: String.raw`^\d$`,
                 }),
-            /ghcr\.io tag pagination exceeded 50 pages/u
+            /ghcr\.io tag pagination exceeded 100 pages/u
         );
 
         const authFetchUrls: string[] = [];
@@ -3689,7 +3767,7 @@ setTimeout(() => process.exit(0), 30);
             authFetchUrls.push(url);
             const headers = new Headers(init?.headers);
             const authorization = headers.get("authorization");
-            if (url.endsWith("/tags/list") && !authorization) {
+            if (url.endsWith("/tags/list?n=1000") && !authorization) {
                 return {
                     ok: false,
                     status: 401,
@@ -3711,7 +3789,7 @@ setTimeout(() => process.exit(0), 30);
                 ok: true,
                 headers: new Headers({ "docker-content-digest": "sha256:authed" }),
                 json: async () =>
-                    url.endsWith("/tags/list") ? { tags: ["1", "2"] } : {},
+                    url.endsWith("/tags/list?n=1000") ? { tags: ["1", "2"] } : {},
             } as Response;
         });
         assert.deepEqual(
@@ -3824,8 +3902,8 @@ setTimeout(() => process.exit(0), 30);
                 headers: new Headers(),
                 json: async () =>
                     dockerHubCall === 1
-                        ? { results: [{ name: "2" }] }
-                        : { images: [], digest: null },
+                        ? { tags: ["2"] }
+                        : { manifests: [], digest: null },
             } as Response;
         });
         assert.deepEqual(
@@ -3843,9 +3921,9 @@ setTimeout(() => process.exit(0), 30);
                 ok: true,
                 headers: new Headers(),
                 json: async () =>
-                    url.includes("/tags?page_size=")
-                        ? { results: [{ name: "stable" }] }
-                        : { images: [], digest: null },
+                    url.includes("/tags/list?n=")
+                        ? { tags: ["stable"] }
+                        : { manifests: [], digest: null },
             } as Response;
         });
         assert.deepEqual(
