@@ -166,16 +166,17 @@ export function parseLogLine(line: string, index?: number): LogEntry | null {
 
     try {
         const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
-        const level =
-            typeof parsed._meta === "object" &&
-            parsed._meta &&
-            "logLevelName" in parsed._meta
-                ? String((parsed._meta as Record<string, unknown>).logLevelName || "INFO")
-                : String(parsed.level || parsed.lvl || "INFO");
-        const ts =
-            typeof parsed._meta === "object" && parsed._meta && "date" in parsed._meta
-                ? String((parsed._meta as Record<string, unknown>).date || "")
-                : String(parsed.time || parsed.timestamp || "");
+        const meta = typeof parsed._meta === "object" ? parsed._meta : null;
+        const levelSource =
+            meta && "logLevelName" in meta
+                ? (meta as Record<string, unknown>).logLevelName
+                : parsed.level || parsed.lvl;
+        const timestampSource =
+            meta && "date" in meta
+                ? (meta as Record<string, unknown>).date
+                : parsed.time || parsed.timestamp;
+        const level = String(levelSource || "INFO");
+        const ts = String(timestampSource || "");
 
         const normalized = normalizeStructuredMessage(parsed);
 

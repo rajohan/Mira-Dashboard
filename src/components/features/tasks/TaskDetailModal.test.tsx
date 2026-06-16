@@ -9,6 +9,11 @@ import {
     TaskDetailModal,
 } from "./TaskDetailModal";
 
+function isoStringFromNowOffset(offsetMs: number): string {
+    const date = new Date(Date.now() + offsetMs);
+    return date.toISOString();
+}
+
 function makeTask(overrides: Partial<Task> = {}): Task {
     return {
         number: 88,
@@ -18,7 +23,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
         labels: [{ name: "in-progress" }, { name: "priority-medium" }],
         assignees: [{ login: "mira-2026" }],
         createdAt: "2026-05-10T08:00:00.000Z",
-        updatedAt: new Date(Date.now() - 120_000).toISOString(),
+        updatedAt: isoStringFromNowOffset(-120_000),
         url: "https://example.com/tasks/8",
         ...overrides,
     };

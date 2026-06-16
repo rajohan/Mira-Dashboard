@@ -20,7 +20,7 @@ describe("CronOverviewCard", () => {
                     name: "Nightly cleanup",
                     enabled: true,
                     state: {
-                        lastRunAtMs: new Date("2026-05-10T08:00:00.000Z").getTime(),
+                        lastRunAtMs: Date.parse("2026-05-10T08:00:00.000Z"),
                         lastRunStatus: "success",
                     },
                 },
@@ -28,7 +28,7 @@ describe("CronOverviewCard", () => {
                     name: "Heartbeat",
                     enabled: true,
                     state: {
-                        nextRunAtMs: new Date("2026-05-10T09:00:00.000Z").getTime(),
+                        nextRunAtMs: Date.parse("2026-05-10T09:00:00.000Z"),
                     },
                 },
                 {
@@ -90,7 +90,7 @@ describe("CronOverviewCard", () => {
                     name: "Older last run",
                     enabled: true,
                     state: {
-                        lastRunAtMs: new Date("2026-05-10T08:00:00.000Z").getTime(),
+                        lastRunAtMs: Date.parse("2026-05-10T08:00:00.000Z"),
                         lastRunStatus: "success",
                     },
                 },
@@ -98,7 +98,7 @@ describe("CronOverviewCard", () => {
                     name: "Newest last run",
                     enabled: true,
                     state: {
-                        lastRunAtMs: new Date("2026-05-10T10:00:00.000Z").getTime(),
+                        lastRunAtMs: Date.parse("2026-05-10T10:00:00.000Z"),
                         lastRunStatus: "failed",
                     },
                 },
@@ -106,14 +106,14 @@ describe("CronOverviewCard", () => {
                     name: "Soonest next run",
                     enabled: true,
                     state: {
-                        nextRunAtMs: new Date("2026-05-10T11:00:00.000Z").getTime(),
+                        nextRunAtMs: Date.parse("2026-05-10T11:00:00.000Z"),
                     },
                 },
                 {
                     name: "Later next run",
                     enabled: true,
                     state: {
-                        nextRunAtMs: new Date("2026-05-10T12:00:00.000Z").getTime(),
+                        nextRunAtMs: Date.parse("2026-05-10T12:00:00.000Z"),
                     },
                 },
             ] satisfies CronJob[],

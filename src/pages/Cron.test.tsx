@@ -195,7 +195,7 @@ describe("Cron page", () => {
             refetch: hooks.refetch,
         });
         rerender(<Cron />);
-        expect(container.querySelector(".animate-spin")).toBeInTheDocument();
+        expect(container.querySelector(":scope .animate-spin")).toBeInTheDocument();
 
         hooks.useCronJobs.mockReturnValue({
             data: [],

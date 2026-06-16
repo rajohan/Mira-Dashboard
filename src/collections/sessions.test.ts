@@ -34,6 +34,7 @@ vi.mock("../lib/queryClient", () => ({
 
 import {
     deleteSessionFromCollection,
+    preloadSessionsCollection,
     replaceSessionsFromWebSocket,
     sessionsCollection,
 } from "./sessions";
@@ -51,9 +52,10 @@ describe("sessions collection", () => {
         expect(mocks.queryCollectionOptions).toHaveBeenCalledWith(
             expect.objectContaining({
                 queryKey: ["sessions"],
-                staleTime: Number.POSITIVE_INFINITY,
+                staleTime: Infinity,
             })
         );
+        preloadSessionsCollection();
         expect(sessionsCollection.preload).toHaveBeenCalled();
 
         const options = mocks.queryCollectionOptions.mock.calls[0]?.[0] as {

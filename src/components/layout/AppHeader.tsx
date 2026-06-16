@@ -100,9 +100,10 @@ export function AppHeader({
                         variant="secondary"
                         size="sm"
                         onClick={() => {
-                            void authActions
-                                .logout()
-                                .then(() => navigate({ to: "/login" }));
+                            void (async () => {
+                                await authActions.logout();
+                                await navigate({ to: "/login" });
+                            })();
                         }}
                     >
                         <LogOut className="h-4 w-4" />

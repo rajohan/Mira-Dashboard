@@ -53,7 +53,7 @@ describe("LogLine", () => {
             />
         );
 
-        const message = container.querySelector("span.text-primary-200");
+        const message = container.querySelector(":scope span.text-primary-200");
 
         expect(message).toBeTruthy();
         expect(message?.textContent).toBe("");

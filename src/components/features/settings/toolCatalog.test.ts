@@ -5,7 +5,8 @@ import { TOOL_CATALOG, TOOL_RISK_LABELS } from "./toolCatalog";
 describe("tool catalog", () => {
     it("keeps tool ids unique and fully described", () => {
         const ids = TOOL_CATALOG.map((tool) => tool.id);
-        expect(new Set(ids).size).toBe(ids.length);
+        const uniqueIds = new Set(ids);
+        expect(uniqueIds.size).toBe(ids.length);
         expect(TOOL_CATALOG.length).toBeGreaterThan(10);
 
         for (const tool of TOOL_CATALOG) {

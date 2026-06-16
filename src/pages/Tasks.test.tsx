@@ -75,9 +75,9 @@ const dndMocks = vi.hoisted(() => ({
     handlers: null as null | {
         onDragEnd: (event: {
             active: { id: string };
-            over: { id: string } | null;
+            over: null | { id: string };
         }) => Promise<void> | void;
-        onDragOver: (event: { over: { id: string } | null }) => void;
+        onDragOver: (event: { over: null | { id: string } }) => void;
         onDragStart: (event: { active: { id: string } }) => void;
     },
 }));
@@ -92,9 +92,9 @@ vi.mock("@dnd-kit/core", () => ({
         children: React.ReactNode;
         onDragEnd: (event: {
             active: { id: string };
-            over: { id: string } | null;
+            over: null | { id: string };
         }) => Promise<void> | void;
-        onDragOver: (event: { over: { id: string } | null }) => void;
+        onDragOver: (event: { over: null | { id: string } }) => void;
         onDragStart: (event: { active: { id: string } }) => void;
     }) => {
         dndMocks.handlers = { onDragEnd, onDragOver, onDragStart };
@@ -138,7 +138,7 @@ vi.mock("../components/features/tasks", () => ({
             body: string,
             priority: string,
             assignee: string,
-            automation: { cronJobId: string } | null
+            automation: null | { cronJobId: string }
         ) => Promise<void>;
     }) => (
         <section data-testid="new-task-modal">
@@ -348,7 +348,7 @@ describe("Tasks page", () => {
             refetch: hooks.refetch,
         });
         rerender(<Tasks />);
-        expect(container.querySelector(".animate-spin")).toBeInTheDocument();
+        expect(container.querySelector(":scope .animate-spin")).toBeInTheDocument();
 
         hooks.useTasks.mockReturnValue({
             data: [],

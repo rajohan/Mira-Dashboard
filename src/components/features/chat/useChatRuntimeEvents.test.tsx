@@ -219,9 +219,10 @@ describe("runtime event formatting helpers", () => {
 
 describe("useChatRuntimeEvents", () => {
     beforeEach(() => {
-        (
-            globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
-        ).IS_REACT_ACT_ENVIRONMENT = true;
+        Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
+            configurable: true,
+            value: true,
+        });
         vi.useFakeTimers();
     });
 

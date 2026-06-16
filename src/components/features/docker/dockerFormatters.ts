@@ -18,7 +18,7 @@ export function formatBytes(bytes: number): string {
     return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
-/** Formats docker memory for display. */
+/** Formats Docker memory for display. */
 export function formatDockerMemory(value: string | undefined): string {
     if (!value) {
         return "—";
@@ -36,7 +36,7 @@ export function formatDockerMemory(value: string | undefined): string {
             return null;
         }
 
-        const amount = Number.parseFloat(match[1]);
+        const amount = Number(match[1]);
         const factors = {
             B: 1,
             KIB: 1024,

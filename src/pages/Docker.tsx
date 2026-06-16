@@ -40,7 +40,7 @@ import {
     useDockerVolumes,
     useRunDockerUpdater,
 } from "../hooks/useDocker";
-/** Renders the docker UI. */
+/** Renders the Docker UI. */
 export function Docker() {
     const [selectedContainerId, setSelectedContainerId] = useState<string | null>(null);
     const [logsContainerId, setLogsContainerId] = useState<string | null>(null);
@@ -53,10 +53,10 @@ export function Docker() {
         | { type: "image"; id: string; label: string }
         | { type: "volume"; id: string; label: string }
     >(null);
-    const [manualUpdateTarget, setManualUpdateTarget] = useState<{
+    const [manualUpdateTarget, setManualUpdateTarget] = useState<null | {
         id: number;
         label: string;
-    } | null>(null);
+    }>(null);
     const [actionOutput, setActionOutput] = useState<string>("");
     const [pruningTarget, setPruningTarget] = useState<"images" | "volumes" | null>(null);
     const actionOutputRef = useRef<HTMLDivElement>(null);
@@ -205,9 +205,8 @@ export function Docker() {
         const target = dangerousDelete;
         showActionOutput(`Deleting Docker ${target.type} ${target.label}...`);
         try {
-            await (target.type === "image"
-                ? deleteImage.mutateAsync(target.id)
-                : deleteVolume.mutateAsync(target.id));
+            const deleteTarget = target.type === "image" ? deleteImage : deleteVolume;
+            await deleteTarget.mutateAsync(target.id);
             setDangerousDelete(null);
             showActionOutput(`Deleted Docker ${target.type} ${target.label}.`);
         } catch (error) {
@@ -789,9 +788,13 @@ export function Docker() {
                         return;
                     }
 
-                    void handleManualUpdate(manualUpdateTarget.id).finally(() => {
-                        setManualUpdateTarget(null);
-                    });
+                    void (async () => {
+                        try {
+                            await handleManualUpdate(manualUpdateTarget.id);
+                        } finally {
+                            setManualUpdateTarget(null);
+                        }
+                    })();
                 }}
             />
         </div>

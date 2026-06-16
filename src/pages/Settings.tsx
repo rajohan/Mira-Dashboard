@@ -27,6 +27,7 @@ import {
     useUpdateConfig,
 } from "../hooks";
 import type { AgentConfig, OpenClawConfig, Skill } from "../hooks/useConfig";
+import { currentIsoString } from "../utils/date";
 
 /** Performs patch success. */
 export function patchSuccess(
@@ -162,7 +163,7 @@ export function Settings() {
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
-            a.download = `openclaw-backup-${new Date().toISOString().split("T", 1)[0]}.json`;
+            a.download = `openclaw-backup-${currentIsoString().split("T", 1)[0]}.json`;
             a.click();
             URL.revokeObjectURL(url);
         } catch (error_) {

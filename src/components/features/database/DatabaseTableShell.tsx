@@ -84,10 +84,12 @@ export function DatabaseTableShell<T extends object>({
                                     onKeyDown={
                                         onRowClick
                                             ? (event) => {
-                                                  if (shouldActivateRow(event)) {
-                                                      event.preventDefault();
-                                                      onRowClick(row.original);
+                                                  if (!shouldActivateRow(event)) {
+                                                      return;
                                                   }
+
+                                                  event.preventDefault();
+                                                  onRowClick(row.original);
                                               }
                                             : undefined
                                     }
@@ -166,10 +168,12 @@ export function DatabaseTableShell<T extends object>({
                                         onKeyDown={
                                             onRowClick
                                                 ? (event) => {
-                                                      if (shouldActivateRow(event)) {
-                                                          event.preventDefault();
-                                                          onRowClick(row.original);
+                                                      if (!shouldActivateRow(event)) {
+                                                          return;
                                                       }
+
+                                                      event.preventDefault();
+                                                      onRowClick(row.original);
                                                   }
                                                 : undefined
                                         }

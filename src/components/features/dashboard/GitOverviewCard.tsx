@@ -6,7 +6,7 @@ import { Card } from "../../ui/Card";
 
 const DEFAULT_BRANCH = "main";
 
-/** Represents git repo summary. */
+/** Represents Git repo summary. */
 interface GitRepoSummary {
     key: string;
     name: string;
@@ -24,7 +24,7 @@ interface GitRepoSummary {
     };
 }
 
-/** Represents git workspace cache. */
+/** Represents Git workspace cache. */
 interface GitWorkspaceCache {
     repos: GitRepoSummary[];
     dirtyRepos: string[];
@@ -33,7 +33,7 @@ interface GitWorkspaceCache {
     checkedAt: string;
 }
 
-/** Renders the git overview card UI. */
+/** Renders the Git overview card UI. */
 export function GitOverviewCard() {
     const { data, isLoading, isError } = useCacheEntry<GitWorkspaceCache>(
         "git.workspace",

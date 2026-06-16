@@ -75,7 +75,7 @@ function collectCoverageFiles(directory, fileName) {
         }
     }
 
-    return files.sort();
+    return files.sort((left, right) => left.localeCompare(right));
 }
 
 /** Creates an empty coverage record for one source file. */
@@ -213,18 +213,22 @@ function summarizeCoverage(coverageByFile) {
         totals.lines.total += fileCoverage.lines.size;
         totals.statements.total += fileCoverage.statements.size;
 
-        totals.branches.covered += [...fileCoverage.branches.values()].filter(
-            (hits) => hits > 0
-        ).length;
-        totals.functions.covered += [...fileCoverage.functions.values()].filter(
-            (hits) => hits > 0
-        ).length;
-        totals.lines.covered += [...fileCoverage.lines.values()].filter(
-            (hits) => hits > 0
-        ).length;
-        totals.statements.covered += [...fileCoverage.statements.values()].filter(
-            (hits) => hits > 0
-        ).length;
+        totals.branches.covered += fileCoverage.branches
+            .values()
+            .filter((hits) => hits > 0)
+            .toArray().length;
+        totals.functions.covered += fileCoverage.functions
+            .values()
+            .filter((hits) => hits > 0)
+            .toArray().length;
+        totals.lines.covered += fileCoverage.lines
+            .values()
+            .filter((hits) => hits > 0)
+            .toArray().length;
+        totals.statements.covered += fileCoverage.statements
+            .values()
+            .filter((hits) => hits > 0)
+            .toArray().length;
     }
 
     return totals;

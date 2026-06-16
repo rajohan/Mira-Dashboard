@@ -126,10 +126,12 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             );
 
             setTimeout(() => {
-                if (pendingRequests.has(id)) {
-                    pendingRequests.delete(id);
-                    reject(new Error("Request timeout"));
+                if (!pendingRequests.has(id)) {
+                    return;
                 }
+
+                pendingRequests.delete(id);
+                reject(new Error("Request timeout"));
             }, 30_000);
         });
     };

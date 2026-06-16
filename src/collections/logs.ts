@@ -11,12 +11,15 @@ export const logsCollection = createCollection(
         queryKey: ["logs"],
         queryFn: async () => [],
         queryClient,
-        staleTime: Number.POSITIVE_INFINITY,
+        staleTime: Infinity,
         getKey: (item: LogEntry) => item.id,
     })
 );
 
-void logsCollection.preload();
+/** Starts the logs collection query. */
+export function preloadLogsCollection() {
+    void logsCollection.preload();
+}
 
 /** Performs write log from WebSocket. */
 export function writeLogFromWebSocket(line: string) {

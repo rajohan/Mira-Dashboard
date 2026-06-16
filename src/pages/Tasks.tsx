@@ -64,10 +64,10 @@ export function Tasks() {
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
     const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
     const [pendingDeleteTaskId, setPendingDeleteTaskId] = useState<number | null>(null);
-    const [pendingDeleteUpdate, setPendingDeleteUpdate] = useState<{
+    const [pendingDeleteUpdate, setPendingDeleteUpdate] = useState<null | {
         taskId: number;
         updateId: number;
-    } | null>(null);
+    }>(null);
 
     const { data: taskUpdates = [] } = useTaskUpdates(selectedTask?.number ?? null);
 

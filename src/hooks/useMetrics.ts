@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { apiFetchRequired } from "./useApi";
 
-/** Represents the detailed system metrics payload returned by /api/metrics. */
+/** Represents the detailed system metrics payload returned by /API/metrics. */
 export interface Metrics {
     cpu: {
         count: number;

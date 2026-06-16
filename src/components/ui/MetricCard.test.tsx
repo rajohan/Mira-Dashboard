@@ -21,7 +21,9 @@ describe("MetricCard", () => {
         expect(screen.getByText("tests")).toBeInTheDocument();
         expect(screen.getByText("125%")).toBeInTheDocument();
         expect(screen.getByTestId("metric-icon")).toBeInTheDocument();
-        expect(container.querySelector("[style='width: 100%;']")).toBeInTheDocument();
+        expect(
+            container.querySelector(":scope [style='width: 100%;']")
+        ).toBeInTheDocument();
     });
 
     it("uses explicit color when no percent is provided", () => {
@@ -29,7 +31,7 @@ describe("MetricCard", () => {
             <MetricCard title="Plan" value="ok" color="purple" icon={<Circle />} />
         );
 
-        expect(container.querySelector(".bg-primary-700")).toBeInTheDocument();
+        expect(container.querySelector(":scope .bg-primary-700")).toBeInTheDocument();
     });
 
     it("selects blue and orange colors from percentage thresholds", () => {

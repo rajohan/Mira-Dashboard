@@ -27,11 +27,11 @@ export function ServiceActionsCard() {
     const [runningActionId, setRunningActionId] = useState<string | null>(null);
     const [runningActionLabel, setRunningActionLabel] = useState<string | null>(null);
     const [runningJobId, setRunningJobId] = useState<string | null>(null);
-    const [result, setResult] = useState<{
+    const [result, setResult] = useState<null | {
         action: string;
         response: ExecResponse;
         ranAt: number;
-    } | null>(null);
+    }>(null);
     const outputRef = useRef<HTMLPreElement | null>(null);
     const [shouldAutoFollowOutput, setShouldAutoFollowOutput] = useState(true);
 
@@ -59,7 +59,13 @@ export function ServiceActionsCard() {
         setRunningJobId(null);
 
         if (completedActionId === "openclaw_update") {
-            void refreshCache.mutateAsync("system.host").catch(() => {});
+            void (async () => {
+                try {
+                    await refreshCache.mutateAsync("system.host");
+                } catch {
+                    // Best-effort refresh after a host update.
+                }
+            })();
         }
     }, [execJob.data, refreshCache, runningActionId, runningActionLabel]);
 

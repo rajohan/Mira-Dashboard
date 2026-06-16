@@ -1,3 +1,4 @@
+import { timestampFromDateString } from "../../../utils/date";
 import { formatDuration } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
@@ -90,7 +91,7 @@ export function AgentCard({
                     <span className="min-w-0 truncate">
                         Last active{" "}
                         {lastActivity
-                            ? formatDuration(new Date(lastActivity).getTime())
+                            ? formatDuration(timestampFromDateString(lastActivity))
                             : "N/A"}
                     </span>
                 </div>

@@ -11,6 +11,11 @@ import {
 } from "./ChatMessagesList";
 import type { ChatRow } from "./chatTypes";
 
+function toBase64(text: string): string {
+    const encoder = new TextEncoder();
+    return encoder.encode(text).toBase64();
+}
+
 vi.mock("./ChatMarkdown", () => ({
     ChatMarkdown: ({ text }: { text: string }) => (
         <div data-testid="markdown">{text}</div>
@@ -72,7 +77,7 @@ function makeRows(): ChatRow[] {
             message: {
                 attachments: [
                     {
-                        contentBase64: btoa("read me"),
+                        contentBase64: toBase64("read me"),
                         fileName: "result.txt",
                         id: "file-1",
                         kind: "text",
@@ -81,7 +86,9 @@ function makeRows(): ChatRow[] {
                     },
                 ],
                 content: "hi",
-                images: [{ data: btoa("image"), mimeType: "image/png", type: "image" }],
+                images: [
+                    { data: toBase64("image"), mimeType: "image/png", type: "image" },
+                ],
                 role: "assistant",
                 text: "Hi Raymond",
                 thinking: [{ text: "thinking" }],
@@ -145,7 +152,7 @@ describe("ChatMessagesList helpers", () => {
             />
         );
 
-        expect(base64ToText(btoa("hello"))).toBe("hello");
+        expect(base64ToText(toBase64("hello"))).toBe("hello");
         expect(base64ToText("not valid base64 🚫")).toBeUndefined();
         expect(
             previewFromAttachment({ fileName: "empty.txt", id: "empty", kind: "text" })
@@ -153,7 +160,7 @@ describe("ChatMessagesList helpers", () => {
         expect(
             previewFromAttachment({
                 dataUrl: "data:text/plain;base64,bm90ZXM=",
-                contentBase64: btoa("notes"),
+                contentBase64: toBase64("notes"),
                 fileName: "notes.txt",
                 id: "notes",
                 kind: "text",
@@ -169,7 +176,7 @@ describe("ChatMessagesList helpers", () => {
         expect(
             previewFromAttachment({
                 dataUrl: "",
-                contentBase64: btoa("fallback"),
+                contentBase64: toBase64("fallback"),
                 fileName: "fallback.txt",
                 id: "fallback",
                 kind: "text",
@@ -178,7 +185,7 @@ describe("ChatMessagesList helpers", () => {
         ).toEqual(
             expect.objectContaining({
                 text: "fallback",
-                url: `data:text/plain;base64,${btoa("fallback")}`,
+                url: `data:text/plain;base64,${toBase64("fallback")}`,
             })
         );
     });
@@ -270,7 +277,7 @@ describe("ChatMessagesList", () => {
         );
         rows[1]!.message.images?.push(
             {
-                source: { data: btoa("source image"), media_type: "image/jpeg" },
+                source: { data: toBase64("source image"), media_type: "image/jpeg" },
                 type: "image",
             },
             { type: "image" }

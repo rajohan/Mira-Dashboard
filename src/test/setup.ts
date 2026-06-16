@@ -3,14 +3,17 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
 
-(
-    globalThis as typeof globalThis & {
-        IS_REACT_ACT_ENVIRONMENT?: boolean;
-        __APP_COMMIT__?: string;
-    }
-).IS_REACT_ACT_ENVIRONMENT = true;
-(globalThis as typeof globalThis & { __APP_COMMIT__?: string }).__APP_COMMIT__ =
-    "test-commit";
+Object.defineProperties(globalThis, {
+    IS_REACT_ACT_ENVIRONMENT: {
+        configurable: true,
+        value: true,
+        writable: true,
+    },
+    __APP_COMMIT__: {
+        configurable: true,
+        value: "test-commit",
+    },
+});
 
 afterEach(() => {
     cleanup();

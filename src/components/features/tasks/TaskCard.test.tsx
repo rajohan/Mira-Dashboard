@@ -6,7 +6,7 @@ import type { Task } from "../../../types/task";
 import { TaskCard } from "./TaskCard";
 
 const sortable = vi.hoisted(() => ({
-    transform: null as { x: number; y: number; scaleX: number; scaleY: number } | null,
+    transform: null as null | { x: number; y: number; scaleX: number; scaleY: number },
 }));
 
 vi.mock("@dnd-kit/sortable", () => ({
@@ -19,6 +19,11 @@ vi.mock("@dnd-kit/sortable", () => ({
     }),
 }));
 
+function isoStringFromNowOffset(offsetMs: number): string {
+    const date = new Date(Date.now() + offsetMs);
+    return date.toISOString();
+}
+
 /** Creates a task fixture for card rendering tests. */
 function makeTask(overrides: Partial<Task> = {}): Task {
     return {
@@ -29,7 +34,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
         labels: [{ name: "in-progress" }, { name: "priority-high" }],
         assignees: [{ login: "mira-2026", avatar_url: "https://example.com/mira.png" }],
         createdAt: "2026-05-10T08:00:00.000Z",
-        updatedAt: new Date(Date.now() - 60_000).toISOString(),
+        updatedAt: isoStringFromNowOffset(-60_000),
         url: "https://example.com/tasks/42",
         ...overrides,
     };

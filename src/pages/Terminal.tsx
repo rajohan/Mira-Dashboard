@@ -112,31 +112,35 @@ export function Terminal() {
 
     // Update command status when job data changes - only if actually different
     useEffect(() => {
-        if (jobData && currentJobId) {
-            const entry = history.find((h) => h.jobId === currentJobId);
-            if (entry) {
-                // Only update if data actually changed
-                const hasChanged =
-                    entry.status !== jobData.status ||
-                    entry.stdout !== jobData.stdout ||
-                    entry.stderr !== jobData.stderr ||
-                    entry.code !== jobData.code;
+        if (!(jobData && currentJobId)) {
+            return;
+        }
 
-                if (hasChanged) {
-                    updateCommand(entry.id, {
-                        status: jobData.status,
-                        code: jobData.code,
-                        stdout: jobData.stdout,
-                        stderr: jobData.stderr,
-                        endedAt: jobData.endedAt,
-                    });
-                }
+        const entry = history.find((h) => h.jobId === currentJobId);
+        if (!entry) {
+            return;
+        }
 
-                // Refocus input when job completes
-                if (jobData.status === "done") {
-                    setTimeout(() => inputRef.current?.focus(), 0);
-                }
-            }
+        // Only update if data actually changed
+        const hasChanged =
+            entry.status !== jobData.status ||
+            entry.stdout !== jobData.stdout ||
+            entry.stderr !== jobData.stderr ||
+            entry.code !== jobData.code;
+
+        if (hasChanged) {
+            updateCommand(entry.id, {
+                status: jobData.status,
+                code: jobData.code,
+                stdout: jobData.stdout,
+                stderr: jobData.stderr,
+                endedAt: jobData.endedAt,
+            });
+        }
+
+        // Refocus input when job completes
+        if (jobData.status === "done") {
+            setTimeout(() => inputRef.current?.focus(), 0);
         }
     }, [jobData, currentJobId, history, updateCommand]);
 
@@ -167,7 +171,7 @@ export function Terminal() {
 
         const trimmedCommand = command.trim();
 
-        // Handle cd command with validation
+        // Handle CD command with validation
         if (trimmedCommand.startsWith("cd ") || trimmedCommand === "cd") {
             const targetPath =
                 trimmedCommand === "cd" ? HOME_DIR : trimmedCommand.slice(3).trim();
@@ -360,7 +364,7 @@ export function Terminal() {
                     {/* Current running job output */}
                     {jobData &&
                         currentJobId &&
-                        !history.some((h) => h.jobId === currentJobId) && (
+                        history.every((h) => h.jobId !== currentJobId) && (
                             <div className="mt-2">
                                 <div className="text-primary-400">
                                     <span className="text-accent-400">

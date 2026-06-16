@@ -137,23 +137,31 @@ export function Logs() {
 
     // Auto-select today's file
     useEffect(() => {
-        if (availableLogFiles.length > 0 && !selectedFile) {
-            const sorted = [...availableLogFiles].sort(compareLogFileNamesDescending);
-            const today = formatDateStamp();
-            const todayFile = sorted.find((f) => f.name.includes(today));
-            setSelectedFile(todayFile?.name || sorted[0]!.name);
+        if (availableLogFiles.length === 0 || selectedFile) {
+            return;
         }
+
+        const sorted = [...availableLogFiles].sort(compareLogFileNamesDescending);
+        const today = formatDateStamp();
+        const todayFile = sorted.find((f) => f.name.includes(today));
+        setSelectedFile(todayFile?.name || sorted[0]!.name);
     }, [availableLogFiles, selectedFile]);
 
     // Subscribe to log stream once per connection
     useEffect(() => {
-        if (isConnected && subscribedConnectionIdRef.current !== connectionId) {
-            subscribedConnectionIdRef.current = connectionId;
-            request("subscribe", { channel: "logs" }).catch((error_) => {
+        if (!(isConnected && subscribedConnectionIdRef.current !== connectionId)) {
+            return;
+        }
+
+        subscribedConnectionIdRef.current = connectionId;
+        void (async () => {
+            try {
+                await request("subscribe", { channel: "logs" });
+            } catch (error_) {
                 console.error("Failed to subscribe to logs:", error_);
                 subscribedConnectionIdRef.current = null;
-            });
-        }
+            }
+        })();
     }, [isConnected, connectionId, request]);
 
     /** Performs load log content. */
@@ -191,19 +199,26 @@ export function Logs() {
 
     // Load on mount and when file/lineCount changes
     useEffect(() => {
-        if (selectedFile && availableLogFiles.length > 0) {
-            shouldStickToBottomRef.current = true;
-            setIsAtBottom(true);
-            void loadLogContent();
+        if (!(selectedFile && availableLogFiles.length > 0)) {
+            return;
         }
+
+        shouldStickToBottomRef.current = true;
+        setIsAtBottom(true);
+        void loadLogContent();
     }, [selectedFile, lineCount, availableLogFiles.length]);
 
     const filteredLogs = liveLogs.filter((log) => {
         const level = typeof log.level === "string" ? log.level.toLowerCase() : null;
-        const raw = typeof log.raw === "string" ? log.raw : String(log.msg || "");
+        if (level && !levelFilter.has(level)) {
+            return false;
+        }
 
-        if (level && !levelFilter.has(level)) return false;
-        if (search && !raw.toLowerCase().includes(search.toLowerCase())) return false;
+        const raw = typeof log.raw === "string" ? log.raw : String(log.msg || "");
+        if (search && !raw.toLowerCase().includes(search.toLowerCase())) {
+            return false;
+        }
+
         return true;
     });
 
@@ -322,7 +337,7 @@ export function Logs() {
 
                 <Select
                     value={lineCount.toString()}
-                    onChange={(v) => setLineCount(Number.parseInt(v, 10))}
+                    onChange={(v) => setLineCount(Math.trunc(Number(v)))}
                     options={LINE_OPTIONS.map((n) => ({
                         value: n.toString(),
                         label: `${n} lines`,

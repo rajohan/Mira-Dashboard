@@ -6,8 +6,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatComposer } from "./ChatComposer";
 import type { ChatSendAttachment } from "./chatTypes";
 
+function toBase64(text: string): string {
+    const encoder = new TextEncoder();
+    return encoder.encode(text).toBase64();
+}
 const textAttachment: ChatSendAttachment = {
-    contentBase64: btoa("hello attachment"),
+    contentBase64: toBase64("hello attachment"),
     file: new File(["hello attachment"], "notes.txt", { type: "text/plain" }),
     fileName: "notes.txt",
     id: "att-1",
@@ -182,7 +186,7 @@ describe("ChatComposer", () => {
         const onPreview = vi.fn();
         const onRemoveAttachment = vi.fn();
         const imageAttachment: ChatSendAttachment = {
-            contentBase64: btoa("image-bytes"),
+            contentBase64: toBase64("image-bytes"),
             dataUrl: "data:image/png;base64,aW1hZ2UtYnl0ZXM=",
             file: new File(["image-bytes"], "photo.png", { type: "image/png" }),
             fileName: "photo.png",
@@ -314,7 +318,9 @@ describe("ChatComposer", () => {
             onAttachFiles,
             onToggleRecording,
         });
-        const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+        const input = container.querySelector(
+            ':scope input[type="file"]'
+        ) as HTMLInputElement;
         const clickSpy = vi.spyOn(fileInputReference.current!, "click");
 
         await user.click(screen.getByRole("button", { name: /Attach/ }));

@@ -59,18 +59,18 @@ async function fetchSession(): Promise<SessionResponse> {
 export const authActions: AuthActions = {
     async initialize() {
         if (!initializePromise) {
-            initializePromise = authActions
-                .refreshSession()
-                .catch(() => {
+            initializePromise = (async () => {
+                try {
+                    await authActions.refreshSession();
+                } catch {
                     authStore.setState(() => ({
                         ...initialState,
                         isInitialized: true,
                     }));
-                })
-                .then(() => {})
-                .finally(() => {
+                } finally {
                     initializePromise = null;
-                });
+                }
+            })();
         }
 
         return initializePromise;
@@ -99,10 +99,14 @@ export const authActions: AuthActions = {
     },
 
     async logout() {
-        await fetch("/api/auth/logout", {
-            method: "POST",
-            credentials: "include",
-        }).catch(() => {});
+        try {
+            await fetch("/api/auth/logout", {
+                method: "POST",
+                credentials: "include",
+            });
+        } catch {
+            // Clear local auth state even if the logout request fails.
+        }
         authActions.clearSession();
     },
 };

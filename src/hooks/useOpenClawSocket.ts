@@ -53,7 +53,13 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                     setIsConnected(true);
                     setError(null);
                     setConnectionId((previous) => previous + 1);
-                    void clientRef.current?.request("sessions.list").catch(() => {});
+                    void (async () => {
+                        try {
+                            await clientRef.current?.request("sessions.list");
+                        } catch {
+                            // Best-effort socket resync.
+                        }
+                    })();
                 },
                 onClose: () => {
                     setIsConnected(false);
@@ -119,15 +125,19 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
             }
 
             const client = clientRef.current;
-            void client.request("sessions.list").catch(() => {
-                if (clientRef.current !== client) {
-                    return;
-                }
+            void (async () => {
+                try {
+                    await client.request("sessions.list");
+                } catch {
+                    if (clientRef.current !== client) {
+                        return;
+                    }
 
-                setIsConnected(false);
-                client.disconnect();
-                client.connect();
-            });
+                    setIsConnected(false);
+                    client.disconnect();
+                    client.connect();
+                }
+            })();
         }, 10_000);
 
         return () => clearInterval(interval);
@@ -149,7 +159,13 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                 return;
             }
 
-            void clientRef.current.request("sessions.list").catch(() => {});
+            void (async () => {
+                try {
+                    await clientRef.current?.request("sessions.list");
+                } catch {
+                    // Best-effort socket resync.
+                }
+            })();
         };
 
         document.addEventListener("visibilitychange", resyncVisibleSocket);

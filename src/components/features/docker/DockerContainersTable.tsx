@@ -24,7 +24,7 @@ function parsePercent(value: string | undefined): number {
     }
 
     const match = value.match(/-?[0-9]+(?:\.[0-9]+)?/);
-    return match ? Number.parseFloat(match[0]) : -1;
+    return match ? Number(match[0]) : -1;
 }
 
 /** Parses memory used mi b. */
@@ -39,7 +39,7 @@ function parseMemoryUsedMiB(value: string | undefined): number {
         return -1;
     }
 
-    const amount = Number.parseFloat(match[1]!);
+    const amount = Number(match[1]!);
     const unit = match[2]!.toUpperCase();
     const factors: Record<string, number> = {
         B: 1 / (1024 * 1024),
@@ -127,7 +127,7 @@ function getStateRank(state: string): number {
     }
 }
 
-/** Provides props for docker containers table. */
+/** Provides props for Docker containers table. */
 interface DockerContainersTableProps {
     containers: DockerContainer[];
     onDetails: (containerId: string) => void;
@@ -137,7 +137,7 @@ interface DockerContainersTableProps {
     onRestartStack: () => void;
 }
 
-/** Renders the docker containers table UI. */
+/** Renders the Docker containers table UI. */
 export function DockerContainersTable({
     containers,
     onDetails,
@@ -305,18 +305,14 @@ export function DockerContainersTable({
         getSortedRowModel: getSortedRowModel(),
     });
 
-    if (containers.length === 0) {
-        return (
-            <Card className="overflow-hidden">
-                <div className="border-primary-700 border-b px-3 py-3 text-lg font-semibold sm:px-4">
-                    Containers
-                </div>
-                <EmptyState message="No containers found." />
-            </Card>
-        );
-    }
-
-    return (
+    return containers.length === 0 ? (
+        <Card className="overflow-hidden">
+            <div className="border-primary-700 border-b px-3 py-3 text-lg font-semibold sm:px-4">
+                Containers
+            </div>
+            <EmptyState message="No containers found." />
+        </Card>
+    ) : (
         <Card className="overflow-hidden">
             <div className="border-primary-700 flex flex-col gap-3 border-b px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
                 <div className="text-lg font-semibold">Containers</div>
@@ -343,10 +339,12 @@ export function DockerContainersTable({
                             className="border-primary-700 bg-primary-900/40 hover:bg-primary-800/50 focus-visible:ring-accent-500 w-full rounded-lg border p-3 text-left focus-visible:ring-2 focus-visible:outline-none"
                             onClick={() => onDetails(container.id)}
                             onKeyDown={(event) => {
-                                if (event.key === "Enter" || event.key === " ") {
-                                    event.preventDefault();
-                                    onDetails(container.id);
+                                if (!(event.key === "Enter" || event.key === " ")) {
+                                    return;
                                 }
+
+                                event.preventDefault();
+                                onDetails(container.id);
                             }}
                         >
                             <div className="flex items-start justify-between gap-3">

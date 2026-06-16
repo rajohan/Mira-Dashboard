@@ -426,7 +426,7 @@ describe("useFileExplorerState", () => {
         });
         await waitFor(() => expect(result.current.editedContent).toBe("{a: 1}"));
 
-        // Switch to json editing mode
+        // Switch to JSON editing mode
         act(() => {
             result.current.setJsonPreview(false);
         });

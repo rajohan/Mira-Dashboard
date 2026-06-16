@@ -33,8 +33,6 @@ export function Moltbook() {
     const { home, posts, profile, myContent, isLoading, error, refetch } =
         useMoltbookData(sort);
 
-    const unreadCount = home?.unreadMessageCount ?? 0;
-
     if (isLoading) {
         return <LoadingState message="Loading Moltbook..." size="lg" />;
     }
@@ -50,6 +48,8 @@ export function Moltbook() {
             </div>
         );
     }
+
+    const unreadCount = home?.unreadMessageCount ?? 0;
 
     return (
         <div className="space-y-4 p-3 sm:p-4 lg:space-y-6 lg:p-6">

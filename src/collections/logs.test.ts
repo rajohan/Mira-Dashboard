@@ -33,7 +33,7 @@ vi.mock("../utils/logUtils", () => ({
     parseLogLine: mocks.parseLogLine,
 }));
 
-import { logsCollection, writeLogFromWebSocket } from "./logs";
+import { logsCollection, preloadLogsCollection, writeLogFromWebSocket } from "./logs";
 
 describe("logs collection", () => {
     beforeEach(() => {
@@ -47,9 +47,10 @@ describe("logs collection", () => {
         expect(mocks.queryCollectionOptions).toHaveBeenCalledWith(
             expect.objectContaining({
                 queryKey: ["logs"],
-                staleTime: Number.POSITIVE_INFINITY,
+                staleTime: Infinity,
             })
         );
+        preloadLogsCollection();
         expect(logsCollection.preload).toHaveBeenCalled();
     });
 

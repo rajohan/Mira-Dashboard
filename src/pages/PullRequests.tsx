@@ -31,12 +31,12 @@ import { formatDate } from "../utils/format";
 
 /** Defines pending action. */
 type PendingAction =
+    | null
     | { type: "merge"; pr: PullRequestSummary }
     | { type: "merge-deploy"; pr: PullRequestSummary }
     | { type: "review-approve"; pr: PullRequestSummary }
     | { type: "reject"; pr: PullRequestSummary }
-    | { type: "deploy" }
-    | null;
+    | { type: "deploy" };
 type PendingActionType = Exclude<PendingAction, null>["type"];
 type UnhandledPendingActionType = Exclude<
     PendingActionType,
@@ -339,9 +339,7 @@ function PullRequestDescription({ body }: { body: string }) {
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeRaw, rehypeSanitize]}
                     components={{
-                        a(props) {
-                            return <a {...props} target="_blank" rel="noreferrer" />;
-                        },
+                        a: (props) => <a {...props} target="_blank" rel="noreferrer" />,
                     }}
                 >
                     {normalizedBody}
@@ -820,10 +818,12 @@ export function PullRequests() {
                         loading={isActionPending}
                         danger={pendingAction.type === "reject"}
                         onCancel={() => {
-                            if (!isActionPending) {
-                                setPendingAction(null);
-                                setActionError(null);
+                            if (isActionPending) {
+                                return;
                             }
+
+                            setPendingAction(null);
+                            setActionError(null);
                         }}
                         onConfirm={() => {
                             void confirmAction(pendingAction);

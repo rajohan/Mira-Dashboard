@@ -56,9 +56,9 @@ export function AttachmentIcon({ attachment }: { attachment: ChatAttachmentDispl
 /** Decodes base64 text attachments without throwing during rendering. */
 export function base64ToText(base64: string): string | undefined {
     try {
-        const binary = window.atob(base64);
-        const bytes = Uint8Array.from(binary, (character) => character.codePointAt(0)!);
-        return new TextDecoder().decode(bytes);
+        const bytes = Uint8Array.fromBase64(base64);
+        const decoder = new TextDecoder();
+        return decoder.decode(bytes);
     } catch {
         return undefined;
     }
@@ -180,11 +180,12 @@ function TtsButton({
     loadingMessageKey: string | null;
     onSpeak: (messageKey: string, text: string) => void;
 }) {
-    const isLoading = loadingMessageKey === messageKey;
-    const isPlaying = playingMessageKey === messageKey;
     if (!text.trim()) {
         return null;
     }
+
+    const isLoading = loadingMessageKey === messageKey;
+    const isPlaying = playingMessageKey === messageKey;
 
     return (
         <button
@@ -297,11 +298,12 @@ export function ChatMessagesList({
             });
 
             if (!response.ok) {
-                const error = (await response
-                    .json()
-                    .catch(() => ({ error: "Failed to generate speech" }))) as {
-                    error?: string;
-                };
+                let error: { error?: string };
+                try {
+                    error = (await response.json()) as { error?: string };
+                } catch {
+                    error = { error: "Failed to generate speech" };
+                }
                 throw new Error(error.error || `HTTP ${response.status}`);
             }
 
@@ -455,14 +457,14 @@ export function ChatMessagesList({
                                                         const imageData =
                                                             image.source?.data ||
                                                             image.data;
+                                                        if (!imageData) {
+                                                            return null;
+                                                        }
+
                                                         const imageMime =
                                                             image.source?.media_type ||
                                                             image.mimeType ||
                                                             "image/png";
-
-                                                        if (!imageData) {
-                                                            return null;
-                                                        }
 
                                                         const imageUrl = `data:${imageMime};base64,${imageData}`;
                                                         const imagePreviewLabel = `Open chat image ${imageIndex + 1} preview`;

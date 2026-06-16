@@ -10,12 +10,15 @@ export const agentsCollection = createCollection(
         queryKey: ["agents"],
         queryFn: async () => [],
         queryClient,
-        staleTime: Number.POSITIVE_INFINITY,
+        staleTime: Infinity,
         getKey: (item: AgentInfo) => item.id,
     })
 );
 
-void agentsCollection.preload();
+/** Starts the agents collection query. */
+export function preloadAgentsCollection() {
+    void agentsCollection.preload();
+}
 
 /** Performs write agents from WebSocket. */
 export function writeAgentsFromWebSocket(agents: AgentInfo[]) {

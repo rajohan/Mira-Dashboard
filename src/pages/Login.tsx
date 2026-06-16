@@ -22,19 +22,21 @@ export function Login() {
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
-        void fetch("/api/auth/bootstrap", { credentials: "include" })
-            .then(async (response) => {
+        void (async () => {
+            try {
+                const response = await fetch("/api/auth/bootstrap", {
+                    credentials: "include",
+                });
                 if (!response.ok) {
                     throw new Error("Failed to load auth state");
                 }
-                return response.json() as Promise<BootstrapResponse>;
-            })
-            .then(setBootstrapState)
-            .catch((error_) => {
+                setBootstrapState((await response.json()) as BootstrapResponse);
+            } catch (error_) {
                 setError(
                     error_ instanceof Error ? error_.message : "Failed to load auth state"
                 );
-            });
+            }
+        })();
     }, []);
 
     const form = useForm({
@@ -55,16 +57,19 @@ export function Login() {
                     body: JSON.stringify({
                         username: value.username.trim(),
                         password: value.password,
-                        ...(bootstrapRequired
-                            ? { gatewayToken: value.gatewayToken.trim() }
-                            : {}),
+                        ...(bootstrapRequired && {
+                            gatewayToken: value.gatewayToken.trim(),
+                        }),
                     }),
                 });
 
                 if (!response.ok) {
-                    const payload = await response
-                        .json()
-                        .catch(() => ({ error: "Authentication failed" }));
+                    let payload: { error?: string };
+                    try {
+                        payload = (await response.json()) as { error?: string };
+                    } catch {
+                        payload = { error: "Authentication failed" };
+                    }
                     throw new Error(payload.error || "Authentication failed");
                 }
 
@@ -74,10 +79,16 @@ export function Login() {
                 setError(
                     error_ instanceof Error ? error_.message : "Authentication failed"
                 );
-                await authActions.refreshSession().catch(() => {});
-                const nextBootstrap = await fetch("/api/auth/bootstrap", {
+                try {
+                    await authActions.refreshSession();
+                } catch {
+                    // Bootstrap reload below handles stale auth state.
+                }
+                const bootstrapResponse = await fetch("/api/auth/bootstrap", {
                     credentials: "include",
-                }).then((response) => response.json() as Promise<BootstrapResponse>);
+                });
+                const nextBootstrap =
+                    (await bootstrapResponse.json()) as BootstrapResponse;
                 setBootstrapState(nextBootstrap);
             } finally {
                 setIsSubmitting(false);

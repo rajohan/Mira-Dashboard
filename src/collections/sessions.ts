@@ -25,12 +25,15 @@ export const sessionsCollection = createCollection(
         queryKey: ["sessions"],
         queryFn: async () => [],
         queryClient,
-        staleTime: Number.POSITIVE_INFINITY,
+        staleTime: Infinity,
         getKey: (item: Session) => getSessionCollectionKey(item) || "unknown-session",
     })
 );
 
-void sessionsCollection.preload();
+/** Starts the sessions collection query. */
+export function preloadSessionsCollection() {
+    void sessionsCollection.preload();
+}
 
 /** Performs delete session from collection. */
 export function deleteSessionFromCollection(key: string) {
