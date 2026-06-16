@@ -195,7 +195,7 @@ function getSystemMetrics(): SystemMetricsResponse {
         if (parts.length >= 5) {
             diskTotal = Number(parts[1]);
             diskUsed = Number(parts[2]);
-            diskPercent = Number(parts[4]);
+            diskPercent = Number(parts[4].replace(/%$/u, ""));
         }
     } catch (error) {
         console.error("[Metrics] df error:", (error as Error).message);

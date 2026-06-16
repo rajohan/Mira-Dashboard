@@ -1882,6 +1882,30 @@ describe("log rotation service", { concurrency: false }, () => {
         }
     });
 
+    it("recovers from whitespace-only non-dry-run rotation locks", async () => {
+        const root = path.join(tempDir, "empty-lock-logs");
+        await mkdir(root);
+        const file = path.join(root, "app.log");
+        await writeFile(file, "log", "utf8");
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [root],
+            groups: [{ name: "empty-lock", paths: [file], maxSizeMb: 0 }],
+        });
+        const lockPath = testLockPath(tempDir);
+        await mkdir(path.dirname(lockPath), { recursive: true });
+        await writeFile(lockPath, " \n", "utf8");
+
+        try {
+            const summary = await runLogRotationService({ dryRun: false, config });
+
+            assert.equal(summary.ok, true);
+            assert.doesNotMatch(JSON.stringify(summary.errors), /already running/u);
+        } finally {
+            await rm(lockPath, { force: true });
+        }
+    });
+
     it("recovers from stale non-dry-run rotation locks", async () => {
         const root = path.join(tempDir, "stale-lock-logs");
         await mkdir(root);

@@ -1280,7 +1280,12 @@ async function reclaimStaleLogRotationLock(
         }
         const pid = Number(rawPid.trim());
         const lockAgeMs = lockStat ? Date.now() - lockStat.mtimeMs : Infinity;
-        if (Number.isFinite(pid) && isProcessRunning(pid) && lockAgeMs < LOCK_STALE_MS) {
+        if (
+            Number.isSafeInteger(pid) &&
+            pid > 0 &&
+            isProcessRunning(pid) &&
+            lockAgeMs < LOCK_STALE_MS
+        ) {
             return null;
         }
         await ignoreMissingPath(fs.unlink(lockFile));

@@ -1519,7 +1519,8 @@ export default function dockerRoutes(app: express.Application): void {
                 sendInvalidDockerIdentifier(res, "containerId");
                 return;
             }
-            const requestedTail = Number(stringFallback(req.query.tail, "200")) || 200;
+            const requestedTail =
+                Math.trunc(Number(stringFallback(req.query.tail, "200"))) || 200;
             const boundedTail = Math.max(MIN_LOG_TAIL, requestedTail);
             const tail = Math.min(MAX_LOG_TAIL, boundedTail);
             const { stdout, stderr } = await execFileAsync(

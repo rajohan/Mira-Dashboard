@@ -4,6 +4,9 @@
     "description": "Gateway Mirror backend for Mira Dashboard",
     "main": "dist/serverStart.js",
     "type": "module",
+    "engines": {
+        "node": ">=25.0.0"
+    },
     "scripts": {
         "build": "tsc",
         "start": "NODE_ENV=production doppler run --config prd --project rajohan -- node dist/serverStart.js",

@@ -245,6 +245,10 @@ if (command === "volume ls --format {{json .}}") {
   process.exit(0);
 }
 if (args[0] === "logs") {
+  if (args[2]?.includes(".")) {
+    process.stderr.write("invalid tail\n");
+    process.exit(125);
+  }
   process.stdout.write("stdout log\n");
   process.stderr.write("stderr log\n");
   process.exit(0);
@@ -1626,6 +1630,13 @@ describe("docker routes", { concurrency: false }, () => {
         );
         assert.equal(logsWithDefaultTail.status, 200);
         assert.equal(logsWithDefaultTail.body.content, "stdout log\n\nstderr log");
+
+        const logsWithFractionalTail = await requestJson<{ content: string }>(
+            server,
+            "/api/docker/containers/abc123/logs?tail=10.9"
+        );
+        assert.equal(logsWithFractionalTail.status, 200);
+        assert.equal(logsWithFractionalTail.body.content, "stdout log\n\nstderr log");
 
         const invalidDetails = await requestJson<{ error: string }>(
             server,

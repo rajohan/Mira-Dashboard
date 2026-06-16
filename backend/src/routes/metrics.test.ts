@@ -124,6 +124,7 @@ describe("metrics routes", () => {
         assert.equal(Array.isArray(body.cpu.loadAvg), true);
         assert.equal(body.memory.total >= body.memory.used, true);
         assert.equal(body.memory.total >= body.memory.free, true);
+        assert.equal(Number.isFinite(body.disk.percent), true);
         assert.equal(body.system.platform, process.platform);
         assert.equal(typeof body.system.hostname, "string");
         assert.equal(typeof body.network.downloadMbps, "number");
