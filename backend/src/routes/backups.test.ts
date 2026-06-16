@@ -762,6 +762,26 @@ describe("backup routes", () => {
         );
     });
 
+    it("keeps backup completion best-effort when job completion rejects", async (t) => {
+        const warn = t.mock.method(console, "warn", () => {});
+        await backupTesting.finishManualScheduledRunWhenCompleteForTest(
+            {
+                completed: Promise.reject(new Error("completion unavailable")),
+            } as Parameters<
+                typeof backupTesting.finishManualScheduledRunWhenCompleteForTest
+            >[0],
+            { jobId: "backup.kopia" } as Parameters<
+                typeof backupTesting.finishManualScheduledRunWhenCompleteForTest
+            >[1]
+        );
+
+        assert.equal(warn.mock.callCount(), 1);
+        assert.match(
+            String(warn.mock.calls[0]?.arguments[0]),
+            /Failed to finish manual backup run/u
+        );
+    });
+
     it("keeps backup start failures visible when failed run history cannot be recorded", async (t) => {
         registerBackupScheduledJobs();
         const warn = t.mock.method(console, "warn", () => {});

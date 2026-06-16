@@ -2192,17 +2192,19 @@ describe("log rotation service", { concurrency: false }, () => {
         assert.equal(await readFile(lockPath, "utf8"), "replacement\n");
     });
 
-    it("ignores missing lock paths when releasing a lock", async () => {
+    it("surfaces missing lock paths when releasing a lock", async () => {
         const lockPath = testLockPath(tempDir);
         const lock = await __testing.acquireLogRotationLock(false);
         assert.ok(lock);
 
         await rm(lockPath, { force: true });
 
-        await __testing.releaseLogRotationLock(lock);
+        await assert.rejects(__testing.releaseLogRotationLock(lock), {
+            code: "ENOENT",
+        });
     });
 
-    it("ignores unexpected lock stat failures during release", async () => {
+    it("surfaces unexpected lock stat failures during release", async () => {
         const lockPath = testLockPath(tempDir);
         const lock = await __testing.acquireLogRotationLock(false);
         assert.ok(lock);
@@ -2223,9 +2225,41 @@ describe("log rotation service", { concurrency: false }, () => {
         );
 
         try {
-            await __testing.releaseLogRotationLock(lock);
+            await assert.rejects(__testing.releaseLogRotationLock(lock), {
+                message: /release stat denied/u,
+            });
         } finally {
             statMock.mock.restore();
+            await rm(lockPath, { force: true });
+        }
+    });
+
+    it("surfaces lock unlink failures during release", async () => {
+        const lockPath = testLockPath(tempDir);
+        const lock = await __testing.acquireLogRotationLock(false);
+        assert.ok(lock);
+        const originalUnlink = fsPromises.unlink.bind(fsPromises);
+        const unlinkMock = mock.method(
+            fsPromises,
+            "unlink",
+            (target: Parameters<typeof fsPromises.unlink>[0]) => {
+                if (String(target) === lockPath) {
+                    const error = new Error(
+                        "release unlink denied"
+                    ) as NodeJS.ErrnoException;
+                    error.code = "EACCES";
+                    return Promise.reject(error);
+                }
+                return originalUnlink(target);
+            }
+        );
+
+        try {
+            await assert.rejects(__testing.releaseLogRotationLock(lock), {
+                message: /release unlink denied/u,
+            });
+        } finally {
+            unlinkMock.mock.restore();
             await rm(lockPath, { force: true });
         }
     });

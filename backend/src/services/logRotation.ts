@@ -45,16 +45,6 @@ async function ignoreMissingPath(
     }
 }
 
-async function statOrNull(
-    filePath: string
-): Promise<Awaited<ReturnType<typeof fs.stat>> | null> {
-    try {
-        return await fs.stat(filePath);
-    } catch {
-        return null;
-    }
-}
-
 const STATE_CACHE_KEY = "log_rotation.state";
 const execFileAsync = promisify(execFile);
 const BUNDLED_CONFIG_PATH = fileURLToPath(
@@ -1339,9 +1329,9 @@ async function releaseLogRotationLock(handle: fs.FileHandle | null) {
     const lockFile = logRotationLockFile;
     try {
         const heldStat = await handle.stat();
-        const pathStat = await statOrNull(lockFile);
+        const pathStat = await fs.stat(lockFile);
         if (pathStat && pathStat.dev === heldStat.dev && pathStat.ino === heldStat.ino) {
-            await ignoreRejection(fs.unlink(lockFile));
+            await fs.unlink(lockFile);
         }
     } finally {
         await handle.close();

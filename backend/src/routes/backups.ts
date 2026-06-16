@@ -881,14 +881,18 @@ async function finishManualScheduledRunWhenComplete(
     job: BackupJob,
     run: ScheduledJobRun
 ): Promise<void> {
-    const completedJob = await job.completed;
-    const success = completedJob.status === "done" && completedJob.code === 0;
-    finishScheduledJobRun(
-        run,
-        success ? "success" : "failed",
-        success ? null : backupFailureMessage(completedJob),
-        { backup: mapJob(completedJob) }
-    );
+    try {
+        const completedJob = await job.completed;
+        const success = completedJob.status === "done" && completedJob.code === 0;
+        finishScheduledJobRun(
+            run,
+            success ? "success" : "failed",
+            success ? null : backupFailureMessage(completedJob),
+            { backup: mapJob(completedJob) }
+        );
+    } catch (error) {
+        console.warn("[Backups] Failed to finish manual backup run:", error);
+    }
 }
 
 function getCurrentBackupJob(type: BackupJob["type"]): BackupJob | null {
@@ -1022,6 +1026,7 @@ export const __testing = {
         command: string,
         signal?: AbortSignal
     ): BackupJob => startBackupJob(type, command, signal),
+    finishManualScheduledRunWhenCompleteForTest: finishManualScheduledRunWhenComplete,
     recordBackupNeedsAttentionForTest: (type: BackupJob["type"]): BackupJob =>
         recordBackupNeedsAttention(type, `${type.toUpperCase()} test attention`),
     setSpawnBackupProcessForTest(nextSpawn?: typeof spawn): void {

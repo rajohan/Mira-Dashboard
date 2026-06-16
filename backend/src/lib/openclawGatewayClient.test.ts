@@ -716,6 +716,26 @@ describe("OpenClaw gateway client websocket protocol", () => {
         assert.equal(errors.at(-1), "gateway connect challenge missing nonce");
     });
 
+    it("reports asynchronous connect response preparation failures", async () => {
+        const { errors, internals } = createProtocolClient();
+        internals.ws = { readyState: WebSocket.OPEN, send: () => {}, close: () => {} };
+        internals.opts.deviceIdentity = {
+            deviceId: "device-id",
+            publicKeyPem: "not a public key",
+            privateKeyPem: "not a private key",
+        };
+
+        internals.handleMessage(
+            JSON.stringify({
+                type: "event",
+                event: "connect.challenge",
+                payload: { nonce: "nonce" },
+            })
+        );
+
+        await waitFor(() => errors.at(-1), "connect preparation failure");
+    });
+
     it("schedules and clears reconnect timers", async () => {
         const { client, internals } = createProtocolClient();
         const originalStart = client.start;

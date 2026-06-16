@@ -254,7 +254,10 @@ function transformSession(session: GatewaySession): Session {
         displayLabel = agentType.charAt(0).toUpperCase() + agentType.slice(1);
     }
 
-    const createdAtDate = session.updatedAt ? new Date(session.updatedAt) : null;
+    const createdAtDate =
+        session.updatedAt === null || session.updatedAt === undefined
+            ? null
+            : new Date(session.updatedAt);
     const createdAt = createdAtDate ? createdAtDate.toISOString() : null;
 
     return {

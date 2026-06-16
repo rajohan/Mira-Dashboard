@@ -880,8 +880,8 @@ async function runActionWithTimeout(
         });
         timeout?.unref();
         const handlerPromise = Promise.resolve(action.handler(job, controller.signal));
-        handlerSettled = observeHandlerSettlement(handlerPromise);
-        void observeHandlerFailure(handlerPromise);
+        handlerSettled = suppressHandlerPromiseRejection(handlerPromise);
+        void suppressHandlerPromiseRejection(handlerPromise);
         const output =
             (await Promise.race([handlerPromise, timeoutPromise, abortPromise])) ?? {};
         return output;
@@ -903,15 +903,9 @@ function trackScheduledRun(run: Promise<void>): void {
     void untrackScheduledRun(run);
 }
 
-async function observeHandlerSettlement(handlerPromise: Promise<unknown>): Promise<void> {
-    try {
-        await handlerPromise;
-    } catch {
-        // The race reports handler failures unless the timeout already won.
-    }
-}
-
-async function observeHandlerFailure(handlerPromise: Promise<unknown>): Promise<void> {
+async function suppressHandlerPromiseRejection(
+    handlerPromise: Promise<unknown>
+): Promise<void> {
     try {
         await handlerPromise;
     } catch {

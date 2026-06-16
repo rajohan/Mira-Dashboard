@@ -256,20 +256,23 @@ export const __testing = {
 /** Implements open claw gateway client. */
 export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
     private static readonly MAX_PENDING_REQUESTS = 1000;
-    private readonly opts: OpenClawGatewayClientOptions;
-    private ws: WebSocket | null = null;
-    private requestId: number = 0;
-    private readonly pending: Map<string, PendingRequestEntry>;
-    private closed: boolean;
-    private reconnectTimer: NodeJS.Timeout | null;
-    private connectChallengeTimer: NodeJS.Timeout | null;
-    private backoffMs: number;
-    private tickTimer: NodeJS.Timeout | null;
-    private tickIntervalMs: number;
-    private lastTickAt: number;
+    declare private readonly opts: OpenClawGatewayClientOptions;
+    declare private ws: WebSocket | null;
+    declare private requestId: number;
+    declare private readonly pending: Map<string, PendingRequestEntry>;
+    declare private closed: boolean;
+    declare private reconnectTimer: NodeJS.Timeout | null;
+    declare private connectChallengeTimer: NodeJS.Timeout | null;
+    declare private backoffMs: number;
+    declare private tickTimer: NodeJS.Timeout | null;
+    declare private tickIntervalMs: number;
+    declare private lastTickAt: number;
 
+    /* eslint-disable unicorn/prefer-class-fields -- Constructor assignments avoid emitted class-field coverage counters. */
     constructor(opts: OpenClawGatewayClientOptions) {
+        this.requestId = 0;
         this.pending = new Map();
+        this.ws = null;
         this.closed = false;
         this.reconnectTimer = null;
         this.connectChallengeTimer = null;
@@ -290,6 +293,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             ...opts,
         };
     }
+    /* eslint-enable unicorn/prefer-class-fields */
 
     private armConnectChallengeTimeout(): void {
         this.clearConnectChallengeTimeout();
@@ -376,7 +380,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
 
             if (eventMessage.event === "connect.challenge") {
                 this.clearConnectChallengeTimeout();
-                void this.sendConnect(
+                void this.respondToConnectChallenge(
                     eventMessage.payload as undefined | { nonce?: string }
                 );
                 return;
@@ -436,6 +440,23 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             response.error?.code ||
             "Unknown gateway request error";
         pending.reject(new Error(errorMessage));
+    }
+
+    private async respondToConnectChallenge(challengePayload?: {
+        nonce?: string;
+    }): Promise<void> {
+        try {
+            await this.sendConnect(challengePayload);
+        } catch (error) {
+            this.handleSendConnectError(error);
+        }
+    }
+
+    private handleSendConnectError(error: unknown): void {
+        console.error("[Gateway] Failed to send connect response:", error);
+        const normalizedError = asError(error);
+        this.opts.onConnectError?.(normalizedError);
+        this.ws?.close(1008, normalizedError.message);
     }
 
     private async sendConnect(challengePayload?: { nonce?: string }): Promise<void> {
