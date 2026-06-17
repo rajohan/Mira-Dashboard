@@ -102,24 +102,30 @@ function readComposeEnvFile(envPath: string): ComposeEnv {
     }
 }
 
-function composeEnvFilePaths(projectDirectory: string, envFileValue: unknown): string[] {
+function composeEnvFilePaths(
+    projectDirectory: string,
+    envFileValue: unknown,
+    composeEnv: ComposeEnv = {}
+): string[] {
     return (Array.isArray(envFileValue) ? envFileValue : [envFileValue])
         .filter((item): item is string => typeof item === "string")
-        .map((envFilePath) =>
-            path.isAbsolute(envFilePath)
+        .map((rawEnvFilePath) => {
+            const envFilePath = interpolateComposePath(rawEnvFilePath, composeEnv);
+            return path.isAbsolute(envFilePath)
                 ? envFilePath
-                : path.resolve(projectDirectory, envFilePath)
-        );
+                : path.resolve(projectDirectory, envFilePath);
+        });
 }
 
 function loadComposeEnvFiles(
     projectDirectory: string,
-    envFileValue: unknown
+    envFileValue: unknown,
+    composeEnv: ComposeEnv = {}
 ): ComposeEnv {
     return Object.assign(
         {},
-        ...composeEnvFilePaths(projectDirectory, envFileValue).map((envPath) =>
-            readComposeEnvFile(envPath)
+        ...composeEnvFilePaths(projectDirectory, envFileValue, composeEnv).map(
+            (envPath) => readComposeEnvFile(envPath)
         )
     ) as ComposeEnv;
 }
@@ -128,9 +134,10 @@ function loadComposeProjectEnv(
     projectDirectory: string,
     envFileValue?: unknown
 ): ComposeEnv {
+    const defaultEnv = readComposeEnvFile(path.join(projectDirectory, ".env"));
     return {
-        ...readComposeEnvFile(path.join(projectDirectory, ".env")),
-        ...loadComposeEnvFiles(projectDirectory, envFileValue),
+        ...defaultEnv,
+        ...loadComposeEnvFiles(projectDirectory, envFileValue, defaultEnv),
     };
 }
 
@@ -241,7 +248,11 @@ function projectComposeIncludesCompose(
                 Array.isArray(includeValue) ? includeValue : [includeValue]
             ).filter((item): item is string => typeof item === "string");
             const entryComposeEnv = {
-                ...loadComposeEnvFiles(projectDirectory, entryRecord.env_file),
+                ...loadComposeEnvFiles(
+                    projectDirectory,
+                    entryRecord.env_file,
+                    composeEnv
+                ),
                 ...composeEnv,
             };
             const hasExplicitEnvFile = entryRecord.env_file !== undefined;

@@ -3010,14 +3010,20 @@ setTimeout(() => {
             "utf8"
         );
         await writeFile(
+            path.join(envFileIncludeRoot, ".env"),
+            "INCLUDE_ENV=include.env\n",
+            "utf8"
+        );
+        await writeFile(
             path.join(envFileIncludeRoot, "compose.yaml"),
-            "include:\n- path: ${APP_COMPOSE}/compose.yaml\n  env_file: include.env\n",
+            "include:\n- path: ${APP_COMPOSE}/compose.yaml\n  env_file: ${INCLUDE_ENV}\n",
             "utf8"
         );
         await writeFile(envFileIncludeComposePath, "services: {}\n", "utf8");
         await withEnv(
             {
                 APP_COMPOSE: undefined,
+                INCLUDE_ENV: undefined,
                 MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
             },
             async () => {
