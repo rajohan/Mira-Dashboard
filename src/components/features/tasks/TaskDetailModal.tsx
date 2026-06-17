@@ -426,7 +426,10 @@ export function TaskDetailModal({
                                     Cron job
                                 </dt>
                                 <dd className="text-primary-200 break-all">
-                                    <a href="/cron" className="hover:text-primary-100">
+                                    <a
+                                        href={`/jobs?view=openclaw&job=${encodeURIComponent(automation.cronJobId)}`}
+                                        className="hover:text-primary-100"
+                                    >
                                         {automation.jobName || automation.cronJobId}
                                     </a>
                                 </dd>

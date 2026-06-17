@@ -27,7 +27,7 @@ const navItems = [
     { to: "/sessions", icon: MessageSquare, label: "Sessions" },
     { to: "/chat", icon: MessageSquare, label: "Chat" },
     { to: "/logs", icon: FileText, label: "Logs" },
-    { to: "/cron", icon: Clock3, label: "Cron" },
+    { to: "/jobs", icon: Clock3, label: "Jobs" },
     { to: "/pull-requests", icon: GitPullRequest, label: "PRs" },
     { to: "/files", icon: FolderOpen, label: "Files" },
     { to: "/docker", icon: Boxes, label: "Docker" },

@@ -559,6 +559,25 @@ export function getScheduledJob(id: string): ScheduledJob | null {
     return row ? mapJob(row) : null;
 }
 
+export function listScheduledJobRuns(id: string, limit = 20): ScheduledJobRun[] {
+    assertValidId(id);
+    const normalizedLimit =
+        Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 100) : 20;
+    return (
+        db
+            .prepare(
+                `SELECT *
+                 FROM scheduled_job_runs
+                 WHERE job_id = ?
+                 ORDER BY started_at DESC, id DESC
+                 LIMIT ?`
+            )
+            .all(id, normalizedLimit) as unknown as ScheduledJobRunRow[]
+    )
+        .map((row) => mapRun(row))
+        .filter((run): run is ScheduledJobRun => run !== null);
+}
+
 export function removeScheduledJobsNotInAction(
     actionKey: string,
     registeredIds: readonly string[]

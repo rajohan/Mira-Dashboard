@@ -156,6 +156,14 @@ test("lists, fetches, updates, and runs scheduled jobs", async () => {
         assert.equal(run.status, 200);
         assert.equal(run.body.ok, true);
         assert.equal(run.body.run.status, "success");
+
+        const runs = await requestJson<{ runs: { status: string }[] }>(
+            server,
+            "/api/jobs/cache.weather/runs"
+        );
+        assert.equal(runs.status, 200);
+        assert.equal(runs.body.runs.length, 1);
+        assert.equal(runs.body.runs[0]?.status, "success");
     } finally {
         await server.close();
     }
@@ -204,6 +212,7 @@ test("returns validation and missing job errors", async () => {
         const missingRun = await requestJson(server, "/api/jobs/missing/run", {
             method: "POST",
         });
+        const missingRuns = await requestJson(server, "/api/jobs/missing/runs");
 
         assert.equal(missingJob.status, 404);
         assert.equal(missingPatch.status, 404);
@@ -215,6 +224,7 @@ test("returns validation and missing job errors", async () => {
         assert.equal(partialUpdate.status, 200);
         assert.equal(partialUpdate.body.ok, true);
         assert.equal(missingRun.status, 404);
+        assert.equal(missingRuns.status, 404);
     } finally {
         await server.close();
     }

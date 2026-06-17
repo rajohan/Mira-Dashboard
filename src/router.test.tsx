@@ -41,11 +41,11 @@ vi.mock("./components/layout/Layout", () => ({
 
 vi.mock("./pages/Agents", () => ({ Agents: () => <div>Agents</div> }));
 vi.mock("./pages/Chat", () => ({ Chat: () => <div>Chat</div> }));
-vi.mock("./pages/Cron", () => ({ Cron: () => <div>Cron</div> }));
 vi.mock("./pages/Dashboard", () => ({ Dashboard: () => <div>Dashboard</div> }));
 vi.mock("./pages/Database", () => ({ Database: () => <div>Database</div> }));
 vi.mock("./pages/Docker", () => ({ Docker: () => <div>Docker</div> }));
 vi.mock("./pages/Files", () => ({ Files: () => <div>Files</div> }));
+vi.mock("./pages/Jobs", () => ({ Jobs: () => <div>Jobs</div> }));
 vi.mock("./pages/Login", () => ({ Login: () => <div>Login</div> }));
 vi.mock("./pages/Logs", () => ({ Logs: () => <div>Logs</div> }));
 vi.mock("./pages/Moltbook", () => ({ Moltbook: () => <div>Moltbook</div> }));
@@ -91,7 +91,7 @@ describe("router", () => {
             "/sessions",
             "/chat",
             "/logs",
-            "/cron",
+            "/jobs",
             "/pull-requests",
             "/files",
             "/docker",
