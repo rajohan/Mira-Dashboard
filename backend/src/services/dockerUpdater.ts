@@ -10,6 +10,7 @@ import YAML from "yaml";
 
 import { db } from "../db.js";
 import { nonEmptyEnvFallback } from "../lib/values.js";
+import type { ScheduledJob } from "./scheduledJobs.js";
 import {
     getScheduledJob,
     registerScheduledJobAction,
@@ -71,7 +72,7 @@ function shouldBlockGlobalUpdateForDiscoveryFailure(
     return !register.ok && failedDiscoveryAppSlugs(register).has("*");
 }
 
-function isNonblockingRegistrationFailure(step: DockerUpdaterStepResult): boolean {
+export function isNonblockingRegistrationFailure(step: DockerUpdaterStepResult): boolean {
     return (
         step.step === "register-services" &&
         !step.ok &&
@@ -2089,13 +2090,24 @@ export async function runDockerUpdaterService(
     return [register, poll, ...applyResults];
 }
 
+function preservedTimeOfDay(
+    existing: ScheduledJob | null,
+    fallback: string
+): string | null {
+    if (!existing) {
+        return fallback;
+    }
+    return existing.timeOfDay;
+}
+
 export function registerDockerUpdaterScheduledJobs(): void {
     const job = {
         id: "docker.updater",
         name: "Docker updater",
         description: "Poll Docker registries and apply approved automatic updates.",
-        scheduleType: "interval",
-        intervalSeconds: 60 * 60,
+        scheduleType: "daily",
+        intervalSeconds: 24 * 60 * 60,
+        timeOfDay: "04:10",
         actionKey: "docker.updater",
         actionPayload: {},
     } as const;
@@ -2124,7 +2136,7 @@ export function registerDockerUpdaterScheduledJobs(): void {
             enabled: existing?.enabled ?? true,
             scheduleType: existing?.scheduleType ?? job.scheduleType,
             intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
-            timeOfDay: existing?.timeOfDay ?? null,
+            timeOfDay: preservedTimeOfDay(existing, job.timeOfDay),
             cronExpression: existing?.cronExpression ?? null,
         });
         db.exec("COMMIT");

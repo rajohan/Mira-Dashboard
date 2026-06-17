@@ -2615,7 +2615,7 @@ setTimeout(() => {
 
             const row = dbHandle
                 .prepare(
-                    `SELECT id, enabled, schedule_type, interval_seconds, action_key
+                    `SELECT id, enabled, schedule_type, interval_seconds, time_of_day, action_key
                  FROM scheduled_jobs WHERE id = 'docker.updater'`
                 )
                 .get() as
@@ -2626,13 +2626,35 @@ setTimeout(() => {
                       id: string;
                       interval_seconds: number;
                       schedule_type: string;
+                      time_of_day: string | null;
                   };
             assert.ok(row);
             assert.equal(row.id, "docker.updater");
             assert.equal(row.enabled, 1);
-            assert.equal(row.schedule_type, "interval");
-            assert.equal(row.interval_seconds, 3600);
+            assert.equal(row.schedule_type, "daily");
+            assert.equal(row.interval_seconds, 86_400);
+            assert.equal(row.time_of_day, "04:10");
             assert.equal(row.action_key, "docker.updater");
+
+            scheduledJobs.updateScheduledJob("docker.updater", {
+                intervalSeconds: 7200,
+                scheduleType: "interval",
+                timeOfDay: null,
+            });
+            updater.registerDockerUpdaterScheduledJobs();
+            const preservedRow = dbHandle
+                .prepare(
+                    `SELECT schedule_type, interval_seconds, time_of_day
+                     FROM scheduled_jobs WHERE id = 'docker.updater'`
+                )
+                .get() as {
+                interval_seconds: number;
+                schedule_type: string;
+                time_of_day: string | null;
+            };
+            assert.equal(preservedRow.schedule_type, "interval");
+            assert.equal(preservedRow.interval_seconds, 7200);
+            assert.equal(preservedRow.time_of_day, null);
 
             const run = await scheduledJobs.runScheduledJob("docker.updater", "manual");
             assert.equal(run.status, "success");
