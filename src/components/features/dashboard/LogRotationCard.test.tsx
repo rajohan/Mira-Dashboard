@@ -73,7 +73,7 @@ describe("LogRotationCard", () => {
         render(<LogRotationCard />);
 
         expect(screen.getByText("Log rotation")).toBeInTheDocument();
-        expect(screen.getByText("03:15 daily")).toBeInTheDocument();
+        expect(screen.getByText("05:15 daily")).toBeInTheDocument();
         expect(screen.getByText("3 rotated · 0 errors")).toBeInTheDocument();
         expect(screen.getByText("Last dry-run output")).toBeInTheDocument();
 
@@ -144,8 +144,88 @@ describe("LogRotationCard", () => {
 
         expect(screen.getByRole("button", { name: "Running..." })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Run dry-run now" })).toBeDisabled();
-        expect(screen.getByText("10 2 * * *")).toBeInTheDocument();
+        expect(screen.getByText("04:10 daily (10 2 * * * UTC)")).toBeInTheDocument();
         expect(screen.getByText("Last real run output")).toBeInTheDocument();
+    });
+
+    it("formats scheduled job fallback times in Oslo time", () => {
+        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
+        hooks.useRunLogRotationDryRun.mockReturnValue({
+            isPending: false,
+            mutate: vi.fn(),
+        });
+        hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: null,
+                    enabled: true,
+                    id: "ops.log-rotation",
+                    intervalSeconds: 86_400,
+                    name: "Log rotation",
+                    nextRunAt: "not-a-date",
+                    scheduleType: "daily",
+                    timeOfDay: "03:15",
+                },
+            ],
+        });
+
+        const { rerender } = render(<LogRotationCard />);
+        expect(screen.getByText("05:15 daily")).toBeInTheDocument();
+
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: "10 2 * * *",
+                    enabled: true,
+                    id: "ops.log-rotation",
+                    intervalSeconds: 3600,
+                    name: "Log rotation",
+                    nextRunAt: null,
+                    scheduleType: "cron",
+                    timeOfDay: null,
+                },
+            ],
+        });
+
+        rerender(<LogRotationCard />);
+        expect(screen.getByText("04:10 daily (10 2 * * * UTC)")).toBeInTheDocument();
+
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: "*/10 * * * *",
+                    enabled: true,
+                    id: "ops.log-rotation",
+                    intervalSeconds: 600,
+                    name: "Log rotation",
+                    nextRunAt: null,
+                    scheduleType: "cron",
+                    timeOfDay: null,
+                },
+            ],
+        });
+
+        rerender(<LogRotationCard />);
+        expect(screen.getByText("*/10 * * * *")).toBeInTheDocument();
+
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: null,
+                    enabled: true,
+                    id: "ops.log-rotation",
+                    intervalSeconds: 86_400,
+                    name: "Log rotation",
+                    nextRunAt: null,
+                    scheduleType: "daily",
+                    timeOfDay: "bad-time",
+                },
+            ],
+        });
+
+        rerender(<LogRotationCard />);
+        expect(screen.getByText("bad-time daily")).toBeInTheDocument();
     });
 
     it("renders disabled and interval scheduled job labels", () => {

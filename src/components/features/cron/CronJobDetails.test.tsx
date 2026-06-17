@@ -27,8 +27,10 @@ function renderDetails(
         togglePending: false,
         runPending: false,
         updatePending: false,
+        deletePending: false,
         onToggle: vi.fn(),
         onRunNow: vi.fn(),
+        onDelete: vi.fn(),
         isEditMode: false,
         onEditModeChange: vi.fn(),
         nameDraft: "Dashboard autopilot",
@@ -81,16 +83,19 @@ describe("CronJobDetails", () => {
         const user = userEvent.setup();
         const onToggle = vi.fn();
         const onRunNow = vi.fn();
+        const onDelete = vi.fn();
         const onEditModeChange = vi.fn();
 
-        renderDetails({ onToggle, onRunNow, onEditModeChange });
+        renderDetails({ onToggle, onRunNow, onDelete, onEditModeChange });
 
         await user.click(screen.getByRole("switch", { name: "Enabled" }));
         await user.click(screen.getByRole("button", { name: /Trigger now/ }));
+        await user.click(screen.getByRole("button", { name: "Delete" }));
         await user.click(screen.getByRole("button", { name: "Edit" }));
 
         expect(onToggle).toHaveBeenCalledWith(job, false);
         expect(onRunNow).toHaveBeenCalledWith(job);
+        expect(onDelete).toHaveBeenCalledWith(job);
         expect(onEditModeChange).toHaveBeenCalledWith(true);
     });
 
@@ -150,6 +155,7 @@ describe("CronJobDetails", () => {
             runPending: true,
             togglePending: true,
             updatePending: true,
+            deletePending: true,
             hasInvalidJson: true,
             payloadValidation: { valid: false, error: null },
             deliveryValidation: { valid: false, error: "missing mode" },
@@ -159,6 +165,7 @@ describe("CronJobDetails", () => {
         expect(screen.getByText("Disabled")).toBeInTheDocument();
         expect(screen.getByRole("switch", { name: "Enabled" })).toBeDisabled();
         expect(screen.getByRole("button", { name: /Triggering/ })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Deleting..." })).toBeDisabled();
         expect(screen.getByText("Running job...")).toBeInTheDocument();
         expect(screen.getByText("Invalid JSON: parse error")).toBeInTheDocument();
         expect(screen.getByText("Invalid JSON: missing mode")).toBeInTheDocument();

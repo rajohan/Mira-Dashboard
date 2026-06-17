@@ -6,6 +6,7 @@ import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
 import {
     cronKeys,
     useCronJobs,
+    useDeleteCronJob,
     useRunCronJobNow,
     useToggleCronJob,
     useUpdateCronJob,
@@ -43,11 +44,13 @@ describe("cron hooks", () => {
         const wrapper = createQueryWrapper(queryClient);
         const { result: toggle } = renderHook(() => useToggleCronJob(), { wrapper });
         const { result: update } = renderHook(() => useUpdateCronJob(), { wrapper });
+        const { result: deleteJob } = renderHook(() => useDeleteCronJob(), { wrapper });
         const { result: runNow } = renderHook(() => useRunCronJobNow(), { wrapper });
 
         await act(async () => {
             await toggle.current.mutateAsync({ id: "job-1", enabled: false });
             await update.current.mutateAsync({ id: "job-1", patch: { enabled: true } });
+            await deleteJob.current.mutateAsync({ id: "job-1" });
             await runNow.current.mutateAsync({ id: "job-1" });
         });
 
@@ -68,6 +71,11 @@ describe("cron hooks", () => {
         );
         expect(fetchMock).toHaveBeenNthCalledWith(
             3,
+            "/api/cron/jobs/job-1/delete",
+            expect.objectContaining({ method: "POST" })
+        );
+        expect(fetchMock).toHaveBeenNthCalledWith(
+            4,
             "/api/cron/jobs/job-1/run",
             expect.objectContaining({ method: "POST" })
         );

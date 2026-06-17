@@ -303,6 +303,7 @@ export function Tasks() {
                                 value={search}
                                 onChange={setSearch}
                                 placeholder="Search tasks..."
+                                clearLabel="Clear task search"
                             />
                             <FilterButtonGroup
                                 options={ASSIGNMENT_FILTERS}

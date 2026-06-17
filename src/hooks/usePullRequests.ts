@@ -21,6 +21,7 @@ export interface PullRequestSummary {
     createdAt: string;
     updatedAt: string;
     isDraft: boolean;
+    headRefOid?: string;
     mergeable?: string;
     mergeStateStatus?: string;
     reviewDecision?: string;
@@ -39,6 +40,7 @@ export interface DeploymentJob {
     startedAt: string;
     updatedAt: string;
     commit?: string;
+    commitTitle?: string;
     commitUrl?: string;
     note?: string;
     stdout?: string;
@@ -156,6 +158,16 @@ async function approvePullRequestReview(
     );
 }
 
+/** Performs update pull request branch. */
+async function updatePullRequestBranch(
+    number: number
+): Promise<PullRequestActionResponse> {
+    return apiPostRequired<PullRequestActionResponse>(
+        `/pull-requests/${number}/update-branch`,
+        {}
+    );
+}
+
 /** Performs deploy dashboard. */
 async function deployDashboard(): Promise<{ ok: boolean; deployment: DeploymentJob }> {
     return apiPostRequired<{ ok: boolean; deployment: DeploymentJob }>(
@@ -219,13 +231,38 @@ export function useApprovePullRequestReview() {
     return useMutation({
         mutationFn: ({ number }: { number: number }) => approvePullRequestReview(number),
         onSuccess: (response) => {
-            if (response.pullRequest) {
+            const updatedPullRequest = response.pullRequest;
+            if (updatedPullRequest) {
                 queryClient.setQueryData<PullRequestSummary[]>(
                     pullRequestKeys.list(),
                     (current = []) =>
                         current.map((pullRequest) =>
-                            pullRequest.number === response.pullRequest?.number
-                                ? response.pullRequest
+                            pullRequest.number === updatedPullRequest.number
+                                ? updatedPullRequest
+                                : pullRequest
+                        )
+                );
+            }
+            void queryClient.invalidateQueries({ queryKey: pullRequestKeys.list() });
+        },
+    });
+}
+
+/** Provides update pull request branch. */
+export function useUpdatePullRequestBranch() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({ number }: { number: number }) => updatePullRequestBranch(number),
+        onSuccess: (response) => {
+            const updatedPullRequest = response.pullRequest;
+            if (updatedPullRequest) {
+                queryClient.setQueryData<PullRequestSummary[]>(
+                    pullRequestKeys.list(),
+                    (current = []) =>
+                        current.map((pullRequest) =>
+                            pullRequest.number === updatedPullRequest.number
+                                ? updatedPullRequest
                                 : pullRequest
                         )
                 );

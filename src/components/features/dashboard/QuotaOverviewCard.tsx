@@ -175,10 +175,6 @@ function formatSyntheticRegenSegment(
 function formatSyntheticWeeklyRemaining(
     weeklyTokenLimit: SyntheticQuota["weeklyTokenLimit"]
 ): string {
-    if (weeklyTokenLimit.remainingCredits) {
-        return `${weeklyTokenLimit.remainingCredits} left`;
-    }
-
     return `${Math.round(weeklyTokenLimit.percentRemaining)}% left`;
 }
 

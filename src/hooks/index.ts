@@ -33,6 +33,7 @@ export type { CronJob } from "./useCron";
 export {
     cronKeys,
     useCronJobs,
+    useDeleteCronJob,
     useRunCronJobNow,
     useToggleCronJob,
     useUpdateCronJob,
@@ -79,6 +80,7 @@ export {
     usePullRequestDeployments,
     usePullRequests,
     useRejectPullRequest,
+    useUpdatePullRequestBranch,
 } from "./usePullRequests";
 export { hasQuotaStatus, useQuotas } from "./useQuotas";
 export { sessionKeys, useDeleteSession, useSessionAction } from "./useSessions";

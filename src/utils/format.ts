@@ -2,6 +2,11 @@ import { format, formatDistanceToNow } from "date-fns";
 import { enUS } from "date-fns/locale";
 
 const defaultLocale = enUS;
+const osloTimeFormatter = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Oslo",
+});
 
 // Date & time formatting
 /** Formats a date/time value with browser-local date and time fields. */
@@ -11,6 +16,17 @@ export function formatDate(date: Date | string | number): string {
         return format(d, "dd.MM.yyyy, HH:mm", { locale: defaultLocale });
     } catch {
         return String(date);
+    }
+}
+
+/** Formats a date/time value as an Oslo clock time. */
+export function formatOsloClock(date: Date | string | number): string {
+    try {
+        const d = date instanceof Date ? date : new Date(date);
+        if (Number.isNaN(d.getTime())) return "--:--";
+        return osloTimeFormatter.format(d);
+    } catch {
+        return "--:--";
     }
 }
 

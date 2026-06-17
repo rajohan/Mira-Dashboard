@@ -4,11 +4,13 @@ import { useEffect, useState } from "react";
 import { CronJobDetails, CronJobList } from "../components/features/cron";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
+import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { LoadingState } from "../components/ui/LoadingState";
 import { PageState } from "../components/ui/PageState";
 import type { CronJob } from "../hooks";
 import {
     useCronJobs,
+    useDeleteCronJob,
     useRunCronJobNow,
     useToggleCronJob,
     useUpdateCronJob,
@@ -23,6 +25,7 @@ export function Cron() {
     const toggleJob = useToggleCronJob();
     const runNow = useRunCronJobNow();
     const updateJob = useUpdateCronJob();
+    const deleteJob = useDeleteCronJob();
 
     const sortedJobs = sortCronJobs(jobs);
     const [selectedJobId, setSelectedJobId] = useState<string>("");
@@ -33,6 +36,7 @@ export function Cron() {
     const [deliveryDraft, setDeliveryDraft] = useState("{}");
     const [editError, setEditError] = useState<string | null>(null);
     const [isEditMode, setIsEditMode] = useState(false);
+    const [deleteCandidate, setDeleteCandidate] = useState<CronJob | null>(null);
 
     const selectedJob =
         sortedJobs.find((job) => getCronJobId(job) === selectedJobId) || null;
@@ -110,6 +114,19 @@ export function Cron() {
         }
     }
 
+    /** Responds to delete confirmation. */
+    async function handleDelete(job: CronJob) {
+        const id = getCronJobId(job);
+        if (!id) {
+            setDeleteCandidate(null);
+            return;
+        }
+
+        await deleteJob.mutateAsync({ id });
+        setSelectedJobId("");
+        setDeleteCandidate(null);
+    }
+
     return (
         <PageState
             isLoading={isLoading}
@@ -152,6 +169,7 @@ export function Cron() {
                             togglePending={toggleJob.isPending}
                             runPending={runNow.isPending}
                             updatePending={updateJob.isPending}
+                            deletePending={deleteJob.isPending}
                             onToggle={(job, enabled) => {
                                 void handleToggle(job, enabled);
                             }}
@@ -181,10 +199,28 @@ export function Cron() {
                             onSave={(job) => {
                                 void handleSaveEdits(job);
                             }}
+                            onDelete={setDeleteCandidate}
                             formatDate={formatDate}
                         />
                     ) : null}
                 </div>
+                {deleteCandidate ? (
+                    <ConfirmModal
+                        isOpen
+                        title="Delete cron job"
+                        message={`Delete ${String(deleteCandidate.name || getCronJobId(deleteCandidate))}?`}
+                        confirmLabel="Delete cron job"
+                        confirmLoadingLabel="Deleting"
+                        loading={deleteJob.isPending}
+                        danger
+                        onCancel={() => {
+                            setDeleteCandidate(null);
+                        }}
+                        onConfirm={() => {
+                            void handleDelete(deleteCandidate);
+                        }}
+                    />
+                ) : null}
             </div>
         </PageState>
     );

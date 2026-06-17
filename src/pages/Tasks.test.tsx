@@ -381,6 +381,11 @@ describe("Tasks page", () => {
         expect(screen.getByTestId("column-todo")).toHaveTextContent("todo (0)");
         expect(screen.getByTestId("column-done")).toHaveTextContent("done (1)");
 
+        await user.click(screen.getByRole("button", { name: "Clear task search" }));
+        expect(screen.getByPlaceholderText("Search tasks...")).toHaveValue("");
+        expect(screen.getByTestId("column-todo")).toHaveTextContent("todo (1)");
+
+        await user.type(screen.getByPlaceholderText("Search tasks..."), "ship");
         await user.click(screen.getByRole("button", { name: "Mira" }));
         expect(screen.getByTestId("column-done")).toHaveTextContent("done (0)");
     });

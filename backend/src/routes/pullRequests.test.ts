@@ -51,7 +51,7 @@ async function waitForDeploymentStatus(
     tempDir: string
 ): Promise<Record<string, unknown>> {
     let lastJob = {} as Record<string, unknown>;
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    for (let attempt = 0; attempt < 160; attempt += 1) {
         try {
             const job = readDeploymentJobFromDb(jobId, tempDir);
             if (job) {
@@ -118,6 +118,7 @@ function readDeploymentJobFromDb(
                     started_at AS startedAt,
                     updated_at AS updatedAt,
                     commit_sha AS "commit",
+                    commit_title AS "commitTitle",
                     note,
                     stdout,
                     stderr
@@ -408,6 +409,30 @@ if (args[0] === "api" && args[1] === "graphql") {
   }
   process.exit(0);
 }
+if (args[0] === "api" && args.includes("repos/rajohan/Mira-Dashboard/pulls/19/update-branch")) {
+  if (!args.includes("-X") || !args.includes("PUT")) {
+    process.stderr.write("update branch should use PUT");
+    process.exit(1);
+  }
+  if (!args.includes("expected_head_sha=head19")) {
+    process.stderr.write("update branch should pass expected head sha");
+    process.exit(1);
+  }
+  process.stdout.write("{}");
+  process.exit(0);
+}
+if (args[0] === "api" && args.includes("repos/rajohan/Mira-Dashboard/pulls/22/update-branch")) {
+  if (!args.includes("-X") || !args.includes("PUT")) {
+    process.stderr.write("update branch should use PUT");
+    process.exit(1);
+  }
+  if (args.some((arg) => arg.startsWith("expected_head_sha="))) {
+    process.stderr.write("update branch should omit missing expected head sha");
+    process.exit(1);
+  }
+  process.stdout.write("{}");
+  process.exit(0);
+}
 if (args[0] === "pr" && args[1] === "view") {
   const requested = Number(args[2]);
   const jsonIndex = args.indexOf("--json");
@@ -497,6 +522,96 @@ if (args[0] === "pr" && args[1] === "view") {
     }));
     process.exit(0);
   }
+  if (requested === 19) {
+    process.stdout.write(JSON.stringify({
+      number: 19,
+      title: "Behind branch",
+      body: "Needs base branch update",
+      url: "https://github.com/rajohan/Mira-Dashboard/pull/19",
+      headRefName: "behind-branch",
+      headRefOid: "head19",
+      baseRefName: "main",
+      author: { login: "mira-2026" },
+      createdAt: "2026-05-10T01:57:00Z",
+      updatedAt: "2026-05-11T06:20:00Z",
+      isDraft: false,
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "BEHIND",
+      reviewDecision: "APPROVED",
+      statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+      additions: 1,
+      deletions: 1,
+      changedFiles: 1
+    }));
+    process.exit(0);
+  }
+  if (requested === 20) {
+    process.stdout.write(JSON.stringify({
+      number: 20,
+      title: "Behind feature branch",
+      body: "Wrong target branch",
+      url: "https://github.com/rajohan/Mira-Dashboard/pull/20",
+      headRefName: "behind-feature-branch",
+      headRefOid: "head20",
+      baseRefName: "develop",
+      author: { login: "mira-2026" },
+      createdAt: "2026-05-10T01:57:00Z",
+      updatedAt: "2026-05-11T06:20:00Z",
+      isDraft: false,
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "BEHIND",
+      reviewDecision: "APPROVED",
+      statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+      additions: 1,
+      deletions: 1,
+      changedFiles: 1
+    }));
+    process.exit(0);
+  }
+  if (requested === 21) {
+    process.stdout.write(JSON.stringify({
+      number: 21,
+      title: "Behind conflicted branch",
+      body: "Needs manual merge",
+      url: "https://github.com/rajohan/Mira-Dashboard/pull/21",
+      headRefName: "behind-conflicted-branch",
+      headRefOid: "head21",
+      baseRefName: "main",
+      author: { login: "mira-2026" },
+      createdAt: "2026-05-10T01:57:00Z",
+      updatedAt: "2026-05-11T06:20:00Z",
+      isDraft: false,
+      mergeable: "DIRTY",
+      mergeStateStatus: "BEHIND",
+      reviewDecision: "APPROVED",
+      statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+      additions: 1,
+      deletions: 1,
+      changedFiles: 1
+    }));
+    process.exit(0);
+  }
+  if (requested === 22) {
+    process.stdout.write(JSON.stringify({
+      number: 22,
+      title: "Behind unknown mergeability branch",
+      body: "GitHub omitted mergeability",
+      url: "https://github.com/rajohan/Mira-Dashboard/pull/22",
+      headRefName: "behind-unknown-mergeable-branch",
+      baseRefName: "main",
+      author: { login: "mira-2026" },
+      createdAt: "2026-05-10T01:57:00Z",
+      updatedAt: "2026-05-11T06:20:00Z",
+      isDraft: false,
+      mergeStateStatus: "BEHIND",
+      reviewDecision: "APPROVED",
+      statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
+      additions: 1,
+      deletions: 1,
+      changedFiles: 1
+    }));
+    process.exit(0);
+  }
   const pr = pullRequests.find((candidate) => candidate.number === requested);
   if (!pr) {
     process.stderr.write("pull request not found");
@@ -562,6 +677,10 @@ if (args.join(" ") === "rev-parse --abbrev-ref HEAD") {
 }
 if (args.join(" ") === "rev-parse --short HEAD") {
   process.stdout.write("abc1234\n");
+  process.exit(0);
+}
+if (args.join(" ") === "log -1 --pretty=%s") {
+  process.stdout.write("Ship dashboard polish\n");
   process.exit(0);
 }
 if (args.join(" ") === "status --short") {
@@ -766,6 +885,7 @@ describe("pull request routes", () => {
             startedAt: "2026-05-11T00:00:00.000Z",
             updatedAt: "2026-05-11T00:01:00.000Z",
             commit: "abc1234",
+            commitTitle: "Initial deploy title",
         });
         __testing.writeDeploymentJob({
             id: "job-without-commit",
@@ -977,6 +1097,7 @@ describe("pull request routes", () => {
                 startedAt: "2026-05-11T00:00:00.000Z",
                 updatedAt: "2026-05-11T00:01:00.000Z",
                 commit: "abc1234",
+                commitTitle: "Initial deploy title",
                 commitUrl: "https://github.com/rajohan/Mira-Dashboard/commit/abc1234",
             },
         ]);
@@ -2079,6 +2200,7 @@ describe("pull request routes", () => {
                 tempDir
             );
             assert.equal(finishedDeploy.commit, "abc1234");
+            assert.equal(finishedDeploy.commitTitle, "Ship dashboard polish");
             assert.equal(
                 finishedDeploy.note,
                 "Build passed; restart + health check scheduled"
@@ -2273,6 +2395,72 @@ describe("pull request routes", () => {
         } finally {
             __testing.releaseDeploymentLock("merge-active-job");
         }
+    });
+
+    it("updates behind pull request branches without merge conflicts", async () => {
+        const response = await requestJson<{
+            ok: boolean;
+            message: string;
+            pullRequest: { number: number; mergeStateStatus: string };
+        }>(server, "/api/pull-requests/19/update-branch", {
+            method: "POST",
+            body: {},
+        });
+
+        assert.equal(response.status, 200);
+        assert.equal(response.body.ok, true);
+        assert.equal(response.body.message, "PR #19 branch update started");
+        assert.equal(response.body.pullRequest.number, 19);
+        assert.equal(response.body.pullRequest.mergeStateStatus, "BEHIND");
+
+        const notBehind = await requestJson<{ error: string }>(
+            server,
+            "/api/pull-requests/10/update-branch",
+            { method: "POST", body: {} }
+        );
+        assert.equal(notBehind.status, 500);
+        assert.equal(
+            notBehind.body.error,
+            "Pull request branch is not behind the base branch"
+        );
+
+        const wrongBase = await requestJson<{ error: string }>(
+            server,
+            "/api/pull-requests/20/update-branch",
+            { method: "POST", body: {} }
+        );
+        assert.equal(wrongBase.status, 500);
+        assert.equal(
+            wrongBase.body.error,
+            "Only main-targeted pull requests can be updated here"
+        );
+
+        const conflicted = await requestJson<{ error: string }>(
+            server,
+            "/api/pull-requests/21/update-branch",
+            { method: "POST", body: {} }
+        );
+        assert.equal(conflicted.status, 500);
+        assert.equal(conflicted.body.error, "Pull request branch has merge conflicts");
+
+        const unknownMergeable = await requestJson<{
+            ok: boolean;
+            pullRequest: { number: number; mergeStateStatus: string };
+        }>(server, "/api/pull-requests/22/update-branch", {
+            method: "POST",
+            body: {},
+        });
+        assert.equal(unknownMergeable.status, 200);
+        assert.equal(unknownMergeable.body.ok, true);
+        assert.equal(unknownMergeable.body.pullRequest.number, 22);
+
+        const invalid = await requestJson<{ error: string }>(
+            server,
+            "/api/pull-requests/not-a-number/update-branch",
+            { method: "POST", body: {} }
+        );
+        assert.equal(invalid.status, 400);
+        assert.equal(invalid.body.error, "Invalid pull request number");
     });
 
     it("allows approved non-Mira pull requests to merge", async () => {

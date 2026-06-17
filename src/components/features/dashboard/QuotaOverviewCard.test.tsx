@@ -93,7 +93,7 @@ describe("QuotaOverviewCard", () => {
         expect(screen.getByText("96%")).toHaveClass("bg-red-500/20");
         expect(screen.getByText("not configured")).toBeInTheDocument();
         expect(screen.getByText("missing key")).toBeInTheDocument();
-        expect(screen.getByText(/weekly \$23\.52 left/u)).toBeInTheDocument();
+        expect(screen.getByText(/weekly 98% left/u)).toBeInTheDocument();
         expect(screen.getByText(/Regen: 5h unknown \(\+5%\)/u)).toBeInTheDocument();
         expect(
             screen.getByText(/weekly 17\.05\.2026, \d{2}:00 \(\+2%\)/u)

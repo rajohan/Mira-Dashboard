@@ -81,6 +81,10 @@ describe("cron routes", () => {
                 return { runId: "run-1" };
             }
 
+            if (method === "cron.remove") {
+                return { removed: true };
+            }
+
             throw new Error(`Unexpected gateway method: ${method}`);
         };
         server = await startServer();
@@ -161,7 +165,7 @@ describe("cron routes", () => {
         ]);
     });
 
-    it("validates update patches and runs jobs", async () => {
+    it("validates update patches, runs jobs, and deletes jobs", async () => {
         const invalid = await requestJson<{ error: string }>(
             server,
             "/api/cron/jobs/job-1/update",
@@ -193,6 +197,16 @@ describe("cron routes", () => {
         assert.equal(run.status, 200);
         assert.deepEqual(run.body, { ok: true, payload: { runId: "run-1" } });
         assert.deepEqual(calls, [{ method: "cron.run", params: { jobId: "job-1" } }]);
+
+        calls.length = 0;
+        const remove = await requestJson<{ ok: true; payload: { removed: boolean } }>(
+            server,
+            "/api/cron/jobs/job-1/delete",
+            { method: "POST" }
+        );
+        assert.equal(remove.status, 200);
+        assert.deepEqual(remove.body, { ok: true, payload: { removed: true } });
+        assert.deepEqual(calls, [{ method: "cron.remove", params: { jobId: "job-1" } }]);
     });
 
     it("returns gateway errors as route errors", async () => {
@@ -220,6 +234,11 @@ describe("cron routes", () => {
                 "/api/cron/jobs/job-1/run",
                 { method: "POST" }
             );
+            const remove = await requestJson<{ error: string }>(
+                server,
+                "/api/cron/jobs/job-1/delete",
+                { method: "POST" }
+            );
 
             assert.equal(response.status, 500);
             assert.equal(response.body.error, "cron.list unavailable");
@@ -229,6 +248,8 @@ describe("cron routes", () => {
             assert.equal(update.body.error, "cron.update unavailable");
             assert.equal(run.status, 500);
             assert.equal(run.body.error, "cron.run unavailable");
+            assert.equal(remove.status, 500);
+            assert.equal(remove.body.error, "cron.remove unavailable");
         } finally {
             gateway.request = savedRequest;
         }
