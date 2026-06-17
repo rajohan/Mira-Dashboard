@@ -898,10 +898,23 @@ process.exit(0);
         await mkdir(appDir, { recursive: true });
         await mkdir(binDir);
         const projectComposePath = path.join(rootDir, "compose.yaml");
+        const projectOverridePath = path.join(rootDir, "compose.override.yaml");
         const composePath = path.join(appDir, "compose.yaml");
         await writeFile(
             projectComposePath,
             "include:\n- apps/web/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(
+            projectOverridePath,
+            [
+                "services:",
+                "  web:",
+                "    image: repo/app:override",
+                "    environment:",
+                "      REQUIRED_VALUE: keep-me",
+                "",
+            ].join("\n"),
             "utf8"
         );
         await writeFile(
@@ -962,6 +975,13 @@ fs.writeFileSync(process.env.SEEN_COMPOSE_ARGS, JSON.stringify({
             )`
             )
             .run(service);
+        const originalUnlinkSync = fs.unlinkSync.bind(fs);
+        mock.method(fs, "unlinkSync", (filePath: fs.PathLike) => {
+            if (String(filePath).includes("compose.override.yaml.rollback-")) {
+                throw new Error("cleanup denied");
+            }
+            return originalUnlinkSync(filePath);
+        });
 
         await withEnv({ SEEN_COMPOSE_ARGS: argsPath }, async () => {
             const result = await updater.__testing.applyServiceUpdate(service, "manual");
@@ -975,6 +995,8 @@ fs.writeFileSync(process.env.SEEN_COMPOSE_ARGS, JSON.stringify({
                 "compose",
                 "-f",
                 projectComposePath,
+                "-f",
+                projectOverridePath,
                 "up",
                 "-d",
                 "--pull",
@@ -983,6 +1005,237 @@ fs.writeFileSync(process.env.SEEN_COMPOSE_ARGS, JSON.stringify({
             ],
             cwd: rootDir,
         });
+        assert.match(await readFile(projectOverridePath, "utf8"), /repo\/app:2/u);
+        assert.match(await readFile(projectOverridePath, "utf8"), /REQUIRED_VALUE/u);
+    });
+
+    it("restores parent compose overrides when aggregate updates fail", async () => {
+        const rootDir = path.join(tempDir, "parent-compose-rollback");
+        const appDir = path.join(rootDir, "apps", "web");
+        const binDir = path.join(tempDir, "parent-compose-rollback-bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        const projectComposePath = path.join(rootDir, "compose.yaml");
+        const projectOverridePath = path.join(rootDir, "compose.override.yaml");
+        const composePath = path.join(appDir, "compose.yaml");
+        const originalOverride = [
+            "services:",
+            "  web:",
+            "    image: repo/app:override",
+            "    environment:",
+            "      REQUIRED_VALUE: keep-me",
+            "",
+        ].join("\n");
+        await writeFile(
+            projectComposePath,
+            "include:\n- apps/web/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(projectOverridePath, originalOverride, "utf8");
+        await writeFile(
+            composePath,
+            "services:\n  web:\n    image: repo/app:1\n",
+            "utf8"
+        );
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            "#!/usr/bin/env node\nprocess.stderr.write('compose failed\\n'); process.exit(12);\n"
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(
+            `./dockerUpdater.js?parent-compose-rollback=${Date.now()}`
+        );
+        const service = {
+            id: 713,
+            app_slug: "web-rollback",
+            service_name: "web",
+            compose_path: composePath,
+            image_repo: "repo/app",
+            compose_image_ref: "repo/app:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+            )
+            .run(service);
+
+        const result = await updater.__testing.applyServiceUpdate(service, "manual");
+
+        assert.equal(result.ok, false);
+        assert.match(result.stderr, /compose failed/u);
+        assert.equal(await readFile(projectOverridePath, "utf8"), originalOverride);
+        assert.match(await readFile(composePath, "utf8"), /repo\/app:1/u);
+    });
+
+    it("keeps compose failures when parent override rollback fails", async () => {
+        const rootDir = path.join(tempDir, "parent-compose-override-rollback-fails");
+        const appDir = path.join(rootDir, "apps", "web");
+        const binDir = path.join(tempDir, "parent-compose-override-rollback-bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        const projectComposePath = path.join(rootDir, "compose.yaml");
+        const projectOverridePath = path.join(rootDir, "compose.override.yaml");
+        const composePath = path.join(appDir, "compose.yaml");
+        await writeFile(
+            projectComposePath,
+            "include:\n- apps/web/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(
+            projectOverridePath,
+            "services:\n  web:\n    image: repo/app:override\n",
+            "utf8"
+        );
+        await writeFile(
+            composePath,
+            "services:\n  web:\n    image: repo/app:1\n",
+            "utf8"
+        );
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            "#!/usr/bin/env node\nprocess.stderr.write('compose failed\\n'); process.exit(12);\n"
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(
+            `./dockerUpdater.js?parent-compose-override-rollback-fails=${Date.now()}`
+        );
+        const service = {
+            id: 715,
+            app_slug: "web-override-rollback-fails",
+            service_name: "web",
+            compose_path: composePath,
+            image_repo: "repo/app",
+            compose_image_ref: "repo/app:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+            )
+            .run(service);
+        const originalRenameSync = fs.renameSync.bind(fs);
+        mock.method(fs, "renameSync", (...args: Parameters<typeof fs.renameSync>) => {
+            if (
+                String(args[0]).includes("compose.override.yaml.rollback-") &&
+                args[1] === projectOverridePath
+            ) {
+                throw new Error("override rollback denied");
+            }
+            return originalRenameSync(...args);
+        });
+
+        const result = await updater.__testing.applyServiceUpdate(service, "manual");
+
+        assert.equal(result.ok, false);
+        assert.match(result.stderr, /compose failed/u);
+    });
+
+    it("ignores malformed override images while applying parent compose updates", async () => {
+        const rootDir = path.join(tempDir, "parent-compose-malformed-override");
+        const appDir = path.join(rootDir, "apps", "web");
+        const binDir = path.join(tempDir, "parent-compose-malformed-bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        const projectComposePath = path.join(rootDir, "compose.yaml");
+        const projectOverridePath = path.join(rootDir, "compose.override.yaml");
+        const composePath = path.join(appDir, "compose.yaml");
+        await writeFile(
+            projectComposePath,
+            "include:\n- apps/web/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(projectOverridePath, "services:\n  web: [\n", "utf8");
+        await writeFile(
+            composePath,
+            "services:\n  web:\n    image: repo/app:1\n",
+            "utf8"
+        );
+        await writeExecutable(path.join(binDir, "docker"), "#!/usr/bin/env node\n");
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(
+            `./dockerUpdater.js?parent-compose-malformed=${Date.now()}`
+        );
+        const service = {
+            id: 714,
+            app_slug: "web-malformed",
+            service_name: "web",
+            compose_path: composePath,
+            image_repo: "repo/app",
+            compose_image_ref: "repo/app:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+            )
+            .run(service);
+
+        const result = await updater.__testing.applyServiceUpdate(service, "manual");
+
+        assert.equal(result.ok, true);
+        assert.match(await readFile(composePath, "utf8"), /repo\/app:2/u);
+        assert.equal(
+            await readFile(projectOverridePath, "utf8"),
+            "services:\n  web: [\n"
+        );
     });
 
     it("serializes concurrent compose updates for services in the same file", async () => {
@@ -3342,8 +3595,8 @@ setTimeout(() => {
                 assert.deepEqual(
                     updater.__testing
                         .getComposeCommand(overrideComposePath, "web")
-                        .args.slice(0, 2),
-                    ["-f", overrideProjectComposePath]
+                        .args.slice(0, 4),
+                    ["-f", overrideProjectComposePath, "-f", overrideProjectOverridePath]
                 );
             }
         );

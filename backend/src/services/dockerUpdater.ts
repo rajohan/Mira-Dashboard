@@ -324,6 +324,15 @@ function composeFileDefinesServiceImage(
     }
 }
 
+function composeFileServiceImageField(
+    composePath: string,
+    serviceName: string
+): string | null {
+    return composeFileDefinesServiceImage(composePath, serviceName)
+        ? `services.${serviceName}.image`
+        : null;
+}
+
 function projectComposeOrOverrideIncludesCompose(
     projectComposePath: string,
     configuredComposePath: string
@@ -395,17 +404,11 @@ function isParentComposePath(
 
 function composeFilesForCommand(
     composePath: string,
-    includeDefaultOverrides: boolean,
-    serviceName: string
+    includeDefaultOverrides: boolean
 ): string[] {
     const files = [composePath];
     if (includeDefaultOverrides) {
-        files.push(
-            ...defaultComposeOverridePaths(composePath).filter(
-                (overridePath) =>
-                    !composeFileDefinesServiceImage(overridePath, serviceName)
-            )
-        );
+        files.push(...defaultComposeOverridePaths(composePath));
     }
     return files;
 }
@@ -424,8 +427,7 @@ function getComposeCommand(configuredComposePath: string, serviceName: string) {
     );
     const composePaths = composeFilesForCommand(
         projectComposePath,
-        includeDefaultOverrides,
-        serviceName
+        includeDefaultOverrides
     );
     const isManagedDockerPath = path
         .resolve(projectComposePath)
@@ -460,6 +462,14 @@ function getComposeCommand(configuredComposePath: string, serviceName: string) {
         ],
         cwd: path.dirname(projectComposePath),
     };
+}
+
+function getComposeCommandPaths(configuredComposePath: string): string[] {
+    const projectComposePath = composeCommandPath(configuredComposePath);
+    return composeFilesForCommand(
+        projectComposePath,
+        isParentComposePath(projectComposePath, configuredComposePath)
+    );
 }
 
 export interface DockerUpdaterStepResult {
@@ -1162,11 +1172,17 @@ async function applyComposeUpdateUnlocked(
     const composeImageField = service.compose_image_field;
     const configuredComposePath = service.compose_path;
     const composePath = fs.realpathSync(configuredComposePath);
+    const commandComposePaths = getComposeCommandPaths(configuredComposePath);
     const raw = fs.readFileSync(composePath, "utf8");
     const originalStats = fs.statSync(composePath);
     const doc = YAML.parse(raw) as JsonRecord;
     setNestedValue(doc, composeImageField, targetImageRef);
     let composeStarted = false;
+    const commandRollbacks: Array<{
+        composePath: string;
+        rollbackTempPath: string;
+        tempPath: string;
+    }> = [];
     const tempPath = path.join(
         path.dirname(composePath),
         `${path.basename(composePath)}.tmp-${randomUUID()}`
@@ -1179,6 +1195,39 @@ async function applyComposeUpdateUnlocked(
         writeFileWithMetadata(rollbackTempPath, raw, originalStats);
         writeFileWithMetadata(tempPath, YAML.stringify(doc), originalStats);
         fs.renameSync(tempPath, composePath);
+        for (const commandComposePath of commandComposePaths) {
+            const realCommandComposePath = fs.realpathSync(commandComposePath);
+            if (realCommandComposePath === composePath) continue;
+            const commandImageField = composeFileServiceImageField(
+                realCommandComposePath,
+                service.service_name
+            );
+            if (!commandImageField) continue;
+            const commandRaw = fs.readFileSync(realCommandComposePath, "utf8");
+            const commandStats = fs.statSync(realCommandComposePath);
+            const commandDoc = YAML.parse(commandRaw) as JsonRecord;
+            setNestedValue(commandDoc, commandImageField, targetImageRef);
+            const commandTempPath = path.join(
+                path.dirname(realCommandComposePath),
+                `${path.basename(realCommandComposePath)}.tmp-${randomUUID()}`
+            );
+            const commandRollbackTempPath = path.join(
+                path.dirname(realCommandComposePath),
+                `${path.basename(realCommandComposePath)}.rollback-${randomUUID()}`
+            );
+            writeFileWithMetadata(commandRollbackTempPath, commandRaw, commandStats);
+            commandRollbacks.push({
+                composePath: realCommandComposePath,
+                rollbackTempPath: commandRollbackTempPath,
+                tempPath: commandTempPath,
+            });
+            writeFileWithMetadata(
+                commandTempPath,
+                YAML.stringify(commandDoc),
+                commandStats
+            );
+            fs.renameSync(commandTempPath, realCommandComposePath);
+        }
         const command = getComposeCommand(configuredComposePath, service.service_name);
         composeStarted = true;
         const { stdout, stderr } = await execFileAsync(command.file, command.args, {
@@ -1192,12 +1241,36 @@ async function applyComposeUpdateUnlocked(
         } catch {
             // The rollback file is only a best-effort safety net after success.
         }
+        for (const rollback of commandRollbacks) {
+            try {
+                fs.unlinkSync(rollback.rollbackTempPath);
+            } catch {
+                // Extra compose rollbacks are best-effort after success too.
+            }
+        }
         return { stdout: String(stdout), stderr: String(stderr) };
     } catch (error) {
         try {
             fs.unlinkSync(tempPath);
         } catch {
             // The temp file may have already been atomically moved into place.
+        }
+        for (const rollback of [...commandRollbacks].reverse()) {
+            try {
+                fs.unlinkSync(rollback.tempPath);
+            } catch {
+                // The temp file may have already been atomically moved into place.
+            }
+            try {
+                if (fs.existsSync(rollback.rollbackTempPath)) {
+                    fs.renameSync(rollback.rollbackTempPath, rollback.composePath);
+                }
+            } catch (rollbackError) {
+                console.error("[DockerUpdater] Failed to restore compose file", {
+                    composePath: rollback.composePath,
+                    rollbackError,
+                });
+            }
         }
         let restored = false;
         try {
