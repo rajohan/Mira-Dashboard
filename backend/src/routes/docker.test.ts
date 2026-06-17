@@ -10,6 +10,11 @@ import { after, before, describe, it, mock } from "node:test";
 import express from "express";
 
 import { db } from "../db.js";
+import {
+    createManualScheduledJobRun,
+    finishScheduledJobRun,
+    upsertScheduledJob,
+} from "../services/scheduledJobs.js";
 
 interface TestServer {
     baseUrl: string;
@@ -1910,6 +1915,17 @@ describe("docker routes", { concurrency: false }, () => {
 
     it("runs updater pipelines through the dashboard service", async () => {
         const { __testing } = await import("./docker.js");
+        db.exec(
+            "DELETE FROM scheduled_job_runs WHERE job_id = 'docker.updater'; DELETE FROM scheduled_jobs WHERE id = 'docker.updater';"
+        );
+        upsertScheduledJob({
+            id: "docker.updater",
+            name: "Docker updater",
+            enabled: true,
+            scheduleType: "daily",
+            timeOfDay: "04:10",
+            actionKey: "docker.updater",
+        });
         __testing.setRunDockerUpdaterServiceForTests(async () => [
             { step: "register-services", ok: true, stdout: "registered", stderr: "" },
             { step: "poll", ok: true, stdout: "checked", stderr: "" },
@@ -1926,6 +1942,70 @@ describe("docker routes", { concurrency: false }, () => {
                 run.body.steps.map((step) => step.step),
                 ["register-services", "poll", "auto-update:media/app"]
             );
+            const scheduledRun = db
+                .prepare(
+                    `SELECT status, trigger_type, message, output_json
+                     FROM scheduled_job_runs
+                     WHERE job_id = 'docker.updater'
+                     ORDER BY id DESC
+                     LIMIT 1`
+                )
+                .get() as {
+                message: string | null;
+                output_json: string;
+                status: string;
+                trigger_type: string;
+            };
+            assert.equal(scheduledRun.status, "success");
+            assert.equal(scheduledRun.trigger_type, "manual");
+            assert.equal(scheduledRun.message, null);
+            assert.deepEqual(
+                (
+                    JSON.parse(scheduledRun.output_json) as {
+                        steps: Array<{ step: string }>;
+                    }
+                ).steps.map((step) => step.step),
+                ["register-services", "poll", "auto-update:media/app"]
+            );
+        } finally {
+            __testing.setRunDockerUpdaterServiceForTests(undefined);
+        }
+
+        __testing.setRunDockerUpdaterServiceForTests(async () => [
+            {
+                step: "register-services",
+                ok: false,
+                stdout: "",
+                stderr: JSON.stringify({
+                    failed: [{ appSlug: "media/app", blocking: false }],
+                }),
+            },
+            { step: "poll", ok: true, stdout: "checked", stderr: "" },
+        ]);
+        try {
+            const partialRun = await requestJson<{
+                success: boolean;
+                steps: Array<{ step: string; ok: boolean }>;
+            }>(server, "/api/docker/updater/run", { method: "POST", body: {} });
+            assert.equal(partialRun.status, 200);
+            assert.equal(partialRun.body.success, true);
+            assert.equal(partialRun.body.steps[0]?.ok, false);
+            const scheduledRun = db
+                .prepare(
+                    `SELECT status, trigger_type, message
+                     FROM scheduled_job_runs
+                     WHERE job_id = 'docker.updater'
+                     ORDER BY id DESC
+                     LIMIT 1`
+                )
+                .get() as {
+                message: string | null;
+                status: string;
+                trigger_type: string;
+            };
+            assert.equal(scheduledRun.status, "success");
+            assert.equal(scheduledRun.trigger_type, "manual");
+            assert.equal(scheduledRun.message, null);
         } finally {
             __testing.setRunDockerUpdaterServiceForTests(undefined);
         }
@@ -1942,14 +2022,150 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(failedRun.status, 200);
             assert.equal(failedRun.body.success, false);
             assert.equal(failedRun.body.steps[1]?.stderr, "poll failed");
+            const scheduledRun = db
+                .prepare(
+                    `SELECT status, trigger_type, message
+                     FROM scheduled_job_runs
+                     WHERE job_id = 'docker.updater'
+                     ORDER BY id DESC
+                     LIMIT 1`
+                )
+                .get() as {
+                message: string | null;
+                status: string;
+                trigger_type: string;
+            };
+            assert.equal(scheduledRun.status, "failed");
+            assert.equal(scheduledRun.trigger_type, "manual");
+            assert.equal(scheduledRun.message, "poll failed");
         } finally {
             __testing.setRunDockerUpdaterServiceForTests(undefined);
+        }
+
+        __testing.setRunDockerUpdaterServiceForTests(async () => [
+            { step: "register-services", ok: true, stdout: "", stderr: "" },
+            { step: "poll", ok: false, stdout: "", stderr: "" },
+        ]);
+        try {
+            const failedRun = await requestJson<{ success: boolean }>(
+                server,
+                "/api/docker/updater/run",
+                { method: "POST", body: {} }
+            );
+            assert.equal(failedRun.status, 200);
+            assert.equal(failedRun.body.success, false);
+            const scheduledRun = db
+                .prepare(
+                    `SELECT status, message
+                     FROM scheduled_job_runs
+                     WHERE job_id = 'docker.updater'
+                     ORDER BY id DESC
+                     LIMIT 1`
+                )
+                .get() as {
+                message: string | null;
+                status: string;
+            };
+            assert.equal(scheduledRun.status, "failed");
+            assert.equal(scheduledRun.message, "Docker updater failed");
+        } finally {
+            __testing.setRunDockerUpdaterServiceForTests(undefined);
+        }
+
+        db.exec(
+            `CREATE TEMP TRIGGER fail_docker_updater_manual_run
+             BEFORE INSERT ON scheduled_job_runs
+             WHEN NEW.job_id = 'docker.updater'
+             BEGIN
+                 SELECT RAISE(ABORT, 'manual run insert denied');
+             END;`
+        );
+        __testing.setRunDockerUpdaterServiceForTests(async () => [
+            { step: "register-services", ok: true, stdout: "registered", stderr: "" },
+        ]);
+        try {
+            const run = await requestJson<{ success: boolean }>(
+                server,
+                "/api/docker/updater/run",
+                { method: "POST", body: {} }
+            );
+            assert.equal(run.status, 200);
+            assert.equal(run.body.success, true);
+        } finally {
+            db.exec("DROP TRIGGER fail_docker_updater_manual_run;");
+            __testing.setRunDockerUpdaterServiceForTests(undefined);
+        }
+
+        const externalRun = createManualScheduledJobRun("docker.updater");
+        let startedWhileRunning = false;
+        __testing.setRunDockerUpdaterServiceForTests(async () => {
+            startedWhileRunning = true;
+            return [{ step: "register-services", ok: true, stdout: "", stderr: "" }];
+        });
+        try {
+            const conflict = await requestJson<{ error: string }>(
+                server,
+                "/api/docker/updater/run",
+                { method: "POST", body: {} }
+            );
+            assert.equal(conflict.status, 409);
+            assert.equal(conflict.body.error, "Scheduled job is already running");
+            assert.equal(startedWhileRunning, false);
+        } finally {
+            finishScheduledJobRun(externalRun, "success", null, {});
+            __testing.setRunDockerUpdaterServiceForTests(undefined);
+        }
+
+        __testing.setRunDockerUpdaterServiceForTests(async () => {
+            throw new Error("updater exploded");
+        });
+        try {
+            const failedRun = await requestJson<{ error: string }>(
+                server,
+                "/api/docker/updater/run",
+                { method: "POST", body: {} }
+            );
+            assert.equal(failedRun.status, 500);
+            const scheduledRun = db
+                .prepare(
+                    `SELECT status, trigger_type, message, output_json
+                     FROM scheduled_job_runs
+                     WHERE job_id = 'docker.updater'
+                     ORDER BY id DESC
+                     LIMIT 1`
+                )
+                .get() as {
+                message: string | null;
+                output_json: string;
+                status: string;
+                trigger_type: string;
+            };
+            assert.equal(scheduledRun.status, "failed");
+            assert.equal(scheduledRun.trigger_type, "manual");
+            assert.equal(scheduledRun.message, "updater exploded");
+            assert.deepEqual(JSON.parse(scheduledRun.output_json), {});
+        } finally {
+            __testing.setRunDockerUpdaterServiceForTests(undefined);
+            db.exec(
+                "DELETE FROM scheduled_job_runs WHERE job_id = 'docker.updater'; DELETE FROM scheduled_jobs WHERE id = 'docker.updater';"
+            );
         }
     });
 
     it("runs manual updater through the dashboard service and maps route errors", async () => {
         resetDockerUpdaterFixtures();
         const { __testing } = await import("./docker.js");
+        db.exec(
+            "DELETE FROM scheduled_job_runs WHERE job_id = 'docker.updater'; DELETE FROM scheduled_jobs WHERE id = 'docker.updater';"
+        );
+        upsertScheduledJob({
+            id: "docker.updater",
+            name: "Docker updater",
+            enabled: true,
+            scheduleType: "daily",
+            timeOfDay: "04:10",
+            actionKey: "docker.updater",
+        });
         __testing.setRunDockerUpdaterServiceForTests(async (serviceId?: number) => {
             db.prepare(
                 `UPDATE docker_managed_services
@@ -1992,6 +2208,27 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(success.body.service.lastStatus, "updated");
             assert.equal(success.body.service.updateAvailable, false);
             assert.equal(success.body.stderr, "");
+            const scheduledRun = db
+                .prepare(
+                    `SELECT status, trigger_type, message, output_json
+                     FROM scheduled_job_runs
+                     WHERE job_id = 'docker.updater'
+                     ORDER BY id DESC
+                     LIMIT 1`
+                )
+                .get() as {
+                message: string | null;
+                output_json: string;
+                status: string;
+                trigger_type: string;
+            };
+            assert.equal(scheduledRun.status, "success");
+            assert.equal(scheduledRun.trigger_type, "manual");
+            assert.equal(scheduledRun.message, null);
+            const scheduledRunOutput = JSON.parse(scheduledRun.output_json) as {
+                serviceId: number;
+            };
+            assert.equal(scheduledRunOutput.serviceId, 1);
         } finally {
             __testing.setRunDockerUpdaterServiceForTests(undefined);
         }
@@ -2042,6 +2279,44 @@ describe("docker routes", { concurrency: false }, () => {
             assert.equal(conflict.body.error, "No update available");
         } finally {
             __testing.setRunDockerUpdaterServiceForTests(undefined);
+        }
+
+        __testing.setRunDockerUpdaterServiceForTests(async () => {
+            throw new Error("manual updater exploded");
+        });
+        try {
+            const failed = await requestJson<{ error: string }>(
+                server,
+                "/api/docker/updater/services/1/update",
+                { method: "POST", body: {} }
+            );
+            assert.equal(failed.status, 500);
+            const scheduledRun = db
+                .prepare(
+                    `SELECT status, trigger_type, message, output_json
+                     FROM scheduled_job_runs
+                     WHERE job_id = 'docker.updater'
+                     ORDER BY id DESC
+                     LIMIT 1`
+                )
+                .get() as {
+                message: string | null;
+                output_json: string;
+                status: string;
+                trigger_type: string;
+            };
+            assert.equal(scheduledRun.status, "failed");
+            assert.equal(scheduledRun.trigger_type, "manual");
+            assert.equal(scheduledRun.message, "manual updater exploded");
+            const scheduledRunOutput = JSON.parse(scheduledRun.output_json) as {
+                serviceId: number;
+            };
+            assert.equal(scheduledRunOutput.serviceId, 1);
+        } finally {
+            __testing.setRunDockerUpdaterServiceForTests(undefined);
+            db.exec(
+                "DELETE FROM scheduled_job_runs WHERE job_id = 'docker.updater'; DELETE FROM scheduled_jobs WHERE id = 'docker.updater';"
+            );
         }
     });
 

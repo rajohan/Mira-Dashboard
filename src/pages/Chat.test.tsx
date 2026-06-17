@@ -633,7 +633,7 @@ describe("Chat helpers", () => {
 
     it("normalizes timestamps and detects recovered assistant history", () => {
         expect(sessionTimestampMs(42)).toBe(42);
-        expect(sessionTimestampMs(NaN)).toBeNull();
+        expect(sessionTimestampMs(Number("NaN"))).toBeNull();
         expect(sessionTimestampMs("2026-05-11T00:00:00.000Z")).toBe(
             Date.parse("2026-05-11T00:00:00.000Z")
         );

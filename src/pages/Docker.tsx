@@ -293,24 +293,13 @@ export function Docker() {
                 </Card>
             ) : null}
 
-            {runDockerUpdater.data ? (
-                <Card className="p-3 sm:p-4">
-                    <div className="text-primary-100 mb-2 text-sm font-semibold">
-                        Last updater run
-                    </div>
-                    <pre className="text-primary-100 max-h-80 overflow-auto rounded-lg bg-black/40 p-3 text-xs">
-                        {JSON.stringify(runDockerUpdater.data, null, 2)}
-                    </pre>
-                </Card>
-            ) : null}
-
             <Card className="overflow-hidden">
                 <div className="border-primary-700 border-b px-3 py-3 sm:px-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0">
                             <div className="text-lg font-semibold">Updater overview</div>
                             <div className="text-primary-400 text-xs">
-                                Registry poll state from n8n, plus recent updater history.
+                                Registry poll state plus recent updater history.
                             </div>
                         </div>
                         <Button

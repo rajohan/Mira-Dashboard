@@ -4,11 +4,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { parse as parseDotenv } from "dotenv";
 import safeRegex from "safe-regex2";
 import YAML from "yaml";
 
 import { db } from "../db.js";
 import { nonEmptyEnvFallback } from "../lib/values.js";
+import type { ScheduledJob } from "./scheduledJobs.js";
 import {
     getScheduledJob,
     registerScheduledJobAction,
@@ -16,10 +18,16 @@ import {
     upsertScheduledJob,
 } from "./scheduledJobs.js";
 
-const COMPOSE_FILENAME = "compose.yaml";
+const COMPOSE_FILENAMES = [
+    "compose.yaml",
+    "compose.yml",
+    "docker-compose.yaml",
+    "docker-compose.yml",
+];
 const execFileAsync = promisify(execFile);
 const SUPPORTED_REGISTRIES = new Set(["docker.io", "ghcr.io", "lscr.io"]);
-const MAX_REGISTRY_TAG_PAGES = 50;
+const REGISTRY_TAG_PAGE_SIZE = 1000;
+const MAX_REGISTRY_TAG_PAGES = 100;
 const composeUpdateLocks = new Map<string, { promise: Promise<void> }>();
 const drainedRegistryResponses = new WeakSet<Response>();
 
@@ -64,7 +72,7 @@ function shouldBlockGlobalUpdateForDiscoveryFailure(
     return !register.ok && failedDiscoveryAppSlugs(register).has("*");
 }
 
-function isNonblockingRegistrationFailure(step: DockerUpdaterStepResult): boolean {
+export function isNonblockingRegistrationFailure(step: DockerUpdaterStepResult): boolean {
     return (
         step.step === "register-services" &&
         !step.ok &&
@@ -84,11 +92,357 @@ function getDockerAppsRoot(): string {
     return nonEmptyEnvFallback("MIRA_DOCKER_APPS_ROOT", "/opt/docker/apps");
 }
 
-function getComposeCommand(composePath: string, serviceName: string) {
+type ComposeEnv = Record<string, string>;
+
+function readComposeEnvFile(envPath: string): ComposeEnv {
+    try {
+        if (!fs.existsSync(envPath)) return {};
+        return parseDotenv(fs.readFileSync(envPath));
+    } catch {
+        return {};
+    }
+}
+
+function composeEnvFilePaths(
+    projectDirectory: string,
+    envFileValue: unknown,
+    composeEnv: ComposeEnv = {}
+): string[] {
+    return (Array.isArray(envFileValue) ? envFileValue : [envFileValue])
+        .filter((item): item is string => typeof item === "string")
+        .map((rawEnvFilePath) => {
+            const envFilePath = interpolateComposePath(rawEnvFilePath, composeEnv);
+            return path.isAbsolute(envFilePath)
+                ? envFilePath
+                : path.resolve(projectDirectory, envFilePath);
+        });
+}
+
+function loadComposeEnvFiles(
+    projectDirectory: string,
+    envFileValue: unknown,
+    composeEnv: ComposeEnv = {}
+): ComposeEnv {
+    return Object.assign(
+        {},
+        ...composeEnvFilePaths(projectDirectory, envFileValue, composeEnv).map(
+            (envPath) => readComposeEnvFile(envPath)
+        )
+    ) as ComposeEnv;
+}
+
+function loadComposeProjectEnv(
+    projectDirectory: string,
+    envFileValue?: unknown
+): ComposeEnv {
+    const defaultEnv = readComposeEnvFile(path.join(projectDirectory, ".env"));
+    return {
+        ...defaultEnv,
+        ...loadComposeEnvFiles(projectDirectory, envFileValue, defaultEnv),
+    };
+}
+
+function resolveComposeEnvValue(
+    name: string,
+    composeEnv: ComposeEnv
+): string | undefined {
+    return process.env[name] ?? composeEnv[name];
+}
+
+function interpolateComposePath(value: string, composeEnv: ComposeEnv = {}): string {
+    let interpolated = value;
+    for (let index = 0; index < 8; index += 1) {
+        const next = interpolateComposePathOnce(interpolated, composeEnv);
+        if (next === interpolated) return next;
+        interpolated = next;
+    }
+    return interpolated;
+}
+
+function interpolateComposePathOnce(value: string, composeEnv: ComposeEnv = {}): string {
+    const braced = value.replaceAll(
+        /\$\{([^}:?+-]+)(?:(:?[-?+])([^}]*))?\}/gu,
+        (match, rawName, op, fallback) => {
+            const envName = String(rawName);
+            const envValue = resolveComposeEnvValue(envName, composeEnv);
+            if (!op) return envValue ?? match;
+            const hasValue = envValue !== undefined && envValue !== "";
+            if (op === ":-" || op === "-") {
+                return hasValue || (op === "-" && envValue !== undefined)
+                    ? envValue
+                    : String(fallback);
+            }
+            if (op === ":+" || op === "+") {
+                return hasValue || (op === "+" && envValue !== undefined)
+                    ? String(fallback)
+                    : "";
+            }
+            return hasValue ? envValue : match;
+        }
+    );
+    return braced.replaceAll(/\$([_a-z]\w*)/giu, (match, rawName) => {
+        const envValue = resolveComposeEnvValue(String(rawName), composeEnv);
+        return envValue ?? match;
+    });
+}
+
+function resolveComposeRelativePath(
+    baseDir: string,
+    includePath: string,
+    composeEnv: ComposeEnv = {}
+): string {
+    const interpolatedPath = interpolateComposePath(includePath, composeEnv);
+    return path.isAbsolute(interpolatedPath)
+        ? interpolatedPath
+        : path.resolve(baseDir, interpolatedPath);
+}
+
+function includePathMatchesCompose(
+    baseDir: string,
+    includePath: string,
+    composePath: string,
+    composeEnv: ComposeEnv
+): boolean {
+    const resolvedIncludePath = resolveComposeRelativePath(
+        baseDir,
+        includePath,
+        composeEnv
+    );
+    const resolvedComposePath = path.resolve(composePath);
+    if (resolvedIncludePath === resolvedComposePath) {
+        return true;
+    }
+    try {
+        return fs.realpathSync(resolvedIncludePath) === fs.realpathSync(composePath);
+    } catch {
+        return false;
+    }
+}
+
+function projectComposeIncludesCompose(
+    projectComposePath: string,
+    composePath: string,
+    seen = new Set<string>(),
+    projectDirectory = path.dirname(projectComposePath),
+    composeEnv = loadComposeProjectEnv(projectDirectory)
+): boolean {
+    const realProjectComposePath = fs.realpathSync(projectComposePath);
+    const contextKey = JSON.stringify({
+        env: Object.entries(composeEnv).sort(([left], [right]) =>
+            left.localeCompare(right)
+        ),
+        path: realProjectComposePath,
+        projectDirectory: path.resolve(projectDirectory),
+    });
+    if (seen.has(contextKey)) {
+        return false;
+    }
+    const branchSeen = new Set(seen);
+    branchSeen.add(contextKey);
+    try {
+        const doc = YAML.parse(fs.readFileSync(projectComposePath, "utf8")) as JsonRecord;
+        const includes = Array.isArray(doc.include) ? doc.include : [];
+        return includes.some((entry) => {
+            const entryRecord = asRecord(entry);
+            const includeValue = typeof entry === "string" ? entry : entryRecord.path;
+            const includePaths = (
+                Array.isArray(includeValue) ? includeValue : [includeValue]
+            ).filter((item): item is string => typeof item === "string");
+            const entryComposeEnv = {
+                ...loadComposeEnvFiles(
+                    projectDirectory,
+                    entryRecord.env_file,
+                    composeEnv
+                ),
+                ...composeEnv,
+            };
+            const hasExplicitEnvFile = entryRecord.env_file !== undefined;
+            const rawProjectDirectory = entryRecord.project_directory;
+            const nestedProjectDirectory =
+                typeof rawProjectDirectory === "string"
+                    ? resolveComposeRelativePath(
+                          projectDirectory,
+                          rawProjectDirectory,
+                          entryComposeEnv
+                      )
+                    : null;
+            for (const includePath of includePaths) {
+                if (
+                    includePathMatchesCompose(
+                        projectDirectory,
+                        includePath,
+                        composePath,
+                        entryComposeEnv
+                    )
+                ) {
+                    return true;
+                }
+                const resolvedIncludePath = resolveComposeRelativePath(
+                    projectDirectory,
+                    includePath,
+                    entryComposeEnv
+                );
+                const resolvedProjectDirectory =
+                    nestedProjectDirectory ?? path.dirname(resolvedIncludePath);
+                const nestedComposeEnv = {
+                    ...(!hasExplicitEnvFile &&
+                        loadComposeProjectEnv(resolvedProjectDirectory)),
+                    ...entryComposeEnv,
+                };
+                if (
+                    fs.existsSync(resolvedIncludePath) &&
+                    projectComposeIncludesCompose(
+                        resolvedIncludePath,
+                        composePath,
+                        new Set(branchSeen),
+                        resolvedProjectDirectory,
+                        nestedComposeEnv
+                    )
+                ) {
+                    return true;
+                }
+            }
+            return false;
+        });
+    } catch {
+        return false;
+    }
+}
+
+function defaultComposeOverridePaths(composePath: string): string[] {
+    const composeDir = path.dirname(composePath);
+    const composeName = path.basename(composePath);
+    const overrideNames =
+        composeName === "docker-compose.yaml" || composeName === "docker-compose.yml"
+            ? ["docker-compose.override.yaml", "docker-compose.override.yml"]
+            : ["compose.override.yaml", "compose.override.yml"];
+    const overridePath = overrideNames
+        .map((overrideName) => path.join(composeDir, overrideName))
+        .find((candidate) => fs.existsSync(candidate));
+    return overridePath ? [fs.realpathSync(overridePath)] : [];
+}
+
+function composeFileDefinesServiceImage(
+    composePath: string,
+    serviceName: string
+): boolean {
+    try {
+        const doc = YAML.parse(fs.readFileSync(composePath, "utf8")) as JsonRecord;
+        const services = asRecord(doc.services);
+        const service = asRecord(services[serviceName]);
+        return typeof service.image === "string";
+    } catch {
+        return false;
+    }
+}
+
+function composeFileServiceImageField(
+    composePath: string,
+    serviceName: string
+): string | null {
+    return composeFileDefinesServiceImage(composePath, serviceName)
+        ? `services.${serviceName}.image`
+        : null;
+}
+
+function projectComposeOrOverrideIncludesCompose(
+    projectComposePath: string,
+    configuredComposePath: string
+): boolean {
+    return [projectComposePath, ...defaultComposeOverridePaths(projectComposePath)].some(
+        (composePath) => projectComposeIncludesCompose(composePath, configuredComposePath)
+    );
+}
+
+function findIncludedComposeInDirectory(
+    currentDir: string,
+    configuredComposePath: string
+): string | null {
+    for (const filename of COMPOSE_FILENAMES) {
+        const candidate = path.join(currentDir, filename);
+        if (
+            candidate !== configuredComposePath &&
+            fs.existsSync(candidate) &&
+            projectComposeOrOverrideIncludesCompose(candidate, configuredComposePath)
+        ) {
+            return candidate;
+        }
+    }
+    return null;
+}
+
+function findProjectComposePath(configuredComposePath: string): string {
+    let currentDir = path.dirname(configuredComposePath);
+    let projectComposePath = configuredComposePath;
+    while (true) {
+        const candidate = findIncludedComposeInDirectory(
+            currentDir,
+            configuredComposePath
+        );
+        if (candidate) {
+            projectComposePath = candidate;
+        }
+        const parent = path.dirname(currentDir);
+        if (parent === currentDir) break;
+        currentDir = parent;
+    }
+    return projectComposePath;
+}
+
+function composeCommandPath(configuredComposePath: string): string {
+    const projectComposePath = findProjectComposePath(configuredComposePath);
+    if (projectComposePath !== configuredComposePath) {
+        return projectComposePath;
+    }
+    try {
+        return fs.realpathSync(configuredComposePath);
+    } catch {
+        return configuredComposePath;
+    }
+}
+
+function isParentComposePath(
+    projectComposePath: string,
+    configuredComposePath: string
+): boolean {
+    try {
+        return (
+            fs.realpathSync(projectComposePath) !== fs.realpathSync(configuredComposePath)
+        );
+    } catch {
+        return path.resolve(projectComposePath) !== path.resolve(configuredComposePath);
+    }
+}
+
+function composeFilesForCommand(
+    composePath: string,
+    includeDefaultOverrides: boolean
+): string[] {
+    const files = [composePath];
+    if (includeDefaultOverrides) {
+        files.push(...defaultComposeOverridePaths(composePath));
+    }
+    return files;
+}
+
+function composeFileArgs(composePaths: string[]): string[] {
+    return composePaths.flatMap((composePath) => ["-f", composePath]);
+}
+
+function getComposeCommand(configuredComposePath: string, serviceName: string) {
     const dockerRoot = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
     const wrapper = getDockerComposeWrapper();
+    const projectComposePath = composeCommandPath(configuredComposePath);
+    const includeDefaultOverrides = isParentComposePath(
+        projectComposePath,
+        configuredComposePath
+    );
+    const composePaths = composeFilesForCommand(
+        projectComposePath,
+        includeDefaultOverrides
+    );
     const isManagedDockerPath = path
-        .resolve(composePath)
+        .resolve(projectComposePath)
         .startsWith(`${path.resolve(dockerRoot)}${path.sep}`);
     if (
         process.env.MIRA_DOCKER_COMPOSE_WRAPPER ||
@@ -96,13 +450,38 @@ function getComposeCommand(composePath: string, serviceName: string) {
     ) {
         return {
             file: wrapper,
-            args: ["-f", composePath, "up", "-d", "--pull", "always", serviceName],
+            args: [
+                ...composeFileArgs(composePaths),
+                "up",
+                "-d",
+                "--pull",
+                "always",
+                serviceName,
+            ],
+            cwd: path.dirname(projectComposePath),
         };
     }
     return {
         file: getDockerBin(),
-        args: ["compose", "-f", composePath, "up", "-d", "--pull", "always", serviceName],
+        args: [
+            "compose",
+            ...composeFileArgs(composePaths),
+            "up",
+            "-d",
+            "--pull",
+            "always",
+            serviceName,
+        ],
+        cwd: path.dirname(projectComposePath),
     };
+}
+
+function getComposeCommandPaths(configuredComposePath: string): string[] {
+    const projectComposePath = composeCommandPath(configuredComposePath);
+    return composeFilesForCommand(
+        projectComposePath,
+        isParentComposePath(projectComposePath, configuredComposePath)
+    );
 }
 
 export interface DockerUpdaterStepResult {
@@ -162,6 +541,10 @@ function nowIso(): string {
     return now.toISOString();
 }
 
+function normalizeComposeLabelValue(value: unknown): string {
+    return String(value ?? "").replaceAll("$$", "$");
+}
+
 function normalizeLabels(rawLabels: unknown): Map<string, string> {
     if (Array.isArray(rawLabels)) {
         return new Map(
@@ -170,7 +553,10 @@ function normalizeLabels(rawLabels: unknown): Map<string, string> {
                 const index = text.indexOf("=");
                 return index === -1
                     ? [text, ""]
-                    : [text.slice(0, index), text.slice(index + 1)];
+                    : [
+                          text.slice(0, index),
+                          normalizeComposeLabelValue(text.slice(index + 1)),
+                      ];
             })
         );
     }
@@ -178,7 +564,7 @@ function normalizeLabels(rawLabels: unknown): Map<string, string> {
         return new Map(
             Object.entries(rawLabels).map(([key, value]) => [
                 String(key),
-                String(value ?? ""),
+                normalizeComposeLabelValue(value),
             ])
         );
     }
@@ -485,62 +871,24 @@ function manifestDigestForPlatform(body: JsonRecord, platform: string): string |
 }
 
 async function lookupDockerHub(service: ManagedServiceRow) {
-    const repo = normalizeDockerHubRepo(stripRegistry(service.image_repo));
-    let latestTag = service.current_tag;
-    if (service.tag_match_type === "regex") {
-        if (needsFullTagScan(service)) {
-            const tags: unknown[] = [];
-            let tagsUrl: string | null =
-                `https://hub.docker.com/v2/repositories/${repo}/tags?page_size=100`;
-            let tagPageCount = 0;
-            while (tagsUrl) {
-                tagPageCount += 1;
-                if (tagPageCount > MAX_REGISTRY_TAG_PAGES) {
-                    throw new Error(
-                        `Docker Hub tag pagination exceeded ${MAX_REGISTRY_TAG_PAGES} pages for ${repo}`
-                    );
-                }
-                const tagsData = await fetchJson(tagsUrl);
-                if (Array.isArray(tagsData.results)) {
-                    tags.push(...tagsData.results);
-                }
-                const next = typeof tagsData.next === "string" ? tagsData.next : "";
-                tagsUrl = next || null;
-            }
-            const candidates = tags
-                .map((item) => String(asRecord(item).name || ""))
-                .filter((tag: string) => tag && tagMatches(service, tag))
-                .sort(compareTags);
-            latestTag = candidates.at(-1) || service.current_tag;
-        }
-    } else if (service.tag_match_pattern) {
-        latestTag = service.tag_match_pattern;
-    }
-    let latestDigest: string | null = null;
-    if (latestTag) {
-        const tagData = await fetchJson(
-            `https://hub.docker.com/v2/repositories/${repo}/tags/${encodeURIComponent(latestTag)}`
-        );
-        const platform = servicePlatform(service);
-        const image = (Array.isArray(tagData.images) ? tagData.images : []).find(
-            (candidate) => imageMatchesPlatform(asRecord(candidate), platform)
-        );
-        const digest = asRecord(image).digest ?? tagData.digest;
-        latestDigest = typeof digest === "string" ? digest : null;
-    }
-    return { latestTag, latestDigest };
+    return lookupRegistryV2(service);
 }
 
 async function lookupRegistryV2(service: ManagedServiceRow) {
     const registry = imageRegistry(service.image_repo);
-    const repo = stripRegistry(service.image_repo);
+    const registryHost = registry === "docker.io" ? "registry-1.docker.io" : registry;
+    const repo =
+        registry === "docker.io"
+            ? normalizeDockerHubRepo(stripRegistry(service.image_repo))
+            : stripRegistry(service.image_repo);
     let tag =
         service.tag_match_type === "exact"
             ? (service.tag_match_pattern ?? service.current_tag)
             : service.current_tag;
     if (needsFullTagScan(service)) {
         const tags: string[] = [];
-        let tagsUrl: string | null = `https://${registry}/v2/${repo}/tags/list`;
+        let tagsUrl: string | null =
+            `https://${registryHost}/v2/${repo}/tags/list?n=${REGISTRY_TAG_PAGE_SIZE}`;
         let tagPageCount = 0;
         while (tagsUrl) {
             tagPageCount += 1;
@@ -566,7 +914,7 @@ async function lookupRegistryV2(service: ManagedServiceRow) {
         return { latestTag: null, latestDigest: null };
     }
     const { body, headers } = await fetchRegistryJsonWithHeaders(
-        `https://${registry}/v2/${repo}/manifests/${tag}`,
+        `https://${registryHost}/v2/${repo}/manifests/${tag}`,
         {
             accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json",
         }
@@ -598,10 +946,7 @@ async function lookupLatest(service: ManagedServiceRow) {
             unsupported: true,
         };
     }
-    if (registry === "ghcr.io" || registry === "lscr.io") {
-        return lookupRegistryV2(service);
-    }
-    return lookupDockerHub(service);
+    return lookupRegistryV2(service);
 }
 
 function hasUpdate(service: ManagedServiceRow): boolean {
@@ -797,7 +1142,7 @@ function createNotificationBestEffort(
 }
 
 function composeUpdateLockKey(service: ManagedServiceRow): string {
-    return service.compose_path;
+    return composeCommandPath(service.compose_path);
 }
 
 async function withComposeUpdateLock<T>(
@@ -839,11 +1184,17 @@ async function applyComposeUpdateUnlocked(
     const composeImageField = service.compose_image_field;
     const configuredComposePath = service.compose_path;
     const composePath = fs.realpathSync(configuredComposePath);
+    const commandComposePaths = getComposeCommandPaths(configuredComposePath);
     const raw = fs.readFileSync(composePath, "utf8");
     const originalStats = fs.statSync(composePath);
     const doc = YAML.parse(raw) as JsonRecord;
     setNestedValue(doc, composeImageField, targetImageRef);
     let composeStarted = false;
+    const commandRollbacks: Array<{
+        composePath: string;
+        rollbackTempPath: string;
+        tempPath: string;
+    }> = [];
     const tempPath = path.join(
         path.dirname(composePath),
         `${path.basename(composePath)}.tmp-${randomUUID()}`
@@ -856,10 +1207,43 @@ async function applyComposeUpdateUnlocked(
         writeFileWithMetadata(rollbackTempPath, raw, originalStats);
         writeFileWithMetadata(tempPath, YAML.stringify(doc), originalStats);
         fs.renameSync(tempPath, composePath);
-        const command = getComposeCommand(composePath, service.service_name);
+        for (const commandComposePath of commandComposePaths) {
+            const realCommandComposePath = fs.realpathSync(commandComposePath);
+            if (realCommandComposePath === composePath) continue;
+            const commandImageField = composeFileServiceImageField(
+                realCommandComposePath,
+                service.service_name
+            );
+            if (!commandImageField) continue;
+            const commandRaw = fs.readFileSync(realCommandComposePath, "utf8");
+            const commandStats = fs.statSync(realCommandComposePath);
+            const commandDoc = YAML.parse(commandRaw) as JsonRecord;
+            setNestedValue(commandDoc, commandImageField, targetImageRef);
+            const commandTempPath = path.join(
+                path.dirname(realCommandComposePath),
+                `${path.basename(realCommandComposePath)}.tmp-${randomUUID()}`
+            );
+            const commandRollbackTempPath = path.join(
+                path.dirname(realCommandComposePath),
+                `${path.basename(realCommandComposePath)}.rollback-${randomUUID()}`
+            );
+            writeFileWithMetadata(commandRollbackTempPath, commandRaw, commandStats);
+            commandRollbacks.push({
+                composePath: realCommandComposePath,
+                rollbackTempPath: commandRollbackTempPath,
+                tempPath: commandTempPath,
+            });
+            writeFileWithMetadata(
+                commandTempPath,
+                YAML.stringify(commandDoc),
+                commandStats
+            );
+            fs.renameSync(commandTempPath, realCommandComposePath);
+        }
+        const command = getComposeCommand(configuredComposePath, service.service_name);
         composeStarted = true;
         const { stdout, stderr } = await execFileAsync(command.file, command.args, {
-            cwd: path.dirname(composePath),
+            cwd: command.cwd,
             env: process.env,
             maxBuffer: 10 * 1024 * 1024,
             timeout: 180_000,
@@ -869,12 +1253,36 @@ async function applyComposeUpdateUnlocked(
         } catch {
             // The rollback file is only a best-effort safety net after success.
         }
+        for (const rollback of commandRollbacks) {
+            try {
+                fs.unlinkSync(rollback.rollbackTempPath);
+            } catch {
+                // Extra compose rollbacks are best-effort after success too.
+            }
+        }
         return { stdout: String(stdout), stderr: String(stderr) };
     } catch (error) {
         try {
             fs.unlinkSync(tempPath);
         } catch {
             // The temp file may have already been atomically moved into place.
+        }
+        for (const rollback of [...commandRollbacks].reverse()) {
+            try {
+                fs.unlinkSync(rollback.tempPath);
+            } catch {
+                // The temp file may have already been atomically moved into place.
+            }
+            try {
+                if (fs.existsSync(rollback.rollbackTempPath)) {
+                    fs.renameSync(rollback.rollbackTempPath, rollback.composePath);
+                }
+            } catch (rollbackError) {
+                console.error("[DockerUpdater] Failed to restore compose file", {
+                    composePath: rollback.composePath,
+                    rollbackError,
+                });
+            }
         }
         let restored = false;
         try {
@@ -890,9 +1298,12 @@ async function applyComposeUpdateUnlocked(
         }
         if (restored && composeStarted) {
             try {
-                const command = getComposeCommand(composePath, service.service_name);
+                const command = getComposeCommand(
+                    configuredComposePath,
+                    service.service_name
+                );
                 await execFileAsync(command.file, command.args, {
-                    cwd: path.dirname(composePath),
+                    cwd: command.cwd,
                     env: process.env,
                     maxBuffer: 10 * 1024 * 1024,
                     timeout: 180_000,
@@ -921,8 +1332,13 @@ function listComposeFiles(root = getDockerAppsRoot()): string[] {
     return fs
         .readdirSync(root, { withFileTypes: true })
         .filter((entry) => entry.isDirectory())
-        .map((entry) => path.join(root, entry.name, COMPOSE_FILENAME))
-        .filter((file) => fs.existsSync(file));
+        .flatMap((entry) => {
+            const appRoot = path.join(root, entry.name);
+            const composePath = COMPOSE_FILENAMES.map((filename) =>
+                path.join(appRoot, filename)
+            ).find((file) => fs.existsSync(file));
+            return composePath ? [composePath] : [];
+        });
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -986,7 +1402,7 @@ function servicesFromCompose(composePath: string):
             const tagPattern = labels.get("mira.updater.tagPattern") || null;
             const tagPatternIsRegex = booleanLabel(
                 labels.get("mira.updater.tagPatternIsRegex"),
-                false
+                true
             );
             const currentTag = image.tag ?? (image.digest ? null : "latest");
             const pinMode: "digest" | "tag" =
@@ -1341,11 +1757,12 @@ export async function pollDockerUpdaterRegistries(
             "docker:updater:updates-available"
         );
     }
+    const ok = failures.length === 0 || (serviceId === undefined && checked.length > 0);
     return {
         step: "poll",
-        ok: failures.length === 0,
+        ok,
         stdout: JSON.stringify({
-            ok: failures.length === 0,
+            ok,
             checkedAt: timestamp,
             checked,
             skipped,
@@ -1673,13 +2090,24 @@ export async function runDockerUpdaterService(
     return [register, poll, ...applyResults];
 }
 
+function preservedTimeOfDay(
+    existing: ScheduledJob | null,
+    fallback: string
+): string | null {
+    if (!existing) {
+        return fallback;
+    }
+    return existing.timeOfDay;
+}
+
 export function registerDockerUpdaterScheduledJobs(): void {
     const job = {
         id: "docker.updater",
         name: "Docker updater",
         description: "Poll Docker registries and apply approved automatic updates.",
-        scheduleType: "interval",
-        intervalSeconds: 60 * 60,
+        scheduleType: "daily",
+        intervalSeconds: 24 * 60 * 60,
+        timeOfDay: "04:10",
         actionKey: "docker.updater",
         actionPayload: {},
     } as const;
@@ -1708,7 +2136,7 @@ export function registerDockerUpdaterScheduledJobs(): void {
             enabled: existing?.enabled ?? true,
             scheduleType: existing?.scheduleType ?? job.scheduleType,
             intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
-            timeOfDay: existing?.timeOfDay ?? null,
+            timeOfDay: preservedTimeOfDay(existing, job.timeOfDay),
             cronExpression: existing?.cronExpression ?? null,
         });
         db.exec("COMMIT");
@@ -1728,6 +2156,8 @@ export const __testing = {
     imageRegistry,
     imageMatchesPlatform,
     hasUpdate,
+    interpolateComposePath,
+    loadComposeProjectEnv,
     listComposeFiles,
     lookupDockerHub,
     lookupGhcr,

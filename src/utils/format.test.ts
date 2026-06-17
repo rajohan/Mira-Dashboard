@@ -27,13 +27,13 @@ describe("format utils", () => {
     });
 
     it("handles invalid date inputs gracefully", () => {
-        const invalidDate = new Date(NaN);
+        const invalidDate = new Date(Number("NaN"));
         expect(formatDate("not-a-date")).toBe("not-a-date");
         expect(formatDate(Infinity)).toBe("Infinity");
         expect(formatDateStamp(invalidDate)).toBe("unknown-date");
         expect(formatOsloDate(invalidDate)).toBe("Unknown date");
         expect(formatWeekdayShort(invalidDate)).toBe("---");
-        expect(formatDuration(NaN)).toBe("Unknown");
+        expect(formatDuration(Number("NaN"))).toBe("Unknown");
     });
 
     it("formats durations safely", () => {
@@ -52,7 +52,7 @@ describe("format utils", () => {
         expect(formatSize(2 * 1024 * 1024)).toBe("2.0 MB");
         expect(formatSize(5 * 1024 * 1024 * 1024)).toBe("5.0 GB");
         expect(formatSize(3 * 1024 * 1024 * 1024 * 1024)).toBe("3.0 TB");
-        expect(formatSize(NaN)).toBe("Unknown");
+        expect(formatSize(Number("NaN"))).toBe("Unknown");
         expect(formatSize(Infinity)).toBe("Unknown");
         expect(formatSize(-1)).toBe("Unknown");
         expect(formatLoad([0.123, 1.2, 9])).toBe("0.12, 1.20, 9.00");

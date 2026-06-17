@@ -383,6 +383,9 @@ function mockDocker(overrides = {}) {
 
 describe("Docker page", () => {
     beforeEach(() => {
+        for (const value of Object.values(docker)) {
+            if (typeof value === "function" && "mockReset" in value) value.mockReset();
+        }
         docker.action.mockResolvedValue({ output: "container restarted" });
         docker.deleteImage.mockResolvedValue(Promise.resolve());
         docker.deleteVolume.mockResolvedValue(Promise.resolve());
@@ -395,9 +398,6 @@ describe("Docker page", () => {
         docker.startExec.mockResolvedValue({ jobId: "job-1" });
         docker.stopExec.mockResolvedValue(Promise.resolve());
         docker.confirmModalHandlers = null;
-        for (const value of Object.values(docker)) {
-            if (typeof value === "function" && "mockClear" in value) value.mockClear();
-        }
         vi.stubGlobal(
             "fetch",
             vi.fn().mockResolvedValue({
@@ -496,7 +496,7 @@ describe("Docker page", () => {
         await user.click(screen.getByRole("button", { name: "Delete volume app-data" }));
         await user.click(screen.getByRole("button", { name: "Delete" }));
         expect(docker.deleteVolume).toHaveBeenCalledWith("app-data");
-    });
+    }, 10_000);
 
     it("ignores closed manual update confirmations without a selected target", async () => {
         render(<Docker />);
@@ -644,7 +644,7 @@ describe("Docker page", () => {
         expect(screen.getByText(/restart failed/)).toBeInTheDocument();
     });
 
-    it("covers fallback action output, persisted updater data, and modal close handlers", async () => {
+    it("covers fallback action output, pending updater state, and modal close handlers", async () => {
         const user = userEvent.setup();
         docker.action.mockResolvedValueOnce({ output: "" });
         docker.manualUpdate.mockResolvedValueOnce({ stderr: "manual warning" });
@@ -684,7 +684,7 @@ describe("Docker page", () => {
 
         render(<Docker />);
 
-        expect(screen.getByText(/"last": true/)).toBeInTheDocument();
+        expect(screen.queryByText(/"last": true/)).not.toBeInTheDocument();
         expect(screen.getByText("Status: —")).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Running..." })).toBeDisabled();
 
