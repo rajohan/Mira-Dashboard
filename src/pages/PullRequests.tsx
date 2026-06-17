@@ -231,6 +231,23 @@ function deploymentVariant(status: DeploymentJob["status"]) {
     return "info" as const;
 }
 
+/** Renders the deploy commit title and commit reference. */
+function deploymentCommitLabel(deployment: DeploymentJob): ReactNode {
+    const commit = deployment.commit || deployment.id;
+    if (!deployment.commitTitle) return commit;
+
+    return (
+        <>
+            <span className="line-clamp-2 min-w-0 flex-1 break-words">
+                {deployment.commitTitle}
+            </span>
+            <span className="text-primary-500 shrink-0 whitespace-nowrap">
+                ({commit})
+            </span>
+        </>
+    );
+}
+
 /** Performs checkout variant. */
 function checkoutVariant(checkout: ProductionCheckoutStatus | undefined) {
     if (!checkout) return "default" as const;
@@ -446,26 +463,21 @@ function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
                             key={deployment.id}
                             className="border-primary-700 bg-primary-900/40 rounded border p-3"
                         >
-                            <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0">
                                     <div className="text-primary-300 text-sm font-medium">
-                                        {deployment.commitTitle ? (
-                                            <div className="truncate">
-                                                {deployment.commitTitle}
-                                            </div>
-                                        ) : null}
                                         {deployment.commitUrl ? (
                                             <a
                                                 href={deployment.commitUrl}
                                                 target="_blank"
                                                 rel="noreferrer"
-                                                className="text-primary-400 hover:text-primary-100 break-all"
+                                                className="text-primary-400 hover:text-primary-100 flex max-w-full min-w-0 items-baseline gap-1"
                                             >
-                                                {deployment.commit || deployment.id}
+                                                {deploymentCommitLabel(deployment)}
                                             </a>
                                         ) : (
-                                            <span className="text-primary-400">
-                                                {deployment.commit || deployment.id}
+                                            <span className="text-primary-400 flex max-w-full min-w-0 items-baseline gap-1">
+                                                {deploymentCommitLabel(deployment)}
                                             </span>
                                         )}
                                     </div>
@@ -475,7 +487,7 @@ function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
                                 </div>
                                 <Badge
                                     variant={deploymentVariant(deployment.status)}
-                                    className="shrink-0"
+                                    className="shrink-0 whitespace-nowrap"
                                 >
                                     {deployment.status}
                                 </Badge>
