@@ -152,33 +152,30 @@ process.stdout.write("updated\n");
         mockFetch(async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();
             fetchUrls.push(url);
-            if (url.includes("hub.docker.com") && url.includes("/tags/1.2.1")) {
+            if (url.includes("/manifests/1.2.1")) {
                 return {
                     ok: true,
                     headers: new Headers(),
                     json: async () => ({
-                        images: [
-                            { architecture: "amd64", digest: "sha256:amd" },
+                        manifests: [
                             {
-                                architecture: "arm64",
-                                variant: null,
+                                digest: "sha256:amd",
+                                platform: { architecture: "amd64" },
+                            },
+                            {
                                 digest: "sha256:new",
+                                platform: { architecture: "arm64", variant: null },
                             },
                         ],
                     }),
                 } as Response;
             }
-            if (url.includes("hub.docker.com")) {
+            if (url.includes("/tags/list?n=1000")) {
                 return {
                     ok: true,
                     headers: new Headers(),
                     json: async () => ({
-                        results: [
-                            { name: "1.1.9" },
-                            { name: "1.2.0" },
-                            { name: "1.2.1" },
-                            { name: "2.0.0" },
-                        ],
+                        tags: ["1.1.9", "1.2.0", "1.2.1", "2.0.0"],
                     }),
                 } as Response;
             }
@@ -260,7 +257,9 @@ process.stdout.write("updated\n");
             false
         );
         assert.ok(
-            fetchUrls.some((url) => url.includes("repositories/library/nginx/tags"))
+            fetchUrls.some((url) =>
+                url.includes("registry-1.docker.io/v2/library/nginx/tags/list?n=1000")
+            )
         );
         assert.ok(
             fetchUrls.some((url) => url.includes("ghcr.io/v2/owner/app/manifests/stable"))
@@ -309,7 +308,7 @@ process.stdout.write("updated\n");
                 ok: !url.includes("busybox"),
                 status: 500,
                 headers: new Headers(),
-                json: async () => ({ results: [{ name: "3" }] }),
+                json: async () => ({ tags: ["3"] }),
             } as Response;
         });
 
@@ -322,7 +321,7 @@ process.stdout.write("updated\n");
                     `./dockerUpdater.js?failure=${Date.now()}`
                 );
                 const firstRun = await runDockerUpdaterService();
-                assert.equal(firstRun[1]?.ok, false);
+                assert.equal(firstRun[1]?.ok, true);
                 assert.match(firstRun[1]?.stderr ?? "", /bad-registry/u);
                 const badRegistry = dbHandle
                     .prepare(
@@ -361,7 +360,7 @@ process.stdout.write("updated\n");
                     fullPollFailure.map((step) => [step.step, step.ok]),
                     [
                         ["register-services", true],
-                        ["poll", false],
+                        ["poll", true],
                     ]
                 );
 
@@ -404,6 +403,7 @@ process.stdout.write("updated\n");
         const appsRoot = path.join(tempDir, "apps");
         const appDir = path.join(appsRoot, "helpers");
         await mkdir(appDir, { recursive: true });
+        await mkdir(path.join(appsRoot, "empty"), { recursive: true });
         await writeFile(
             path.join(appDir, "compose.yaml"),
             `services:
@@ -890,6 +890,354 @@ process.exit(0);
         );
     });
 
+    it("applies updates through the parent compose project when present", async () => {
+        const rootDir = path.join(tempDir, "parent-compose-apply");
+        const appDir = path.join(rootDir, "apps", "web");
+        const binDir = path.join(tempDir, "parent-compose-bin");
+        const argsPath = path.join(tempDir, "parent-compose-args.json");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        const projectComposePath = path.join(rootDir, "compose.yaml");
+        const projectOverridePath = path.join(rootDir, "compose.override.yaml");
+        const composePath = path.join(appDir, "compose.yaml");
+        await writeFile(
+            projectComposePath,
+            "include:\n- apps/web/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(
+            projectOverridePath,
+            [
+                "services:",
+                "  web:",
+                "    image: repo/app:override",
+                "    environment:",
+                "      REQUIRED_VALUE: keep-me",
+                "",
+            ].join("\n"),
+            "utf8"
+        );
+        await writeFile(
+            composePath,
+            [
+                "services:",
+                "  web:",
+                "    image: repo/app:1",
+                "    depends_on:",
+                "      db:",
+                "        condition: service_started",
+                "",
+            ].join("\n"),
+            "utf8"
+        );
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            `#!/usr/bin/env node
+const fs = require("node:fs");
+fs.writeFileSync(process.env.SEEN_COMPOSE_ARGS, JSON.stringify({
+  argv: process.argv.slice(2),
+  cwd: process.cwd(),
+}));
+`
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(`./dockerUpdater.js?parent-compose=${Date.now()}`);
+        const service = {
+            id: 712,
+            app_slug: "web",
+            service_name: "web",
+            compose_path: composePath,
+            image_repo: "repo/app",
+            compose_image_ref: "repo/app:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+            )
+            .run(service);
+        const originalUnlinkSync = fs.unlinkSync.bind(fs);
+        mock.method(fs, "unlinkSync", (filePath: fs.PathLike) => {
+            if (String(filePath).includes("compose.override.yaml.rollback-")) {
+                throw new Error("cleanup denied");
+            }
+            return originalUnlinkSync(filePath);
+        });
+
+        await withEnv({ SEEN_COMPOSE_ARGS: argsPath }, async () => {
+            const result = await updater.__testing.applyServiceUpdate(service, "manual");
+
+            assert.equal(result.ok, true);
+        });
+
+        assert.match(await readFile(composePath, "utf8"), /repo\/app:2/u);
+        assert.deepEqual(JSON.parse(await readFile(argsPath, "utf8")), {
+            argv: [
+                "compose",
+                "-f",
+                projectComposePath,
+                "-f",
+                projectOverridePath,
+                "up",
+                "-d",
+                "--pull",
+                "always",
+                "web",
+            ],
+            cwd: rootDir,
+        });
+        assert.match(await readFile(projectOverridePath, "utf8"), /repo\/app:2/u);
+        assert.match(await readFile(projectOverridePath, "utf8"), /REQUIRED_VALUE/u);
+    });
+
+    it("restores parent compose overrides when aggregate updates fail", async () => {
+        const rootDir = path.join(tempDir, "parent-compose-rollback");
+        const appDir = path.join(rootDir, "apps", "web");
+        const binDir = path.join(tempDir, "parent-compose-rollback-bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        const projectComposePath = path.join(rootDir, "compose.yaml");
+        const projectOverridePath = path.join(rootDir, "compose.override.yaml");
+        const composePath = path.join(appDir, "compose.yaml");
+        const originalOverride = [
+            "services:",
+            "  web:",
+            "    image: repo/app:override",
+            "    environment:",
+            "      REQUIRED_VALUE: keep-me",
+            "",
+        ].join("\n");
+        await writeFile(
+            projectComposePath,
+            "include:\n- apps/web/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(projectOverridePath, originalOverride, "utf8");
+        await writeFile(
+            composePath,
+            "services:\n  web:\n    image: repo/app:1\n",
+            "utf8"
+        );
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            "#!/usr/bin/env node\nprocess.stderr.write('compose failed\\n'); process.exit(12);\n"
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(
+            `./dockerUpdater.js?parent-compose-rollback=${Date.now()}`
+        );
+        const service = {
+            id: 713,
+            app_slug: "web-rollback",
+            service_name: "web",
+            compose_path: composePath,
+            image_repo: "repo/app",
+            compose_image_ref: "repo/app:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+            )
+            .run(service);
+
+        const result = await updater.__testing.applyServiceUpdate(service, "manual");
+
+        assert.equal(result.ok, false);
+        assert.match(result.stderr, /compose failed/u);
+        assert.equal(await readFile(projectOverridePath, "utf8"), originalOverride);
+        assert.match(await readFile(composePath, "utf8"), /repo\/app:1/u);
+    });
+
+    it("keeps compose failures when parent override rollback fails", async () => {
+        const rootDir = path.join(tempDir, "parent-compose-override-rollback-fails");
+        const appDir = path.join(rootDir, "apps", "web");
+        const binDir = path.join(tempDir, "parent-compose-override-rollback-bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        const projectComposePath = path.join(rootDir, "compose.yaml");
+        const projectOverridePath = path.join(rootDir, "compose.override.yaml");
+        const composePath = path.join(appDir, "compose.yaml");
+        await writeFile(
+            projectComposePath,
+            "include:\n- apps/web/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(
+            projectOverridePath,
+            "services:\n  web:\n    image: repo/app:override\n",
+            "utf8"
+        );
+        await writeFile(
+            composePath,
+            "services:\n  web:\n    image: repo/app:1\n",
+            "utf8"
+        );
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            "#!/usr/bin/env node\nprocess.stderr.write('compose failed\\n'); process.exit(12);\n"
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(
+            `./dockerUpdater.js?parent-compose-override-rollback-fails=${Date.now()}`
+        );
+        const service = {
+            id: 715,
+            app_slug: "web-override-rollback-fails",
+            service_name: "web",
+            compose_path: composePath,
+            image_repo: "repo/app",
+            compose_image_ref: "repo/app:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+            )
+            .run(service);
+        const originalRenameSync = fs.renameSync.bind(fs);
+        mock.method(fs, "renameSync", (...args: Parameters<typeof fs.renameSync>) => {
+            if (
+                String(args[0]).includes("compose.override.yaml.rollback-") &&
+                args[1] === projectOverridePath
+            ) {
+                throw new Error("override rollback denied");
+            }
+            return originalRenameSync(...args);
+        });
+
+        const result = await updater.__testing.applyServiceUpdate(service, "manual");
+
+        assert.equal(result.ok, false);
+        assert.match(result.stderr, /compose failed/u);
+    });
+
+    it("ignores malformed override images while applying parent compose updates", async () => {
+        const rootDir = path.join(tempDir, "parent-compose-malformed-override");
+        const appDir = path.join(rootDir, "apps", "web");
+        const binDir = path.join(tempDir, "parent-compose-malformed-bin");
+        await mkdir(appDir, { recursive: true });
+        await mkdir(binDir);
+        const projectComposePath = path.join(rootDir, "compose.yaml");
+        const projectOverridePath = path.join(rootDir, "compose.override.yaml");
+        const composePath = path.join(appDir, "compose.yaml");
+        await writeFile(
+            projectComposePath,
+            "include:\n- apps/web/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(projectOverridePath, "services:\n  web: [\n", "utf8");
+        await writeFile(
+            composePath,
+            "services:\n  web:\n    image: repo/app:1\n",
+            "utf8"
+        );
+        await writeExecutable(path.join(binDir, "docker"), "#!/usr/bin/env node\n");
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(
+            `./dockerUpdater.js?parent-compose-malformed=${Date.now()}`
+        );
+        const service = {
+            id: 714,
+            app_slug: "web-malformed",
+            service_name: "web",
+            compose_path: composePath,
+            image_repo: "repo/app",
+            compose_image_ref: "repo/app:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+            )
+            .run(service);
+
+        const result = await updater.__testing.applyServiceUpdate(service, "manual");
+
+        assert.equal(result.ok, true);
+        assert.match(await readFile(composePath, "utf8"), /repo\/app:2/u);
+        assert.equal(
+            await readFile(projectOverridePath, "utf8"),
+            "services:\n  web: [\n"
+        );
+    });
+
     it("serializes concurrent compose updates for services in the same file", async () => {
         const appDir = path.join(tempDir, "locked-apply");
         const binDir = path.join(tempDir, "bin");
@@ -1004,6 +1352,109 @@ setTimeout(() => process.exit(0), 30);
         const composeText = await readFile(composePath, "utf8");
         assert.match(composeText, /repo\/app:2/u);
         assert.match(composeText, /repo\/worker:3/u);
+    });
+
+    it("serializes concurrent compose updates for child files in the same parent project", async () => {
+        const rootDir = path.join(tempDir, "locked-parent-apply");
+        const appsDir = path.join(rootDir, "apps");
+        const binDir = path.join(tempDir, "bin-parent-lock");
+        const activePath = path.join(tempDir, "parent-compose-active.lock");
+        await mkdir(path.join(appsDir, "web"), { recursive: true });
+        await mkdir(path.join(appsDir, "worker"), { recursive: true });
+        await mkdir(binDir);
+        const projectComposePath = path.join(rootDir, "compose.yaml");
+        const webComposePath = path.join(appsDir, "web", "compose.yaml");
+        const workerComposePath = path.join(appsDir, "worker", "compose.yaml");
+        await writeFile(
+            projectComposePath,
+            "include:\n- apps/web/compose.yaml\n- apps/worker/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(
+            webComposePath,
+            "services:\n  web:\n    image: repo/app:1\n",
+            "utf8"
+        );
+        await writeFile(
+            workerComposePath,
+            "services:\n  worker:\n    image: repo/worker:1\n",
+            "utf8"
+        );
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            `#!/usr/bin/env node
+const fs = require("node:fs");
+if (fs.existsSync(process.env.ACTIVE_PARENT_COMPOSE)) {
+  process.exit(12);
+}
+fs.writeFileSync(process.env.ACTIVE_PARENT_COMPOSE, "active");
+setTimeout(() => {
+  fs.rmSync(process.env.ACTIVE_PARENT_COMPOSE, { force: true });
+  process.exit(0);
+}, 80);
+`
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(
+            `./dockerUpdater.js?locked-parent-apply=${Date.now()}`
+        );
+        const webService = {
+            id: 81,
+            app_slug: "locked-parent-web",
+            service_name: "web",
+            compose_path: webComposePath,
+            image_repo: "repo/app",
+            compose_image_ref: "repo/app:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+        const workerService = {
+            ...webService,
+            id: 82,
+            app_slug: "locked-parent-worker",
+            service_name: "worker",
+            compose_path: workerComposePath,
+            image_repo: "repo/worker",
+            compose_image_ref: "repo/worker:1",
+            compose_image_field: "services.worker.image",
+        };
+        const insertService = dbHandle.prepare(
+            `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+        );
+        insertService.run(webService);
+        insertService.run(workerService);
+
+        await withEnv({ ACTIVE_PARENT_COMPOSE: activePath }, async () => {
+            const results = await Promise.all([
+                updater.__testing.applyServiceUpdate(webService, "manual"),
+                updater.__testing.applyServiceUpdate(workerService, "manual"),
+            ]);
+
+            assert.deepEqual(
+                results.map((result) => result.ok),
+                [true, true]
+            );
+        });
+        assert.match(await readFile(webComposePath, "utf8"), /repo\/app:2/u);
+        assert.match(await readFile(workerComposePath, "utf8"), /repo\/worker:2/u);
     });
 
     it("removes stale services after an empty successful compose scan", async () => {
@@ -1183,9 +1634,16 @@ setTimeout(() => process.exit(0), 30);
                 ok: true,
                 headers: new Headers(),
                 json: async () =>
-                    url.endsWith("/tags/3")
-                        ? { images: [{ architecture: "arm64", digest: "sha256:new" }] }
-                        : { results: [{ name: "1" }, { name: "2" }, { name: "3" }] },
+                    url.endsWith("/manifests/3")
+                        ? {
+                              manifests: [
+                                  {
+                                      digest: "sha256:new",
+                                      platform: { architecture: "arm64" },
+                                  },
+                              ],
+                          }
+                        : { tags: ["1", "2", "3"] },
             } as Response;
         });
 
@@ -1243,7 +1701,7 @@ setTimeout(() => process.exit(0), 30);
                 return {
                     ok: true,
                     headers: new Headers(),
-                    json: async () => ({ results: [{ name: "3" }] }),
+                    json: async () => ({ tags: ["3"] }),
                 } as Response;
             });
             const missingAfterPoll = await updater.runDockerUpdaterService(service.id);
@@ -1271,7 +1729,7 @@ setTimeout(() => process.exit(0), 30);
                 return {
                     ok: true,
                     headers: new Headers(),
-                    json: async () => ({ results: [{ name: "3" }] }),
+                    json: async () => ({ tags: ["3"] }),
                 } as Response;
             });
             const disabledAfterPoll = await updater.runDockerUpdaterService(
@@ -1341,6 +1799,125 @@ setTimeout(() => process.exit(0), 30);
         });
     });
 
+    it("keeps global registry polls successful when only some services fail", async () => {
+        const updater = await import(`./dockerUpdater.js?partial-poll=${Date.now()}`);
+        const insert = dbHandle.prepare(
+            `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, 'web', '/tmp/compose.yaml', @image_repo,
+                @compose_image_ref, 'services.web.image', '1', NULL,
+                NULL, NULL, 'notify', 'tag', 'exact', '2', 1, '{}'
+            )`
+        );
+        insert.run({
+            id: 721,
+            app_slug: "healthy",
+            image_repo: "nginx",
+            compose_image_ref: "nginx:1",
+        });
+        insert.run({
+            id: 722,
+            app_slug: "limited",
+            image_repo: "busybox",
+            compose_image_ref: "busybox:1",
+        });
+        mockFetch(async (input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input.toString();
+            if (url.includes("/library/nginx/manifests/2")) {
+                return {
+                    ok: true,
+                    headers: new Headers(),
+                    json: async () => ({
+                        manifests: [
+                            {
+                                digest: "sha256:new",
+                                platform: { architecture: "amd64" },
+                            },
+                        ],
+                    }),
+                } as Response;
+            }
+            return {
+                ok: false,
+                status: 429,
+                headers: new Headers(),
+                json: async () => ({}),
+            } as Response;
+        });
+
+        const globalResult = await updater.pollDockerUpdaterRegistries();
+        assert.equal(globalResult.ok, true);
+        assert.match(globalResult.stderr, /limited\/web: HTTP 429/u);
+        const globalStdout = JSON.parse(globalResult.stdout) as {
+            checked: string[];
+            ok: boolean;
+            updates: string[];
+        };
+        assert.equal(globalStdout.ok, true);
+        assert.deepEqual(globalStdout.checked, ["healthy/web"]);
+        assert.deepEqual(globalStdout.updates, ["healthy/web"]);
+
+        const targetedResult = await updater.pollDockerUpdaterRegistries(722);
+        assert.equal(targetedResult.ok, false);
+        assert.match(targetedResult.stderr, /limited\/web: HTTP 429/u);
+    });
+
+    it("does not count skipped services as successful registry checks", async () => {
+        const updater = await import(`./dockerUpdater.js?skipped-poll=${Date.now()}`);
+        const insert = dbHandle.prepare(
+            `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, 'web', '/tmp/compose.yaml', @image_repo,
+                @compose_image_ref, 'services.web.image', '1', NULL,
+                NULL, NULL, 'notify', 'tag', 'exact', '2', 1, '{}'
+            )`
+        );
+        insert.run({
+            id: 723,
+            app_slug: "unsupported",
+            image_repo: "quay.io/example/app",
+            compose_image_ref: "quay.io/example/app:1",
+        });
+        insert.run({
+            id: 724,
+            app_slug: "limited",
+            image_repo: "busybox",
+            compose_image_ref: "busybox:1",
+        });
+        mockFetch(
+            async () =>
+                ({
+                    ok: false,
+                    status: 429,
+                    headers: new Headers(),
+                    json: async () => ({}),
+                }) as Response
+        );
+
+        const result = await updater.pollDockerUpdaterRegistries();
+        assert.equal(result.ok, false);
+        assert.match(result.stderr, /limited\/web: HTTP 429/u);
+        const stdout = JSON.parse(result.stdout) as {
+            checked: string[];
+            ok: boolean;
+            skipped: Array<{ service: string }>;
+        };
+        assert.equal(stdout.ok, false);
+        assert.deepEqual(stdout.checked, []);
+        assert.deepEqual(
+            stdout.skipped.map((item) => item.service),
+            ["unsupported/web"]
+        );
+    });
+
     it("does not block a manual update on unrelated registry or discovery failures", async () => {
         const appsRoot = path.join(tempDir, "apps");
         const appDir = path.join(appsRoot, "manual-scope");
@@ -1398,9 +1975,16 @@ setTimeout(() => process.exit(0), 30);
                 ok: true,
                 headers: new Headers(),
                 json: async () =>
-                    url.endsWith("/tags/2")
-                        ? { images: [{ architecture: "arm64", digest: "sha256:new" }] }
-                        : { results: [{ name: "1" }, { name: "2" }] },
+                    url.endsWith("/manifests/2")
+                        ? {
+                              manifests: [
+                                  {
+                                      digest: "sha256:new",
+                                      platform: { architecture: "arm64" },
+                                  },
+                              ],
+                          }
+                        : { tags: ["1", "2"] },
             } as Response;
         });
 
@@ -1518,9 +2102,16 @@ setTimeout(() => process.exit(0), 30);
                 ok: true,
                 headers: new Headers(),
                 json: async () =>
-                    url.endsWith("/tags/2")
-                        ? { images: [{ architecture: "amd64", digest: "sha256:new" }] }
-                        : { results: [{ name: "1" }, { name: "2" }] },
+                    url.endsWith("/manifests/2")
+                        ? {
+                              manifests: [
+                                  {
+                                      digest: "sha256:new",
+                                      platform: { architecture: "amd64" },
+                                  },
+                              ],
+                          }
+                        : { tags: ["1", "2"] },
             } as Response;
         });
 
@@ -1718,9 +2309,9 @@ setTimeout(() => process.exit(0), 30);
                 ok: true,
                 headers: new Headers(),
                 json: async () =>
-                    url.endsWith("/tags/1")
+                    url.endsWith("/manifests/1")
                         ? { digest: "sha256:same-tag" }
-                        : { results: [{ name: "1" }] },
+                        : { tags: ["1"] },
             } as Response;
         });
 
@@ -1828,9 +2419,9 @@ setTimeout(() => process.exit(0), 30);
                     ok: true,
                     headers: new Headers(),
                     json: async () =>
-                        url.endsWith("/tags/2")
+                        url.endsWith("/manifests/2")
                             ? { digest: "sha256:new" }
-                            : { results: [{ name: "1" }, { name: "2" }] },
+                            : { tags: ["1", "2"] },
                 } as Response;
             });
 
@@ -1877,18 +2468,22 @@ setTimeout(() => process.exit(0), 30);
                 ok: true,
                 headers: new Headers(),
                 json: async () =>
-                    url.endsWith("/tags/2")
+                    url.endsWith("/manifests/2")
                         ? {
-                              images: [
+                              manifests: [
                                   {
-                                      architecture:
-                                          process.arch === "x64" ? "amd64" : process.arch,
                                       digest: "sha256:new",
-                                      os: "linux",
+                                      platform: {
+                                          architecture:
+                                              process.arch === "x64"
+                                                  ? "amd64"
+                                                  : process.arch,
+                                          os: "linux",
+                                      },
                                   },
                               ],
                           }
-                        : { results: [{ name: "1" }, { name: "2" }] },
+                        : { tags: ["1", "2"] },
             } as Response;
         });
 
@@ -1963,9 +2558,16 @@ setTimeout(() => process.exit(0), 30);
                 ok: true,
                 headers: new Headers(),
                 json: async () =>
-                    url.endsWith("/tags/2")
-                        ? { images: [{ architecture: "amd64", digest: "sha256:new" }] }
-                        : { results: [{ name: "1" }, { name: "2" }] },
+                    url.endsWith("/manifests/2")
+                        ? {
+                              manifests: [
+                                  {
+                                      digest: "sha256:new",
+                                      platform: { architecture: "amd64" },
+                                  },
+                              ],
+                          }
+                        : { tags: ["1", "2"] },
             } as Response;
         });
 
@@ -2129,6 +2731,109 @@ setTimeout(() => process.exit(0), 30);
             ),
             { realm: "https://ghcr.io/token", service: "ghcr.io" }
         );
+        await withEnv(
+            {
+                COMPOSE_EMPTY: "",
+                COMPOSE_LOOP: "${COMPOSE_LOOP}x",
+                COMPOSE_SET: "apps/app/compose.yaml",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.interpolateComposePath("${COMPOSE_SET}"),
+                    "apps/app/compose.yaml"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath("$COMPOSE_SET"),
+                    "apps/app/compose.yaml"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath("$COMPOSE_MISSING"),
+                    "$COMPOSE_MISSING"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath("${COMPOSE_MISSING}"),
+                    "${COMPOSE_MISSING}"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath(
+                        "${COMPOSE_MISSING:-fallback.yaml}"
+                    ),
+                    "fallback.yaml"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath(
+                        "${COMPOSE_MISSING:-${COMPOSE_SET}}"
+                    ),
+                    "apps/app/compose.yaml"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath("${COMPOSE_LOOP}"),
+                    "${COMPOSE_LOOP}xxxxxxxx"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath(
+                        "${COMPOSE_EMPTY-default.yaml}"
+                    ),
+                    ""
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath("${COMPOSE_SET:+alt.yaml}"),
+                    "alt.yaml"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath(
+                        "${COMPOSE_EMPTY:+alt.yaml}"
+                    ),
+                    ""
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath("${COMPOSE_EMPTY+alt.yaml}"),
+                    "alt.yaml"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath("${COMPOSE_SET:?required}"),
+                    "apps/app/compose.yaml"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath(
+                        "${COMPOSE_MISSING:?required}"
+                    ),
+                    "${COMPOSE_MISSING:?required}"
+                );
+            }
+        );
+        const helperEnvRoot = path.join(tempDir, "helper-env-root");
+        await mkdir(helperEnvRoot, { recursive: true });
+        await writeFile(
+            path.join(helperEnvRoot, ".env"),
+            "APP_COMPOSE=apps/env-app\nFROM_DOTENV=base\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(helperEnvRoot, "compose.env"),
+            "FROM_DOTENV=override\nFROM_ENV_FILE=value\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(helperEnvRoot, "absolute.env"),
+            "FROM_ABSOLUTE_ENV=absolute\n",
+            "utf8"
+        );
+        assert.deepEqual(
+            updater.__testing.loadComposeProjectEnv(helperEnvRoot, [
+                "compose.env",
+                path.join(helperEnvRoot, "absolute.env"),
+            ]),
+            {
+                APP_COMPOSE: "apps/env-app",
+                FROM_ABSOLUTE_ENV: "absolute",
+                FROM_DOTENV: "override",
+                FROM_ENV_FILE: "value",
+            }
+        );
+        const brokenEnvRoot = path.join(tempDir, "broken-helper-env-root");
+        await mkdir(path.join(brokenEnvRoot, ".env"), { recursive: true });
+        assert.deepEqual(updater.__testing.loadComposeProjectEnv(brokenEnvRoot), {});
         assert.equal(
             updater.__testing.stripRegistry("docker.io/library/redis"),
             "library/redis"
@@ -2160,7 +2865,1035 @@ setTimeout(() => process.exit(0), 30);
                             "always",
                             "web",
                         ],
+                        cwd: "/srv/app",
                     }
+                );
+            }
+        );
+        const nestedRoot = path.join(tempDir, "nested-compose-root");
+        const nestedComposePath = path.join(nestedRoot, "apps", "app", "compose.yaml");
+        const projectComposePath = path.join(nestedRoot, "compose.yaml");
+        await mkdir(path.dirname(nestedComposePath), { recursive: true });
+        await writeFile(
+            projectComposePath,
+            "include:\n- apps/app/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(nestedComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing.getComposeCommand(nestedComposePath, "web"),
+                    {
+                        file: "/tmp/mira-compose-wrapper",
+                        args: [
+                            "-f",
+                            projectComposePath,
+                            "up",
+                            "-d",
+                            "--pull",
+                            "always",
+                            "web",
+                        ],
+                        cwd: nestedRoot,
+                    }
+                );
+            }
+        );
+        const interpolatedIncludeRoot = path.join(tempDir, "interpolated-include-root");
+        const interpolatedIncludeComposePath = path.join(
+            interpolatedIncludeRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(interpolatedIncludeComposePath), { recursive: true });
+        await writeFile(
+            path.join(interpolatedIncludeRoot, "compose.yaml"),
+            "include:\n- ${APP_COMPOSE_PATH:-apps/app/compose.yaml}\n",
+            "utf8"
+        );
+        await writeFile(interpolatedIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(
+                        interpolatedIncludeComposePath,
+                        "web"
+                    ).cwd,
+                    interpolatedIncludeRoot
+                );
+            }
+        );
+        const envIncludeRoot = path.join(tempDir, "env-include-root");
+        const envIncludeComposePath = path.join(
+            envIncludeRoot,
+            "apps",
+            "env-app",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(envIncludeComposePath), { recursive: true });
+        await writeFile(
+            path.join(envIncludeRoot, ".env"),
+            "APP_COMPOSE=apps/env-app\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(envIncludeRoot, "compose.yaml"),
+            "include:\n- ${APP_COMPOSE}/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(envIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                APP_COMPOSE: undefined,
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(envIncludeComposePath, "web").cwd,
+                    envIncludeRoot
+                );
+            }
+        );
+        const unbracedEnvIncludeRoot = path.join(tempDir, "unbraced-env-include-root");
+        const unbracedEnvIncludeComposePath = path.join(
+            unbracedEnvIncludeRoot,
+            "apps",
+            "env-app",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(unbracedEnvIncludeComposePath), { recursive: true });
+        await writeFile(
+            path.join(unbracedEnvIncludeRoot, ".env"),
+            "APP_COMPOSE=apps/env-app\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(unbracedEnvIncludeRoot, "compose.yaml"),
+            "include:\n- $APP_COMPOSE/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(unbracedEnvIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                APP_COMPOSE: undefined,
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(
+                        unbracedEnvIncludeComposePath,
+                        "web"
+                    ).cwd,
+                    unbracedEnvIncludeRoot
+                );
+            }
+        );
+        const envFileIncludeRoot = path.join(tempDir, "env-file-include-root");
+        const envFileIncludeComposePath = path.join(
+            envFileIncludeRoot,
+            "apps",
+            "env-file-app",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(envFileIncludeComposePath), { recursive: true });
+        await writeFile(
+            path.join(envFileIncludeRoot, "include.env"),
+            "APP_COMPOSE=apps/env-file-app\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(envFileIncludeRoot, ".env"),
+            "INCLUDE_ENV=include.env\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(envFileIncludeRoot, "compose.yaml"),
+            "include:\n- path: ${APP_COMPOSE}/compose.yaml\n  env_file: ${INCLUDE_ENV}\n",
+            "utf8"
+        );
+        await writeFile(envFileIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                APP_COMPOSE: undefined,
+                INCLUDE_ENV: undefined,
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(envFileIncludeComposePath, "web")
+                        .cwd,
+                    envFileIncludeRoot
+                );
+            }
+        );
+        const localEnvPrecedenceRoot = path.join(tempDir, "local-env-precedence-root");
+        const localEnvPrecedenceComposePath = path.join(
+            localEnvPrecedenceRoot,
+            "apps",
+            "local",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(localEnvPrecedenceComposePath), {
+            recursive: true,
+        });
+        await mkdir(path.join(localEnvPrecedenceRoot, "apps", "include-file"), {
+            recursive: true,
+        });
+        await writeFile(
+            path.join(localEnvPrecedenceRoot, ".env"),
+            "APP_COMPOSE=apps/local\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(localEnvPrecedenceRoot, "include.env"),
+            "APP_COMPOSE=apps/include-file\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(localEnvPrecedenceRoot, "compose.yaml"),
+            "include:\n- path: ${APP_COMPOSE}/compose.yaml\n  env_file: include.env\n",
+            "utf8"
+        );
+        await writeFile(localEnvPrecedenceComposePath, "services: {}\n", "utf8");
+        await writeFile(
+            path.join(localEnvPrecedenceRoot, "apps", "include-file", "compose.yaml"),
+            "services: {}\n",
+            "utf8"
+        );
+        await withEnv(
+            {
+                APP_COMPOSE: undefined,
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(
+                        localEnvPrecedenceComposePath,
+                        "web"
+                    ).cwd,
+                    localEnvPrecedenceRoot
+                );
+            }
+        );
+        const nestedEnvFileRoot = path.join(tempDir, "nested-env-file-root");
+        const nestedEnvFileComposePath = path.join(
+            nestedEnvFileRoot,
+            "apps",
+            "leaf",
+            "compose.yaml"
+        );
+        const nestedEnvFileIntermediatePath = path.join(
+            nestedEnvFileRoot,
+            "apps",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(nestedEnvFileComposePath), { recursive: true });
+        await writeFile(
+            path.join(nestedEnvFileRoot, "apps", "include.env"),
+            "APP=leaf\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(nestedEnvFileRoot, "compose.yaml"),
+            "include:\n- path: apps/compose.yaml\n  env_file: apps/include.env\n",
+            "utf8"
+        );
+        await writeFile(
+            nestedEnvFileIntermediatePath,
+            "include:\n- ${APP}/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(nestedEnvFileComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                APP: undefined,
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(nestedEnvFileComposePath, "web")
+                        .cwd,
+                    nestedEnvFileRoot
+                );
+            }
+        );
+        const explicitEnvFileNoDefaultRoot = path.join(
+            tempDir,
+            "explicit-env-file-no-default-root"
+        );
+        const explicitEnvFileNoDefaultComposePath = path.join(
+            explicitEnvFileNoDefaultRoot,
+            "apps",
+            "leaf",
+            "compose.yaml"
+        );
+        const explicitEnvFileNoDefaultIntermediatePath = path.join(
+            explicitEnvFileNoDefaultRoot,
+            "apps",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(explicitEnvFileNoDefaultComposePath), {
+            recursive: true,
+        });
+        await writeFile(
+            path.join(explicitEnvFileNoDefaultRoot, "apps", ".env"),
+            "APP=leaf\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(explicitEnvFileNoDefaultRoot, "include.env"),
+            "OTHER=value\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(explicitEnvFileNoDefaultRoot, "compose.yaml"),
+            "include:\n- path: apps/compose.yaml\n  env_file: include.env\n",
+            "utf8"
+        );
+        await writeFile(
+            explicitEnvFileNoDefaultIntermediatePath,
+            "include:\n- ${APP}/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(explicitEnvFileNoDefaultComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                APP: undefined,
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(
+                        explicitEnvFileNoDefaultComposePath,
+                        "web"
+                    ).cwd,
+                    path.dirname(explicitEnvFileNoDefaultIntermediatePath)
+                );
+            }
+        );
+        const objectIncludeRoot = path.join(tempDir, "object-include-root");
+        const objectIncludeComposePath = path.join(
+            objectIncludeRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        const objectProjectComposePath = path.join(objectIncludeRoot, "compose.yaml");
+        await mkdir(path.dirname(objectIncludeComposePath), { recursive: true });
+        await writeFile(
+            objectProjectComposePath,
+            `include:\n- path: ${JSON.stringify(objectIncludeComposePath)}\n`,
+            "utf8"
+        );
+        await writeFile(objectIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing.getComposeCommand(objectIncludeComposePath, "web"),
+                    {
+                        file: "/tmp/mira-compose-wrapper",
+                        args: [
+                            "-f",
+                            objectProjectComposePath,
+                            "up",
+                            "-d",
+                            "--pull",
+                            "always",
+                            "web",
+                        ],
+                        cwd: objectIncludeRoot,
+                    }
+                );
+            }
+        );
+        const listIncludeRoot = path.join(tempDir, "list-include-root");
+        const listIncludeComposePath = path.join(
+            listIncludeRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        const listProjectComposePath = path.join(listIncludeRoot, "compose.yaml");
+        await mkdir(path.dirname(listIncludeComposePath), { recursive: true });
+        await writeFile(
+            listProjectComposePath,
+            "include:\n- path:\n  - apps/app/compose.yaml\n  - apps/app/override.yaml\n",
+            "utf8"
+        );
+        await writeFile(listIncludeComposePath, "services: {}\n", "utf8");
+        const listOverrideComposePath = path.join(
+            listIncludeRoot,
+            "apps",
+            "app",
+            "override.yaml"
+        );
+        await writeFile(listOverrideComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(listIncludeComposePath, "web")
+                        .cwd,
+                    listIncludeRoot
+                );
+                assert.equal(
+                    updater.__testing.getComposeCommand(listOverrideComposePath, "web")
+                        .cwd,
+                    listIncludeRoot
+                );
+            }
+        );
+        const projectDirectoryRoot = path.join(tempDir, "project-directory-root");
+        const projectDirectoryComposePath = path.join(
+            projectDirectoryRoot,
+            "apps",
+            "web",
+            "compose.yaml"
+        );
+        const sharedComposePath = path.join(
+            projectDirectoryRoot,
+            "shared",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(projectDirectoryComposePath), { recursive: true });
+        await mkdir(path.dirname(sharedComposePath), { recursive: true });
+        await writeFile(
+            path.join(projectDirectoryRoot, "compose.yaml"),
+            "include:\n- path: shared/compose.yaml\n  project_directory: apps\n",
+            "utf8"
+        );
+        await writeFile(sharedComposePath, "include:\n- web/compose.yaml\n", "utf8");
+        await writeFile(projectDirectoryComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(
+                        projectDirectoryComposePath,
+                        "web"
+                    ).cwd,
+                    projectDirectoryRoot
+                );
+            }
+        );
+        const recursiveIncludeRoot = path.join(tempDir, "recursive-include-root");
+        const recursiveIncludeComposePath = path.join(
+            recursiveIncludeRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        const intermediateComposePath = path.join(
+            recursiveIncludeRoot,
+            "apps",
+            "compose.yaml"
+        );
+        const recursiveProjectComposePath = path.join(
+            recursiveIncludeRoot,
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(recursiveIncludeComposePath), { recursive: true });
+        await writeFile(
+            recursiveProjectComposePath,
+            "include:\n- apps/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(
+            intermediateComposePath,
+            "include:\n- app/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(recursiveIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(
+                        recursiveIncludeComposePath,
+                        "web"
+                    ).cwd,
+                    recursiveIncludeRoot
+                );
+            }
+        );
+        const repeatedIncludeRoot = path.join(tempDir, "repeated-include-root");
+        const repeatedIncludeComposePath = path.join(
+            repeatedIncludeRoot,
+            "apps",
+            "web",
+            "compose.yaml"
+        );
+        const repeatedMissingComposePath = path.join(
+            repeatedIncludeRoot,
+            "apps",
+            "missing",
+            "compose.yaml"
+        );
+        const repeatedSharedComposePath = path.join(
+            repeatedIncludeRoot,
+            "shared",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(repeatedIncludeComposePath), { recursive: true });
+        await mkdir(path.dirname(repeatedMissingComposePath), { recursive: true });
+        await mkdir(path.dirname(repeatedSharedComposePath), { recursive: true });
+        await writeFile(
+            path.join(repeatedIncludeRoot, "first.env"),
+            "Z_CONTEXT=first\nAPP=missing\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(repeatedIncludeRoot, "second.env"),
+            "Z_CONTEXT=second\nAPP=web\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(repeatedIncludeRoot, "compose.yaml"),
+            [
+                "include:",
+                "- path: shared/compose.yaml",
+                "  env_file: first.env",
+                "- path: shared/compose.yaml",
+                "  env_file: second.env",
+                "",
+            ].join("\n"),
+            "utf8"
+        );
+        await writeFile(
+            repeatedSharedComposePath,
+            "include:\n- ../apps/${APP}/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(repeatedMissingComposePath, "services: {}\n", "utf8");
+        await writeFile(repeatedIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                APP: undefined,
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(repeatedIncludeComposePath, "web")
+                        .cwd,
+                    repeatedIncludeRoot
+                );
+            }
+        );
+        const absoluteRecursiveRoot = path.join(tempDir, "absolute-recursive-root");
+        const absoluteRecursiveComposePath = path.join(
+            absoluteRecursiveRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        const absoluteIntermediateComposePath = path.join(
+            absoluteRecursiveRoot,
+            "apps",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(absoluteRecursiveComposePath), { recursive: true });
+        await writeFile(
+            path.join(absoluteRecursiveRoot, "compose.yaml"),
+            `include:\n- ${JSON.stringify(absoluteIntermediateComposePath)}\n`,
+            "utf8"
+        );
+        await writeFile(
+            absoluteIntermediateComposePath,
+            "include:\n- app/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(absoluteRecursiveComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(
+                        absoluteRecursiveComposePath,
+                        "web"
+                    ).cwd,
+                    absoluteRecursiveRoot
+                );
+            }
+        );
+        const cyclicIncludeRoot = path.join(tempDir, "cyclic-include-root");
+        const cyclicIncludeComposePath = path.join(
+            cyclicIncludeRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        const cyclicIntermediateComposePath = path.join(
+            cyclicIncludeRoot,
+            "apps",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(cyclicIncludeComposePath), { recursive: true });
+        await writeFile(
+            path.join(cyclicIncludeRoot, "compose.yaml"),
+            "include:\n- apps/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(
+            cyclicIntermediateComposePath,
+            "include:\n- ../compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(cyclicIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_BIN: "/tmp/mira-docker",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(cyclicIncludeComposePath, "web")
+                        .cwd,
+                    path.dirname(cyclicIncludeComposePath)
+                );
+            }
+        );
+        const alternateFilenameRoot = path.join(tempDir, "alternate-filename-root");
+        const alternateFilenameComposePath = path.join(
+            alternateFilenameRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        const alternateProjectComposePath = path.join(
+            alternateFilenameRoot,
+            "docker-compose.yml"
+        );
+        await mkdir(path.dirname(alternateFilenameComposePath), { recursive: true });
+        await writeFile(
+            alternateProjectComposePath,
+            "include:\n- apps/app/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(alternateFilenameComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing.getComposeCommand(
+                        alternateFilenameComposePath,
+                        "web"
+                    ),
+                    {
+                        file: "/tmp/mira-compose-wrapper",
+                        args: [
+                            "-f",
+                            alternateProjectComposePath,
+                            "up",
+                            "-d",
+                            "--pull",
+                            "always",
+                            "web",
+                        ],
+                        cwd: alternateFilenameRoot,
+                    }
+                );
+            }
+        );
+        const filenamePrecedenceRoot = path.join(tempDir, "filename-precedence-root");
+        const filenamePrecedenceComposePath = path.join(
+            filenamePrecedenceRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        const canonicalProjectComposePath = path.join(
+            filenamePrecedenceRoot,
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(filenamePrecedenceComposePath), { recursive: true });
+        await writeFile(
+            canonicalProjectComposePath,
+            "include:\n- apps/app/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(filenamePrecedenceRoot, "docker-compose.yml"),
+            "include:\n- apps/app/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(filenamePrecedenceComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing
+                        .getComposeCommand(filenamePrecedenceComposePath, "web")
+                        .args.slice(0, 2),
+                    ["-f", canonicalProjectComposePath]
+                );
+            }
+        );
+        const overrideRoot = path.join(tempDir, "override-root");
+        const overrideComposePath = path.join(
+            overrideRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        const overrideProjectComposePath = path.join(overrideRoot, "compose.yaml");
+        const overrideProjectOverridePath = path.join(
+            overrideRoot,
+            "compose.override.yaml"
+        );
+        await mkdir(path.dirname(overrideComposePath), { recursive: true });
+        await writeFile(
+            overrideProjectComposePath,
+            "include:\n- apps/app/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(overrideProjectOverridePath, "services: {}\n", "utf8");
+        await writeFile(
+            path.join(overrideRoot, "compose.override.yml"),
+            "services:\n  stale:\n    image: stale:latest\n",
+            "utf8"
+        );
+        await writeFile(overrideComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing
+                        .getComposeCommand(overrideComposePath, "web")
+                        .args.slice(0, 4),
+                    ["-f", overrideProjectComposePath, "-f", overrideProjectOverridePath]
+                );
+            }
+        );
+        await writeFile(
+            overrideProjectOverridePath,
+            "services:\n  web:\n    image: repo/app:override\n",
+            "utf8"
+        );
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing
+                        .getComposeCommand(overrideComposePath, "web")
+                        .args.slice(0, 4),
+                    ["-f", overrideProjectComposePath, "-f", overrideProjectOverridePath]
+                );
+            }
+        );
+        await writeFile(overrideProjectOverridePath, "services:\n  web: [\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing
+                        .getComposeCommand(overrideComposePath, "web")
+                        .args.slice(0, 4),
+                    ["-f", overrideProjectComposePath, "-f", overrideProjectOverridePath]
+                );
+            }
+        );
+        const symlinkParentOverrideRoot = path.join(
+            tempDir,
+            "symlink-parent-override-root"
+        );
+        const symlinkParentTargetRoot = path.join(
+            tempDir,
+            "symlink-parent-override-target"
+        );
+        const symlinkParentComposePath = path.join(
+            symlinkParentOverrideRoot,
+            "compose.yaml"
+        );
+        const symlinkParentTargetComposePath = path.join(
+            symlinkParentTargetRoot,
+            "compose.yaml"
+        );
+        const symlinkParentOverridePath = path.join(
+            symlinkParentOverrideRoot,
+            "compose.override.yaml"
+        );
+        const symlinkParentChildComposePath = path.join(
+            symlinkParentOverrideRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        await mkdir(symlinkParentOverrideRoot, { recursive: true });
+        await mkdir(symlinkParentTargetRoot, { recursive: true });
+        await mkdir(path.dirname(symlinkParentChildComposePath), { recursive: true });
+        await writeFile(symlinkParentTargetComposePath, "services: {}\n", "utf8");
+        await symlink(symlinkParentTargetComposePath, symlinkParentComposePath);
+        await writeFile(
+            symlinkParentOverridePath,
+            "include:\n- apps/app/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(symlinkParentChildComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing
+                        .getComposeCommand(symlinkParentChildComposePath, "web")
+                        .args.slice(0, 4),
+                    ["-f", symlinkParentComposePath, "-f", symlinkParentOverridePath]
+                );
+            }
+        );
+        const nestedFallbackIncludeRoot = path.join(
+            tempDir,
+            "nested-fallback-include-root"
+        );
+        const nestedFallbackIncludeComposePath = path.join(
+            nestedFallbackIncludeRoot,
+            "apps",
+            "fallback-app",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(nestedFallbackIncludeComposePath), {
+            recursive: true,
+        });
+        await writeFile(
+            path.join(nestedFallbackIncludeRoot, ".env"),
+            "DEFAULT_APP_DIR=apps/fallback-app\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(nestedFallbackIncludeRoot, "compose.yaml"),
+            "include:\n- ${APP_DIR:-${DEFAULT_APP_DIR}}/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(nestedFallbackIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                APP_DIR: undefined,
+                DEFAULT_APP_DIR: undefined,
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(
+                        nestedFallbackIncludeComposePath,
+                        "web"
+                    ).cwd,
+                    nestedFallbackIncludeRoot
+                );
+            }
+        );
+        const overrideOnlyIncludeRoot = path.join(tempDir, "override-only-include-root");
+        const overrideOnlyIncludeComposePath = path.join(
+            overrideOnlyIncludeRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        const overrideOnlyProjectComposePath = path.join(
+            overrideOnlyIncludeRoot,
+            "compose.yaml"
+        );
+        const overrideOnlyProjectOverridePath = path.join(
+            overrideOnlyIncludeRoot,
+            "compose.override.yaml"
+        );
+        await mkdir(path.dirname(overrideOnlyIncludeComposePath), { recursive: true });
+        await writeFile(overrideOnlyProjectComposePath, "services: {}\n", "utf8");
+        await writeFile(
+            overrideOnlyProjectOverridePath,
+            "include:\n- apps/app/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(overrideOnlyIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing
+                        .getComposeCommand(overrideOnlyIncludeComposePath, "web")
+                        .args.slice(0, 4),
+                    [
+                        "-f",
+                        overrideOnlyProjectComposePath,
+                        "-f",
+                        overrideOnlyProjectOverridePath,
+                    ]
+                );
+            }
+        );
+        const standaloneOverrideRoot = path.join(tempDir, "standalone-override-root");
+        const standaloneOverrideComposePath = path.join(
+            standaloneOverrideRoot,
+            "compose.yaml"
+        );
+        const standaloneOverridePath = path.join(
+            standaloneOverrideRoot,
+            "compose.override.yaml"
+        );
+        await mkdir(standaloneOverrideRoot, { recursive: true });
+        await writeFile(standaloneOverrideComposePath, "services: {}\n", "utf8");
+        await writeFile(
+            standaloneOverridePath,
+            "services:\n  web:\n    image: nginx:override\n",
+            "utf8"
+        );
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing
+                        .getComposeCommand(standaloneOverrideComposePath, "web")
+                        .args.slice(0, 2),
+                    ["-f", standaloneOverrideComposePath]
+                );
+            }
+        );
+        const symlinkStandaloneRoot = path.join(tempDir, "symlink-standalone-root");
+        const symlinkTargetRoot = path.join(tempDir, "symlink-standalone-target");
+        const symlinkStandaloneComposePath = path.join(
+            symlinkStandaloneRoot,
+            "compose.yaml"
+        );
+        const symlinkTargetComposePath = path.join(symlinkTargetRoot, "compose.yaml");
+        await mkdir(symlinkStandaloneRoot, { recursive: true });
+        await mkdir(symlinkTargetRoot, { recursive: true });
+        await writeFile(symlinkTargetComposePath, "services: {}\n", "utf8");
+        await writeFile(
+            path.join(symlinkTargetRoot, "compose.override.yaml"),
+            "services:\n  web:\n    image: nginx:override\n",
+            "utf8"
+        );
+        await symlink(symlinkTargetComposePath, symlinkStandaloneComposePath);
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing
+                        .getComposeCommand(symlinkStandaloneComposePath, "web")
+                        .args.slice(0, 2),
+                    ["-f", symlinkTargetComposePath]
+                );
+            }
+        );
+        const missingIncludeRoot = path.join(tempDir, "missing-include-root");
+        const missingIncludeComposePath = path.join(
+            missingIncludeRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(missingIncludeComposePath), { recursive: true });
+        await writeFile(
+            path.join(missingIncludeRoot, "compose.yaml"),
+            "include:\n- apps/missing/compose.yaml\n- path: 123\n",
+            "utf8"
+        );
+        await writeFile(missingIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_BIN: "/tmp/mira-docker",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing.getComposeCommand(missingIncludeComposePath, "web"),
+                    {
+                        file: "/tmp/mira-docker",
+                        args: [
+                            "compose",
+                            "-f",
+                            missingIncludeComposePath,
+                            "up",
+                            "-d",
+                            "--pull",
+                            "always",
+                            "web",
+                        ],
+                        cwd: path.dirname(missingIncludeComposePath),
+                    }
+                );
+            }
+        );
+        const nonArrayIncludeRoot = path.join(tempDir, "non-array-include-root");
+        const nonArrayIncludeComposePath = path.join(
+            nonArrayIncludeRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(nonArrayIncludeComposePath), { recursive: true });
+        await writeFile(
+            path.join(nonArrayIncludeRoot, "compose.yaml"),
+            "include:\n  path: apps/app/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(nonArrayIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_BIN: "/tmp/mira-docker",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(nonArrayIncludeComposePath, "web")
+                        .cwd,
+                    path.dirname(nonArrayIncludeComposePath)
+                );
+            }
+        );
+        const malformedIncludeRoot = path.join(tempDir, "malformed-include-root");
+        const malformedIncludeComposePath = path.join(
+            malformedIncludeRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(malformedIncludeComposePath), { recursive: true });
+        await writeFile(path.join(malformedIncludeRoot, "compose.yaml"), "[", "utf8");
+        await writeFile(malformedIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_BIN: "/tmp/mira-docker",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(
+                        malformedIncludeComposePath,
+                        "web"
+                    ).cwd,
+                    path.dirname(malformedIncludeComposePath)
                 );
             }
         );
@@ -2202,6 +3935,7 @@ setTimeout(() => process.exit(0), 30);
                             "always",
                             "web",
                         ],
+                        cwd: "/srv/app",
                     }
                 );
             }
@@ -2699,6 +4433,44 @@ setTimeout(() => process.exit(0), 30);
             () => updater.__testing.fetchJson("https://hub.docker.com/timeout"),
             /Request timeout/u
         );
+        mockFetch(
+            async () =>
+                ({
+                    ok: false,
+                    status: 500,
+                    headers: new Headers(),
+                    json: async () => ({}),
+                }) as Response
+        );
+        await assert.rejects(
+            () => updater.__testing.fetchJson("https://hub.docker.com/fail"),
+            /HTTP 500/u
+        );
+        mockFetch(
+            async () =>
+                ({
+                    ok: true,
+                    headers: new Headers(),
+                    json: async () => ({ ok: true }),
+                }) as Response
+        );
+        assert.deepEqual(await updater.__testing.fetchJson("https://hub.docker.com/ok"), {
+            ok: true,
+        });
+        mockFetch(
+            async () =>
+                ({
+                    ok: true,
+                    headers: new Headers(),
+                    json: async () => {
+                        throw new Error("bad json");
+                    },
+                }) as unknown as Response
+        );
+        await assert.rejects(
+            () => updater.__testing.fetchJson("https://hub.docker.com/bad-json"),
+            /bad json/u
+        );
         mockFetch(async () => {
             throw new Error("network down");
         });
@@ -2821,33 +4593,35 @@ setTimeout(() => process.exit(0), 30);
 
         mockFetch(async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();
-            if (url.endsWith("/tags?page_size=100")) {
+            if (url.endsWith("/tags/list?n=1000")) {
                 return {
                     ok: true,
-                    headers: new Headers(),
-                    json: async () => ({
-                        results: [{}, { name: "1" }, { name: "2" }],
-                        next: "https://hub.docker.com/v2/repositories/library/nginx/tags?page=2",
+                    headers: new Headers({
+                        link: '</v2/repo/app/tags/list?n=1000&last=2>; rel="next"',
                     }),
+                    json: async () => ({ tags: ["1", "2"] }),
                 } as Response;
             }
-            if (url.endsWith("/tags?page=2")) {
+            if (url.endsWith("/tags/list?n=1000&last=2")) {
                 return {
                     ok: true,
                     headers: new Headers(),
-                    json: async () => ({
-                        results: [{ name: "3" }],
-                        next: null,
-                    }),
+                    json: async () => ({ tags: ["3"] }),
                 } as Response;
             }
             return {
                 ok: true,
                 headers: new Headers(),
                 json: async () => ({
-                    images: [
-                        { architecture: "arm64", variant: "v7", digest: "sha256:v7" },
-                        { architecture: "arm64", variant: "v8", digest: "sha256:v8" },
+                    manifests: [
+                        {
+                            digest: "sha256:v7",
+                            platform: { architecture: "arm64", variant: "v7" },
+                        },
+                        {
+                            digest: "sha256:v8",
+                            platform: { architecture: "arm64", variant: "v8" },
+                        },
                     ],
                 }),
             } as Response;
@@ -2869,11 +4643,10 @@ setTimeout(() => process.exit(0), 30);
             const url = typeof input === "string" ? input : input.toString();
             return {
                 ok: true,
-                headers: new Headers(),
-                json: async () => ({
-                    results: [{ name: "1" }],
-                    next: url,
+                headers: new Headers({
+                    link: `<${url}>; rel="next"`,
                 }),
+                json: async () => ({ tags: ["1"] }),
             } as Response;
         });
         await assert.rejects(
@@ -2881,30 +4654,33 @@ setTimeout(() => process.exit(0), 30);
                 updater.__testing.lookupDockerHub({
                     ...baseService,
                     tag_match_type: "regex",
-                    tag_match_pattern: String.raw`^\d$`,
+                    tag_match_pattern: String.raw`^v\d$`,
                 }),
-            /Docker Hub tag pagination exceeded 50 pages/u
+            /docker\.io tag pagination exceeded 100 pages/u
         );
 
         mockFetch(async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();
-            if (url.includes("/tags?page_size=100")) {
+            if (url.includes("/tags/list?n=1000")) {
                 return {
                     ok: true,
                     headers: new Headers(),
-                    json: async () => ({
-                        results: [{ name: "3" }],
-                        next: null,
-                    }),
+                    json: async () => ({ tags: ["3"] }),
                 } as Response;
             }
             return {
                 ok: true,
                 headers: new Headers(),
                 json: async () => ({
-                    images: [
-                        { architecture: "arm64", variant: "v8", digest: "sha256:v8" },
-                        { os: "linux", architecture: "amd64", digest: "sha256:amd64" },
+                    manifests: [
+                        {
+                            digest: "sha256:v8",
+                            platform: { architecture: "arm64", variant: "v8" },
+                        },
+                        {
+                            digest: "sha256:amd64",
+                            platform: { os: "linux", architecture: "amd64" },
+                        },
                     ],
                 }),
             } as Response;
@@ -3041,16 +4817,16 @@ setTimeout(() => process.exit(0), 30);
 
         mockFetch(async (input: string | URL | Request) => {
             const url = typeof input === "string" ? input : input.toString();
-            if (url.endsWith("/tags/list")) {
+            if (url.endsWith("/tags/list?n=1000")) {
                 return {
                     ok: true,
                     headers: new Headers({
-                        link: '<https://ghcr.io/v2/owner/app/tags/list?n=100&last=1.0.0>; rel="next"',
+                        link: '<https://ghcr.io/v2/owner/app/tags/list?n=1000&last=1.0.0>; rel="next"',
                     }),
                     json: async () => ({ tags: ["1.0.0", "dev"] }),
                 } as Response;
             }
-            if (url.includes("/tags/list?n=100&last=1.0.0")) {
+            if (url.includes("/tags/list?n=1000&last=1.0.0")) {
                 return {
                     ok: true,
                     headers: new Headers(),
@@ -3122,7 +4898,7 @@ setTimeout(() => process.exit(0), 30);
                     tag_match_type: "regex",
                     tag_match_pattern: String.raw`^\d$`,
                 }),
-            /ghcr\.io tag pagination exceeded 50 pages/u
+            /ghcr\.io tag pagination exceeded 100 pages/u
         );
 
         const authFetchUrls: string[] = [];
@@ -3131,7 +4907,7 @@ setTimeout(() => process.exit(0), 30);
             authFetchUrls.push(url);
             const headers = new Headers(init?.headers);
             const authorization = headers.get("authorization");
-            if (url.endsWith("/tags/list") && !authorization) {
+            if (url.endsWith("/tags/list?n=1000") && !authorization) {
                 return {
                     ok: false,
                     status: 401,
@@ -3153,7 +4929,7 @@ setTimeout(() => process.exit(0), 30);
                 ok: true,
                 headers: new Headers({ "docker-content-digest": "sha256:authed" }),
                 json: async () =>
-                    url.endsWith("/tags/list") ? { tags: ["1", "2"] } : {},
+                    url.endsWith("/tags/list?n=1000") ? { tags: ["1", "2"] } : {},
             } as Response;
         });
         assert.deepEqual(
@@ -3266,8 +5042,8 @@ setTimeout(() => process.exit(0), 30);
                 headers: new Headers(),
                 json: async () =>
                     dockerHubCall === 1
-                        ? { results: [{ name: "2" }] }
-                        : { images: [], digest: null },
+                        ? { tags: ["2"] }
+                        : { manifests: [], digest: null },
             } as Response;
         });
         assert.deepEqual(
@@ -3285,9 +5061,9 @@ setTimeout(() => process.exit(0), 30);
                 ok: true,
                 headers: new Headers(),
                 json: async () =>
-                    url.includes("/tags?page_size=")
-                        ? { results: [{ name: "stable" }] }
-                        : { images: [], digest: null },
+                    url.includes("/tags/list?n=")
+                        ? { tags: ["stable"] }
+                        : { manifests: [], digest: null },
             } as Response;
         });
         assert.deepEqual(
@@ -3869,15 +5645,22 @@ process.exit(0);
     });
 
     it("updates symlinked compose targets without replacing the symlink", async () => {
-        const appDir = path.join(tempDir, "symlink-compose");
+        const rootDir = path.join(tempDir, "symlink-project");
+        const appDir = path.join(rootDir, "apps", "symlink-compose");
         const targetDir = path.join(tempDir, "symlink-compose-target");
         const binDir = path.join(tempDir, "bin");
         await mkdir(appDir, { recursive: true });
         await mkdir(targetDir, { recursive: true });
         await mkdir(binDir);
+        const projectComposePath = path.join(rootDir, "compose.yaml");
         const composeTargetPath = path.join(targetDir, "compose.yaml");
         const composeLinkPath = path.join(appDir, "compose.yaml");
         const callLogPath = path.join(tempDir, "symlink-compose-calls.log");
+        await writeFile(
+            projectComposePath,
+            "include:\n- apps/symlink-compose/compose.yaml\n",
+            "utf8"
+        );
         await writeFile(
             composeTargetPath,
             "services:\n  web:\n    image: nginx:1\n",
@@ -3934,6 +5717,79 @@ process.exit(0);
         assert.equal(fs.lstatSync(composeLinkPath).isSymbolicLink(), true);
         assert.match(await readFile(composeTargetPath, "utf8"), /nginx:2/u);
         assert.match(await readFile(composeLinkPath, "utf8"), /nginx:2/u);
+        const composeCalls = await readFile(callLogPath, "utf8");
+        assert.equal(composeCalls.includes(projectComposePath), true);
+        assert.equal(composeCalls.includes(composeTargetPath), false);
+        assert.equal(composeCalls.includes(composeLinkPath), false);
+    });
+
+    it("runs standalone symlinked compose updates from the real target path", async () => {
+        const linkDir = path.join(tempDir, "standalone-symlink-link");
+        const targetDir = path.join(tempDir, "standalone-symlink-target");
+        const binDir = path.join(tempDir, "standalone-symlink-bin");
+        await mkdir(linkDir, { recursive: true });
+        await mkdir(targetDir, { recursive: true });
+        await mkdir(binDir);
+        const composeTargetPath = path.join(targetDir, "compose.yaml");
+        const composeLinkPath = path.join(linkDir, "compose.yaml");
+        const callLogPath = path.join(tempDir, "standalone-symlink-calls.log");
+        await writeFile(
+            composeTargetPath,
+            "services:\n  web:\n    image: nginx:1\n",
+            "utf8"
+        );
+        await symlink(composeTargetPath, composeLinkPath);
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            String.raw`#!/usr/bin/env node
+const fs = require("node:fs");
+fs.appendFileSync(${JSON.stringify(callLogPath)}, process.argv.slice(2).join(" ") + "\n");
+process.exit(0);
+`
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(
+            `./dockerUpdater.js?standalone-symlink-compose=${Date.now()}`
+        );
+        const service = {
+            id: 1,
+            app_slug: "standalone-symlink",
+            service_name: "web",
+            compose_path: composeLinkPath,
+            image_repo: "nginx",
+            compose_image_ref: "nginx:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+        dbHandle
+            .prepare(
+                `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+            )
+            .run(service);
+
+        const result = await updater.__testing.applyServiceUpdate(service, "manual");
+
+        assert.equal(result.ok, true);
+        assert.equal(fs.lstatSync(composeLinkPath).isSymbolicLink(), true);
+        assert.match(await readFile(composeTargetPath, "utf8"), /nginx:2/u);
         const composeCalls = await readFile(callLogPath, "utf8");
         assert.equal(composeCalls.includes(composeTargetPath), true);
         assert.equal(composeCalls.includes(composeLinkPath), false);
