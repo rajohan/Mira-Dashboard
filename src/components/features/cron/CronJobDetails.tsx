@@ -1,4 +1,4 @@
-import { Pencil, Play, Save, X } from "lucide-react";
+import { Pencil, Play, Save, Trash2, X } from "lucide-react";
 import { useId } from "react";
 
 import type { CronJob } from "../../../hooks";
@@ -30,8 +30,10 @@ interface CronJobDetailsProps {
     togglePending: boolean;
     runPending: boolean;
     updatePending: boolean;
+    deletePending: boolean;
     onToggle: (job: CronJob, enabled: boolean) => void;
     onRunNow: (job: CronJob) => void;
+    onDelete: (job: CronJob) => void;
     isEditMode: boolean;
     onEditModeChange: (enabled: boolean) => void;
     nameDraft: string;
@@ -58,8 +60,10 @@ export function CronJobDetails({
     togglePending,
     runPending,
     updatePending,
+    deletePending,
     onToggle,
     onRunNow,
+    onDelete,
     isEditMode,
     onEditModeChange,
     nameDraft,
@@ -116,7 +120,7 @@ export function CronJobDetails({
                     <Button
                         size="sm"
                         variant="primary"
-                        disabled={runPending}
+                        disabled={runPending || deletePending}
                         onClick={() => onRunNow(job)}
                         className="w-full sm:w-auto"
                     >
@@ -127,6 +131,16 @@ export function CronJobDetails({
                             ].join(" ")}
                         />
                         {runPending ? "Triggering..." : "Trigger now"}
+                    </Button>
+                    <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={deletePending}
+                        onClick={() => onDelete(job)}
+                        className="w-full sm:w-auto"
+                    >
+                        <Trash2 className="h-4 w-4" />
+                        {deletePending ? "Deleting..." : "Delete"}
                     </Button>
                     {runPending ? (
                         <span className="text-primary-400 text-xs">Running job...</span>

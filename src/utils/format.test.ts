@@ -5,6 +5,7 @@ import {
     formatDateStamp,
     formatDuration,
     formatLoad,
+    formatOsloClock,
     formatOsloDate,
     formatOsloTime,
     formatSize,
@@ -20,6 +21,7 @@ describe("format utils", () => {
 
     it("formats dates and times", () => {
         expect(formatDate(date)).toBe("10.05.2026, 06:07");
+        expect(formatOsloClock("2026-05-10T06:07:08.000Z")).toBe("08:07");
         expect(formatDateStamp(date)).toBe("2026-05-10");
         expect(formatOsloTime(date)).toBe("06:07:08");
         expect(formatOsloDate(date)).toBe("Sunday 10. May 2026");
@@ -29,6 +31,8 @@ describe("format utils", () => {
     it("handles invalid date inputs gracefully", () => {
         const invalidDate = new Date(Number("NaN"));
         expect(formatDate("not-a-date")).toBe("not-a-date");
+        expect(formatOsloClock("not-a-date")).toBe("--:--");
+        expect(formatOsloClock(Symbol("bad-date") as unknown as string)).toBe("--:--");
         expect(formatDate(Infinity)).toBe("Infinity");
         expect(formatDateStamp(invalidDate)).toBe("unknown-date");
         expect(formatOsloDate(invalidDate)).toBe("Unknown date");

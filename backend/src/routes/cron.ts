@@ -97,4 +97,15 @@ export default function cronRoutes(app: express.Application): void {
             res.status(500).json({ error: (error as Error).message });
         }
     }) as RequestHandler);
+
+    app.post("/api/cron/jobs/:id/delete", (async (req, res) => {
+        const jobId = req.params.id;
+
+        try {
+            const payload = await gateway.request("cron.remove", { jobId });
+            res.json({ ok: true, payload });
+        } catch (error) {
+            res.status(500).json({ error: (error as Error).message });
+        }
+    }) as RequestHandler);
 }

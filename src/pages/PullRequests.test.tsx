@@ -42,6 +42,7 @@ const hooks = vi.hoisted(() => ({
     ],
     refetch: vi.fn(),
     reject: vi.fn(),
+    updateBranch: vi.fn(),
     useApprovePullRequest: vi.fn(),
     useApprovePullRequestReview: vi.fn(),
     useDeployDashboard: vi.fn(),
@@ -49,6 +50,7 @@ const hooks = vi.hoisted(() => ({
     usePullRequestDeployments: vi.fn(),
     usePullRequests: vi.fn(),
     useRejectPullRequest: vi.fn(),
+    useUpdatePullRequestBranch: vi.fn(),
 }));
 
 vi.mock("../hooks", () => ({
@@ -59,6 +61,7 @@ vi.mock("../hooks", () => ({
     usePullRequestDeployments: hooks.usePullRequestDeployments,
     usePullRequests: hooks.usePullRequests,
     useRejectPullRequest: hooks.useRejectPullRequest,
+    useUpdatePullRequestBranch: hooks.useUpdatePullRequestBranch,
 }));
 
 vi.mock("../components/ui/ConfirmModal", () => ({
@@ -102,6 +105,7 @@ function mockPullRequests(overrides = {}) {
         data: [
             {
                 commit: "abc123",
+                commitTitle: "Fix dashboard deploy",
                 commitUrl: "https://github.com/rajohan/Mira-Dashboard/commit/abc123",
                 id: "deploy-1",
                 note: "Service restart scheduled",
@@ -126,6 +130,10 @@ function mockPullRequests(overrides = {}) {
         isPending: false,
         mutateAsync: hooks.reject,
     });
+    hooks.useUpdatePullRequestBranch.mockReturnValue({
+        isPending: false,
+        mutateAsync: hooks.updateBranch,
+    });
     hooks.useDeployDashboard.mockReturnValue({
         isPending: false,
         mutateAsync: hooks.deploy,
@@ -139,6 +147,8 @@ function mockPullRequests(overrides = {}) {
         if (key === "approveReview")
             hooks.useApprovePullRequestReview.mockReturnValue(value);
         if (key === "reject") hooks.useRejectPullRequest.mockReturnValue(value);
+        if (key === "updateBranch")
+            hooks.useUpdatePullRequestBranch.mockReturnValue(value);
         if (key === "deploy") hooks.useDeployDashboard.mockReturnValue(value);
     }
 }
@@ -162,6 +172,7 @@ describe("PullRequests page", () => {
             cleanup: { message: "Review worktree left intact" },
             message: "PR rejected",
         });
+        hooks.updateBranch.mockResolvedValue({ message: "Branch update started" });
         hooks.useApprovePullRequest.mockReset();
         hooks.useApprovePullRequestReview.mockReset();
         hooks.useDeployDashboard.mockReset();
@@ -169,6 +180,7 @@ describe("PullRequests page", () => {
         hooks.usePullRequestDeployments.mockReset();
         hooks.usePullRequests.mockReset();
         hooks.useRejectPullRequest.mockReset();
+        hooks.useUpdatePullRequestBranch.mockReset();
         mockPullRequests();
     });
 
@@ -181,6 +193,7 @@ describe("PullRequests page", () => {
         expect(screen.getByText("Review approved")).toBeInTheDocument();
         expect(screen.getByText("Ready to deploy")).toBeInTheDocument();
         expect(screen.getByText("Clean")).toBeInTheDocument();
+        expect(screen.getByText("Fix dashboard deploy")).toBeInTheDocument();
         expect(screen.getByText("restart-scheduled")).toBeInTheDocument();
     });
 
@@ -518,6 +531,107 @@ describe("PullRequests page", () => {
         ).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Merge + deploy" })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Merge only" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Update branch" })).toBeEnabled();
+    });
+
+    it("updates a behind branch when GitHub reports no conflicts", async () => {
+        const user = userEvent.setup();
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        mergeStateStatus: "BEHIND",
+                        mergeable: "MERGEABLE",
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        await user.click(screen.getByRole("button", { name: "Update branch" }));
+
+        expect(hooks.updateBranch).toHaveBeenCalledWith({ number: 10 });
+        expect(await screen.findByText("Branch update started")).toBeInTheDocument();
+    });
+
+    it("shows pending update branch state", () => {
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        mergeStateStatus: "BEHIND",
+                        mergeable: undefined,
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+            updateBranch: {
+                isPending: true,
+                mutateAsync: hooks.updateBranch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(screen.getByRole("button", { name: "Updating..." })).toBeDisabled();
+    });
+
+    it("shows update branch errors", async () => {
+        const user = userEvent.setup();
+        hooks.updateBranch.mockRejectedValueOnce(new Error("Update branch failed"));
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        mergeStateStatus: "BEHIND",
+                        mergeable: "MERGEABLE",
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        await user.click(screen.getByRole("button", { name: "Update branch" }));
+
+        expect(await screen.findByText("Update branch failed")).toBeInTheDocument();
+    });
+
+    it("shows a fallback update branch error for non-error throws", async () => {
+        const user = userEvent.setup();
+        hooks.updateBranch.mockRejectedValueOnce("nope");
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        mergeStateStatus: "BEHIND",
+                        mergeable: "MERGEABLE",
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        await user.click(screen.getByRole("button", { name: "Update branch" }));
+
+        expect(await screen.findByText("Action failed")).toBeInTheDocument();
     });
 
     it("blocks merge actions when GitHub reports merge conflicts", () => {

@@ -6,10 +6,12 @@ import { Cron } from "./Cron";
 
 const hooks = vi.hoisted(() => ({
     refetch: vi.fn(),
+    deleteJob: vi.fn(),
     runNow: vi.fn(),
     toggleJob: vi.fn(),
     updateJob: vi.fn(),
     useCronJobs: vi.fn(),
+    useDeleteCronJob: vi.fn(),
     useRunCronJobNow: vi.fn(),
     useToggleCronJob: vi.fn(),
     useUpdateCronJob: vi.fn(),
@@ -27,6 +29,7 @@ interface MockCronJob {
 
 vi.mock("../hooks", () => ({
     useCronJobs: hooks.useCronJobs,
+    useDeleteCronJob: hooks.useDeleteCronJob,
     useRunCronJobNow: hooks.useRunCronJobNow,
     useToggleCronJob: hooks.useToggleCronJob,
     useUpdateCronJob: hooks.useUpdateCronJob,
@@ -41,6 +44,7 @@ vi.mock("../components/features/cron", () => ({
         lastTriggeredAt,
         nameDraft,
         onDeliveryDraftChange,
+        onDelete,
         onEditModeChange,
         onNameDraftChange,
         onPayloadDraftChange,
@@ -58,6 +62,7 @@ vi.mock("../components/features/cron", () => ({
         lastTriggeredAt?: number;
         nameDraft: string;
         onDeliveryDraftChange: (value: string) => void;
+        onDelete: (job: MockCronJob) => void;
         onEditModeChange: (value: boolean) => void;
         onNameDraftChange: (value: string) => void;
         onPayloadDraftChange: (value: string) => void;
@@ -106,6 +111,9 @@ vi.mock("../components/features/cron", () => ({
             </button>
             <button type="button" onClick={() => onSave(job)}>
                 Save
+            </button>
+            <button type="button" onClick={() => onDelete(job)}>
+                Delete cron
             </button>
         </section>
     ),
@@ -165,10 +173,15 @@ function mockCronJobs(overrides = {}) {
 describe("Cron page", () => {
     beforeEach(() => {
         hooks.refetch.mockReset();
+        hooks.deleteJob.mockResolvedValue(Promise.resolve({}));
         hooks.runNow.mockResolvedValue(Promise.resolve({}));
         hooks.toggleJob.mockResolvedValue(Promise.resolve({}));
         hooks.updateJob.mockResolvedValue(Promise.resolve({}));
         hooks.useCronJobs.mockReset();
+        hooks.useDeleteCronJob.mockReturnValue({
+            isPending: false,
+            mutateAsync: hooks.deleteJob,
+        });
         hooks.useRunCronJobNow.mockReturnValue({
             isPending: false,
             mutateAsync: hooks.runNow,
@@ -257,6 +270,80 @@ describe("Cron page", () => {
                 payload: { kind: "systemEvent" },
             }),
         });
+    });
+
+    it("confirms and deletes the selected job", async () => {
+        const user = userEvent.setup();
+
+        render(<Cron />);
+
+        await user.click(screen.getByRole("button", { name: "Delete cron" }));
+        expect(screen.getByText("Delete Daily summary?")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(screen.queryByText("Delete Daily summary?")).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Delete cron" }));
+
+        await user.click(screen.getByRole("button", { name: "Delete cron job" }));
+
+        expect(hooks.deleteJob).toHaveBeenCalledWith({ id: "daily" });
+    });
+
+    it("skips delete confirmations for jobs without ids", async () => {
+        const user = userEvent.setup();
+        mockCronJobs({
+            data: [
+                {
+                    delivery: { mode: "none" },
+                    enabled: true,
+                    name: "Missing id",
+                    payload: { kind: "systemEvent" },
+                    schedule: { expr: "0 9 * * *", kind: "cron" },
+                },
+            ],
+        });
+
+        render(<Cron />);
+
+        hooks.deleteJob.mockClear();
+        await user.click(screen.getByRole("button", { name: "Delete cron" }));
+        await user.click(screen.getByRole("button", { name: "Delete cron job" }));
+        expect(hooks.deleteJob).not.toHaveBeenCalled();
+    });
+
+    it("uses cron job ids in delete confirmations when names are missing", async () => {
+        const user = userEvent.setup();
+        mockCronJobs({
+            data: [
+                {
+                    delivery: { mode: "none" },
+                    enabled: true,
+                    id: "nameless",
+                    payload: { kind: "systemEvent" },
+                    schedule: { expr: "0 9 * * *", kind: "cron" },
+                },
+            ],
+        });
+
+        render(<Cron />);
+
+        await user.click(screen.getByRole("button", { name: "Delete cron" }));
+
+        expect(screen.getByText("Delete nameless?")).toBeInTheDocument();
+    });
+
+    it("keeps pending delete confirmations open", async () => {
+        const user = userEvent.setup();
+        hooks.useDeleteCronJob.mockReturnValue({
+            isPending: true,
+            mutateAsync: hooks.deleteJob,
+        });
+
+        render(<Cron />);
+        await user.click(screen.getByRole("button", { name: "Delete cron" }));
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+        expect(screen.getByText("Delete Daily summary?")).toBeInTheDocument();
     });
 
     it("surfaces invalid JSON save errors", async () => {

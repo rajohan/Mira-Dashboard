@@ -1,4 +1,11 @@
-import { CheckCircle, GitMerge, GitPullRequest, Rocket, XCircle } from "lucide-react";
+import {
+    CheckCircle,
+    GitBranch,
+    GitMerge,
+    GitPullRequest,
+    Rocket,
+    XCircle,
+} from "lucide-react";
 import { type ReactNode, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
@@ -26,6 +33,7 @@ import {
     usePullRequestDeployments,
     usePullRequests,
     useRejectPullRequest,
+    useUpdatePullRequestBranch,
 } from "../hooks";
 import { formatDate } from "../utils/format";
 
@@ -269,6 +277,17 @@ function githubMergeBlocked(pr: PullRequestSummary): boolean {
     );
 }
 
+/** Returns whether GitHub reports the pull request branch is behind the base branch. */
+function pullRequestBranchBehind(pr: PullRequestSummary): boolean {
+    return pr.mergeStateStatus?.toUpperCase() === "BEHIND";
+}
+
+/** Returns whether GitHub reports merge conflicts for a pull request. */
+function pullRequestHasConflicts(pr: PullRequestSummary): boolean {
+    const mergeable = pr.mergeable?.toUpperCase();
+    return mergeable === "CONFLICTING" || mergeable === "DIRTY";
+}
+
 /** Returns whether the configured reviewer can approve the pull request review. */
 function canConfiguredReviewerApproveReview(pr: PullRequestSummary): boolean {
     if (typeof pr.reviewerCanApprove === "boolean") {
@@ -430,17 +449,24 @@ function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
                             <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0">
                                     <div className="text-primary-300 text-sm font-medium">
+                                        {deployment.commitTitle ? (
+                                            <div className="truncate">
+                                                {deployment.commitTitle}
+                                            </div>
+                                        ) : null}
                                         {deployment.commitUrl ? (
                                             <a
                                                 href={deployment.commitUrl}
                                                 target="_blank"
                                                 rel="noreferrer"
-                                                className="hover:text-primary-100 break-all"
+                                                className="text-primary-400 hover:text-primary-100 break-all"
                                             >
                                                 {deployment.commit || deployment.id}
                                             </a>
                                         ) : (
-                                            deployment.commit || deployment.id
+                                            <span className="text-primary-400">
+                                                {deployment.commit || deployment.id}
+                                            </span>
                                         )}
                                     </div>
                                     <div className="text-primary-500 text-xs">
@@ -478,6 +504,7 @@ export function PullRequests() {
     const approvePullRequest = useApprovePullRequest();
     const approvePullRequestReview = useApprovePullRequestReview();
     const rejectPullRequest = useRejectPullRequest();
+    const updatePullRequestBranch = useUpdatePullRequestBranch();
     const deployDashboard = useDeployDashboard();
     const [pendingAction, setPendingAction] = useState<PendingAction>(null);
     const [lastResult, setLastResult] = useState<string | null>(null);
@@ -486,6 +513,7 @@ export function PullRequests() {
         approvePullRequest.isPending ||
         approvePullRequestReview.isPending ||
         rejectPullRequest.isPending ||
+        updatePullRequestBranch.isPending ||
         deployDashboard.isPending;
     const isProductionActionBlocked = !productionCheckout?.isSafeForDeploy;
     const miraPullRequests = pullRequests.filter(isMiraPullRequest);
@@ -552,6 +580,8 @@ export function PullRequests() {
         const checksPassed = pullRequestChecksPassed(pr.statusCheckRollup);
         const reviewApproved = pullRequestReviewApproved(pr);
         const mergeBlocked = githubMergeBlocked(pr);
+        const canUpdateBranch =
+            pullRequestBranchBehind(pr) && !pullRequestHasConflicts(pr);
         const mergeDisabled =
             isActionPending ||
             isProductionActionBlocked ||
@@ -602,6 +632,32 @@ export function PullRequests() {
                     >
                         <CheckCircle className="h-4 w-4" />
                         Approve PR
+                    </Button>
+                ) : null}
+                {canUpdateBranch ? (
+                    <Button
+                        variant="secondary"
+                        onClick={async () => {
+                            try {
+                                const result = await updatePullRequestBranch.mutateAsync({
+                                    number: pr.number,
+                                });
+                                setLastResult(result.message);
+                                setActionError(null);
+                            } catch (error_) {
+                                setActionError(
+                                    error_ instanceof Error
+                                        ? error_.message
+                                        : "Action failed"
+                                );
+                            }
+                        }}
+                        disabled={isActionPending}
+                    >
+                        <GitBranch className="h-4 w-4" />
+                        {updatePullRequestBranch.isPending
+                            ? "Updating..."
+                            : "Update branch"}
                     </Button>
                 ) : null}
                 <Button

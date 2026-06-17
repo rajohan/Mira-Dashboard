@@ -61,6 +61,19 @@ export function useUpdateCronJob() {
     });
 }
 
+/** Provides delete cron job. */
+export function useDeleteCronJob() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({ id }: { id: string }) =>
+            apiPostRequired<{ ok: boolean }>(`/cron/jobs/${id}/delete`),
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: cronKeys.jobs() });
+        },
+    });
+}
+
 /** Provides run cron job now. */
 export function useRunCronJobNow() {
     const queryClient = useQueryClient();

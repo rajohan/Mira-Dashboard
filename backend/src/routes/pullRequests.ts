@@ -79,6 +79,7 @@ interface PullRequestSummary {
     createdAt: string;
     updatedAt: string;
     isDraft: boolean;
+    headRefOid?: string;
     mergeable?: string;
     mergeStateStatus?: string;
     reviewDecision?: string;
@@ -111,6 +112,7 @@ interface DeploymentJob {
     startedAt: string;
     updatedAt: string;
     commit?: string;
+    commitTitle?: string;
     commitUrl?: string;
     note?: string;
     stdout?: string;
@@ -165,16 +167,18 @@ function writeDeploymentJob(job: DeploymentJob): void {
             started_at,
             updated_at,
             commit_sha,
+            commit_title,
             note,
             stdout,
             stderr
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             status = excluded.status,
             started_at = excluded.started_at,
             updated_at = excluded.updated_at,
             commit_sha = excluded.commit_sha,
+            commit_title = excluded.commit_title,
             note = excluded.note,
             stdout = excluded.stdout,
             stderr = excluded.stderr
@@ -185,6 +189,7 @@ function writeDeploymentJob(job: DeploymentJob): void {
         job.startedAt,
         job.updatedAt,
         job.commit ?? null,
+        job.commitTitle ?? null,
         job.note ?? null,
         job.stdout ?? null,
         job.stderr ?? null
@@ -208,6 +213,7 @@ interface DeploymentJobRow {
     started_at: string;
     updated_at: string;
     commit_sha: string | null;
+    commit_title: string | null;
     note: string | null;
     stdout: string | null;
     stderr: string | null;
@@ -221,6 +227,7 @@ function mapDeploymentJob(row: DeploymentJobRow): DeploymentJob {
         startedAt: row.started_at,
         updatedAt: row.updated_at,
         commit,
+        commitTitle: row.commit_title ?? undefined,
         commitUrl: commit
             ? `https://github.com/${DASHBOARD_REPO}/commit/${encodeURIComponent(commit)}`
             : undefined,
@@ -241,6 +248,7 @@ function readDeploymentJob(jobId: string): DeploymentJob | undefined {
                 started_at,
                 updated_at,
                 commit_sha,
+                commit_title,
                 note,
                 stdout,
                 stderr
@@ -356,6 +364,7 @@ function readDeploymentJobs(): DeploymentJob[] {
                     started_at,
                     updated_at,
                     commit_sha,
+                    commit_title,
                     note,
                     stdout,
                     stderr
@@ -687,6 +696,7 @@ async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
                         body
                         url
                         headRefName
+                        headRefOid
                         baseRefName
                         author {
                             login
@@ -770,6 +780,7 @@ async function getPullRequest(number: number): Promise<PullRequestSummary> {
                 "body",
                 "url",
                 "headRefName",
+                "headRefOid",
                 "baseRefName",
                 "author",
                 "createdAt",
@@ -921,6 +932,23 @@ function validateDashboardPr(pr: PullRequestSummary): void {
 
     if (pr.isDraft) {
         throw new Error("Draft pull requests cannot be approved from the dashboard");
+    }
+}
+
+/** Validates a pull request can be updated with the latest base branch. */
+function validateDashboardPrForBranchUpdate(pr: PullRequestSummary): void {
+    if (pr.baseRefName !== DEFAULT_BASE) {
+        throw new Error(
+            `Only ${DEFAULT_BASE}-targeted pull requests can be updated here`
+        );
+    }
+
+    if (pr.mergeStateStatus?.toUpperCase() !== "BEHIND") {
+        throw new Error("Pull request branch is not behind the base branch");
+    }
+
+    if (["CONFLICTING", "DIRTY"].includes(pr.mergeable?.toUpperCase() || "")) {
+        throw new Error("Pull request branch has merge conflicts");
     }
 }
 
@@ -1087,16 +1115,18 @@ try {
         started_at,
         updated_at,
         commit_sha,
+        commit_title,
         note,
         stdout,
         stderr
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
         status = excluded.status,
         started_at = excluded.started_at,
         updated_at = excluded.updated_at,
         commit_sha = excluded.commit_sha,
+        commit_title = excluded.commit_title,
         note = excluded.note,
         stdout = excluded.stdout,
         stderr = excluded.stderr
@@ -1106,6 +1136,7 @@ try {
     job.startedAt,
     job.updatedAt,
     job.commit ?? null,
+    job.commitTitle ?? null,
     job.note ?? null,
     job.stdout ?? null,
     job.stderr ?? null
@@ -1200,6 +1231,11 @@ async function runDeploymentJob(job: DeploymentJob): Promise<void> {
                 timeoutMs: 30_000,
             }
         );
+        const { stdout: commitTitle } = await runCommand(
+            "git",
+            ["log", "-1", "--pretty=%s"],
+            { timeoutMs: 30_000 }
+        );
         currentJob = refreshDeploymentHeartbeat(currentJob);
 
         const restartScheduled: DeploymentJob = {
@@ -1207,6 +1243,7 @@ async function runDeploymentJob(job: DeploymentJob): Promise<void> {
             status: "restart-scheduled",
             updatedAt: dateToISOString(new Date()),
             commit: commit.trim(),
+            commitTitle: commitTitle.trim(),
             note: "Build passed; restart + health check scheduled",
         };
         writeDeploymentJob(restartScheduled);
@@ -1366,6 +1403,30 @@ async function approvePullRequestReview(number: number) {
     };
 }
 
+/** Updates one pull request branch with the latest base branch. */
+async function updatePullRequestBranch(number: number) {
+    const pr = await getPullRequest(number);
+    validateDashboardPrForBranchUpdate(pr);
+    const repo = parseRepoParts(DASHBOARD_REPO);
+    const args = [
+        "api",
+        "-X",
+        "PUT",
+        `repos/${repo.owner}/${repo.name}/pulls/${number}/update-branch`,
+    ];
+    if (pr.headRefOid) {
+        args.push("-f", `expected_head_sha=${pr.headRefOid}`);
+    }
+
+    await runCommand("gh", args, { timeoutMs: 60_000 });
+
+    return {
+        ok: true,
+        message: `PR #${number} branch update started`,
+        pullRequest: await getPullRequest(number),
+    };
+}
+
 /** Performs reject pull request. */
 async function rejectPullRequest(number: number, comment: string) {
     const pr = await getPullRequest(number);
@@ -1454,6 +1515,23 @@ export default function pullRequestsRoutes(app: express.Application): void {
     );
 
     app.post(
+        "/api/pull-requests/:number/update-branch",
+        express.json(),
+        asyncRoute(async (req, res) => {
+            let number: number;
+            try {
+                number = validatePrNumber(req.params.number);
+            } catch (error) {
+                res.status(400).json({
+                    error: errorMessage(error, "Invalid pull request number"),
+                });
+                return;
+            }
+            res.json(await updatePullRequestBranch(number));
+        })
+    );
+
+    app.post(
         "/api/pull-requests/:number/reject",
         express.json(),
         asyncRoute(async (req, res) => {
@@ -1499,9 +1577,11 @@ export const __testing = {
     validatePrNumber,
     validateDashboardPr,
     validateDashboardPrForApproval,
+    validateDashboardPrForBranchUpdate,
     validateDashboardPrForReviewApproval,
     validateMiraPr,
     validateMiraPrForApproval,
+    updatePullRequestBranch,
     shellQuote,
     startDeployLatest,
     trimOutput,

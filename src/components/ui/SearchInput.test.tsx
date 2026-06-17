@@ -56,4 +56,22 @@ describe("SearchInput", () => {
             "Search"
         );
     });
+
+    it("clears the value with a default accessible label", async () => {
+        const onChange = vi.fn();
+        render(
+            <SearchInput
+                value="deploy"
+                onChange={onChange}
+                label="Find deployments"
+                placeholder="Search"
+            />
+        );
+
+        await userEvent.click(
+            screen.getByRole("button", { name: "Clear find deployments" })
+        );
+
+        expect(onChange).toHaveBeenCalledWith("");
+    });
 });

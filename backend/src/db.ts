@@ -133,6 +133,7 @@ CREATE TABLE IF NOT EXISTS deployment_jobs (
     started_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     commit_sha TEXT,
+    commit_title TEXT,
     note TEXT,
     stdout TEXT,
     stderr TEXT
@@ -236,6 +237,12 @@ async function initializeDatabase(): Promise<DatabaseSync> {
     initializedDb.exec("PRAGMA foreign_keys = ON");
     initializedDb.exec("PRAGMA busy_timeout = 5000");
     initializedDb.exec(SCHEMA_SQL);
+    const deploymentColumns = initializedDb
+        .prepare("PRAGMA table_info(deployment_jobs)")
+        .all() as Array<{ name: string }>;
+    if (deploymentColumns.every((column) => column.name !== "commit_title")) {
+        initializedDb.exec("ALTER TABLE deployment_jobs ADD COLUMN commit_title TEXT");
+    }
 
     return initializedDb;
 }

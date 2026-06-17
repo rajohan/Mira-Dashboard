@@ -12,6 +12,7 @@ import {
     usePullRequestDeployments,
     usePullRequests,
     useRejectPullRequest,
+    useUpdatePullRequestBranch,
 } from "./usePullRequests";
 
 describe("pull request hooks", () => {
@@ -82,7 +83,16 @@ describe("pull request hooks", () => {
                                   title: "Approved",
                               },
                           }
-                        : { ok: true },
+                        : url.endsWith("/10/update-branch")
+                          ? {
+                                ok: true,
+                                pullRequest: {
+                                    number: 11,
+                                    reviewDecision: "REVIEW_REQUIRED",
+                                    title: "Updated branch",
+                                },
+                            }
+                          : { ok: true },
             };
         });
         vi.stubGlobal("fetch", fetchMock);
@@ -103,6 +113,9 @@ describe("pull request hooks", () => {
                 wrapper,
             }
         );
+        const { result: updateBranch } = renderHook(() => useUpdatePullRequestBranch(), {
+            wrapper,
+        });
         const { result: reject } = renderHook(() => useRejectPullRequest(), { wrapper });
         const { result: deploy } = renderHook(() => useDeployDashboard(), { wrapper });
 
@@ -110,6 +123,7 @@ describe("pull request hooks", () => {
             await approve.current.mutateAsync({ number: 10, deploy: true });
             await reviewApprove.current.mutateAsync({ number: 10 });
             await reviewApprove.current.mutateAsync({ number: 11 });
+            await updateBranch.current.mutateAsync({ number: 10 });
             await reject.current.mutateAsync({ number: 10, comment: "Needs work" });
             await deploy.current.mutateAsync();
         });
@@ -140,11 +154,19 @@ describe("pull request hooks", () => {
         );
         expect(fetchMock).toHaveBeenNthCalledWith(
             4,
+            "/api/pull-requests/10/update-branch",
+            expect.objectContaining({
+                method: "POST",
+                body: JSON.stringify({}),
+            })
+        );
+        expect(fetchMock).toHaveBeenNthCalledWith(
+            5,
             "/api/pull-requests/10/reject",
             expect.objectContaining({ body: JSON.stringify({ comment: "Needs work" }) })
         );
         expect(fetchMock).toHaveBeenNthCalledWith(
-            5,
+            6,
             "/api/pull-requests/deploy",
             expect.objectContaining({ method: "POST" })
         );
@@ -157,7 +179,55 @@ describe("pull request hooks", () => {
         });
         expect(queryClient.getQueryData(pullRequestKeys.list())).toEqual([
             { number: 10, reviewDecision: "APPROVED", title: "Approved" },
-            { number: 11, reviewDecision: "REVIEW_REQUIRED", title: "Unchanged" },
+            { number: 11, reviewDecision: "REVIEW_REQUIRED", title: "Updated branch" },
         ]);
+    });
+
+    it("updates a missing pull request cache when GitHub returns a branch result", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                ok: true,
+                pullRequest: { number: 12, title: "Branch updated" },
+            }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        const queryClient = createTestQueryClient();
+        const wrapper = createQueryWrapper(queryClient);
+        const { result } = renderHook(() => useUpdatePullRequestBranch(), { wrapper });
+
+        await act(async () => {
+            await result.current.mutateAsync({ number: 12 });
+        });
+
+        expect(queryClient.getQueryData(pullRequestKeys.list())).toEqual([]);
+    });
+
+    it("invalidates pull requests when branch updates return no pull request", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ ok: true }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        const queryClient = createTestQueryClient();
+        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const wrapper = createQueryWrapper(queryClient);
+        queryClient.setQueryData(pullRequestKeys.list(), [
+            { number: 12, title: "Existing branch" },
+        ]);
+        const { result } = renderHook(() => useUpdatePullRequestBranch(), { wrapper });
+
+        await act(async () => {
+            await result.current.mutateAsync({ number: 12 });
+        });
+
+        expect(queryClient.getQueryData(pullRequestKeys.list())).toEqual([
+            { number: 12, title: "Existing branch" },
+        ]);
+        expect(invalidateSpy).toHaveBeenCalledWith({
+            queryKey: pullRequestKeys.list(),
+        });
     });
 });
