@@ -1,13 +1,18 @@
 import { db } from "../db.js";
 import { fetchCachedSystemHost } from "../lib/systemCache.js";
 import { pruneReadNotifications } from "./notificationMaintenance.js";
+import {
+    getScheduledJob,
+    registerScheduledJobAction,
+    removeScheduledJobsNotInAction,
+    upsertScheduledJob,
+} from "./scheduledJobs.js";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
 }
 
-const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
-const MAX_TIMER_MS = 2_147_483_647;
+const OPENCLAW_NOTIFICATION_JOB_ID = "notifications.openclaw";
 
 /** Represents alert state. */
 interface AlertState {
@@ -68,12 +73,10 @@ function insertUpdateAvailableNotification(current: string, latest: string): voi
 }
 
 let running = false;
-let monitorTimer: NodeJS.Timeout | undefined;
-
 /** Performs run OpenClaw notification check. */
-export async function runOpenClawNotificationCheck(): Promise<void> {
+export async function runOpenClawNotificationCheck(): Promise<boolean> {
     if (running) {
-        return;
+        return true;
     }
 
     running = true;
@@ -103,41 +106,49 @@ export async function runOpenClawNotificationCheck(): Promise<void> {
                 last_latest: version.latest,
             });
         }
+        return true;
     } catch (error) {
         console.error("[OpenClawNotifications] check failed", error);
+        return false;
     } finally {
         running = false;
     }
 }
 
-/** Performs start OpenClaw notification monitor. */
-export function startOpenClawNotificationMonitor(intervalMs = DEFAULT_INTERVAL_MS): void {
-    const safeInterval =
-        Number.isFinite(intervalMs) && intervalMs >= 60_000
-            ? Math.min(Math.trunc(intervalMs), MAX_TIMER_MS)
-            : DEFAULT_INTERVAL_MS;
-
-    if (monitorTimer) {
-        clearInterval(monitorTimer);
-        monitorTimer = undefined;
+/** Registers OpenClaw update notification checks with the shared scheduler. */
+export function registerOpenClawNotificationScheduledJobs(): void {
+    registerScheduledJobAction("notifications.openclaw", async () => {
+        const ok = await runOpenClawNotificationCheck();
+        if (!ok) {
+            throw new Error("OpenClaw notification check failed");
+        }
+        return { ok: true };
+    });
+    db.exec("BEGIN");
+    try {
+        removeScheduledJobsNotInAction("notifications.openclaw", [
+            OPENCLAW_NOTIFICATION_JOB_ID,
+        ]);
+        const existing = getScheduledJob(OPENCLAW_NOTIFICATION_JOB_ID);
+        upsertScheduledJob({
+            id: OPENCLAW_NOTIFICATION_JOB_ID,
+            name: "OpenClaw notifications",
+            description: "Check cached OpenClaw version status and update notifications.",
+            enabled: existing?.enabled ?? true,
+            scheduleType: existing?.scheduleType ?? "interval",
+            intervalSeconds: existing?.intervalSeconds ?? 60 * 60,
+            timeOfDay: existing?.timeOfDay ?? null,
+            cronExpression: existing?.cronExpression ?? null,
+            actionKey: "notifications.openclaw",
+            actionPayload: {},
+        });
+        db.exec("COMMIT");
+    } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
     }
-
-    void runOpenClawNotificationCheck();
-    monitorTimer = setInterval(() => {
-        void runOpenClawNotificationCheck();
-    }, safeInterval).unref();
-}
-
-/** Stops OpenClaw notification monitor. */
-export function stopOpenClawNotificationMonitor(): void {
-    if (!monitorTimer) {
-        return;
-    }
-    clearInterval(monitorTimer);
-    monitorTimer = undefined;
 }
 
 export const __testing = {
     getState,
-    stopOpenClawNotificationMonitorForTest: stopOpenClawNotificationMonitor,
 };

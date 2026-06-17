@@ -16,6 +16,7 @@ const latestRunsJobIdChunkSize = 900;
 const runningJobs = new Set<string>();
 const scheduledJobRuns = new Set<Promise<void>>();
 const actionHandlers = new Map<string, ScheduledJobActionRegistration>();
+const abortHandlerSettled = new WeakMap<ScheduledJobAbortError, Promise<unknown>>();
 
 let scheduler: NodeJS.Timeout | null = null;
 let schedulerTickRunning = false;
@@ -39,11 +40,13 @@ interface ScheduledJobActionRegistration {
 }
 
 class ScheduledJobAbortError extends Error {
-    readonly handlerSettled: Promise<unknown>;
-
     constructor(handlerSettled: Promise<unknown>) {
         super("Scheduled job aborted");
-        this.handlerSettled = handlerSettled;
+        abortHandlerSettled.set(this, handlerSettled);
+    }
+
+    getHandlerSettled(): Promise<unknown> {
+        return abortHandlerSettled.get(this)!;
     }
 }
 
@@ -125,7 +128,7 @@ interface ScheduledJobRunRow {
 }
 
 export class ScheduledJobValidationError extends Error {
-    statusCode: number;
+    declare statusCode: number;
 
     constructor(message: string) {
         super(message);
@@ -834,7 +837,7 @@ export async function runScheduledJob(
             output = await runActionWithTimeout(timeoutMs, action, job, signal);
         } catch (error) {
             if (error instanceof ScheduledJobAbortError) {
-                await error.handlerSettled;
+                await error.getHandlerSettled();
             }
             return finishRunOrReport(
                 run,

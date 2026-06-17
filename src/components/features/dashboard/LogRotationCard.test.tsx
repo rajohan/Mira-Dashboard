@@ -8,12 +8,17 @@ const hooks = vi.hoisted(() => ({
     useLogRotationStatus: vi.fn(),
     useRunLogRotationDryRun: vi.fn(),
     useRunLogRotationNow: vi.fn(),
+    useScheduledJobs: vi.fn(),
 }));
 
 vi.mock("../../../hooks/useLogRotation", () => ({
     useLogRotationStatus: hooks.useLogRotationStatus,
     useRunLogRotationDryRun: hooks.useRunLogRotationDryRun,
     useRunLogRotationNow: hooks.useRunLogRotationNow,
+}));
+
+vi.mock("../../../hooks/useScheduledJobs", () => ({
+    useScheduledJobs: hooks.useScheduledJobs,
 }));
 
 describe("LogRotationCard", () => {
@@ -50,10 +55,25 @@ describe("LogRotationCard", () => {
             isPending: false,
             mutate: realRunMutate,
         });
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: null,
+                    enabled: true,
+                    id: "ops.log-rotation",
+                    intervalSeconds: 86_400,
+                    name: "Log rotation",
+                    nextRunAt: "2026-05-11T03:15:00.000Z",
+                    scheduleType: "daily",
+                    timeOfDay: "03:15",
+                },
+            ],
+        });
 
         render(<LogRotationCard />);
 
         expect(screen.getByText("Log rotation")).toBeInTheDocument();
+        expect(screen.getByText("03:15 daily")).toBeInTheDocument();
         expect(screen.getByText("3 rotated · 0 errors")).toBeInTheDocument();
         expect(screen.getByText("Last dry-run output")).toBeInTheDocument();
 
@@ -71,6 +91,7 @@ describe("LogRotationCard", () => {
             mutate: vi.fn(),
         });
         hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+        hooks.useScheduledJobs.mockReturnValue({ data: [] });
 
         render(<LogRotationCard />);
 
@@ -84,12 +105,13 @@ describe("LogRotationCard", () => {
             mutate: vi.fn(),
         });
         hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+        hooks.useScheduledJobs.mockReturnValue({ data: undefined });
 
         render(<LogRotationCard />);
 
         expect(screen.getByRole("button", { name: "Running..." })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Run real now" })).toBeDisabled();
-        expect(screen.getByText("Loading...")).toBeInTheDocument();
+        expect(screen.getAllByText("Loading...").length).toBeGreaterThanOrEqual(1);
     });
 
     it("shows real-run pending and last real-run output states", () => {
@@ -103,11 +125,134 @@ describe("LogRotationCard", () => {
             isPending: true,
             mutate: vi.fn(),
         });
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: "10 2 * * *",
+                    enabled: true,
+                    id: "ops.log-rotation",
+                    intervalSeconds: 3600,
+                    name: "Log rotation",
+                    nextRunAt: "2026-05-11T02:10:00.000Z",
+                    scheduleType: "cron",
+                    timeOfDay: null,
+                },
+            ],
+        });
 
         render(<LogRotationCard />);
 
         expect(screen.getByRole("button", { name: "Running..." })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Run dry-run now" })).toBeDisabled();
+        expect(screen.getByText("10 2 * * *")).toBeInTheDocument();
         expect(screen.getByText("Last real run output")).toBeInTheDocument();
+    });
+
+    it("renders disabled and interval scheduled job labels", () => {
+        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
+        hooks.useRunLogRotationDryRun.mockReturnValue({
+            isPending: false,
+            mutate: vi.fn(),
+        });
+        hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: null,
+                    enabled: false,
+                    id: "ops.log-rotation",
+                    intervalSeconds: 7200,
+                    name: "Log rotation",
+                    nextRunAt: null,
+                    scheduleType: "interval",
+                    timeOfDay: null,
+                },
+            ],
+        });
+
+        const { rerender } = render(<LogRotationCard />);
+        expect(screen.getByText("Disabled")).toBeInTheDocument();
+
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: null,
+                    enabled: true,
+                    id: "ops.log-rotation",
+                    intervalSeconds: 7200,
+                    name: "Log rotation",
+                    nextRunAt: "2026-05-11T02:10:00.000Z",
+                    scheduleType: "interval",
+                    timeOfDay: null,
+                },
+            ],
+        });
+
+        rerender(<LogRotationCard />);
+        expect(screen.getByText("Every 2h")).toBeInTheDocument();
+
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: null,
+                    enabled: true,
+                    id: "ops.log-rotation",
+                    intervalSeconds: 900,
+                    name: "Log rotation",
+                    nextRunAt: "2026-05-11T02:10:00.000Z",
+                    scheduleType: "interval",
+                    timeOfDay: null,
+                },
+            ],
+        });
+
+        rerender(<LogRotationCard />);
+        expect(screen.getByText("Every 15m")).toBeInTheDocument();
+    });
+
+    it("does not fall through to interval labels when typed schedules miss details", () => {
+        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
+        hooks.useRunLogRotationDryRun.mockReturnValue({
+            isPending: false,
+            mutate: vi.fn(),
+        });
+        hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: null,
+                    enabled: true,
+                    id: "ops.log-rotation",
+                    intervalSeconds: 7200,
+                    name: "Log rotation",
+                    nextRunAt: "2026-05-11T02:10:00.000Z",
+                    scheduleType: "daily",
+                    timeOfDay: null,
+                },
+            ],
+        });
+
+        const { rerender } = render(<LogRotationCard />);
+        expect(screen.getByText("Daily")).toBeInTheDocument();
+        expect(screen.queryByText("Every 2h")).not.toBeInTheDocument();
+
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: null,
+                    enabled: true,
+                    id: "ops.log-rotation",
+                    intervalSeconds: 7200,
+                    name: "Log rotation",
+                    nextRunAt: "2026-05-11T02:10:00.000Z",
+                    scheduleType: "cron",
+                    timeOfDay: null,
+                },
+            ],
+        });
+
+        rerender(<LogRotationCard />);
+        expect(screen.getByText("Cron schedule")).toBeInTheDocument();
+        expect(screen.queryByText("Every 2h")).not.toBeInTheDocument();
     });
 });
