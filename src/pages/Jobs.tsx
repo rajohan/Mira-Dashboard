@@ -407,8 +407,12 @@ function ScheduledJobDetails({
     );
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+    return error instanceof Error ? error.message : fallback;
+}
+
 /** Renders the jobs UI. */
-export function Cron() {
+export function Jobs() {
     const {
         data: scheduledJobs = [],
         isLoading: scheduledLoading,
@@ -447,6 +451,7 @@ export function Cron() {
     const [timeDraft, setTimeDraft] = useState("");
     const [cronExpressionDraft, setCronExpressionDraft] = useState("");
     const [scheduledEditError, setScheduledEditError] = useState<string | null>(null);
+    const [actionError, setActionError] = useState<string | null>(null);
 
     const selectedScheduledJob =
         sortedScheduledJobs.find((job) => job.id === selectedScheduledJobId) || null;
@@ -486,11 +491,23 @@ export function Cron() {
     }, [currentScheduledJob]);
 
     async function handleScheduledToggle(job: ScheduledJob, enabled: boolean) {
-        await updateScheduledJob.mutateAsync({ id: job.id, patch: { enabled } });
+        try {
+            await updateScheduledJob.mutateAsync({ id: job.id, patch: { enabled } });
+            setActionError(null);
+        } catch (error) {
+            setActionError(
+                getErrorMessage(error, "Failed to update scheduled job state")
+            );
+        }
     }
 
     async function handleScheduledRun(job: ScheduledJob) {
-        await runScheduledJob.mutateAsync({ id: job.id });
+        try {
+            await runScheduledJob.mutateAsync({ id: job.id });
+            setActionError(null);
+        } catch (error) {
+            setActionError(getErrorMessage(error, "Failed to run scheduled job"));
+        }
     }
 
     async function handleScheduledSave(job: ScheduledJob) {
@@ -498,7 +515,7 @@ export function Cron() {
             scheduleType: scheduleTypeDraft,
             intervalSeconds:
                 scheduleTypeDraft === "interval"
-                    ? (parsePositiveInteger(intervalDraft) ?? job.intervalSeconds)
+                    ? Number(intervalDraft)
                     : job.intervalSeconds,
             timeOfDay: scheduleTypeDraft === "daily" ? timeDraft : null,
             cronExpression:
@@ -507,24 +524,33 @@ export function Cron() {
         try {
             await updateScheduledJob.mutateAsync({ id: job.id, patch });
             setScheduledEditError(null);
+            setActionError(null);
         } catch (error) {
-            setScheduledEditError(
-                error instanceof Error ? error.message : "Scheduled job update failed"
-            );
+            setScheduledEditError(getErrorMessage(error, "Scheduled job update failed"));
         }
     }
 
     async function handleCronToggle(job: CronJob, enabled: boolean) {
         const id = getCronJobId(job);
         if (!id) return;
-        await toggleCronJob.mutateAsync({ id, enabled });
+        try {
+            await toggleCronJob.mutateAsync({ id, enabled });
+            setActionError(null);
+        } catch (error) {
+            setActionError(getErrorMessage(error, "Failed to update cron job state"));
+        }
     }
 
     async function handleCronRunNow(job: CronJob) {
         const id = getCronJobId(job);
         if (!id) return;
-        await runCronNow.mutateAsync({ id });
-        setLastCronRunAt((prev) => ({ ...prev, [id]: Date.now() }));
+        try {
+            await runCronNow.mutateAsync({ id });
+            setLastCronRunAt((prev) => ({ ...prev, [id]: Date.now() }));
+            setActionError(null);
+        } catch (error) {
+            setActionError(getErrorMessage(error, "Failed to run cron job"));
+        }
     }
 
     async function handleCronSave(job: CronJob) {
@@ -541,10 +567,9 @@ export function Cron() {
                 },
             });
             setCronEditError(null);
+            setActionError(null);
         } catch (error) {
-            setCronEditError(
-                error instanceof Error ? error.message : "Invalid JSON in edit fields"
-            );
+            setCronEditError(getErrorMessage(error, "Invalid JSON in edit fields"));
         }
     }
 
@@ -554,13 +579,18 @@ export function Cron() {
             setDeleteCandidate(null);
             return;
         }
-        await deleteCronJob.mutateAsync({ id });
-        setSelectedCronJobId("");
-        setDeleteCandidate(null);
+        try {
+            await deleteCronJob.mutateAsync({ id });
+            setSelectedCronJobId("");
+            setDeleteCandidate(null);
+            setActionError(null);
+        } catch (error) {
+            setActionError(getErrorMessage(error, "Failed to delete cron job"));
+        }
     }
 
-    const isLoading = scheduledLoading || cronLoading;
-    const error = scheduledError || cronError;
+    const isLoading = view === "scheduled" ? scheduledLoading : cronLoading;
+    const error = view === "scheduled" ? scheduledError : cronError;
 
     return (
         <PageState
@@ -595,6 +625,15 @@ export function Cron() {
             }
         >
             <div className="space-y-3 p-3 sm:space-y-4 sm:p-4 lg:p-6">
+                {actionError ? (
+                    <Card
+                        variant="bordered"
+                        className="border-red-500/40 bg-red-500/10 p-3"
+                    >
+                        <p className="text-sm text-red-300">{actionError}</p>
+                    </Card>
+                ) : null}
+
                 <Card variant="bordered" className="p-2">
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         <Button

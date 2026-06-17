@@ -25,6 +25,7 @@ const {
     createManualScheduledJobRun,
     finishScheduledJobRun,
     getScheduledJob,
+    listScheduledJobRuns,
     listScheduledJobs,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
@@ -431,6 +432,26 @@ test("lists latest runs for jobs across query chunks", () => {
     assert.equal(jobs.length, 901);
     assert.equal(jobs.at(0)?.lastRun?.message, "cache.job.000.latest");
     assert.equal(jobs.at(-1)?.lastRun?.message, "cache.job.900.latest");
+});
+
+test("lists scheduled job runs with normalized limits", async () => {
+    registerScheduledJobAction("cache.refresh", () => ({}));
+    upsertScheduledJob({
+        id: "cache.weather",
+        name: "Weather cache",
+        enabled: true,
+        scheduleType: "interval",
+        intervalSeconds: 120,
+        actionKey: "cache.refresh",
+    });
+    for (let index = 0; index < 25; index += 1) {
+        await runScheduledJob("cache.weather", "manual");
+    }
+
+    assert.equal(listScheduledJobRuns("cache.weather").length, 20);
+    assert.equal(listScheduledJobRuns("cache.weather", 3).length, 3);
+    assert.equal(listScheduledJobRuns("cache.weather", 0).length, 20);
+    assert.equal(listScheduledJobRuns("cache.weather", 101).length, 25);
 });
 
 test("normalizes non-object JSON payloads from persisted rows", async () => {

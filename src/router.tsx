@@ -9,11 +9,11 @@ import {
 import { Layout } from "./components/layout/Layout";
 import { Agents } from "./pages/Agents";
 import { Chat } from "./pages/Chat";
-import { Cron } from "./pages/Cron";
 import { Dashboard } from "./pages/Dashboard";
 import { Database } from "./pages/Database";
 import { Docker } from "./pages/Docker";
 import { Files } from "./pages/Files";
+import { Jobs } from "./pages/Jobs";
 import { Login } from "./pages/Login";
 import { Logs } from "./pages/Logs";
 import { Moltbook } from "./pages/Moltbook";
@@ -92,10 +92,10 @@ const logsRoute = createRoute({
     component: Logs,
 });
 
-const cronRoute = createRoute({
+const jobsRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
-    path: "/cron",
-    component: Cron,
+    path: "/jobs",
+    component: Jobs,
 });
 
 const pullRequestsRoute = createRoute({
@@ -149,7 +149,7 @@ const routeTree = rootRoute.addChildren([
         sessionsRoute,
         chatRoute,
         logsRoute,
-        cronRoute,
+        jobsRoute,
         pullRequestsRoute,
         filesRoute,
         dockerRoute,
