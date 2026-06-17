@@ -1737,7 +1737,7 @@ function persistLogRotationScheduledFailure(
 ): void {
     const existingState = readLogRotationStateCacheForFailure();
     const structuredLastRun = asRecord(logRotation.result);
-    writeCacheSuccess({
+    writeLogRotationCacheSuccess({
         key: STATE_CACHE_KEY,
         data: {
             ...existingState,

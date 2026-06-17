@@ -210,9 +210,9 @@ function handleQuotaBucket(
 let running = false;
 
 /** Performs run quota notification check. */
-export async function runQuotaNotificationCheck(): Promise<void> {
+export async function runQuotaNotificationCheck(): Promise<boolean> {
     if (running) {
-        return;
+        return true;
     }
 
     running = true;
@@ -237,8 +237,10 @@ export async function runQuotaNotificationCheck(): Promise<void> {
                 handleQuotaBucket(provider, bucket, percent, quotas, occurredAt);
             }
         }
+        return true;
     } catch (error) {
         console.error("[QuotaNotifications] check failed", error);
+        return false;
     } finally {
         running = false;
     }
@@ -247,7 +249,10 @@ export async function runQuotaNotificationCheck(): Promise<void> {
 /** Registers quota notification checks with the shared scheduler. */
 export function registerQuotaNotificationScheduledJobs(): boolean {
     registerScheduledJobAction("notifications.quota", async () => {
-        await runQuotaNotificationCheck();
+        const ok = await runQuotaNotificationCheck();
+        if (!ok) {
+            throw new Error("Quota notification check failed");
+        }
         return { ok: true };
     });
     db.exec("BEGIN");

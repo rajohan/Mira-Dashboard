@@ -74,9 +74,9 @@ function insertUpdateAvailableNotification(current: string, latest: string): voi
 
 let running = false;
 /** Performs run OpenClaw notification check. */
-export async function runOpenClawNotificationCheck(): Promise<void> {
+export async function runOpenClawNotificationCheck(): Promise<boolean> {
     if (running) {
-        return;
+        return true;
     }
 
     running = true;
@@ -106,8 +106,10 @@ export async function runOpenClawNotificationCheck(): Promise<void> {
                 last_latest: version.latest,
             });
         }
+        return true;
     } catch (error) {
         console.error("[OpenClawNotifications] check failed", error);
+        return false;
     } finally {
         running = false;
     }
@@ -116,7 +118,10 @@ export async function runOpenClawNotificationCheck(): Promise<void> {
 /** Registers OpenClaw update notification checks with the shared scheduler. */
 export function registerOpenClawNotificationScheduledJobs(): void {
     registerScheduledJobAction("notifications.openclaw", async () => {
-        await runOpenClawNotificationCheck();
+        const ok = await runOpenClawNotificationCheck();
+        if (!ok) {
+            throw new Error("OpenClaw notification check failed");
+        }
         return { ok: true };
     });
     db.exec("BEGIN");

@@ -59,7 +59,7 @@ function insertSystemHostCacheFromEnv(): void {
 }
 
 describe("OpenClaw update notifications", () => {
-    let runOpenClawNotificationCheck: () => Promise<void>;
+    let runOpenClawNotificationCheck: () => Promise<boolean>;
     let registerOpenClawNotificationScheduledJobs: () => void;
     let getState: () => { is_armed: number; last_latest: string | null };
 
@@ -69,7 +69,7 @@ describe("OpenClaw update notifications", () => {
             openClawNotifications.registerOpenClawNotificationScheduledJobs;
         runOpenClawNotificationCheck = async () => {
             insertSystemHostCacheFromEnv();
-            await openClawNotifications.runOpenClawNotificationCheck();
+            return openClawNotifications.runOpenClawNotificationCheck();
         };
         ({ getState } = openClawNotifications.__testing);
     });
@@ -169,7 +169,7 @@ describe("OpenClaw update notifications", () => {
         const stateBeforeMalformedCache = getState();
 
         process.env.FAKE_OPENCLAW_MISSING_VERSION = "true";
-        await runOpenClawNotificationCheck();
+        assert.equal(await runOpenClawNotificationCheck(), false);
         assert.equal(openClawNotifications().length, 1);
         assert.deepEqual(getState(), stateBeforeMalformedCache);
     });
@@ -207,8 +207,26 @@ describe("OpenClaw update notifications", () => {
                 }
             );
 
+            insertSystemHostCacheFromEnv();
             const run = await runScheduledJob("notifications.openclaw");
             assert.equal(run.status, "success");
+        } finally {
+            db.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run(
+                "notifications.openclaw"
+            );
+            db.exec("BEGIN TRANSACTION");
+        }
+    });
+
+    it("fails scheduled OpenClaw checks when host cache cannot be evaluated", async () => {
+        db.exec("ROLLBACK");
+        try {
+            registerOpenClawNotificationScheduledJobs();
+
+            db.prepare("DELETE FROM cache_entries WHERE key = ?").run("system.host");
+            const run = await runScheduledJob("notifications.openclaw");
+            assert.equal(run.status, "failed");
+            assert.equal(run.message, "OpenClaw notification check failed");
         } finally {
             db.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run(
                 "notifications.openclaw"

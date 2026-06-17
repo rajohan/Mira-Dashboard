@@ -57,7 +57,7 @@ function insertQuotaCacheFromEnv(): void {
 }
 
 describe("quota notifications", () => {
-    let runQuotaNotificationCheck: () => Promise<void>;
+    let runQuotaNotificationCheck: () => Promise<boolean>;
     let registerQuotaNotificationScheduledJobs: () => boolean;
     let quotaTesting: typeof import("./quotaNotifications.js").__testing;
 
@@ -68,7 +68,7 @@ describe("quota notifications", () => {
         const actualRunQuotaNotificationCheck = runQuotaNotificationCheck;
         runQuotaNotificationCheck = async () => {
             insertQuotaCacheFromEnv();
-            await actualRunQuotaNotificationCheck();
+            return actualRunQuotaNotificationCheck();
         };
     });
 
@@ -206,7 +206,11 @@ describe("quota notifications", () => {
             errors.push(args);
         };
         try {
-            await Promise.all([runQuotaNotificationCheck(), runQuotaNotificationCheck()]);
+            const results = await Promise.all([
+                runQuotaNotificationCheck(),
+                runQuotaNotificationCheck(),
+            ]);
+            assert.equal(results.includes(false), true);
             assert.equal(errors.length > 0, true);
             assert.equal(errors[0]?.[0], "[QuotaNotifications] check failed");
 
@@ -265,8 +269,26 @@ describe("quota notifications", () => {
                 }
             );
 
+            insertQuotaCacheFromEnv();
             const run = await runScheduledJob("notifications.quota");
             assert.equal(run.status, "success");
+        } finally {
+            db.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run(
+                "notifications.quota"
+            );
+            db.exec("BEGIN TRANSACTION");
+        }
+    });
+
+    it("fails scheduled quota checks when quotas cannot be evaluated", async () => {
+        db.exec("ROLLBACK");
+        try {
+            assert.equal(registerQuotaNotificationScheduledJobs(), true);
+
+            db.prepare("DELETE FROM cache_entries WHERE key = ?").run("quotas.summary");
+            const run = await runScheduledJob("notifications.quota");
+            assert.equal(run.status, "failed");
+            assert.equal(run.message, "Quota notification check failed");
         } finally {
             db.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run(
                 "notifications.quota"

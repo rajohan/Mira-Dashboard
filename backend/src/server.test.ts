@@ -719,6 +719,7 @@ describe("server bootstrap", () => {
                 Promise.reject(quotaSeedError),
                 async () => {
                     quotaCheckRan = true;
+                    return true;
                 }
             );
             await new Promise((resolve) => setImmediate(resolve));
