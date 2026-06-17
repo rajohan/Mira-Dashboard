@@ -12,7 +12,7 @@ import {
 describe("docker formatters", () => {
     it("formats byte values with stable units and fallbacks", () => {
         expect(formatBytes(0)).toBe("0 B");
-        expect(formatBytes(NaN)).toBe("0 B");
+        expect(formatBytes(Number("NaN"))).toBe("0 B");
         expect(formatBytes(512)).toBe("512 B");
         expect(formatBytes(1536)).toBe("1.5 KB");
         expect(formatBytes(10 * 1024 ** 2)).toBe("10 MB");

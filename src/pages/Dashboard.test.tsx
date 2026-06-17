@@ -203,7 +203,7 @@ describe("Dashboard page", () => {
             weather: {
                 data: {
                     description,
-                    feelsLikeC: NaN,
+                    feelsLikeC: Number("NaN"),
                     forecast: [
                         {
                             date: "2026-05-13",
@@ -214,7 +214,7 @@ describe("Dashboard page", () => {
                     ],
                     humidityPercent: undefined,
                     location: "Spydeberg",
-                    temperatureC: NaN,
+                    temperatureC: Number("NaN"),
                     windKph: undefined,
                 },
                 isError: false,

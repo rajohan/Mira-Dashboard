@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import express, { type RequestHandler } from "express";
 
 import { db } from "../db.js";
-import { asyncRoute as baseAsyncRoute } from "../lib/errors.js";
+import { asyncRoute as baseAsyncRoute, errorMessage } from "../lib/errors.js";
 import {
     arrayFallback,
     nonEmptyEnvFallback,
@@ -17,6 +17,12 @@ import {
     type DockerUpdaterStepResult,
     runDockerUpdaterService,
 } from "../services/dockerUpdater.js";
+import {
+    createManualScheduledJobRun,
+    finishScheduledJobRun,
+    getScheduledJob,
+    type ScheduledJobRun,
+} from "../services/scheduledJobs.js";
 
 const execFileAsync = promisify(execFile);
 const DOCKER_ROOT = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
@@ -794,6 +800,81 @@ function firstFailedStepCode(steps: DockerUpdaterStepResult[]): string | undefin
     return steps.find((step) => !step.ok)?.code;
 }
 
+function createDockerUpdaterManualScheduledRun(): ScheduledJobRun | null {
+    if (!getScheduledJob("docker.updater")) {
+        return null;
+    }
+    try {
+        return createManualScheduledJobRun("docker.updater");
+    } catch (error) {
+        console.warn("[Docker] Failed to record manual updater run:", error);
+        return null;
+    }
+}
+
+function finishDockerUpdaterManualScheduledRun(
+    run: ScheduledJobRun | null,
+    success: boolean,
+    message: string | null,
+    output: Record<string, unknown>
+): void {
+    if (!run) {
+        return;
+    }
+    finishScheduledJobRun(run, success ? "success" : "failed", message, output);
+}
+
+async function runTrackedDockerUpdaterNow() {
+    const run = createDockerUpdaterManualScheduledRun();
+    try {
+        const steps = await runDockerUpdaterNow();
+        const success = steps.every((step) => step.ok);
+        const message = success
+            ? null
+            : steps
+                  .filter((step) => !step.ok)
+                  .map((step) => step.stderr)
+                  .filter(Boolean)
+                  .join("\n") || "Docker updater failed";
+        finishDockerUpdaterManualScheduledRun(run, success, message, { steps });
+        return steps;
+    } catch (error) {
+        finishDockerUpdaterManualScheduledRun(
+            run,
+            false,
+            errorMessage(error, "Docker updater failed"),
+            {}
+        );
+        throw error;
+    }
+}
+
+async function runTrackedManualUpdaterForService(service: DockerUpdaterService) {
+    const run = createDockerUpdaterManualScheduledRun();
+    try {
+        const result = await runManualUpdaterForService(service);
+        finishDockerUpdaterManualScheduledRun(
+            run,
+            result.success,
+            result.success ? null : result.stderr || "Docker updater failed",
+            {
+                serviceId: service.id,
+                result: result.output,
+                steps: result.steps,
+            }
+        );
+        return result;
+    } catch (error) {
+        finishDockerUpdaterManualScheduledRun(
+            run,
+            false,
+            errorMessage(error, "Docker updater failed"),
+            { serviceId: service.id }
+        );
+        throw error;
+    }
+}
+
 /** Represents one Docker updater event row. */
 interface DockerUpdaterEventRow {
     id: string;
@@ -1195,7 +1276,7 @@ export default function dockerRoutes(app: express.Application): void {
         "/api/docker/updater/run",
         express.json(),
         asyncRoute(async (_req, res) => {
-            const steps = await runDockerUpdaterNow();
+            const steps = await runTrackedDockerUpdaterNow();
             res.json({
                 success: steps.every((step) => step.ok),
                 steps,
@@ -1227,7 +1308,7 @@ export default function dockerRoutes(app: express.Application): void {
                 return;
             }
 
-            const result = await runManualUpdaterForService(service);
+            const result = await runTrackedManualUpdaterForService(service);
             if (!result.success && result.code === "NOT_FOUND") {
                 res.status(404).json({
                     error: result.stderr || "Updater service not found",

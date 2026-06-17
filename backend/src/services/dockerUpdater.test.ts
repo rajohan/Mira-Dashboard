@@ -2636,18 +2636,13 @@ setTimeout(() => {
             assert.equal(row.time_of_day, "04:10");
             assert.equal(row.action_key, "docker.updater");
 
-            dbHandle
-                .prepare(
-                    `UPDATE scheduled_jobs
-                     SET schedule_type = 'interval',
-                         interval_seconds = 3600,
-                         time_of_day = NULL,
-                         cron_expression = NULL
-                     WHERE id = 'docker.updater'`
-                )
-                .run();
+            scheduledJobs.updateScheduledJob("docker.updater", {
+                intervalSeconds: 7200,
+                scheduleType: "interval",
+                timeOfDay: null,
+            });
             updater.registerDockerUpdaterScheduledJobs();
-            const migratedRow = dbHandle
+            const preservedRow = dbHandle
                 .prepare(
                     `SELECT schedule_type, interval_seconds, time_of_day
                      FROM scheduled_jobs WHERE id = 'docker.updater'`
@@ -2657,9 +2652,9 @@ setTimeout(() => {
                 schedule_type: string;
                 time_of_day: string | null;
             };
-            assert.equal(migratedRow.schedule_type, "daily");
-            assert.equal(migratedRow.interval_seconds, 86_400);
-            assert.equal(migratedRow.time_of_day, "04:10");
+            assert.equal(preservedRow.schedule_type, "interval");
+            assert.equal(preservedRow.interval_seconds, 7200);
+            assert.equal(preservedRow.time_of_day, null);
 
             const run = await scheduledJobs.runScheduledJob("docker.updater", "manual");
             assert.equal(run.status, "success");

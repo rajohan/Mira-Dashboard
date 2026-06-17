@@ -10,6 +10,7 @@ import YAML from "yaml";
 
 import { db } from "../db.js";
 import { nonEmptyEnvFallback } from "../lib/values.js";
+import type { ScheduledJob } from "./scheduledJobs.js";
 import {
     getScheduledJob,
     registerScheduledJobAction,
@@ -2089,6 +2090,16 @@ export async function runDockerUpdaterService(
     return [register, poll, ...applyResults];
 }
 
+function preservedTimeOfDay(
+    existing: ScheduledJob | null,
+    fallback: string
+): string | null {
+    if (!existing) {
+        return fallback;
+    }
+    return existing.timeOfDay;
+}
+
 export function registerDockerUpdaterScheduledJobs(): void {
     const job = {
         id: "docker.updater",
@@ -2120,19 +2131,12 @@ export function registerDockerUpdaterScheduledJobs(): void {
     try {
         removeScheduledJobsNotInAction("docker.updater", [job.id]);
         const existing = getScheduledJob(job.id);
-        const shouldMigrateHourlyDefault =
-            existing?.scheduleType === "interval" &&
-            existing.intervalSeconds === 60 * 60 &&
-            !existing.timeOfDay &&
-            !existing.cronExpression;
-        const preservedExisting =
-            existing && !shouldMigrateHourlyDefault ? existing : null;
         upsertScheduledJob({
             ...job,
             enabled: existing?.enabled ?? true,
-            scheduleType: preservedExisting?.scheduleType ?? job.scheduleType,
-            intervalSeconds: preservedExisting?.intervalSeconds ?? job.intervalSeconds,
-            timeOfDay: preservedExisting?.timeOfDay ?? job.timeOfDay,
+            scheduleType: existing?.scheduleType ?? job.scheduleType,
+            intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
+            timeOfDay: preservedTimeOfDay(existing, job.timeOfDay),
             cronExpression: existing?.cronExpression ?? null,
         });
         db.exec("COMMIT");

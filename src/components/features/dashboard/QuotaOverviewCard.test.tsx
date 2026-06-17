@@ -317,7 +317,7 @@ describe("QuotaOverviewCard", () => {
         const RealDate = Date;
         const MockDate = function (this: Date, ...args: unknown[]) {
             if (args.length === 7) {
-                return new RealDate(NaN);
+                return new RealDate(Number("NaN"));
             }
 
             if (new.target) {
