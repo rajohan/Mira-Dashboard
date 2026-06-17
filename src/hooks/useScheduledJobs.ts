@@ -1,17 +1,47 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiFetchRequired } from "./useApi";
+import { apiFetchRequired, apiPatchRequired, apiPostRequired } from "./useApi";
 
 /** Represents a backend-native scheduled job. */
 export interface ScheduledJob {
     id: string;
     name: string;
+    description: string;
     enabled: boolean;
     scheduleType: "interval" | "daily" | "cron";
     intervalSeconds: number;
     timeOfDay: string | null;
     cronExpression: string | null;
+    actionKey: string;
+    actionPayload: Record<string, unknown>;
     nextRunAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+    lastRun: ScheduledJobRun | null;
+    isRunning: boolean;
+}
+
+/** Represents a backend-native scheduled job run. */
+export interface ScheduledJobRun {
+    id: number;
+    jobId: string;
+    status: "running" | "success" | "failed";
+    triggerType: "manual" | "schedule";
+    startedAt: string;
+    finishedAt: string | null;
+    message: string | null;
+    output: Record<string, unknown>;
+}
+
+export type ScheduledJobPatch = Partial<
+    Pick<
+        ScheduledJob,
+        "cronExpression" | "enabled" | "intervalSeconds" | "scheduleType" | "timeOfDay"
+    >
+>;
+
+interface ScheduledJobRunsResponse {
+    runs: ScheduledJobRun[];
 }
 
 interface ScheduledJobsResponse {
@@ -22,6 +52,7 @@ interface ScheduledJobsResponse {
 export const scheduledJobKeys = {
     all: ["scheduled-jobs"] as const,
     list: () => [...scheduledJobKeys.all, "list"] as const,
+    runs: (id: string) => [...scheduledJobKeys.all, "runs", id] as const,
 };
 
 /** Provides backend-native scheduled jobs. */
@@ -31,5 +62,56 @@ export function useScheduledJobs() {
         queryFn: () => apiFetchRequired<ScheduledJobsResponse>("/jobs"),
         select: (data) => data.jobs,
         refetchInterval: 30_000,
+    });
+}
+
+/** Provides backend-native scheduled job runs. */
+export function useScheduledJobRuns(id: string) {
+    return useQuery({
+        queryKey: scheduledJobKeys.runs(id),
+        queryFn: () =>
+            apiFetchRequired<ScheduledJobRunsResponse>(
+                `/jobs/${encodeURIComponent(id)}/runs`
+            ),
+        select: (data) => data.runs,
+        enabled: id.length > 0,
+        refetchInterval: 30_000,
+    });
+}
+
+/** Provides scheduled job update. */
+export function useUpdateScheduledJob() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({ id, patch }: { id: string; patch: ScheduledJobPatch }) =>
+            apiPatchRequired<{ ok: boolean; job: ScheduledJob }>(
+                `/jobs/${encodeURIComponent(id)}`,
+                { patch }
+            ),
+        onSuccess: (_data, variables) => {
+            void queryClient.invalidateQueries({ queryKey: scheduledJobKeys.list() });
+            void queryClient.invalidateQueries({
+                queryKey: scheduledJobKeys.runs(variables.id),
+            });
+        },
+    });
+}
+
+/** Provides scheduled job manual run. */
+export function useRunScheduledJobNow() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({ id }: { id: string }) =>
+            apiPostRequired<{ ok: boolean; run: ScheduledJobRun }>(
+                `/jobs/${encodeURIComponent(id)}/run`
+            ),
+        onSuccess: (_data, variables) => {
+            void queryClient.invalidateQueries({ queryKey: scheduledJobKeys.list() });
+            void queryClient.invalidateQueries({
+                queryKey: scheduledJobKeys.runs(variables.id),
+            });
+        },
     });
 }

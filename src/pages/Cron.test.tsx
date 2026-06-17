@@ -8,13 +8,20 @@ const hooks = vi.hoisted(() => ({
     refetch: vi.fn(),
     deleteJob: vi.fn(),
     runNow: vi.fn(),
+    runScheduledNow: vi.fn(),
+    scheduledRunsRefetch: vi.fn(),
     toggleJob: vi.fn(),
     updateJob: vi.fn(),
+    updateScheduledJob: vi.fn(),
     useCronJobs: vi.fn(),
     useDeleteCronJob: vi.fn(),
     useRunCronJobNow: vi.fn(),
+    useRunScheduledJobNow: vi.fn(),
+    useScheduledJobRuns: vi.fn(),
+    useScheduledJobs: vi.fn(),
     useToggleCronJob: vi.fn(),
     useUpdateCronJob: vi.fn(),
+    useUpdateScheduledJob: vi.fn(),
 }));
 
 interface MockCronJob {
@@ -31,8 +38,12 @@ vi.mock("../hooks", () => ({
     useCronJobs: hooks.useCronJobs,
     useDeleteCronJob: hooks.useDeleteCronJob,
     useRunCronJobNow: hooks.useRunCronJobNow,
+    useRunScheduledJobNow: hooks.useRunScheduledJobNow,
+    useScheduledJobRuns: hooks.useScheduledJobRuns,
+    useScheduledJobs: hooks.useScheduledJobs,
     useToggleCronJob: hooks.useToggleCronJob,
     useUpdateCronJob: hooks.useUpdateCronJob,
+    useUpdateScheduledJob: hooks.useUpdateScheduledJob,
 }));
 
 vi.mock("../components/features/cron", () => ({
@@ -170,14 +181,98 @@ function mockCronJobs(overrides = {}) {
     });
 }
 
+function mockScheduledJobs(overrides = {}) {
+    hooks.useScheduledJobs.mockReturnValue({
+        data: [
+            {
+                actionKey: "cache.prune",
+                actionPayload: { cache: "deployments" },
+                createdAt: "2026-06-17T20:00:00.000Z",
+                cronExpression: null,
+                description: "Trim expired cache entries",
+                enabled: true,
+                id: "cache.cleanup",
+                intervalSeconds: 3600,
+                isRunning: false,
+                lastRun: {
+                    finishedAt: "2026-06-17T21:00:10.000Z",
+                    id: 7,
+                    jobId: "cache.cleanup",
+                    message: null,
+                    output: { deleted: 4 },
+                    startedAt: "2026-06-17T21:00:00.000Z",
+                    status: "success",
+                    triggerType: "schedule",
+                },
+                name: "Cache cleanup",
+                nextRunAt: "2026-06-17T22:00:00.000Z",
+                scheduleType: "interval",
+                timeOfDay: null,
+                updatedAt: "2026-06-17T21:00:10.000Z",
+            },
+            {
+                actionKey: "backup.run",
+                actionPayload: { target: "kopia" },
+                createdAt: "2026-06-17T20:00:00.000Z",
+                cronExpression: null,
+                description: "Run nightly backup",
+                enabled: false,
+                id: "backup.kopia",
+                intervalSeconds: 86_400,
+                isRunning: false,
+                lastRun: null,
+                name: "Backup",
+                nextRunAt: null,
+                scheduleType: "daily",
+                timeOfDay: "04:10",
+                updatedAt: "2026-06-17T21:00:10.000Z",
+            },
+        ],
+        error: null,
+        isLoading: false,
+        refetch: hooks.refetch,
+        ...overrides,
+    });
+}
+
+function mockScheduledRuns(overrides = {}) {
+    hooks.useScheduledJobRuns.mockReturnValue({
+        data: [
+            {
+                finishedAt: "2026-06-17T21:00:10.000Z",
+                id: 7,
+                jobId: "cache.cleanup",
+                message: null,
+                output: { deleted: 4 },
+                startedAt: "2026-06-17T21:00:00.000Z",
+                status: "success",
+                triggerType: "schedule",
+            },
+        ],
+        error: null,
+        isLoading: false,
+        refetch: hooks.scheduledRunsRefetch,
+        ...overrides,
+    });
+}
+
+async function switchToOpenClawCron(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole("button", { name: /OpenClaw cron/ }));
+}
+
 describe("Cron page", () => {
     beforeEach(() => {
         hooks.refetch.mockReset();
         hooks.deleteJob.mockResolvedValue(Promise.resolve({}));
         hooks.runNow.mockResolvedValue(Promise.resolve({}));
+        hooks.runScheduledNow.mockResolvedValue(Promise.resolve({}));
+        hooks.scheduledRunsRefetch.mockReset();
         hooks.toggleJob.mockResolvedValue(Promise.resolve({}));
         hooks.updateJob.mockResolvedValue(Promise.resolve({}));
+        hooks.updateScheduledJob.mockResolvedValue(Promise.resolve({}));
         hooks.useCronJobs.mockReset();
+        hooks.useScheduledJobs.mockReset();
+        hooks.useScheduledJobRuns.mockReset();
         hooks.useDeleteCronJob.mockReturnValue({
             isPending: false,
             mutateAsync: hooks.deleteJob,
@@ -185,6 +280,10 @@ describe("Cron page", () => {
         hooks.useRunCronJobNow.mockReturnValue({
             isPending: false,
             mutateAsync: hooks.runNow,
+        });
+        hooks.useRunScheduledJobNow.mockReturnValue({
+            isPending: false,
+            mutateAsync: hooks.runScheduledNow,
         });
         hooks.useToggleCronJob.mockReturnValue({
             isPending: false,
@@ -194,13 +293,20 @@ describe("Cron page", () => {
             isPending: false,
             mutateAsync: hooks.updateJob,
         });
+        hooks.useUpdateScheduledJob.mockReturnValue({
+            isPending: false,
+            mutateAsync: hooks.updateScheduledJob,
+        });
         mockCronJobs();
+        mockScheduledJobs();
+        mockScheduledRuns();
     });
 
     it("renders loading, error retry, and empty states", async () => {
         const user = userEvent.setup();
         const { container, rerender } = render(<Cron />);
 
+        mockScheduledJobs({ data: [], isLoading: true });
         hooks.useCronJobs.mockReturnValue({
             data: [],
             error: null,
@@ -210,17 +316,11 @@ describe("Cron page", () => {
         rerender(<Cron />);
         expect(container.querySelector(":scope .animate-spin")).toBeInTheDocument();
 
-        hooks.useCronJobs.mockReturnValue({
+        mockScheduledJobs({
             data: [],
-            error: new Error("Cron unavailable"),
+            error: new Error("Jobs unavailable"),
             isLoading: false,
-            refetch: hooks.refetch,
         });
-        rerender(<Cron />);
-        expect(screen.getByText("Cron unavailable")).toBeInTheDocument();
-        await user.click(screen.getByRole("button", { name: "Retry" }));
-        expect(hooks.refetch).toHaveBeenCalledTimes(1);
-
         hooks.useCronJobs.mockReturnValue({
             data: [],
             error: null,
@@ -228,13 +328,68 @@ describe("Cron page", () => {
             refetch: hooks.refetch,
         });
         rerender(<Cron />);
-        expect(screen.getByText("No cron jobs found")).toBeInTheDocument();
+        expect(screen.getByText("Jobs unavailable")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Retry" }));
+        expect(hooks.refetch).toHaveBeenCalledTimes(2);
+
+        mockScheduledJobs({ data: [], error: null, isLoading: false });
+        hooks.useCronJobs.mockReturnValue({
+            data: [],
+            error: null,
+            isLoading: false,
+            refetch: hooks.refetch,
+        });
+        rerender(<Cron />);
+        expect(screen.getByText("No jobs found")).toBeInTheDocument();
+    });
+
+    it("renders dashboard jobs and exposes logs", async () => {
+        const user = userEvent.setup();
+
+        render(<Cron />);
+
+        expect(screen.getByText("Dashboard jobs")).toBeInTheDocument();
+        expect(screen.getAllByText("Backup").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("Cache cleanup").length).toBeGreaterThan(0);
+        expect(screen.getByText("schedule run #7")).toBeInTheDocument();
+        expect(screen.getByText(/"deleted": 4/)).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Run now" }));
+        await user.click(screen.getByRole("switch", { name: "Enabled" }));
+
+        expect(hooks.runScheduledNow).toHaveBeenCalledWith({ id: "backup.kopia" });
+        expect(hooks.updateScheduledJob).toHaveBeenCalledWith({
+            id: "backup.kopia",
+            patch: { enabled: true },
+        });
+    });
+
+    it("saves dashboard job schedules", async () => {
+        const user = userEvent.setup();
+
+        render(<Cron />);
+
+        await user.click(screen.getByRole("button", { name: "Schedule type: Daily" }));
+        await user.click(screen.getByRole("menuitem", { name: /Interval/ }));
+        const intervalInput = screen.getByDisplayValue("86400");
+        await user.clear(intervalInput);
+        await user.type(intervalInput, "7200");
+        await user.click(screen.getByRole("button", { name: "Save schedule" }));
+
+        expect(hooks.updateScheduledJob).toHaveBeenCalledWith({
+            id: "backup.kopia",
+            patch: expect.objectContaining({
+                intervalSeconds: 7200,
+                scheduleType: "interval",
+            }),
+        });
     });
 
     it("renders sorted jobs and selects a job", async () => {
         const user = userEvent.setup();
 
         render(<Cron />);
+        await switchToOpenClawCron(user);
 
         expect(await screen.findByTestId("cron-list")).toHaveTextContent("jobs: 2");
         expect(screen.getByTestId("cron-list")).toHaveTextContent("current: daily");
@@ -251,6 +406,7 @@ describe("Cron page", () => {
         const user = userEvent.setup();
 
         render(<Cron />);
+        await switchToOpenClawCron(user);
 
         await user.click(screen.getByRole("button", { name: "Disable" }));
         await user.click(screen.getByRole("button", { name: "Run now" }));
@@ -276,6 +432,7 @@ describe("Cron page", () => {
         const user = userEvent.setup();
 
         render(<Cron />);
+        await switchToOpenClawCron(user);
 
         await user.click(screen.getByRole("button", { name: "Delete cron" }));
         expect(screen.getByText("Delete Daily summary?")).toBeInTheDocument();
@@ -304,6 +461,7 @@ describe("Cron page", () => {
         });
 
         render(<Cron />);
+        await switchToOpenClawCron(user);
 
         hooks.deleteJob.mockClear();
         await user.click(screen.getByRole("button", { name: "Delete cron" }));
@@ -327,6 +485,7 @@ describe("Cron page", () => {
         });
 
         render(<Cron />);
+        await switchToOpenClawCron(user);
 
         await user.click(screen.getByRole("button", { name: "Delete cron" }));
 
@@ -341,6 +500,7 @@ describe("Cron page", () => {
         });
 
         render(<Cron />);
+        await switchToOpenClawCron(user);
         await user.click(screen.getByRole("button", { name: "Delete cron" }));
         await user.click(screen.getByRole("button", { name: "Cancel" }));
 
@@ -351,6 +511,7 @@ describe("Cron page", () => {
         const user = userEvent.setup();
 
         render(<Cron />);
+        await switchToOpenClawCron(user);
 
         await user.click(screen.getByRole("button", { name: "Edit" }));
         await user.click(screen.getByRole("button", { name: "Invalid schedule" }));
@@ -367,6 +528,7 @@ describe("Cron page", () => {
         hooks.updateJob.mockRejectedValueOnce("nope");
 
         render(<Cron />);
+        await switchToOpenClawCron(user);
 
         await user.click(screen.getByRole("button", { name: "Save" }));
 
@@ -389,6 +551,7 @@ describe("Cron page", () => {
         });
 
         render(<Cron />);
+        await switchToOpenClawCron(user);
 
         expect(await screen.findByTestId("cron-details")).toHaveTextContent(
             "job: Missing id"
@@ -417,6 +580,7 @@ describe("Cron page", () => {
         });
 
         render(<Cron />);
+        await switchToOpenClawCron(user);
 
         expect(await screen.findByTestId("cron-details")).toHaveTextContent(
             "name draft:"

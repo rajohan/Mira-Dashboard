@@ -83,6 +83,18 @@ export {
     useUpdatePullRequestBranch,
 } from "./usePullRequests";
 export { hasQuotaStatus, useQuotas } from "./useQuotas";
+export type {
+    ScheduledJob,
+    ScheduledJobPatch,
+    ScheduledJobRun,
+} from "./useScheduledJobs";
+export {
+    scheduledJobKeys,
+    useRunScheduledJobNow,
+    useScheduledJobRuns,
+    useScheduledJobs,
+    useUpdateScheduledJob,
+} from "./useScheduledJobs";
 export { sessionKeys, useDeleteSession, useSessionAction } from "./useSessions";
 export {
     taskKeys,

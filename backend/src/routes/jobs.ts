@@ -8,6 +8,7 @@ import {
 import {
     getScheduledJob,
     isScheduledJobValidationError,
+    listScheduledJobRuns,
     listScheduledJobs,
     runScheduledJob,
     type ScheduledJobScheduleType,
@@ -153,6 +154,18 @@ export default function jobsRoutes(app: express.Application): void {
                 }
                 throw error;
             }
+        })
+    );
+
+    app.get(
+        "/api/jobs/:id/runs",
+        asyncRoute((req, res) => {
+            const job = getScheduledJob(String(req.params.id));
+            if (!job) {
+                res.status(404).json({ error: "Scheduled job not found" });
+                return;
+            }
+            res.json({ runs: listScheduledJobRuns(job.id) });
         })
     );
 
