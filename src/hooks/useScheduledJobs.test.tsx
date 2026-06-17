@@ -143,4 +143,60 @@ describe("useScheduledJobs", () => {
             expect.objectContaining({ method: "POST" })
         );
     });
+
+    it("rejects failed manual scheduled job runs", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            text: async () =>
+                JSON.stringify({
+                    ok: false,
+                    run: {
+                        finishedAt: "2026-05-11T02:10:01.000Z",
+                        id: 44,
+                        jobId: "ops.log-rotation",
+                        message: "Rotation failed",
+                        output: {},
+                        startedAt: "2026-05-11T02:10:00.000Z",
+                        status: "failed",
+                        triggerType: "manual",
+                    },
+                }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useRunScheduledJobNow(), { wrapper });
+
+        await expect(
+            result.current.mutateAsync({ id: "ops.log-rotation" })
+        ).rejects.toThrow("Rotation failed");
+    });
+
+    it("uses a fallback error for failed manual runs without messages", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            text: async () =>
+                JSON.stringify({
+                    ok: true,
+                    run: {
+                        finishedAt: "2026-05-11T02:10:01.000Z",
+                        id: 45,
+                        jobId: "ops.log-rotation",
+                        message: null,
+                        output: {},
+                        startedAt: "2026-05-11T02:10:00.000Z",
+                        status: "failed",
+                        triggerType: "manual",
+                    },
+                }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { result } = renderHook(() => useRunScheduledJobNow(), { wrapper });
+
+        await expect(
+            result.current.mutateAsync({ id: "ops.log-rotation" })
+        ).rejects.toThrow("Scheduled job run failed");
+    });
 });

@@ -294,6 +294,7 @@ async function switchToOpenClawCron(user: ReturnType<typeof userEvent.setup>) {
 
 describe("Jobs page", () => {
     beforeEach(() => {
+        window.history.replaceState(null, "", "/jobs");
         hooks.refetch.mockReset();
         hooks.deleteJob.mockResolvedValue(Promise.resolve({}));
         hooks.runNow.mockResolvedValue(Promise.resolve({}));
@@ -362,7 +363,7 @@ describe("Jobs page", () => {
         rerender(<Jobs />);
         expect(screen.getByText("Jobs unavailable")).toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: "Retry" }));
-        expect(hooks.refetch).toHaveBeenCalledTimes(2);
+        expect(hooks.refetch).toHaveBeenCalledTimes(1);
 
         mockScheduledJobs({ data: [], error: null, isLoading: false });
         hooks.useCronJobs.mockReturnValue({
@@ -373,6 +374,32 @@ describe("Jobs page", () => {
         });
         rerender(<Jobs />);
         expect(screen.getByText("No jobs found")).toBeInTheDocument();
+    });
+
+    it("shows empty and error states only for the active tab", async () => {
+        const user = userEvent.setup();
+        mockScheduledJobs({ data: [], error: null, isLoading: false });
+
+        const { rerender } = render(<Jobs />);
+
+        expect(
+            screen.getByText("Dashboard scheduled jobs will appear here.")
+        ).toBeInTheDocument();
+
+        await switchToOpenClawCron(user);
+        expect(screen.getByTestId("cron-list")).toHaveTextContent("jobs: 2");
+
+        mockScheduledJobs({
+            data: [],
+            error: new Error("Jobs unavailable"),
+            isLoading: false,
+        });
+        await user.click(screen.getByRole("button", { name: /Dashboard jobs/ }));
+        rerender(<Jobs />);
+
+        expect(screen.getByText("Jobs unavailable")).toBeInTheDocument();
+        await switchToOpenClawCron(user);
+        expect(screen.getByTestId("cron-list")).toHaveTextContent("jobs: 2");
     });
 
     it("keeps the active dashboard jobs view available when OpenClaw cron fails", async () => {
@@ -443,7 +470,7 @@ describe("Jobs page", () => {
                     description: "",
                     enabled: true,
                     id: "cache.fast",
-                    intervalSeconds: 1800,
+                    intervalSeconds: 30,
                     isRunning: false,
                     lastRun: {
                         finishedAt: "2026-06-17T21:00:05.000Z",
@@ -555,12 +582,30 @@ describe("Jobs page", () => {
                     timeOfDay: null,
                     updatedAt: "2026-06-17T21:00:10.000Z",
                 },
+                {
+                    actionKey: "jobs.minutes",
+                    actionPayload: {},
+                    createdAt: "2026-06-17T20:00:00.000Z",
+                    cronExpression: null,
+                    description: "",
+                    enabled: true,
+                    id: "jobs.minutes",
+                    intervalSeconds: 90,
+                    isRunning: false,
+                    lastRun: null,
+                    name: "Minute interval",
+                    nextRunAt: null,
+                    scheduleType: "interval",
+                    timeOfDay: null,
+                    updatedAt: "2026-06-17T21:00:10.000Z",
+                },
             ],
         });
 
         render(<Jobs />);
 
-        expect(screen.getByText("Schedule: Every 30m")).toBeInTheDocument();
+        expect(screen.getByText("Schedule: Every 30s")).toBeInTheDocument();
+        expect(screen.getByText("Schedule: Every 2m")).toBeInTheDocument();
         expect(screen.getByText("Schedule: Cron schedule")).toBeInTheDocument();
         expect(screen.getByText("Schedule: Daily at 05:30")).toBeInTheDocument();
         expect(screen.getByText("Schedule: Daily at --:--")).toBeInTheDocument();
@@ -633,6 +678,79 @@ describe("Jobs page", () => {
                 timeOfDay: null,
             }),
         });
+    });
+
+    it("preserves scheduled schedule drafts across job refreshes", async () => {
+        const user = userEvent.setup();
+        const { rerender } = render(<Jobs />);
+
+        await user.click(screen.getByRole("button", { name: "Schedule type: Daily" }));
+        await user.click(screen.getByRole("menuitem", { name: /Interval/ }));
+        const intervalInput = screen.getByDisplayValue("86400");
+        await user.clear(intervalInput);
+        await user.type(intervalInput, "7200");
+
+        mockScheduledJobs({
+            data: [
+                {
+                    actionKey: "backup.run",
+                    actionPayload: { target: "kopia" },
+                    createdAt: "2026-06-17T20:00:00.000Z",
+                    cronExpression: null,
+                    description: "Run nightly backup",
+                    enabled: false,
+                    id: "backup.kopia",
+                    intervalSeconds: 86_400,
+                    isRunning: true,
+                    lastRun: null,
+                    name: "Backup",
+                    nextRunAt: null,
+                    scheduleType: "daily",
+                    timeOfDay: "04:10",
+                    updatedAt: "2026-06-17T21:01:10.000Z",
+                },
+            ],
+        });
+        rerender(<Jobs />);
+
+        expect(screen.getByDisplayValue("7200")).toBeInTheDocument();
+    });
+
+    it("opens OpenClaw cron from jobs deep links", () => {
+        window.history.replaceState(null, "", "/jobs?view=openclaw&job=cleanup");
+
+        render(<Jobs />);
+
+        expect(screen.getByTestId("cron-list")).toHaveTextContent("selected: cleanup");
+        expect(screen.getByTestId("cron-details")).toHaveTextContent("job: Cleanup");
+    });
+
+    it("shows OpenClaw empty and retry states inside the active tab", async () => {
+        const user = userEvent.setup();
+        hooks.useCronJobs.mockReturnValue({
+            data: [],
+            error: null,
+            isLoading: false,
+            refetch: hooks.refetch,
+        });
+
+        const { rerender } = render(<Jobs />);
+        await switchToOpenClawCron(user);
+
+        expect(
+            screen.getByText("OpenClaw cron jobs will appear here.")
+        ).toBeInTheDocument();
+
+        hooks.useCronJobs.mockReturnValue({
+            data: [],
+            error: new Error("OpenClaw unavailable"),
+            isLoading: false,
+            refetch: hooks.refetch,
+        });
+        rerender(<Jobs />);
+        await user.click(screen.getByRole("button", { name: "Retry" }));
+
+        expect(hooks.refetch).toHaveBeenCalledTimes(1);
     });
 
     it("renders scheduled pending and loading run states", () => {

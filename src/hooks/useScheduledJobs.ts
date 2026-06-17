@@ -103,10 +103,15 @@ export function useRunScheduledJobNow() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ id }: { id: string }) =>
-            apiPostRequired<{ ok: boolean; run: ScheduledJobRun }>(
+        mutationFn: async ({ id }: { id: string }) => {
+            const result = await apiPostRequired<{ ok: boolean; run: ScheduledJobRun }>(
                 `/jobs/${encodeURIComponent(id)}/run`
-            ),
+            );
+            if (!result.ok || result.run.status === "failed") {
+                throw new Error(result.run.message || "Scheduled job run failed");
+            }
+            return result;
+        },
         onSuccess: (_data, variables) => {
             void queryClient.invalidateQueries({ queryKey: scheduledJobKeys.list() });
             void queryClient.invalidateQueries({

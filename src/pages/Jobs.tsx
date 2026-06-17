@@ -1,5 +1,5 @@
 import { Play, RotateCw, Save } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { CronJobDetails, CronJobList } from "../components/features/cron";
 import { Badge } from "../components/ui/Badge";
@@ -8,7 +8,6 @@ import { Card, CardTitle } from "../components/ui/Card";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { Input } from "../components/ui/Input";
 import { LoadingState } from "../components/ui/LoadingState";
-import { PageState } from "../components/ui/PageState";
 import { Select } from "../components/ui/Select";
 import { Switch } from "../components/ui/Switch";
 import type { CronJob, ScheduledJob, ScheduledJobPatch } from "../hooks";
@@ -39,9 +38,20 @@ function formatScheduledJobSchedule(job: ScheduledJob): string {
     if (!job.enabled) return "Disabled";
     if (job.scheduleType === "daily") return `Daily at ${job.timeOfDay || "--:--"}`;
     if (job.scheduleType === "cron") return job.cronExpression || "Cron schedule";
+    if (job.intervalSeconds < 60) return `Every ${job.intervalSeconds}s`;
     const minutes = Math.round(job.intervalSeconds / 60);
     if (minutes >= 60 && minutes % 60 === 0) return `Every ${minutes / 60}h`;
     return `Every ${minutes}m`;
+}
+
+function getInitialJobsView(): JobsView {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("view") === "openclaw" ? "openclaw" : "scheduled";
+}
+
+function getInitialCronJobId(): string {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("job") || "";
 }
 
 function scheduledJobStatusVariant(job: ScheduledJob) {
@@ -434,9 +444,10 @@ export function Jobs() {
 
     const sortedScheduledJobs = sortScheduledJobs(scheduledJobs);
     const sortedCronJobs = sortCronJobs(cronJobs);
-    const [view, setView] = useState<JobsView>("scheduled");
+    const [view, setView] = useState<JobsView>(getInitialJobsView);
     const [selectedScheduledJobId, setSelectedScheduledJobId] = useState("");
-    const [selectedCronJobId, setSelectedCronJobId] = useState("");
+    const [selectedCronJobId, setSelectedCronJobId] = useState(getInitialCronJobId);
+    const lastScheduledDraftJobId = useRef<string | null>(null);
     const [lastCronRunAt, setLastCronRunAt] = useState<Record<string, number>>({});
     const [cronNameDraft, setCronNameDraft] = useState("");
     const [cronScheduleDraft, setCronScheduleDraft] = useState("{}");
@@ -483,6 +494,8 @@ export function Jobs() {
 
     useEffect(() => {
         if (!currentScheduledJob) return;
+        if (lastScheduledDraftJobId.current === currentScheduledJob.id) return;
+        lastScheduledDraftJobId.current = currentScheduledJob.id;
         setScheduleTypeDraft(currentScheduledJob.scheduleType);
         setIntervalDraft(String(currentScheduledJob.intervalSeconds));
         setTimeDraft(currentScheduledJob.timeOfDay || "");
@@ -591,173 +604,165 @@ export function Jobs() {
 
     const isLoading = view === "scheduled" ? scheduledLoading : cronLoading;
     const error = view === "scheduled" ? scheduledError : cronError;
+    const isEmpty =
+        (view === "scheduled" && sortedScheduledJobs.length === 0) ||
+        (view === "openclaw" && sortedCronJobs.length === 0);
+    const retryActiveView = () => {
+        if (view === "scheduled") {
+            void refetchScheduledJobs();
+            return;
+        }
+        void refetchCronJobs();
+    };
 
     return (
-        <PageState
-            isLoading={isLoading}
-            loading={<LoadingState size="lg" />}
-            error={error?.message ?? null}
-            errorView={
-                <div className="flex h-full min-h-0 flex-col items-center justify-center gap-4 p-3 sm:p-6">
-                    <p className="text-red-400">{error?.message}</p>
+        <div className="space-y-3 p-3 sm:space-y-4 sm:p-4 lg:p-6">
+            {actionError ? (
+                <Card variant="bordered" className="border-red-500/40 bg-red-500/10 p-3">
+                    <p className="text-sm text-red-300">{actionError}</p>
+                </Card>
+            ) : null}
+
+            <Card variant="bordered" className="p-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <Button
-                        variant="secondary"
-                        onClick={() => {
-                            void refetchScheduledJobs();
-                            void refetchCronJobs();
-                        }}
+                        type="button"
+                        variant={view === "scheduled" ? "primary" : "ghost"}
+                        onClick={() => setView("scheduled")}
+                        className="justify-center"
                     >
+                        Dashboard jobs ({sortedScheduledJobs.length})
+                    </Button>
+                    <Button
+                        type="button"
+                        variant={view === "openclaw" ? "primary" : "ghost"}
+                        onClick={() => setView("openclaw")}
+                        className="justify-center"
+                    >
+                        OpenClaw cron ({sortedCronJobs.length})
+                    </Button>
+                </div>
+            </Card>
+
+            {isLoading ? (
+                <div className="flex min-h-80 items-center justify-center">
+                    <LoadingState size="lg" />
+                </div>
+            ) : error ? (
+                <div className="flex min-h-80 flex-col items-center justify-center gap-4">
+                    <p className="text-red-400">{error.message}</p>
+                    <Button variant="secondary" onClick={retryActiveView}>
                         <RotateCw className="h-4 w-4" />
                         Retry
                     </Button>
                 </div>
-            }
-            isEmpty={sortedScheduledJobs.length === 0 && sortedCronJobs.length === 0}
-            empty={
-                <div className="p-3 sm:p-6">
-                    <Card variant="bordered">
-                        <CardTitle>No jobs found</CardTitle>
-                        <p className="text-primary-300 mt-2 text-sm">
-                            Scheduled jobs and OpenClaw cron jobs will appear here.
-                        </p>
-                    </Card>
-                </div>
-            }
-        >
-            <div className="space-y-3 p-3 sm:space-y-4 sm:p-4 lg:p-6">
-                {actionError ? (
-                    <Card
-                        variant="bordered"
-                        className="border-red-500/40 bg-red-500/10 p-3"
-                    >
-                        <p className="text-sm text-red-300">{actionError}</p>
-                    </Card>
-                ) : null}
-
-                <Card variant="bordered" className="p-2">
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                        <Button
-                            type="button"
-                            variant={view === "scheduled" ? "primary" : "ghost"}
-                            onClick={() => setView("scheduled")}
-                            className="justify-center"
-                        >
-                            Dashboard jobs ({sortedScheduledJobs.length})
-                        </Button>
-                        <Button
-                            type="button"
-                            variant={view === "openclaw" ? "primary" : "ghost"}
-                            onClick={() => setView("openclaw")}
-                            className="justify-center"
-                        >
-                            OpenClaw cron ({sortedCronJobs.length})
-                        </Button>
-                    </div>
+            ) : isEmpty ? (
+                <Card variant="bordered">
+                    <CardTitle>No jobs found</CardTitle>
+                    <p className="text-primary-300 mt-2 text-sm">
+                        {view === "scheduled"
+                            ? "Dashboard scheduled jobs will appear here."
+                            : "OpenClaw cron jobs will appear here."}
+                    </p>
                 </Card>
-
-                {view === "scheduled" ? (
-                    <div className="grid grid-cols-1 gap-3 sm:gap-4 xl:grid-cols-[380px_1fr]">
-                        <ScheduledJobList
-                            jobs={sortedScheduledJobs}
-                            selectedId={selectedScheduledJobId}
-                            currentJobId={currentScheduledJobId}
-                            onSelect={setSelectedScheduledJobId}
-                        />
-                        {currentScheduledJob ? (
-                            <ScheduledJobDetails
-                                job={currentScheduledJob}
-                                scheduleTypeDraft={scheduleTypeDraft}
-                                intervalDraft={intervalDraft}
-                                timeDraft={timeDraft}
-                                cronDraft={cronExpressionDraft}
-                                editError={scheduledEditError}
-                                runPending={runScheduledJob.isPending}
-                                updatePending={updateScheduledJob.isPending}
-                                onScheduleTypeChange={setScheduleTypeDraft}
-                                onIntervalChange={setIntervalDraft}
-                                onTimeChange={setTimeDraft}
-                                onCronChange={setCronExpressionDraft}
-                                onToggle={(enabled) => {
-                                    void handleScheduledToggle(
-                                        currentScheduledJob,
-                                        enabled
-                                    );
-                                }}
-                                onRunNow={() => {
-                                    void handleScheduledRun(currentScheduledJob);
-                                }}
-                                onSave={() => {
-                                    void handleScheduledSave(currentScheduledJob);
-                                }}
-                            />
-                        ) : null}
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-1 gap-3 sm:gap-4 xl:grid-cols-[360px_1fr]">
-                        <CronJobList
-                            jobs={sortedCronJobs}
-                            selectedId={selectedCronId}
-                            currentJobId={currentCronJobId}
-                            onSelect={setSelectedCronJobId}
-                        />
-                        {currentCronJob ? (
-                            <CronJobDetails
-                                job={currentCronJob}
-                                lastTriggeredAt={lastCronRunAt[currentCronJobId]}
-                                togglePending={toggleCronJob.isPending}
-                                runPending={runCronNow.isPending}
-                                updatePending={updateCronJob.isPending}
-                                deletePending={deleteCronJob.isPending}
-                                onToggle={(job, enabled) => {
-                                    void handleCronToggle(job, enabled);
-                                }}
-                                onRunNow={(job) => {
-                                    void handleCronRunNow(job);
-                                }}
-                                isEditMode={isCronEditMode}
-                                onEditModeChange={(enabled) => {
-                                    setIsCronEditMode(enabled);
-                                    if (!enabled) setCronEditError(null);
-                                }}
-                                nameDraft={cronNameDraft}
-                                onNameDraftChange={setCronNameDraft}
-                                scheduleDraft={cronScheduleDraft}
-                                onScheduleDraftChange={setCronScheduleDraft}
-                                payloadDraft={cronPayloadDraft}
-                                onPayloadDraftChange={setCronPayloadDraft}
-                                deliveryDraft={cronDeliveryDraft}
-                                onDeliveryDraftChange={setCronDeliveryDraft}
-                                scheduleValidation={cronScheduleValidation}
-                                payloadValidation={cronPayloadValidation}
-                                deliveryValidation={cronDeliveryValidation}
-                                hasInvalidJson={hasInvalidCronJson}
-                                editError={cronEditError}
-                                onSave={(job) => {
-                                    void handleCronSave(job);
-                                }}
-                                onDelete={setDeleteCandidate}
-                                formatDate={formatDate}
-                            />
-                        ) : null}
-                    </div>
-                )}
-
-                {deleteCandidate ? (
-                    <ConfirmModal
-                        isOpen
-                        title="Delete cron job"
-                        message={`Delete ${String(deleteCandidate.name || getCronJobId(deleteCandidate))}?`}
-                        confirmLabel="Delete cron job"
-                        confirmLoadingLabel="Deleting"
-                        loading={deleteCronJob.isPending}
-                        danger
-                        onCancel={() => setDeleteCandidate(null)}
-                        onConfirm={() => {
-                            void handleCronDelete(deleteCandidate);
+            ) : view === "scheduled" ? (
+                <div className="grid grid-cols-1 gap-3 sm:gap-4 xl:grid-cols-[380px_1fr]">
+                    <ScheduledJobList
+                        jobs={sortedScheduledJobs}
+                        selectedId={selectedScheduledJobId}
+                        currentJobId={currentScheduledJobId}
+                        onSelect={setSelectedScheduledJobId}
+                    />
+                    <ScheduledJobDetails
+                        job={currentScheduledJob as ScheduledJob}
+                        scheduleTypeDraft={scheduleTypeDraft}
+                        intervalDraft={intervalDraft}
+                        timeDraft={timeDraft}
+                        cronDraft={cronExpressionDraft}
+                        editError={scheduledEditError}
+                        runPending={runScheduledJob.isPending}
+                        updatePending={updateScheduledJob.isPending}
+                        onScheduleTypeChange={setScheduleTypeDraft}
+                        onIntervalChange={setIntervalDraft}
+                        onTimeChange={setTimeDraft}
+                        onCronChange={setCronExpressionDraft}
+                        onToggle={(enabled) => {
+                            void handleScheduledToggle(
+                                currentScheduledJob as ScheduledJob,
+                                enabled
+                            );
+                        }}
+                        onRunNow={() => {
+                            void handleScheduledRun(currentScheduledJob as ScheduledJob);
+                        }}
+                        onSave={() => {
+                            void handleScheduledSave(currentScheduledJob as ScheduledJob);
                         }}
                     />
-                ) : null}
-            </div>
-        </PageState>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 gap-3 sm:gap-4 xl:grid-cols-[360px_1fr]">
+                    <CronJobList
+                        jobs={sortedCronJobs}
+                        selectedId={selectedCronId}
+                        currentJobId={currentCronJobId}
+                        onSelect={setSelectedCronJobId}
+                    />
+                    <CronJobDetails
+                        job={currentCronJob as CronJob}
+                        lastTriggeredAt={lastCronRunAt[currentCronJobId]}
+                        togglePending={toggleCronJob.isPending}
+                        runPending={runCronNow.isPending}
+                        updatePending={updateCronJob.isPending}
+                        deletePending={deleteCronJob.isPending}
+                        onToggle={(job, enabled) => {
+                            void handleCronToggle(job, enabled);
+                        }}
+                        onRunNow={(job) => {
+                            void handleCronRunNow(job);
+                        }}
+                        isEditMode={isCronEditMode}
+                        onEditModeChange={(enabled) => {
+                            setIsCronEditMode(enabled);
+                            if (!enabled) setCronEditError(null);
+                        }}
+                        nameDraft={cronNameDraft}
+                        onNameDraftChange={setCronNameDraft}
+                        scheduleDraft={cronScheduleDraft}
+                        onScheduleDraftChange={setCronScheduleDraft}
+                        payloadDraft={cronPayloadDraft}
+                        onPayloadDraftChange={setCronPayloadDraft}
+                        deliveryDraft={cronDeliveryDraft}
+                        onDeliveryDraftChange={setCronDeliveryDraft}
+                        scheduleValidation={cronScheduleValidation}
+                        payloadValidation={cronPayloadValidation}
+                        deliveryValidation={cronDeliveryValidation}
+                        hasInvalidJson={hasInvalidCronJson}
+                        editError={cronEditError}
+                        onSave={(job) => {
+                            void handleCronSave(job);
+                        }}
+                        onDelete={setDeleteCandidate}
+                        formatDate={formatDate}
+                    />
+                </div>
+            )}
+
+            {deleteCandidate ? (
+                <ConfirmModal
+                    isOpen
+                    title="Delete cron job"
+                    message={`Delete ${String(deleteCandidate.name || getCronJobId(deleteCandidate))}?`}
+                    confirmLabel="Delete cron job"
+                    confirmLoadingLabel="Deleting"
+                    loading={deleteCronJob.isPending}
+                    danger
+                    onCancel={() => setDeleteCandidate(null)}
+                    onConfirm={() => {
+                        void handleCronDelete(deleteCandidate);
+                    }}
+                />
+            ) : null}
+        </div>
     );
 }

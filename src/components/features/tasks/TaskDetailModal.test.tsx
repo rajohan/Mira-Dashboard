@@ -436,6 +436,10 @@ describe("TaskDetailModal", () => {
         expect(screen.getByText("DISABLED")).toBeInTheDocument();
         expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(4);
         expect(screen.getByText("Stored metadata")).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "job-disabled" })).toHaveAttribute(
+            "href",
+            "/jobs?view=openclaw&job=job-disabled"
+        );
         expect(screen.getByText("No updates yet.")).toBeInTheDocument();
     });
 
