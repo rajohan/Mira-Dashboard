@@ -237,29 +237,8 @@ async function initializeDatabase(): Promise<DatabaseSync> {
     initializedDb.exec("PRAGMA foreign_keys = ON");
     initializedDb.exec("PRAGMA busy_timeout = 5000");
     initializedDb.exec(SCHEMA_SQL);
-    const deploymentColumns = initializedDb
-        .prepare("PRAGMA table_info(deployment_jobs)")
-        .all() as Array<{ name: string }>;
-    if (deploymentColumns.every((column) => column.name !== "commit_title")) {
-        try {
-            initializedDb.exec(
-                "ALTER TABLE deployment_jobs ADD COLUMN commit_title TEXT"
-            );
-        } catch (error) {
-            if (!isDuplicateCommitTitleColumnError(error)) {
-                throw error;
-            }
-        }
-    }
 
     return initializedDb;
-}
-
-function isDuplicateCommitTitleColumnError(error: unknown): boolean {
-    return (
-        error instanceof Error &&
-        error.message.includes("duplicate column name: commit_title")
-    );
 }
 
 /** Defines db. */

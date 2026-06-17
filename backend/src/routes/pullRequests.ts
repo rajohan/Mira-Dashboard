@@ -41,6 +41,7 @@ const MIRA_AUTHOR = "mira-2026";
 const DEFAULT_REVIEWER_AUTHOR = "rajohan";
 const DEFAULT_BASE = "main";
 const DEPLOYMENT_LOCK_STALE_MS = 30 * 60 * 1000;
+const RECENT_DEPLOYMENTS_LIMIT = 10;
 const MAX_BUFFER = 20 * 1024 * 1024;
 const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 const PR_LIST_TIMEOUT_MS = 180_000;
@@ -194,17 +195,6 @@ function writeDeploymentJob(job: DeploymentJob): void {
         job.stdout ?? null,
         job.stderr ?? null
     );
-    db.prepare(
-        `
-        DELETE FROM deployment_jobs
-        WHERE id NOT IN (
-            SELECT id
-            FROM deployment_jobs
-            ORDER BY updated_at DESC
-            LIMIT 10
-        )
-        `
-    ).run();
 }
 
 interface DeploymentJobRow {
@@ -370,10 +360,10 @@ function readDeploymentJobs(): DeploymentJob[] {
                     stderr
                 FROM deployment_jobs
                 ORDER BY updated_at DESC
-                LIMIT 10
+                LIMIT ?
                 `
             )
-            .all() as unknown as DeploymentJobRow[]
+            .all(RECENT_DEPLOYMENTS_LIMIT) as unknown as DeploymentJobRow[]
     ).map(mapDeploymentJob);
 }
 
