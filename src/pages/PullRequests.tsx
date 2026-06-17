@@ -581,7 +581,9 @@ export function PullRequests() {
         const reviewApproved = pullRequestReviewApproved(pr);
         const mergeBlocked = githubMergeBlocked(pr);
         const canUpdateBranch =
-            pullRequestBranchBehind(pr) && !pullRequestHasConflicts(pr);
+            pr.baseRefName === DEFAULT_BASE &&
+            pullRequestBranchBehind(pr) &&
+            !pullRequestHasConflicts(pr);
         const mergeDisabled =
             isActionPending ||
             isProductionActionBlocked ||

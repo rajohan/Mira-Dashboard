@@ -118,6 +118,7 @@ export function Cron() {
     async function handleDelete(job: CronJob) {
         const id = getCronJobId(job);
         if (!id) {
+            setDeleteCandidate(null);
             return;
         }
 

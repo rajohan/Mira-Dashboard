@@ -45,7 +45,7 @@ function formatUtcTimeOfDayAsOslo(value: string): string {
     const match = value.match(/^(\d{2}):(\d{2})$/u);
     if (!match) return value;
 
-    const date = new Date(Date.UTC(2026, 0, 1, Number(match[1]), Number(match[2])));
+    const date = new Date(Date.UTC(2026, 5, 1, Number(match[1]), Number(match[2])));
     return formatOsloClock(date);
 }
 

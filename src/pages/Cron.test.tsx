@@ -309,6 +309,7 @@ describe("Cron page", () => {
         await user.click(screen.getByRole("button", { name: "Delete cron" }));
         await user.click(screen.getByRole("button", { name: "Delete cron job" }));
         expect(hooks.deleteJob).not.toHaveBeenCalled();
+        expect(screen.queryByText("Delete Unnamed job?")).not.toBeInTheDocument();
     });
 
     it("uses cron job ids in delete confirmations when names are missing", async () => {

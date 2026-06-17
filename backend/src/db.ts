@@ -241,10 +241,25 @@ async function initializeDatabase(): Promise<DatabaseSync> {
         .prepare("PRAGMA table_info(deployment_jobs)")
         .all() as Array<{ name: string }>;
     if (deploymentColumns.every((column) => column.name !== "commit_title")) {
-        initializedDb.exec("ALTER TABLE deployment_jobs ADD COLUMN commit_title TEXT");
+        try {
+            initializedDb.exec(
+                "ALTER TABLE deployment_jobs ADD COLUMN commit_title TEXT"
+            );
+        } catch (error) {
+            if (!isDuplicateCommitTitleColumnError(error)) {
+                throw error;
+            }
+        }
     }
 
     return initializedDb;
+}
+
+function isDuplicateCommitTitleColumnError(error: unknown): boolean {
+    return (
+        error instanceof Error &&
+        error.message.includes("duplicate column name: commit_title")
+    );
 }
 
 /** Defines db. */

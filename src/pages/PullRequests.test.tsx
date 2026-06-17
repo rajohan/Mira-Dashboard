@@ -584,6 +584,30 @@ describe("PullRequests page", () => {
         expect(screen.getByRole("button", { name: "Updating..." })).toBeDisabled();
     });
 
+    it("hides update branch actions for non-main targets", () => {
+        mockPullRequests({
+            pullRequests: {
+                data: [
+                    {
+                        ...hooks.pullRequests[0],
+                        baseRefName: "develop",
+                        mergeStateStatus: "BEHIND",
+                        mergeable: "MERGEABLE",
+                    },
+                ],
+                error: null,
+                isLoading: false,
+                refetch: hooks.refetch,
+            },
+        });
+
+        render(<PullRequests />);
+
+        expect(
+            screen.queryByRole("button", { name: "Update branch" })
+        ).not.toBeInTheDocument();
+    });
+
     it("shows update branch errors", async () => {
         const user = userEvent.setup();
         hooks.updateBranch.mockRejectedValueOnce(new Error("Update branch failed"));

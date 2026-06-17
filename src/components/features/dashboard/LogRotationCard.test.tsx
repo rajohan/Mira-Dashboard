@@ -171,7 +171,7 @@ describe("LogRotationCard", () => {
         });
 
         const { rerender } = render(<LogRotationCard />);
-        expect(screen.getByText("04:15 daily")).toBeInTheDocument();
+        expect(screen.getByText("05:15 daily")).toBeInTheDocument();
 
         hooks.useScheduledJobs.mockReturnValue({
             data: [
