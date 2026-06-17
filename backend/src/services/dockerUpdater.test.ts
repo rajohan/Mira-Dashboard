@@ -2378,6 +2378,7 @@ setTimeout(() => process.exit(0), 30);
         await withEnv(
             {
                 COMPOSE_EMPTY: "",
+                COMPOSE_LOOP: "${COMPOSE_LOOP}x",
                 COMPOSE_SET: "apps/app/compose.yaml",
             },
             async () => {
@@ -2402,6 +2403,16 @@ setTimeout(() => process.exit(0), 30);
                         "${COMPOSE_MISSING:-fallback.yaml}"
                     ),
                     "fallback.yaml"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath(
+                        "${COMPOSE_MISSING:-${COMPOSE_SET}}"
+                    ),
+                    "apps/app/compose.yaml"
+                );
+                assert.equal(
+                    updater.__testing.interpolateComposePath("${COMPOSE_LOOP}"),
+                    "${COMPOSE_LOOP}xxxxxxxx"
                 );
                 assert.equal(
                     updater.__testing.interpolateComposePath(
@@ -3030,6 +3041,11 @@ setTimeout(() => process.exit(0), 30);
             "utf8"
         );
         await writeFile(overrideProjectOverridePath, "services: {}\n", "utf8");
+        await writeFile(
+            path.join(overrideRoot, "compose.override.yml"),
+            "services:\n  stale:\n    image: stale:latest\n",
+            "utf8"
+        );
         await writeFile(overrideComposePath, "services: {}\n", "utf8");
         await withEnv(
             {
@@ -3041,6 +3057,46 @@ setTimeout(() => process.exit(0), 30);
                         .getComposeCommand(overrideComposePath, "web")
                         .args.slice(0, 4),
                     ["-f", overrideProjectComposePath, "-f", overrideProjectOverridePath]
+                );
+            }
+        );
+        const nestedFallbackIncludeRoot = path.join(
+            tempDir,
+            "nested-fallback-include-root"
+        );
+        const nestedFallbackIncludeComposePath = path.join(
+            nestedFallbackIncludeRoot,
+            "apps",
+            "fallback-app",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(nestedFallbackIncludeComposePath), {
+            recursive: true,
+        });
+        await writeFile(
+            path.join(nestedFallbackIncludeRoot, ".env"),
+            "DEFAULT_APP_DIR=apps/fallback-app\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(nestedFallbackIncludeRoot, "compose.yaml"),
+            "include:\n- ${APP_DIR:-${DEFAULT_APP_DIR}}/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(nestedFallbackIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                APP_DIR: undefined,
+                DEFAULT_APP_DIR: undefined,
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(
+                        nestedFallbackIncludeComposePath,
+                        "web"
+                    ).cwd,
+                    nestedFallbackIncludeRoot
                 );
             }
         );
@@ -3111,6 +3167,35 @@ setTimeout(() => process.exit(0), 30);
                         .getComposeCommand(standaloneOverrideComposePath, "web")
                         .args.slice(0, 2),
                     ["-f", standaloneOverrideComposePath]
+                );
+            }
+        );
+        const symlinkStandaloneRoot = path.join(tempDir, "symlink-standalone-root");
+        const symlinkTargetRoot = path.join(tempDir, "symlink-standalone-target");
+        const symlinkStandaloneComposePath = path.join(
+            symlinkStandaloneRoot,
+            "compose.yaml"
+        );
+        const symlinkTargetComposePath = path.join(symlinkTargetRoot, "compose.yaml");
+        await mkdir(symlinkStandaloneRoot, { recursive: true });
+        await mkdir(symlinkTargetRoot, { recursive: true });
+        await writeFile(symlinkTargetComposePath, "services: {}\n", "utf8");
+        await writeFile(
+            path.join(symlinkTargetRoot, "compose.override.yaml"),
+            "services:\n  web:\n    image: nginx:override\n",
+            "utf8"
+        );
+        await symlink(symlinkTargetComposePath, symlinkStandaloneComposePath);
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing
+                        .getComposeCommand(symlinkStandaloneComposePath, "web")
+                        .args.slice(0, 2),
+                    ["-f", symlinkTargetComposePath]
                 );
             }
         );

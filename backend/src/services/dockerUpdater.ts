@@ -142,6 +142,16 @@ function resolveComposeEnvValue(
 }
 
 function interpolateComposePath(value: string, composeEnv: ComposeEnv = {}): string {
+    let interpolated = value;
+    for (let index = 0; index < 8; index += 1) {
+        const next = interpolateComposePathOnce(interpolated, composeEnv);
+        if (next === interpolated) return next;
+        interpolated = next;
+    }
+    return interpolated;
+}
+
+function interpolateComposePathOnce(value: string, composeEnv: ComposeEnv = {}): string {
     const braced = value.replaceAll(
         /\$\{([^}:?+-]+)(?:(:?[-?+])([^}]*))?\}/gu,
         (match, rawName, op, fallback) => {
@@ -284,10 +294,10 @@ function defaultComposeOverridePaths(composePath: string): string[] {
         composeName === "docker-compose.yaml" || composeName === "docker-compose.yml"
             ? ["docker-compose.override.yaml", "docker-compose.override.yml"]
             : ["compose.override.yaml", "compose.override.yml"];
-    return overrideNames
+    const overridePath = overrideNames
         .map((overrideName) => path.join(composeDir, overrideName))
-        .filter((overridePath) => fs.existsSync(overridePath))
-        .map((overridePath) => fs.realpathSync(overridePath));
+        .find((candidate) => fs.existsSync(candidate));
+    return overridePath ? [fs.realpathSync(overridePath)] : [];
 }
 
 function projectComposeOrOverrideIncludesCompose(
@@ -346,6 +356,19 @@ function composeCommandPath(configuredComposePath: string): string {
     }
 }
 
+function isParentComposePath(
+    projectComposePath: string,
+    configuredComposePath: string
+): boolean {
+    try {
+        return (
+            fs.realpathSync(projectComposePath) !== fs.realpathSync(configuredComposePath)
+        );
+    } catch {
+        return path.resolve(projectComposePath) !== path.resolve(configuredComposePath);
+    }
+}
+
 function composeFilesForCommand(
     composePath: string,
     includeDefaultOverrides: boolean
@@ -365,8 +388,10 @@ function getComposeCommand(configuredComposePath: string, serviceName: string) {
     const dockerRoot = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
     const wrapper = getDockerComposeWrapper();
     const projectComposePath = composeCommandPath(configuredComposePath);
-    const includeDefaultOverrides =
-        path.resolve(projectComposePath) !== path.resolve(configuredComposePath);
+    const includeDefaultOverrides = isParentComposePath(
+        projectComposePath,
+        configuredComposePath
+    );
     const composePaths = composeFilesForCommand(
         projectComposePath,
         includeDefaultOverrides
