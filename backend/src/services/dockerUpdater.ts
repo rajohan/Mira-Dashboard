@@ -72,7 +72,7 @@ function shouldBlockGlobalUpdateForDiscoveryFailure(
     return !register.ok && failedDiscoveryAppSlugs(register).has("*");
 }
 
-function isNonblockingRegistrationFailure(step: DockerUpdaterStepResult): boolean {
+export function isNonblockingRegistrationFailure(step: DockerUpdaterStepResult): boolean {
     return (
         step.step === "register-services" &&
         !step.ok &&

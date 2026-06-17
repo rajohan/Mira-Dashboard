@@ -15,6 +15,7 @@ import {
 } from "../lib/values.js";
 import {
     type DockerUpdaterStepResult,
+    isNonblockingRegistrationFailure,
     runDockerUpdaterService,
 } from "../services/dockerUpdater.js";
 import {
@@ -800,6 +801,12 @@ function firstFailedStepCode(steps: DockerUpdaterStepResult[]): string | undefin
     return steps.find((step) => !step.ok)?.code;
 }
 
+function blockingDockerUpdaterFailures(
+    steps: DockerUpdaterStepResult[]
+): DockerUpdaterStepResult[] {
+    return steps.filter((step) => !step.ok && !isNonblockingRegistrationFailure(step));
+}
+
 function createDockerUpdaterManualScheduledRun(): ScheduledJobRun | null {
     if (!getScheduledJob("docker.updater")) {
         return null;
@@ -807,6 +814,9 @@ function createDockerUpdaterManualScheduledRun(): ScheduledJobRun | null {
     try {
         return createManualScheduledJobRun("docker.updater");
     } catch (error) {
+        if ((error as { statusCode?: number }).statusCode === 409) {
+            throw error;
+        }
         console.warn("[Docker] Failed to record manual updater run:", error);
         return null;
     }
@@ -828,11 +838,11 @@ async function runTrackedDockerUpdaterNow() {
     const run = createDockerUpdaterManualScheduledRun();
     try {
         const steps = await runDockerUpdaterNow();
-        const success = steps.every((step) => step.ok);
+        const failed = blockingDockerUpdaterFailures(steps);
+        const success = failed.length === 0;
         const message = success
             ? null
-            : steps
-                  .filter((step) => !step.ok)
+            : failed
                   .map((step) => step.stderr)
                   .filter(Boolean)
                   .join("\n") || "Docker updater failed";
@@ -1278,7 +1288,7 @@ export default function dockerRoutes(app: express.Application): void {
         asyncRoute(async (_req, res) => {
             const steps = await runTrackedDockerUpdaterNow();
             res.json({
-                success: steps.every((step) => step.ok),
+                success: blockingDockerUpdaterFailures(steps).length === 0,
                 steps,
             });
         })
