@@ -241,9 +241,10 @@ function projectComposeIncludesCompose(
                 Array.isArray(includeValue) ? includeValue : [includeValue]
             ).filter((item): item is string => typeof item === "string");
             const entryComposeEnv = {
-                ...composeEnv,
                 ...loadComposeEnvFiles(projectDirectory, entryRecord.env_file),
+                ...composeEnv,
             };
+            const hasExplicitEnvFile = entryRecord.env_file !== undefined;
             const rawProjectDirectory = entryRecord.project_directory;
             const nestedProjectDirectory =
                 typeof rawProjectDirectory === "string"
@@ -272,7 +273,8 @@ function projectComposeIncludesCompose(
                 const resolvedProjectDirectory =
                     nestedProjectDirectory ?? path.dirname(resolvedIncludePath);
                 const nestedComposeEnv = {
-                    ...loadComposeProjectEnv(resolvedProjectDirectory),
+                    ...(!hasExplicitEnvFile &&
+                        loadComposeProjectEnv(resolvedProjectDirectory)),
                     ...entryComposeEnv,
                 };
                 if (
@@ -306,6 +308,20 @@ function defaultComposeOverridePaths(composePath: string): string[] {
         .map((overrideName) => path.join(composeDir, overrideName))
         .find((candidate) => fs.existsSync(candidate));
     return overridePath ? [fs.realpathSync(overridePath)] : [];
+}
+
+function composeFileDefinesServiceImage(
+    composePath: string,
+    serviceName: string
+): boolean {
+    try {
+        const doc = YAML.parse(fs.readFileSync(composePath, "utf8")) as JsonRecord;
+        const services = asRecord(doc.services);
+        const service = asRecord(services[serviceName]);
+        return typeof service.image === "string";
+    } catch {
+        return false;
+    }
 }
 
 function projectComposeOrOverrideIncludesCompose(
@@ -379,11 +395,17 @@ function isParentComposePath(
 
 function composeFilesForCommand(
     composePath: string,
-    includeDefaultOverrides: boolean
+    includeDefaultOverrides: boolean,
+    serviceName: string
 ): string[] {
     const files = [composePath];
     if (includeDefaultOverrides) {
-        files.push(...defaultComposeOverridePaths(composePath));
+        files.push(
+            ...defaultComposeOverridePaths(composePath).filter(
+                (overridePath) =>
+                    !composeFileDefinesServiceImage(overridePath, serviceName)
+            )
+        );
     }
     return files;
 }
@@ -402,7 +424,8 @@ function getComposeCommand(configuredComposePath: string, serviceName: string) {
     );
     const composePaths = composeFilesForCommand(
         projectComposePath,
-        includeDefaultOverrides
+        includeDefaultOverrides,
+        serviceName
     );
     const isManagedDockerPath = path
         .resolve(projectComposePath)
