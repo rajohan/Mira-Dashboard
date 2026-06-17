@@ -446,7 +446,7 @@ function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
                             key={deployment.id}
                             className="border-primary-700 bg-primary-900/40 rounded border p-3"
                         >
-                            <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center justify-between gap-2">
                                 <div className="min-w-0">
                                     <div className="text-primary-300 text-sm font-medium">
                                         {deployment.commitTitle ? (
@@ -473,7 +473,10 @@ function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
                                         {formatDate(deployment.updatedAt)}
                                     </div>
                                 </div>
-                                <Badge variant={deploymentVariant(deployment.status)}>
+                                <Badge
+                                    variant={deploymentVariant(deployment.status)}
+                                    className="shrink-0"
+                                >
                                     {deployment.status}
                                 </Badge>
                             </div>
