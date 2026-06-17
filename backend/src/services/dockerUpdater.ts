@@ -219,10 +219,18 @@ function projectComposeIncludesCompose(
     composeEnv = loadComposeProjectEnv(projectDirectory)
 ): boolean {
     const realProjectComposePath = fs.realpathSync(projectComposePath);
-    if (seen.has(realProjectComposePath)) {
+    const contextKey = JSON.stringify({
+        env: Object.entries(composeEnv).sort(([left], [right]) =>
+            left.localeCompare(right)
+        ),
+        path: realProjectComposePath,
+        projectDirectory: path.resolve(projectDirectory),
+    });
+    if (seen.has(contextKey)) {
         return false;
     }
-    seen.add(realProjectComposePath);
+    const branchSeen = new Set(seen);
+    branchSeen.add(contextKey);
     try {
         const doc = YAML.parse(fs.readFileSync(projectComposePath, "utf8")) as JsonRecord;
         const includes = Array.isArray(doc.include) ? doc.include : [];
@@ -272,7 +280,7 @@ function projectComposeIncludesCompose(
                     projectComposeIncludesCompose(
                         resolvedIncludePath,
                         composePath,
-                        seen,
+                        new Set(branchSeen),
                         resolvedProjectDirectory,
                         nestedComposeEnv
                     )
@@ -320,7 +328,7 @@ function findIncludedComposeInDirectory(
             fs.existsSync(candidate) &&
             projectComposeOrOverrideIncludesCompose(candidate, configuredComposePath)
         ) {
-            return fs.realpathSync(candidate);
+            return candidate;
         }
     }
     return null;
@@ -1089,7 +1097,7 @@ function createNotificationBestEffort(
 }
 
 function composeUpdateLockKey(service: ManagedServiceRow): string {
-    return service.compose_path;
+    return composeCommandPath(service.compose_path);
 }
 
 async function withComposeUpdateLock<T>(

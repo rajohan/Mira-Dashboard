@@ -1101,6 +1101,109 @@ setTimeout(() => process.exit(0), 30);
         assert.match(composeText, /repo\/worker:3/u);
     });
 
+    it("serializes concurrent compose updates for child files in the same parent project", async () => {
+        const rootDir = path.join(tempDir, "locked-parent-apply");
+        const appsDir = path.join(rootDir, "apps");
+        const binDir = path.join(tempDir, "bin-parent-lock");
+        const activePath = path.join(tempDir, "parent-compose-active.lock");
+        await mkdir(path.join(appsDir, "web"), { recursive: true });
+        await mkdir(path.join(appsDir, "worker"), { recursive: true });
+        await mkdir(binDir);
+        const projectComposePath = path.join(rootDir, "compose.yaml");
+        const webComposePath = path.join(appsDir, "web", "compose.yaml");
+        const workerComposePath = path.join(appsDir, "worker", "compose.yaml");
+        await writeFile(
+            projectComposePath,
+            "include:\n- apps/web/compose.yaml\n- apps/worker/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(
+            webComposePath,
+            "services:\n  web:\n    image: repo/app:1\n",
+            "utf8"
+        );
+        await writeFile(
+            workerComposePath,
+            "services:\n  worker:\n    image: repo/worker:1\n",
+            "utf8"
+        );
+        await writeExecutable(
+            path.join(binDir, "docker"),
+            `#!/usr/bin/env node
+const fs = require("node:fs");
+if (fs.existsSync(process.env.ACTIVE_PARENT_COMPOSE)) {
+  process.exit(12);
+}
+fs.writeFileSync(process.env.ACTIVE_PARENT_COMPOSE, "active");
+setTimeout(() => {
+  fs.rmSync(process.env.ACTIVE_PARENT_COMPOSE, { force: true });
+  process.exit(0);
+}, 80);
+`
+        );
+        process.env.PATH = `${binDir}${path.delimiter}${originalPath || ""}`;
+        const updater = await import(
+            `./dockerUpdater.js?locked-parent-apply=${Date.now()}`
+        );
+        const webService = {
+            id: 81,
+            app_slug: "locked-parent-web",
+            service_name: "web",
+            compose_path: webComposePath,
+            image_repo: "repo/app",
+            compose_image_ref: "repo/app:1",
+            compose_image_field: "services.web.image",
+            current_tag: "1",
+            current_digest: null,
+            latest_tag: "2",
+            latest_digest: null,
+            policy: "manual",
+            pin_mode: "tag",
+            tag_match_type: "exact",
+            tag_match_pattern: null,
+            enabled: 1,
+        };
+        const workerService = {
+            ...webService,
+            id: 82,
+            app_slug: "locked-parent-worker",
+            service_name: "worker",
+            compose_path: workerComposePath,
+            image_repo: "repo/worker",
+            compose_image_ref: "repo/worker:1",
+            compose_image_field: "services.worker.image",
+        };
+        const insertService = dbHandle.prepare(
+            `INSERT INTO docker_managed_services (
+                id, app_slug, service_name, compose_path, image_repo,
+                compose_image_ref, compose_image_field, current_tag, current_digest,
+                latest_tag, latest_digest, policy, pin_mode, tag_match_type,
+                tag_match_pattern, enabled, metadata_json
+            ) VALUES (
+                @id, @app_slug, @service_name, @compose_path, @image_repo,
+                @compose_image_ref, @compose_image_field, @current_tag, @current_digest,
+                @latest_tag, @latest_digest, @policy, @pin_mode, @tag_match_type,
+                @tag_match_pattern, @enabled, '{}'
+            )`
+        );
+        insertService.run(webService);
+        insertService.run(workerService);
+
+        await withEnv({ ACTIVE_PARENT_COMPOSE: activePath }, async () => {
+            const results = await Promise.all([
+                updater.__testing.applyServiceUpdate(webService, "manual"),
+                updater.__testing.applyServiceUpdate(workerService, "manual"),
+            ]);
+
+            assert.deepEqual(
+                results.map((result) => result.ok),
+                [true, true]
+            );
+        });
+        assert.match(await readFile(webComposePath, "utf8"), /repo\/app:2/u);
+        assert.match(await readFile(workerComposePath, "utf8"), /repo\/worker:2/u);
+    });
+
     it("removes stale services after an empty successful compose scan", async () => {
         const appsRoot = path.join(tempDir, "empty-apps");
         await mkdir(appsRoot);
@@ -2868,6 +2971,69 @@ setTimeout(() => process.exit(0), 30);
                 );
             }
         );
+        const repeatedIncludeRoot = path.join(tempDir, "repeated-include-root");
+        const repeatedIncludeComposePath = path.join(
+            repeatedIncludeRoot,
+            "apps",
+            "web",
+            "compose.yaml"
+        );
+        const repeatedMissingComposePath = path.join(
+            repeatedIncludeRoot,
+            "apps",
+            "missing",
+            "compose.yaml"
+        );
+        const repeatedSharedComposePath = path.join(
+            repeatedIncludeRoot,
+            "shared",
+            "compose.yaml"
+        );
+        await mkdir(path.dirname(repeatedIncludeComposePath), { recursive: true });
+        await mkdir(path.dirname(repeatedMissingComposePath), { recursive: true });
+        await mkdir(path.dirname(repeatedSharedComposePath), { recursive: true });
+        await writeFile(
+            path.join(repeatedIncludeRoot, "first.env"),
+            "Z_CONTEXT=first\nAPP=missing\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(repeatedIncludeRoot, "second.env"),
+            "Z_CONTEXT=second\nAPP=web\n",
+            "utf8"
+        );
+        await writeFile(
+            path.join(repeatedIncludeRoot, "compose.yaml"),
+            [
+                "include:",
+                "- path: shared/compose.yaml",
+                "  env_file: first.env",
+                "- path: shared/compose.yaml",
+                "  env_file: second.env",
+                "",
+            ].join("\n"),
+            "utf8"
+        );
+        await writeFile(
+            repeatedSharedComposePath,
+            "include:\n- ../apps/${APP}/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(repeatedMissingComposePath, "services: {}\n", "utf8");
+        await writeFile(repeatedIncludeComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                APP: undefined,
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.equal(
+                    updater.__testing.getComposeCommand(repeatedIncludeComposePath, "web")
+                        .cwd,
+                    repeatedIncludeRoot
+                );
+            }
+        );
         const absoluteRecursiveRoot = path.join(tempDir, "absolute-recursive-root");
         const absoluteRecursiveComposePath = path.join(
             absoluteRecursiveRoot,
@@ -3057,6 +3223,56 @@ setTimeout(() => process.exit(0), 30);
                         .getComposeCommand(overrideComposePath, "web")
                         .args.slice(0, 4),
                     ["-f", overrideProjectComposePath, "-f", overrideProjectOverridePath]
+                );
+            }
+        );
+        const symlinkParentOverrideRoot = path.join(
+            tempDir,
+            "symlink-parent-override-root"
+        );
+        const symlinkParentTargetRoot = path.join(
+            tempDir,
+            "symlink-parent-override-target"
+        );
+        const symlinkParentComposePath = path.join(
+            symlinkParentOverrideRoot,
+            "compose.yaml"
+        );
+        const symlinkParentTargetComposePath = path.join(
+            symlinkParentTargetRoot,
+            "compose.yaml"
+        );
+        const symlinkParentOverridePath = path.join(
+            symlinkParentOverrideRoot,
+            "compose.override.yaml"
+        );
+        const symlinkParentChildComposePath = path.join(
+            symlinkParentOverrideRoot,
+            "apps",
+            "app",
+            "compose.yaml"
+        );
+        await mkdir(symlinkParentOverrideRoot, { recursive: true });
+        await mkdir(symlinkParentTargetRoot, { recursive: true });
+        await mkdir(path.dirname(symlinkParentChildComposePath), { recursive: true });
+        await writeFile(symlinkParentTargetComposePath, "services: {}\n", "utf8");
+        await symlink(symlinkParentTargetComposePath, symlinkParentComposePath);
+        await writeFile(
+            symlinkParentOverridePath,
+            "include:\n- apps/app/compose.yaml\n",
+            "utf8"
+        );
+        await writeFile(symlinkParentChildComposePath, "services: {}\n", "utf8");
+        await withEnv(
+            {
+                MIRA_DOCKER_COMPOSE_WRAPPER: "/tmp/mira-compose-wrapper",
+            },
+            async () => {
+                assert.deepEqual(
+                    updater.__testing
+                        .getComposeCommand(symlinkParentChildComposePath, "web")
+                        .args.slice(0, 4),
+                    ["-f", symlinkParentComposePath, "-f", symlinkParentOverridePath]
                 );
             }
         );
