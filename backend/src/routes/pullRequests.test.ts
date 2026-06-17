@@ -2025,66 +2025,78 @@ describe("pull request routes", () => {
         const restoreNpmEnv = saveEnv(["FAKE_NPM_LOG_FILE"]);
         process.env.FAKE_NPM_LOG_FILE = npmLogFile;
         await rm(npmLogFile, { force: true });
+        let deployId: string | null = null;
 
-        const approve = await requestJson<{
-            ok: boolean;
-            message: string;
-            cleanup: { status: string; branch: string };
-        }>(server, "/api/pull-requests/10/approve", {
-            method: "POST",
-            body: { deploy: false },
-        });
-        assert.equal(approve.status, 200);
-        assert.equal(approve.body.ok, true);
-        assert.equal(approve.body.message, "PR #10 merged");
-        assert.deepEqual(approve.body.cleanup, {
-            status: "removed",
-            branch: "add-playwright-smoke-tests",
-            path: path.join(tempDir, "worktrees", "add-playwright-smoke-tests"),
-            message: "Removed local worktree for add-playwright-smoke-tests",
-        });
+        try {
+            const approve = await requestJson<{
+                ok: boolean;
+                message: string;
+                cleanup: { status: string; branch: string };
+            }>(server, "/api/pull-requests/10/approve", {
+                method: "POST",
+                body: { deploy: false },
+            });
+            assert.equal(approve.status, 200);
+            assert.equal(approve.body.ok, true);
+            assert.equal(approve.body.message, "PR #10 merged");
+            assert.deepEqual(approve.body.cleanup, {
+                status: "removed",
+                branch: "add-playwright-smoke-tests",
+                path: path.join(tempDir, "worktrees", "add-playwright-smoke-tests"),
+                message: "Removed local worktree for add-playwright-smoke-tests",
+            });
 
-        const reject = await requestJson<{
-            ok: boolean;
-            message: string;
-            cleanup: { status: string };
-        }>(server, "/api/pull-requests/10/reject", {
-            method: "POST",
-            body: { comment: " Not this one " },
-        });
-        assert.equal(reject.status, 200);
-        assert.equal(reject.body.ok, true);
-        assert.equal(reject.body.message, "PR #10 closed");
+            const reject = await requestJson<{
+                ok: boolean;
+                message: string;
+                cleanup: { status: string };
+            }>(server, "/api/pull-requests/10/reject", {
+                method: "POST",
+                body: { comment: " Not this one " },
+            });
+            assert.equal(reject.status, 200);
+            assert.equal(reject.body.ok, true);
+            assert.equal(reject.body.message, "PR #10 closed");
 
-        const deploy = await requestJson<{
-            ok: boolean;
-            deployment: { id: string; status: string; commit?: string; note: string };
-        }>(server, "/api/pull-requests/deploy", { method: "POST", body: {} });
-        assert.equal(deploy.status, 200);
-        assert.equal(deploy.body.ok, true);
-        assert.equal(deploy.body.deployment.status, "building");
-        assert.equal(deploy.body.deployment.commit, undefined);
-        assert.equal(deploy.body.deployment.note, "Deploy started");
-        const finishedDeploy = await waitForDeploymentStatus(
-            deploy.body.deployment.id,
-            "restart-scheduled",
-            tempDir
-        );
-        assert.equal(finishedDeploy.commit, "abc1234");
-        assert.equal(
-            finishedDeploy.note,
-            "Build passed; restart + health check scheduled"
-        );
-        const npmCommands = await readFile(npmLogFile, "utf8");
-        assert.deepEqual(npmCommands.trim().split("\n"), [
-            "ci --legacy-peer-deps",
-            "run build",
-            "--prefix backend ci",
-            "--prefix backend run build",
-        ]);
-        restoreNpmEnv();
-        releaseDeploymentLockInDb(deploy.body.deployment.id, tempDir);
-        await waitForDeploymentLockReleased(tempDir);
+            const deploy = await requestJson<{
+                ok: boolean;
+                deployment: {
+                    id: string;
+                    status: string;
+                    commit?: string;
+                    note: string;
+                };
+            }>(server, "/api/pull-requests/deploy", { method: "POST", body: {} });
+            assert.equal(deploy.status, 200);
+            assert.equal(deploy.body.ok, true);
+            deployId = deploy.body.deployment.id;
+            assert.equal(deploy.body.deployment.status, "building");
+            assert.equal(deploy.body.deployment.commit, undefined);
+            assert.equal(deploy.body.deployment.note, "Deploy started");
+            const finishedDeploy = await waitForDeploymentStatus(
+                deploy.body.deployment.id,
+                "restart-scheduled",
+                tempDir
+            );
+            assert.equal(finishedDeploy.commit, "abc1234");
+            assert.equal(
+                finishedDeploy.note,
+                "Build passed; restart + health check scheduled"
+            );
+            const npmCommands = await readFile(npmLogFile, "utf8");
+            assert.deepEqual(npmCommands.trim().split("\n"), [
+                "ci --legacy-peer-deps --include=dev",
+                "run build",
+                "--prefix backend ci --include=dev",
+                "--prefix backend run build",
+            ]);
+        } finally {
+            restoreNpmEnv();
+            if (deployId) {
+                releaseDeploymentLockInDb(deployId, tempDir);
+                await waitForDeploymentLockReleased(tempDir);
+            }
+        }
 
         await mkdir(path.join(tempDir, "worktrees", "add-playwright-smoke-tests"), {
             recursive: true,

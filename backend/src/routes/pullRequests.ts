@@ -1179,13 +1179,13 @@ async function runDeploymentJob(job: DeploymentJob): Promise<void> {
         currentJob = refreshDeploymentHeartbeat(currentJob);
 
         currentJob = refreshDeploymentHeartbeat(currentJob);
-        await runCommand("npm", ["ci", "--legacy-peer-deps"], {
+        await runCommand("npm", ["ci", "--legacy-peer-deps", "--include=dev"], {
             timeoutMs: 180_000,
         });
         currentJob = refreshDeploymentHeartbeat(currentJob);
         await runCommand("npm", ["run", "build"], { timeoutMs: 180_000 });
         currentJob = refreshDeploymentHeartbeat(currentJob);
-        await runCommand("npm", ["--prefix", "backend", "ci"], {
+        await runCommand("npm", ["--prefix", "backend", "ci", "--include=dev"], {
             timeoutMs: 120_000,
         });
         currentJob = refreshDeploymentHeartbeat(currentJob);
