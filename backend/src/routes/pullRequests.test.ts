@@ -1726,6 +1726,7 @@ describe("pull request routes", () => {
                 ],
             ]);
 
+            clearDeploymentState(tempDir);
             for (let index = 0; index < 52; index += 1) {
                 __testing.writeDeploymentJob({
                     id: `history-${index}`,
