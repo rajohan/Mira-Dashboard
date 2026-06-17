@@ -9,6 +9,7 @@ import {
     waitForLocalCacheSeed,
 } from "./services/cacheRefresh.js";
 import { registerDockerUpdaterScheduledJobs } from "./services/dockerUpdater.js";
+import { registerLogRotationScheduledJobs } from "./services/logRotation.js";
 import { registerOpenClawNotificationScheduledJobs } from "./services/openclawNotifications.js";
 import {
     registerQuotaNotificationScheduledJobs,
@@ -83,6 +84,7 @@ function queueQuotaNotificationCheckAfterSeed(
 export function handleServerListening(): void {
     let gatewayStarted = false;
     let scheduledJobSchedulerStarted = false;
+    let shouldQueueStartupQuotaCheck = true;
     try {
         const token = getPersistedGatewayToken() || process.env.OPENCLAW_TOKEN;
         if (token) {
@@ -98,13 +100,16 @@ export function handleServerListening(): void {
             registerBackupScheduledJobs();
             registerCacheRefreshScheduledJobs();
             registerDockerUpdaterScheduledJobs();
-            registerQuotaNotificationScheduledJobs();
+            registerLogRotationScheduledJobs();
+            shouldQueueStartupQuotaCheck = registerQuotaNotificationScheduledJobs();
             registerOpenClawNotificationScheduledJobs();
             startScheduledJobScheduler();
             scheduledJobSchedulerStarted = true;
             installSchedulerCloseCleanup();
         }
-        queueQuotaNotificationCheckAfterSeed();
+        if (shouldQueueStartupQuotaCheck) {
+            queueQuotaNotificationCheckAfterSeed();
+        }
         afterBackgroundServicesStartedForTest?.();
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);

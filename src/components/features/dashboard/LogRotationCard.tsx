@@ -23,8 +23,16 @@ function formatSchedule(job: ScheduledJob | undefined): string {
         return `${job.timeOfDay} daily`;
     }
 
+    if (job.scheduleType === "daily") {
+        return "Daily";
+    }
+
     if (job.scheduleType === "cron" && job.cronExpression) {
         return job.cronExpression;
+    }
+
+    if (job.scheduleType === "cron") {
+        return "Cron schedule";
     }
 
     const minutes = Math.round(job.intervalSeconds / 60);

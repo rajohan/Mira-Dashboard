@@ -245,7 +245,7 @@ export async function runQuotaNotificationCheck(): Promise<void> {
 }
 
 /** Registers quota notification checks with the shared scheduler. */
-export function registerQuotaNotificationScheduledJobs(): void {
+export function registerQuotaNotificationScheduledJobs(): boolean {
     registerScheduledJobAction("notifications.quota", async () => {
         await runQuotaNotificationCheck();
         return { ok: true };
@@ -269,6 +269,7 @@ export function registerQuotaNotificationScheduledJobs(): void {
             actionPayload: {},
         });
         db.exec("COMMIT");
+        return existing?.enabled ?? true;
     } catch (error) {
         db.exec("ROLLBACK");
         throw error;

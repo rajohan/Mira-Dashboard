@@ -17,10 +17,6 @@ import { db } from "../db.js";
 import { nonEmptyEnvFallback } from "../lib/values.js";
 import { writeCacheSuccess } from "./cacheEntryWriter.js";
 import {
-    type ElevatedLogRotationResult,
-    runElevatedLogRotationService,
-} from "./logRotation.js";
-import {
     getScheduledJob,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
@@ -48,7 +44,6 @@ const KOPIA_EXPECTED_SOURCE_PATHS = [
 ] as const;
 const BACKUP_STATUS_STALE_HOURS = 30;
 const BACKUP_STATUS_MAX_TTL_HOURS = 25;
-const LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS = 100_000;
 
 type JsonRecord = Record<string, unknown>;
 type CacheTtlUnit = "hours" | "minutes";
@@ -2087,16 +2082,6 @@ const cacheRefreshScheduledJobs = [
         actionKey: "cache.refresh",
         actionPayload: { key: "backup.walg.status" },
     },
-    {
-        id: "ops.log-rotation",
-        name: "Log rotation",
-        description: "Rotate approved Docker file logs and update log rotation cache.",
-        scheduleType: "daily",
-        intervalSeconds: 24 * 60 * 60,
-        timeOfDay: "02:10",
-        actionKey: "ops.log-rotation",
-        actionPayload: { key: LOG_ROTATION_STATE_KEY },
-    },
 ] as const;
 
 function getScheduledCacheKey(job: ScheduledJob): string {
@@ -2167,101 +2152,11 @@ export function seedMissingLocalCacheEntry(key: string): void {
     })();
 }
 
-function logRotationFailureMessage(logRotation: {
-    result?: Record<string, unknown>;
-    stderr?: string;
-}): string {
-    if (typeof logRotation.stderr === "string" && logRotation.stderr.trim()) {
-        return logRotation.stderr.trim();
-    }
-    const result = logRotation.result;
-    if (result) {
-        const details = {
-            errors: Array.isArray(result.errors) ? result.errors : [],
-            groups: Array.isArray(result.groups) ? result.groups : [],
-            warnings: Array.isArray(result.warnings) ? result.warnings : [],
-        };
-        if (
-            details.errors.length > 0 ||
-            details.warnings.length > 0 ||
-            details.groups.length > 0
-        ) {
-            return `Log rotation failed: ${JSON.stringify(details)}`;
-        }
-    }
-    return "Log rotation failed";
-}
-
-function capLogRotationFailureOutput(value: unknown): string | undefined {
-    if (typeof value !== "string") {
-        return undefined;
-    }
-    if (value.length <= LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS) {
-        return value;
-    }
-    return value.slice(-LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS);
-}
-
-function readLogRotationStateCacheForFailure(): JsonRecord {
-    const fallback = { version: 1, files: {} };
-    const row = db
-        .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
-        .get(LOG_ROTATION_STATE_KEY) as undefined | { data_json?: string | null };
-    if (!row?.data_json) {
-        return fallback;
-    }
-    try {
-        return { ...fallback, ...asRecord(JSON.parse(row.data_json) as unknown) };
-    } catch {
-        return fallback;
-    }
-}
-
-function persistLogRotationScheduledFailure(
-    logRotation: ElevatedLogRotationResult,
-    message: string
-): void {
-    const existingState = readLogRotationStateCacheForFailure();
-    const structuredLastRun = asRecord(logRotation.result);
-    writeCacheSuccess({
-        key: LOG_ROTATION_STATE_KEY,
-        data: {
-            ...existingState,
-            version: 1,
-            lastRun: {
-                ...structuredLastRun,
-                ok: false,
-                dryRun: false,
-                stdout: capLogRotationFailureOutput(structuredLastRun.stdout),
-                finishedAt:
-                    typeof structuredLastRun.finishedAt === "string"
-                        ? structuredLastRun.finishedAt
-                        : dateToISOString(new Date()),
-                message,
-                stderr: capLogRotationFailureOutput(logRotation.stderr),
-            },
-        },
-        source: "backend",
-        ttl: 90 * 24,
-        ttlUnit: "hours",
-        metadata: { workflow: "Log Rotation - Foundation" },
-    });
-}
-
 export function registerCacheRefreshScheduledJobs(): void {
     registerScheduledJobAction("cache.refresh", async (job, signal) => {
         const key = getScheduledCacheKey(job);
         const result = await refreshCacheProducer(key, signal);
         return { key, ...result };
-    });
-    registerScheduledJobAction("ops.log-rotation", async () => {
-        const logRotation = await runElevatedLogRotationService({ dryRun: false });
-        if (logRotation.result?.ok !== true) {
-            const message = logRotationFailureMessage(logRotation);
-            persistLogRotationScheduledFailure(logRotation, message);
-            throw new Error(message);
-        }
-        return { logRotation };
     });
     const seedKeys: string[] = [];
     db.exec("BEGIN");

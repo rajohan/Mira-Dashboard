@@ -209,4 +209,50 @@ describe("LogRotationCard", () => {
         rerender(<LogRotationCard />);
         expect(screen.getByText("Every 15m")).toBeInTheDocument();
     });
+
+    it("does not fall through to interval labels when typed schedules miss details", () => {
+        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
+        hooks.useRunLogRotationDryRun.mockReturnValue({
+            isPending: false,
+            mutate: vi.fn(),
+        });
+        hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: null,
+                    enabled: true,
+                    id: "ops.log-rotation",
+                    intervalSeconds: 7200,
+                    name: "Log rotation",
+                    nextRunAt: "2026-05-11T02:10:00.000Z",
+                    scheduleType: "daily",
+                    timeOfDay: null,
+                },
+            ],
+        });
+
+        const { rerender } = render(<LogRotationCard />);
+        expect(screen.getByText("Daily")).toBeInTheDocument();
+        expect(screen.queryByText("Every 2h")).not.toBeInTheDocument();
+
+        hooks.useScheduledJobs.mockReturnValue({
+            data: [
+                {
+                    cronExpression: null,
+                    enabled: true,
+                    id: "ops.log-rotation",
+                    intervalSeconds: 7200,
+                    name: "Log rotation",
+                    nextRunAt: "2026-05-11T02:10:00.000Z",
+                    scheduleType: "cron",
+                    timeOfDay: null,
+                },
+            ],
+        });
+
+        rerender(<LogRotationCard />);
+        expect(screen.getByText("Cron schedule")).toBeInTheDocument();
+        expect(screen.queryByText("Every 2h")).not.toBeInTheDocument();
+    });
 });

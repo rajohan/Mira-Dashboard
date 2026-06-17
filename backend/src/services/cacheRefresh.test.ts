@@ -29,6 +29,9 @@ let refreshCacheProducer: Awaited<
 let refreshMoltbookCache: Awaited<
     typeof import("./cacheRefresh.js")
 >["refreshMoltbookCache"];
+let registerLogRotationScheduledJobs: Awaited<
+    typeof import("./logRotation.js")
+>["registerLogRotationScheduledJobs"];
 let registerCacheRefreshScheduledJobs: Awaited<
     typeof import("./cacheRefresh.js")
 >["registerCacheRefreshScheduledJobs"];
@@ -169,6 +172,7 @@ describe("backend cache refresh producers", { concurrency: false }, () => {
             getScheduledJob,
             runScheduledJob,
         } = await import("./scheduledJobs.js"));
+        ({ registerLogRotationScheduledJobs } = await import("./logRotation.js"));
     });
 
     beforeEach(async () => {
@@ -3243,6 +3247,7 @@ else if (args === "security audit --json") process.stdout.write(JSON.stringify({
         );
         try {
             registerCacheRefreshScheduledJobs();
+            registerLogRotationScheduledJobs();
             assert.equal(
                 (
                     db

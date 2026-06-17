@@ -58,7 +58,7 @@ function insertQuotaCacheFromEnv(): void {
 
 describe("quota notifications", () => {
     let runQuotaNotificationCheck: () => Promise<void>;
-    let registerQuotaNotificationScheduledJobs: () => void;
+    let registerQuotaNotificationScheduledJobs: () => boolean;
     let quotaTesting: typeof import("./quotaNotifications.js").__testing;
 
     before(async () => {
@@ -235,7 +235,7 @@ describe("quota notifications", () => {
     it("registers quota notifications with the shared scheduler", async () => {
         db.exec("ROLLBACK");
         try {
-            registerQuotaNotificationScheduledJobs();
+            assert.equal(registerQuotaNotificationScheduledJobs(), true);
 
             const job = db
                 .prepare(
@@ -267,6 +267,34 @@ describe("quota notifications", () => {
 
             const run = await runScheduledJob("notifications.quota");
             assert.equal(run.status, "success");
+        } finally {
+            db.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run(
+                "notifications.quota"
+            );
+            db.exec("BEGIN TRANSACTION");
+        }
+    });
+
+    it("preserves disabled quota notification jobs during registration", () => {
+        db.exec("ROLLBACK");
+        try {
+            db.prepare(
+                `INSERT INTO scheduled_jobs (
+                    id, name, description, enabled, schedule_type, interval_seconds,
+                    time_of_day, cron_expression, action_key, action_payload_json, next_run_at, created_at, updated_at
+                ) VALUES (?, ?, '', 0, 'interval', 900, NULL, NULL, 'notifications.quota', '{}', NULL, ?, ?)`
+            ).run(
+                "notifications.quota",
+                "Quota notifications",
+                dateToISOString(new Date()),
+                dateToISOString(new Date())
+            );
+
+            assert.equal(registerQuotaNotificationScheduledJobs(), false);
+            const job = db
+                .prepare("SELECT enabled FROM scheduled_jobs WHERE id = ?")
+                .get("notifications.quota") as { enabled: number };
+            assert.equal(job.enabled, 0);
         } finally {
             db.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run(
                 "notifications.quota"

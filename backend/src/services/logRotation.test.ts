@@ -41,9 +41,18 @@ const { db } = await withEnv(
     { MIRA_DASHBOARD_DB_PATH: suiteDbPath },
     () => import("../db.js")
 );
-const { __testing, runElevatedLogRotationService, runLogRotationService } = await withEnv(
+const {
+    __testing,
+    registerLogRotationScheduledJobs,
+    runElevatedLogRotationService,
+    runLogRotationService,
+} = await withEnv(
     { MIRA_DASHBOARD_DB_PATH: suiteDbPath },
     () => import("./logRotation.js")
+);
+const { runScheduledJob } = await withEnv(
+    { MIRA_DASHBOARD_DB_PATH: suiteDbPath },
+    () => import("./scheduledJobs.js")
 );
 
 async function writeConfig(root: string, config: unknown) {
@@ -85,6 +94,8 @@ describe("log rotation service", { concurrency: false }, () => {
             path.join(tempDir, "data", "log-rotation.lock")
         );
         db.exec("DELETE FROM cache_entries;");
+        db.exec("DELETE FROM scheduled_job_runs;");
+        db.exec("DELETE FROM scheduled_jobs;");
     });
 
     afterEach(async () => {
@@ -1147,6 +1158,49 @@ describe("log rotation service", { concurrency: false }, () => {
             assert.match(builtArgs[builtEvalIndex + 1] ?? "", /logRotation\.js/u);
         } finally {
             __testing.resetElevatedLogRotationExecFileRunner();
+        }
+    });
+
+    it("registers scheduled log rotation and records failure fallbacks", async () => {
+        registerLogRotationScheduledJobs();
+
+        __testing.setElevatedLogRotationExecFileRunner(async () => ({
+            stderr: "",
+            stdout: JSON.stringify({ ok: false, error: "config missing" }),
+        }));
+        try {
+            const errorRun = await runScheduledJob("ops.log-rotation");
+            assert.equal(errorRun.status, "failed");
+            assert.equal(errorRun.message, "config missing");
+
+            __testing.setElevatedLogRotationExecFileRunner(async () => ({
+                stderr: "",
+                stdout: "null",
+            }));
+            const nullRun = await runScheduledJob("ops.log-rotation");
+            assert.equal(nullRun.status, "failed");
+            assert.equal(nullRun.message, "Log rotation failed");
+        } finally {
+            __testing.resetElevatedLogRotationExecFileRunner();
+        }
+    });
+
+    it("rolls back scheduled log rotation registration failures", () => {
+        const originalExec = db.exec.bind(db);
+        const execMock = mock.method(db, "exec", (sql: string) => {
+            if (sql === "COMMIT") {
+                throw new Error("commit failed");
+            }
+            if (sql === "ROLLBACK") {
+                originalExec(sql);
+                throw new Error("rollback failed");
+            }
+            return originalExec(sql);
+        });
+        try {
+            assert.throws(registerLogRotationScheduledJobs, /commit failed/u);
+        } finally {
+            execMock.mock.restore();
         }
     });
 

@@ -10,6 +10,12 @@ import { createGzip } from "node:zlib";
 import { db } from "../db.js";
 import { nonEmptyEnvFallback } from "../lib/values.js";
 import { writeCacheSuccess } from "./cacheEntryWriter.js";
+import {
+    getScheduledJob,
+    registerScheduledJobAction,
+    removeScheduledJobsNotInAction,
+    upsertScheduledJob,
+} from "./scheduledJobs.js";
 
 function compareStrings(left: string, right: string): number {
     return left.localeCompare(right);
@@ -59,6 +65,8 @@ const RECLAIM_DIR_STALE_MS = 5 * 60 * 1000;
 const LOCK_STALE_MS = 12 * 60 * 60 * 1000;
 const ELEVATED_LOG_ROTATION_TIMEOUT_MS = 5 * 60_000;
 const ELEVATED_LOG_ROTATION_MAX_BUFFER = 16 * 1024 * 1024;
+const LOG_ROTATION_JOB_ID = "ops.log-rotation";
+const LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS = 100_000;
 let logRotationLockFile = DEFAULT_LOCK_FILE;
 
 type ExecFileRunner = (
@@ -1664,6 +1672,132 @@ export async function runElevatedLogRotationService(options: {
             },
             stderr: stderr ? `${stderr}\n${parseContext}` : parseContext,
         };
+    }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+}
+
+function logRotationFailureMessage(logRotation: ElevatedLogRotationResult): string {
+    if (logRotation.stderr.trim()) {
+        return logRotation.stderr.trim();
+    }
+    const result = asRecord(logRotation.result);
+    if (typeof result.error === "string" && result.error.trim()) {
+        return result.error.trim();
+    }
+    if (result.ok === false) {
+        const details = {
+            errors: Array.isArray(result.errors) ? result.errors : [],
+            groups: Array.isArray(result.groups) ? result.groups : [],
+            warnings: Array.isArray(result.warnings) ? result.warnings : [],
+        };
+        if (
+            details.errors.length > 0 ||
+            details.warnings.length > 0 ||
+            details.groups.length > 0
+        ) {
+            return `Log rotation failed: ${JSON.stringify(details)}`;
+        }
+    }
+    return "Log rotation failed";
+}
+
+function capLogRotationFailureOutput(value: unknown): string | undefined {
+    if (typeof value !== "string") {
+        return undefined;
+    }
+    if (value.length <= LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS) {
+        return value;
+    }
+    return value.slice(-LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS);
+}
+
+function readLogRotationStateCacheForFailure(): Record<string, unknown> {
+    const fallback = { version: 1, files: {} };
+    const row = db
+        .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
+        .get(STATE_CACHE_KEY) as undefined | { data_json?: string | null };
+    if (!row?.data_json) {
+        return fallback;
+    }
+    try {
+        return { ...fallback, ...asRecord(JSON.parse(row.data_json) as unknown) };
+    } catch {
+        return fallback;
+    }
+}
+
+function persistLogRotationScheduledFailure(
+    logRotation: ElevatedLogRotationResult,
+    message: string
+): void {
+    const existingState = readLogRotationStateCacheForFailure();
+    const structuredLastRun = asRecord(logRotation.result);
+    writeCacheSuccess({
+        key: STATE_CACHE_KEY,
+        data: {
+            ...existingState,
+            version: 1,
+            lastRun: {
+                ...structuredLastRun,
+                ok: false,
+                dryRun: false,
+                stdout: capLogRotationFailureOutput(structuredLastRun.stdout),
+                finishedAt:
+                    typeof structuredLastRun.finishedAt === "string"
+                        ? structuredLastRun.finishedAt
+                        : dateToISOString(new Date()),
+                message,
+                stderr: capLogRotationFailureOutput(logRotation.stderr),
+            },
+        },
+        source: "backend",
+        ttl: 90 * 24,
+        ttlUnit: "hours",
+        metadata: { workflow: "Log Rotation - Foundation" },
+    });
+}
+
+/** Registers the scheduled real log rotation job. */
+export function registerLogRotationScheduledJobs(): void {
+    registerScheduledJobAction(LOG_ROTATION_JOB_ID, async () => {
+        const logRotation = await runElevatedLogRotationService({ dryRun: false });
+        if (logRotation.result?.ok !== true) {
+            const message = logRotationFailureMessage(logRotation);
+            persistLogRotationScheduledFailure(logRotation, message);
+            throw new Error(message);
+        }
+        return { logRotation };
+    });
+    db.exec("BEGIN");
+    try {
+        removeScheduledJobsNotInAction(LOG_ROTATION_JOB_ID, [LOG_ROTATION_JOB_ID]);
+        const existing = getScheduledJob(LOG_ROTATION_JOB_ID);
+        upsertScheduledJob({
+            id: LOG_ROTATION_JOB_ID,
+            name: "Log rotation",
+            description:
+                "Rotate approved Docker file logs and update log rotation cache.",
+            enabled: existing?.enabled ?? true,
+            scheduleType: existing?.scheduleType ?? "daily",
+            intervalSeconds: existing?.intervalSeconds ?? 24 * 60 * 60,
+            timeOfDay: existing ? existing.timeOfDay : "02:10",
+            cronExpression: existing?.cronExpression ?? null,
+            actionKey: LOG_ROTATION_JOB_ID,
+            actionPayload: { key: STATE_CACHE_KEY },
+        });
+        db.exec("COMMIT");
+    } catch (error) {
+        try {
+            db.exec("ROLLBACK");
+        } catch {
+            // Preserve the registration error.
+        }
+        throw error;
     }
 }
 
