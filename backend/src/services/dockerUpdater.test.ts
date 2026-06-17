@@ -2615,7 +2615,7 @@ setTimeout(() => {
 
             const row = dbHandle
                 .prepare(
-                    `SELECT id, enabled, schedule_type, interval_seconds, action_key
+                    `SELECT id, enabled, schedule_type, interval_seconds, time_of_day, action_key
                  FROM scheduled_jobs WHERE id = 'docker.updater'`
                 )
                 .get() as
@@ -2626,13 +2626,40 @@ setTimeout(() => {
                       id: string;
                       interval_seconds: number;
                       schedule_type: string;
+                      time_of_day: string | null;
                   };
             assert.ok(row);
             assert.equal(row.id, "docker.updater");
             assert.equal(row.enabled, 1);
-            assert.equal(row.schedule_type, "interval");
-            assert.equal(row.interval_seconds, 3600);
+            assert.equal(row.schedule_type, "daily");
+            assert.equal(row.interval_seconds, 86_400);
+            assert.equal(row.time_of_day, "04:10");
             assert.equal(row.action_key, "docker.updater");
+
+            dbHandle
+                .prepare(
+                    `UPDATE scheduled_jobs
+                     SET schedule_type = 'interval',
+                         interval_seconds = 3600,
+                         time_of_day = NULL,
+                         cron_expression = NULL
+                     WHERE id = 'docker.updater'`
+                )
+                .run();
+            updater.registerDockerUpdaterScheduledJobs();
+            const migratedRow = dbHandle
+                .prepare(
+                    `SELECT schedule_type, interval_seconds, time_of_day
+                     FROM scheduled_jobs WHERE id = 'docker.updater'`
+                )
+                .get() as {
+                interval_seconds: number;
+                schedule_type: string;
+                time_of_day: string | null;
+            };
+            assert.equal(migratedRow.schedule_type, "daily");
+            assert.equal(migratedRow.interval_seconds, 86_400);
+            assert.equal(migratedRow.time_of_day, "04:10");
 
             const run = await scheduledJobs.runScheduledJob("docker.updater", "manual");
             assert.equal(run.status, "success");

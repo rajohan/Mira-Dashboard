@@ -2094,8 +2094,9 @@ export function registerDockerUpdaterScheduledJobs(): void {
         id: "docker.updater",
         name: "Docker updater",
         description: "Poll Docker registries and apply approved automatic updates.",
-        scheduleType: "interval",
-        intervalSeconds: 60 * 60,
+        scheduleType: "daily",
+        intervalSeconds: 24 * 60 * 60,
+        timeOfDay: "04:10",
         actionKey: "docker.updater",
         actionPayload: {},
     } as const;
@@ -2119,12 +2120,19 @@ export function registerDockerUpdaterScheduledJobs(): void {
     try {
         removeScheduledJobsNotInAction("docker.updater", [job.id]);
         const existing = getScheduledJob(job.id);
+        const shouldMigrateHourlyDefault =
+            existing?.scheduleType === "interval" &&
+            existing.intervalSeconds === 60 * 60 &&
+            !existing.timeOfDay &&
+            !existing.cronExpression;
+        const preservedExisting =
+            existing && !shouldMigrateHourlyDefault ? existing : null;
         upsertScheduledJob({
             ...job,
             enabled: existing?.enabled ?? true,
-            scheduleType: existing?.scheduleType ?? job.scheduleType,
-            intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
-            timeOfDay: existing?.timeOfDay ?? null,
+            scheduleType: preservedExisting?.scheduleType ?? job.scheduleType,
+            intervalSeconds: preservedExisting?.intervalSeconds ?? job.intervalSeconds,
+            timeOfDay: preservedExisting?.timeOfDay ?? job.timeOfDay,
             cronExpression: existing?.cronExpression ?? null,
         });
         db.exec("COMMIT");
