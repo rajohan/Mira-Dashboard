@@ -5,6 +5,12 @@ import {
     type SyntheticQuota,
 } from "../lib/quotasCache.js";
 import { pruneReadNotifications } from "./notificationMaintenance.js";
+import {
+    getScheduledJob,
+    registerScheduledJobAction,
+    removeScheduledJobsNotInAction,
+    upsertScheduledJob,
+} from "./scheduledJobs.js";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -15,18 +21,12 @@ type ProviderKey = "openrouter" | "elevenlabs" | "synthetic" | "openai";
 
 const THRESHOLDS = [80, 90, 95] as const;
 const HYSTERESIS = 5;
-const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
-const MAX_TIMER_MS = 2_147_483_647;
-const quotaMonitorIntervals = new Set<NodeJS.Timeout>();
+const QUOTA_NOTIFICATION_JOB_ID = "notifications.quota";
 
 /** Formats the Synthetic.new weekly remaining quota. */
 function formatSyntheticWeeklyRemaining(
     weeklyTokenLimit: SyntheticQuota["weeklyTokenLimit"]
 ): string {
-    if (weeklyTokenLimit.remainingCredits) {
-        return `${weeklyTokenLimit.remainingCredits} left`;
-    }
-
     return `${weeklyTokenLimit.percentRemaining}% left`;
 }
 
@@ -244,34 +244,39 @@ export async function runQuotaNotificationCheck(): Promise<void> {
     }
 }
 
-/** Performs start quota notification monitor. */
-export function startQuotaNotificationMonitor(intervalMs = DEFAULT_INTERVAL_MS): void {
-    if (quotaMonitorIntervals.size > 0) {
-        return;
+/** Registers quota notification checks with the shared scheduler. */
+export function registerQuotaNotificationScheduledJobs(): void {
+    registerScheduledJobAction("notifications.quota", async () => {
+        await runQuotaNotificationCheck();
+        return { ok: true };
+    });
+    db.exec("BEGIN");
+    try {
+        removeScheduledJobsNotInAction("notifications.quota", [
+            QUOTA_NOTIFICATION_JOB_ID,
+        ]);
+        const existing = getScheduledJob(QUOTA_NOTIFICATION_JOB_ID);
+        upsertScheduledJob({
+            id: QUOTA_NOTIFICATION_JOB_ID,
+            name: "Quota notifications",
+            description: "Check provider quota thresholds and update notifications.",
+            enabled: existing?.enabled ?? true,
+            scheduleType: existing?.scheduleType ?? "interval",
+            intervalSeconds: existing?.intervalSeconds ?? 15 * 60,
+            timeOfDay: existing?.timeOfDay ?? null,
+            cronExpression: existing?.cronExpression ?? null,
+            actionKey: "notifications.quota",
+            actionPayload: {},
+        });
+        db.exec("COMMIT");
+    } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
     }
-
-    const safeInterval =
-        Number.isFinite(intervalMs) && intervalMs >= 60_000
-            ? Math.min(Math.trunc(intervalMs), MAX_TIMER_MS)
-            : DEFAULT_INTERVAL_MS;
-
-    void runQuotaNotificationCheck();
-    const monitor = setInterval(() => {
-        void runQuotaNotificationCheck();
-    }, safeInterval);
-    quotaMonitorIntervals.add(monitor);
-    monitor.unref();
-}
-
-/** Stops quota notification monitors. */
-export function stopQuotaNotificationMonitor(): void {
-    for (const monitor of quotaMonitorIntervals) {
-        clearInterval(monitor);
-    }
-    quotaMonitorIntervals.clear();
 }
 
 export const __testing = {
+    formatSyntheticWeeklyRemaining,
     getNotificationPayload,
     getProviderNotificationPayload,
     getProviderPercent,

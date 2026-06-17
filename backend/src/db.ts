@@ -7,61 +7,6 @@ export const miraDbPath = configuredDbPath
     ? path.resolve(configuredDbPath)
     : path.join(process.cwd(), "data", "mira-dashboard.db");
 
-interface MigrationDatabase {
-    exec(sql: string): unknown;
-    prepare(sql: string): {
-        all(): Array<Record<string, unknown>>;
-    };
-}
-
-const TASK_AUTOMATION_COLUMN_SQL =
-    "ALTER TABLE tasks ADD COLUMN automation_json TEXT NOT NULL DEFAULT '{}'";
-const SCHEDULED_JOBS_CRON_EXPRESSION_COLUMN_SQL =
-    "ALTER TABLE scheduled_jobs ADD COLUMN cron_expression TEXT";
-
-function taskAutomationColumnExists(targetDb: MigrationDatabase): boolean {
-    const taskColumns = targetDb.prepare("PRAGMA table_info(tasks)").all();
-    return taskColumns.some((column) => column.name === "automation_json");
-}
-
-/**
- * table must be a trusted literal (no user input); SQLite PRAGMA table names
- * cannot be parameterized.
- */
-function columnExists(
-    targetDb: MigrationDatabase,
-    table: string,
-    columnName: string
-): boolean {
-    const columns = targetDb.prepare(`PRAGMA table_info(${table})`).all();
-    return columns.some((column) => column.name === columnName);
-}
-
-function isDuplicateColumnError(error: unknown, columnName: string): boolean {
-    const escapedName = columnName.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
-    const duplicateColumnPattern = new RegExp(
-        String.raw`duplicate column name:\s*${escapedName}`,
-        "u"
-    );
-    return error instanceof Error && duplicateColumnPattern.test(error.message);
-}
-
-function isTransientSqliteLock(error: unknown): boolean {
-    if (!(error instanceof Error)) {
-        return false;
-    }
-    const code = "code" in error ? String(error.code).toUpperCase() : "";
-    const message = error.message;
-    return (
-        /\bSQLITE_(?:BUSY|LOCKED)\b/u.test(`${code} ${message.toUpperCase()}`) ||
-        /database\b.*\blocked\b/iu.test(message)
-    );
-}
-
-async function sleep(milliseconds: number): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -283,123 +228,6 @@ CREATE INDEX IF NOT EXISTS idx_docker_update_events_created_at
     ON docker_update_events(created_at DESC);
 `;
 
-/** Ensures older task databases have the automation column. */
-export async function ensureTaskAutomationColumn(
-    targetDb: MigrationDatabase
-): Promise<void> {
-    try {
-        if (taskAutomationColumnExists(targetDb)) {
-            return;
-        }
-    } catch (error) {
-        if (!isTransientSqliteLock(error)) {
-            throw error;
-        }
-    }
-
-    let lastError: unknown;
-
-    for (const delay of [0, 10, 25, 50]) {
-        if (delay > 0) {
-            await sleep(delay);
-        }
-
-        try {
-            targetDb.exec(TASK_AUTOMATION_COLUMN_SQL);
-            return;
-        } catch (error) {
-            lastError = error;
-            if (isDuplicateColumnError(error, "automation_json")) {
-                return;
-            }
-
-            try {
-                if (taskAutomationColumnExists(targetDb)) {
-                    return;
-                }
-            } catch (columnError) {
-                if (!isTransientSqliteLock(columnError)) {
-                    throw columnError;
-                }
-            }
-
-            if (!isTransientSqliteLock(error)) {
-                throw error;
-            }
-        }
-    }
-
-    try {
-        if (taskAutomationColumnExists(targetDb)) {
-            return;
-        }
-    } catch {
-        // Preserve the migration error that triggered the retry loop.
-    }
-
-    throw lastError;
-}
-
-/** Ensures older scheduled job databases have the cron expression column. */
-export async function ensureScheduledJobCronExpressionColumn(
-    targetDb: MigrationDatabase
-): Promise<void> {
-    const cronExpressionColumnExists = (): boolean =>
-        columnExists(targetDb, "scheduled_jobs", "cron_expression");
-
-    try {
-        if (cronExpressionColumnExists()) {
-            return;
-        }
-    } catch (error) {
-        if (!isTransientSqliteLock(error)) {
-            throw error;
-        }
-    }
-
-    let lastError: unknown;
-
-    for (const delay of [0, 10, 25, 50]) {
-        if (delay > 0) {
-            await sleep(delay);
-        }
-
-        try {
-            targetDb.exec(SCHEDULED_JOBS_CRON_EXPRESSION_COLUMN_SQL);
-            return;
-        } catch (error) {
-            lastError = error;
-            if (isDuplicateColumnError(error, "cron_expression")) {
-                return;
-            }
-
-            try {
-                if (cronExpressionColumnExists()) {
-                    return;
-                }
-            } catch (columnError) {
-                if (!isTransientSqliteLock(columnError)) {
-                    throw columnError;
-                }
-            }
-
-            if (!isTransientSqliteLock(error)) {
-                throw error;
-            }
-        }
-    }
-
-    try {
-        if (cronExpressionColumnExists()) {
-            return;
-        }
-    } catch {
-        // Preserve the migration error that triggered the retry loop.
-    }
-
-    throw lastError;
-}
-
 async function initializeDatabase(): Promise<DatabaseSync> {
     const dataDirectory = path.dirname(miraDbPath);
     fs.mkdirSync(dataDirectory, { recursive: true });
@@ -408,9 +236,6 @@ async function initializeDatabase(): Promise<DatabaseSync> {
     initializedDb.exec("PRAGMA foreign_keys = ON");
     initializedDb.exec("PRAGMA busy_timeout = 5000");
     initializedDb.exec(SCHEMA_SQL);
-
-    await ensureTaskAutomationColumn(initializedDb);
-    await ensureScheduledJobCronExpressionColumn(initializedDb);
 
     return initializedDb;
 }

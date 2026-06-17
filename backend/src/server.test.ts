@@ -12,14 +12,9 @@ import { fileURLToPath } from "node:url";
 
 import { WebSocket } from "ws";
 
-import {
-    db,
-    ensureScheduledJobCronExpressionColumn,
-    ensureTaskAutomationColumn,
-} from "./db.js";
+import { db } from "./db.js";
 import gateway from "./gateway.js";
-import { stopOpenClawNotificationMonitor } from "./services/openclawNotifications.js";
-import { stopQuotaNotificationMonitor } from "./services/quotaNotifications.js";
+import { stopScheduledJobScheduler } from "./services/scheduledJobs.js";
 
 function setGlobalProperty<Key extends keyof typeof globalThis>(
     key: Key,
@@ -385,369 +380,7 @@ describe("server bootstrap", () => {
         }
     });
 
-    it("covers database migration and commit fallback helpers", async () => {
-        const executedSql: string[] = [];
-        await ensureTaskAutomationColumn({
-            exec: (sql) => {
-                executedSql.push(sql);
-            },
-            prepare: () => ({
-                all: () => [{ name: "id" }],
-            }),
-        });
-        assert.equal(executedSql.length, 1);
-
-        executedSql.length = 0;
-        let initialLockedPrepareCalls = 0;
-        await ensureTaskAutomationColumn({
-            exec: (sql) => {
-                executedSql.push(sql);
-            },
-            prepare: () => ({
-                all: () => {
-                    initialLockedPrepareCalls += 1;
-                    if (initialLockedPrepareCalls === 1) {
-                        throw new Error("database is locked");
-                    }
-                    return [{ name: "id" }];
-                },
-            }),
-        });
-        assert.equal(initialLockedPrepareCalls, 1);
-        assert.equal(executedSql.length, 1);
-
-        executedSql.length = 0;
-        let tableLockedPrepareCalls = 0;
-        await ensureTaskAutomationColumn({
-            exec: (sql) => {
-                executedSql.push(sql);
-            },
-            prepare: () => ({
-                all: () => {
-                    tableLockedPrepareCalls += 1;
-                    if (tableLockedPrepareCalls === 1) {
-                        throw new Error("database table is locked");
-                    }
-                    return [{ name: "id" }];
-                },
-            }),
-        });
-        assert.equal(tableLockedPrepareCalls, 1);
-        assert.equal(executedSql.length, 1);
-
-        const initialPrepareError = new Error("schema unavailable");
-        await assert.rejects(
-            () =>
-                ensureTaskAutomationColumn({
-                    exec: () => {},
-                    prepare: () => ({
-                        all: () => {
-                            throw initialPrepareError;
-                        },
-                    }),
-                }),
-            initialPrepareError
-        );
-
-        executedSql.length = 0;
-        await ensureTaskAutomationColumn({
-            exec: (sql) => {
-                executedSql.push(sql);
-            },
-            prepare: () => ({
-                all: () => [{ name: "automation_json" }],
-            }),
-        });
-        assert.deepEqual(executedSql, []);
-
-        let lockedAttempts = 0;
-        await ensureTaskAutomationColumn({
-            exec: () => {
-                lockedAttempts += 1;
-                if (lockedAttempts < 3) {
-                    const error = new Error("database is locked") as Error & {
-                        code: string;
-                    };
-                    error.code = "SQLITE_LOCKED";
-                    throw error;
-                }
-            },
-            prepare: () => ({
-                all: () => [{ name: "id" }],
-            }),
-        });
-        assert.equal(lockedAttempts, 3);
-
-        let concurrentPrepareChecks = 0;
-        await ensureTaskAutomationColumn({
-            exec: () => {
-                throw new Error("SQLITE_BUSY");
-            },
-            prepare: () => ({
-                all: () => {
-                    concurrentPrepareChecks += 1;
-                    return concurrentPrepareChecks >= 2
-                        ? [{ name: "automation_json" }]
-                        : [{ name: "id" }];
-                },
-            }),
-        });
-        assert.equal(concurrentPrepareChecks, 2);
-
-        let transientRecheckAttempts = 0;
-        await ensureTaskAutomationColumn({
-            exec: () => {
-                transientRecheckAttempts += 1;
-                if (transientRecheckAttempts === 1) {
-                    throw new Error("SQLITE_BUSY");
-                }
-            },
-            prepare: () => ({
-                all: () => {
-                    if (transientRecheckAttempts === 1) {
-                        throw new Error("SQLITE_BUSY");
-                    }
-                    return [{ name: "id" }];
-                },
-            }),
-        });
-        assert.equal(transientRecheckAttempts, 2);
-
-        const recheckError = new Error("recheck failed");
-        let recheckPrepareCalls = 0;
-        await assert.rejects(
-            () =>
-                ensureTaskAutomationColumn({
-                    exec: () => {
-                        throw new Error("SQLITE_BUSY");
-                    },
-                    prepare: () => ({
-                        all: () => {
-                            recheckPrepareCalls += 1;
-                            if (recheckPrepareCalls === 1) {
-                                return [{ name: "id" }];
-                            }
-                            throw recheckError;
-                        },
-                    }),
-                }),
-            recheckError
-        );
-
-        const nonTransientError = new Error("disk unavailable");
-        await assert.rejects(
-            () =>
-                ensureTaskAutomationColumn({
-                    exec: () => {
-                        throw nonTransientError;
-                    },
-                    prepare: () => ({
-                        all: () => [{ name: "id" }],
-                    }),
-                }),
-            nonTransientError
-        );
-
-        await assert.rejects(
-            () =>
-                ensureTaskAutomationColumn({
-                    exec: () => {
-                        throw "SQLITE_LOCKED";
-                    },
-                    prepare: () => ({
-                        all: () => [{ name: "id" }],
-                    }),
-                }),
-            /SQLITE_LOCKED/u
-        );
-
-        await assert.rejects(
-            () =>
-                ensureTaskAutomationColumn({
-                    exec: () => {
-                        throw new Error("SQLITE_BUSY");
-                    },
-                    prepare: () => ({
-                        all: () => [{ name: "id" }],
-                    }),
-                }),
-            /SQLITE_BUSY/u
-        );
-
-        let finalCheckCalls = 0;
-        await assert.rejects(
-            () =>
-                ensureTaskAutomationColumn({
-                    exec: () => {
-                        throw new Error("SQLITE_BUSY");
-                    },
-                    prepare: () => ({
-                        all: () => {
-                            finalCheckCalls += 1;
-                            if (finalCheckCalls === 6) {
-                                throw new Error("final check unavailable");
-                            }
-                            return [{ name: "id" }];
-                        },
-                    }),
-                }),
-            /SQLITE_BUSY/u
-        );
-        assert.equal(finalCheckCalls, 6);
-
-        let resolvedAfterRetries = 0;
-        let resolvedAfterRetryChecks = 0;
-        await ensureTaskAutomationColumn({
-            exec: () => {
-                resolvedAfterRetries += 1;
-                throw new Error("SQLITE_BUSY");
-            },
-            prepare: () => ({
-                all: () => {
-                    resolvedAfterRetryChecks += 1;
-                    return resolvedAfterRetryChecks >= 6
-                        ? [{ name: "automation_json" }]
-                        : [{ name: "id" }];
-                },
-            }),
-        });
-        assert.equal(resolvedAfterRetries, 4);
-
-        await ensureTaskAutomationColumn({
-            exec: () => {
-                throw new Error("duplicate column name: automation_json");
-            },
-            prepare: () => ({
-                all: () => [{ name: "id" }],
-            }),
-        });
-
-        const scheduledJobMigrationSql: string[] = [];
-        await ensureScheduledJobCronExpressionColumn({
-            exec: (sql) => {
-                scheduledJobMigrationSql.push(sql);
-            },
-            prepare: () => ({
-                all: () => [{ name: "id" }],
-            }),
-        });
-        assert.deepEqual(scheduledJobMigrationSql, [
-            "ALTER TABLE scheduled_jobs ADD COLUMN cron_expression TEXT",
-        ]);
-
-        scheduledJobMigrationSql.length = 0;
-        await ensureScheduledJobCronExpressionColumn({
-            exec: (sql) => {
-                scheduledJobMigrationSql.push(sql);
-            },
-            prepare: () => ({
-                all: () => [{ name: "cron_expression" }],
-            }),
-        });
-        assert.deepEqual(scheduledJobMigrationSql, []);
-
-        await ensureScheduledJobCronExpressionColumn({
-            exec: () => {
-                throw new Error("duplicate column name: cron_expression");
-            },
-            prepare: () => ({
-                all: () => [{ name: "id" }],
-            }),
-        });
-
-        let cronResolvedAfterRetries = 0;
-        let cronResolvedAfterRetryChecks = 0;
-        await ensureScheduledJobCronExpressionColumn({
-            exec: () => {
-                cronResolvedAfterRetries += 1;
-                throw new Error("SQLITE_BUSY");
-            },
-            prepare: () => ({
-                all: () => {
-                    cronResolvedAfterRetryChecks += 1;
-                    return cronResolvedAfterRetryChecks >= 6
-                        ? [{ name: "cron_expression" }]
-                        : [{ name: "id" }];
-                },
-            }),
-        });
-        assert.equal(cronResolvedAfterRetries, 4);
-
-        let cronResolvedAfterColumnCheck = 0;
-        let cronResolvedAfterColumnCheckReads = 0;
-        await ensureScheduledJobCronExpressionColumn({
-            exec: () => {
-                cronResolvedAfterColumnCheck += 1;
-                throw new Error("SQLITE_BUSY");
-            },
-            prepare: () => ({
-                all: () => {
-                    cronResolvedAfterColumnCheckReads += 1;
-                    return cronResolvedAfterColumnCheckReads >= 2
-                        ? [{ name: "cron_expression" }]
-                        : [{ name: "id" }];
-                },
-            }),
-        });
-        assert.equal(cronResolvedAfterColumnCheck, 1);
-
-        let cronInnerSchemaChecks = 0;
-        await assert.rejects(
-            ensureScheduledJobCronExpressionColumn({
-                exec: () => {
-                    throw new Error("SQLITE_BUSY");
-                },
-                prepare: () => ({
-                    all: () => {
-                        cronInnerSchemaChecks += 1;
-                        if (cronInnerSchemaChecks === 1) {
-                            return [{ name: "id" }];
-                        }
-                        throw new Error("schema unavailable");
-                    },
-                }),
-            }),
-            /schema unavailable/u
-        );
-
-        await assert.rejects(
-            ensureScheduledJobCronExpressionColumn({
-                exec: () => {
-                    throw new Error("SQLITE_BUSY");
-                },
-                prepare: () => ({
-                    all: () => {
-                        throw new Error("SQLITE_BUSY");
-                    },
-                }),
-            }),
-            /SQLITE_BUSY/u
-        );
-
-        await assert.rejects(
-            ensureScheduledJobCronExpressionColumn({
-                exec: () => {
-                    throw new Error("migration failed");
-                },
-                prepare: () => ({
-                    all: () => [{ name: "id" }],
-                }),
-            }),
-            /migration failed/u
-        );
-
-        await assert.rejects(
-            ensureScheduledJobCronExpressionColumn({
-                exec: () => {},
-                prepare: () => ({
-                    all: () => {
-                        throw new Error("schema unavailable");
-                    },
-                }),
-            }),
-            /schema unavailable/u
-        );
-
+    it("covers backend commit fallback helpers", () => {
         assert.equal(
             resolveBackendCommit("/missing", () => {
                 throw new Error("git unavailable");
@@ -954,8 +587,7 @@ describe("server bootstrap", () => {
             process.env.OPENCLAW_TOKEN = "test-token";
             handleServerListening();
             assert.equal(initializedToken, "test-token");
-            stopQuotaNotificationMonitor();
-            stopOpenClawNotificationMonitor();
+            stopScheduledJobScheduler();
             process.env.NODE_ENV = "production";
             server.emit("close");
             const closeListenersBeforeScheduler = server.listenerCount("close");
@@ -976,8 +608,7 @@ describe("server bootstrap", () => {
                 1
             );
             server.emit("close");
-            stopQuotaNotificationMonitor();
-            stopOpenClawNotificationMonitor();
+            stopScheduledJobScheduler();
             server.close = (() => {
                 closeCalled = true;
                 return server;
@@ -991,8 +622,7 @@ describe("server bootstrap", () => {
             assert.equal(server.listenerCount("close"), closeListenersBeforeScheduler);
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
             server.close = originalClose;
-            stopQuotaNotificationMonitor();
-            stopOpenClawNotificationMonitor();
+            stopScheduledJobScheduler();
             process.env.NODE_ENV = originalNodeEnv;
             gateway.init = () => {
                 throw new Error("gateway failed");
@@ -1013,12 +643,13 @@ describe("server bootstrap", () => {
                 shutdownCalled = true;
             };
             let intervalCalls = 0;
+            process.env.NODE_ENV = "production";
             setGlobalProperty("setInterval", ((
                 ...args: Parameters<typeof setInterval>
             ) => {
                 intervalCalls += 1;
-                if (intervalCalls === 2) {
-                    throw new Error("monitor failed");
+                if (intervalCalls === 1) {
+                    throw new Error("scheduler failed");
                 }
                 return originalSetInterval(...args);
             }) as typeof setInterval);
@@ -1026,23 +657,21 @@ describe("server bootstrap", () => {
                 closeCalled = true;
                 return server;
             }) as typeof server.close;
-            assert.throws(() => handleServerListening(), /monitor failed/u);
+            assert.throws(() => handleServerListening(), /scheduler failed/u);
             assert.equal(closeCalled, true);
             assert.equal(shutdownCalled, true);
-            stopQuotaNotificationMonitor();
-            stopOpenClawNotificationMonitor();
+            stopScheduledJobScheduler();
             setGlobalProperty("setInterval", originalSetInterval);
             closeCalled = false;
             shutdownCalled = false;
             serverStartTesting.setAfterBackgroundServicesStartedForTest(() => {
-                throw new Error("post monitor failed");
+                throw new Error("post scheduler failed");
             });
-            assert.throws(() => handleServerListening(), /post monitor failed/u);
+            assert.throws(() => handleServerListening(), /post scheduler failed/u);
             assert.equal(closeCalled, true);
             assert.equal(shutdownCalled, true);
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
-            stopQuotaNotificationMonitor();
-            stopOpenClawNotificationMonitor();
+            stopScheduledJobScheduler();
             gateway.shutdown = () => {
                 throw new Error("shutdown cleanup failed");
             };
@@ -1050,9 +679,12 @@ describe("server bootstrap", () => {
                 throw new Error("server cleanup failed");
             }) as typeof server.close;
             serverStartTesting.setAfterBackgroundServicesStartedForTest(() => {
-                throw new Error("post monitor cleanup failed");
+                throw new Error("post scheduler cleanup failed");
             });
-            assert.throws(() => handleServerListening(), /post monitor cleanup failed/u);
+            assert.throws(
+                () => handleServerListening(),
+                /post scheduler cleanup failed/u
+            );
             assert.equal(
                 errors.some((entry) =>
                     String(entry[0]).includes("Failed to stop gateway")
@@ -1066,8 +698,7 @@ describe("server bootstrap", () => {
                 true
             );
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
-            stopQuotaNotificationMonitor();
-            stopOpenClawNotificationMonitor();
+            stopScheduledJobScheduler();
             gateway.shutdown = originalShutdown;
             server.close = originalClose;
             gateway.init = (token: string) => {
@@ -1079,6 +710,7 @@ describe("server bootstrap", () => {
             assert.equal(initializedToken, undefined);
             assert.match(String(warnings.at(-1)?.[0]), /No gateway token/u);
 
+            serverStartTesting.removeSchedulerCloseCleanup();
             serverStartTesting.removeSchedulerCloseCleanup();
 
             const quotaSeedError = new Error("quota seed unavailable");
@@ -1285,8 +917,7 @@ describe("server bootstrap", () => {
             setGlobalProperty("setInterval", originalSetInterval);
             gateway.shutdown = originalShutdown;
             serverStartTesting.setAfterBackgroundServicesStartedForTest(undefined);
-            stopQuotaNotificationMonitor();
-            stopOpenClawNotificationMonitor();
+            stopScheduledJobScheduler();
             if (originalListeningDescriptor) {
                 Object.defineProperty(server, "listening", originalListeningDescriptor);
             } else {

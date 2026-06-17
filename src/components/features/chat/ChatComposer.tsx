@@ -98,8 +98,12 @@ export function ChatComposer({
     onToggleRecording,
 }: ChatComposerProps) {
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const [slashSuggestionsDismissed, setSlashSuggestionsDismissed] = useState(false);
     const composerReference = useRef<HTMLDivElement | null>(null);
     const textareaReference = useRef<HTMLTextAreaElement | null>(null);
+    const visibleSlashCommandSuggestions = slashSuggestionsDismissed
+        ? []
+        : slashCommandSuggestions;
 
     useEffect(() => {
         if (!showEmojiPicker) {
@@ -133,6 +137,39 @@ export function ChatComposer({
             document.removeEventListener("keydown", handleKeyDown);
         };
     }, [showEmojiPicker]);
+
+    useEffect(() => {
+        if (slashCommandSuggestions.length === 0 || slashSuggestionsDismissed) {
+            return;
+        }
+
+        /** Responds to pointer down events. */
+        const handlePointerDown = (event: PointerEvent) => {
+            if (
+                event.target instanceof Node &&
+                composerReference.current?.contains(event.target)
+            ) {
+                return;
+            }
+
+            setSlashSuggestionsDismissed(true);
+        };
+
+        /** Responds to key down events. */
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") {
+                setSlashSuggestionsDismissed(true);
+            }
+        };
+
+        document.addEventListener("pointerdown", handlePointerDown);
+        document.addEventListener("keydown", handleKeyDown);
+
+        return () => {
+            document.removeEventListener("pointerdown", handlePointerDown);
+            document.removeEventListener("keydown", handleKeyDown);
+        };
+    }, [slashCommandSuggestions.length, slashSuggestionsDismissed]);
 
     /** Performs insert emoji. */
     const insertEmoji = (emoji: string) => {
@@ -230,13 +267,13 @@ export function ChatComposer({
                     onChange={(event) => onAttachFiles(event.target.files)}
                 />
                 <div className="relative min-w-0 flex-1">
-                    {slashCommandSuggestions.length > 0 ? (
+                    {visibleSlashCommandSuggestions.length > 0 ? (
                         <div className="border-primary-700 bg-primary-900 absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border shadow-2xl">
                             <div className="border-primary-700 text-primary-400 border-b px-3 py-2 text-xs font-medium tracking-wide uppercase">
                                 Slash commands
                             </div>
                             <div className="max-h-72 overflow-y-auto py-1">
-                                {slashCommandSuggestions.map((suggestion) => (
+                                {visibleSlashCommandSuggestions.map((suggestion) => (
                                     <button
                                         key={suggestion.value}
                                         type="button"
@@ -289,15 +326,18 @@ export function ChatComposer({
                     <Textarea
                         ref={textareaReference}
                         value={draft}
-                        onChange={(event) => onChangeDraft(event.target.value)}
+                        onChange={(event) => {
+                            setSlashSuggestionsDismissed(false);
+                            onChangeDraft(event.target.value);
+                        }}
                         onKeyDown={(event) => {
                             if (
                                 event.key === "Tab" &&
-                                slashCommandSuggestions.length > 0
+                                visibleSlashCommandSuggestions.length > 0
                             ) {
                                 event.preventDefault();
                                 onApplySlashSuggestion(
-                                    slashCommandSuggestions[0]?.value || draft
+                                    visibleSlashCommandSuggestions[0]?.value || draft
                                 );
                                 return;
                             }

@@ -5,17 +5,45 @@ import {
     useRunLogRotationDryRun,
     useRunLogRotationNow,
 } from "../../../hooks/useLogRotation";
+import { type ScheduledJob, useScheduledJobs } from "../../../hooks/useScheduledJobs";
 import { formatDate } from "../../../utils/format";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 
+function formatSchedule(job: ScheduledJob | undefined): string {
+    if (!job) {
+        return "Loading...";
+    }
+
+    if (!job.enabled) {
+        return "Disabled";
+    }
+
+    if (job.scheduleType === "daily" && job.timeOfDay) {
+        return `${job.timeOfDay} daily`;
+    }
+
+    if (job.scheduleType === "cron" && job.cronExpression) {
+        return job.cronExpression;
+    }
+
+    const minutes = Math.round(job.intervalSeconds / 60);
+    return minutes >= 60 && minutes % 60 === 0
+        ? `Every ${minutes / 60}h`
+        : `Every ${minutes}m`;
+}
+
 /** Renders the log rotation card UI. */
 export function LogRotationCard() {
     const status = useLogRotationStatus(30_000);
+    const scheduledJobs = useScheduledJobs();
     const dryRun = useRunLogRotationDryRun();
     const realRun = useRunLogRotationNow();
     const lastAction = realRun.data || dryRun.data;
     const lastRun = status.data?.lastRun;
+    const logRotationJob = scheduledJobs.data?.find(
+        (job) => job.id === "ops.log-rotation"
+    );
 
     return (
         <Card className="overflow-hidden">
@@ -62,7 +90,9 @@ export function LogRotationCard() {
                 </Card>
                 <Card className="p-4">
                     <div className="text-primary-400 text-sm">Schedule</div>
-                    <div className="mt-2 text-lg font-semibold">02:10 daily</div>
+                    <div className="mt-2 text-lg font-semibold">
+                        {formatSchedule(logRotationJob)}
+                    </div>
                 </Card>
                 <Card className="p-4">
                     <div className="text-primary-400 text-sm">Retention</div>

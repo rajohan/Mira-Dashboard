@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { after, afterEach, before, beforeEach, describe, it } from "node:test";
+import { after, afterEach, before, beforeEach, describe, it, mock } from "node:test";
 
 import { db } from "../db.js";
 import { insertCacheEntry } from "../testUtils/cacheFixtures.js";
+import { runScheduledJob } from "./scheduledJobs.js";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -10,14 +11,6 @@ function dateToISOString(date: Date): string {
 
 const originalPercent = process.env.FAKE_OPENROUTER_PERCENT;
 const originalQuotasJson = process.env.FAKE_QUOTAS_JSON;
-
-function setGlobalSetInterval(nextSetInterval: typeof setInterval): void {
-    Object.defineProperty(globalThis, "setInterval", {
-        configurable: true,
-        value: nextSetInterval,
-        writable: true,
-    });
-}
 
 function quotaNotifications(): Array<{
     title: string;
@@ -65,16 +58,12 @@ function insertQuotaCacheFromEnv(): void {
 
 describe("quota notifications", () => {
     let runQuotaNotificationCheck: () => Promise<void>;
-    let startQuotaNotificationMonitor: (intervalMs?: number) => void;
-    let stopQuotaNotificationMonitor: () => void;
+    let registerQuotaNotificationScheduledJobs: () => void;
     let quotaTesting: typeof import("./quotaNotifications.js").__testing;
 
     before(async () => {
-        ({
-            runQuotaNotificationCheck,
-            startQuotaNotificationMonitor,
-            stopQuotaNotificationMonitor,
-        } = await import("./quotaNotifications.js"));
+        ({ runQuotaNotificationCheck, registerQuotaNotificationScheduledJobs } =
+            await import("./quotaNotifications.js"));
         ({ __testing: quotaTesting } = await import("./quotaNotifications.js"));
         const actualRunQuotaNotificationCheck = runQuotaNotificationCheck;
         runQuotaNotificationCheck = async () => {
@@ -209,7 +198,7 @@ describe("quota notifications", () => {
         assert.ok(titles.every((title) => !title.includes("OpenRouter")));
     });
 
-    it("handles concurrent checks, cache failures, and monitor interval fallbacks", async () => {
+    it("handles concurrent checks and cache failures", async () => {
         process.env.FAKE_QUOTAS_JSON = "{not-json";
         const originalError = console.error;
         const errors: unknown[][] = [];
@@ -229,22 +218,7 @@ describe("quota notifications", () => {
                 checkedAt: 1_800_000_000_000,
                 cacheAgeMs: 0,
             });
-            const originalSetInterval = setInterval;
-            const scheduled: number[] = [];
-            setGlobalSetInterval(((_callback: () => void, intervalMs?: number) => {
-                _callback();
-                scheduled.push(intervalMs ?? 0);
-                return { unref: () => {} } as unknown as NodeJS.Timeout;
-            }) as typeof setInterval);
-            try {
-                startQuotaNotificationMonitor(1);
-                startQuotaNotificationMonitor(60_000);
-                assert.deepEqual(scheduled, [15 * 60 * 1000]);
-                await new Promise((resolve) => setTimeout(resolve, 100));
-            } finally {
-                stopQuotaNotificationMonitor();
-                setGlobalSetInterval(originalSetInterval);
-            }
+            await new Promise((resolve) => setTimeout(resolve, 100));
             for (
                 let attempt = 0;
                 quotaTesting.isRunning() && attempt < 200;
@@ -256,6 +230,81 @@ describe("quota notifications", () => {
         } finally {
             console.error = originalError;
         }
+    });
+
+    it("registers quota notifications with the shared scheduler", async () => {
+        db.exec("ROLLBACK");
+        try {
+            registerQuotaNotificationScheduledJobs();
+
+            const job = db
+                .prepare(
+                    `SELECT id, name, enabled, schedule_type, interval_seconds, action_key, action_payload_json
+                     FROM scheduled_jobs WHERE id = 'notifications.quota'`
+                )
+                .get() as {
+                action_key: string;
+                action_payload_json: string;
+                enabled: number;
+                id: string;
+                interval_seconds: number;
+                name: string;
+                schedule_type: string;
+            };
+
+            assert.deepEqual(
+                { ...job },
+                {
+                    action_key: "notifications.quota",
+                    action_payload_json: "{}",
+                    enabled: 1,
+                    id: "notifications.quota",
+                    interval_seconds: 15 * 60,
+                    name: "Quota notifications",
+                    schedule_type: "interval",
+                }
+            );
+
+            const run = await runScheduledJob("notifications.quota");
+            assert.equal(run.status, "success");
+        } finally {
+            db.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run(
+                "notifications.quota"
+            );
+            db.exec("BEGIN TRANSACTION");
+        }
+    });
+
+    it("rolls back quota notification schedule registration failures", () => {
+        db.exec("ROLLBACK");
+        const originalExec = db.exec.bind(db);
+        const execMock = mock.method(db, "exec", (sql: string) => {
+            if (sql === "COMMIT") {
+                throw new Error("commit failed");
+            }
+            return originalExec(sql);
+        });
+        try {
+            assert.throws(registerQuotaNotificationScheduledJobs, /commit failed/u);
+        } finally {
+            execMock.mock.restore();
+            db.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run(
+                "notifications.quota"
+            );
+            db.exec("BEGIN TRANSACTION");
+        }
+    });
+
+    it("formats Synthetic.new weekly quota as percent even when credits are present", () => {
+        assert.equal(
+            quotaTesting.formatSyntheticWeeklyRemaining({
+                maxCredits: "$25.00",
+                nextRegenAt: null,
+                percentRemaining: 98,
+                remainingCredits: "$23.78",
+            }),
+            "98% left"
+        );
     });
 
     it("handles synthetic rolling usage fallbacks", async () => {
@@ -357,7 +406,7 @@ describe("quota notifications", () => {
         );
         assert.deepEqual(quotaTesting.getNotificationPayload("synthetic", 80, quotas), {
             title: "Synthetic.new usage high (80%)",
-            description: "5h 100% left · weekly 3 left",
+            description: "5h 100% left · weekly 90% left",
         });
         assert.deepEqual(quotaTesting.getState("openrouter", 80), { is_armed: 1 });
     });

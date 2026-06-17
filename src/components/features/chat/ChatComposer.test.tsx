@@ -157,6 +157,37 @@ describe("ChatComposer", () => {
         expect(onApplySlashSuggestion).toHaveBeenCalledWith("/help ");
     });
 
+    it("dismisses slash suggestions with escape or outside click until typing resumes", async () => {
+        const user = userEvent.setup();
+        const onChangeDraft = vi.fn();
+
+        renderComposer({
+            draft: "/h",
+            onChangeDraft,
+            slashCommandSuggestions: [
+                {
+                    description: "Show help",
+                    title: "/help",
+                    value: "/help ",
+                },
+            ],
+        });
+
+        expect(screen.getByText("Slash commands")).toBeInTheDocument();
+        fireEvent.keyDown(document, { key: "Escape" });
+        expect(screen.queryByText("Slash commands")).not.toBeInTheDocument();
+
+        const textarea = screen.getByPlaceholderText(
+            "Message, attach files, or use / commands (try /help)"
+        );
+        await user.type(textarea, "e");
+        expect(onChangeDraft).toHaveBeenLastCalledWith("/he");
+        expect(screen.getByText("Slash commands")).toBeInTheDocument();
+
+        fireEvent.pointerDown(document.body);
+        expect(screen.queryByText("Slash commands")).not.toBeInTheDocument();
+    });
+
     it("falls back to the draft when applying an empty slash suggestion with tab", async () => {
         const user = userEvent.setup();
         const onApplySlashSuggestion = vi.fn();

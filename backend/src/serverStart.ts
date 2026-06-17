@@ -9,14 +9,10 @@ import {
     waitForLocalCacheSeed,
 } from "./services/cacheRefresh.js";
 import { registerDockerUpdaterScheduledJobs } from "./services/dockerUpdater.js";
+import { registerOpenClawNotificationScheduledJobs } from "./services/openclawNotifications.js";
 import {
-    startOpenClawNotificationMonitor,
-    stopOpenClawNotificationMonitor,
-} from "./services/openclawNotifications.js";
-import {
+    registerQuotaNotificationScheduledJobs,
     runQuotaNotificationCheck,
-    startQuotaNotificationMonitor,
-    stopQuotaNotificationMonitor,
 } from "./services/quotaNotifications.js";
 import {
     startScheduledJobScheduler,
@@ -86,8 +82,6 @@ function queueQuotaNotificationCheckAfterSeed(
 /** Starts Gateway and notification monitors after the HTTP server is listening. */
 export function handleServerListening(): void {
     let gatewayStarted = false;
-    let quotaMonitorStarted = false;
-    let openClawMonitorStarted = false;
     let scheduledJobSchedulerStarted = false;
     try {
         const token = getPersistedGatewayToken() || process.env.OPENCLAW_TOKEN;
@@ -104,15 +98,13 @@ export function handleServerListening(): void {
             registerBackupScheduledJobs();
             registerCacheRefreshScheduledJobs();
             registerDockerUpdaterScheduledJobs();
+            registerQuotaNotificationScheduledJobs();
+            registerOpenClawNotificationScheduledJobs();
             startScheduledJobScheduler();
             scheduledJobSchedulerStarted = true;
             installSchedulerCloseCleanup();
         }
-        startQuotaNotificationMonitor();
-        quotaMonitorStarted = true;
         queueQuotaNotificationCheckAfterSeed();
-        startOpenClawNotificationMonitor();
-        openClawMonitorStarted = true;
         afterBackgroundServicesStartedForTest?.();
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
@@ -123,23 +115,11 @@ export function handleServerListening(): void {
                 console.error(label, cleanupError);
             }
         };
-        if (openClawMonitorStarted) {
-            rollback(
-                stopOpenClawNotificationMonitor,
-                "[Backend] Failed to stop OpenClaw notification monitor:"
-            );
-        }
         if (scheduledJobSchedulerStarted) {
             removeSchedulerCloseCleanup();
             rollback(
                 stopScheduledJobScheduler,
                 "[Backend] Failed to stop scheduled job scheduler:"
-            );
-        }
-        if (quotaMonitorStarted) {
-            rollback(
-                stopQuotaNotificationMonitor,
-                "[Backend] Failed to stop quota notification monitor:"
             );
         }
         if (gatewayStarted) {

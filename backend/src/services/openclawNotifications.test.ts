@@ -1,20 +1,13 @@
 import assert from "node:assert/strict";
-import { after, afterEach, before, beforeEach, describe, it } from "node:test";
+import { after, afterEach, before, beforeEach, describe, it, mock } from "node:test";
 
 import { db } from "../db.js";
 import { insertCacheEntry } from "../testUtils/cacheFixtures.js";
+import { runScheduledJob } from "./scheduledJobs.js";
 
 const originalUpdateAvailable = process.env.FAKE_OPENCLAW_UPDATE_AVAILABLE;
 const originalLatest = process.env.FAKE_OPENCLAW_LATEST;
 const originalMissingVersion = process.env.FAKE_OPENCLAW_MISSING_VERSION;
-
-function setGlobalSetInterval(nextSetInterval: typeof setInterval): void {
-    Object.defineProperty(globalThis, "setInterval", {
-        configurable: true,
-        value: nextSetInterval,
-        writable: true,
-    });
-}
 
 function openClawNotifications(): Array<{
     title: string;
@@ -67,20 +60,18 @@ function insertSystemHostCacheFromEnv(): void {
 
 describe("OpenClaw update notifications", () => {
     let runOpenClawNotificationCheck: () => Promise<void>;
-    let startOpenClawNotificationMonitor: (intervalMs?: number) => void;
+    let registerOpenClawNotificationScheduledJobs: () => void;
     let getState: () => { is_armed: number; last_latest: string | null };
-    let stopOpenClawNotificationMonitorForTest: () => void;
 
     before(async () => {
         const openClawNotifications = await import("./openclawNotifications.js");
-        startOpenClawNotificationMonitor =
-            openClawNotifications.startOpenClawNotificationMonitor;
+        registerOpenClawNotificationScheduledJobs =
+            openClawNotifications.registerOpenClawNotificationScheduledJobs;
         runOpenClawNotificationCheck = async () => {
             insertSystemHostCacheFromEnv();
             await openClawNotifications.runOpenClawNotificationCheck();
         };
-        ({ getState, stopOpenClawNotificationMonitorForTest } =
-            openClawNotifications.__testing);
+        ({ getState } = openClawNotifications.__testing);
     });
 
     beforeEach(() => {
@@ -183,30 +174,66 @@ describe("OpenClaw update notifications", () => {
         assert.deepEqual(getState(), stateBeforeMalformedCache);
     });
 
-    it("starts the monitor with a safe interval fallback", async () => {
-        const originalSetInterval = setInterval;
-        let scheduledInterval = 0;
-        let callbackRuns = 0;
-        setGlobalSetInterval(((callback: () => void, intervalMs?: number) => {
-            scheduledInterval = intervalMs ?? 0;
-            callback();
-            callbackRuns += 1;
-            const timer = { unref: () => timer } as unknown as NodeJS.Timeout;
-            return timer;
-        }) as typeof setInterval);
+    it("registers OpenClaw notifications with the shared scheduler", async () => {
+        db.exec("ROLLBACK");
         try {
-            startOpenClawNotificationMonitor(Number.MAX_SAFE_INTEGER);
-            assert.equal(scheduledInterval, 2_147_483_647);
-            stopOpenClawNotificationMonitorForTest();
+            registerOpenClawNotificationScheduledJobs();
 
-            startOpenClawNotificationMonitor(1);
-            assert.equal(scheduledInterval, 60 * 60 * 1000);
-            assert.equal(callbackRuns, 2);
-            await new Promise((resolve) => setTimeout(resolve, 100));
+            const job = db
+                .prepare(
+                    `SELECT id, name, enabled, schedule_type, interval_seconds, action_key, action_payload_json
+                     FROM scheduled_jobs WHERE id = 'notifications.openclaw'`
+                )
+                .get() as {
+                action_key: string;
+                action_payload_json: string;
+                enabled: number;
+                id: string;
+                interval_seconds: number;
+                name: string;
+                schedule_type: string;
+            };
+
+            assert.deepEqual(
+                { ...job },
+                {
+                    action_key: "notifications.openclaw",
+                    action_payload_json: "{}",
+                    enabled: 1,
+                    id: "notifications.openclaw",
+                    interval_seconds: 60 * 60,
+                    name: "OpenClaw notifications",
+                    schedule_type: "interval",
+                }
+            );
+
+            const run = await runScheduledJob("notifications.openclaw");
+            assert.equal(run.status, "success");
         } finally {
-            stopOpenClawNotificationMonitorForTest();
-            stopOpenClawNotificationMonitorForTest();
-            setGlobalSetInterval(originalSetInterval);
+            db.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run(
+                "notifications.openclaw"
+            );
+            db.exec("BEGIN TRANSACTION");
+        }
+    });
+
+    it("rolls back OpenClaw notification schedule registration failures", () => {
+        db.exec("ROLLBACK");
+        const originalExec = db.exec.bind(db);
+        const execMock = mock.method(db, "exec", (sql: string) => {
+            if (sql === "COMMIT") {
+                throw new Error("commit failed");
+            }
+            return originalExec(sql);
+        });
+        try {
+            assert.throws(registerOpenClawNotificationScheduledJobs, /commit failed/u);
+        } finally {
+            execMock.mock.restore();
+            db.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run(
+                "notifications.openclaw"
+            );
+            db.exec("BEGIN TRANSACTION");
         }
     });
 });
