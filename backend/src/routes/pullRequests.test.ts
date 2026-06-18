@@ -2148,6 +2148,10 @@ describe("pull request routes", () => {
         const restoreBunEnv = saveEnv(["FAKE_BUN_LOG_FILE"]);
         process.env.FAKE_BUN_LOG_FILE = bunLogFile;
         await rm(bunLogFile, { force: true });
+        const rootStaleModule = path.join(tempDir, "node_modules", "stale");
+        const backendStaleModule = path.join(tempDir, "backend", "node_modules", "stale");
+        await mkdir(rootStaleModule, { recursive: true });
+        await mkdir(backendStaleModule, { recursive: true });
         let deployId: string | null = null;
 
         try {
@@ -2214,6 +2218,12 @@ describe("pull request routes", () => {
                 `${path.join(tempDir, "backend")} :: install --frozen-lockfile`,
                 `${path.join(tempDir, "backend")} :: run build`,
             ]);
+            await assert.rejects(stat(rootStaleModule), {
+                code: "ENOENT",
+            });
+            await assert.rejects(stat(backendStaleModule), {
+                code: "ENOENT",
+            });
         } finally {
             restoreBunEnv();
             if (deployId) {

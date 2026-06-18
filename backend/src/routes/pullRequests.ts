@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -1207,12 +1208,20 @@ async function runDeploymentJob(job: DeploymentJob): Promise<void> {
         currentJob = refreshDeploymentHeartbeat(currentJob);
 
         currentJob = refreshDeploymentHeartbeat(currentJob);
+        await rm(path.join(DASHBOARD_ROOT, "node_modules"), {
+            force: true,
+            recursive: true,
+        });
         await runCommand("bun", ["install", "--frozen-lockfile"], {
             timeoutMs: 180_000,
         });
         currentJob = refreshDeploymentHeartbeat(currentJob);
         await runCommand("bun", ["run", "build"], { timeoutMs: 180_000 });
         currentJob = refreshDeploymentHeartbeat(currentJob);
+        await rm(path.join(DASHBOARD_ROOT, "backend", "node_modules"), {
+            force: true,
+            recursive: true,
+        });
         await runCommand("bun", ["install", "--frozen-lockfile"], {
             cwd: path.join(DASHBOARD_ROOT, "backend"),
             timeoutMs: 120_000,
