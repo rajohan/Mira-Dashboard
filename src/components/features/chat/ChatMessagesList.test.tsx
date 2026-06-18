@@ -1,8 +1,9 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 import { createRef } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { stubGlobal } from "../../../test/testUtils";
 import {
     AttachmentIcon,
     base64ToText,
@@ -16,13 +17,13 @@ function toBase64(text: string): string {
     return encoder.encode(text).toBase64();
 }
 
-vi.mock("./ChatMarkdown", () => ({
+mock.module("./ChatMarkdown", () => ({
     ChatMarkdown: ({ text }: { text: string }) => (
         <div data-testid="markdown">{text}</div>
     ),
 }));
 
-vi.mock("./ChatMessageDetails", () => ({
+mock.module("./ChatMessageDetails", () => ({
     ChatMessageDetails: ({
         message,
         visibility,
@@ -54,7 +55,7 @@ function makeVirtualizer(
                 key: `row-${index}`,
                 start: index * 100 + (options.padded ? 25 : 0),
             })),
-        measureElement: vi.fn(),
+        measureElement: jest.fn(),
     } as never;
 }
 
@@ -120,12 +121,12 @@ function makeProps(
         messagesBottomReference: createRef<HTMLDivElement>(),
         messagesContainerReference: createRef<HTMLDivElement>(),
         messagesVirtualizer: makeVirtualizer(rows.length),
-        onDeleteMessage: vi.fn(),
-        onDynamicContentLoad: vi.fn(),
-        onFollow: vi.fn(),
-        onPreview: vi.fn(),
-        onScroll: vi.fn(),
-        onTtsError: vi.fn(),
+        onDeleteMessage: jest.fn(),
+        onDynamicContentLoad: jest.fn(),
+        onFollow: jest.fn(),
+        onPreview: jest.fn(),
+        onScroll: jest.fn(),
+        onTtsError: jest.fn(),
         visibility: { showThinking: true, showTools: true },
         ...overrides,
     } satisfies React.ComponentProps<typeof ChatMessagesList>;
@@ -193,29 +194,29 @@ describe("ChatMessagesList helpers", () => {
 
 describe("ChatMessagesList", () => {
     beforeEach(() => {
-        vi.stubGlobal(
+        stubGlobal(
             "fetch",
-            vi.fn().mockResolvedValue({
+            jest.fn().mockResolvedValue({
                 blob: async () => new Blob(["audio"], { type: "audio/mpeg" }),
                 ok: true,
             })
         );
         class MockAudio {
-            addEventListener = vi.fn();
-            pause = vi.fn();
-            play = vi.fn().mockResolvedValue(null);
+            addEventListener = jest.fn();
+            pause = jest.fn();
+            play = jest.fn().mockResolvedValue(null);
         }
 
-        vi.stubGlobal("Audio", MockAudio);
-        vi.stubGlobal("URL", {
-            createObjectURL: vi.fn(() => "blob:audio"),
-            revokeObjectURL: vi.fn(),
+        stubGlobal("Audio", MockAudio);
+        stubGlobal("URL", {
+            createObjectURL: jest.fn(() => "blob:audio"),
+            revokeObjectURL: jest.fn(),
         });
     });
 
     it("renders loading, empty, and follow states", async () => {
         const user = userEvent.setup();
-        const onFollow = vi.fn();
+        const onFollow = jest.fn();
         const { rerender } = renderMessages({
             chatRows: [],
             isLoadingHistory: true,
@@ -256,9 +257,9 @@ describe("ChatMessagesList", () => {
 
     it("renders messages, attachments, diagnostics, and typing indicator", async () => {
         const user = userEvent.setup();
-        const onDeleteMessage = vi.fn();
-        const onDynamicContentLoad = vi.fn();
-        const onPreview = vi.fn();
+        const onDeleteMessage = jest.fn();
+        const onDynamicContentLoad = jest.fn();
+        const onPreview = jest.fn();
         const rows = makeRows();
         rows[1]!.message.attachments?.push(
             {
@@ -395,7 +396,7 @@ describe("ChatMessagesList", () => {
 
     it("uses the TTS endpoint for assistant messages and reports errors", async () => {
         const user = userEvent.setup();
-        const onTtsError = vi.fn();
+        const onTtsError = jest.fn();
 
         renderMessages({ onTtsError });
 
@@ -412,7 +413,7 @@ describe("ChatMessagesList", () => {
         await waitFor(() => expect(onTtsError).toHaveBeenCalledWith(""));
         await user.click(screen.getByRole("button", { name: "Stop reading aloud" }));
 
-        (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        (fetch as unknown as ReturnType<typeof jest.fn>).mockResolvedValueOnce({
             json: async () => ({ error: "TTS failed" }),
             ok: false,
             status: 500,
@@ -425,7 +426,7 @@ describe("ChatMessagesList", () => {
 
     it("omits TTS controls for blank messages and handles speech fallbacks", async () => {
         const user = userEvent.setup();
-        const onTtsError = vi.fn();
+        const onTtsError = jest.fn();
         const rows = makeRows();
         rows[1]!.message.text = " ".repeat(3);
 
@@ -440,7 +441,7 @@ describe("ChatMessagesList", () => {
         ).not.toBeInTheDocument();
 
         rows[1]!.message.text = "Hi Raymond";
-        (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        (fetch as unknown as ReturnType<typeof jest.fn>).mockResolvedValueOnce({
             json: async () => {
                 throw new Error("invalid json");
             },
@@ -464,7 +465,7 @@ describe("ChatMessagesList", () => {
             expect(onTtsError).toHaveBeenCalledWith("Failed to generate speech")
         );
 
-        (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        (fetch as unknown as ReturnType<typeof jest.fn>).mockResolvedValueOnce({
             json: async () => ({}),
             ok: false,
             status: 429,
@@ -477,16 +478,16 @@ describe("ChatMessagesList", () => {
 
     it("reports generated audio playback errors", async () => {
         const user = userEvent.setup();
-        const onTtsError = vi.fn();
+        const onTtsError = jest.fn();
         let errorListener: (() => void) | undefined;
         class ErrorAudio {
-            addEventListener = vi.fn((type: string, listener: () => void) => {
+            addEventListener = jest.fn((type: string, listener: () => void) => {
                 if (type === "error") errorListener = listener;
             });
-            pause = vi.fn();
-            play = vi.fn().mockResolvedValue(null);
+            pause = jest.fn();
+            play = jest.fn().mockResolvedValue(null);
         }
-        vi.stubGlobal("Audio", ErrorAudio);
+        stubGlobal("Audio", ErrorAudio);
 
         renderMessages({ onTtsError });
 

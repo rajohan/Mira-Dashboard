@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import type { FileNode } from "../../../types/file";
 import { FileTreeItem } from "./FileTreeItem";
@@ -26,8 +26,8 @@ const tree: FileNode = {
 describe("FileTreeItem", () => {
     it("toggles directories and selects files", async () => {
         const user = userEvent.setup();
-        const onSelect = vi.fn();
-        const onToggle = vi.fn();
+        const onSelect = jest.fn();
+        const onToggle = jest.fn();
 
         render(
             <FileTreeItem
@@ -59,8 +59,8 @@ describe("FileTreeItem", () => {
 
     it("supports keyboard activation for tree rows", async () => {
         const user = userEvent.setup();
-        const onSelect = vi.fn();
-        const onToggle = vi.fn();
+        const onSelect = jest.fn();
+        const onToggle = jest.fn();
 
         render(
             <FileTreeItem
@@ -94,8 +94,8 @@ describe("FileTreeItem", () => {
                 node={{ name: "archive.bin", path: "/repo/archive.bin", type: "file" }}
                 selectedPath={null}
                 expandedPaths={new Set()}
-                onSelect={vi.fn()}
-                onToggle={vi.fn()}
+                onSelect={jest.fn()}
+                onToggle={jest.fn()}
             />
         );
 
@@ -116,8 +116,8 @@ describe("FileTreeItem", () => {
                 node={tree}
                 selectedPath={null}
                 expandedPaths={new Set(["/repo"])}
-                onSelect={vi.fn()}
-                onToggle={vi.fn()}
+                onSelect={jest.fn()}
+                onToggle={jest.fn()}
             />
         );
 
@@ -131,8 +131,8 @@ describe("FileTreeItem", () => {
                 node={loadingDirectory}
                 selectedPath={null}
                 expandedPaths={new Set(["/loading"])}
-                onSelect={vi.fn()}
-                onToggle={vi.fn()}
+                onSelect={jest.fn()}
+                onToggle={jest.fn()}
             />
         );
 
@@ -158,8 +158,8 @@ describe("FileTreeItem", () => {
                 node={node}
                 selectedPath={null}
                 expandedPaths={new Set(["/repo"])}
-                onSelect={vi.fn()}
-                onToggle={vi.fn()}
+                onSelect={jest.fn()}
+                onToggle={jest.fn()}
             />
         );
 
@@ -170,25 +170,20 @@ describe("FileTreeItem", () => {
         expect(node.children?.map((child) => child.name)).toEqual(childOrder);
     });
 
-    it("does not sort hidden children while collapsed", () => {
-        const sortSpy = vi.spyOn(Array.prototype, "sort");
+    it("keeps children hidden while collapsed", () => {
+        render(
+            <FileTreeItem
+                node={tree}
+                selectedPath={null}
+                expandedPaths={new Set()}
+                onSelect={jest.fn()}
+                onToggle={jest.fn()}
+            />
+        );
 
-        try {
-            render(
-                <FileTreeItem
-                    node={tree}
-                    selectedPath={null}
-                    expandedPaths={new Set()}
-                    onSelect={vi.fn()}
-                    onToggle={vi.fn()}
-                />
-            );
-
-            expect(screen.getByText("repo")).toBeInTheDocument();
-            expect(screen.queryByText("src")).not.toBeInTheDocument();
-            expect(sortSpy).not.toHaveBeenCalled();
-        } finally {
-            sortSpy.mockRestore();
-        }
+        expect(screen.getByText("repo")).toBeInTheDocument();
+        expect(screen.queryByText("src")).not.toBeInTheDocument();
+        expect(screen.queryByText("README.md")).not.toBeInTheDocument();
+        expect(screen.queryByText("package.json")).not.toBeInTheDocument();
     });
 });

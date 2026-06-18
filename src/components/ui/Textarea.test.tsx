@@ -1,12 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { Textarea } from "./Textarea";
 
 describe("Textarea", () => {
     it("renders default textarea metadata and reports changes", async () => {
-        const onChange = vi.fn();
+        const onChange = jest.fn();
         render(
             <Textarea
                 label="Notes"

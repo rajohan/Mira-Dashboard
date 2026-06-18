@@ -1,12 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { Button } from "./Button";
 
 describe("Button", () => {
     it("renders children and forwards click handlers", async () => {
-        const onClick = vi.fn();
+        const onClick = jest.fn();
         render(<Button onClick={onClick}>Save</Button>);
 
         await userEvent.click(screen.getByRole("button", { name: "Save" }));

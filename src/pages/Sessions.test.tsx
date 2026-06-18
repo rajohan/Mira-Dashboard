@@ -1,13 +1,14 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted } from "../test/testUtils";
 import { Sessions } from "./Sessions";
 
-const mocks = vi.hoisted(() => ({
-    compact: vi.fn(),
-    remove: vi.fn(),
-    reset: vi.fn(),
+const mocks = hoisted(() => ({
+    compact: jest.fn(),
+    remove: jest.fn(),
+    reset: jest.fn(),
     sessions: [] as Array<{
         displayLabel?: string;
         displayName?: string;
@@ -15,30 +16,30 @@ const mocks = vi.hoisted(() => ({
         lastActivityAt?: string;
         type?: string;
     }> | null,
-    useOpenClawSocket: vi.fn(),
-    useSessionActions: vi.fn(),
+    useOpenClawSocket: jest.fn(),
+    useSessionActions: jest.fn(),
 }));
 
-vi.mock("@tanstack/react-db", () => ({
+mock.module("@tanstack/react-db", () => ({
     useLiveQuery: (select: (query: { from: () => typeof mocks.sessions }) => unknown) => {
         const data = select({ from: () => mocks.sessions });
         return { data };
     },
 }));
 
-vi.mock("../collections/sessions", () => ({
+mock.module("../collections/sessions", () => ({
     sessionsCollection: {},
 }));
 
-vi.mock("../hooks/useOpenClawSocket", () => ({
+mock.module("../hooks/useOpenClawSocket", () => ({
     useOpenClawSocket: mocks.useOpenClawSocket,
 }));
 
-vi.mock("../hooks/useSessionActions", () => ({
+mock.module("../hooks/useSessionActions", () => ({
     useSessionActions: mocks.useSessionActions,
 }));
 
-vi.mock("../components/ui/ConfirmModal", () => ({
+mock.module("../components/ui/ConfirmModal", () => ({
     ConfirmModal: ({
         isOpen,
         message,
@@ -66,7 +67,7 @@ vi.mock("../components/ui/ConfirmModal", () => ({
         ) : null,
 }));
 
-vi.mock("../components/features/sessions", () => ({
+mock.module("../components/features/sessions", () => ({
     SESSION_TYPES: ["ALL", "DIRECT", "CHANNEL"],
     SessionsTable: ({
         onCompact,
@@ -144,7 +145,7 @@ function mockSessions(
 
 describe("Sessions page", () => {
     beforeEach(() => {
-        vi.spyOn(console, "error").mockImplementation(() => {});
+        jest.spyOn(console, "error").mockImplementation(() => {});
         mocks.compact.mockReset();
         mocks.remove.mockResolvedValue(Promise.resolve());
         mocks.reset.mockReset();
@@ -154,7 +155,7 @@ describe("Sessions page", () => {
     });
 
     afterEach(() => {
-        vi.restoreAllMocks();
+        jest.restoreAllMocks();
     });
 
     it("renders connected sessions without the removed live feed", () => {

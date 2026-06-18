@@ -1,23 +1,23 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest, mock } from "bun:test";
 
 import type { FileContent } from "../../../types/file";
 import { FileContentViewer } from "./FileContentViewer";
 
-vi.mock("./viewers/MarkdownPreview", () => ({
+mock.module("./viewers/MarkdownPreview", () => ({
     MarkdownPreview: ({ content }: { content: string }) => (
         <div data-testid="markdown-preview">{content}</div>
     ),
 }));
 
-vi.mock("./viewers/JsonPreview", () => ({
+mock.module("./viewers/JsonPreview", () => ({
     JsonPreview: ({ content }: { content: string }) => (
         <div data-testid="json-preview">{content}</div>
     ),
 }));
 
-vi.mock("./viewers/CodePreview", () => ({
+mock.module("./viewers/CodePreview", () => ({
     CodePreview: ({ content, language }: { content: string; language: string }) => (
         <div data-testid="code-preview" data-language={language}>
             {content}
@@ -34,7 +34,7 @@ const baseFile: FileContent = {
 };
 
 function renderViewer(overrides: Partial<Parameters<typeof FileContentViewer>[0]> = {}) {
-    const onContentChange = vi.fn();
+    const onContentChange = jest.fn();
     const props: Parameters<typeof FileContentViewer>[0] = {
         codeEditMode: false,
         editedContent: "hello",
@@ -76,7 +76,7 @@ describe("FileContentViewer", () => {
                 jsonPreview={false}
                 largeFileWarning={false}
                 markdownPreview={false}
-                onContentChange={vi.fn()}
+                onContentChange={jest.fn()}
                 syntaxClass="text-primary-300"
             />
         );
@@ -96,7 +96,7 @@ describe("FileContentViewer", () => {
                 jsonPreview={false}
                 largeFileWarning={false}
                 markdownPreview={false}
-                onContentChange={vi.fn()}
+                onContentChange={jest.fn()}
                 syntaxClass="text-primary-300"
             />
         );
@@ -120,7 +120,7 @@ describe("FileContentViewer", () => {
                 jsonPreview={false}
                 largeFileWarning={false}
                 markdownPreview={false}
-                onContentChange={vi.fn()}
+                onContentChange={jest.fn()}
                 syntaxClass="text-primary-300"
             />
         );
@@ -146,7 +146,7 @@ describe("FileContentViewer", () => {
                 jsonPreview={false}
                 largeFileWarning={false}
                 markdownPreview={false}
-                onContentChange={vi.fn()}
+                onContentChange={jest.fn()}
                 syntaxClass="text-primary-300"
             />
         );
@@ -180,7 +180,7 @@ describe("FileContentViewer", () => {
                 jsonPreview={false}
                 largeFileWarning={false}
                 markdownPreview={true}
-                onContentChange={vi.fn()}
+                onContentChange={jest.fn()}
                 syntaxClass="text-primary-300"
             />
         );
@@ -198,7 +198,7 @@ describe("FileContentViewer", () => {
                 jsonPreview={true}
                 largeFileWarning={false}
                 markdownPreview={false}
-                onContentChange={vi.fn()}
+                onContentChange={jest.fn()}
                 syntaxClass="text-primary-300"
             />
         );
@@ -216,7 +216,7 @@ describe("FileContentViewer", () => {
                 jsonPreview={false}
                 largeFileWarning={false}
                 markdownPreview={false}
-                onContentChange={vi.fn()}
+                onContentChange={jest.fn()}
                 syntaxClass="text-primary-300"
             />
         );

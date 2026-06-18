@@ -1,8 +1,9 @@
 import { renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, jest } from "bun:test";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import { cacheKeys } from "./useCache";
 import {
     logRotationKeys,
@@ -13,7 +14,7 @@ import {
 
 describe("log rotation hooks", () => {
     it("fetches log rotation status", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({
@@ -21,7 +22,7 @@ describe("log rotation hooks", () => {
                 lastRun: { ok: true, dryRun: false, rotatedFiles: 3 },
             }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useLogRotationStatus(), {
             wrapper: createQueryWrapper(),
@@ -30,7 +31,7 @@ describe("log rotation hooks", () => {
     });
 
     it("runs dry-run (no invalidation) and live run (invalidates)", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({
@@ -39,9 +40,9 @@ describe("log rotation hooks", () => {
                 stderr: "",
             }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
-        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const invalidateSpy = jest.spyOn(queryClient, "invalidateQueries");
         const wrapper = createQueryWrapper(queryClient);
 
         const { result: dryRun } = renderHook(() => useRunLogRotationDryRun(), {

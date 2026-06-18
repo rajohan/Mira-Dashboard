@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import type { AgentConfig } from "../../../hooks/useConfig";
 import { AgentAccessSection } from "./AgentAccessSection";
@@ -17,7 +17,7 @@ const agents: AgentConfig[] = [
 describe("AgentAccessSection", () => {
     it("renders agent tool counts and saves deny-list edits", async () => {
         const user = userEvent.setup();
-        const onSave = vi.fn(async () => {});
+        const onSave = jest.fn(async () => {});
 
         render(<AgentAccessSection agents={agents} onSave={onSave} saving={false} />);
 
@@ -55,7 +55,7 @@ describe("AgentAccessSection", () => {
 
     it("filters tools, updates allow-list agents, and resets active agent on prop changes", async () => {
         const user = userEvent.setup();
-        const onSave = vi.fn(async () => {});
+        const onSave = jest.fn(async () => {});
         const { rerender } = render(
             <AgentAccessSection agents={agents} onSave={onSave} saving={false} />
         );
@@ -108,7 +108,7 @@ describe("AgentAccessSection", () => {
 
     it("adds disabled tools to deny-list agents", async () => {
         const user = userEvent.setup();
-        const onSave = vi.fn(async () => {});
+        const onSave = jest.fn(async () => {});
 
         render(
             <AgentAccessSection
@@ -143,7 +143,7 @@ describe("AgentAccessSection", () => {
 
     it("handles empty and unnamed agent configs", async () => {
         const user = userEvent.setup();
-        const onSave = vi.fn(async () => {});
+        const onSave = jest.fn(async () => {});
         const { rerender } = render(
             <AgentAccessSection agents={[]} onSave={onSave} saving={false} />
         );

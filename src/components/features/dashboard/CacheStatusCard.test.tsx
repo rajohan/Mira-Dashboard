@@ -1,22 +1,23 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted } from "../../../test/testUtils";
 import { CacheStatusCard } from "./CacheStatusCard";
 
-const hooks = vi.hoisted(() => ({
-    useCacheHeartbeat: vi.fn(),
-    useRefreshCacheEntry: vi.fn(),
+const hooks = hoisted(() => ({
+    useCacheHeartbeat: jest.fn(),
+    useRefreshCacheEntry: jest.fn(),
 }));
 
-vi.mock("../../../hooks", () => ({
+mock.module("../../../hooks", () => ({
     useCacheHeartbeat: hooks.useCacheHeartbeat,
     useRefreshCacheEntry: hooks.useRefreshCacheEntry,
 }));
 
 describe("CacheStatusCard", () => {
     it("renders cache entries and refreshes grouped keys", async () => {
-        const mutate = vi.fn();
+        const mutate = jest.fn();
         hooks.useCacheHeartbeat.mockReturnValue({
             data: {
                 entries: [
@@ -84,7 +85,7 @@ describe("CacheStatusCard", () => {
         });
         hooks.useRefreshCacheEntry.mockReturnValue({
             isPending: true,
-            mutate: vi.fn(),
+            mutate: jest.fn(),
             variables: "system.host",
         });
 

@@ -1,17 +1,18 @@
 import { renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { createQueryWrapper } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import { useHealth } from "./useHealth";
 
 describe("useHealth", () => {
     it("fetches health status", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ status: "ok", gatewayConnected: true, sessionCount: 2 }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useHealth(), {
             wrapper: createQueryWrapper(),

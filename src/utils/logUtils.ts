@@ -286,8 +286,7 @@ export function getSubsystemColor(subsystem?: string): string {
         case "memory": {
             return "text-emerald-400";
         }
-        default: {
+        default:
             return "text-purple-400";
-        }
     }
 }

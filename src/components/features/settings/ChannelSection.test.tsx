@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { ChannelSection, type ChannelSummary } from "./ChannelSection";
 
@@ -11,7 +11,7 @@ const channels: ChannelSummary[] = [
 
 describe("ChannelSection", () => {
     it("renders empty channel state", async () => {
-        render(<ChannelSection channels={[]} onSave={vi.fn()} saving={false} />);
+        render(<ChannelSection channels={[]} onSave={jest.fn()} saving={false} />);
 
         await userEvent.click(screen.getByRole("button", { name: /Channels/u }));
 
@@ -21,7 +21,7 @@ describe("ChannelSection", () => {
     });
 
     it("toggles channel state before saving", async () => {
-        const onSave = vi.fn().mockImplementation(async () => {});
+        const onSave = jest.fn().mockImplementation(async () => {});
         render(<ChannelSection channels={channels} onSave={onSave} saving={false} />);
 
         await userEvent.click(screen.getByRole("button", { name: /Channels/u }));
@@ -38,7 +38,7 @@ describe("ChannelSection", () => {
     });
 
     it("shows saving state", async () => {
-        render(<ChannelSection channels={channels} onSave={vi.fn()} saving />);
+        render(<ChannelSection channels={channels} onSave={jest.fn()} saving />);
 
         await userEvent.click(screen.getByRole("button", { name: /Channels/u }));
 

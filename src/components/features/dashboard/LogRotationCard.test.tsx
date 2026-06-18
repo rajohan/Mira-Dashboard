@@ -1,30 +1,31 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted } from "../../../test/testUtils";
 import { LogRotationCard } from "./LogRotationCard";
 
-const hooks = vi.hoisted(() => ({
-    useLogRotationStatus: vi.fn(),
-    useRunLogRotationDryRun: vi.fn(),
-    useRunLogRotationNow: vi.fn(),
-    useScheduledJobs: vi.fn(),
+const hooks = hoisted(() => ({
+    useLogRotationStatus: jest.fn(),
+    useRunLogRotationDryRun: jest.fn(),
+    useRunLogRotationNow: jest.fn(),
+    useScheduledJobs: jest.fn(),
 }));
 
-vi.mock("../../../hooks/useLogRotation", () => ({
+mock.module("../../../hooks/useLogRotation", () => ({
     useLogRotationStatus: hooks.useLogRotationStatus,
     useRunLogRotationDryRun: hooks.useRunLogRotationDryRun,
     useRunLogRotationNow: hooks.useRunLogRotationNow,
 }));
 
-vi.mock("../../../hooks/useScheduledJobs", () => ({
+mock.module("../../../hooks/useScheduledJobs", () => ({
     useScheduledJobs: hooks.useScheduledJobs,
 }));
 
 describe("LogRotationCard", () => {
     it("renders log rotation status and runs dry-run/real actions", async () => {
-        const dryRunMutate = vi.fn();
-        const realRunMutate = vi.fn();
+        const dryRunMutate = jest.fn();
+        const realRunMutate = jest.fn();
         hooks.useLogRotationStatus.mockReturnValue({
             data: {
                 lastRun: {
@@ -88,9 +89,12 @@ describe("LogRotationCard", () => {
         hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
         hooks.useRunLogRotationDryRun.mockReturnValue({
             isPending: false,
-            mutate: vi.fn(),
+            mutate: jest.fn(),
         });
-        hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+        hooks.useRunLogRotationNow.mockReturnValue({
+            isPending: false,
+            mutate: jest.fn(),
+        });
         hooks.useScheduledJobs.mockReturnValue({ data: [] });
 
         render(<LogRotationCard />);
@@ -102,9 +106,12 @@ describe("LogRotationCard", () => {
         hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: true });
         hooks.useRunLogRotationDryRun.mockReturnValue({
             isPending: true,
-            mutate: vi.fn(),
+            mutate: jest.fn(),
         });
-        hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+        hooks.useRunLogRotationNow.mockReturnValue({
+            isPending: false,
+            mutate: jest.fn(),
+        });
         hooks.useScheduledJobs.mockReturnValue({ data: undefined });
 
         render(<LogRotationCard />);
@@ -118,12 +125,12 @@ describe("LogRotationCard", () => {
         hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
         hooks.useRunLogRotationDryRun.mockReturnValue({
             isPending: false,
-            mutate: vi.fn(),
+            mutate: jest.fn(),
         });
         hooks.useRunLogRotationNow.mockReturnValue({
             data: { result: { dryRun: false }, success: true },
             isPending: true,
-            mutate: vi.fn(),
+            mutate: jest.fn(),
         });
         hooks.useScheduledJobs.mockReturnValue({
             data: [
@@ -152,9 +159,12 @@ describe("LogRotationCard", () => {
         hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
         hooks.useRunLogRotationDryRun.mockReturnValue({
             isPending: false,
-            mutate: vi.fn(),
+            mutate: jest.fn(),
         });
-        hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+        hooks.useRunLogRotationNow.mockReturnValue({
+            isPending: false,
+            mutate: jest.fn(),
+        });
         hooks.useScheduledJobs.mockReturnValue({
             data: [
                 {
@@ -232,9 +242,12 @@ describe("LogRotationCard", () => {
         hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
         hooks.useRunLogRotationDryRun.mockReturnValue({
             isPending: false,
-            mutate: vi.fn(),
+            mutate: jest.fn(),
         });
-        hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+        hooks.useRunLogRotationNow.mockReturnValue({
+            isPending: false,
+            mutate: jest.fn(),
+        });
         hooks.useScheduledJobs.mockReturnValue({
             data: [
                 {
@@ -294,9 +307,12 @@ describe("LogRotationCard", () => {
         hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
         hooks.useRunLogRotationDryRun.mockReturnValue({
             isPending: false,
-            mutate: vi.fn(),
+            mutate: jest.fn(),
         });
-        hooks.useRunLogRotationNow.mockReturnValue({ isPending: false, mutate: vi.fn() });
+        hooks.useRunLogRotationNow.mockReturnValue({
+            isPending: false,
+            mutate: jest.fn(),
+        });
         hooks.useScheduledJobs.mockReturnValue({
             data: [
                 {

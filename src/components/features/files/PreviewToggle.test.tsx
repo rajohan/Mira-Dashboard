@@ -1,13 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { PreviewToggle } from "./PreviewToggle";
 
 describe("PreviewToggle", () => {
     it("renders default labels and toggles preview mode", async () => {
         const user = userEvent.setup();
-        const onToggle = vi.fn();
+        const onToggle = jest.fn();
 
         render(<PreviewToggle preview={false} onToggle={onToggle} />);
 
@@ -22,7 +22,7 @@ describe("PreviewToggle", () => {
         render(
             <PreviewToggle
                 preview
-                onToggle={vi.fn()}
+                onToggle={jest.fn()}
                 previewLabel="Rendered"
                 editLabel="Source"
             />

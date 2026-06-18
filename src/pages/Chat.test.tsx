@@ -1,8 +1,9 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
 import type { ChatRow } from "../components/features/chat/chatTypes";
+import { hoisted, mocked, stubGlobal } from "../test/testUtils";
 import {
     Chat,
     historyHasNewerAssistantMessage,
@@ -54,7 +55,7 @@ interface ChatTestMocks {
     };
     isConnected: boolean;
     liveSessions: MockLiveSession[] | undefined;
-    request: ReturnType<typeof vi.fn>;
+    request: ReturnType<typeof jest.fn>;
     runtimeEventsOptions: null | {
         connectionId: number;
         isConnected: boolean;
@@ -65,17 +66,17 @@ interface ChatTestMocks {
     };
     skipComposerFileInputRef: boolean;
     skipMessagesContainerRef: boolean;
-    slashCommand: ReturnType<typeof vi.fn>;
+    slashCommand: ReturnType<typeof jest.fn>;
     slashCommandOptions: null | { confirmResetSession: () => Promise<boolean> };
     socketError: string | null;
-    subscribe: ReturnType<typeof vi.fn>;
+    subscribe: ReturnType<typeof jest.fn>;
     virtualizerOptions: ChatVirtualizerOptions | null;
 }
 
-const mocks = vi.hoisted<ChatTestMocks>(() => ({
-    request: vi.fn(),
-    subscribe: vi.fn(),
-    slashCommand: vi.fn(),
+const mocks = hoisted<ChatTestMocks>(() => ({
+    request: jest.fn(),
+    subscribe: jest.fn(),
+    slashCommand: jest.fn(),
     socketError: null as string | null,
     isConnected: true,
     liveSessions: [
@@ -135,15 +136,15 @@ function getVirtualizerOptions(): ChatVirtualizerOptions & {
 
 const mockVirtualizerInstance = {} as ChatVirtualizerInstance;
 
-vi.mock("@tanstack/react-db", () => ({
+mock.module("@tanstack/react-db", () => ({
     useLiveQuery: (
         buildQuery: (query: { from: (collection: unknown) => unknown }) => unknown
     ) => ({
-        data: buildQuery({ from: vi.fn(() => mocks.liveSessions) }),
+        data: buildQuery({ from: jest.fn(() => mocks.liveSessions) }),
     }),
 }));
 
-vi.mock("@tanstack/react-virtual", () => ({
+mock.module("@tanstack/react-virtual", () => ({
     useVirtualizer: (options: ChatVirtualizerOptions) => {
         const { count, estimateSize, getItemKey, getScrollElement } = options;
         mocks.virtualizerOptions = options;
@@ -158,20 +159,20 @@ vi.mock("@tanstack/react-virtual", () => ({
                     key: getItemKey?.(index) ?? index,
                     start: index * estimateSize(index),
                 })),
-            measureElement: vi.fn(),
+            measureElement: jest.fn(),
         };
     },
 }));
 
-vi.mock("../collections/sessions", () => ({
+mock.module("../collections/sessions", () => ({
     sessionsCollection: {},
 }));
 
-vi.mock("../hooks/useAgents", () => ({
+mock.module("../hooks/useAgents", () => ({
     useAgentsStatus: () => ({ data: mocks.agentsStatus }),
 }));
 
-vi.mock("../hooks/useOpenClawSocket", () => ({
+mock.module("../hooks/useOpenClawSocket", () => ({
     useOpenClawSocket: () => ({
         connectionId: 1,
         error: mocks.socketError,
@@ -181,8 +182,8 @@ vi.mock("../hooks/useOpenClawSocket", () => ({
     }),
 }));
 
-vi.mock("../components/features/chat/useChatRuntimeEvents", () => ({
-    useChatRuntimeEvents: vi.fn(
+mock.module("../components/features/chat/useChatRuntimeEvents", () => ({
+    useChatRuntimeEvents: jest.fn(
         (options: {
             connectionId: number;
             isConnected: boolean;
@@ -196,14 +197,14 @@ vi.mock("../components/features/chat/useChatRuntimeEvents", () => ({
     ),
 }));
 
-vi.mock("../components/features/chat/useChatSlashCommands", () => ({
+mock.module("../components/features/chat/useChatSlashCommands", () => ({
     useChatSlashCommands: (options: { confirmResetSession: () => Promise<boolean> }) => {
         mocks.slashCommandOptions = options;
         return mocks.slashCommand;
     },
 }));
 
-vi.mock("../components/features/chat/AttachmentPreviewModal", () => ({
+mock.module("../components/features/chat/AttachmentPreviewModal", () => ({
     AttachmentPreviewModal: ({
         previewItem,
         onClose,
@@ -221,7 +222,7 @@ vi.mock("../components/features/chat/AttachmentPreviewModal", () => ({
         ) : null,
 }));
 
-vi.mock("../components/features/chat/ChatHeader", () => ({
+mock.module("../components/features/chat/ChatHeader", () => ({
     ChatHeader: ({
         agentOptions,
         onSelectAgent,
@@ -277,7 +278,7 @@ vi.mock("../components/features/chat/ChatHeader", () => ({
     ),
 }));
 
-vi.mock("../components/features/chat/ChatMessagesList", () => ({
+mock.module("../components/features/chat/ChatMessagesList", () => ({
     ChatMessagesList: ({
         chatRows,
         isAtBottom,
@@ -341,7 +342,7 @@ vi.mock("../components/features/chat/ChatMessagesList", () => ({
     ),
 }));
 
-vi.mock("../components/features/chat/ChatComposer", () => ({
+mock.module("../components/features/chat/ChatComposer", () => ({
     ChatComposer: ({
         attachments,
         canSend,
@@ -429,7 +430,7 @@ vi.mock("../components/features/chat/ChatComposer", () => ({
     ),
 }));
 
-vi.mock("../components/ui/ConfirmModal", () => ({
+mock.module("../components/ui/ConfirmModal", () => ({
     ConfirmModal: ({
         isOpen,
         onCancel,
@@ -464,10 +465,10 @@ function installLocalStorageMock() {
     Object.defineProperty(window, "localStorage", {
         configurable: true,
         value: {
-            clear: vi.fn(() => store.clear()),
-            getItem: vi.fn((key: string) => store.get(key) ?? null),
-            removeItem: vi.fn((key: string) => store.delete(key)),
-            setItem: vi.fn((key: string, value: string) => store.set(key, value)),
+            clear: jest.fn(() => store.clear()),
+            getItem: jest.fn((key: string) => store.get(key) ?? null),
+            removeItem: jest.fn((key: string) => store.delete(key)),
+            setItem: jest.fn((key: string, value: string) => store.set(key, value)),
         },
     });
 }
@@ -541,10 +542,10 @@ describe("Chat helpers", () => {
         Object.defineProperty(window, "localStorage", {
             configurable: true,
             value: {
-                getItem: vi.fn(() => {
+                getItem: jest.fn(() => {
                     throw new Error("storage blocked");
                 }),
-                setItem: vi.fn(() => {
+                setItem: jest.fn(() => {
                     throw new Error("storage blocked");
                 }),
             },
@@ -591,10 +592,10 @@ describe("Chat helpers", () => {
         Object.defineProperty(window, "localStorage", {
             configurable: true,
             value: {
-                getItem: vi.fn(() => {
+                getItem: jest.fn(() => {
                     throw new Error("storage blocked");
                 }),
-                setItem: vi.fn(() => {
+                setItem: jest.fn(() => {
                     throw new Error("storage blocked");
                 }),
             },
@@ -690,11 +691,11 @@ describe("Chat helpers", () => {
             "new error"
         );
 
-        const scheduleBottomFollow = vi.fn();
+        const scheduleBottomFollow = jest.fn();
         expect(scheduleBottomFollowWhenNeeded(false, scheduleBottomFollow)).toBe(false);
         expect(scheduleBottomFollow).not.toHaveBeenCalled();
         expect(scheduleBottomFollowWhenNeeded(true, scheduleBottomFollow)).toBe(true);
-        expect(scheduleBottomFollow).toHaveBeenCalledOnce();
+        expect(scheduleBottomFollow).toHaveBeenCalledTimes(1);
     });
 
     it("selects the first supported recorder mime type", () => {
@@ -703,7 +704,7 @@ describe("Chat helpers", () => {
         Object.defineProperty(window, "MediaRecorder", {
             configurable: true,
             value: {
-                isTypeSupported: vi.fn((mimeType: string) => mimeType === "audio/mp4"),
+                isTypeSupported: jest.fn((mimeType: string) => mimeType === "audio/mp4"),
             },
         });
 
@@ -714,7 +715,7 @@ describe("Chat helpers", () => {
         Object.defineProperty(window, "MediaRecorder", {
             configurable: true,
             value: {
-                isTypeSupported: vi.fn(() => false),
+                isTypeSupported: jest.fn(() => false),
             },
         });
 
@@ -723,6 +724,13 @@ describe("Chat helpers", () => {
 });
 
 describe("Chat", () => {
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+
+    afterEach(() => {
+        cleanup();
+        Element.prototype.scrollIntoView = originalScrollIntoView;
+    });
+
     beforeEach(() => {
         installLocalStorageMock();
         mocks.isConnected = true;
@@ -765,7 +773,7 @@ describe("Chat", () => {
             ],
         };
         mocks.slashCommand.mockResolvedValue(false);
-        mocks.subscribe.mockReturnValue(vi.fn());
+        mocks.subscribe.mockReturnValue(jest.fn());
         mocks.request.mockReset();
         mocks.confirmModalHandlers = null;
         mocks.slashCommandOptions = null;
@@ -782,8 +790,8 @@ describe("Chat", () => {
             configurable: true,
             value: undefined,
         });
-        Element.prototype.scrollIntoView = vi.fn();
-        vi.stubGlobal("fetch", vi.fn());
+        Element.prototype.scrollIntoView = jest.fn();
+        stubGlobal("fetch", jest.fn());
     });
 
     it("loads sessions, models, history, and toggles diagnostic visibility", async () => {
@@ -1475,7 +1483,7 @@ describe("Chat", () => {
     it("renders runtime stream rows and clears them when disconnected", async () => {
         const { rerender } = render(<Chat />);
         await screen.findByText("old user message");
-        const clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
+        const clearTimeoutSpy = jest.spyOn(window, "clearTimeout");
 
         try {
             act(() => {
@@ -1513,7 +1521,7 @@ describe("Chat", () => {
             expect(await screen.findByText("streaming answer")).toBeInTheDocument();
             expect(screen.getByText("Using tools")).toBeInTheDocument();
 
-            const liveRefreshTimer = window.setTimeout(vi.fn(), 1000);
+            const liveRefreshTimer = window.setTimeout(jest.fn(), 1000);
             mocks.runtimeEventsOptions!.liveHistoryRefreshTimerReference.current =
                 liveRefreshTimer;
             mocks.isConnected = false;
@@ -1536,7 +1544,7 @@ describe("Chat", () => {
     });
 
     it("computes virtual row keys, sizes typing rows, and follows bottom changes", async () => {
-        const requestAnimationFrameSpy = vi
+        const requestAnimationFrameSpy = jest
             .spyOn(window, "requestAnimationFrame")
             .mockImplementation((callback: FrameRequestCallback) => {
                 callback(0);
@@ -1603,7 +1611,7 @@ describe("Chat", () => {
     });
 
     it("does not render a live stream row when the same assistant text is already visible", async () => {
-        const nowSpy = vi
+        const nowSpy = jest
             .spyOn(Date, "now")
             .mockReturnValue(Date.parse("2026-05-11T00:05:00.000Z"));
         try {
@@ -1632,7 +1640,7 @@ describe("Chat", () => {
     });
 
     it("hides a fresh live stream row when it exactly matches a visible assistant message", async () => {
-        const nowSpy = vi
+        const nowSpy = jest
             .spyOn(Date, "now")
             .mockReturnValue(Date.parse("2026-05-11T00:05:00.000Z"));
         try {
@@ -1661,7 +1669,7 @@ describe("Chat", () => {
     });
 
     it("keeps a fresh live stream row when it only partially matches a visible assistant message", async () => {
-        const nowSpy = vi
+        const nowSpy = jest
             .spyOn(Date, "now")
             .mockReturnValue(Date.parse("2026-05-11T00:05:00.000Z"));
         try {
@@ -1692,7 +1700,7 @@ describe("Chat", () => {
     });
 
     it("recovers quiet active streams from refreshed history", async () => {
-        const nowSpy = vi
+        const nowSpy = jest
             .spyOn(Date, "now")
             .mockReturnValue(Date.parse("2026-05-11T00:05:00.000Z"));
         try {
@@ -1759,7 +1767,7 @@ describe("Chat", () => {
     });
 
     it("recovers quiet textless streams when history has a newer assistant message", async () => {
-        const nowSpy = vi
+        const nowSpy = jest
             .spyOn(Date, "now")
             .mockReturnValue(Date.parse("2026-05-11T00:05:00.000Z"));
         try {
@@ -2543,7 +2551,7 @@ describe("Chat", () => {
 
     it("transcribes selected voice files and reports audio errors", async () => {
         const user = userEvent.setup();
-        const fetchMock = vi.mocked(fetch);
+        const fetchMock = mocked(fetch);
         fetchMock
             .mockResolvedValueOnce({
                 json: async () => ({ text: "  voice draft  " }),
@@ -2616,7 +2624,7 @@ describe("Chat", () => {
     });
 
     it("appends transcribed voice text to an existing draft", async () => {
-        const fetchMock = vi.mocked(fetch).mockResolvedValue({
+        const fetchMock = mocked(fetch).mockResolvedValue({
             json: async () => ({ text: "second line" }),
             ok: true,
         } as Response);
@@ -2643,7 +2651,7 @@ describe("Chat", () => {
     });
 
     it("uses generic transcription errors when the response body is unavailable", async () => {
-        const fetchMock = vi.mocked(fetch).mockResolvedValue({
+        const fetchMock = mocked(fetch).mockResolvedValue({
             json: async () => {
                 throw new Error("invalid json");
             },
@@ -2669,12 +2677,12 @@ describe("Chat", () => {
 
     it("cleans up voice file input safely after unmount", async () => {
         let resolveFetch: (value: Response) => void = () => {};
-        vi.mocked(fetch).mockReturnValue(
+        mocked(fetch).mockReturnValue(
             new Promise((resolve) => {
                 resolveFetch = resolve;
             }) as Promise<Response>
         );
-        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
 
         try {
             const { unmount } = render(<Chat />);
@@ -2707,8 +2715,8 @@ describe("Chat", () => {
 
     it("records direct microphone audio and transcribes the stopped recording", async () => {
         const user = userEvent.setup();
-        const stopTrack = vi.fn();
-        const fetchMock = vi.mocked(fetch).mockResolvedValue({
+        const stopTrack = jest.fn();
+        const fetchMock = mocked(fetch).mockResolvedValue({
             json: async () => ({ text: "recorded text" }),
             ok: true,
         } as Response);
@@ -2717,7 +2725,7 @@ describe("Chat", () => {
             mimeType: string;
             stop: () => void;
         } = null;
-        const MediaRecorderMock = vi.fn(function (this: typeof recorder) {
+        const MediaRecorderMock = jest.fn(function (this: typeof recorder) {
             recorder = {
                 listeners: {},
                 mimeType: "audio/webm",
@@ -2747,16 +2755,16 @@ describe("Chat", () => {
                         listener,
                     ];
                 },
-                start: vi.fn(),
+                start: jest.fn(),
             });
         });
         Object.assign(MediaRecorderMock, {
-            isTypeSupported: vi.fn((mimeType: string) => mimeType === "audio/webm"),
+            isTypeSupported: jest.fn((mimeType: string) => mimeType === "audio/webm"),
         });
         Object.defineProperty(navigator, "mediaDevices", {
             configurable: true,
             value: {
-                getUserMedia: vi.fn().mockResolvedValue({
+                getUserMedia: jest.fn().mockResolvedValue({
                     getTracks: () => [{ stop: stopTrack }],
                 }),
             },
@@ -2791,8 +2799,8 @@ describe("Chat", () => {
 
     it("ignores empty recorder chunks before transcribing captured audio", async () => {
         const user = userEvent.setup();
-        const stopTrack = vi.fn();
-        const fetchMock = vi.mocked(fetch).mockResolvedValue({
+        const stopTrack = jest.fn();
+        const fetchMock = mocked(fetch).mockResolvedValue({
             json: async () => ({ text: "non-empty chunk" }),
             ok: true,
         } as Response);
@@ -2801,7 +2809,7 @@ describe("Chat", () => {
             mimeType: string;
             stop: () => void;
         } = null;
-        const MediaRecorderMock = vi.fn(function (this: typeof recorder) {
+        const MediaRecorderMock = jest.fn(function (this: typeof recorder) {
             recorder = {
                 listeners: {},
                 mimeType: "audio/webm",
@@ -2827,16 +2835,16 @@ describe("Chat", () => {
                         listener,
                     ];
                 },
-                start: vi.fn(),
+                start: jest.fn(),
             });
         });
         Object.assign(MediaRecorderMock, {
-            isTypeSupported: vi.fn((mimeType: string) => mimeType === "audio/webm"),
+            isTypeSupported: jest.fn((mimeType: string) => mimeType === "audio/webm"),
         });
         Object.defineProperty(navigator, "mediaDevices", {
             configurable: true,
             value: {
-                getUserMedia: vi.fn().mockResolvedValue({
+                getUserMedia: jest.fn().mockResolvedValue({
                     getTracks: () => [{ stop: stopTrack }],
                 }),
             },
@@ -2864,25 +2872,25 @@ describe("Chat", () => {
 
     it("reports an empty recording when no audio chunks are captured", async () => {
         const user = userEvent.setup();
-        const stopTrack = vi.fn();
+        const stopTrack = jest.fn();
         let stopListener: (() => void) | null = null;
-        const MediaRecorderMock = vi.fn(function () {
+        const MediaRecorderMock = jest.fn(function () {
             return {
                 addEventListener: (type: string, listener: () => void) => {
                     if (type === "stop") stopListener = listener;
                 },
                 mimeType: "",
-                start: vi.fn(),
+                start: jest.fn(),
                 stop: () => stopListener?.(),
             };
         });
         Object.assign(MediaRecorderMock, {
-            isTypeSupported: vi.fn(() => false),
+            isTypeSupported: jest.fn(() => false),
         });
         Object.defineProperty(navigator, "mediaDevices", {
             configurable: true,
             value: {
-                getUserMedia: vi.fn().mockResolvedValue({
+                getUserMedia: jest.fn().mockResolvedValue({
                     getTracks: () => [{ stop: stopTrack }],
                 }),
             },
@@ -3026,14 +3034,12 @@ describe("Chat", () => {
 
     it("polls visible history while connected and following the bottom", async () => {
         const intervalCallbacks: Array<() => void> = [];
-        const setIntervalSpy = vi
-            .spyOn(window, "setInterval")
-            .mockImplementation((callback: TimerHandler) => {
-                intervalCallbacks.push(callback as () => void);
-                return intervalCallbacks.length as unknown as ReturnType<
-                    typeof setInterval
-                >;
-            });
+        const setIntervalSpy = jest.spyOn(window, "setInterval").mockImplementation(((
+            callback: TimerHandler
+        ) => {
+            intervalCallbacks.push(callback as () => void);
+            return intervalCallbacks.length;
+        }) as typeof window.setInterval);
 
         try {
             render(<Chat />);
@@ -3060,14 +3066,12 @@ describe("Chat", () => {
 
     it("skips live history polling while hidden, unfollowed, or already refreshing", async () => {
         const intervalCallbacks: Array<() => void> = [];
-        const setIntervalSpy = vi
-            .spyOn(window, "setInterval")
-            .mockImplementation((callback: TimerHandler) => {
-                intervalCallbacks.push(callback as () => void);
-                return intervalCallbacks.length as unknown as ReturnType<
-                    typeof setInterval
-                >;
-            });
+        const setIntervalSpy = jest.spyOn(window, "setInterval").mockImplementation(((
+            callback: TimerHandler
+        ) => {
+            intervalCallbacks.push(callback as () => void);
+            return intervalCallbacks.length;
+        }) as typeof window.setInterval);
         const originalVisibility = Object.getOwnPropertyDescriptor(
             document,
             "visibilityState"
@@ -3133,14 +3137,12 @@ describe("Chat", () => {
 
     it("ignores live history polling responses after unmount", async () => {
         const intervalCallbacks: Array<() => void> = [];
-        const setIntervalSpy = vi
-            .spyOn(window, "setInterval")
-            .mockImplementation((callback: TimerHandler) => {
-                intervalCallbacks.push(callback as () => void);
-                return intervalCallbacks.length as unknown as ReturnType<
-                    typeof setInterval
-                >;
-            });
+        const setIntervalSpy = jest.spyOn(window, "setInterval").mockImplementation(((
+            callback: TimerHandler
+        ) => {
+            intervalCallbacks.push(callback as () => void);
+            return intervalCallbacks.length;
+        }) as typeof window.setInterval);
         const historyRequests: Array<(value: unknown) => void> = [];
         mocks.request.mockImplementation((method: string) =>
             method === "chat.history"
@@ -3331,12 +3333,12 @@ describe("Chat", () => {
         Object.defineProperty(navigator, "mediaDevices", {
             configurable: true,
             value: {
-                getUserMedia: vi.fn().mockRejectedValue(new Error("microphone denied")),
+                getUserMedia: jest.fn().mockRejectedValue(new Error("microphone denied")),
             },
         });
         Object.defineProperty(window, "MediaRecorder", {
             configurable: true,
-            value: vi.fn(),
+            value: jest.fn(),
         });
 
         render(<Chat />);
@@ -3359,17 +3361,17 @@ describe("Chat", () => {
 
     it("stops opened microphone tracks when recorder construction fails", async () => {
         const user = userEvent.setup();
-        const stopTrack = vi.fn();
+        const stopTrack = jest.fn();
         Object.defineProperty(navigator, "mediaDevices", {
             configurable: true,
             value: {
-                getUserMedia: vi.fn().mockResolvedValue({
+                getUserMedia: jest.fn().mockResolvedValue({
                     getTracks: () => [{ stop: stopTrack }],
                 }),
             },
         });
         class MediaRecorderMock {
-            static isTypeSupported = vi.fn(() => false);
+            static isTypeSupported = jest.fn(() => false);
 
             constructor() {
                 throw new Error("recorder unavailable");

@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import type { DockerVolume } from "../../../hooks/useDocker";
 import { DockerVolumesTable } from "./DockerVolumesTable";
@@ -34,15 +34,19 @@ const volumes: DockerVolume[] = [
 describe("DockerVolumesTable", () => {
     it("renders empty state", () => {
         render(
-            <DockerVolumesTable volumes={[]} onDelete={vi.fn()} onPruneUnused={vi.fn()} />
+            <DockerVolumesTable
+                volumes={[]}
+                onDelete={jest.fn()}
+                onPruneUnused={jest.fn()}
+            />
         );
 
         expect(screen.getByText("No volumes found.")).toBeInTheDocument();
     });
 
     it("renders volumes and deletes only unused volumes", async () => {
-        const onDelete = vi.fn();
-        const onPruneUnused = vi.fn();
+        const onDelete = jest.fn();
+        const onPruneUnused = jest.fn();
         render(
             <DockerVolumesTable
                 volumes={volumes}
@@ -83,8 +87,8 @@ describe("DockerVolumesTable", () => {
             <DockerVolumesTable
                 volumes={volumes}
                 isPruning
-                onDelete={vi.fn()}
-                onPruneUnused={vi.fn()}
+                onDelete={jest.fn()}
+                onPruneUnused={jest.fn()}
             />
         );
 
@@ -106,8 +110,8 @@ describe("DockerVolumesTable", () => {
                         usedBy: ["comet", "jackett"],
                     }),
                 ]}
-                onDelete={vi.fn()}
-                onPruneUnused={vi.fn()}
+                onDelete={jest.fn()}
+                onPruneUnused={jest.fn()}
             />
         );
 
@@ -125,8 +129,8 @@ describe("DockerVolumesTable", () => {
         render(
             <DockerVolumesTable
                 volumes={volumes}
-                onDelete={vi.fn()}
-                onPruneUnused={vi.fn()}
+                onDelete={jest.fn()}
+                onPruneUnused={jest.fn()}
             />
         );
 

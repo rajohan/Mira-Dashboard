@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import {
     formatLogTime,
@@ -132,7 +132,7 @@ describe("log utils", () => {
 
     it("falls back when compact stringification is unavailable", () => {
         const line = JSON.stringify({ msg: { key: "val" } });
-        const stringifySpy = vi.spyOn(JSON, "stringify").mockImplementationOnce(() => {
+        const stringifySpy = jest.spyOn(JSON, "stringify").mockImplementationOnce(() => {
             throw new Error("stringify failed");
         });
 
@@ -145,7 +145,7 @@ describe("log utils", () => {
 
     it("falls back when compact stringification returns undefined", () => {
         const line = JSON.stringify({ msg: { key: "val" } });
-        const stringifySpy = vi
+        const stringifySpy = jest
             .spyOn(JSON, "stringify")
             .mockImplementationOnce(() => undefined as never);
 
@@ -247,6 +247,7 @@ describe("log utils", () => {
         expect(getSubsystemColor("http")).toBe("text-teal-400");
         expect(getSubsystemColor("ws")).toBe("text-amber-400");
         expect(getSubsystemColor("memory")).toBe("text-emerald-400");
+        expect(getSubsystemColor("custom")).toBe("text-purple-400");
         expect(getSubsystemColor("unknown")).toBe("text-purple-400");
     });
 

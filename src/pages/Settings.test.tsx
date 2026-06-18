@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted, stubGlobal } from "../test/testUtils";
 import {
     configuredChannels,
     errorMessage,
@@ -11,23 +12,23 @@ import {
     Settings,
 } from "./Settings";
 
-const hooks = vi.hoisted(() => ({
-    createBackup: vi.fn(),
-    createObjectUrl: vi.fn(() => "blob:backup"),
-    restartGateway: vi.fn(),
-    revokeObjectUrl: vi.fn(),
-    toggleSkill: vi.fn(),
-    updateConfig: vi.fn(),
-    useCacheEntry: vi.fn(),
-    useConfig: vi.fn(),
-    useCreateBackup: vi.fn(),
-    useRestartGateway: vi.fn(),
-    useSkills: vi.fn(),
-    useToggleSkill: vi.fn(),
-    useUpdateConfig: vi.fn(),
+const hooks = hoisted(() => ({
+    createBackup: jest.fn(),
+    createObjectUrl: jest.fn(() => "blob:backup"),
+    restartGateway: jest.fn(),
+    revokeObjectUrl: jest.fn(),
+    toggleSkill: jest.fn(),
+    updateConfig: jest.fn(),
+    useCacheEntry: jest.fn(),
+    useConfig: jest.fn(),
+    useCreateBackup: jest.fn(),
+    useRestartGateway: jest.fn(),
+    useSkills: jest.fn(),
+    useToggleSkill: jest.fn(),
+    useUpdateConfig: jest.fn(),
 }));
 
-vi.mock("../hooks", () => ({
+mock.module("../hooks", () => ({
     useCacheEntry: hooks.useCacheEntry,
     useConfig: hooks.useConfig,
     useCreateBackup: hooks.useCreateBackup,
@@ -37,7 +38,7 @@ vi.mock("../hooks", () => ({
     useUpdateConfig: hooks.useUpdateConfig,
 }));
 
-vi.mock("../components/ui/Modal", () => ({
+mock.module("../components/ui/Modal", () => ({
     Modal: ({
         children,
         isOpen,
@@ -60,7 +61,7 @@ vi.mock("../components/ui/Modal", () => ({
         ) : null,
 }));
 
-vi.mock("../components/features/settings", () => ({
+mock.module("../components/features/settings", () => ({
     AgentAccessSection: ({
         agents,
         onSave,
@@ -299,51 +300,51 @@ describe("Settings helpers", () => {
     });
 
     it("clears success messages after the timeout", () => {
-        vi.useFakeTimers();
+        jest.useFakeTimers();
         try {
-            const setSuccess = vi.fn();
+            const setSuccess = jest.fn();
 
             patchSuccess(setSuccess, "Saved");
             expect(setSuccess).toHaveBeenCalledWith("Saved");
 
-            vi.advanceTimersByTime(3000);
+            jest.advanceTimersByTime(3000);
             expect(setSuccess).toHaveBeenLastCalledWith(null);
         } finally {
-            vi.useRealTimers();
+            jest.useRealTimers();
         }
     });
 
     it("clears stored success timer refs", () => {
-        vi.useFakeTimers();
-        const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+        jest.useFakeTimers();
+        const clearTimeoutSpy = jest.spyOn(globalThis, "clearTimeout");
         try {
             const timerRef: { current: ReturnType<typeof setTimeout> | null } = {
                 current: null,
             };
-            const setSuccess = vi.fn();
+            const setSuccess = jest.fn();
 
             patchSuccess(setSuccess, "Saved once", timerRef);
             const firstTimer = timerRef.current;
             expect(firstTimer).not.toBeNull();
 
-            vi.advanceTimersByTime(1000);
+            jest.advanceTimersByTime(1000);
 
             patchSuccess(setSuccess, "Saved twice", timerRef);
             expect(clearTimeoutSpy).toHaveBeenCalledWith(firstTimer);
             expect(timerRef.current).not.toBe(firstTimer);
 
             setSuccess.mockClear();
-            vi.advanceTimersByTime(2000);
+            jest.advanceTimersByTime(2000);
 
             expect(setSuccess).not.toHaveBeenCalledWith(null);
 
-            vi.advanceTimersByTime(1000);
+            jest.advanceTimersByTime(1000);
 
             expect(setSuccess).toHaveBeenLastCalledWith(null);
             expect(timerRef.current).toBeNull();
         } finally {
             clearTimeoutSpy.mockRestore();
-            vi.useRealTimers();
+            jest.useRealTimers();
         }
     });
 });
@@ -372,11 +373,11 @@ describe("Settings page", () => {
         });
         hooks.createObjectUrl.mockClear();
         hooks.revokeObjectUrl.mockClear();
-        vi.stubGlobal("URL", {
+        stubGlobal("URL", {
             createObjectURL: hooks.createObjectUrl,
             revokeObjectURL: hooks.revokeObjectUrl,
         });
-        HTMLAnchorElement.prototype.click = vi.fn();
+        HTMLAnchorElement.prototype.click = jest.fn();
         mockSettings();
     });
 
@@ -411,7 +412,7 @@ describe("Settings page", () => {
     it("backs up config and confirms gateway restart", async () => {
         const user = userEvent.setup();
         const originalLocation = window.location;
-        const reload = vi.fn();
+        const reload = jest.fn();
         let setTimeoutSpy: undefined | { mockRestore: () => void };
         let clearTimeoutSpy: undefined | { mockRestore: () => void };
         Object.defineProperty(window, "location", {
@@ -437,12 +438,12 @@ describe("Settings page", () => {
             expect(screen.queryByTestId("modal")).not.toBeInTheDocument();
 
             await user.click(screen.getByRole("button", { name: "Restart" }));
-            setTimeoutSpy = vi
-                .spyOn(globalThis, "setTimeout")
-                .mockImplementation((handler) => {
-                    if (typeof handler === "function") handler();
-                    return 1 as unknown as ReturnType<typeof setTimeout>;
-                });
+            setTimeoutSpy = jest.spyOn(globalThis, "setTimeout").mockImplementation(((
+                handler: TimerHandler
+            ) => {
+                if (typeof handler === "function") handler();
+                return 1;
+            }) as typeof globalThis.setTimeout);
             await act(async () => {
                 fireEvent.click(
                     screen.getAllByRole("button", { name: "Restart" }).at(-1)!
@@ -453,7 +454,7 @@ describe("Settings page", () => {
             await Promise.resolve();
             expect(reload).toHaveBeenCalledTimes(1);
 
-            clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
+            clearTimeoutSpy = jest.spyOn(window, "clearTimeout");
             unmount();
             expect(clearTimeoutSpy).toHaveBeenCalled();
         } finally {

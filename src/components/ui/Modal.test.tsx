@@ -1,12 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { Modal } from "./Modal";
 
 describe("Modal", () => {
     it("renders dialog title, children and closes from header button", async () => {
-        const onClose = vi.fn();
+        const onClose = jest.fn();
         render(
             <Modal isOpen onClose={onClose} title="Settings" size="lg">
                 <p>Modal body</p>
@@ -26,7 +26,7 @@ describe("Modal", () => {
 
     it("can render without a title", async () => {
         render(
-            <Modal isOpen onClose={vi.fn()}>
+            <Modal isOpen onClose={jest.fn()}>
                 <p>Untitled body</p>
             </Modal>
         );

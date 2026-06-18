@@ -1,21 +1,22 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 import { act } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hoisted, stubGlobal } from "../test/testUtils";
 import { Login } from "./Login";
 
-const mocks = vi.hoisted(() => ({
-    fetch: vi.fn(),
-    navigate: vi.fn(),
-    refreshSession: vi.fn(),
+const mocks = hoisted(() => ({
+    fetch: jest.fn(),
+    navigate: jest.fn(),
+    refreshSession: jest.fn(),
 }));
 
-vi.mock("@tanstack/react-router", () => ({
+mock.module("@tanstack/react-router", () => ({
     useNavigate: () => mocks.navigate,
 }));
 
-vi.mock("../stores/authStore", () => ({
+mock.module("../stores/authStore", () => ({
     authActions: { refreshSession: mocks.refreshSession },
 }));
 
@@ -32,7 +33,7 @@ describe("Login page", () => {
         mocks.navigate.mockReset();
         mocks.refreshSession.mockReset();
         mocks.refreshSession.mockResolvedValue(Promise.resolve());
-        vi.stubGlobal("fetch", mocks.fetch);
+        stubGlobal("fetch", mocks.fetch);
     });
 
     it("loads standard login mode and submits credentials", async () => {

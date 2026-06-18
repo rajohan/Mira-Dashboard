@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import type { Session } from "../../../types/session";
 import { SessionsTable } from "./SessionsTable";
@@ -45,9 +45,9 @@ const sessions: Session[] = [
 /** Renders the sessions table with default action spies and optional props. */
 function renderTable(overrides = {}) {
     const handlers = {
-        onCompact: vi.fn(),
-        onDelete: vi.fn(),
-        onReset: vi.fn(),
+        onCompact: jest.fn(),
+        onDelete: jest.fn(),
+        onReset: jest.fn(),
     };
 
     render(<SessionsTable sessions={sessions} {...handlers} {...overrides} />);

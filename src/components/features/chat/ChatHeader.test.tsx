@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import type { Session } from "../../../types/session";
 import { ChatHeader } from "./ChatHeader";
@@ -27,8 +27,8 @@ const session: Session = {
 describe("ChatHeader", () => {
     it("renders empty state and diagnostic toggles", async () => {
         const user = userEvent.setup();
-        const onToggleThinking = vi.fn();
-        const onToggleTools = vi.fn();
+        const onToggleThinking = jest.fn();
+        const onToggleTools = jest.fn();
 
         render(
             <ChatHeader
@@ -41,8 +41,8 @@ describe("ChatHeader", () => {
                 showTools
                 onToggleThinking={onToggleThinking}
                 onToggleTools={onToggleTools}
-                onSelectAgent={vi.fn()}
-                onSelectSession={vi.fn()}
+                onSelectAgent={jest.fn()}
+                onSelectSession={jest.fn()}
             />
         );
 
@@ -65,7 +65,7 @@ describe("ChatHeader", () => {
 
     it("renders selected session metadata and session selectors", async () => {
         const user = userEvent.setup();
-        const onSelectSession = vi.fn();
+        const onSelectSession = jest.fn();
 
         render(
             <ChatHeader
@@ -82,8 +82,8 @@ describe("ChatHeader", () => {
                 ]}
                 showThinking
                 showTools={false}
-                onToggleThinking={vi.fn()}
-                onToggleTools={vi.fn()}
+                onToggleThinking={jest.fn()}
+                onToggleTools={jest.fn()}
                 onSelectAgent={onSelectSession}
                 onSelectSession={onSelectSession}
             />
@@ -111,10 +111,10 @@ describe("ChatHeader", () => {
                 agentOptions={[]}
                 showThinking
                 showTools
-                onToggleThinking={vi.fn()}
-                onToggleTools={vi.fn()}
-                onSelectAgent={vi.fn()}
-                onSelectSession={vi.fn()}
+                onToggleThinking={jest.fn()}
+                onToggleTools={jest.fn()}
+                onSelectAgent={jest.fn()}
+                onSelectSession={jest.fn()}
             />
         );
 

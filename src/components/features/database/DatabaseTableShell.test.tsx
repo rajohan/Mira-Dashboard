@@ -1,7 +1,7 @@
 import { createColumnHelper } from "@tanstack/react-table";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { DatabaseTableShell } from "./DatabaseTableShell";
 
@@ -41,7 +41,7 @@ describe("DatabaseTableShell", () => {
     });
 
     it("renders table and mobile rows and forwards row clicks", async () => {
-        const onRowClick = vi.fn();
+        const onRowClick = jest.fn();
         renderShell({
             onRowClick,
             renderMobileCard: (row) => <div>Mobile {row.name}</div>,
@@ -90,7 +90,7 @@ describe("DatabaseTableShell", () => {
     });
 
     it("activates mobile rows by keyboard when a row click handler is provided", async () => {
-        const onRowClick = vi.fn();
+        const onRowClick = jest.fn();
         renderShell({
             onRowClick,
             renderMobileCard: (row) => <div>Mobile {row.name}</div>,
@@ -108,7 +108,7 @@ describe("DatabaseTableShell", () => {
     });
 
     it("activates desktop rows by keyboard when a row click handler is provided", async () => {
-        const onRowClick = vi.fn();
+        const onRowClick = jest.fn();
         renderShell({ onRowClick });
 
         const desktopAlpha = screen.getByText("Alpha").closest("tr");

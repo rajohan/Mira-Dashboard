@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { authStore } from "../stores/authStore";
+import { stubGlobal } from "../test/testUtils";
 import {
     apiDelete,
     apiDeleteRequired,
@@ -16,8 +17,8 @@ import {
 } from "./useApi";
 
 function mockFetch(response: Partial<Response> & { json?: () => Promise<unknown> }) {
-    const fetchMock = vi.fn().mockResolvedValue(response);
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = jest.fn().mockResolvedValue(response);
+    stubGlobal("fetch", fetchMock);
     return fetchMock;
 }
 
@@ -164,7 +165,7 @@ describe("apiFetch", () => {
             isInitialized: true,
             bootstrapRequired: false,
         }));
-        const listener = vi.fn();
+        const listener = jest.fn();
         window.addEventListener("openclaw:unauthorized", listener);
         mockFetch({ ok: false, status: 401, json: async () => ({}) });
 

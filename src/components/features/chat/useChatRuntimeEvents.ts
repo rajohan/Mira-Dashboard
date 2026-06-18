@@ -157,9 +157,10 @@ export function runtimeProgressText(
             stringValue(data.title) ||
             stringValue(data.summary) ||
             stringValue(data.progressText);
-        return compactStatusText(
-            detail ? `${formatToolName(toolName)}: ${detail}` : formatToolName(toolName)
-        );
+        const statusText = detail
+            ? `${formatToolName(toolName)}: ${detail}`
+            : formatToolName(toolName);
+        return compactStatusText(statusText);
     }
 
     if (stream === "item") {

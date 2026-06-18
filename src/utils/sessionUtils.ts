@@ -23,9 +23,8 @@ export function getTypeSortOrder(type: string | null | undefined): number {
         case "CRON": {
             return 3;
         }
-        default: {
+        default:
             return 4;
-        }
     }
 }
 

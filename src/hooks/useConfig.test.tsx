@@ -1,8 +1,9 @@
 import { renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, jest } from "bun:test";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import {
     configKeys,
     useConfig,
@@ -15,7 +16,7 @@ import {
 
 describe("config hooks", () => {
     it("fetches config and skills", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -31,7 +32,7 @@ describe("config hooks", () => {
                     skills: [{ name: "weather", path: "/s/weather", enabled: true }],
                 }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const wrapper = createQueryWrapper();
 
         const { result: cfg } = renderHook(() => useConfig(), { wrapper });
@@ -44,12 +45,12 @@ describe("config hooks", () => {
     });
 
     it("updates config and invalidates", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
-        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const invalidateSpy = jest.spyOn(queryClient, "invalidateQueries");
         const wrapper = createQueryWrapper(queryClient);
 
         const { result } = renderHook(() => useUpdateConfig(), { wrapper });
@@ -65,12 +66,12 @@ describe("config hooks", () => {
     });
 
     it("toggles skill and restarts gateway", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
-        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const invalidateSpy = jest.spyOn(queryClient, "invalidateQueries");
         const wrapper = createQueryWrapper(queryClient);
 
         const { result: toggle } = renderHook(() => useToggleSkill(), { wrapper });

@@ -1,7 +1,8 @@
 import { renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { createQueryWrapper } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import {
     useAgentsConfig,
     useAgentsStatus,
@@ -10,10 +11,10 @@ import {
 } from "./useAgents";
 
 function mockJson(data: unknown) {
-    const fetchMock = vi
+    const fetchMock = jest
         .fn()
         .mockResolvedValue({ ok: true, status: 200, json: async () => data });
-    vi.stubGlobal("fetch", fetchMock);
+    stubGlobal("fetch", fetchMock);
     return fetchMock;
 }
 

@@ -1,8 +1,9 @@
 import { renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, jest } from "bun:test";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import { OPS_ACTIONS, useExecJob, useStartOpsAction } from "./useOpsActions";
 
 describe("ops actions hooks", () => {
@@ -13,7 +14,7 @@ describe("ops actions hooks", () => {
     });
 
     it("starts ops action and polls exec job", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -46,7 +47,7 @@ describe("ops actions hooks", () => {
                     endedAt: null,
                 }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const wrapper = createQueryWrapper();
 
         const { result: start } = renderHook(() => useStartOpsAction(), { wrapper });

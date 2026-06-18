@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import type { DockerContainer } from "../../../hooks/useDocker";
 import { DockerContainersTable } from "./DockerContainersTable";
@@ -51,11 +51,11 @@ function renderTable(
 ) {
     const props = {
         containers: tableContainers,
-        onConsole: vi.fn(),
-        onDetails: vi.fn(),
-        onLogs: vi.fn(),
-        onRestart: vi.fn(),
-        onRestartStack: vi.fn(),
+        onConsole: jest.fn(),
+        onDetails: jest.fn(),
+        onLogs: jest.fn(),
+        onRestart: jest.fn(),
+        onRestartStack: jest.fn(),
         ...handlers,
     } satisfies React.ComponentProps<typeof DockerContainersTable>;
 
@@ -73,11 +73,11 @@ describe("DockerContainersTable", () => {
     });
 
     it("renders containers and dispatches actions", async () => {
-        const onConsole = vi.fn();
-        const onDetails = vi.fn();
-        const onLogs = vi.fn();
-        const onRestart = vi.fn();
-        const onRestartStack = vi.fn();
+        const onConsole = jest.fn();
+        const onDetails = jest.fn();
+        const onLogs = jest.fn();
+        const onRestart = jest.fn();
+        const onRestartStack = jest.fn();
 
         renderTable(containers, {
             onConsole,
@@ -122,8 +122,8 @@ describe("DockerContainersTable", () => {
 
     it("labels mobile cards and keeps nested actions scoped", async () => {
         const user = userEvent.setup();
-        const onDetails = vi.fn();
-        const onLogs = vi.fn();
+        const onDetails = jest.fn();
+        const onLogs = jest.fn();
 
         renderTable(containers, { onDetails, onLogs });
 
@@ -349,7 +349,7 @@ describe("DockerContainersTable", () => {
     });
 
     it("opens details from the desktop row click", () => {
-        const onDetails = vi.fn();
+        const onDetails = jest.fn();
         const { container } = renderTable(containers, { onDetails });
 
         fireEvent.click(container.querySelector(":scope tbody tr")!);
@@ -359,7 +359,7 @@ describe("DockerContainersTable", () => {
 
     it("supports keyboard row activation and sortable columns", async () => {
         const user = userEvent.setup();
-        const onDetails = vi.fn();
+        const onDetails = jest.fn();
 
         renderTable(
             [

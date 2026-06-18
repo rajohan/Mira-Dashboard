@@ -1,8 +1,9 @@
 import { renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, jest } from "bun:test";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import {
     backupKeys,
     useClearKopiaBackupAttention,
@@ -16,7 +17,7 @@ import { cacheKeys } from "./useCache";
 
 describe("backup hooks", () => {
     it("fetches kopia and walg backup state", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -28,7 +29,7 @@ describe("backup hooks", () => {
                 status: 200,
                 json: async () => ({ job: { id: "walg", status: "running" } }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const wrapper = createQueryWrapper();
 
         const { result: kopia } = renderHook(() => useKopiaBackup(), { wrapper });
@@ -50,12 +51,12 @@ describe("backup hooks", () => {
     });
 
     it("uses short polling while kopia backup is running", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ job: { id: "kopia", status: "running" } }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useKopiaBackup(), {
             wrapper: createQueryWrapper(),
@@ -65,14 +66,14 @@ describe("backup hooks", () => {
     });
 
     it("runs backups and invalidates status caches", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ ok: true, job: { id: "job" } }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
-        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const invalidateSpy = jest.spyOn(queryClient, "invalidateQueries");
         const wrapper = createQueryWrapper(queryClient);
 
         const { result: kopia } = renderHook(() => useRunKopiaBackup(), { wrapper });
@@ -99,14 +100,14 @@ describe("backup hooks", () => {
     });
 
     it("clears backup attention and invalidates backup state", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ ok: true, cleared: { id: "job" } }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
-        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const invalidateSpy = jest.spyOn(queryClient, "invalidateQueries");
         const wrapper = createQueryWrapper(queryClient);
 
         const { result: kopia } = renderHook(() => useClearKopiaBackupAttention(), {

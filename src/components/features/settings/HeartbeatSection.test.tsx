@@ -1,12 +1,12 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { HeartbeatSection } from "./HeartbeatSection";
 
 describe("HeartbeatSection", () => {
     it("submits updated heartbeat settings", async () => {
-        const onSave = vi.fn().mockImplementation(async () => {});
+        const onSave = jest.fn().mockImplementation(async () => {});
         render(
             <HeartbeatSection
                 every={1800}
@@ -30,7 +30,7 @@ describe("HeartbeatSection", () => {
 
     it("shows saving state", async () => {
         render(
-            <HeartbeatSection every={1800} onSave={vi.fn()} saving target="discord" />
+            <HeartbeatSection every={1800} onSave={jest.fn()} saving target="discord" />
         );
 
         await userEvent.click(screen.getByRole("button", { name: /Heartbeat/u }));

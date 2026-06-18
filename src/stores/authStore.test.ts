@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, jest } from "bun:test";
 
+import { stubGlobal, unstubAllGlobals } from "../test/testUtils";
 import {
     authActions,
     authStore,
@@ -11,7 +12,7 @@ import {
 
 describe("authStore", () => {
     afterEach(() => {
-        vi.unstubAllGlobals();
+        unstubAllGlobals();
         act(() => {
             authStore.setState(() => ({
                 user: null,
@@ -64,7 +65,7 @@ describe("authStore", () => {
     });
 
     it("initialize fetches session and deduplicates concurrent calls", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             json: async () => ({
                 authenticated: true,
@@ -72,7 +73,7 @@ describe("authStore", () => {
                 user: { id: 2, username: "mira" },
             }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const first = authActions.initialize();
         const second = authActions.initialize();
@@ -84,8 +85,8 @@ describe("authStore", () => {
     });
 
     it("initialize marks initialized on session fetch failure", async () => {
-        const fetchMock = vi.fn().mockRejectedValue(new Error("Network error"));
-        vi.stubGlobal("fetch", fetchMock);
+        const fetchMock = jest.fn().mockRejectedValue(new Error("Network error"));
+        stubGlobal("fetch", fetchMock);
 
         await authActions.initialize();
         expect(authStore.state.isAuthenticated).toBe(false);
@@ -93,7 +94,7 @@ describe("authStore", () => {
     });
 
     it("refreshSession fetches and sets session", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             json: async () => ({
                 authenticated: true,
@@ -101,7 +102,7 @@ describe("authStore", () => {
                 user: { id: 2, username: "mira" },
             }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         await authActions.refreshSession();
         expect(authStore.state.isAuthenticated).toBe(true);
@@ -109,10 +110,10 @@ describe("authStore", () => {
     });
 
     it("refreshSession throws on non-ok response", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: false,
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         await expect(authActions.refreshSession()).rejects.toThrow(
             "Failed to fetch auth session"
@@ -120,8 +121,8 @@ describe("authStore", () => {
     });
 
     it("logout calls API and clears session", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({ ok: true });
-        vi.stubGlobal("fetch", fetchMock);
+        const fetchMock = jest.fn().mockResolvedValue({ ok: true });
+        stubGlobal("fetch", fetchMock);
 
         authActions.setSession({
             authenticated: true,
@@ -138,8 +139,8 @@ describe("authStore", () => {
     });
 
     it("logout handles fetch failure gracefully", async () => {
-        const fetchMock = vi.fn().mockRejectedValue(new Error("Network error"));
-        vi.stubGlobal("fetch", fetchMock);
+        const fetchMock = jest.fn().mockRejectedValue(new Error("Network error"));
+        stubGlobal("fetch", fetchMock);
 
         authActions.setSession({
             authenticated: true,

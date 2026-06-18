@@ -1,7 +1,8 @@
 import { renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { createQueryWrapper } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import { useDatabaseOverview } from "./useDatabase";
 
 describe("useDatabaseOverview", () => {
@@ -29,10 +30,10 @@ describe("useDatabaseOverview", () => {
             pgbouncerPools: [],
             pgbouncerStats: [],
         };
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValue({ ok: true, status: 200, json: async () => overview });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useDatabaseOverview(), {
             wrapper: createQueryWrapper(),

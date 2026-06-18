@@ -1,19 +1,20 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted } from "../test/testUtils";
 import { Moltbook } from "./Moltbook";
 
-const hooks = vi.hoisted(() => ({
-    refetch: vi.fn(),
-    useMoltbookData: vi.fn(),
+const hooks = hoisted(() => ({
+    refetch: jest.fn(),
+    useMoltbookData: jest.fn(),
 }));
 
-vi.mock("../hooks", () => ({
+mock.module("../hooks", () => ({
     useMoltbookData: hooks.useMoltbookData,
 }));
 
-vi.mock("../components/features/moltbook", () => ({
+mock.module("../components/features/moltbook", () => ({
     FeedPostCard: ({ post }: { post: { id: string; title: string } }) => (
         <article data-testid="feed-post">feed: {post.title}</article>
     ),

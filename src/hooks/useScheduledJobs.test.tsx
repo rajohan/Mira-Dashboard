@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, jest } from "bun:test";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { stubGlobal, unstubAllGlobals } from "../test/testUtils";
 import {
     scheduledJobKeys,
     useRunScheduledJobNow,
@@ -20,11 +21,11 @@ function wrapper({ children }: { children: ReactNode }) {
 
 describe("useScheduledJobs", () => {
     afterEach(() => {
-        vi.unstubAllGlobals();
+        unstubAllGlobals();
     });
 
     it("fetches backend-native scheduled jobs", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             text: async () =>
@@ -44,7 +45,7 @@ describe("useScheduledJobs", () => {
                     ],
                 }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useScheduledJobs(), { wrapper });
 
@@ -56,7 +57,7 @@ describe("useScheduledJobs", () => {
     });
 
     it("fetches scheduled job runs", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             text: async () =>
@@ -75,7 +76,7 @@ describe("useScheduledJobs", () => {
                     ],
                 }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useScheduledJobRuns("ops.log-rotation"), {
             wrapper,
@@ -96,7 +97,7 @@ describe("useScheduledJobs", () => {
     });
 
     it("updates and manually runs scheduled jobs", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             text: async () =>
@@ -114,7 +115,7 @@ describe("useScheduledJobs", () => {
                     },
                 }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result: update } = renderHook(() => useUpdateScheduledJob(), {
             wrapper,
@@ -145,7 +146,7 @@ describe("useScheduledJobs", () => {
     });
 
     it("rejects failed manual scheduled job runs", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             text: async () =>
@@ -163,7 +164,7 @@ describe("useScheduledJobs", () => {
                     },
                 }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useRunScheduledJobNow(), { wrapper });
 
@@ -173,7 +174,7 @@ describe("useScheduledJobs", () => {
     });
 
     it("uses a fallback error for failed manual runs without messages", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             text: async () =>
@@ -191,7 +192,7 @@ describe("useScheduledJobs", () => {
                     },
                 }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useRunScheduledJobNow(), { wrapper });
 

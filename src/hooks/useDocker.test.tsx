@@ -1,8 +1,9 @@
 import { renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, jest } from "bun:test";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import {
     dockerKeys,
     startDockerExec,
@@ -25,7 +26,7 @@ import {
 
 describe("docker hooks", () => {
     it("fetches docker query resources and handles disabled queries", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -67,7 +68,7 @@ describe("docker hooks", () => {
                 status: 200,
                 json: async () => ({ events: [{ id: 1 }] }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const wrapper = createQueryWrapper();
 
         const { result: containers } = renderHook(() => useDockerContainers(), {
@@ -122,7 +123,7 @@ describe("docker hooks", () => {
     });
 
     it("falls back when docker list/content responses omit arrays", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) })
             .mockResolvedValueOnce({
@@ -133,7 +134,7 @@ describe("docker hooks", () => {
             .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) })
             .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) })
             .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const wrapper = createQueryWrapper();
 
         const { result: containers } = renderHook(() => useDockerContainers(), {
@@ -159,14 +160,14 @@ describe("docker hooks", () => {
     });
 
     it("runs docker mutations and invalidates relevant queries", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ success: true, output: "ok" }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
-        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const invalidateSpy = jest.spyOn(queryClient, "invalidateQueries");
         const wrapper = createQueryWrapper(queryClient);
 
         const { result: action } = renderHook(() => useDockerAction(), { wrapper });
@@ -235,12 +236,12 @@ describe("docker hooks", () => {
     });
 
     it("starts and stops docker exec jobs", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ jobId: "job" }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         await startDockerExec("c1", "ls");
         await stopDockerExec("job/1");

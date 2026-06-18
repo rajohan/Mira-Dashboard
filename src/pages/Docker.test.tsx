@@ -1,40 +1,41 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted, mocked, stubGlobal } from "../test/testUtils";
 import { Docker } from "./Docker";
 
-const docker = vi.hoisted(() => ({
-    action: vi.fn(),
+const docker = hoisted(() => ({
+    action: jest.fn(),
     confirmModalHandlers: null as null | {
         isOpen: boolean;
         onConfirm: () => void;
         title: string;
     },
-    deleteImage: vi.fn(),
-    deleteVolume: vi.fn(),
-    manualUpdate: vi.fn(),
-    prune: vi.fn(),
-    runUpdater: vi.fn(),
-    startExec: vi.fn(),
-    stopExec: vi.fn(),
-    useDeleteDockerImage: vi.fn(),
-    useDeleteDockerVolume: vi.fn(),
-    useDockerAction: vi.fn(),
-    useDockerContainer: vi.fn(),
-    useDockerContainerLogs: vi.fn(),
-    useDockerContainers: vi.fn(),
-    useDockerExecJob: vi.fn(),
-    useDockerImages: vi.fn(),
-    useDockerManualUpdate: vi.fn(),
-    useDockerPrune: vi.fn(),
-    useDockerUpdaterEvents: vi.fn(),
-    useDockerUpdaterServices: vi.fn(),
-    useDockerVolumes: vi.fn(),
-    useRunDockerUpdater: vi.fn(),
+    deleteImage: jest.fn(),
+    deleteVolume: jest.fn(),
+    manualUpdate: jest.fn(),
+    prune: jest.fn(),
+    runUpdater: jest.fn(),
+    startExec: jest.fn(),
+    stopExec: jest.fn(),
+    useDeleteDockerImage: jest.fn(),
+    useDeleteDockerVolume: jest.fn(),
+    useDockerAction: jest.fn(),
+    useDockerContainer: jest.fn(),
+    useDockerContainerLogs: jest.fn(),
+    useDockerContainers: jest.fn(),
+    useDockerExecJob: jest.fn(),
+    useDockerImages: jest.fn(),
+    useDockerManualUpdate: jest.fn(),
+    useDockerPrune: jest.fn(),
+    useDockerUpdaterEvents: jest.fn(),
+    useDockerUpdaterServices: jest.fn(),
+    useDockerVolumes: jest.fn(),
+    useRunDockerUpdater: jest.fn(),
 }));
 
-vi.mock("../hooks/useDocker", () => ({
+mock.module("../hooks/useDocker", () => ({
     startDockerExec: docker.startExec,
     stopDockerExec: docker.stopExec,
     useDeleteDockerImage: docker.useDeleteDockerImage,
@@ -53,7 +54,7 @@ vi.mock("../hooks/useDocker", () => ({
     useRunDockerUpdater: docker.useRunDockerUpdater,
 }));
 
-vi.mock("../components/ui/ConfirmModal", () => ({
+mock.module("../components/ui/ConfirmModal", () => ({
     ConfirmModal: ({
         confirmLabel,
         isOpen,
@@ -85,7 +86,7 @@ vi.mock("../components/ui/ConfirmModal", () => ({
     },
 }));
 
-vi.mock("../components/ui/Modal", () => ({
+mock.module("../components/ui/Modal", () => ({
     Modal: ({
         children,
         isOpen,
@@ -108,7 +109,7 @@ vi.mock("../components/ui/Modal", () => ({
         ) : null,
 }));
 
-vi.mock("../components/ui/Select", () => ({
+mock.module("../components/ui/Select", () => ({
     Select: ({
         onChange,
         options,
@@ -132,7 +133,7 @@ vi.mock("../components/ui/Select", () => ({
     ),
 }));
 
-vi.mock("../components/features/docker/DockerContainersTable", () => ({
+mock.module("../components/features/docker/DockerContainersTable", () => ({
     DockerContainersTable: ({
         containers,
         onConsole,
@@ -174,7 +175,7 @@ vi.mock("../components/features/docker/DockerContainersTable", () => ({
     ),
 }));
 
-vi.mock("../components/features/docker/DockerImagesTable", () => ({
+mock.module("../components/features/docker/DockerImagesTable", () => ({
     DockerImagesTable: ({
         images,
         onDelete,
@@ -202,7 +203,7 @@ vi.mock("../components/features/docker/DockerImagesTable", () => ({
     ),
 }));
 
-vi.mock("../components/features/docker/DockerVolumesTable", () => ({
+mock.module("../components/features/docker/DockerVolumesTable", () => ({
     DockerVolumesTable: ({
         onDelete,
         onPruneUnused,
@@ -300,7 +301,7 @@ function mockDocker(overrides = {}) {
     docker.useDockerContainerLogs.mockReturnValue({
         data: "container log line",
         isFetching: false,
-        refetch: vi.fn(),
+        refetch: jest.fn(),
     });
     docker.useDockerExecJob.mockReturnValue({
         data: { status: "running", stderr: "", stdout: "exec output" },
@@ -398,14 +399,14 @@ describe("Docker page", () => {
         docker.startExec.mockResolvedValue({ jobId: "job-1" });
         docker.stopExec.mockResolvedValue(Promise.resolve());
         docker.confirmModalHandlers = null;
-        vi.stubGlobal(
+        stubGlobal(
             "fetch",
-            vi.fn().mockResolvedValue({
+            jest.fn().mockResolvedValue({
                 json: async () => ({ output: "stack restarted" }),
                 ok: true,
             })
         );
-        Element.prototype.scrollIntoView = vi.fn();
+        Element.prototype.scrollIntoView = jest.fn();
         mockDocker();
     });
 
@@ -536,7 +537,7 @@ describe("Docker page", () => {
 
     it("opens details, logs, and console modals", async () => {
         const user = userEvent.setup();
-        const refetchLogs = vi.fn();
+        const refetchLogs = jest.fn();
         docker.useDockerContainerLogs.mockReturnValue({
             data: "container log line",
             isFetching: false,
@@ -620,7 +621,7 @@ describe("Docker page", () => {
         docker.useDockerContainerLogs.mockReturnValue({
             data: "",
             isFetching: true,
-            refetch: vi.fn(),
+            refetch: jest.fn(),
         });
         rerender(<Docker />);
         await user.click(screen.getByRole("button", { name: "Logs web" }));
@@ -693,14 +694,14 @@ describe("Docker page", () => {
         await user.click(screen.getByRole("button", { name: "Dismiss" }));
         expect(screen.queryByText("restart completed.")).not.toBeInTheDocument();
 
-        vi.mocked(fetch).mockResolvedValueOnce({
+        mocked(fetch).mockResolvedValueOnce({
             json: async () => ({}),
             ok: true,
         } as Response);
         await user.click(screen.getByRole("button", { name: "Restart stack" }));
-        const stackRestartCall = vi
-            .mocked(fetch)
-            .mock.calls.find(([url]) => url === "/api/docker/stack/action");
+        const stackRestartCall = mocked(fetch).mock.calls.find(
+            ([url]) => url === "/api/docker/stack/action"
+        );
         expect(stackRestartCall?.[1]).toEqual(
             expect.objectContaining({
                 body: JSON.stringify({ action: "restart" }),
@@ -810,7 +811,7 @@ describe("Docker page", () => {
 
     it("reports stack, updater, manual update, prune, and delete failures", async () => {
         const user = userEvent.setup();
-        vi.mocked(fetch).mockResolvedValueOnce({
+        mocked(fetch).mockResolvedValueOnce({
             json: async () => ({}),
             ok: false,
         } as Response);

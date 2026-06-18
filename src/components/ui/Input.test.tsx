@@ -1,12 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { Input } from "./Input";
 
 describe("Input", () => {
     it("renders label, description, value changes, error and custom classes", async () => {
-        const onChange = vi.fn();
+        const onChange = jest.fn();
         render(
             <Input
                 label="Username"

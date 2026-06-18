@@ -1,17 +1,18 @@
 import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted } from "../test/testUtils";
 import { Agents } from "./Agents";
 
-const hooks = vi.hoisted(() => ({
-    useAgentsStatus: vi.fn(),
+const hooks = hoisted(() => ({
+    useAgentsStatus: jest.fn(),
 }));
 
-vi.mock("../hooks/useAgents", () => ({
+mock.module("../hooks/useAgents", () => ({
     useAgentsStatus: hooks.useAgentsStatus,
 }));
 
-vi.mock("../components/features/agents/AgentCard", () => ({
+mock.module("../components/features/agents/AgentCard", () => ({
     AgentCard: ({ id, status }: { id: string; status: string }) => (
         <article data-testid="agent-card">
             {id}: {status}
@@ -19,7 +20,7 @@ vi.mock("../components/features/agents/AgentCard", () => ({
     ),
 }));
 
-vi.mock("../components/features/agents/TaskHistorySidebar", () => ({
+mock.module("../components/features/agents/TaskHistorySidebar", () => ({
     TaskHistorySidebar: () => <aside data-testid="task-history">Task history</aside>,
 }));
 

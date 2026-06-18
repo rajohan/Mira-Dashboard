@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 import type { DatabaseOverviewResponse } from "../../../hooks/useDatabase";
 import { AutovacuumHealthTable } from "./AutovacuumHealthTable";

@@ -1,12 +1,12 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { RefreshButton } from "./RefreshButton";
 
 describe("RefreshButton", () => {
     it("calls onClick when enabled", async () => {
-        const onClick = vi.fn();
+        const onClick = jest.fn();
         render(<RefreshButton onClick={onClick} label="Reload" />);
 
         await userEvent.click(screen.getByRole("button", { name: "Reload" }));
@@ -16,7 +16,7 @@ describe("RefreshButton", () => {
 
     it("disables while loading and hides empty labels", () => {
         const { container } = render(
-            <RefreshButton onClick={vi.fn()} isLoading label="" />
+            <RefreshButton onClick={jest.fn()} isLoading label="" />
         );
 
         expect(within(container).getByRole("button")).toBeDisabled();

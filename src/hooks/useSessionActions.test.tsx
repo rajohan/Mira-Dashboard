@@ -1,18 +1,19 @@
 import { renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, jest } from "bun:test";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import { useSessionActions } from "./useSessionActions";
 
 describe("useSessionActions", () => {
     it("exposes convenience actions for session mutations", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ ok: true }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useSessionActions(), {
             wrapper: createQueryWrapper(),

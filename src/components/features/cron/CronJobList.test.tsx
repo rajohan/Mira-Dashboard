@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import type { CronJob } from "../../../hooks";
 import { CronJobList } from "./CronJobList";
@@ -30,7 +30,7 @@ describe("CronJobList", () => {
                 jobs={jobs}
                 selectedId="job-1"
                 currentJobId=""
-                onSelect={vi.fn()}
+                onSelect={jest.fn()}
             />
         );
 
@@ -47,7 +47,7 @@ describe("CronJobList", () => {
 
     it("selects jobs by resolved id", async () => {
         const user = userEvent.setup();
-        const onSelect = vi.fn();
+        const onSelect = jest.fn();
 
         render(
             <CronJobList

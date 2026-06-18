@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import type { DatabaseOverviewResponse } from "../../../hooks/useDatabase";
 import { TopQueriesTable } from "./TopQueriesTable";
@@ -51,7 +51,7 @@ describe("TopQueriesTable", () => {
         const user = userEvent.setup();
         let setTimeoutSpy: undefined | { mockRestore: () => void };
         let resetCopied: (() => void) | undefined;
-        const writeText = vi.fn().mockImplementation(async () => {});
+        const writeText = jest.fn().mockImplementation(async () => {});
         const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
         Object.defineProperty(navigator, "clipboard", {
             configurable: true,
@@ -68,19 +68,19 @@ describe("TopQueriesTable", () => {
             expect(await screen.findByText("Query details")).toBeInTheDocument();
             expect(screen.getByText("Calls: 12")).toBeInTheDocument();
 
-            setTimeoutSpy = vi
-                .spyOn(window, "setTimeout")
-                .mockImplementationOnce((handler) => {
-                    if (typeof handler === "function") {
-                        resetCopied = handler as () => void;
-                    }
-                    return 1 as unknown as ReturnType<typeof setTimeout>;
-                });
+            setTimeoutSpy = jest.spyOn(window, "setTimeout").mockImplementationOnce(((
+                handler: TimerHandler
+            ) => {
+                if (typeof handler === "function") {
+                    resetCopied = handler as () => void;
+                }
+                return 1;
+            }) as typeof window.setTimeout);
             await act(async () => {
                 fireEvent.click(screen.getByRole("button", { name: /Copy query/u }));
                 await Promise.resolve();
             });
-            setTimeoutSpy.mockRestore();
+            setTimeoutSpy?.mockRestore();
             setTimeoutSpy = undefined;
 
             expect(writeText).toHaveBeenCalledWith(
@@ -100,11 +100,11 @@ describe("TopQueriesTable", () => {
     it("resets copy state when clipboard writes fail", async () => {
         const user = userEvent.setup();
         const copyError = new Error("clipboard unavailable");
-        const writeText = vi
+        const writeText = jest
             .fn()
             .mockImplementationOnce(async () => {})
             .mockRejectedValueOnce(copyError);
-        const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+        const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
         const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
         Object.defineProperty(navigator, "clipboard", {
             configurable: true,
@@ -173,8 +173,7 @@ describe("TopQueriesTable", () => {
         const mobileCard = screen.getByRole("button", {
             name: /UPDATE streams SET watched_at/u,
         });
-        mobileCard.focus();
-        await userEvent.keyboard("{Enter}");
+        fireEvent.keyDown(mobileCard, { key: "Enter" });
 
         expect(await screen.findByText("Query details")).toBeInTheDocument();
         expect(screen.getByText("Calls: 2")).toBeInTheDocument();
@@ -183,10 +182,12 @@ describe("TopQueriesTable", () => {
         expect(screen.getByText("Rows: 1")).toBeInTheDocument();
 
         const dialog = screen.getByRole("dialog", { name: "Query details" });
-        await userEvent.click(within(dialog).getAllByRole("button")[0]!);
+        fireEvent.click(within(dialog).getAllByRole("button")[0]!);
 
         await waitFor(() => {
-            expect(screen.queryByText("Query details")).not.toBeInTheDocument();
+            expect(
+                screen.queryByRole("dialog", { name: "Query details" })?.isConnected
+            ).not.toBe(true);
         });
     });
 });

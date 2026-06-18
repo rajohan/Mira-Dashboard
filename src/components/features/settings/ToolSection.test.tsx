@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { ToolSection, type ToolSettings } from "./ToolSection";
 
@@ -9,7 +9,7 @@ const defaultProps = {
     elevatedEnabled: false,
     execAsk: "on-miss",
     execSecurity: "allowlist",
-    onSave: vi.fn(),
+    onSave: jest.fn(),
     profile: "full",
     saving: false,
     sessionsVisibility: "all",
@@ -23,7 +23,7 @@ function renderToolSection(
 ) {
     const mergedProps = {
         ...defaultProps,
-        onSave: vi.fn().mockImplementation(async () => {}),
+        onSave: jest.fn().mockImplementation(async () => {}),
         ...props,
     } satisfies React.ComponentProps<typeof ToolSection>;
 
@@ -35,7 +35,7 @@ function renderToolSection(
 
 describe("ToolSection", () => {
     it("edits toggles and saves tool settings", async () => {
-        const onSave = vi.fn().mockImplementation(async () => {});
+        const onSave = jest.fn().mockImplementation(async () => {});
         renderToolSection({ onSave });
 
         await userEvent.click(screen.getByRole("button", { name: /Tools/u }));
@@ -76,7 +76,7 @@ describe("ToolSection", () => {
 
     it("edits exec selectors, elevated switch, and optional visibility", async () => {
         const user = userEvent.setup();
-        const onSave = vi.fn().mockImplementation(async () => {});
+        const onSave = jest.fn().mockImplementation(async () => {});
         renderToolSection({ onSave, sessionsVisibility: undefined });
 
         await user.click(screen.getByRole("button", { name: /Tools/u }));
@@ -104,7 +104,9 @@ describe("ToolSection", () => {
 
     it("resets draft values when saved settings change", async () => {
         const user = userEvent.setup();
-        const onSave = vi.fn().mockImplementation(async (values: ToolSettings) => values);
+        const onSave = jest
+            .fn()
+            .mockImplementation(async (values: ToolSettings) => values);
         const { rerender } = renderToolSection({ onSave });
 
         await user.click(screen.getByRole("button", { name: /Tools/u }));

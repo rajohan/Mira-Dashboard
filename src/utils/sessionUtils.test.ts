@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 import type { Session } from "../types/session";
 import {
@@ -31,6 +31,7 @@ describe("session utils", () => {
         expect(getTypeSortOrder("SUBAGENT")).toBe(1);
         expect(getTypeSortOrder("HOOK")).toBe(2);
         expect(getTypeSortOrder("CRON")).toBe(3);
+        expect(getTypeSortOrder("UNKNOWN")).toBe(4);
         expect(getTypeSortOrder("OTHER")).toBe(4);
         expect(getTypeSortOrder(null)).toBe(4);
     });

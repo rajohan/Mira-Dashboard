@@ -51,7 +51,7 @@ jobs:
               if: always()
               with:
                   name: frontend-coverage-lcov
-                  path: coverage/chunks/*/lcov.info
+                  path: coverage/lcov.info
                   if-no-files-found: error
                   retention-days: 14
 
@@ -62,7 +62,7 @@ jobs:
                   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
               with:
                   token: ${{ env.CODECOV_TOKEN }}
-                  files: coverage/chunks/*/lcov.info
+                  files: coverage/lcov.info
                   flags: frontend
                   name: frontend
                   fail_ci_if_error: true

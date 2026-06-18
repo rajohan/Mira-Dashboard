@@ -1,10 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted } from "../../../test/testUtils";
 import { ServiceActionsCard } from "./ServiceActionsCard";
 
-const hooks = vi.hoisted(() => ({
+const hooks = hoisted(() => ({
     actions: [
         {
             id: "system_restart",
@@ -35,22 +36,22 @@ const hooks = vi.hoisted(() => ({
             scope: "openclaw",
         },
     ],
-    refreshCache: vi.fn(),
-    startAction: vi.fn(),
-    useCacheEntry: vi.fn(),
-    useExecJob: vi.fn(),
-    useRefreshCacheEntry: vi.fn(),
-    useStartOpsAction: vi.fn(),
+    refreshCache: jest.fn(),
+    startAction: jest.fn(),
+    useCacheEntry: jest.fn(),
+    useExecJob: jest.fn(),
+    useRefreshCacheEntry: jest.fn(),
+    useStartOpsAction: jest.fn(),
 }));
 
-const confirmModalMock = vi.hoisted(() => ({
+const confirmModalMock = hoisted(() => ({
     props: null as null | {
         onCancel: () => void;
         onConfirm: () => void;
     },
 }));
 
-vi.mock("../../../hooks", () => ({
+mock.module("../../../hooks", () => ({
     OPS_ACTIONS: hooks.actions,
     useCacheEntry: hooks.useCacheEntry,
     useExecJob: hooks.useExecJob,
@@ -58,7 +59,7 @@ vi.mock("../../../hooks", () => ({
     useStartOpsAction: hooks.useStartOpsAction,
 }));
 
-vi.mock("../../ui/ConfirmModal", () => ({
+mock.module("../../ui/ConfirmModal", () => ({
     ConfirmModal: ({
         confirmLabel,
         isOpen,

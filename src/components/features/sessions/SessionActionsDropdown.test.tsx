@@ -1,15 +1,15 @@
 import { screen } from "@testing-library/react";
 import { render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { SessionActionsDropdown } from "./SessionActionsDropdown";
 
 describe("SessionActionsDropdown", () => {
     it("renders compact, reset, and delete actions", async () => {
-        const onCompact = vi.fn();
-        const onReset = vi.fn();
-        const onDelete = vi.fn();
+        const onCompact = jest.fn();
+        const onReset = jest.fn();
+        const onDelete = jest.fn();
 
         render(
             <SessionActionsDropdown
@@ -34,8 +34,8 @@ describe("SessionActionsDropdown", () => {
     it("hides delete when disabled or missing", async () => {
         render(
             <SessionActionsDropdown
-                onCompact={vi.fn()}
-                onReset={vi.fn()}
+                onCompact={jest.fn()}
+                onReset={jest.fn()}
                 showDelete={false}
             />
         );
@@ -54,8 +54,8 @@ describe("SessionActionsDropdown", () => {
         render(
             <SessionActionsDropdown
                 ariaLabel="Actions for Main"
-                onCompact={vi.fn()}
-                onReset={vi.fn()}
+                onCompact={jest.fn()}
+                onReset={jest.fn()}
             />
         );
 

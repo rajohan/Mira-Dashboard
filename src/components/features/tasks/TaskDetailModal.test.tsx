@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import type { Task, TaskUpdate } from "../../../types/task";
 import {
@@ -44,17 +44,22 @@ function renderModal(
 ) {
     const props: React.ComponentProps<typeof TaskDetailModal> = {
         task: makeTask(),
-        onClose: vi.fn(),
-        onMove: vi.fn(async () => {}),
-        onAssign: vi.fn(async () => {}),
-        onDelete: vi.fn(async () => {}),
-        onUpdate: vi
+        onClose: jest.fn(),
+        onMove: jest.fn(async () => {}),
+        onAssign: jest.fn(async () => {}),
+        onDelete: jest.fn(async () => {}),
+        onUpdate: jest
             .fn()
-            .mockImplementation(async (next) => ({ ...makeTask(), ...next })),
+            .mockImplementation(
+                async (next: Partial<NonNullable<typeof props.task>>) => ({
+                    ...makeTask(),
+                    ...next,
+                })
+            ),
         updates,
-        onAddUpdate: vi.fn(async () => {}),
-        onEditUpdate: vi.fn(async () => {}),
-        onDeleteUpdate: vi.fn(async () => {}),
+        onAddUpdate: jest.fn(async () => {}),
+        onEditUpdate: jest.fn(async () => {}),
+        onDeleteUpdate: jest.fn(async () => {}),
         ...overrides,
     };
 
@@ -83,17 +88,22 @@ describe("TaskDetailModal", () => {
     it("opens cleanly after rendering with no selected task", async () => {
         const props: React.ComponentProps<typeof TaskDetailModal> = {
             task: null,
-            onClose: vi.fn(),
-            onMove: vi.fn(async () => {}),
-            onAssign: vi.fn(async () => {}),
-            onDelete: vi.fn(async () => {}),
-            onUpdate: vi
+            onClose: jest.fn(),
+            onMove: jest.fn(async () => {}),
+            onAssign: jest.fn(async () => {}),
+            onDelete: jest.fn(async () => {}),
+            onUpdate: jest
                 .fn()
-                .mockImplementation(async (next) => ({ ...makeTask(), ...next })),
+                .mockImplementation(
+                    async (next: Partial<NonNullable<typeof props.task>>) => ({
+                        ...makeTask(),
+                        ...next,
+                    })
+                ),
             updates,
-            onAddUpdate: vi.fn(async () => {}),
-            onEditUpdate: vi.fn(async () => {}),
-            onDeleteUpdate: vi.fn(async () => {}),
+            onAddUpdate: jest.fn(async () => {}),
+            onEditUpdate: jest.fn(async () => {}),
+            onDeleteUpdate: jest.fn(async () => {}),
         };
 
         const { rerender } = render(<TaskDetailModal {...props} />);
@@ -118,15 +128,15 @@ describe("TaskDetailModal", () => {
         const user = userEvent.setup();
         const props: React.ComponentProps<typeof TaskDetailModal> = {
             task: makeTask({ number: 88, title: "First task" }),
-            onClose: vi.fn(),
-            onMove: vi.fn(async () => {}),
-            onAssign: vi.fn(async () => {}),
-            onDelete: vi.fn(async () => {}),
-            onUpdate: vi.fn(async () => makeTask()),
+            onClose: jest.fn(),
+            onMove: jest.fn(async () => {}),
+            onAssign: jest.fn(async () => {}),
+            onDelete: jest.fn(async () => {}),
+            onUpdate: jest.fn(async () => makeTask()),
             updates,
-            onAddUpdate: vi.fn(async () => {}),
-            onEditUpdate: vi.fn(async () => {}),
-            onDeleteUpdate: vi.fn(async () => {}),
+            onAddUpdate: jest.fn(async () => {}),
+            onEditUpdate: jest.fn(async () => {}),
+            onDeleteUpdate: jest.fn(async () => {}),
         };
         const { rerender } = render(<TaskDetailModal {...props} />);
 
@@ -175,15 +185,15 @@ describe("TaskDetailModal", () => {
         });
         const props: React.ComponentProps<typeof TaskDetailModal> = {
             task,
-            onClose: vi.fn(),
-            onMove: vi.fn(async () => {}),
-            onAssign: vi.fn(async () => {}),
-            onDelete: vi.fn(async () => {}),
-            onUpdate: vi.fn(async () => task),
+            onClose: jest.fn(),
+            onMove: jest.fn(async () => {}),
+            onAssign: jest.fn(async () => {}),
+            onDelete: jest.fn(async () => {}),
+            onUpdate: jest.fn(async () => task),
             updates,
-            onAddUpdate: vi.fn(async () => {}),
-            onEditUpdate: vi.fn(async () => {}),
-            onDeleteUpdate: vi.fn(async () => {}),
+            onAddUpdate: jest.fn(async () => {}),
+            onEditUpdate: jest.fn(async () => {}),
+            onDeleteUpdate: jest.fn(async () => {}),
         };
         const { rerender } = render(<TaskDetailModal {...props} />);
 
@@ -281,7 +291,7 @@ describe("TaskDetailModal", () => {
 
     it("labels the icon-only close button", async () => {
         const user = userEvent.setup();
-        const onClose = vi.fn();
+        const onClose = jest.fn();
         renderModal({ onClose });
 
         await user.click(screen.getByRole("button", { name: "Close task details" }));
@@ -456,14 +466,14 @@ describe("TaskDetailModal", () => {
                 },
             }),
             updates: [],
-            onClose: vi.fn(),
-            onMove: vi.fn(),
-            onAssign: vi.fn(),
-            onDelete: vi.fn(),
-            onUpdate: vi.fn(),
-            onAddUpdate: vi.fn(),
-            onEditUpdate: vi.fn(),
-            onDeleteUpdate: vi.fn(),
+            onClose: jest.fn(),
+            onMove: jest.fn(),
+            onAssign: jest.fn(),
+            onDelete: jest.fn(),
+            onUpdate: jest.fn(),
+            onAddUpdate: jest.fn(),
+            onEditUpdate: jest.fn(),
+            onDeleteUpdate: jest.fn(),
         };
         const { rerender } = render(<TaskDetailModal {...baseProps} />);
 
@@ -501,11 +511,11 @@ describe("TaskDetailModal", () => {
                         lastDurationMs: 3_660_000,
                     },
                 })}
-                onClose={vi.fn()}
-                onMove={vi.fn(async () => {})}
-                onAssign={vi.fn(async () => {})}
-                onDelete={vi.fn(async () => {})}
-                onUpdate={vi.fn(async () => makeTask())}
+                onClose={jest.fn()}
+                onMove={jest.fn(async () => {})}
+                onAssign={jest.fn(async () => {})}
+                onDelete={jest.fn(async () => {})}
+                onUpdate={jest.fn(async () => makeTask())}
                 updates={[
                     {
                         id: 32,
@@ -515,9 +525,9 @@ describe("TaskDetailModal", () => {
                         createdAt: "2026-05-10T10:00:00.000Z",
                     },
                 ]}
-                onAddUpdate={vi.fn(async () => {})}
-                onEditUpdate={vi.fn(async () => {})}
-                onDeleteUpdate={vi.fn(async () => {})}
+                onAddUpdate={jest.fn(async () => {})}
+                onEditUpdate={jest.fn(async () => {})}
+                onDeleteUpdate={jest.fn(async () => {})}
             />
         );
 
@@ -527,7 +537,7 @@ describe("TaskDetailModal", () => {
 
     it("renders completed automation fallbacks and cancels progress edit mode", async () => {
         const user = userEvent.setup();
-        const onEditUpdate = vi.fn(async () => {});
+        const onEditUpdate = jest.fn(async () => {});
         renderModal({
             onEditUpdate,
             task: makeTask({
@@ -570,9 +580,9 @@ describe("TaskDetailModal", () => {
 
     it("ignores blank progress edits and saves automation metadata", async () => {
         const user = userEvent.setup();
-        const onAddUpdate = vi.fn(async () => {});
-        const onEditUpdate = vi.fn(async () => {});
-        const onUpdate = vi.fn().mockResolvedValue(makeTask());
+        const onAddUpdate = jest.fn(async () => {});
+        const onEditUpdate = jest.fn(async () => {});
+        const onUpdate = jest.fn().mockResolvedValue(makeTask());
         renderModal({ onAddUpdate, onEditUpdate, onUpdate });
 
         await user.click(screen.getByRole("button", { name: "Add Update" }));
@@ -627,7 +637,7 @@ describe("TaskDetailModal", () => {
 
     it("saves task edits and clears automation when cron id is blank", async () => {
         const user = userEvent.setup();
-        const onUpdate = vi.fn().mockResolvedValue(makeTask());
+        const onUpdate = jest.fn().mockResolvedValue(makeTask());
         renderModal({
             onUpdate,
             task: makeTask({

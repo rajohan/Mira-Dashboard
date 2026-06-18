@@ -1,13 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { ConfigSection } from "./ConfigSection";
 
 describe("ConfigSection", () => {
     it("expands config groups and selects files", async () => {
         const user = userEvent.setup();
-        const onSelect = vi.fn();
+        const onSelect = jest.fn();
 
         render(<ConfigSection selectedPath="config:openclaw.json" onSelect={onSelect} />);
 
@@ -35,7 +35,7 @@ describe("ConfigSection", () => {
 
     it("supports keyboard activation for config groups and files", async () => {
         const user = userEvent.setup();
-        const onSelect = vi.fn();
+        const onSelect = jest.fn();
 
         render(<ConfigSection selectedPath={null} onSelect={onSelect} />);
 
@@ -56,7 +56,7 @@ describe("ConfigSection", () => {
     it("marks selected nested hook files", async () => {
         const user = userEvent.setup();
         const { rerender } = render(
-            <ConfigSection selectedPath="config:openclaw.json" onSelect={vi.fn()} />
+            <ConfigSection selectedPath="config:openclaw.json" onSelect={jest.fn()} />
         );
 
         expect(screen.getByRole("button", { name: "openclaw.json" })).toHaveAttribute(
@@ -67,7 +67,7 @@ describe("ConfigSection", () => {
         rerender(
             <ConfigSection
                 selectedPath="config:hooks/transforms/agentmail.ts"
-                onSelect={vi.fn()}
+                onSelect={jest.fn()}
             />
         );
         await user.click(screen.getByRole("button", { name: "hooks" }));

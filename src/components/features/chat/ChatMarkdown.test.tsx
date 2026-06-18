@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
+import { describe, expect, it, mock } from "bun:test";
 import { createElement, type ReactElement, type ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import {
     ChatMarkdown,
@@ -9,13 +9,13 @@ import {
     markdownComponents,
 } from "./ChatMarkdown";
 
-vi.mock("@microlink/react-json-view", () => ({
+mock.module("@microlink/react-json-view", () => ({
     default: ({ src }: { src: unknown }) => (
         <pre data-testid="json-block">{JSON.stringify(src)}</pre>
     ),
 }));
 
-vi.mock("react-syntax-highlighter", () => ({
+mock.module("react-syntax-highlighter", () => ({
     default: ({ children, language }: { children: string; language: string }) => (
         <pre data-language={language} data-testid="syntax-block">
             {children}
@@ -23,7 +23,7 @@ vi.mock("react-syntax-highlighter", () => ({
     ),
 }));
 
-vi.mock("react-syntax-highlighter/dist/esm/styles/hljs", () => ({
+mock.module("react-syntax-highlighter/dist/esm/styles/hljs", () => ({
     monokai: {},
 }));
 

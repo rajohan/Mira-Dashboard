@@ -1,15 +1,11 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest, mock } from "bun:test";
 
-import { AgentCard } from "./AgentCard";
-
-vi.mock("../../../utils/format", async (importOriginal) => {
-    const actual = await importOriginal<typeof import("../../../utils/format")>();
-    return {
-        ...actual,
-        formatDuration: vi.fn(() => "2m ago"),
-    };
+mock.module("../../../utils/format", () => {
+    return { formatDuration: jest.fn(() => "2m ago") };
 });
+
+const { AgentCard } = await import("./AgentCard");
 
 describe("AgentCard", () => {
     it("renders active task, activity, channel, status and shortened model", () => {
@@ -19,7 +15,7 @@ describe("AgentCard", () => {
                 status="thinking"
                 model="openai-codex/gpt-5.5"
                 currentTask="Writing tests"
-                currentActivity="Running vitest"
+                currentActivity="Running bun test"
                 lastActivity="2026-05-10T10:00:00.000Z"
                 channel="webchat"
             />
@@ -29,7 +25,7 @@ describe("AgentCard", () => {
         expect(screen.getByText("gpt-5.5")).toBeInTheDocument();
         expect(screen.getByText("Thinking")).toBeInTheDocument();
         expect(screen.getByText("Writing tests")).toBeInTheDocument();
-        expect(screen.getByText("Running vitest")).toBeInTheDocument();
+        expect(screen.getByText("Running bun test")).toBeInTheDocument();
         expect(screen.getByText("webchat")).toBeInTheDocument();
         expect(screen.getByText(/Last active 2m ago/)).toBeInTheDocument();
     });

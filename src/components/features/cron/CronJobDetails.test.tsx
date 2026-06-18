@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import type { CronJob } from "../../../hooks";
 import { CronJobDetails } from "./CronJobDetails";
@@ -28,25 +28,25 @@ function renderDetails(
         runPending: false,
         updatePending: false,
         deletePending: false,
-        onToggle: vi.fn(),
-        onRunNow: vi.fn(),
-        onDelete: vi.fn(),
+        onToggle: jest.fn(),
+        onRunNow: jest.fn(),
+        onDelete: jest.fn(),
         isEditMode: false,
-        onEditModeChange: vi.fn(),
+        onEditModeChange: jest.fn(),
         nameDraft: "Dashboard autopilot",
-        onNameDraftChange: vi.fn(),
+        onNameDraftChange: jest.fn(),
         scheduleDraft: JSON.stringify(job.schedule, null, 2),
-        onScheduleDraftChange: vi.fn(),
+        onScheduleDraftChange: jest.fn(),
         payloadDraft: JSON.stringify(job.payload, null, 2),
-        onPayloadDraftChange: vi.fn(),
+        onPayloadDraftChange: jest.fn(),
         deliveryDraft: JSON.stringify(job.delivery, null, 2),
-        onDeliveryDraftChange: vi.fn(),
+        onDeliveryDraftChange: jest.fn(),
         scheduleValidation: { valid: true, error: null },
         payloadValidation: { valid: true, error: null },
         deliveryValidation: { valid: true, error: null },
         hasInvalidJson: false,
         editError: null,
-        onSave: vi.fn(),
+        onSave: jest.fn(),
         formatDate: (value: number) => {
             const date = new Date(value);
             return date.toISOString();
@@ -81,10 +81,10 @@ describe("CronJobDetails", () => {
 
     it("dispatches toggle, run, and edit actions", async () => {
         const user = userEvent.setup();
-        const onToggle = vi.fn();
-        const onRunNow = vi.fn();
-        const onDelete = vi.fn();
-        const onEditModeChange = vi.fn();
+        const onToggle = jest.fn();
+        const onRunNow = jest.fn();
+        const onDelete = jest.fn();
+        const onEditModeChange = jest.fn();
 
         renderDetails({ onToggle, onRunNow, onDelete, onEditModeChange });
 
@@ -101,11 +101,11 @@ describe("CronJobDetails", () => {
 
     it("renders edit validation and saves valid edits", async () => {
         const user = userEvent.setup();
-        const onSave = vi.fn();
-        const onNameDraftChange = vi.fn();
-        const onScheduleDraftChange = vi.fn();
-        const onPayloadDraftChange = vi.fn();
-        const onDeliveryDraftChange = vi.fn();
+        const onSave = jest.fn();
+        const onNameDraftChange = jest.fn();
+        const onScheduleDraftChange = jest.fn();
+        const onPayloadDraftChange = jest.fn();
+        const onDeliveryDraftChange = jest.fn();
 
         renderDetails({
             isEditMode: true,
@@ -147,7 +147,7 @@ describe("CronJobDetails", () => {
 
     it("renders pending and disabled states", async () => {
         const user = userEvent.setup();
-        const onEditModeChange = vi.fn();
+        const onEditModeChange = jest.fn();
 
         renderDetails({
             job: { ...job, enabled: false },

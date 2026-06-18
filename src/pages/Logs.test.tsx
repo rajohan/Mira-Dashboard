@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted, stubGlobal } from "../test/testUtils";
 import {
     compareLogFileNamesDescending,
     isLogViewportAtBottom,
@@ -11,8 +12,8 @@ import {
     scrollLogViewportToBottomAndReport,
 } from "./Logs";
 
-const mocks = vi.hoisted(() => ({
-    createObjectUrl: vi.fn(() => "blob:logs"),
+const mocks = hoisted(() => ({
+    createObjectUrl: jest.fn(() => "blob:logs"),
     liveLogs: [] as Array<{
         id: string;
         level?: unknown;
@@ -20,26 +21,26 @@ const mocks = vi.hoisted(() => ({
         raw?: unknown;
     }>,
     logsReady: true,
-    measureElement: vi.fn(),
-    refetchContent: vi.fn(),
-    request: vi.fn(),
-    revokeObjectUrl: vi.fn(),
-    scrollToIndex: vi.fn(),
-    useLogContent: vi.fn(),
-    useLogFiles: vi.fn(),
-    useOpenClawSocket: vi.fn(),
-    writeDelete: vi.fn(),
-    writeInsert: vi.fn(),
+    measureElement: jest.fn(),
+    refetchContent: jest.fn(),
+    request: jest.fn(),
+    revokeObjectUrl: jest.fn(),
+    scrollToIndex: jest.fn(),
+    useLogContent: jest.fn(),
+    useLogFiles: jest.fn(),
+    useOpenClawSocket: jest.fn(),
+    writeDelete: jest.fn(),
+    writeInsert: jest.fn(),
 }));
 
-vi.mock("@tanstack/react-db", () => ({
+mock.module("@tanstack/react-db", () => ({
     useLiveQuery: (select: (query: { from: () => typeof mocks.liveLogs }) => unknown) => {
         const data = select({ from: () => mocks.liveLogs });
         return { data };
     },
 }));
 
-vi.mock("@tanstack/react-virtual", () => ({
+mock.module("@tanstack/react-virtual", () => ({
     useVirtualizer: ({
         count,
         estimateSize,
@@ -73,7 +74,7 @@ vi.mock("@tanstack/react-virtual", () => ({
     },
 }));
 
-vi.mock("../collections/logs", () => ({
+mock.module("../collections/logs", () => ({
     logsCollection: {
         *[Symbol.iterator]() {
             yield ["existing-1", {}];
@@ -87,13 +88,13 @@ vi.mock("../collections/logs", () => ({
     },
 }));
 
-vi.mock("../hooks", () => ({
+mock.module("../hooks", () => ({
     useLogContent: mocks.useLogContent,
     useLogFiles: mocks.useLogFiles,
     useOpenClawSocket: mocks.useOpenClawSocket,
 }));
 
-vi.mock("../components/features/logs", () => ({
+mock.module("../components/features/logs", () => ({
     LevelFilter: ({
         activeLevels,
         levels,
@@ -116,7 +117,7 @@ vi.mock("../components/features/logs", () => ({
     ),
 }));
 
-vi.mock("../components/ui/Select", () => ({
+mock.module("../components/ui/Select", () => ({
     Select: ({
         onChange,
         options,
@@ -197,7 +198,7 @@ describe("Logs helpers", () => {
     it("checks and scrolls log viewports defensively", () => {
         expect(isLogViewportAtBottom(null)).toBe(false);
         expect(scrollLogViewportToBottom(null)).toBe(false);
-        const onScrolled = vi.fn();
+        const onScrolled = jest.fn();
         expect(scrollLogViewportToBottomAndReport(null, onScrolled)).toBe(false);
         expect(onScrolled).not.toHaveBeenCalled();
 
@@ -236,11 +237,11 @@ describe("Logs page", () => {
         mocks.writeInsert.mockReset();
         mocks.createObjectUrl.mockClear();
         mocks.revokeObjectUrl.mockClear();
-        vi.stubGlobal("URL", {
+        stubGlobal("URL", {
             createObjectURL: mocks.createObjectUrl,
             revokeObjectURL: mocks.revokeObjectUrl,
         });
-        HTMLAnchorElement.prototype.click = vi.fn();
+        HTMLAnchorElement.prototype.click = jest.fn();
         mockLogs();
     });
 
@@ -252,7 +253,7 @@ describe("Logs page", () => {
         try {
             render(<Logs />);
 
-            createElementSpy = vi
+            createElementSpy = jest
                 .spyOn(document, "createElement")
                 .mockReturnValueOnce(anchor);
             fireEvent.click(screen.getByRole("button", { name: "Export" }));
@@ -362,7 +363,7 @@ describe("Logs page", () => {
                     "openclaw-2099-01-02.log"
                 )
             );
-            createElementSpy = vi
+            createElementSpy = jest
                 .spyOn(document, "createElement")
                 .mockReturnValueOnce(anchor);
             await user.click(screen.getByRole("button", { name: "Export" }));
@@ -393,7 +394,7 @@ describe("Logs page", () => {
             fireEvent.change(screen.getAllByLabelText("select")[0]!, {
                 target: { value: "" },
             });
-            createElementSpy = vi
+            createElementSpy = jest
                 .spyOn(document, "createElement")
                 .mockReturnValueOnce(anchor);
             fireEvent.click(screen.getByRole("button", { name: "Export" }));
@@ -451,13 +452,13 @@ describe("Logs page", () => {
     it("keeps manual scroll position when log rows change away from the bottom", async () => {
         const user = userEvent.setup();
         const animationFrames: FrameRequestCallback[] = [];
-        const requestAnimationFrameSpy = vi
+        const requestAnimationFrameSpy = jest
             .spyOn(window, "requestAnimationFrame")
             .mockImplementation((callback) => {
                 animationFrames.push(callback);
                 return animationFrames.length;
             });
-        const cancelAnimationFrameSpy = vi
+        const cancelAnimationFrameSpy = jest
             .spyOn(window, "cancelAnimationFrame")
             .mockImplementation(() => {});
 
@@ -585,7 +586,7 @@ describe("Logs page", () => {
 
     it("handles socket and load-content edge cases", async () => {
         const user = userEvent.setup();
-        const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+        const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
 
         try {
             mockLogs({

@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { Select } from "./Select";
 
@@ -11,7 +11,7 @@ describe("Select", () => {
     ];
 
     it("renders selected option and calls onChange from menu", async () => {
-        const onChange = vi.fn();
+        const onChange = jest.fn();
         render(<Select value="todo" onChange={onChange} options={options} />);
 
         expect(screen.getByRole("button", { name: /Todo/u })).toBeInTheDocument();
@@ -25,7 +25,7 @@ describe("Select", () => {
         const { container } = render(
             <Select
                 value="todo"
-                onChange={vi.fn()}
+                onChange={jest.fn()}
                 options={options}
                 icon={<span data-testid="select-icon" />}
                 width="w-full"
@@ -48,7 +48,7 @@ describe("Select", () => {
         render(
             <Select
                 value="missing"
-                onChange={vi.fn()}
+                onChange={jest.fn()}
                 options={options}
                 placeholder="Pick"
             />
@@ -61,7 +61,7 @@ describe("Select", () => {
         render(
             <Select
                 value="todo"
-                onChange={vi.fn()}
+                onChange={jest.fn()}
                 options={options}
                 ariaLabel="Status"
             />

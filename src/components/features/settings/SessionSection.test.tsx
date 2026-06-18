@@ -1,12 +1,12 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { SessionSection } from "./SessionSection";
 
 describe("SessionSection", () => {
     it("submits updated idle timeout", async () => {
-        const onSave = vi.fn().mockImplementation(async () => {});
+        const onSave = jest.fn().mockImplementation(async () => {});
         render(<SessionSection idleMinutes={60} onSave={onSave} saving={false} />);
 
         await userEvent.click(screen.getByRole("button", { name: /Session/u }));
@@ -19,7 +19,7 @@ describe("SessionSection", () => {
     });
 
     it("shows saving state", async () => {
-        render(<SessionSection idleMinutes={60} onSave={vi.fn()} saving />);
+        render(<SessionSection idleMinutes={60} onSave={jest.fn()} saving />);
 
         await userEvent.click(screen.getByRole("button", { name: /Session/u }));
 

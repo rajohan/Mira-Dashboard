@@ -1,8 +1,9 @@
 import { renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, jest } from "bun:test";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import {
     cacheKeys,
     useCacheEntry,
@@ -12,7 +13,7 @@ import {
 
 describe("cache hooks", () => {
     it("fetches heartbeat and encoded cache entries", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -24,7 +25,7 @@ describe("cache hooks", () => {
                 status: 200,
                 json: async () => ({ key: "system.host", data: { ok: true } }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const wrapper = createQueryWrapper();
         const { result: heartbeat } = renderHook(() => useCacheHeartbeat(1000), {
@@ -50,14 +51,14 @@ describe("cache hooks", () => {
     });
 
     it("refreshes non-moltbook entries without broad moltbook invalidation", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ ok: true }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
-        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const invalidateSpy = jest.spyOn(queryClient, "invalidateQueries");
 
         const { result } = renderHook(() => useRefreshCacheEntry(), {
             wrapper: createQueryWrapper(queryClient),
@@ -71,7 +72,7 @@ describe("cache hooks", () => {
     });
 
     it("refreshes comma-separated entries and invalidates related queries", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({
@@ -79,9 +80,9 @@ describe("cache hooks", () => {
                 entry: { key: "moltbook.home", data: { refreshed: true } },
             }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
-        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const invalidateSpy = jest.spyOn(queryClient, "invalidateQueries");
 
         const { result } = renderHook(() => useRefreshCacheEntry(), {
             wrapper: createQueryWrapper(queryClient),
@@ -106,7 +107,9 @@ describe("cache hooks", () => {
             queryKey: cacheKeys.entry("system.host"),
         });
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["moltbook"] });
-        expect(queryClient.getQueryData(cacheKeys.entry("moltbook.home"))).toEqual({
+        expect(
+            queryClient.getQueryData<unknown>(cacheKeys.entry("moltbook.home"))
+        ).toEqual({
             key: "moltbook.home",
             data: { refreshed: true },
         });

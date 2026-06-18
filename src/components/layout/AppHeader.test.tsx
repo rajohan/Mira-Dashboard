@@ -1,35 +1,36 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted } from "../../test/testUtils";
 import { AppHeader } from "./AppHeader";
 
-const hooks = vi.hoisted(() => ({
-    authLogout: vi.fn().mockResolvedValue(Promise.resolve()),
-    clearRead: vi.fn(),
-    deleteNotification: vi.fn(),
-    markAllRead: vi.fn(),
-    markNotificationRead: vi.fn(),
-    navigate: vi.fn(),
-    useClearReadNotifications: vi.fn(),
-    useDeleteNotification: vi.fn(),
-    useHealth: vi.fn(),
-    useMarkAllNotificationsRead: vi.fn(),
-    useMarkNotificationRead: vi.fn(),
-    useNavigate: vi.fn(),
-    useNotifications: vi.fn(),
-    useOpenClawSocket: vi.fn(),
+const hooks = hoisted(() => ({
+    authLogout: jest.fn().mockResolvedValue(Promise.resolve()),
+    clearRead: jest.fn(),
+    deleteNotification: jest.fn(),
+    markAllRead: jest.fn(),
+    markNotificationRead: jest.fn(),
+    navigate: jest.fn(),
+    useClearReadNotifications: jest.fn(),
+    useDeleteNotification: jest.fn(),
+    useHealth: jest.fn(),
+    useMarkAllNotificationsRead: jest.fn(),
+    useMarkNotificationRead: jest.fn(),
+    useNavigate: jest.fn(),
+    useNotifications: jest.fn(),
+    useOpenClawSocket: jest.fn(),
 }));
 
-vi.mock("@tanstack/react-router", () => ({
-    useNavigate: () => hooks.useNavigate,
+mock.module("@tanstack/react-router", () => ({
+    useNavigate: () => hooks.useNavigate(),
 }));
 
-vi.mock("../../hooks/useOpenClawSocket", () => ({
+mock.module("../../hooks/useOpenClawSocket", () => ({
     useOpenClawSocket: hooks.useOpenClawSocket,
 }));
 
-vi.mock("../../hooks", () => ({
+mock.module("../../hooks", () => ({
     useHealth: hooks.useHealth,
     useNotifications: hooks.useNotifications,
     useMarkNotificationRead: hooks.useMarkNotificationRead,
@@ -38,7 +39,7 @@ vi.mock("../../hooks", () => ({
     useDeleteNotification: hooks.useDeleteNotification,
 }));
 
-vi.mock("../../stores/authStore", () => ({
+mock.module("../../stores/authStore", () => ({
     authActions: { logout: hooks.authLogout },
 }));
 
@@ -73,7 +74,7 @@ describe("AppHeader", () => {
                 title="Dashboard"
                 isSidebarOpen={false}
                 sidebarId="sidebar"
-                onToggleSidebar={vi.fn()}
+                onToggleSidebar={jest.fn()}
             />
         );
 
@@ -95,7 +96,7 @@ describe("AppHeader", () => {
                 title="Sessions"
                 isSidebarOpen={false}
                 sidebarId="sidebar"
-                onToggleSidebar={vi.fn()}
+                onToggleSidebar={jest.fn()}
             />
         );
 
@@ -119,7 +120,7 @@ describe("AppHeader", () => {
                 title="Tasks"
                 isSidebarOpen={false}
                 sidebarId="sidebar"
-                onToggleSidebar={vi.fn()}
+                onToggleSidebar={jest.fn()}
             />
         );
 
@@ -130,7 +131,7 @@ describe("AppHeader", () => {
     });
 
     it("opens sidebar via hamburger button on mobile", async () => {
-        const onToggleSidebar = vi.fn();
+        const onToggleSidebar = jest.fn();
         const user = userEvent.setup();
 
         render(
@@ -147,7 +148,7 @@ describe("AppHeader", () => {
     });
 
     it("labels and dispatches the mobile navigation toggle when the sidebar is open", async () => {
-        const onToggleSidebar = vi.fn();
+        const onToggleSidebar = jest.fn();
         const user = userEvent.setup();
 
         render(
@@ -174,7 +175,7 @@ describe("AppHeader", () => {
                 title="Dashboard"
                 isSidebarOpen={false}
                 sidebarId="sidebar"
-                onToggleSidebar={vi.fn()}
+                onToggleSidebar={jest.fn()}
             />
         );
 

@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { FilterButtonGroup } from "./FilterButtonGroup";
 
@@ -10,7 +10,7 @@ describe("FilterButtonGroup", () => {
             <FilterButtonGroup
                 options={[{ value: "all", label: "All" }]}
                 value="all"
-                onChange={vi.fn()}
+                onChange={jest.fn()}
             />
         );
 
@@ -18,7 +18,7 @@ describe("FilterButtonGroup", () => {
     });
 
     it("renders options and emits selected values", async () => {
-        const onChange = vi.fn();
+        const onChange = jest.fn();
         render(
             <FilterButtonGroup
                 options={[

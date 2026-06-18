@@ -1,12 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { ModelSection } from "./ModelSection";
 
 describe("ModelSection", () => {
     it("edits and saves model settings", async () => {
-        const onSave = vi.fn().mockImplementation(async () => {});
+        const onSave = jest.fn().mockImplementation(async () => {});
         render(
             <ModelSection
                 defaultModel="codex"
@@ -42,7 +42,7 @@ describe("ModelSection", () => {
             <ModelSection
                 defaultModel="codex"
                 fallbacks={[]}
-                onSave={vi.fn()}
+                onSave={jest.fn()}
                 saving={false}
             />
         );
@@ -59,7 +59,7 @@ describe("ModelSection", () => {
 
     it("shows saving state", async () => {
         render(
-            <ModelSection defaultModel="codex" fallbacks={[]} onSave={vi.fn()} saving />
+            <ModelSection defaultModel="codex" fallbacks={[]} onSave={jest.fn()} saving />
         );
 
         await userEvent.click(

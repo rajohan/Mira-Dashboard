@@ -1,27 +1,28 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted } from "../test/testUtils";
 import { Files } from "./Files";
 
-const hooks = vi.hoisted(() => ({
-    handleContentChange: vi.fn(),
-    handleRefresh: vi.fn(),
-    handleSave: vi.fn(),
-    handleSelect: vi.fn(),
-    handleToggle: vi.fn(),
-    setCodeEditMode: vi.fn(),
-    setError: vi.fn(),
-    setJsonPreview: vi.fn(),
-    setMarkdownPreview: vi.fn(),
-    useFileExplorerState: vi.fn(),
+const hooks = hoisted(() => ({
+    handleContentChange: jest.fn(),
+    handleRefresh: jest.fn(),
+    handleSave: jest.fn(),
+    handleSelect: jest.fn(),
+    handleToggle: jest.fn(),
+    setCodeEditMode: jest.fn(),
+    setError: jest.fn(),
+    setJsonPreview: jest.fn(),
+    setMarkdownPreview: jest.fn(),
+    useFileExplorerState: jest.fn(),
 }));
 
-vi.mock("../hooks/useFileExplorerState", () => ({
+mock.module("../hooks/useFileExplorerState", () => ({
     useFileExplorerState: hooks.useFileExplorerState,
 }));
 
-vi.mock("../components/features/files", () => ({
+mock.module("../components/features/files", () => ({
     FileEditorPanel: ({
         fileContent,
         isEditable,

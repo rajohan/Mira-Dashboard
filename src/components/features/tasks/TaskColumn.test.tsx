@@ -1,24 +1,24 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest, mock } from "bun:test";
 
 import type { ColumnId, Task } from "../../../types/task";
 import { TaskColumn } from "./TaskColumn";
 
-vi.mock("@dnd-kit/core", () => ({
-    useDroppable: () => ({ setNodeRef: vi.fn() }),
+mock.module("@dnd-kit/core", () => ({
+    useDroppable: () => ({ setNodeRef: jest.fn() }),
 }));
 
-vi.mock("@dnd-kit/sortable", () => ({
+mock.module("@dnd-kit/sortable", () => ({
     SortableContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     useSortable: () => ({
         attributes: {},
         listeners: {},
-        setActivatorNodeRef: vi.fn(),
-        setNodeRef: vi.fn(),
+        setActivatorNodeRef: jest.fn(),
+        setNodeRef: jest.fn(),
         transform: null,
     }),
-    verticalListSortingStrategy: vi.fn(),
+    verticalListSortingStrategy: jest.fn(),
 }));
 
 function isoStringFromNowOffset(offsetMs: number): string {
@@ -42,7 +42,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 
 describe("TaskColumn", () => {
     it("renders configured column title, count, and tasks", async () => {
-        const onTaskClick = vi.fn();
+        const onTaskClick = jest.fn();
         const task = makeTask();
         render(
             <TaskColumn
@@ -63,7 +63,7 @@ describe("TaskColumn", () => {
     });
 
     it("renders empty state and drop highlight", () => {
-        render(<TaskColumn id="blocked" tasks={[]} isOver onTaskClick={vi.fn()} />);
+        render(<TaskColumn id="blocked" tasks={[]} isOver onTaskClick={jest.fn()} />);
 
         expect(screen.getByText("Blocked")).toBeInTheDocument();
         expect(screen.getByText("No tasks")).toBeInTheDocument();
@@ -78,7 +78,7 @@ describe("TaskColumn", () => {
                 id={"archived" as unknown as ColumnId}
                 tasks={[]}
                 isOver={false}
-                onTaskClick={vi.fn()}
+                onTaskClick={jest.fn()}
             />
         );
 

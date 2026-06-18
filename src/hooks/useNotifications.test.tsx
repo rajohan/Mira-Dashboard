@@ -1,8 +1,9 @@
 import { renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, jest } from "bun:test";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import {
     useClearReadNotifications,
     useCreateNotification,
@@ -14,7 +15,7 @@ import {
 
 describe("notification hooks", () => {
     it("fetches notifications", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({
@@ -23,7 +24,7 @@ describe("notification hooks", () => {
                 unreadCount: 1,
             }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useNotifications(), {
             wrapper: createQueryWrapper(),
@@ -33,14 +34,14 @@ describe("notification hooks", () => {
     });
 
     it("mutation hooks invalidate notifications", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ ok: true }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
-        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const invalidateSpy = jest.spyOn(queryClient, "invalidateQueries");
         const wrapper = createQueryWrapper(queryClient);
 
         const { result: create } = renderHook(() => useCreateNotification(), { wrapper });

@@ -1,11 +1,11 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { LevelFilter } from "./LevelFilter";
 
 describe("LevelFilter", () => {
     it("renders levels and toggles the selected level", () => {
-        const onToggle = vi.fn();
+        const onToggle = jest.fn();
 
         render(
             <LevelFilter

@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, jest } from "bun:test";
 import { createRef } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { stubGlobal, unstubAllGlobals } from "../../../test/testUtils";
 import { ChatComposer } from "./ChatComposer";
 import type { ChatSendAttachment } from "./chatTypes";
 
@@ -35,13 +36,13 @@ function renderComposer(
         isTranscribing: false,
         selectedSessionKey: "session-1",
         slashCommandSuggestions: [],
-        onApplySlashSuggestion: vi.fn(),
-        onAttachFiles: vi.fn(),
-        onChangeDraft: vi.fn(),
-        onPreview: vi.fn(),
-        onRemoveAttachment: vi.fn(),
-        onSend: vi.fn(),
-        onToggleRecording: vi.fn(),
+        onApplySlashSuggestion: jest.fn(),
+        onAttachFiles: jest.fn(),
+        onChangeDraft: jest.fn(),
+        onPreview: jest.fn(),
+        onRemoveAttachment: jest.fn(),
+        onSend: jest.fn(),
+        onToggleRecording: jest.fn(),
         ...overrides,
     } satisfies React.ComponentProps<typeof ChatComposer>;
 
@@ -54,20 +55,20 @@ function renderComposer(
 
 describe("ChatComposer", () => {
     beforeEach(() => {
-        vi.useRealTimers();
-        vi.unstubAllGlobals();
+        jest.useRealTimers();
+        unstubAllGlobals();
     });
 
     it("edits and sends draft text from keyboard and send button", async () => {
         const user = userEvent.setup();
-        const onChangeDraft = vi.fn();
-        const onSend = vi.fn();
+        const onChangeDraft = jest.fn();
+        const onSend = jest.fn();
 
         renderComposer({ draft: "hello", onChangeDraft, onSend });
 
         const textarea = screen.getByPlaceholderText(
             "Message, attach files, or use / commands (try /help)"
-        );
+        ) as HTMLTextAreaElement;
         await user.type(textarea, "!");
         expect(onChangeDraft).toHaveBeenLastCalledWith("hello!");
 
@@ -79,7 +80,7 @@ describe("ChatComposer", () => {
     });
 
     it("keeps Enter as a newline when sending is disabled", () => {
-        const onSend = vi.fn();
+        const onSend = jest.fn();
 
         renderComposer({ canSend: false, draft: "hello", onSend });
 
@@ -96,8 +97,8 @@ describe("ChatComposer", () => {
 
     it("keeps Enter as newline on coarse pointer keyboards", async () => {
         const user = userEvent.setup();
-        const onSend = vi.fn();
-        vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true }));
+        const onSend = jest.fn();
+        stubGlobal("matchMedia", jest.fn().mockReturnValue({ matches: true }));
 
         renderComposer({ draft: "hello", onSend });
 
@@ -111,9 +112,9 @@ describe("ChatComposer", () => {
 
     it("sends from Enter when matchMedia is unavailable or returns no query", async () => {
         const user = userEvent.setup();
-        const onSend = vi.fn();
+        const onSend = jest.fn();
 
-        vi.stubGlobal("matchMedia", void 0);
+        stubGlobal("matchMedia", void 0);
         const { rerender, props } = renderComposer({ draft: "hello", onSend });
 
         screen
@@ -122,7 +123,7 @@ describe("ChatComposer", () => {
         await user.keyboard("{Enter}");
         expect(onSend).toHaveBeenCalledTimes(1);
 
-        vi.stubGlobal("matchMedia", vi.fn().mockReturnValue(null));
+        stubGlobal("matchMedia", jest.fn().mockReturnValue(null));
         rerender(<ChatComposer {...props} draft="again" onSend={onSend} />);
         screen
             .getByPlaceholderText("Message, attach files, or use / commands (try /help)")
@@ -133,7 +134,7 @@ describe("ChatComposer", () => {
 
     it("renders slash suggestions and applies them by click or tab", async () => {
         const user = userEvent.setup();
-        const onApplySlashSuggestion = vi.fn();
+        const onApplySlashSuggestion = jest.fn();
 
         renderComposer({
             draft: "/h",
@@ -159,7 +160,7 @@ describe("ChatComposer", () => {
 
     it("dismisses slash suggestions with escape or outside click until typing resumes", async () => {
         const user = userEvent.setup();
-        const onChangeDraft = vi.fn();
+        const onChangeDraft = jest.fn();
 
         renderComposer({
             draft: "/h",
@@ -179,7 +180,7 @@ describe("ChatComposer", () => {
 
         const textarea = screen.getByPlaceholderText(
             "Message, attach files, or use / commands (try /help)"
-        );
+        ) as HTMLTextAreaElement;
         await user.type(textarea, "e");
         expect(onChangeDraft).toHaveBeenLastCalledWith("/he");
         expect(screen.getByText("Slash commands")).toBeInTheDocument();
@@ -190,7 +191,7 @@ describe("ChatComposer", () => {
 
     it("falls back to the draft when applying an empty slash suggestion with tab", async () => {
         const user = userEvent.setup();
-        const onApplySlashSuggestion = vi.fn();
+        const onApplySlashSuggestion = jest.fn();
 
         renderComposer({
             draft: "/custom",
@@ -214,8 +215,8 @@ describe("ChatComposer", () => {
 
     it("previews image attachments and removes attachments from the keyboard", async () => {
         const user = userEvent.setup();
-        const onPreview = vi.fn();
-        const onRemoveAttachment = vi.fn();
+        const onPreview = jest.fn();
+        const onRemoveAttachment = jest.fn();
         const imageAttachment: ChatSendAttachment = {
             contentBase64: toBase64("image-bytes"),
             dataUrl: "data:image/png;base64,aW1hZ2UtYnl0ZXM=",
@@ -258,8 +259,8 @@ describe("ChatComposer", () => {
 
     it("previews and removes attachments", async () => {
         const user = userEvent.setup();
-        const onPreview = vi.fn();
-        const onRemoveAttachment = vi.fn();
+        const onPreview = jest.fn();
+        const onRemoveAttachment = jest.fn();
 
         renderComposer({
             attachments: [textAttachment],
@@ -308,9 +309,13 @@ describe("ChatComposer", () => {
 
     it("opens the emoji picker and inserts an emoji at the cursor", async () => {
         const user = userEvent.setup();
-        const onChangeDraft = vi.fn();
+        const onChangeDraft = jest.fn();
 
         renderComposer({ draft: "Hi ", onChangeDraft });
+        const textarea = screen.getByPlaceholderText(
+            "Message, attach files, or use / commands (try /help)"
+        ) as HTMLTextAreaElement;
+        textarea.setSelectionRange(0, 0);
 
         await user.click(screen.getByRole("button", { name: "Insert emoji" }));
         await user.click(screen.getByRole("button", { name: "Insert 😀" }));
@@ -323,7 +328,7 @@ describe("ChatComposer", () => {
 
     it("ignores emoji insertion when the textarea selection is unavailable", async () => {
         const user = userEvent.setup();
-        const onChangeDraft = vi.fn();
+        const onChangeDraft = jest.fn();
 
         renderComposer({ draft: "Hi ", onChangeDraft });
         const textarea = screen.getByPlaceholderText(
@@ -343,8 +348,8 @@ describe("ChatComposer", () => {
 
     it("handles file attachment and voice controls", async () => {
         const user = userEvent.setup();
-        const onAttachFiles = vi.fn();
-        const onToggleRecording = vi.fn();
+        const onAttachFiles = jest.fn();
+        const onToggleRecording = jest.fn();
         const { container, fileInputReference } = renderComposer({
             onAttachFiles,
             onToggleRecording,
@@ -352,7 +357,7 @@ describe("ChatComposer", () => {
         const input = container.querySelector(
             ':scope input[type="file"]'
         ) as HTMLInputElement;
-        const clickSpy = vi.spyOn(fileInputReference.current!, "click");
+        const clickSpy = jest.spyOn(fileInputReference.current!, "click");
 
         await user.click(screen.getByRole("button", { name: /Attach/ }));
         expect(clickSpy).toHaveBeenCalledTimes(1);

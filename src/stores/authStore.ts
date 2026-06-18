@@ -1,4 +1,4 @@
-import { Store, useStore } from "@tanstack/react-store";
+import { Store, useSelector } from "@tanstack/react-store";
 
 /** Represents auth user. */
 export interface AuthUser {
@@ -113,7 +113,7 @@ export const authActions: AuthActions = {
 
 /** Provides auth store. */
 export function useAuthStore(): AuthState & AuthActions {
-    const state = useStore(authStore, (s) => s);
+    const state = useSelector(authStore, (s) => s);
     return {
         ...state,
         ...authActions,
@@ -122,10 +122,10 @@ export function useAuthStore(): AuthState & AuthActions {
 
 /** Provides auth user. */
 export function useAuthUser(): AuthUser | null {
-    return useStore(authStore, (state) => state.user);
+    return useSelector(authStore, (state) => state.user);
 }
 
 /** Provides is authenticated. */
 export function useIsAuthenticated(): boolean {
-    return useStore(authStore, (state) => state.isAuthenticated);
+    return useSelector(authStore, (state) => state.isAuthenticated);
 }

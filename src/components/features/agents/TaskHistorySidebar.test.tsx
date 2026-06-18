@@ -1,11 +1,11 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest, mock } from "bun:test";
 
 import { TaskHistorySidebar } from "./TaskHistorySidebar";
 
-const useAgentTaskHistoryMock = vi.fn();
+const useAgentTaskHistoryMock = jest.fn();
 
-vi.mock("../../../hooks/useAgents", () => ({
+mock.module("../../../hooks/useAgents", () => ({
     useAgentTaskHistory: (limit: number) => useAgentTaskHistoryMock(limit),
 }));
 

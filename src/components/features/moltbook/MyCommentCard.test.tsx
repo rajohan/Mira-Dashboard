@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 import type { MiraComment } from "../../../types/moltbook";
 import { MyCommentCard } from "./MyCommentCard";

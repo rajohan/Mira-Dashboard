@@ -1,49 +1,51 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest, mock } from "bun:test";
 
-const mocks = vi.hoisted(() => ({
-    navigate: vi.fn(),
+import { hoisted } from "./test/testUtils";
+
+const mocks = hoisted(() => ({
+    navigate: jest.fn(),
 }));
 
-vi.mock("@tanstack/react-devtools", () => ({
+mock.module("@tanstack/react-devtools", () => ({
     TanStackDevtools: ({ plugins }: { plugins: unknown[] }) => (
         <div data-testid="devtools">{plugins.length} devtools plugins</div>
     ),
 }));
 
-vi.mock("@tanstack/react-form-devtools", () => ({
+mock.module("@tanstack/react-form-devtools", () => ({
     FormDevtoolsPanel: () => <div>form devtools</div>,
 }));
 
-vi.mock("@tanstack/react-query", () => ({
+mock.module("@tanstack/react-query", () => ({
     QueryClientProvider: ({ children }: { children: React.ReactNode }) => (
         <div data-testid="query-provider">{children}</div>
     ),
 }));
 
-vi.mock("@tanstack/react-query-devtools", () => ({
+mock.module("@tanstack/react-query-devtools", () => ({
     ReactQueryDevtoolsPanel: () => <div>query devtools</div>,
 }));
 
-vi.mock("@tanstack/react-router", () => ({
+mock.module("@tanstack/react-router", () => ({
     RouterProvider: () => <div data-testid="router-provider">router content</div>,
 }));
 
-vi.mock("@tanstack/react-router-devtools", () => ({
+mock.module("@tanstack/react-router-devtools", () => ({
     TanStackRouterDevtoolsPanel: () => <div>router devtools</div>,
 }));
 
-vi.mock("./hooks/useOpenClawSocket", () => ({
+mock.module("./hooks/useOpenClawSocket", () => ({
     OpenClawSocketProvider: ({ children }: { children: React.ReactNode }) => (
         <div data-testid="socket-provider">{children}</div>
     ),
 }));
 
-vi.mock("./lib/queryClient", () => ({
+mock.module("./lib/queryClient", () => ({
     queryClient: {},
 }));
 
-vi.mock("./router", () => ({
+mock.module("./router", () => ({
     router: { navigate: mocks.navigate },
 }));
 

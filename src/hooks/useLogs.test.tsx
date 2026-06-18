@@ -1,28 +1,43 @@
 import { renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { createQueryWrapper } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import { useLogContent, useLogFiles } from "./useLogs";
 
 describe("log hooks", () => {
     it("filters invalid log files and fetches content", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
                 status: 200,
-                json: async () => ({ logs: [{ name: "app.log" }, { name: "" }, null] }),
+                json: async () => ({
+                    logs: [
+                        {
+                            modified: "2026-05-11T00:00:00.000Z",
+                            name: "app.log",
+                            size: 123,
+                        },
+                        { modified: "2026-05-11T00:00:00.000Z", name: "", size: 0 },
+                        null,
+                    ],
+                }),
             })
             .mockResolvedValueOnce({
                 ok: true,
                 status: 200,
                 json: async () => ({ content: "hello" }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const wrapper = createQueryWrapper();
 
         const { result: files } = renderHook(() => useLogFiles(), { wrapper });
-        await waitFor(() => expect(files.current.data).toEqual([{ name: "app.log" }]));
+        await waitFor(() =>
+            expect(files.current.data).toEqual([
+                { modified: "2026-05-11T00:00:00.000Z", name: "app.log", size: 123 },
+            ])
+        );
 
         const { result: content } = renderHook(() => useLogContent("app.log", 50), {
             wrapper,
@@ -37,7 +52,7 @@ describe("log hooks", () => {
     });
 
     it("handles missing log arrays and non-string content", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -49,7 +64,7 @@ describe("log hooks", () => {
                 status: 200,
                 json: async () => ({ content: null }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const wrapper = createQueryWrapper();
 
         const { result: files } = renderHook(() => useLogFiles(), { wrapper });
@@ -68,8 +83,8 @@ describe("log hooks", () => {
     });
 
     it("does not fetch content when disabled or file is missing", () => {
-        const fetchMock = vi.fn();
-        vi.stubGlobal("fetch", fetchMock);
+        const fetchMock = jest.fn();
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useLogContent(null, 20), {
             wrapper: createQueryWrapper(),

@@ -1,24 +1,24 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted } from "../../../test/testUtils";
 import { BackupOverviewCard } from "./BackupOverviewCard";
 
-const hooks = vi.hoisted(() => ({
-    clearKopiaAttention: vi.fn(),
-    clearWalgAttention: vi.fn(),
-    runKopiaBackup: vi.fn(),
-    runWalgBackup: vi.fn(),
-    useClearKopiaBackupAttention: vi.fn(),
-    useClearWalgBackupAttention: vi.fn(),
-    useCacheEntry: vi.fn(),
-    useKopiaBackup: vi.fn(),
-    useRunKopiaBackup: vi.fn(),
-    useRunWalgBackup: vi.fn(),
-    useWalgBackup: vi.fn(),
+const hooks = hoisted(() => ({
+    clearKopiaAttention: jest.fn(),
+    clearWalgAttention: jest.fn(),
+    runKopiaBackup: jest.fn(),
+    runWalgBackup: jest.fn(),
+    useClearKopiaBackupAttention: jest.fn(),
+    useClearWalgBackupAttention: jest.fn(),
+    useCacheEntry: jest.fn(),
+    useKopiaBackup: jest.fn(),
+    useRunKopiaBackup: jest.fn(),
+    useRunWalgBackup: jest.fn(),
+    useWalgBackup: jest.fn(),
 }));
 
-vi.mock("../../../hooks", () => ({
+mock.module("../../../hooks", () => ({
     useClearKopiaBackupAttention: hooks.useClearKopiaBackupAttention,
     useClearWalgBackupAttention: hooks.useClearWalgBackupAttention,
     useCacheEntry: hooks.useCacheEntry,
@@ -116,8 +116,6 @@ beforeEach(() => {
 
 describe("BackupOverviewCard", () => {
     it("renders Kopia and WAL-G backup status and starts backup actions", async () => {
-        const user = userEvent.setup();
-
         render(<BackupOverviewCard />);
 
         expect(screen.getByText("Backups")).toBeInTheDocument();
@@ -133,20 +131,34 @@ describe("BackupOverviewCard", () => {
         expect(screen.getByText("0000000100000000000000AA")).toBeInTheDocument();
         expect(screen.getByText("7")).toBeInTheDocument();
 
-        await user.click(screen.getByRole("button", { name: /Run Postgres backup/u }));
+        await act(async () => {
+            fireEvent.click(screen.getByRole("button", { name: /Run Postgres backup/u }));
+        });
         expect(hooks.runWalgBackup).toHaveBeenCalledTimes(1);
 
-        await user.click(screen.getByRole("button", { name: /Run filesystem backup/u }));
+        await act(async () => {
+            fireEvent.click(
+                screen.getByRole("button", { name: /Run filesystem backup/u })
+            );
+        });
         expect(screen.getByText(/Start a Kopia backup now\?/u)).toBeInTheDocument();
-        await user.click(screen.getByRole("button", { name: "Cancel" }));
+        await act(async () => {
+            fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        });
         await waitFor(() => {
             expect(
-                screen.queryByText(/Start a Kopia backup now\?/u)
+                screen.queryByRole("dialog", { name: "Start filesystem backup" })
             ).not.toBeInTheDocument();
         });
 
-        await user.click(screen.getByRole("button", { name: /Run filesystem backup/u }));
-        await user.click(screen.getByRole("button", { name: "Run backup" }));
+        await act(async () => {
+            fireEvent.click(
+                screen.getByRole("button", { name: /Run filesystem backup/u })
+            );
+        });
+        await act(async () => {
+            fireEvent.click(screen.getByRole("button", { name: "Run backup" }));
+        });
 
         expect(hooks.runKopiaBackup).toHaveBeenCalledTimes(1);
     });
@@ -206,7 +218,6 @@ describe("BackupOverviewCard", () => {
     });
 
     it("shows and clears backup jobs that need attention", async () => {
-        const user = userEvent.setup();
         hooks.useKopiaBackup.mockReturnValue({
             data: {
                 job: {
@@ -244,8 +255,8 @@ describe("BackupOverviewCard", () => {
         ).toBeDisabled();
 
         const clearButtons = screen.getAllByRole("button", { name: "Clear attention" });
-        await user.click(clearButtons[0]);
-        await user.click(clearButtons[1]);
+        fireEvent.click(clearButtons[0]!);
+        fireEvent.click(clearButtons[1]!);
 
         expect(hooks.clearWalgAttention).toHaveBeenCalledTimes(1);
         expect(hooks.clearKopiaAttention).toHaveBeenCalledTimes(1);

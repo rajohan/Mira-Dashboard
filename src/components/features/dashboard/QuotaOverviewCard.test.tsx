@@ -1,7 +1,8 @@
 import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
 
 import type { QuotasResponse, SyntheticQuota } from "../../../hooks/useQuotas";
+import { stubGlobal, unstubAllGlobals } from "../../../test/testUtils";
 import { formatDate } from "../../../utils/format";
 import { QuotaOverviewCard } from "./QuotaOverviewCard";
 
@@ -69,7 +70,7 @@ const quotas: QuotasResponse = {
 
 describe("QuotaOverviewCard", () => {
     afterEach(() => {
-        vi.unstubAllGlobals();
+        unstubAllGlobals();
     });
 
     it("renders loading state without quota data", () => {
@@ -331,7 +332,7 @@ describe("QuotaOverviewCard", () => {
         MockDate.now = RealDate.now;
         MockDate.parse = RealDate.parse;
         Object.defineProperty(MockDate, "prototype", { value: RealDate.prototype });
-        vi.stubGlobal("Date", MockDate);
+        stubGlobal("Date", MockDate);
 
         render(
             <QuotaOverviewCard

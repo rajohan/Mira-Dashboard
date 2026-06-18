@@ -1,13 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { Dropdown } from "./Dropdown";
 
 describe("Dropdown", () => {
     it("renders items and invokes enabled item actions", async () => {
-        const onEdit = vi.fn();
-        const onDelete = vi.fn();
+        const onEdit = jest.fn();
+        const onDelete = jest.fn();
         render(
             <Dropdown
                 label="Actions"

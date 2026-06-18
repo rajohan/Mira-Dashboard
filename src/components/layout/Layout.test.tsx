@@ -1,29 +1,30 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted } from "../../test/testUtils";
 import { Layout } from "./Layout";
 
-const hooks = vi.hoisted(() => ({
-    authLogout: vi.fn().mockResolvedValue(Promise.resolve()),
-    clearRead: vi.fn(),
-    deleteNotification: vi.fn(),
-    markAllRead: vi.fn(),
-    markNotificationRead: vi.fn(),
-    useCacheEntry: vi.fn(),
-    useClearReadNotifications: vi.fn(),
-    useDeleteNotification: vi.fn(),
-    useHealth: vi.fn(),
-    useLocation: vi.fn(),
-    useMarkAllNotificationsRead: vi.fn(),
-    useMarkNotificationRead: vi.fn(),
-    useNavigate: vi.fn(),
-    useNotifications: vi.fn(),
-    useOpenClawSocket: vi.fn(),
-    usePullRequests: vi.fn(),
+const hooks = hoisted(() => ({
+    authLogout: jest.fn().mockResolvedValue(Promise.resolve()),
+    clearRead: jest.fn(),
+    deleteNotification: jest.fn(),
+    markAllRead: jest.fn(),
+    markNotificationRead: jest.fn(),
+    useCacheEntry: jest.fn(),
+    useClearReadNotifications: jest.fn(),
+    useDeleteNotification: jest.fn(),
+    useHealth: jest.fn(),
+    useLocation: jest.fn(),
+    useMarkAllNotificationsRead: jest.fn(),
+    useMarkNotificationRead: jest.fn(),
+    useNavigate: jest.fn(),
+    useNotifications: jest.fn(),
+    useOpenClawSocket: jest.fn(),
+    usePullRequests: jest.fn(),
 }));
 
-vi.mock("@tanstack/react-router", () => ({
+mock.module("@tanstack/react-router", () => ({
     Link: ({
         to,
         children,
@@ -40,14 +41,14 @@ vi.mock("@tanstack/react-router", () => ({
         </a>
     ),
     useLocation: () => hooks.useLocation(),
-    useNavigate: () => hooks.useNavigate,
+    useNavigate: () => hooks.useNavigate(),
 }));
 
-vi.mock("../../hooks/useOpenClawSocket", () => ({
+mock.module("../../hooks/useOpenClawSocket", () => ({
     useOpenClawSocket: hooks.useOpenClawSocket,
 }));
 
-vi.mock("../../hooks", () => ({
+mock.module("../../hooks", () => ({
     useHealth: hooks.useHealth,
     useCacheEntry: hooks.useCacheEntry,
     useNotifications: hooks.useNotifications,
@@ -58,7 +59,7 @@ vi.mock("../../hooks", () => ({
     useDeleteNotification: hooks.useDeleteNotification,
 }));
 
-vi.mock("../../stores/authStore", () => ({
+mock.module("../../stores/authStore", () => ({
     authActions: { logout: hooks.authLogout },
 }));
 
@@ -80,7 +81,7 @@ beforeEach(() => {
     hooks.useMarkNotificationRead.mockReturnValue({
         mutate: hooks.markNotificationRead,
     });
-    hooks.useNavigate.mockReturnValue(vi.fn());
+    hooks.useNavigate.mockReturnValue(jest.fn());
     hooks.useNotifications.mockReturnValue({
         data: { items: [], unreadCount: 0 },
     });

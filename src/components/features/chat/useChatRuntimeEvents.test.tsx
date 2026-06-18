@@ -1,7 +1,8 @@
 import { renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { act, useRef, useState } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { advanceTimersByTimeAsync } from "../../../test/testUtils";
 import type { ActiveChatStreams } from "./chatRuntime";
 import type { ChatHistoryMessage } from "./chatTypes";
 import {
@@ -28,21 +29,21 @@ function renderRuntimeEvents(
         clearInitialRequests?: boolean;
         connectionId?: number;
         isConnected?: boolean;
-        request?: ReturnType<typeof vi.fn>;
+        request?: ReturnType<typeof jest.fn>;
         selectedSessionKey?: string;
         shouldStickToBottom?: boolean;
         showToolOutput?: boolean;
     } = {}
 ) {
     let listener: ((data: unknown) => void) | undefined;
-    const unsubscribe = vi.fn();
-    const subscribe = vi.fn((nextListener: (data: unknown) => void) => {
+    const unsubscribe = jest.fn();
+    const subscribe = jest.fn((nextListener: (data: unknown) => void) => {
         listener = nextListener;
         return unsubscribe;
     });
     const request =
         overrides.request ||
-        vi.fn().mockResolvedValue({
+        jest.fn().mockResolvedValue({
             messages: [
                 {
                     content: "history message",
@@ -166,6 +167,12 @@ describe("runtime event formatting helpers", () => {
                 toolName: "functions.exec",
             })
         ).toBe("Exec: date");
+        expect(
+            runtimeProgressText("session.tool", "tool", "start", {
+                progressText: "checking status",
+                toolName: "functions.exec",
+            })
+        ).toBe("Exec: checking status");
         expect(runtimeProgressText("session.tool", "tool", "start", {})).toBe("Tool");
         expect(runtimeProgressText("session.item", "item", "start", {})).toBeUndefined();
         expect(
@@ -224,11 +231,11 @@ describe("useChatRuntimeEvents", () => {
             value: true,
             writable: true,
         });
-        vi.useFakeTimers();
+        jest.useFakeTimers();
     });
 
     afterEach(() => {
-        vi.useRealTimers();
+        jest.useRealTimers();
     });
 
     it("buffers delta events, appends final messages, and refreshes history", async () => {
@@ -245,7 +252,7 @@ describe("useChatRuntimeEvents", () => {
                 },
                 type: "event",
             });
-            await vi.advanceTimersByTimeAsync(80);
+            await advanceTimersByTimeAsync(80);
         });
 
         expect(result.current.activeStreams["session-a"]).toEqual(
@@ -273,7 +280,7 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.messages.map((message) => message.text)).toContain("Done");
 
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(500);
+            await advanceTimersByTimeAsync(500);
         });
 
         expect(request).toHaveBeenCalledWith("chat.history", {
@@ -292,7 +299,7 @@ describe("useChatRuntimeEvents", () => {
         let resolveHistory:
             | ((value: { messages: Array<{ role: string; text: string }> }) => void)
             | undefined;
-        const request = vi.fn((method: string) => {
+        const request = jest.fn((method: string) => {
             if (method === "chat.history") {
                 historyRequest = new Promise((resolve) => {
                     resolveHistory = resolve;
@@ -327,7 +334,7 @@ describe("useChatRuntimeEvents", () => {
         });
 
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(500);
+            await advanceTimersByTimeAsync(500);
         });
 
         expect(requestMock).toHaveBeenCalledWith("chat.history", {
@@ -393,7 +400,7 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.activeStreams["session-a"]).toBeUndefined();
 
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(150);
+            await advanceTimersByTimeAsync(150);
         });
 
         expect(request).toHaveBeenCalledWith("chat.history", {
@@ -404,7 +411,7 @@ describe("useChatRuntimeEvents", () => {
 
     it.each(["aborted", "error", "final"] as const)(
         "ignores stale selected-session %s events from replaced runs",
-        async (state) => {
+        async (state: "aborted" | "error" | "final") => {
             const { emit, request, result } = renderRuntimeEvents({
                 activeStreams: {
                     "session-a": {
@@ -431,7 +438,7 @@ describe("useChatRuntimeEvents", () => {
             });
 
             await act(async () => {
-                await vi.advanceTimersByTimeAsync(500);
+                await advanceTimersByTimeAsync(500);
                 await Promise.resolve();
             });
 
@@ -483,7 +490,7 @@ describe("useChatRuntimeEvents", () => {
         ]);
 
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(500);
+            await advanceTimersByTimeAsync(500);
             await Promise.resolve();
         });
 
@@ -881,7 +888,7 @@ describe("useChatRuntimeEvents", () => {
                 },
                 type: "event",
             });
-            await vi.advanceTimersByTimeAsync(80);
+            await advanceTimersByTimeAsync(80);
         });
 
         expect(result.current.activeStreams["session-a"]?.text).toBe("First");
@@ -922,7 +929,7 @@ describe("useChatRuntimeEvents", () => {
                     },
                     type: "event",
                 });
-                await vi.advanceTimersByTimeAsync(80);
+                await advanceTimersByTimeAsync(80);
             });
 
             expect(result.current.activeStreams["session-a"]?.text).toBe(value);
@@ -953,7 +960,7 @@ describe("useChatRuntimeEvents", () => {
                 },
                 type: "event",
             });
-            await vi.advanceTimersByTimeAsync(80);
+            await advanceTimersByTimeAsync(80);
         });
 
         expect(result.current.activeStreams["session-a"]).toEqual(
@@ -998,7 +1005,7 @@ describe("useChatRuntimeEvents", () => {
                 },
                 type: "event",
             });
-            await vi.advanceTimersByTimeAsync(80);
+            await advanceTimersByTimeAsync(80);
         });
 
         expect(result.current.activeStreams["session-a"]).toEqual(
@@ -1038,7 +1045,7 @@ describe("useChatRuntimeEvents", () => {
                 },
                 type: "event",
             });
-            await vi.advanceTimersByTimeAsync(80);
+            await advanceTimersByTimeAsync(80);
         });
 
         expect(result.current.activeStreams["session-a"]).toEqual(
@@ -1102,7 +1109,7 @@ describe("useChatRuntimeEvents", () => {
                 },
                 type: "event",
             });
-            await vi.advanceTimersByTimeAsync(80);
+            await advanceTimersByTimeAsync(80);
         });
 
         expect(result.current.activeStreams["session-a"]).toEqual(
@@ -1137,7 +1144,7 @@ describe("useChatRuntimeEvents", () => {
                 },
                 type: "event",
             });
-            await vi.advanceTimersByTimeAsync(80);
+            await advanceTimersByTimeAsync(80);
         });
 
         expect(result.current.activeStreams["session-a"]).toEqual(
@@ -1172,7 +1179,7 @@ describe("useChatRuntimeEvents", () => {
                 },
                 type: "event",
             });
-            await vi.advanceTimersByTimeAsync(80);
+            await advanceTimersByTimeAsync(80);
         });
 
         expect(result.current.activeStreams["session-a"]).toEqual(
@@ -1246,7 +1253,7 @@ describe("useChatRuntimeEvents", () => {
         });
 
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(80);
+            await advanceTimersByTimeAsync(80);
         });
 
         expect(result.current.activeStreams["session-a"]).toEqual(
@@ -1292,14 +1299,14 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.activeStreams["session-a"]?.text).toBe("Replacement");
 
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(80);
+            await advanceTimersByTimeAsync(80);
         });
 
         expect(result.current.activeStreams["session-a"]?.text).toBe("Replacement");
     });
 
     it("coalesces queued Gateway v4 deltas onto one flush timer", async () => {
-        const setTimeoutSpy = vi.spyOn(window, "setTimeout");
+        const setTimeoutSpy = jest.spyOn(window, "setTimeout");
         const { emit, result } = renderRuntimeEvents({
             activeStreams: {
                 "session-a": {
@@ -1340,7 +1347,7 @@ describe("useChatRuntimeEvents", () => {
             expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
 
             await act(async () => {
-                await vi.advanceTimersByTimeAsync(80);
+                await advanceTimersByTimeAsync(80);
             });
 
             expect(result.current.activeStreams["session-a"]?.text).toBe("Hello");
@@ -1381,7 +1388,7 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.activeStreams["session-a"]?.text).toBe("Hello");
 
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(80);
+            await advanceTimersByTimeAsync(80);
         });
 
         expect(result.current.activeStreams["session-a"]?.text).toBe("Hello");
@@ -1630,7 +1637,7 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.activeStreams["session-a"]).toBeUndefined();
 
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(80);
+            await advanceTimersByTimeAsync(80);
         });
 
         expect(result.current.activeStreams["session-a"]).toBeUndefined();
@@ -1734,7 +1741,7 @@ describe("useChatRuntimeEvents", () => {
         });
 
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(150);
+            await advanceTimersByTimeAsync(150);
         });
 
         expect(request).not.toHaveBeenCalled();
@@ -1854,7 +1861,7 @@ describe("useChatRuntimeEvents", () => {
         });
 
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(500);
+            await advanceTimersByTimeAsync(500);
         });
 
         expect(request).not.toHaveBeenCalled();
@@ -1874,7 +1881,7 @@ describe("useChatRuntimeEvents", () => {
                 },
                 type: "event",
             });
-            await vi.advanceTimersByTimeAsync(80);
+            await advanceTimersByTimeAsync(80);
             emit({
                 event: "chat",
                 payload: {
@@ -2040,7 +2047,7 @@ describe("useChatRuntimeEvents", () => {
                 type: "event",
             });
             emit({ event: "session.tool", payload: null, type: "event" });
-            await vi.advanceTimersByTimeAsync(600);
+            await advanceTimersByTimeAsync(600);
         });
 
         expect(result.current.activeStreams).toEqual({});
@@ -2078,7 +2085,7 @@ describe("useChatRuntimeEvents", () => {
         });
 
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(600);
+            await advanceTimersByTimeAsync(600);
         });
 
         expect(result.current.activeStreams).toEqual({});
@@ -2099,7 +2106,7 @@ describe("useChatRuntimeEvents", () => {
                 },
                 type: "event",
             });
-            await vi.advanceTimersByTimeAsync(80);
+            await advanceTimersByTimeAsync(80);
             emit({
                 event: "chat",
                 payload: {
@@ -2110,7 +2117,7 @@ describe("useChatRuntimeEvents", () => {
                 },
                 type: "event",
             });
-            await vi.advanceTimersByTimeAsync(80);
+            await advanceTimersByTimeAsync(80);
         });
 
         expect(result.current.activeStreams["session-a"]).toEqual(
@@ -2146,7 +2153,7 @@ describe("useChatRuntimeEvents", () => {
                 },
                 type: "event",
             });
-            await vi.advanceTimersByTimeAsync(80);
+            await advanceTimersByTimeAsync(80);
         });
 
         expect(result.current.activeStreams["session-a"]).toEqual(
@@ -2187,7 +2194,7 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.activeStreams["session-b"]).toBeUndefined();
 
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(500);
+            await advanceTimersByTimeAsync(500);
         });
 
         expect(request).toHaveBeenCalledWith("chat.history", {
@@ -2295,7 +2302,7 @@ describe("useChatRuntimeEvents", () => {
     });
 
     it("handles runtime aliases, refresh failures, and command final messages", async () => {
-        const request = vi.fn().mockRejectedValue(new Error("history offline"));
+        const request = jest.fn().mockRejectedValue(new Error("history offline"));
         const { emit, result } = renderRuntimeEvents({
             activeStreams: {
                 "session-a": {
@@ -2347,7 +2354,7 @@ describe("useChatRuntimeEvents", () => {
         );
 
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(500);
+            await advanceTimersByTimeAsync(500);
         });
 
         expect(request).toHaveBeenCalledWith("chat.history", {
@@ -2417,7 +2424,7 @@ describe("useChatRuntimeEvents", () => {
         expect(unsubscribe).toHaveBeenCalledTimes(1);
 
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(100);
+            await advanceTimersByTimeAsync(100);
         });
     });
 
@@ -2435,7 +2442,7 @@ describe("useChatRuntimeEvents", () => {
                 },
                 type: "event",
             });
-            await vi.advanceTimersByTimeAsync(80);
+            await advanceTimersByTimeAsync(80);
         });
 
         expect(result.current.activeStreams).toEqual({});

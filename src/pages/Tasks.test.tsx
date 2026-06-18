@@ -1,8 +1,9 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 import { act } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hoisted } from "../test/testUtils";
 import { Tasks } from "./Tasks";
 
 type MockTask = {
@@ -15,29 +16,29 @@ type MockTask = {
     updatedAt: string;
 };
 
-const hooks = vi.hoisted(() => ({
-    assignTask: vi.fn(),
-    createTask: vi.fn(),
-    createTaskUpdate: vi.fn(),
-    deleteTask: vi.fn(),
-    deleteTaskUpdate: vi.fn(),
-    moveTask: vi.fn(),
-    refetch: vi.fn(),
-    updateTask: vi.fn(),
-    updateTaskUpdate: vi.fn(),
-    useAssignTask: vi.fn(),
-    useCreateTask: vi.fn(),
-    useCreateTaskUpdate: vi.fn(),
-    useDeleteTask: vi.fn(),
-    useDeleteTaskUpdate: vi.fn(),
-    useMoveTask: vi.fn(),
-    useTaskUpdates: vi.fn(),
-    useTasks: vi.fn(),
-    useUpdateTask: vi.fn(),
-    useUpdateTaskUpdate: vi.fn(),
+const hooks = hoisted(() => ({
+    assignTask: jest.fn(),
+    createTask: jest.fn(),
+    createTaskUpdate: jest.fn(),
+    deleteTask: jest.fn(),
+    deleteTaskUpdate: jest.fn(),
+    moveTask: jest.fn(),
+    refetch: jest.fn(),
+    updateTask: jest.fn(),
+    updateTaskUpdate: jest.fn(),
+    useAssignTask: jest.fn(),
+    useCreateTask: jest.fn(),
+    useCreateTaskUpdate: jest.fn(),
+    useDeleteTask: jest.fn(),
+    useDeleteTaskUpdate: jest.fn(),
+    useMoveTask: jest.fn(),
+    useTaskUpdates: jest.fn(),
+    useTasks: jest.fn(),
+    useUpdateTask: jest.fn(),
+    useUpdateTaskUpdate: jest.fn(),
 }));
 
-const taskModule = vi.hoisted(() => {
+const taskModule = hoisted(() => {
     const hasLabel = (task: { labels: Array<{ name: string }> }, label: string) =>
         task.labels.some((taskLabel) => taskLabel.name === label);
 
@@ -71,7 +72,7 @@ const taskModule = vi.hoisted(() => {
     };
 });
 
-const dndMocks = vi.hoisted(() => ({
+const dndMocks = hoisted(() => ({
     handlers: null as null | {
         onDragEnd: (event: {
             active: { id: string };
@@ -82,7 +83,7 @@ const dndMocks = vi.hoisted(() => ({
     },
 }));
 
-vi.mock("@dnd-kit/core", () => ({
+mock.module("@dnd-kit/core", () => ({
     DndContext: ({
         children,
         onDragEnd,
@@ -105,7 +106,7 @@ vi.mock("@dnd-kit/core", () => ({
     ),
 }));
 
-vi.mock("../hooks", () => ({
+mock.module("../hooks", () => ({
     useAssignTask: hooks.useAssignTask,
     useCreateTask: hooks.useCreateTask,
     useCreateTaskUpdate: hooks.useCreateTaskUpdate,
@@ -118,7 +119,7 @@ vi.mock("../hooks", () => ({
     useUpdateTaskUpdate: hooks.useUpdateTaskUpdate,
 }));
 
-vi.mock("../components/features/tasks", () => ({
+mock.module("../components/features/tasks", () => ({
     COLUMN_CONFIG: taskModule.columnConfig,
     getColumnId: (value: string | MockTask) => {
         if (typeof value === "string") {
@@ -241,7 +242,7 @@ vi.mock("../components/features/tasks", () => ({
     ),
 }));
 
-vi.mock("../components/ui/ConfirmModal", () => ({
+mock.module("../components/ui/ConfirmModal", () => ({
     ConfirmModal: ({
         isOpen,
         message,
@@ -304,7 +305,7 @@ function mockTaskHooks(overrides = {}) {
 
 describe("Tasks page", () => {
     beforeEach(() => {
-        vi.clearAllMocks();
+        jest.clearAllMocks();
         dndMocks.handlers = null;
         hooks.assignTask.mockResolvedValue(task({ number: 1, title: "Assigned" }));
         hooks.createTask.mockResolvedValue(task({ number: 3, title: "New task" }));
@@ -655,7 +656,7 @@ describe("Tasks page", () => {
     });
 
     it("handles drag/drop edge cases without leaking state", async () => {
-        const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+        const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
         try {
             render(<Tasks />);
 
@@ -771,7 +772,7 @@ describe("Tasks page", () => {
 
     it("keeps delete confirmation open and logs when task deletion fails", async () => {
         const user = userEvent.setup();
-        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         const deleteError = new Error("delete failed");
         hooks.deleteTask.mockRejectedValue(deleteError);
 
@@ -798,7 +799,7 @@ describe("Tasks page", () => {
 
     it("logs and keeps progress-update deletion confirmation open when deletion fails", async () => {
         const user = userEvent.setup();
-        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         const deleteError = new Error("delete update failed");
         hooks.deleteTaskUpdate.mockRejectedValue(deleteError);
 

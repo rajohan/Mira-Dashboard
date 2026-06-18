@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import type { Skill } from "../../../types/settings";
 import { SkillsSection } from "./SkillsSection";
@@ -34,7 +34,7 @@ const skills: Skill[] = [
 
 describe("SkillsSection", () => {
     it("filters skills and toggles a skill", async () => {
-        const onToggle = vi.fn();
+        const onToggle = jest.fn();
         render(<SkillsSection skills={skills} onToggle={onToggle} />);
 
         await userEvent.click(screen.getByRole("button", { name: /Skills/u }));
@@ -81,7 +81,7 @@ describe("SkillsSection", () => {
     });
 
     it("shows empty filter state", async () => {
-        render(<SkillsSection skills={skills} onToggle={vi.fn()} />);
+        render(<SkillsSection skills={skills} onToggle={jest.fn()} />);
 
         await userEvent.click(screen.getByRole("button", { name: /Skills/u }));
         await userEvent.type(screen.getByPlaceholderText("Search skills..."), "missing");

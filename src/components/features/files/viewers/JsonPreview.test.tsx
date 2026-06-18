@@ -1,9 +1,9 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, mock } from "bun:test";
 
 import { JsonPreview } from "./JsonPreview";
 
-vi.mock("@microlink/react-json-view", () => ({
+mock.module("@microlink/react-json-view", () => ({
     __esModule: true,
     default: ({ src }: { src: unknown }) => (
         <div data-testid="json-view" data-json={JSON.stringify(src)} />

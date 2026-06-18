@@ -1,20 +1,20 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { NewTaskModal } from "./NewTaskModal";
 
 describe("NewTaskModal", () => {
     it("does not render when closed", () => {
-        render(<NewTaskModal isOpen={false} onClose={vi.fn()} onSubmit={vi.fn()} />);
+        render(<NewTaskModal isOpen={false} onClose={jest.fn()} onSubmit={jest.fn()} />);
 
         expect(screen.queryByText("New Task")).not.toBeInTheDocument();
     });
 
     it("submits trimmed task fields and automation metadata", async () => {
         const user = userEvent.setup();
-        const onClose = vi.fn();
-        const onSubmit = vi.fn(async () => {});
+        const onClose = jest.fn();
+        const onSubmit = jest.fn(async () => {});
         render(<NewTaskModal isOpen onClose={onClose} onSubmit={onSubmit} />);
 
         fireEvent.change(screen.getByLabelText("Title"), {
@@ -53,8 +53,8 @@ describe("NewTaskModal", () => {
 
     it("ignores empty titles and closes from cancel controls", async () => {
         const user = userEvent.setup();
-        const onClose = vi.fn();
-        const onSubmit = vi.fn();
+        const onClose = jest.fn();
+        const onSubmit = jest.fn();
         render(<NewTaskModal isOpen onClose={onClose} onSubmit={onSubmit} />);
 
         await user.click(screen.getByRole("button", { name: /Create Task/ }));
@@ -66,8 +66,8 @@ describe("NewTaskModal", () => {
 
     it("submits without optional body or automation", async () => {
         const user = userEvent.setup();
-        const onSubmit = vi.fn(async () => {});
-        render(<NewTaskModal isOpen onClose={vi.fn()} onSubmit={onSubmit} />);
+        const onSubmit = jest.fn(async () => {});
+        render(<NewTaskModal isOpen onClose={jest.fn()} onSubmit={onSubmit} />);
 
         fireEvent.change(screen.getByLabelText("Title"), {
             target: { value: "Minimal task" },
@@ -88,8 +88,8 @@ describe("NewTaskModal", () => {
 
     it("shows the submitting state while creation is pending", async () => {
         const user = userEvent.setup();
-        const onSubmit = vi.fn(() => new Promise<void>(() => {}));
-        render(<NewTaskModal isOpen onClose={vi.fn()} onSubmit={onSubmit} />);
+        const onSubmit = jest.fn(() => new Promise<void>(() => {}));
+        render(<NewTaskModal isOpen onClose={jest.fn()} onSubmit={onSubmit} />);
 
         fireEvent.change(screen.getByLabelText("Title"), {
             target: { value: "Slow task" },
@@ -101,8 +101,8 @@ describe("NewTaskModal", () => {
 
     it("labels the icon-only close button", async () => {
         const user = userEvent.setup();
-        const onClose = vi.fn();
-        render(<NewTaskModal isOpen onClose={onClose} onSubmit={vi.fn()} />);
+        const onClose = jest.fn();
+        render(<NewTaskModal isOpen onClose={onClose} onSubmit={jest.fn()} />);
 
         await user.click(screen.getByRole("button", { name: "Close new task modal" }));
 

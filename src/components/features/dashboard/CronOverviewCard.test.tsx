@@ -1,14 +1,15 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest, mock } from "bun:test";
 
 import type { CronJob } from "../../../hooks";
+import { hoisted } from "../../../test/testUtils";
 import { CronOverviewCard } from "./CronOverviewCard";
 
-const hooks = vi.hoisted(() => ({
-    useCronJobs: vi.fn(),
+const hooks = hoisted(() => ({
+    useCronJobs: jest.fn(),
 }));
 
-vi.mock("../../../hooks", () => ({
+mock.module("../../../hooks", () => ({
     useCronJobs: hooks.useCronJobs,
 }));
 

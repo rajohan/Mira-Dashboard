@@ -1,26 +1,27 @@
 import { act, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted, stubGlobal } from "../test/testUtils";
 import { Dashboard } from "./Dashboard";
 
-const hooks = vi.hoisted(() => ({
-    useMetrics: vi.fn(),
-    useOpenClawSocket: vi.fn(),
-    useQuotas: vi.fn(),
-    useWeather: vi.fn(),
+const hooks = hoisted(() => ({
+    useMetrics: jest.fn(),
+    useOpenClawSocket: jest.fn(),
+    useQuotas: jest.fn(),
+    useWeather: jest.fn(),
 }));
 
-vi.mock("../hooks/useOpenClawSocket", () => ({
+mock.module("../hooks/useOpenClawSocket", () => ({
     useOpenClawSocket: hooks.useOpenClawSocket,
 }));
 
-vi.mock("../hooks", () => ({
+mock.module("../hooks", () => ({
     useMetrics: hooks.useMetrics,
     useQuotas: hooks.useQuotas,
     useWeather: hooks.useWeather,
 }));
 
-vi.mock("../components/ui/MetricCard", () => ({
+mock.module("../components/ui/MetricCard", () => ({
     MetricCard: ({
         percent,
         subtitle,
@@ -38,7 +39,7 @@ vi.mock("../components/ui/MetricCard", () => ({
     ),
 }));
 
-vi.mock("../components/features/dashboard", () => ({
+mock.module("../components/features/dashboard", () => ({
     BackupOverviewCard: () => <section data-testid="backup-card">Backup</section>,
     CacheStatusCard: ({ items }: { items: unknown[] }) => (
         <section data-testid="cache-card">Cache items: {items.length}</section>
@@ -103,7 +104,7 @@ function mockDashboardData(overrides = {}) {
 
 describe("Dashboard page", () => {
     beforeEach(() => {
-        vi.useRealTimers();
+        jest.useRealTimers();
         hooks.useMetrics.mockReset();
         hooks.useOpenClawSocket.mockReset();
         hooks.useQuotas.mockReset();
@@ -177,14 +178,30 @@ describe("Dashboard page", () => {
     });
 
     it("updates the weather clock on an interval", () => {
-        vi.useFakeTimers();
-        vi.setSystemTime(new Date("2026-05-11T08:00:00.000Z"));
+        const RealDate = Date;
+        let now = new RealDate("2026-05-11T08:00:00.000Z");
+
+        stubGlobal(
+            "Date",
+            class extends RealDate {
+                constructor(value?: string | number | Date) {
+                    super(value ?? now);
+                    return value === undefined ? new RealDate(now) : new RealDate(value);
+                }
+
+                static now() {
+                    return now.getTime();
+                }
+            }
+        );
+        jest.useFakeTimers();
 
         render(<Dashboard />);
         expect(screen.getByText("10:00:00")).toBeInTheDocument();
 
         act(() => {
-            vi.advanceTimersByTime(1000);
+            now = new RealDate("2026-05-11T08:00:01.000Z");
+            jest.advanceTimersByTime(1000);
         });
 
         expect(screen.getByText("10:00:01")).toBeInTheDocument();

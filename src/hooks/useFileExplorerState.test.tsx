@@ -1,11 +1,12 @@
 import { renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, jest, mock } from "bun:test";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import { useFileExplorerState } from "./useFileExplorerState";
 
-vi.mock("../utils/json", () => ({
+mock.module("../utils/json", () => ({
     validateJsonString: (s: string) => {
         if (s === "missing error") {
             return { valid: false, error: null };
@@ -22,7 +23,7 @@ vi.mock("../utils/json", () => ({
 
 describe("useFileExplorerState", () => {
     it("initializes with defaults and handles file selection", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -36,7 +37,7 @@ describe("useFileExplorerState", () => {
                 status: 200,
                 json: async () => ({ path: "/a/b.txt", content: "hello", size: 5 }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -52,7 +53,7 @@ describe("useFileExplorerState", () => {
     });
 
     it("tracks content changes and saves", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -65,7 +66,7 @@ describe("useFileExplorerState", () => {
                 json: async () => ({ path: "/a/b.json", content: '{"x":1}', size: 7 }),
             })
             .mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -91,7 +92,7 @@ describe("useFileExplorerState", () => {
     });
 
     it("rejects save with invalid json when in json editing mode", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -103,7 +104,7 @@ describe("useFileExplorerState", () => {
                 status: 200,
                 json: async () => ({ path: "/a/b.json", content: "{}", size: 2 }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -129,12 +130,12 @@ describe("useFileExplorerState", () => {
     });
 
     it("refreshes files and content", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ files: [] }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -157,7 +158,7 @@ describe("useFileExplorerState", () => {
             { path: "/root/sub", type: "directory" },
         ];
 
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -169,7 +170,7 @@ describe("useFileExplorerState", () => {
                 status: 200,
                 json: async () => ({ files: childFiles }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -186,14 +187,14 @@ describe("useFileExplorerState", () => {
     });
 
     it("collapses an expanded directory", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({
                 files: [{ path: "/dir", type: "directory", loaded: true }],
             }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -222,7 +223,7 @@ describe("useFileExplorerState", () => {
                 children: [{ path: "/root/sub", type: "directory", loaded: false }],
             },
         ];
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -236,7 +237,7 @@ describe("useFileExplorerState", () => {
                     files: [{ path: "/root/sub/file.txt", type: "file" }],
                 }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -250,7 +251,7 @@ describe("useFileExplorerState", () => {
     });
 
     it("refreshes selected file content", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -262,7 +263,7 @@ describe("useFileExplorerState", () => {
                 status: 200,
                 json: async () => ({ path: "/a/b.txt", content: "hello", size: 5 }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -280,7 +281,7 @@ describe("useFileExplorerState", () => {
     });
 
     it("uses empty content fallback for sparse file responses", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -292,7 +293,7 @@ describe("useFileExplorerState", () => {
                 status: 200,
                 json: async () => ({ path: "/empty.txt", size: 0 }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -307,7 +308,7 @@ describe("useFileExplorerState", () => {
     });
 
     it("handles large file warning", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -323,7 +324,7 @@ describe("useFileExplorerState", () => {
                     size: 200_000,
                 }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -337,7 +338,7 @@ describe("useFileExplorerState", () => {
     });
 
     it("handles save error", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -354,7 +355,7 @@ describe("useFileExplorerState", () => {
                 }),
             })
             .mockRejectedValueOnce(new Error("Network error"));
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -377,12 +378,12 @@ describe("useFileExplorerState", () => {
     });
 
     it("handles save without selection", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ files: [] }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -398,7 +399,7 @@ describe("useFileExplorerState", () => {
     });
 
     it("validates json5 editing mode", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -414,7 +415,7 @@ describe("useFileExplorerState", () => {
                     size: 6,
                 }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -435,12 +436,12 @@ describe("useFileExplorerState", () => {
     });
 
     it("handles code edit mode and markdown preview toggle", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ files: [] }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -460,7 +461,7 @@ describe("useFileExplorerState", () => {
     });
 
     it("handles unloaded directories with missing children payloads", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -474,7 +475,7 @@ describe("useFileExplorerState", () => {
                 status: 200,
                 json: async () => ({}),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -489,7 +490,7 @@ describe("useFileExplorerState", () => {
     });
 
     it("handles toggles for missing nested targets without loading children", async () => {
-        const fetchMock = vi.fn().mockResolvedValueOnce({
+        const fetchMock = jest.fn().mockResolvedValueOnce({
             ok: true,
             status: 200,
             json: async () => ({
@@ -503,7 +504,7 @@ describe("useFileExplorerState", () => {
                 ],
             }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -519,7 +520,7 @@ describe("useFileExplorerState", () => {
     });
 
     it("uses parse-error fallback for invalid JSON without an error message", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -531,7 +532,7 @@ describe("useFileExplorerState", () => {
                 status: 200,
                 json: async () => ({ path: "/a/b.json", content: "{}", size: 2 }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -555,7 +556,7 @@ describe("useFileExplorerState", () => {
     });
 
     it("uses generic save error fallback for non-error failures", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -568,7 +569,7 @@ describe("useFileExplorerState", () => {
                 json: async () => ({ path: "/a/b.txt", content: "original", size: 8 }),
             })
             .mockRejectedValueOnce("boom");
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),
@@ -591,9 +592,9 @@ describe("useFileExplorerState", () => {
     });
 
     it("handles directory toggle failure gracefully", async () => {
-        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         const dirFiles = [{ path: "/fail", type: "directory", loaded: false }];
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -601,7 +602,7 @@ describe("useFileExplorerState", () => {
                 json: async () => ({ files: dirFiles }),
             })
             .mockRejectedValueOnce(new Error("Failed to load directory"));
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFileExplorerState(), {
             wrapper: createQueryWrapper(),

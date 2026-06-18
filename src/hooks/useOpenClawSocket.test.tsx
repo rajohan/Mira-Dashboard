@@ -1,32 +1,33 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, jest, mock } from "bun:test";
 import { createElement, type ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { advanceTimersByTimeAsync } from "../test/testUtils";
 import { OpenClawSocketProvider, useOpenClawSocket } from "./useOpenClawSocket";
 
 const mockClient = {
-    connect: vi.fn(),
-    disconnect: vi.fn(),
-    isOpen: vi.fn(() => false),
-    request: vi.fn(() => Promise.resolve()),
+    connect: jest.fn(),
+    disconnect: jest.fn(),
+    isOpen: jest.fn(() => false),
+    request: jest.fn(() => Promise.resolve()),
 };
 
-vi.mock("../lib/socket/socketClient", () => ({
-    createSocketClient: vi.fn(() => mockClient),
+mock.module("../lib/socket/socketClient", () => ({
+    createSocketClient: jest.fn(() => mockClient),
 }));
 
-const mockUseIsAuthenticated = vi.fn(() => false);
+const mockUseIsAuthenticated = jest.fn(() => false);
 
-vi.mock("../stores/authStore", () => ({
+mock.module("../stores/authStore", () => ({
     useIsAuthenticated: () => mockUseIsAuthenticated(),
 }));
 
-vi.mock("../utils/websocket", () => ({
-    getWebSocketUrl: vi.fn(() => "ws://localhost:1234"),
+mock.module("../utils/websocket", () => ({
+    getWebSocketUrl: jest.fn(() => "ws://localhost:1234"),
 }));
 
-vi.mock("../lib/socket/socketMessageRouter", () => ({
-    handleSocketMessage: vi.fn(() => null),
+mock.module("../lib/socket/socketMessageRouter", () => ({
+    handleSocketMessage: jest.fn(() => null),
 }));
 
 function createWrapper({ children }: { children: ReactNode }) {
@@ -35,7 +36,7 @@ function createWrapper({ children }: { children: ReactNode }) {
 
 describe("useOpenClawSocket", () => {
     beforeEach(() => {
-        vi.clearAllMocks();
+        jest.clearAllMocks();
         mockUseIsAuthenticated.mockReturnValue(false);
         mockClient.connect.mockReset();
         mockClient.disconnect.mockReset();
@@ -44,11 +45,11 @@ describe("useOpenClawSocket", () => {
     });
 
     afterEach(() => {
-        vi.useRealTimers();
+        jest.useRealTimers();
     });
 
     it("throws when used outside provider", () => {
-        const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         try {
             let error: Error | undefined;
             try {
@@ -84,7 +85,7 @@ describe("useOpenClawSocket", () => {
         const { result } = renderHook(() => useOpenClawSocket(), {
             wrapper: createWrapper,
         });
-        const listener = vi.fn();
+        const listener = jest.fn();
         const unsub = result.current.subscribe(listener);
         expect(typeof unsub).toBe("function");
         unsub();
@@ -125,7 +126,7 @@ describe("useOpenClawSocket", () => {
     it("reuses the existing client on repeated connect calls", async () => {
         mockUseIsAuthenticated.mockReturnValue(true);
         const { createSocketClient } = await import("../lib/socket/socketClient");
-        const createSocketClientMock = createSocketClient as ReturnType<typeof vi.fn>;
+        const createSocketClientMock = createSocketClient as ReturnType<typeof jest.fn>;
         createSocketClientMock.mockClear();
 
         const { result } = renderHook(() => useOpenClawSocket(), {
@@ -160,8 +161,8 @@ describe("useOpenClawSocket", () => {
     it("calls onConnect callback when connected", async () => {
         mockUseIsAuthenticated.mockReturnValue(true);
 
-        const onConnect = vi.fn();
-        renderHook(() => useOpenClawSocket({ onConnect, onDisconnect: vi.fn() }), {
+        const onConnect = jest.fn();
+        renderHook(() => useOpenClawSocket({ onConnect, onDisconnect: jest.fn() }), {
             wrapper: createWrapper,
         });
 
@@ -174,14 +175,14 @@ describe("useOpenClawSocket", () => {
 
         let onMessageCallback: ((data: unknown) => void) | undefined;
         const { createSocketClient } = await import("../lib/socket/socketClient");
-        (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
+        (createSocketClient as ReturnType<typeof jest.fn>).mockImplementation(
             (opts: Record<string, unknown>) => {
                 onMessageCallback = opts.onMessage as (data: unknown) => void;
                 return mockClient;
             }
         );
 
-        const listener = vi.fn();
+        const listener = jest.fn();
         const { result } = renderHook(() => useOpenClawSocket(), {
             wrapper: createWrapper,
         });
@@ -201,11 +202,11 @@ describe("useOpenClawSocket", () => {
         mockUseIsAuthenticated.mockReturnValue(true);
 
         const { handleSocketMessage } = await import("../lib/socket/socketMessageRouter");
-        (handleSocketMessage as ReturnType<typeof vi.fn>).mockReturnValue(true);
+        (handleSocketMessage as ReturnType<typeof jest.fn>).mockReturnValue(true);
 
         let onMessageCallback: ((data: unknown) => void) | undefined;
         const { createSocketClient } = await import("../lib/socket/socketClient");
-        (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
+        (createSocketClient as ReturnType<typeof jest.fn>).mockImplementation(
             (opts: Record<string, unknown>) => {
                 onMessageCallback = opts.onMessage as (data: unknown) => void;
                 return mockClient;
@@ -224,7 +225,7 @@ describe("useOpenClawSocket", () => {
 
         expect(result.current.isConnected).toBe(true);
 
-        (handleSocketMessage as ReturnType<typeof vi.fn>).mockReturnValue(null);
+        (handleSocketMessage as ReturnType<typeof jest.fn>).mockReturnValue(null);
     });
 
     it("updates state from socket lifecycle callbacks", async () => {
@@ -232,15 +233,15 @@ describe("useOpenClawSocket", () => {
 
         let options: Record<string, unknown> = {};
         const { createSocketClient } = await import("../lib/socket/socketClient");
-        (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
+        (createSocketClient as ReturnType<typeof jest.fn>).mockImplementation(
             (opts: Record<string, unknown>) => {
                 options = opts;
                 return mockClient;
             }
         );
 
-        const onConnect = vi.fn();
-        const onDisconnect = vi.fn();
+        const onConnect = jest.fn();
+        const onDisconnect = jest.fn();
         const { result } = renderHook(
             () => useOpenClawSocket({ onConnect, onDisconnect }),
             { wrapper: createWrapper }
@@ -274,7 +275,7 @@ describe("useOpenClawSocket", () => {
 
         let options: Record<string, unknown> = {};
         const { createSocketClient } = await import("../lib/socket/socketClient");
-        (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
+        (createSocketClient as ReturnType<typeof jest.fn>).mockImplementation(
             (opts: Record<string, unknown>) => {
                 options = opts;
                 return mockClient;
@@ -310,16 +311,16 @@ describe("useOpenClawSocket", () => {
 
     it("logs message processing errors", async () => {
         mockUseIsAuthenticated.mockReturnValue(true);
-        const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
 
         const { handleSocketMessage } = await import("../lib/socket/socketMessageRouter");
-        (handleSocketMessage as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+        (handleSocketMessage as ReturnType<typeof jest.fn>).mockImplementationOnce(() => {
             throw new Error("router failed");
         });
 
         let onMessageCallback: ((data: unknown) => void) | undefined;
         const { createSocketClient } = await import("../lib/socket/socketClient");
-        (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
+        (createSocketClient as ReturnType<typeof jest.fn>).mockImplementation(
             (opts: Record<string, unknown>) => {
                 onMessageCallback = opts.onMessage as (data: unknown) => void;
                 return mockClient;
@@ -336,13 +337,13 @@ describe("useOpenClawSocket", () => {
     });
 
     it("reconnects on heartbeat request failure", async () => {
-        vi.useFakeTimers();
+        jest.useFakeTimers();
         mockUseIsAuthenticated.mockReturnValue(true);
         mockClient.isOpen.mockReturnValue(true);
 
         let options: Record<string, unknown> = {};
         const { createSocketClient } = await import("../lib/socket/socketClient");
-        (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
+        (createSocketClient as ReturnType<typeof jest.fn>).mockImplementation(
             (opts: Record<string, unknown>) => {
                 options = opts;
                 return mockClient;
@@ -356,7 +357,7 @@ describe("useOpenClawSocket", () => {
         mockClient.request.mockRejectedValueOnce(new Error("heartbeat failed"));
 
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(10_000);
+            await advanceTimersByTimeAsync(10_000);
         });
 
         expect(mockClient.disconnect).toHaveBeenCalled();
@@ -364,13 +365,13 @@ describe("useOpenClawSocket", () => {
     });
 
     it("skips heartbeat work while the socket is closed", async () => {
-        vi.useFakeTimers();
+        jest.useFakeTimers();
         mockUseIsAuthenticated.mockReturnValue(true);
         mockClient.isOpen.mockReturnValue(false);
 
         let options: Record<string, unknown> = {};
         const { createSocketClient } = await import("../lib/socket/socketClient");
-        (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
+        (createSocketClient as ReturnType<typeof jest.fn>).mockImplementation(
             (opts: Record<string, unknown>) => {
                 options = opts;
                 return mockClient;
@@ -384,21 +385,21 @@ describe("useOpenClawSocket", () => {
         mockClient.request.mockClear();
 
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(10_000);
+            await advanceTimersByTimeAsync(10_000);
         });
 
         expect(mockClient.request).not.toHaveBeenCalled();
     });
 
     it("ignores stale heartbeat failures after the client changes", async () => {
-        vi.useFakeTimers();
+        jest.useFakeTimers();
         mockUseIsAuthenticated.mockReturnValue(true);
         mockClient.isOpen.mockReturnValue(true);
         let rejectHeartbeat: (error: Error) => void = () => {};
 
         let options: Record<string, unknown> = {};
         const { createSocketClient } = await import("../lib/socket/socketClient");
-        (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
+        (createSocketClient as ReturnType<typeof jest.fn>).mockImplementation(
             (opts: Record<string, unknown>) => {
                 options = opts;
                 return mockClient;
@@ -419,7 +420,7 @@ describe("useOpenClawSocket", () => {
         );
 
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(10_000);
+            await advanceTimersByTimeAsync(10_000);
         });
         act(() => {
             result.current.disconnect();

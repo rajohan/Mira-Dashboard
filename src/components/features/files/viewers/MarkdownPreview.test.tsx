@@ -1,21 +1,21 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, mock } from "bun:test";
 
 import { MarkdownPreview } from "./MarkdownPreview";
 
-vi.mock("react-markdown", () => ({
+mock.module("react-markdown", () => ({
     __esModule: true,
     default: ({ children }: { children: string }) => (
         <div data-testid="react-markdown">{children}</div>
     ),
 }));
 
-vi.mock("remark-gfm", () => ({
+mock.module("remark-gfm", () => ({
     __esModule: true,
     default: () => () => {},
 }));
 
-vi.mock("remark-frontmatter", () => ({
+mock.module("remark-frontmatter", () => ({
     __esModule: true,
     default: () => () => {},
 }));

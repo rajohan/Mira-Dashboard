@@ -1,8 +1,9 @@
 import { renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, jest } from "bun:test";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import {
     moltbookKeys,
     useMoltbookData,
@@ -52,7 +53,7 @@ describe("moltbook hooks", () => {
             comments: [{ id: "c1", content: "hi" }],
         };
 
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -90,7 +91,7 @@ describe("moltbook hooks", () => {
                     cachedAt: "2026-01-01",
                 }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useMoltbookData(), {
             wrapper: createQueryWrapper(),
@@ -125,7 +126,7 @@ describe("moltbook hooks", () => {
             ],
         };
 
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -163,7 +164,7 @@ describe("moltbook hooks", () => {
                     cachedAt: "2026-01-01",
                 }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useMoltbookData(), {
             wrapper: createQueryWrapper(),
@@ -180,7 +181,7 @@ describe("moltbook hooks", () => {
     });
 
     it("uses safe defaults for sparse feed posts", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -218,7 +219,7 @@ describe("moltbook hooks", () => {
                     cachedAt: "2026-01-01",
                 }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useMoltbookData(), {
             wrapper: createQueryWrapper(),
@@ -235,7 +236,7 @@ describe("moltbook hooks", () => {
     });
 
     it("handles error state from cache entries", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: false,
@@ -247,7 +248,7 @@ describe("moltbook hooks", () => {
                 status: 200,
                 json: async () => ({ key: "x", data: {}, cachedAt: "2026-01-01" }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useMoltbookData(), {
             wrapper: createQueryWrapper(),
@@ -257,12 +258,12 @@ describe("moltbook hooks", () => {
     });
 
     it("refetches all moltbook cache entries", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ key: "x", data: {}, cachedAt: "2026-01-01" }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useMoltbookData(), {
             wrapper: createQueryWrapper(),
@@ -278,12 +279,12 @@ describe("moltbook hooks", () => {
     });
 
     it("individual cache hooks call useCacheEntry with correct keys", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ key: "x", data: {}, cachedAt: "2026-01-01" }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const wrapper = createQueryWrapper();
 
         renderHook(() => useMoltbookHome(), { wrapper });

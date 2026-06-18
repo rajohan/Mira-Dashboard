@@ -1,15 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
-vi.mock("../../collections/agents", () => ({
-    writeAgentsFromWebSocket: vi.fn(),
+import { mocked } from "../../test/testUtils";
+
+mock.module("../../collections/agents", () => ({
+    writeAgentsFromWebSocket: jest.fn(),
 }));
 
-vi.mock("../../collections/logs", () => ({
-    writeLogFromWebSocket: vi.fn(),
+mock.module("../../collections/logs", () => ({
+    writeLogFromWebSocket: jest.fn(),
 }));
 
-vi.mock("../../collections/sessions", () => ({
-    replaceSessionsFromWebSocket: vi.fn(),
+mock.module("../../collections/sessions", () => ({
+    replaceSessionsFromWebSocket: jest.fn(),
 }));
 
 import { writeAgentsFromWebSocket } from "../../collections/agents";
@@ -19,9 +21,9 @@ import { handleSocketMessage } from "./socketMessageRouter";
 
 describe("socketMessageRouter", () => {
     beforeEach(() => {
-        vi.mocked(writeAgentsFromWebSocket).mockClear();
-        vi.mocked(writeLogFromWebSocket).mockClear();
-        vi.mocked(replaceSessionsFromWebSocket).mockClear();
+        mocked(writeAgentsFromWebSocket).mockClear();
+        mocked(writeLogFromWebSocket).mockClear();
+        mocked(replaceSessionsFromWebSocket).mockClear();
     });
 
     it("returns null for invalid envelope", () => {
@@ -56,7 +58,7 @@ describe("socketMessageRouter", () => {
 
     it("handles agents event", () => {
         handleSocketMessage({ type: "event", event: "agents", payload: [{ id: "1" }] });
-        expect(vi.mocked(writeAgentsFromWebSocket)).toHaveBeenCalledWith([{ id: "1" }]);
+        expect(mocked(writeAgentsFromWebSocket)).toHaveBeenCalledWith([{ id: "1" }]);
     });
 
     it("handles agents.list event", () => {
@@ -65,24 +67,24 @@ describe("socketMessageRouter", () => {
             event: "agents.list",
             payload: [{ id: "a" }],
         });
-        expect(vi.mocked(writeAgentsFromWebSocket)).toHaveBeenCalledWith([{ id: "a" }]);
+        expect(mocked(writeAgentsFromWebSocket)).toHaveBeenCalledWith([{ id: "a" }]);
     });
 
     it("ignores agents event with non-array payload", () => {
         handleSocketMessage({ type: "event", event: "agents", payload: { id: "a" } });
-        expect(vi.mocked(writeAgentsFromWebSocket)).not.toHaveBeenCalled();
+        expect(mocked(writeAgentsFromWebSocket)).not.toHaveBeenCalled();
     });
 
     it("handles log type", () => {
         handleSocketMessage({ type: "log", line: '{"level":"info","0":"hello"}' });
-        expect(vi.mocked(writeLogFromWebSocket)).toHaveBeenCalledWith(
+        expect(mocked(writeLogFromWebSocket)).toHaveBeenCalledWith(
             '{"level":"info","0":"hello"}'
         );
     });
 
     it("ignores log type without line", () => {
         handleSocketMessage({ type: "log" });
-        expect(vi.mocked(writeLogFromWebSocket)).not.toHaveBeenCalled();
+        expect(mocked(writeLogFromWebSocket)).not.toHaveBeenCalled();
     });
 
     it("handles state type with sessions", () => {
@@ -90,7 +92,7 @@ describe("socketMessageRouter", () => {
             type: "state",
             sessions: [{ key: "s1", id: "s1" }],
         });
-        expect(vi.mocked(replaceSessionsFromWebSocket)).toHaveBeenCalledWith([
+        expect(mocked(replaceSessionsFromWebSocket)).toHaveBeenCalledWith([
             { key: "s1", id: "s1" },
         ]);
     });
@@ -100,7 +102,7 @@ describe("socketMessageRouter", () => {
             type: "sessions",
             sessions: [{ key: "s2", id: "s2" }],
         });
-        expect(vi.mocked(replaceSessionsFromWebSocket)).toHaveBeenCalledWith([
+        expect(mocked(replaceSessionsFromWebSocket)).toHaveBeenCalledWith([
             { key: "s2", id: "s2" },
         ]);
     });
@@ -112,7 +114,7 @@ describe("socketMessageRouter", () => {
             ok: true,
             payload: [{ key: "s3", id: "s3" }],
         });
-        expect(vi.mocked(replaceSessionsFromWebSocket)).toHaveBeenCalledWith([
+        expect(mocked(replaceSessionsFromWebSocket)).toHaveBeenCalledWith([
             { key: "s3", id: "s3" },
         ]);
     });
@@ -124,7 +126,7 @@ describe("socketMessageRouter", () => {
             ok: true,
             payload: { sessions: [{ key: "s4", id: "s4" }] },
         });
-        expect(vi.mocked(replaceSessionsFromWebSocket)).toHaveBeenCalledWith([
+        expect(mocked(replaceSessionsFromWebSocket)).toHaveBeenCalledWith([
             { key: "s4", id: "s4" },
         ]);
     });
@@ -142,16 +144,16 @@ describe("socketMessageRouter", () => {
             ok: true,
             payload: { data: { sessions: [{ key: "s6", id: "s6" }] } },
         });
-        expect(vi.mocked(replaceSessionsFromWebSocket)).toHaveBeenCalledTimes(2);
+        expect(mocked(replaceSessionsFromWebSocket)).toHaveBeenCalledTimes(2);
     });
 
     it("ignores res payloads without sessions", () => {
         handleSocketMessage({ type: "res", id: "1", ok: true, payload: { ok: true } });
-        expect(vi.mocked(replaceSessionsFromWebSocket)).not.toHaveBeenCalled();
+        expect(mocked(replaceSessionsFromWebSocket)).not.toHaveBeenCalled();
     });
 
     it("ignores primitive res payloads", () => {
         handleSocketMessage({ type: "res", id: "1", ok: true, payload: "ok" });
-        expect(vi.mocked(replaceSessionsFromWebSocket)).not.toHaveBeenCalled();
+        expect(mocked(replaceSessionsFromWebSocket)).not.toHaveBeenCalled();
     });
 });

@@ -1,8 +1,9 @@
 import { renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, jest } from "bun:test";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import {
     changeDirectory,
     getCompletions,
@@ -14,7 +15,7 @@ import {
 
 describe("terminal hooks", () => {
     it("starts terminal command and polls job", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -47,9 +48,9 @@ describe("terminal hooks", () => {
                     endedAt: null,
                 }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
-        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const invalidateSpy = jest.spyOn(queryClient, "invalidateQueries");
         const wrapper = createQueryWrapper(queryClient);
 
         const { result: start } = renderHook(() => useStartTerminalCommand(), {
@@ -114,7 +115,7 @@ describe("terminal hooks", () => {
     });
 
     it("calls helper functions", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({
@@ -124,24 +125,24 @@ describe("terminal hooks", () => {
                 commonPrefix: "file",
             }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const result = await getCompletions("fi", "/home");
         expect(result.commonPrefix).toBe("file");
 
-        const cdMock = vi.fn().mockResolvedValue({
+        const cdMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ success: true, newCwd: "/tmp" }),
         });
-        vi.stubGlobal("fetch", cdMock);
+        stubGlobal("fetch", cdMock);
         const cdResult = await changeDirectory("/tmp", "/home");
         expect(cdResult.newCwd).toBe("/tmp");
 
-        const stopMock = vi
+        const stopMock = jest
             .fn()
             .mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
-        vi.stubGlobal("fetch", stopMock);
+        stubGlobal("fetch", stopMock);
         await stopTerminalJob("j1");
         expect(stopMock).toHaveBeenCalledWith(
             "/api/exec/j1/stop",

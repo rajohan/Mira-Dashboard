@@ -1,13 +1,14 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted } from "../../../test/testUtils";
 import { GitOverviewCard } from "./GitOverviewCard";
 
-const hooks = vi.hoisted(() => ({
-    useCacheEntry: vi.fn(),
+const hooks = hoisted(() => ({
+    useCacheEntry: jest.fn(),
 }));
 
-vi.mock("../../../hooks/useCache", () => ({
+mock.module("../../../hooks/useCache", () => ({
     useCacheEntry: hooks.useCacheEntry,
 }));
 

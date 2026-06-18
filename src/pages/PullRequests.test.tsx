@@ -1,13 +1,14 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted } from "../test/testUtils";
 import { PullRequests } from "./PullRequests";
 
-const hooks = vi.hoisted(() => ({
-    approve: vi.fn(),
-    approveReview: vi.fn(),
-    deploy: vi.fn(),
+const hooks = hoisted(() => ({
+    approve: jest.fn(),
+    approveReview: jest.fn(),
+    deploy: jest.fn(),
     productionCheckout: {
         branch: "main",
         expectedBranch: "main",
@@ -40,20 +41,20 @@ const hooks = vi.hoisted(() => ({
             url: "https://github.com/rajohan/Mira-Dashboard/pull/10",
         },
     ],
-    refetch: vi.fn(),
-    reject: vi.fn(),
-    updateBranch: vi.fn(),
-    useApprovePullRequest: vi.fn(),
-    useApprovePullRequestReview: vi.fn(),
-    useDeployDashboard: vi.fn(),
-    useProductionCheckout: vi.fn(),
-    usePullRequestDeployments: vi.fn(),
-    usePullRequests: vi.fn(),
-    useRejectPullRequest: vi.fn(),
-    useUpdatePullRequestBranch: vi.fn(),
+    refetch: jest.fn(),
+    reject: jest.fn(),
+    updateBranch: jest.fn(),
+    useApprovePullRequest: jest.fn(),
+    useApprovePullRequestReview: jest.fn(),
+    useDeployDashboard: jest.fn(),
+    useProductionCheckout: jest.fn(),
+    usePullRequestDeployments: jest.fn(),
+    usePullRequests: jest.fn(),
+    useRejectPullRequest: jest.fn(),
+    useUpdatePullRequestBranch: jest.fn(),
 }));
 
-vi.mock("../hooks", () => ({
+mock.module("../hooks", () => ({
     useApprovePullRequest: hooks.useApprovePullRequest,
     useApprovePullRequestReview: hooks.useApprovePullRequestReview,
     useDeployDashboard: hooks.useDeployDashboard,
@@ -64,7 +65,7 @@ vi.mock("../hooks", () => ({
     useUpdatePullRequestBranch: hooks.useUpdatePullRequestBranch,
 }));
 
-vi.mock("../components/ui/ConfirmModal", () => ({
+mock.module("../components/ui/ConfirmModal", () => ({
     ConfirmModal: ({
         confirmLabel,
         isOpen,
@@ -155,7 +156,7 @@ function mockPullRequests(overrides = {}) {
 
 describe("PullRequests page", () => {
     beforeEach(() => {
-        vi.clearAllMocks();
+        jest.clearAllMocks();
         hooks.approve.mockResolvedValue({
             cleanup: { message: "Worktree cleaned" },
             deployment: { note: "Deploy scheduled" },
@@ -266,8 +267,10 @@ describe("PullRequests page", () => {
         await user.click(
             screen.getByTestId("confirm-modal").querySelector(":scope button:last-child")!
         );
-        expect(hooks.reject).toHaveBeenCalledWith({ number: 10 });
-        expect(screen.getByText(/PR rejected/)).toBeInTheDocument();
+        await waitFor(() => {
+            expect(hooks.reject).toHaveBeenCalledWith({ number: 10 });
+        });
+        expect(await screen.findByText(/PR rejected/)).toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: "Deploy latest main" }));
         expect(screen.getByTestId("confirm-modal")).toHaveTextContent(

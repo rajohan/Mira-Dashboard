@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 import { CONFIG_TOP_FILES, HOOKS_DIR_FILES, MAX_PREVIEW_SIZE } from "./fileConstants";
 

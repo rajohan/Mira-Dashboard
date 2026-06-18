@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 import type { MiraProfile } from "../../../types/moltbook";
 import { ProfileCard } from "./ProfileCard";

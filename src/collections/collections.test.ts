@@ -1,36 +1,39 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
-const { capturedOptions, mockUtils, mockIsReady, mockEntries } = vi.hoisted(() => ({
+import { hoisted } from "../test/testUtils";
+
+const { capturedOptions, mockUtils, mockIsReady, mockEntries } = hoisted(() => ({
     capturedOptions: [] as Array<Record<string, unknown>>,
-    mockUtils: { writeUpsert: vi.fn(), writeDelete: vi.fn() },
-    mockIsReady: vi.fn(() => false),
+    mockUtils: { writeUpsert: jest.fn(), writeDelete: jest.fn() },
+    mockIsReady: jest.fn(() => false),
     mockEntries: [] as Array<[string, unknown]>,
 }));
 
-vi.mock("@tanstack/query-db-collection", () => ({
-    queryCollectionOptions: vi.fn((options: Record<string, unknown>) => {
+mock.module("@tanstack/query-db-collection", () => ({
+    queryCollectionOptions: jest.fn((options: Record<string, unknown>) => {
         capturedOptions.push(options);
         return options;
     }),
 }));
 
-vi.mock("@tanstack/react-db", () => ({
-    createCollection: vi.fn(() => ({
+mock.module("@tanstack/react-db", () => ({
+    createCollection: jest.fn(() => ({
         isReady: mockIsReady,
         utils: mockUtils,
-        preload: vi.fn(),
+        preload: jest.fn(),
         [Symbol.iterator]: () => mockEntries[Symbol.iterator](),
     })),
 }));
 
-vi.mock("../lib/queryClient", () => ({
+mock.module("../lib/queryClient", () => ({
     queryClient: {},
     AUTO_REFRESH_MS: 5000,
 }));
 
-import { writeAgentsFromWebSocket } from "./agents";
-import { writeLogFromWebSocket } from "./logs";
-import { deleteSessionFromCollection, replaceSessionsFromWebSocket } from "./sessions";
+const { writeAgentsFromWebSocket } = await import("./agents");
+const { writeLogFromWebSocket } = await import("./logs");
+const { deleteSessionFromCollection, replaceSessionsFromWebSocket } =
+    await import("./sessions");
 
 describe("collections", () => {
     beforeEach(() => {
@@ -105,7 +108,7 @@ describe("collections", () => {
     });
 
     it("writeLogFromWebSocket catches parser errors", () => {
-        const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         mockIsReady.mockReturnValue(true);
         // Force writeUpsert to throw to exercise catch block around parsing/write handling.
         mockUtils.writeUpsert.mockImplementationOnce(() => {

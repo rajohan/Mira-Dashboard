@@ -1,9 +1,9 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, mock } from "bun:test";
 
 import { CodePreview } from "./CodePreview";
 
-vi.mock("react-syntax-highlighter", () => ({
+mock.module("react-syntax-highlighter", () => ({
     __esModule: true,
     default: ({
         language,
@@ -24,7 +24,7 @@ vi.mock("react-syntax-highlighter", () => ({
     ),
 }));
 
-vi.mock("react-syntax-highlighter/dist/esm/styles/hljs", () => ({
+mock.module("react-syntax-highlighter/dist/esm/styles/hljs", () => ({
     monokai: {},
 }));
 

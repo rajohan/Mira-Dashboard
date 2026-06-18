@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, jest } from "bun:test";
 
+import { stubGlobal } from "../../../test/testUtils";
 import type { ChatHistoryMessage } from "./chatTypes";
 import {
     assistantTextLooksRecovered,
@@ -26,7 +27,7 @@ function message(overrides: Partial<ChatHistoryMessage>): ChatHistoryMessage {
 
 describe("chat utils", () => {
     afterEach(() => {
-        vi.restoreAllMocks();
+        jest.restoreAllMocks();
     });
 
     it("converts data URLs and base64 text", () => {
@@ -254,7 +255,7 @@ describe("chat utils", () => {
     });
 
     it("covers merge edge cases and timestamp ordering", () => {
-        vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
+        jest.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
 
         const previous = [
             message({ role: "assistant", text: "" }),
@@ -288,7 +289,7 @@ describe("chat utils", () => {
     });
 
     it("retains recent optimistic and local messages missing from refreshed history", () => {
-        vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
+        jest.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
 
         const previous = [
             message({
@@ -317,7 +318,7 @@ describe("chat utils", () => {
     });
 
     it("retains empty local diagnostics during history merges", () => {
-        vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
+        jest.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
 
         const previous = [
             message({
@@ -353,7 +354,7 @@ describe("chat utils", () => {
     });
 
     it("does not retain optimistic assistant text recovered in refreshed history", () => {
-        vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
+        jest.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
 
         const previous = [
             message({
@@ -383,7 +384,7 @@ describe("chat utils", () => {
     });
 
     it("drops exact assistant text recovered in refreshed history", () => {
-        vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
+        jest.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
 
         const previous = [
             message({
@@ -398,7 +399,7 @@ describe("chat utils", () => {
     });
 
     it("orders missing messages with invalid timestamps after dated insertions", () => {
-        vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
+        jest.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
 
         const previous = [
             message({
@@ -432,7 +433,7 @@ describe("chat utils", () => {
     });
 
     it("drops old optimistic messages with invalid timestamps", () => {
-        vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
+        jest.spyOn(Date, "now").mockReturnValue(Date.parse("2026-05-10T10:02:00.000Z"));
 
         const previous = [
             message({
@@ -478,22 +479,22 @@ describe("chat utils", () => {
                 }
             }
 
-            vi.stubGlobal("FileReader", NonStringFileReader);
+            stubGlobal("FileReader", NonStringFileReader);
             await expect(readFileAsDataUrl(new File(["x"], "bad.bin"))).rejects.toThrow(
                 "Could not read bad.bin"
             );
 
-            vi.stubGlobal("FileReader", ErrorFileReader);
+            stubGlobal("FileReader", ErrorFileReader);
             await expect(readFileAsDataUrl(new File(["x"], "bad.bin"))).rejects.toThrow(
                 "reader failed"
             );
 
-            vi.stubGlobal("FileReader", EmptyErrorFileReader);
+            stubGlobal("FileReader", EmptyErrorFileReader);
             await expect(readFileAsDataUrl(new File(["x"], "bad.bin"))).rejects.toThrow(
                 "Could not read bad.bin"
             );
         } finally {
-            vi.stubGlobal("FileReader", OriginalFileReader);
+            stubGlobal("FileReader", OriginalFileReader);
         }
     });
 

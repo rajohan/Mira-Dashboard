@@ -1,7 +1,8 @@
 import { renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { createQueryWrapper } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import { hasQuotaStatus, useQuotas } from "./useQuotas";
 
 describe("quota hooks", () => {
@@ -59,7 +60,7 @@ describe("quota hooks", () => {
             checkedAt: Date.now(),
             cacheAgeMs: 0,
         };
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({
@@ -68,7 +69,7 @@ describe("quota hooks", () => {
                 cachedAt: "2026-01-01",
             }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useQuotas(), {
             wrapper: createQueryWrapper(),

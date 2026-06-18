@@ -1,13 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { ConfirmModal } from "./ConfirmModal";
 
 describe("ConfirmModal", () => {
     it("renders confirmation content and handles actions", async () => {
-        const onConfirm = vi.fn();
-        const onCancel = vi.fn();
+        const onConfirm = jest.fn();
+        const onCancel = jest.fn();
         render(
             <ConfirmModal
                 isOpen
@@ -38,8 +38,8 @@ describe("ConfirmModal", () => {
                 message="Deploy now?"
                 confirmLabel="Deploy"
                 loading
-                onConfirm={vi.fn()}
-                onCancel={vi.fn()}
+                onConfirm={jest.fn()}
+                onCancel={jest.fn()}
             />
         );
 

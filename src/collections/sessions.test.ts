@@ -1,43 +1,45 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
-const mocks = vi.hoisted(() => {
+import { hoisted } from "../test/testUtils";
+
+const mocks = hoisted(() => {
     const entries: Array<[string, unknown]> = [];
     const collection = {
-        isReady: vi.fn(() => true),
-        preload: vi.fn(),
+        isReady: jest.fn(() => true),
+        preload: jest.fn(),
         utils: {
-            writeDelete: vi.fn(),
-            writeUpsert: vi.fn(),
+            writeDelete: jest.fn(),
+            writeUpsert: jest.fn(),
         },
-        [Symbol.iterator]: vi.fn(() => entries[Symbol.iterator]()),
+        [Symbol.iterator]: jest.fn(() => entries[Symbol.iterator]()),
     };
 
     return {
         collection,
-        createCollection: vi.fn(() => collection),
+        createCollection: jest.fn(() => collection),
         entries,
-        queryCollectionOptions: vi.fn((options: unknown) => options),
+        queryCollectionOptions: jest.fn((options: unknown) => options),
     };
 });
 
-vi.mock("@tanstack/react-db", () => ({
+mock.module("@tanstack/react-db", () => ({
     createCollection: mocks.createCollection,
 }));
 
-vi.mock("@tanstack/query-db-collection", () => ({
+mock.module("@tanstack/query-db-collection", () => ({
     queryCollectionOptions: mocks.queryCollectionOptions,
 }));
 
-vi.mock("../lib/queryClient", () => ({
+mock.module("../lib/queryClient", () => ({
     queryClient: {},
 }));
 
-import {
+const {
     deleteSessionFromCollection,
     preloadSessionsCollection,
     replaceSessionsFromWebSocket,
     sessionsCollection,
-} from "./sessions";
+} = await import("./sessions");
 
 describe("sessions collection", () => {
     beforeEach(() => {

@@ -74,7 +74,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         ws.addEventListener("close", () => {
             options.onClose?.();
             if (shouldReconnect) {
-                setTimeout(() => {
+                window.setTimeout(() => {
                     if (shouldReconnect) {
                         connect();
                     }
@@ -125,7 +125,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                 })
             );
 
-            setTimeout(() => {
+            window.setTimeout(() => {
                 if (!pendingRequests.has(id)) {
                     return;
                 }

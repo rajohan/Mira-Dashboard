@@ -1,12 +1,12 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { AttachmentPreviewModal } from "./AttachmentPreviewModal";
 import type { ChatPreviewItem } from "./chatTypes";
 
 describe("AttachmentPreviewModal", () => {
     it("stays closed without a preview item", () => {
-        render(<AttachmentPreviewModal previewItem={null} onClose={vi.fn()} />);
+        render(<AttachmentPreviewModal previewItem={null} onClose={jest.fn()} />);
 
         expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
@@ -20,7 +20,7 @@ describe("AttachmentPreviewModal", () => {
             url: "data:image/png;base64,abc",
         };
 
-        render(<AttachmentPreviewModal previewItem={preview} onClose={vi.fn()} />);
+        render(<AttachmentPreviewModal previewItem={preview} onClose={jest.fn()} />);
 
         expect(
             await screen.findByRole("dialog", { name: "avatar.png" })
@@ -41,7 +41,7 @@ describe("AttachmentPreviewModal", () => {
                     text: "hello from attachment",
                     title: "notes.txt",
                 }}
-                onClose={vi.fn()}
+                onClose={jest.fn()}
             />
         );
 
@@ -55,7 +55,7 @@ describe("AttachmentPreviewModal", () => {
                     title: "archive.zip",
                     url: "https://example.com/archive.zip",
                 }}
-                onClose={vi.fn()}
+                onClose={jest.fn()}
             />
         );
 
@@ -70,7 +70,7 @@ describe("AttachmentPreviewModal", () => {
         rerender(
             <AttachmentPreviewModal
                 previewItem={{ kind: "file", title: "historical.bin" }}
-                onClose={vi.fn()}
+                onClose={jest.fn()}
             />
         );
 

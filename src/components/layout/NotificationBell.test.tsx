@@ -1,22 +1,23 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted } from "../../test/testUtils";
 import { NotificationBell } from "./NotificationBell";
 
-const hooks = vi.hoisted(() => ({
-    clearRead: vi.fn(),
-    deleteNotification: vi.fn(),
-    markAllRead: vi.fn(),
-    markNotificationRead: vi.fn(),
-    useClearReadNotifications: vi.fn(),
-    useDeleteNotification: vi.fn(),
-    useMarkAllNotificationsRead: vi.fn(),
-    useMarkNotificationRead: vi.fn(),
-    useNotifications: vi.fn(),
+const hooks = hoisted(() => ({
+    clearRead: jest.fn(),
+    deleteNotification: jest.fn(),
+    markAllRead: jest.fn(),
+    markNotificationRead: jest.fn(),
+    useClearReadNotifications: jest.fn(),
+    useDeleteNotification: jest.fn(),
+    useMarkAllNotificationsRead: jest.fn(),
+    useMarkNotificationRead: jest.fn(),
+    useNotifications: jest.fn(),
 }));
 
-vi.mock("../../hooks", () => ({
+mock.module("../../hooks", () => ({
     useClearReadNotifications: hooks.useClearReadNotifications,
     useDeleteNotification: hooks.useDeleteNotification,
     useMarkAllNotificationsRead: hooks.useMarkAllNotificationsRead,

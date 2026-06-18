@@ -1,17 +1,17 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, mock } from "bun:test";
 
 import { CodePreview } from "./CodePreview";
 import { JsonPreview } from "./JsonPreview";
 import { MarkdownPreview } from "./MarkdownPreview";
 
-vi.mock("@microlink/react-json-view", () => ({
+mock.module("@microlink/react-json-view", () => ({
     default: ({ src }: { src: unknown }) => (
         <pre data-testid="json-preview">{JSON.stringify(src)}</pre>
     ),
 }));
 
-vi.mock("react-syntax-highlighter", () => ({
+mock.module("react-syntax-highlighter", () => ({
     default: ({ children, language }: { children: string; language: string }) => (
         <pre data-language={language} data-testid="code-preview">
             {children}
@@ -19,7 +19,7 @@ vi.mock("react-syntax-highlighter", () => ({
     ),
 }));
 
-vi.mock("react-syntax-highlighter/dist/esm/styles/hljs", () => ({
+mock.module("react-syntax-highlighter/dist/esm/styles/hljs", () => ({
     monokai: {},
 }));
 

@@ -1,13 +1,14 @@
 import { renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, jest } from "bun:test";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import { useFileContent, useFiles, useSaveFile } from "./useFiles";
 
 describe("useFiles hooks", () => {
     it("fetches file listing and file content, handles null content path", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -19,7 +20,7 @@ describe("useFiles hooks", () => {
                 status: 200,
                 json: async () => ({ path: "/a", content: "hello", size: 5 }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const wrapper = createQueryWrapper();
 
         const { result: files } = renderHook(() => useFiles(), { wrapper });
@@ -33,12 +34,12 @@ describe("useFiles hooks", () => {
     });
 
     it("fetches path-specific listings and falls back to an empty file list", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({}),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useFiles("/nested path"), {
             wrapper: createQueryWrapper(),
@@ -52,12 +53,12 @@ describe("useFiles hooks", () => {
     });
 
     it("saves file content and invalidates", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
-        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const invalidateSpy = jest.spyOn(queryClient, "invalidateQueries");
         const wrapper = createQueryWrapper(queryClient);
 
         const { result } = renderHook(() => useSaveFile(), { wrapper });
@@ -73,10 +74,10 @@ describe("useFiles hooks", () => {
     });
 
     it("saves config files with config: prefix", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const wrapper = createQueryWrapper();
 
         const { result: content } = renderHook(

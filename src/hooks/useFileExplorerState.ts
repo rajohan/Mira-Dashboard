@@ -126,9 +126,16 @@ export function useFileExplorerState() {
         setHasChanges(value !== fileContent?.content);
     };
 
-    const isJsonEditing = !!(fileContent && isJsonFile(fileContent.path) && !jsonPreview);
+    const activeContentPath = fileContent?.path ?? selectedPath;
+    const isJsonEditing = !!(
+        activeContentPath &&
+        isJsonFile(activeContentPath) &&
+        !jsonPreview
+    );
     const jsonValidationMode =
-        fileContent && getFileExtension(fileContent.path) === "json5" ? "json5" : "json";
+        activeContentPath && getFileExtension(activeContentPath) === "json5"
+            ? "json5"
+            : "json";
     const jsonValidation = isJsonEditing
         ? validateJsonString(editedContent, jsonValidationMode)
         : { valid: true, error: null };

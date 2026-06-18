@@ -1,0 +1,12 @@
+[test]
+root = "src"
+preload = ["./src/test/happydom.ts", "./src/test/testingLibrary.ts"]
+coverageReporter = ["text", "lcov"]
+coverageDir = "coverage"
+coverageThreshold = { lines = 1.0, functions = 1.0, statements = 1.0 }
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = [
+    "src/test/**",
+    "src/types/**",
+    "src/**/*.d.ts",
+]

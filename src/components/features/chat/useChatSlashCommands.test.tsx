@@ -1,6 +1,6 @@
 import { renderHook } from "@testing-library/react";
+import { describe, expect, it, jest } from "bun:test";
 import { act, useState } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import type { ActiveChatStreams } from "./chatRuntime";
 import type { ChatHistoryMessage, ChatSendAttachment } from "./chatTypes";
@@ -29,15 +29,15 @@ function makeAttachment(): ChatSendAttachment {
 function renderSlashCommands(
     overrides: {
         attachments?: ChatSendAttachment[];
-        request?: ReturnType<typeof vi.fn>;
+        request?: ReturnType<typeof jest.fn>;
         initialSendError?: string | null;
         selectedSessionKey?: string;
         confirmResetSession?: () => Promise<boolean>;
     } = {}
 ) {
-    const request = overrides.request || vi.fn().mockResolvedValue({});
+    const request = overrides.request || jest.fn().mockResolvedValue({});
     const confirmResetSession =
-        overrides.confirmResetSession || vi.fn().mockResolvedValue(true);
+        overrides.confirmResetSession || jest.fn().mockResolvedValue(true);
 
     const hook = renderHook(() => {
         const [messages, setMessages] = useState<ChatHistoryMessage[]>([
@@ -139,7 +139,7 @@ describe("useChatSlashCommands", () => {
     });
 
     it("cancels reset commands locally when confirmation is denied", async () => {
-        const confirmResetSession = vi.fn().mockResolvedValue(false);
+        const confirmResetSession = jest.fn().mockResolvedValue(false);
         const { request, result } = renderSlashCommands({ confirmResetSession });
 
         await act(async () => {
@@ -152,7 +152,7 @@ describe("useChatSlashCommands", () => {
     });
 
     it("cancels reset commands when confirmation throws", async () => {
-        const confirmResetSession = vi.fn().mockRejectedValue(new Error("closed"));
+        const confirmResetSession = jest.fn().mockRejectedValue(new Error("closed"));
         const { request, result } = renderSlashCommands({ confirmResetSession });
 
         await act(async () => {
@@ -190,7 +190,7 @@ describe("useChatSlashCommands", () => {
     });
 
     it("reports stop command failures", async () => {
-        const request = vi.fn().mockRejectedValue(new Error("abort failed"));
+        const request = jest.fn().mockRejectedValue(new Error("abort failed"));
         const { result } = renderSlashCommands({ request });
 
         await act(async () => {

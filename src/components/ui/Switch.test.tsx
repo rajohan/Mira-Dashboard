@@ -1,12 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { Switch } from "./Switch";
 
 describe("Switch", () => {
     it("renders label/description and emits changes", async () => {
-        const onChange = vi.fn();
+        const onChange = jest.fn();
         render(
             <Switch
                 checked={false}
@@ -24,7 +24,7 @@ describe("Switch", () => {
 
     it("renders without label or description", () => {
         const { container } = render(
-            <Switch checked={false} onChange={vi.fn()} className="extra" />
+            <Switch checked={false} onChange={jest.fn()} className="extra" />
         );
 
         expect(screen.getByRole("switch")).toBeInTheDocument();
@@ -32,7 +32,7 @@ describe("Switch", () => {
     });
 
     it("shows checked and disabled state", () => {
-        render(<Switch checked onChange={vi.fn()} label="Enabled" disabled />);
+        render(<Switch checked onChange={jest.fn()} label="Enabled" disabled />);
 
         expect(screen.getByRole("switch", { name: "Enabled" })).toBeChecked();
         expect(screen.getByRole("switch", { name: "Enabled" })).toBeDisabled();

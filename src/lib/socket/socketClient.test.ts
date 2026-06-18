@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 
+import { stubGlobal, unstubAllGlobals } from "../../test/testUtils";
 import { createSocketClient } from "./socketClient";
 
 type Listener = (event: Event | MessageEvent) => void;
@@ -68,12 +69,12 @@ const mockSocketInstances: MockWebSocket[] = [];
 describe("socketClient", () => {
     beforeEach(() => {
         mockSocketInstances.length = 0;
-        vi.stubGlobal("WebSocket", MockWebSocket);
+        stubGlobal("WebSocket", MockWebSocket);
     });
 
     afterEach(() => {
-        vi.useRealTimers();
-        vi.unstubAllGlobals();
+        jest.useRealTimers();
+        unstubAllGlobals();
     });
 
     it("creates a client with connect/disconnect/request/isOpen", () => {
@@ -85,7 +86,7 @@ describe("socketClient", () => {
     });
 
     it("connects and reports open state", () => {
-        const onOpen = vi.fn();
+        const onOpen = jest.fn();
         const client = createSocketClient({ url: "ws://localhost", onOpen });
 
         client.connect();
@@ -155,7 +156,7 @@ describe("socketClient", () => {
     });
 
     it("ignores responses without a matching pending request", () => {
-        const onMessage = vi.fn();
+        const onMessage = jest.fn();
         const client = createSocketClient({ url: "ws://localhost", onMessage });
         client.connect();
         mockSocketInstances[0]?.emitOpen();
@@ -172,7 +173,7 @@ describe("socketClient", () => {
     });
 
     it("forwards parsed messages to onMessage", () => {
-        const onMessage = vi.fn();
+        const onMessage = jest.fn();
         const client = createSocketClient({ url: "ws://localhost", onMessage });
         client.connect();
 
@@ -181,7 +182,7 @@ describe("socketClient", () => {
     });
 
     it("handles unparsable messages", () => {
-        const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         const client = createSocketClient({ url: "ws://localhost" });
         client.connect();
 
@@ -191,8 +192,8 @@ describe("socketClient", () => {
     });
 
     it("calls onError and onClose callbacks", () => {
-        const onError = vi.fn();
-        const onClose = vi.fn();
+        const onError = jest.fn();
+        const onClose = jest.fn();
         const client = createSocketClient({ url: "ws://localhost", onError, onClose });
         client.connect();
 
@@ -216,24 +217,55 @@ describe("socketClient", () => {
     });
 
     it("times out unanswered requests", async () => {
-        vi.useFakeTimers();
+        let timeout: (() => void) | undefined;
+        const setTimeoutMock = jest
+            .fn()
+            .mockImplementationOnce((handler: TimerHandler) => {
+                timeout = handler as () => void;
+                return 1;
+            });
+        const setTimeoutSpy = jest
+            .spyOn(window, "setTimeout")
+            .mockImplementationOnce(
+                setTimeoutMock as unknown as typeof window.setTimeout
+            );
         const client = createSocketClient({ url: "ws://localhost" });
         client.connect();
         mockSocketInstances[0]?.emitOpen();
 
-        const promise = client.request("slow.method");
-        const expectation = expect(promise).rejects.toThrow("Request timeout");
-        await vi.advanceTimersByTimeAsync(30_000);
-        await expectation;
+        const rejectionPromise = (async () => {
+            try {
+                await client.request("slow.method");
+            } catch (error) {
+                return error;
+            }
+            throw new Error("Expected request to reject");
+        })();
+        expect(setTimeoutMock).toHaveBeenCalledTimes(1);
+        timeout?.();
+        await expect(rejectionPromise).resolves.toThrow("Request timeout");
+        setTimeoutSpy.mockRestore();
     });
 
     it("does not timeout requests that already resolved", async () => {
-        vi.useFakeTimers();
+        let timeout: (() => void) | undefined;
+        const setTimeoutMock = jest
+            .fn()
+            .mockImplementationOnce((handler: TimerHandler) => {
+                timeout = handler as () => void;
+                return 1;
+            });
+        const setTimeoutSpy = jest
+            .spyOn(window, "setTimeout")
+            .mockImplementationOnce(
+                setTimeoutMock as unknown as typeof window.setTimeout
+            );
         const client = createSocketClient({ url: "ws://localhost" });
         client.connect();
         mockSocketInstances[0]?.emitOpen();
 
         const promise = client.request("fast.method");
+        expect(setTimeoutMock).toHaveBeenCalledTimes(1);
         mockSocketInstances[0]?.emitMessage({
             type: "res",
             id: "1",
@@ -242,44 +274,70 @@ describe("socketClient", () => {
         });
 
         await expect(promise).resolves.toBe("done");
-        await vi.advanceTimersByTimeAsync(30_000);
+        timeout?.();
         expect(mockSocketInstances[0]?.sent).toHaveLength(1);
+        setTimeoutSpy.mockRestore();
     });
 
-    it("reconnects after close while reconnect is enabled", async () => {
-        vi.useFakeTimers();
+    it("reconnects after close while reconnect is enabled", () => {
+        let reconnect: (() => void) | undefined;
+        const setTimeoutMock = jest
+            .fn()
+            .mockImplementationOnce((handler: TimerHandler) => {
+                reconnect = handler as () => void;
+                return 1;
+            });
+        const setTimeoutSpy = jest
+            .spyOn(window, "setTimeout")
+            .mockImplementationOnce(
+                setTimeoutMock as unknown as typeof window.setTimeout
+            );
         const client = createSocketClient({ url: "ws://localhost" });
         client.connect();
         expect(mockSocketInstances).toHaveLength(1);
 
         mockSocketInstances[0]?.emitClose();
-        await vi.advanceTimersByTimeAsync(2_000);
+        reconnect?.();
         expect(mockSocketInstances).toHaveLength(2);
+        setTimeoutSpy.mockRestore();
     });
 
-    it("skips reconnect when disconnected before the retry fires", async () => {
-        vi.useFakeTimers();
+    it("skips reconnect when disconnected before the retry fires", () => {
+        let reconnect: (() => void) | undefined;
+        const setTimeoutMock = jest
+            .fn()
+            .mockImplementationOnce((handler: TimerHandler) => {
+                reconnect = handler as () => void;
+                return 1;
+            });
+        const setTimeoutSpy = jest
+            .spyOn(window, "setTimeout")
+            .mockImplementationOnce(
+                setTimeoutMock as unknown as typeof window.setTimeout
+            );
         const client = createSocketClient({ url: "ws://localhost" });
         client.connect();
         expect(mockSocketInstances).toHaveLength(1);
 
         mockSocketInstances[0]?.emitClose();
         client.disconnect();
-        await vi.advanceTimersByTimeAsync(2_000);
+        reconnect?.();
 
         expect(mockSocketInstances).toHaveLength(1);
+        setTimeoutSpy.mockRestore();
     });
 
-    it("does not schedule reconnect for intentional disconnect close events", async () => {
-        vi.useFakeTimers();
+    it("does not schedule reconnect for intentional disconnect close events", () => {
+        const setTimeoutSpy = jest.spyOn(window, "setTimeout");
         const client = createSocketClient({ url: "ws://localhost" });
         client.connect();
         const socket = mockSocketInstances[0];
 
         client.disconnect();
         socket?.emitClose();
-        await vi.advanceTimersByTimeAsync(2_000);
 
         expect(mockSocketInstances).toHaveLength(1);
+        expect(setTimeoutSpy).not.toHaveBeenCalled();
+        setTimeoutSpy.mockRestore();
     });
 });

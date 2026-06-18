@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import type { DockerImage } from "../../../hooks/useDocker";
 import { DockerImagesTable } from "./DockerImagesTable";
@@ -44,15 +44,19 @@ const images: DockerImage[] = [
 describe("DockerImagesTable", () => {
     it("renders empty state", () => {
         render(
-            <DockerImagesTable images={[]} onDelete={vi.fn()} onPruneUnused={vi.fn()} />
+            <DockerImagesTable
+                images={[]}
+                onDelete={jest.fn()}
+                onPruneUnused={jest.fn()}
+            />
         );
 
         expect(screen.getByText("No images found.")).toBeInTheDocument();
     });
 
     it("renders images and deletes only unused images", async () => {
-        const onDelete = vi.fn();
-        const onPruneUnused = vi.fn();
+        const onDelete = jest.fn();
+        const onPruneUnused = jest.fn();
         render(
             <DockerImagesTable
                 images={images}
@@ -97,8 +101,8 @@ describe("DockerImagesTable", () => {
             <DockerImagesTable
                 images={images}
                 isPruning
-                onDelete={vi.fn()}
-                onPruneUnused={vi.fn()}
+                onDelete={jest.fn()}
+                onPruneUnused={jest.fn()}
             />
         );
 

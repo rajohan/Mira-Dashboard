@@ -1,39 +1,42 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
-const mocks = vi.hoisted(() => {
+import { hoisted } from "../test/testUtils";
+
+const mocks = hoisted(() => {
     const collection = {
-        isReady: vi.fn(() => true),
-        preload: vi.fn(),
+        isReady: jest.fn(() => true),
+        preload: jest.fn(),
         utils: {
-            writeUpsert: vi.fn(),
+            writeUpsert: jest.fn(),
         },
     };
 
     return {
         collection,
-        createCollection: vi.fn(() => collection),
-        parseLogLine: vi.fn(),
-        queryCollectionOptions: vi.fn((options: unknown) => options),
+        createCollection: jest.fn(() => collection),
+        parseLogLine: jest.fn(),
+        queryCollectionOptions: jest.fn((options: unknown) => options),
     };
 });
 
-vi.mock("@tanstack/react-db", () => ({
+mock.module("@tanstack/react-db", () => ({
     createCollection: mocks.createCollection,
 }));
 
-vi.mock("@tanstack/query-db-collection", () => ({
+mock.module("@tanstack/query-db-collection", () => ({
     queryCollectionOptions: mocks.queryCollectionOptions,
 }));
 
-vi.mock("../lib/queryClient", () => ({
+mock.module("../lib/queryClient", () => ({
     queryClient: {},
 }));
 
-vi.mock("../utils/logUtils", () => ({
+mock.module("../utils/logUtils", () => ({
     parseLogLine: mocks.parseLogLine,
 }));
 
-import { logsCollection, preloadLogsCollection, writeLogFromWebSocket } from "./logs";
+const { logsCollection, preloadLogsCollection, writeLogFromWebSocket } =
+    await import("./logs");
 
 describe("logs collection", () => {
     beforeEach(() => {
@@ -75,7 +78,7 @@ describe("logs collection", () => {
     });
 
     it("ignores unparseable logs, parser failures, and unready collections", () => {
-        const consoleError = vi.spyOn(console, "error").mockImplementation(() => {
+        const consoleError = jest.spyOn(console, "error").mockImplementation(() => {
             // Suppress expected parser error noise for this negative-path assertion.
         });
 

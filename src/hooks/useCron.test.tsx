@@ -1,8 +1,9 @@
 import { renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, jest } from "bun:test";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import {
     cronKeys,
     useCronJobs,
@@ -14,12 +15,12 @@ import {
 
 describe("cron hooks", () => {
     it("selects jobs from cron jobs response", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ jobs: [{ id: "job-1", enabled: true }] }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useCronJobs(), {
             wrapper: createQueryWrapper(),
@@ -32,14 +33,14 @@ describe("cron hooks", () => {
     });
 
     it("posts mutation payloads and invalidates jobs", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ ok: true }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
-        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const invalidateSpy = jest.spyOn(queryClient, "invalidateQueries");
 
         const wrapper = createQueryWrapper(queryClient);
         const { result: toggle } = renderHook(() => useToggleCronJob(), { wrapper });

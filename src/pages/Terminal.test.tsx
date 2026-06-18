@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 import { act } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hoisted } from "../test/testUtils";
 import {
     isTerminalOutputAtBottom,
     scrollTerminalOutputToBottom,
@@ -10,11 +11,11 @@ import {
     Terminal,
 } from "./Terminal";
 
-const terminal = vi.hoisted(() => ({
-    addCommand: vi.fn(),
-    changeDirectory: vi.fn(),
-    clearHistory: vi.fn(),
-    getCompletions: vi.fn(),
+const terminal = hoisted(() => ({
+    addCommand: jest.fn(),
+    changeDirectory: jest.fn(),
+    clearHistory: jest.fn(),
+    getCompletions: jest.fn(),
     history: [] as Array<{
         code: number | null;
         command: string;
@@ -28,15 +29,15 @@ const terminal = vi.hoisted(() => ({
         stdout: string;
     }>,
     nextId: 1,
-    startCommand: vi.fn(),
-    stopTerminalJob: vi.fn(),
-    updateCommand: vi.fn(),
-    useStartTerminalCommand: vi.fn(),
-    useTerminalHistory: vi.fn(),
-    useTerminalJob: vi.fn(),
+    startCommand: jest.fn(),
+    stopTerminalJob: jest.fn(),
+    updateCommand: jest.fn(),
+    useStartTerminalCommand: jest.fn(),
+    useTerminalHistory: jest.fn(),
+    useTerminalJob: jest.fn(),
 }));
 
-vi.mock("../hooks/useTerminal", () => ({
+mock.module("../hooks/useTerminal", () => ({
     changeDirectory: terminal.changeDirectory,
     getCompletions: terminal.getCompletions,
     stopTerminalJob: terminal.stopTerminalJob,
@@ -131,7 +132,7 @@ describe("Terminal page", () => {
 
     it("scrolls terminal output to the bottom defensively", () => {
         expect(scrollTerminalOutputToBottom(null)).toBe(false);
-        const onScrolled = vi.fn();
+        const onScrolled = jest.fn();
         expect(scrollTerminalOutputToBottomAndReport(null, onScrolled)).toBe(false);
         expect(onScrolled).not.toHaveBeenCalled();
 
@@ -144,7 +145,7 @@ describe("Terminal page", () => {
         expect(scrollTerminalOutputToBottom(output)).toBe(true);
         expect(output.scrollTop).toBe(500);
         expect(scrollTerminalOutputToBottomAndReport(output, onScrolled)).toBe(true);
-        expect(onScrolled).toHaveBeenCalledOnce();
+        expect(onScrolled).toHaveBeenCalledTimes(1);
     });
 
     it("handles pwd locally", async () => {

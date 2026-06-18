@@ -1,35 +1,36 @@
 import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted } from "../test/testUtils";
 import { Database } from "./Database";
 
-const hooks = vi.hoisted(() => ({
-    useDatabaseOverview: vi.fn(),
+const hooks = hoisted(() => ({
+    useDatabaseOverview: jest.fn(),
 }));
 
-vi.mock("../hooks/useDatabase", () => ({
+mock.module("../hooks/useDatabase", () => ({
     useDatabaseOverview: hooks.useDatabaseOverview,
 }));
 
-vi.mock("../components/features/database/DatabaseOverviewCards", () => ({
+mock.module("../components/features/database/DatabaseOverviewCards", () => ({
     DatabaseOverviewCards: ({ overview }: { overview: { databaseCount: number } }) => (
         <div data-testid="overview-cards">databases: {overview.databaseCount}</div>
     ),
 }));
 
-vi.mock("../components/features/database/DatabaseSizesTable", () => ({
+mock.module("../components/features/database/DatabaseSizesTable", () => ({
     DatabasesTable: ({ databases }: { databases: unknown[] }) => (
         <div data-testid="databases-table">database rows: {databases.length}</div>
     ),
 }));
 
-vi.mock("../components/features/database/AutovacuumHealthTable", () => ({
+mock.module("../components/features/database/AutovacuumHealthTable", () => ({
     AutovacuumHealthTable: ({ data }: { data: unknown[] }) => (
         <div data-testid="autovacuum-table">dead tuples: {data.length}</div>
     ),
 }));
 
-vi.mock("../components/features/database/TopQueriesTable", () => ({
+mock.module("../components/features/database/TopQueriesTable", () => ({
     TopQueriesTable: ({ data, enabled }: { data: unknown[]; enabled: boolean }) => (
         <div data-testid="top-queries-table">
             top queries: {data.length}, enabled: {String(enabled)}

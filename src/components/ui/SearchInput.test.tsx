@@ -1,12 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { SearchInput } from "./SearchInput";
 
 describe("SearchInput", () => {
     it("renders placeholder and emits typed values", async () => {
-        const onChange = vi.fn();
+        const onChange = jest.fn();
         render(<SearchInput value="" onChange={onChange} placeholder="Search tasks" />);
 
         await userEvent.type(
@@ -21,7 +21,7 @@ describe("SearchInput", () => {
         render(
             <SearchInput
                 value=""
-                onChange={vi.fn()}
+                onChange={jest.fn()}
                 label="Filter task board"
                 placeholder="Search tasks"
             />
@@ -36,7 +36,7 @@ describe("SearchInput", () => {
         render(
             <SearchInput
                 value=""
-                onChange={vi.fn()}
+                onChange={jest.fn()}
                 label="   "
                 placeholder=" Search tasks "
             />
@@ -49,7 +49,9 @@ describe("SearchInput", () => {
     });
 
     it("uses a fallback accessible label when label and placeholder are empty", () => {
-        render(<SearchInput value="" onChange={vi.fn()} label="   " placeholder="   " />);
+        render(
+            <SearchInput value="" onChange={jest.fn()} label="   " placeholder="   " />
+        );
 
         expect(screen.getByRole("textbox", { name: "Search" })).toHaveAttribute(
             "aria-label",
@@ -58,7 +60,7 @@ describe("SearchInput", () => {
     });
 
     it("clears the value with a default accessible label", async () => {
-        const onChange = vi.fn();
+        const onChange = jest.fn();
         render(
             <SearchInput
                 value="deploy"

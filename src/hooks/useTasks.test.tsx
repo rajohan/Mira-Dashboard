@@ -1,8 +1,9 @@
 import { renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, jest } from "bun:test";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import {
     taskKeys,
     useAssignTask,
@@ -19,7 +20,7 @@ import {
 
 describe("task hooks", () => {
     it("fetches task lists and enabled task updates", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -31,7 +32,7 @@ describe("task hooks", () => {
                 status: 200,
                 json: async () => [{ id: 2, messageMd: "done" }],
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const wrapper = createQueryWrapper();
 
         const { result: tasks } = renderHook(() => useTasks(), { wrapper });
@@ -49,8 +50,8 @@ describe("task hooks", () => {
     });
 
     it("does not fetch task updates without a task id", () => {
-        const fetchMock = vi.fn();
-        vi.stubGlobal("fetch", fetchMock);
+        const fetchMock = jest.fn();
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useTaskUpdates(null), {
             wrapper: createQueryWrapper(),
@@ -61,14 +62,14 @@ describe("task hooks", () => {
     });
 
     it("posts task mutations and invalidates task lists", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ number: 1 }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
-        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const invalidateSpy = jest.spyOn(queryClient, "invalidateQueries");
         const wrapper = createQueryWrapper(queryClient);
 
         const { result: createTask } = renderHook(() => useCreateTask(), { wrapper });
@@ -122,12 +123,12 @@ describe("task hooks", () => {
     });
 
     it("posts task update mutations and invalidates update/list queries", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValue({ ok: true, status: 200, json: async () => ({ id: 2 }) });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
-        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const invalidateSpy = jest.spyOn(queryClient, "invalidateQueries");
         const wrapper = createQueryWrapper(queryClient);
 
         const { result: createUpdate } = renderHook(() => useCreateTaskUpdate(), {

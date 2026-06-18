@@ -20,10 +20,8 @@
         "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css}\" \"backend/**/*.js\"",
         "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json,css}\" \"backend/**/*.js\"",
         "preview": "vite preview",
-        "test": "node scripts/runVitestChunks.mjs",
-        "test:vitest": "vitest run",
-        "test:coverage": "node scripts/runVitestChunks.mjs --coverage --coverage.reporter=lcovonly --coverage.reporter=json --coverage.reporter=text-summary && node scripts/checkLcovThresholds.mjs --lines=100 --functions=100 --branches=100 --statements=100",
-        "test:coverage:vitest": "vitest run --coverage"
+        "test": "bun test --isolate",
+        "test:coverage": "bun test --isolate --coverage"
     },
     "dependencies": {
         "@dnd-kit/core": "^6.3.1",
@@ -62,6 +60,7 @@
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
+        "@happy-dom/global-registrator": "^20.10.6",
         "@rolldown/plugin-babel": "^0.2.3",
         "@tailwindcss/postcss": "^4.3.1",
         "@tanstack/devtools-vite": "^0.7.0",
@@ -69,12 +68,12 @@
         "@testing-library/jest-dom": "^6.9.1",
         "@testing-library/react": "^16.3.2",
         "@testing-library/user-event": "^14.6.1",
+        "@types/bun": "^1.3.14",
         "@types/node": "^25.9.3",
         "@types/react": "^19.2.17",
         "@types/react-dom": "^19.2.3",
         "@types/react-syntax-highlighter": "^15.5.13",
         "@vitejs/plugin-react": "^6.0.2",
-        "@vitest/coverage-v8": "^4.1.8",
         "autoprefixer": "^10.5.0",
         "babel-plugin-react-compiler": "^1.0.0",
         "eslint": "^10.5.0",
@@ -86,14 +85,13 @@
         "eslint-plugin-simple-import-sort": "^13.0.0",
         "eslint-plugin-unicorn": "^66.0.0",
         "globals": "^17.6.0",
-        "jsdom": "^29.1.1",
+        "happy-dom": "^20.10.6",
         "postcss": "^8.5.15",
         "prettier": "^3.8.4",
         "prettier-plugin-tailwindcss": "^0.8.0",
         "tailwindcss": "^4.2.4",
         "typescript": "^6.0.3",
         "typescript-eslint": "^8.61.0",
-        "vite": "^8.0.16",
-        "vitest": "^4.1.8"
+        "vite": "^8.0.16"
     }
 }

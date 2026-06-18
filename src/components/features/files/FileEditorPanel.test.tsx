@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import type { FileContent } from "../../../types/file";
 import { FileEditorPanel } from "./FileEditorPanel";
@@ -15,11 +15,11 @@ const jsonFile: FileContent = {
 
 function renderPanel(overrides: Partial<Parameters<typeof FileEditorPanel>[0]> = {}) {
     const handlers = {
-        onCodePreviewChange: vi.fn(),
-        onContentChange: vi.fn(),
-        onJsonPreviewChange: vi.fn(),
-        onMarkdownPreviewChange: vi.fn(),
-        onSave: vi.fn(),
+        onCodePreviewChange: jest.fn(),
+        onContentChange: jest.fn(),
+        onJsonPreviewChange: jest.fn(),
+        onMarkdownPreviewChange: jest.fn(),
+        onSave: jest.fn(),
     };
     const props: Parameters<typeof FileEditorPanel>[0] = {
         codeEditMode: false,
@@ -63,11 +63,11 @@ describe("FileEditorPanel", () => {
                 jsonValidation={{ error: null, valid: true }}
                 largeFileWarning={false}
                 markdownPreview={false}
-                onCodePreviewChange={vi.fn()}
-                onContentChange={vi.fn()}
-                onJsonPreviewChange={vi.fn()}
-                onMarkdownPreviewChange={vi.fn()}
-                onSave={vi.fn()}
+                onCodePreviewChange={jest.fn()}
+                onContentChange={jest.fn()}
+                onJsonPreviewChange={jest.fn()}
+                onMarkdownPreviewChange={jest.fn()}
+                onSave={jest.fn()}
                 savePending={false}
                 selectedPath="/workspace/missing.txt"
                 syntaxClass="text-primary-300"
@@ -88,11 +88,11 @@ describe("FileEditorPanel", () => {
                 jsonValidation={{ error: null, valid: true }}
                 largeFileWarning={false}
                 markdownPreview={false}
-                onCodePreviewChange={vi.fn()}
-                onContentChange={vi.fn()}
-                onJsonPreviewChange={vi.fn()}
-                onMarkdownPreviewChange={vi.fn()}
-                onSave={vi.fn()}
+                onCodePreviewChange={jest.fn()}
+                onContentChange={jest.fn()}
+                onJsonPreviewChange={jest.fn()}
+                onMarkdownPreviewChange={jest.fn()}
+                onSave={jest.fn()}
                 savePending={false}
                 selectedPath="/workspace/missing.txt"
                 syntaxClass="text-primary-300"
@@ -167,11 +167,11 @@ describe("FileEditorPanel", () => {
                 jsonValidation={{ error: null, valid: true }}
                 largeFileWarning={false}
                 markdownPreview={false}
-                onCodePreviewChange={vi.fn()}
-                onContentChange={vi.fn()}
-                onJsonPreviewChange={vi.fn()}
-                onMarkdownPreviewChange={vi.fn()}
-                onSave={vi.fn()}
+                onCodePreviewChange={jest.fn()}
+                onContentChange={jest.fn()}
+                onJsonPreviewChange={jest.fn()}
+                onMarkdownPreviewChange={jest.fn()}
+                onSave={jest.fn()}
                 savePending={false}
                 selectedPath="/workspace/config.json"
                 syntaxClass="text-primary-300"

@@ -1,27 +1,28 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted } from "../test/testUtils";
 import { Jobs } from "./Jobs";
 
-const hooks = vi.hoisted(() => ({
-    refetch: vi.fn(),
-    deleteJob: vi.fn(),
-    runNow: vi.fn(),
-    runScheduledNow: vi.fn(),
-    scheduledRunsRefetch: vi.fn(),
-    toggleJob: vi.fn(),
-    updateJob: vi.fn(),
-    updateScheduledJob: vi.fn(),
-    useCronJobs: vi.fn(),
-    useDeleteCronJob: vi.fn(),
-    useRunCronJobNow: vi.fn(),
-    useRunScheduledJobNow: vi.fn(),
-    useScheduledJobRuns: vi.fn(),
-    useScheduledJobs: vi.fn(),
-    useToggleCronJob: vi.fn(),
-    useUpdateCronJob: vi.fn(),
-    useUpdateScheduledJob: vi.fn(),
+const hooks = hoisted(() => ({
+    refetch: jest.fn(),
+    deleteJob: jest.fn(),
+    runNow: jest.fn(),
+    runScheduledNow: jest.fn(),
+    scheduledRunsRefetch: jest.fn(),
+    toggleJob: jest.fn(),
+    updateJob: jest.fn(),
+    updateScheduledJob: jest.fn(),
+    useCronJobs: jest.fn(),
+    useDeleteCronJob: jest.fn(),
+    useRunCronJobNow: jest.fn(),
+    useRunScheduledJobNow: jest.fn(),
+    useScheduledJobRuns: jest.fn(),
+    useScheduledJobs: jest.fn(),
+    useToggleCronJob: jest.fn(),
+    useUpdateCronJob: jest.fn(),
+    useUpdateScheduledJob: jest.fn(),
 }));
 
 interface MockCronJob {
@@ -34,7 +35,7 @@ interface MockCronJob {
     enabled?: boolean;
 }
 
-vi.mock("../hooks", () => ({
+mock.module("../hooks", () => ({
     useCronJobs: hooks.useCronJobs,
     useDeleteCronJob: hooks.useDeleteCronJob,
     useRunCronJobNow: hooks.useRunCronJobNow,
@@ -46,7 +47,7 @@ vi.mock("../hooks", () => ({
     useUpdateScheduledJob: hooks.useUpdateScheduledJob,
 }));
 
-vi.mock("../components/features/cron", () => ({
+mock.module("../components/features/cron", () => ({
     CronJobDetails: ({
         deliveryDraft,
         editError,
@@ -909,12 +910,18 @@ describe("Jobs page", () => {
         expect(screen.getByDisplayValue("7200")).toBeInTheDocument();
     });
 
-    it("opens OpenClaw cron from jobs deep links", () => {
-        window.history.replaceState(null, "", "/jobs?view=openclaw&job=cleanup");
+    it("opens OpenClaw cron from jobs deep links", async () => {
+        window.history.replaceState(
+            null,
+            "",
+            "http://localhost/jobs?view=openclaw&job=cleanup"
+        );
 
         render(<Jobs />);
 
-        expect(screen.getByTestId("cron-list")).toHaveTextContent("selected: cleanup");
+        await waitFor(() =>
+            expect(screen.getByTestId("cron-list")).toHaveTextContent("selected: cleanup")
+        );
         expect(screen.getByTestId("cron-details")).toHaveTextContent("job: Cleanup");
     });
 
@@ -1130,10 +1137,11 @@ describe("Jobs page", () => {
         await user.click(screen.getByRole("button", { name: "Invalid schedule" }));
         expect(screen.getByText("invalid: true")).toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: "Save" }));
-        expect(await screen.findByText(/Unexpected token/)).toBeInTheDocument();
+        const parseErrorPattern = /Unexpected (token|identifier)/;
+        expect(await screen.findByText(parseErrorPattern)).toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: "Cancel edit" }));
-        expect(screen.queryByText(/Unexpected token/)).not.toBeInTheDocument();
+        expect(screen.queryByText(parseErrorPattern)).not.toBeInTheDocument();
     });
 
     it("uses the generic edit error for non-Error save failures", async () => {

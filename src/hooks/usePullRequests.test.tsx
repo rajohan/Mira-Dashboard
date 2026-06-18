@@ -1,8 +1,9 @@
 import { renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, jest } from "bun:test";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import {
     pullRequestKeys,
     useApprovePullRequest,
@@ -17,7 +18,7 @@ import {
 
 describe("pull request hooks", () => {
     it("fetches PR, deployment and checkout queries", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
@@ -34,7 +35,7 @@ describe("pull request hooks", () => {
                 status: 200,
                 json: async () => ({ checkout: { branch: "main" } }),
             });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const wrapper = createQueryWrapper();
 
         const { result: prs } = renderHook(() => usePullRequests(), { wrapper });
@@ -68,36 +69,38 @@ describe("pull request hooks", () => {
     });
 
     it("posts PR actions and invalidates related queries", async () => {
-        const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
-            const url = String(input);
-            return {
-                ok: true,
-                status: 200,
-                json: async () =>
-                    url.endsWith("/10/review-approval")
-                        ? {
-                              ok: true,
-                              pullRequest: {
-                                  number: 10,
-                                  reviewDecision: "APPROVED",
-                                  title: "Approved",
-                              },
-                          }
-                        : url.endsWith("/10/update-branch")
-                          ? {
-                                ok: true,
-                                pullRequest: {
-                                    number: 11,
-                                    reviewDecision: "REVIEW_REQUIRED",
-                                    title: "Updated branch",
-                                },
-                            }
-                          : { ok: true },
-            };
-        });
-        vi.stubGlobal("fetch", fetchMock);
+        const fetchMock = jest
+            .fn()
+            .mockImplementation(async (input: RequestInfo | URL) => {
+                const url = String(input);
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () =>
+                        url.endsWith("/10/review-approval")
+                            ? {
+                                  ok: true,
+                                  pullRequest: {
+                                      number: 10,
+                                      reviewDecision: "APPROVED",
+                                      title: "Approved",
+                                  },
+                              }
+                            : url.endsWith("/10/update-branch")
+                              ? {
+                                    ok: true,
+                                    pullRequest: {
+                                        number: 11,
+                                        reviewDecision: "REVIEW_REQUIRED",
+                                        title: "Updated branch",
+                                    },
+                                }
+                              : { ok: true },
+                };
+            });
+        stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
-        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const invalidateSpy = jest.spyOn(queryClient, "invalidateQueries");
         const wrapper = createQueryWrapper(queryClient);
         queryClient.setQueryData(pullRequestKeys.list(), [
             { number: 10, reviewDecision: "REVIEW_REQUIRED", title: "Old" },
@@ -177,14 +180,14 @@ describe("pull request hooks", () => {
         expect(invalidateSpy).toHaveBeenCalledWith({
             queryKey: pullRequestKeys.productionCheckout(),
         });
-        expect(queryClient.getQueryData(pullRequestKeys.list())).toEqual([
+        expect(queryClient.getQueryData<unknown>(pullRequestKeys.list())).toEqual([
             { number: 10, reviewDecision: "APPROVED", title: "Approved" },
             { number: 11, reviewDecision: "REVIEW_REQUIRED", title: "Updated branch" },
         ]);
     });
 
     it("updates a missing pull request cache when GitHub returns a branch result", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({
@@ -192,7 +195,7 @@ describe("pull request hooks", () => {
                 pullRequest: { number: 12, title: "Branch updated" },
             }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
         const wrapper = createQueryWrapper(queryClient);
         const { result } = renderHook(() => useUpdatePullRequestBranch(), { wrapper });
@@ -201,18 +204,18 @@ describe("pull request hooks", () => {
             await result.current.mutateAsync({ number: 12 });
         });
 
-        expect(queryClient.getQueryData(pullRequestKeys.list())).toEqual([]);
+        expect(queryClient.getQueryData<unknown>(pullRequestKeys.list())).toEqual([]);
     });
 
     it("invalidates pull requests when branch updates return no pull request", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ ok: true }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
-        const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+        const invalidateSpy = jest.spyOn(queryClient, "invalidateQueries");
         const wrapper = createQueryWrapper(queryClient);
         queryClient.setQueryData(pullRequestKeys.list(), [
             { number: 12, title: "Existing branch" },
@@ -223,7 +226,7 @@ describe("pull request hooks", () => {
             await result.current.mutateAsync({ number: 12 });
         });
 
-        expect(queryClient.getQueryData(pullRequestKeys.list())).toEqual([
+        expect(queryClient.getQueryData<unknown>(pullRequestKeys.list())).toEqual([
             { number: 12, title: "Existing branch" },
         ]);
         expect(invalidateSpy).toHaveBeenCalledWith({

@@ -1,20 +1,21 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
+import { hoisted } from "../../../test/testUtils";
 import type { Task } from "../../../types/task";
 import { TaskCard } from "./TaskCard";
 
-const sortable = vi.hoisted(() => ({
+const sortable = hoisted(() => ({
     transform: null as null | { x: number; y: number; scaleX: number; scaleY: number },
 }));
 
-vi.mock("@dnd-kit/sortable", () => ({
+mock.module("@dnd-kit/sortable", () => ({
     useSortable: () => ({
         attributes: { "aria-describedby": "sortable-task" },
-        listeners: { onPointerDown: vi.fn() },
-        setActivatorNodeRef: vi.fn(),
-        setNodeRef: vi.fn(),
+        listeners: { onPointerDown: jest.fn() },
+        setActivatorNodeRef: jest.fn(),
+        setNodeRef: jest.fn(),
         transform: sortable.transform,
     }),
 }));
@@ -46,7 +47,7 @@ describe("TaskCard", () => {
     });
 
     it("renders task metadata and calls onClick", async () => {
-        const onClick = vi.fn();
+        const onClick = jest.fn();
         render(<TaskCard task={makeTask()} onClick={onClick} />);
 
         expect(screen.getByText("#42")).toBeInTheDocument();
@@ -64,7 +65,7 @@ describe("TaskCard", () => {
 
     it("opens the task from keyboard focus", async () => {
         const user = userEvent.setup();
-        const onClick = vi.fn();
+        const onClick = jest.fn();
         render(<TaskCard task={makeTask()} onClick={onClick} />);
 
         const openButton = screen.getByRole("button", {
@@ -79,7 +80,7 @@ describe("TaskCard", () => {
     });
 
     it("stops card clicks from the drag handle", async () => {
-        const onClick = vi.fn();
+        const onClick = jest.fn();
         render(<TaskCard task={makeTask()} onClick={onClick} />);
 
         await userEvent.click(screen.getByRole("button", { name: "Drag task #42" }));
@@ -93,7 +94,7 @@ describe("TaskCard", () => {
         render(
             <TaskCard
                 isDragging
-                onClick={vi.fn()}
+                onClick={jest.fn()}
                 task={makeTask({
                     assignees: [{ name: "Raymond" }],
                     automation: {
@@ -116,7 +117,7 @@ describe("TaskCard", () => {
         render(
             <TaskCard
                 isDragging={false}
-                onClick={vi.fn()}
+                onClick={jest.fn()}
                 task={makeTask({ number: 43, title: "Stationary transformed task" })}
             />
         );
@@ -126,7 +127,7 @@ describe("TaskCard", () => {
     it("shows live cron status on recurring task cards", () => {
         const { rerender } = render(
             <TaskCard
-                onClick={vi.fn()}
+                onClick={jest.fn()}
                 task={makeTask({
                     automation: {
                         type: "cron",
@@ -143,7 +144,7 @@ describe("TaskCard", () => {
 
         rerender(
             <TaskCard
-                onClick={vi.fn()}
+                onClick={jest.fn()}
                 task={makeTask({
                     automation: {
                         type: "cron",
@@ -160,7 +161,7 @@ describe("TaskCard", () => {
 
         rerender(
             <TaskCard
-                onClick={vi.fn()}
+                onClick={jest.fn()}
                 task={makeTask({
                     automation: {
                         type: "cron",
@@ -178,7 +179,7 @@ describe("TaskCard", () => {
 
     it("renders without an assignee and falls back to unknown avatar initials", () => {
         const { rerender } = render(
-            <TaskCard task={makeTask({ assignees: [] })} onClick={vi.fn()} />
+            <TaskCard task={makeTask({ assignees: [] })} onClick={jest.fn()} />
         );
 
         expect(screen.queryByText("Recurring")).not.toBeInTheDocument();
@@ -189,7 +190,7 @@ describe("TaskCard", () => {
                 task={makeTask({
                     assignees: [{}],
                 })}
-                onClick={vi.fn()}
+                onClick={jest.fn()}
             />
         );
 
@@ -200,7 +201,7 @@ describe("TaskCard", () => {
                 task={makeTask({
                     assignees: [{ avatar_url: "https://example.com/avatar.png" }],
                 })}
-                onClick={vi.fn()}
+                onClick={jest.fn()}
             />
         );
         expect(screen.getByAltText("Avatar")).toHaveAttribute(

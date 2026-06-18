@@ -1,90 +1,66 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const mocks = vi.hoisted(() => {
-    const authStore = { state: { isAuthenticated: false } };
-    const authActions = { initialize: vi.fn() };
-    const routes: Array<Record<string, unknown>> = [];
-    const rootRoute = {
-        addChildren: vi.fn((children: unknown[]) => ({ type: "root", children })),
-    };
-
-    return {
-        authActions,
-        authStore,
-        createRootRoute: vi.fn(() => rootRoute),
-        createRoute: vi.fn((config: Record<string, unknown>) => {
-            const route = {
-                ...config,
-                addChildren: vi.fn((children: unknown[]) => ({ ...route, children })),
-            };
-            routes.push(route);
-            return route;
-        }),
-        createRouter: vi.fn((config: unknown) => ({ type: "router", config })),
-        redirect: vi.fn((target: unknown) => ({ type: "redirect", target })),
-        rootRoute,
-        routes,
-    };
-});
-
-vi.mock("@tanstack/react-router", () => ({
-    createRootRoute: mocks.createRootRoute,
-    createRoute: mocks.createRoute,
-    createRouter: mocks.createRouter,
-    Outlet: () => <div data-testid="outlet" />,
-    redirect: mocks.redirect,
-}));
-
-vi.mock("./components/layout/Layout", () => ({
-    Layout: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
-
-vi.mock("./pages/Agents", () => ({ Agents: () => <div>Agents</div> }));
-vi.mock("./pages/Chat", () => ({ Chat: () => <div>Chat</div> }));
-vi.mock("./pages/Dashboard", () => ({ Dashboard: () => <div>Dashboard</div> }));
-vi.mock("./pages/Database", () => ({ Database: () => <div>Database</div> }));
-vi.mock("./pages/Docker", () => ({ Docker: () => <div>Docker</div> }));
-vi.mock("./pages/Files", () => ({ Files: () => <div>Files</div> }));
-vi.mock("./pages/Jobs", () => ({ Jobs: () => <div>Jobs</div> }));
-vi.mock("./pages/Login", () => ({ Login: () => <div>Login</div> }));
-vi.mock("./pages/Logs", () => ({ Logs: () => <div>Logs</div> }));
-vi.mock("./pages/Moltbook", () => ({ Moltbook: () => <div>Moltbook</div> }));
-vi.mock("./pages/PullRequests", () => ({
-    PullRequests: () => <div>PullRequests</div>,
-}));
-vi.mock("./pages/Sessions", () => ({ Sessions: () => <div>Sessions</div> }));
-vi.mock("./pages/Settings", () => ({ Settings: () => <div>Settings</div> }));
-vi.mock("./pages/Tasks", () => ({ Tasks: () => <div>Tasks</div> }));
-vi.mock("./pages/Terminal", () => ({ Terminal: () => <div>Terminal</div> }));
-
-vi.mock("./stores/authStore", () => ({
-    authActions: mocks.authActions,
-    authStore: mocks.authStore,
-}));
+import { beforeEach, describe, expect, it, jest } from "bun:test";
+import { isValidElement } from "react";
 
 import { router } from "./router";
+import { authActions } from "./stores/authStore";
+import { stubGlobal, unstubAllGlobals } from "./test/testUtils";
+
+type TestRoute = {
+    children?: TestRoute[];
+    id?: string;
+    options: {
+        beforeLoad?: () => Promise<void>;
+        component?: () => unknown;
+        path?: string;
+    };
+};
+
+function getRootRoute(): TestRoute {
+    return router.options.routeTree as unknown as TestRoute;
+}
+
+function getRoute(pathOrId: string): TestRoute {
+    const stack = [...(getRootRoute().children ?? [])];
+
+    while (stack.length > 0) {
+        const route = stack.shift() as TestRoute;
+        if (route.options.path === pathOrId || route.id === pathOrId) {
+            return route;
+        }
+        stack.push(...(route.children ?? []));
+    }
+
+    throw new Error(`Route not found: ${pathOrId}`);
+}
+
+function mockSession(authenticated: boolean): void {
+    stubGlobal(
+        "fetch",
+        jest.fn(async () =>
+            Response.json({
+                authenticated,
+                bootstrapRequired: false,
+                user: authenticated ? { id: 1, username: "mira" } : null,
+            })
+        )
+    );
+}
 
 describe("router", () => {
     beforeEach(() => {
-        mocks.authActions.initialize.mockClear();
-        mocks.redirect.mockClear();
-        mocks.authStore.state.isAuthenticated = false;
+        authActions.clearSession();
+        unstubAllGlobals();
     });
 
     it("builds the dashboard route tree", () => {
-        expect(router).toEqual({
-            type: "router",
-            config: expect.objectContaining({ routeTree: expect.any(Object) }),
-        });
-        expect(mocks.createRootRoute).toHaveBeenCalledTimes(1);
-        expect(mocks.createRouter).toHaveBeenCalledTimes(1);
-
-        const routePaths = mocks.routes
-            .map((route) => route.path || route.id)
+        const routePaths = (getRootRoute().children ?? [])
+            .flatMap((route) => [route, ...(route.children ?? [])])
+            .map((route) => route.options.path ?? route.id)
             .filter(Boolean);
+
         expect(routePaths).toEqual([
             "/login",
-            "authenticated",
+            "/authenticated",
             "/",
             "/tasks",
             "/agents",
@@ -97,37 +73,42 @@ describe("router", () => {
             "/docker",
             "/database",
             "/moltbook",
-            "/settings",
             "/terminal",
+            "/settings",
         ]);
     });
 
+    it("renders the root route outlet", () => {
+        expect(isValidElement(getRootRoute().options.component?.())).toBe(true);
+    });
+
     it("allows login route for guests and redirects authenticated users home", async () => {
-        const loginRoute = mocks.routes.find((route) => route.path === "/login") as {
-            beforeLoad: () => Promise<void>;
-        };
+        const loginRoute = getRoute("/login");
 
-        await expect(loginRoute.beforeLoad()).resolves.toBeUndefined();
-        expect(mocks.authActions.initialize).toHaveBeenCalledTimes(1);
+        mockSession(false);
+        await expect(loginRoute.options.beforeLoad?.()).resolves.toBeUndefined();
 
-        mocks.authStore.state.isAuthenticated = true;
-        await expect(loginRoute.beforeLoad()).rejects.toEqual({
-            type: "redirect",
-            target: { to: "/" },
+        mockSession(true);
+        await expect(loginRoute.options.beforeLoad?.()).rejects.toMatchObject({
+            options: { to: "/" },
         });
     });
 
     it("guards authenticated routes from guests", async () => {
-        const authenticatedRoute = mocks.routes.find(
-            (route) => route.id === "authenticated"
-        ) as { beforeLoad: () => Promise<void> };
+        const authenticatedRoute = getRoute("/authenticated");
 
-        await expect(authenticatedRoute.beforeLoad()).rejects.toEqual({
-            type: "redirect",
-            target: { to: "/login" },
+        mockSession(false);
+        await expect(authenticatedRoute.options.beforeLoad?.()).rejects.toMatchObject({
+            options: { to: "/login" },
         });
 
-        mocks.authStore.state.isAuthenticated = true;
-        await expect(authenticatedRoute.beforeLoad()).resolves.toBeUndefined();
+        mockSession(true);
+        await expect(authenticatedRoute.options.beforeLoad?.()).resolves.toBeUndefined();
+    });
+
+    it("renders the authenticated route wrapper", () => {
+        const authenticatedRoute = getRoute("/authenticated");
+
+        expect(isValidElement(authenticatedRoute.options.component?.())).toBe(true);
     });
 });

@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import type { FileNode } from "../../../types/file";
 import { FilesSidebar } from "./FilesSidebar";
@@ -19,8 +19,8 @@ describe("FilesSidebar", () => {
                 rootLoading
                 selectedPath={null}
                 expandedPaths={new Set()}
-                onSelect={vi.fn()}
-                onToggle={vi.fn()}
+                onSelect={jest.fn()}
+                onToggle={jest.fn()}
             />
         );
 
@@ -32,8 +32,8 @@ describe("FilesSidebar", () => {
                 rootLoading={false}
                 selectedPath={null}
                 expandedPaths={new Set()}
-                onSelect={vi.fn()}
-                onToggle={vi.fn()}
+                onSelect={jest.fn()}
+                onToggle={jest.fn()}
             />
         );
 
@@ -42,8 +42,8 @@ describe("FilesSidebar", () => {
 
     it("sorts workspace files and delegates selection/toggle events", async () => {
         const user = userEvent.setup();
-        const onSelect = vi.fn();
-        const onToggle = vi.fn();
+        const onSelect = jest.fn();
+        const onToggle = jest.fn();
 
         render(
             <FilesSidebar

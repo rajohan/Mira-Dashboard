@@ -1,12 +1,13 @@
 import { renderHook } from "@testing-library/react";
+import { describe, expect, it, jest, mock } from "bun:test";
 import { act } from "react";
-import { describe, expect, it, vi } from "vitest";
 
 import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
+import { stubGlobal } from "../test/testUtils";
 import { sessionKeys, useDeleteSession, useSessionAction } from "./useSessions";
 
-vi.mock("../collections/sessions", () => ({
-    deleteSessionFromCollection: vi.fn(),
+mock.module("../collections/sessions", () => ({
+    deleteSessionFromCollection: jest.fn(),
 }));
 
 const { deleteSessionFromCollection } = await import("../collections/sessions");
@@ -15,16 +16,16 @@ describe("session hooks", () => {
     it("exposes session list query key", () => {
         const queryClient = createTestQueryClient();
         queryClient.setQueryData(sessionKeys.all, ["cached"]);
-        expect(queryClient.getQueryData(sessionKeys.all)).toEqual(["cached"]);
+        expect(queryClient.getQueryData<unknown>(sessionKeys.all)).toEqual(["cached"]);
     });
 
     it("posts session actions", async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
+        const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: async () => ({ ok: true }),
         });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useSessionAction(), {
             wrapper: createQueryWrapper(),
@@ -44,10 +45,10 @@ describe("session hooks", () => {
     });
 
     it("deletes sessions and updates the collection", async () => {
-        const fetchMock = vi
+        const fetchMock = jest
             .fn()
             .mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
-        vi.stubGlobal("fetch", fetchMock);
+        stubGlobal("fetch", fetchMock);
 
         const { result } = renderHook(() => useDeleteSession(), {
             wrapper: createQueryWrapper(),

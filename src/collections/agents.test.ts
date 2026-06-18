@@ -1,38 +1,37 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test";
 
-const mocks = vi.hoisted(() => {
+import { hoisted } from "../test/testUtils";
+
+const mocks = hoisted(() => {
     const collection = {
-        isReady: vi.fn(() => true),
-        preload: vi.fn(),
+        isReady: jest.fn(() => true),
+        preload: jest.fn(),
         utils: {
-            writeUpsert: vi.fn(),
+            writeUpsert: jest.fn(),
         },
     };
 
     return {
         collection,
-        createCollection: vi.fn(() => collection),
-        queryCollectionOptions: vi.fn((options: unknown) => options),
+        createCollection: jest.fn(() => collection),
+        queryCollectionOptions: jest.fn((options: unknown) => options),
     };
 });
 
-vi.mock("@tanstack/react-db", () => ({
+mock.module("@tanstack/react-db", () => ({
     createCollection: mocks.createCollection,
 }));
 
-vi.mock("@tanstack/query-db-collection", () => ({
+mock.module("@tanstack/query-db-collection", () => ({
     queryCollectionOptions: mocks.queryCollectionOptions,
 }));
 
-vi.mock("../lib/queryClient", () => ({
+mock.module("../lib/queryClient", () => ({
     queryClient: {},
 }));
 
-import {
-    agentsCollection,
-    preloadAgentsCollection,
-    writeAgentsFromWebSocket,
-} from "./agents";
+const { agentsCollection, preloadAgentsCollection, writeAgentsFromWebSocket } =
+    await import("./agents");
 
 describe("agents collection", () => {
     beforeEach(() => {

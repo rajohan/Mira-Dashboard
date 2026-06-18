@@ -1,12 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 
 import { AppErrorFallback } from "./AppErrorFallback";
 
 describe("AppErrorFallback", () => {
     it("renders error messages and resets the boundary", async () => {
-        const resetErrorBoundary = vi.fn();
+        const resetErrorBoundary = jest.fn();
         render(
             <AppErrorFallback
                 error={new Error("Boom")}
@@ -25,7 +25,7 @@ describe("AppErrorFallback", () => {
     });
 
     it("triggers a full page reload", async () => {
-        const reload = vi.fn();
+        const reload = jest.fn();
         const originalLocation = window.location;
         Object.defineProperty(window, "location", {
             configurable: true,
@@ -36,7 +36,7 @@ describe("AppErrorFallback", () => {
             render(
                 <AppErrorFallback
                     error={new Error("Boom")}
-                    resetErrorBoundary={vi.fn()}
+                    resetErrorBoundary={jest.fn()}
                 />
             );
 
@@ -51,7 +51,7 @@ describe("AppErrorFallback", () => {
     });
 
     it("falls back for non-Error values", () => {
-        render(<AppErrorFallback error="bad" resetErrorBoundary={vi.fn()} />);
+        render(<AppErrorFallback error="bad" resetErrorBoundary={jest.fn()} />);
 
         expect(screen.getByText("Unknown error")).toBeInTheDocument();
     });

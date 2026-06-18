@@ -1,11 +1,11 @@
+import { afterEach, describe, expect, it, jest } from "bun:test";
 import JSON5 from "json5";
-import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { validateJsonString } from "./json";
 
 describe("json utils", () => {
     afterEach(() => {
-        vi.restoreAllMocks();
+        jest.restoreAllMocks();
     });
 
     it("validates strict JSON", () => {
@@ -28,7 +28,7 @@ describe("json utils", () => {
     });
 
     it("handles non-Error throws in JSON.parse", () => {
-        vi.spyOn(JSON, "parse").mockImplementationOnce(() => {
+        jest.spyOn(JSON, "parse").mockImplementationOnce(() => {
             throw "bad json";
         });
         const result = validateJsonString("{}");
@@ -36,7 +36,7 @@ describe("json utils", () => {
     });
 
     it("handles non-Error throws in JSON5.parse", () => {
-        vi.spyOn(JSON5, "parse").mockImplementationOnce(() => {
+        jest.spyOn(JSON5, "parse").mockImplementationOnce(() => {
             throw "bad json5";
         });
         const result = validateJsonString("{}", "json5");
