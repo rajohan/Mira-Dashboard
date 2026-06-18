@@ -982,6 +982,7 @@ describe("server bootstrap", () => {
                     os.tmpdir(),
                     "mira-server-entrypoint-coverage"
                 ),
+                OPENCLAW_GATEWAY_TOKEN: "",
                 OPENCLAW_TOKEN: "test-token",
                 OPENCLAW_HOME: openclawHome,
                 MIRA_DASHBOARD_OPENCLAW_HOME: openclawHome,
