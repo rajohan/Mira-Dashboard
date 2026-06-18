@@ -333,9 +333,9 @@ describe("agents routes", () => {
         );
         assert.equal(
             __testing.summarizeToolActivity("exec_command", {
-                arguments: { cmd: "npm run test -- --coverage" },
+                arguments: { cmd: "bun run test -- --coverage" },
             }),
-            "exec npm run test -- --coverage"
+            "exec bun run test -- --coverage"
         );
         assert.equal(
             __testing.summarizeToolActivity("browser", {
@@ -421,10 +421,10 @@ describe("agents routes", () => {
                 payload: {
                     type: "custom_tool_call",
                     name: "exec",
-                    input: 'await tools.exec_command({ "cmd": "npm run build" });',
+                    input: 'await tools.exec_command({ "cmd": "bun run build" });',
                 },
             }),
-            "exec npm run build"
+            "exec bun run build"
         );
         assert.equal(
             __testing.getCodexResponseItemActivity({
@@ -502,9 +502,9 @@ describe("agents routes", () => {
         assert.deepEqual(
             __testing.getTrajectoryActivity({
                 type: "tool.call",
-                data: { name: "exec", args: { command: "npm test" } },
+                data: { name: "exec", args: { command: "bun run test" } },
             }),
-            { activity: "exec npm test" }
+            { activity: "exec bun run test" }
         );
         assert.deepEqual(
             __testing.getTrajectoryActivity({
@@ -618,7 +618,7 @@ describe("agents routes", () => {
                             {
                                 type: "toolCall",
                                 name: "functions.exec_command",
-                                arguments: { command: "npm run lint" },
+                                arguments: { command: "bun run lint" },
                             },
                         ],
                     },
@@ -628,7 +628,7 @@ describe("agents routes", () => {
         );
         const activity = await __testing.getLatestActivityFromFile("array-agent");
         assert.equal(activity?.task, "Array task");
-        assert.equal(activity?.activity, "exec npm run lint");
+        assert.equal(activity?.activity, "exec bun run lint");
 
         const mixedSessionsDir = path.join(
             homeDir,
@@ -676,7 +676,7 @@ describe("agents routes", () => {
                             {
                                 type: "toolCall",
                                 name: "functions.exec_command",
-                                arguments: { command: "npm test" },
+                                arguments: { command: "bun run test" },
                             },
                         ],
                     },
@@ -694,7 +694,7 @@ describe("agents routes", () => {
         );
         const mixedActivity = await __testing.getLatestActivityFromFile("mixed-agent");
         assert.equal(mixedActivity?.task, "[object Object]");
-        assert.equal(mixedActivity?.activity, "exec npm test");
+        assert.equal(mixedActivity?.activity, "exec bun run test");
     });
 
     it("covers agent session selection and status helper branches", async () => {
@@ -761,7 +761,7 @@ describe("agents routes", () => {
         assert.equal(status.status, "thinking");
         assert.equal(status.lastActivity, "2026-05-16T15:00:00.000Z");
 
-        status.currentActivity = "exec npm test";
+        status.currentActivity = "exec bun run test";
         __testing.applyGatewaySessionStatus(status, {
             key: "channel:discord:team",
             model: "main",
@@ -1512,7 +1512,7 @@ describe("agents routes", () => {
                     type: "tool.call",
                     data: {
                         name: "exec_command",
-                        args: { cmd: "npm run test -- agents" },
+                        args: { cmd: "bun run test -- agents" },
                     },
                 }),
                 JSON.stringify({
@@ -1526,7 +1526,7 @@ describe("agents routes", () => {
                     type: "tool.result",
                     data: {
                         name: "exec_command",
-                        args: { cmd: "npm run result -- agents" },
+                        args: { cmd: "bun run result -- agents" },
                         success: true,
                     },
                 }),
@@ -1572,7 +1572,7 @@ describe("agents routes", () => {
             assert.equal(response.status, 200);
             assert.equal(response.body.status, "active");
             assert.equal(response.body.currentTask, "Fix agent activity");
-            assert.equal(response.body.currentActivity, "exec npm run result -- agents");
+            assert.equal(response.body.currentActivity, "exec bun run result -- agents");
             assert.equal(response.body.sessionKey, "Agent:Alias-Agent:Main");
             assert.equal(response.body.lastActivity, gatewayUpdatedAt);
         } finally {
@@ -1619,7 +1619,7 @@ describe("agents routes", () => {
                             {
                                 type: "toolCall",
                                 name: "bash",
-                                arguments: { command: "npm run build" },
+                                arguments: { command: "bun run build" },
                             },
                         ],
                     },
@@ -1711,7 +1711,7 @@ describe("agents routes", () => {
                         {
                             type: "toolCall",
                             name: "bash",
-                            arguments: { command: "npm run old-task" },
+                            arguments: { command: "bun run old-task" },
                         },
                     ],
                     __openclaw: {
@@ -1939,7 +1939,7 @@ describe("agents routes", () => {
                         {
                             type: "toolCall",
                             name: "bash",
-                            arguments: { command: "npm run no-turn" },
+                            arguments: { command: "bun run no-turn" },
                         },
                     ],
                     __openclaw: {
@@ -1980,7 +1980,7 @@ describe("agents routes", () => {
 
             assert.equal(response.status, 200);
             assert.equal(response.body.currentTask, "Run without explicit turn id");
-            assert.equal(response.body.currentActivity, "exec npm run no-turn");
+            assert.equal(response.body.currentActivity, "exec bun run no-turn");
         } finally {
             gateway.request = previousGatewayRequest;
             await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
@@ -2010,7 +2010,7 @@ describe("agents routes", () => {
                     payload: {
                         type: "custom_tool_call",
                         name: "exec",
-                        input: "await tools.exec_command({ cmd: `npm run stale` });",
+                        input: "await tools.exec_command({ cmd: `bun run stale` });",
                     },
                 }),
                 JSON.stringify({
@@ -2023,7 +2023,7 @@ describe("agents routes", () => {
                     payload: {
                         type: "custom_tool_call",
                         name: "exec",
-                        input: "await tools.exec_command({ cmd: `npm run also-stale` });",
+                        input: "await tools.exec_command({ cmd: `bun run also-stale` });",
                     },
                 }),
                 JSON.stringify({
@@ -2115,7 +2115,7 @@ describe("agents routes", () => {
                         {
                             type: "toolCall",
                             name: "bash",
-                            arguments: { command: "npm run unrelated" },
+                            arguments: { command: "bun run unrelated" },
                         },
                     ],
                 },
@@ -2131,7 +2131,7 @@ describe("agents routes", () => {
                         {
                             type: "toolCall",
                             name: "bash",
-                            arguments: { command: "npm run active" },
+                            arguments: { command: "bun run active" },
                         },
                     ],
                     __openclaw: {
@@ -2173,7 +2173,7 @@ describe("agents routes", () => {
 
             assert.equal(response.status, 200);
             assert.equal(response.body.currentTask, "Keep scanning active group");
-            assert.equal(response.body.currentActivity, "exec npm run active");
+            assert.equal(response.body.currentActivity, "exec bun run active");
         } finally {
             gateway.request = previousGatewayRequest;
             await rm(path.join(homeDir, ".openclaw", "agents", "alias-agent"), {
@@ -2243,7 +2243,7 @@ describe("agents routes", () => {
                     payload: {
                         type: "custom_tool_call",
                         name: "exec",
-                        input: "await tools.exec_command({ cmd: `npm run agents:test` });",
+                        input: "await tools.exec_command({ cmd: `bun run agents:test` });",
                     },
                 }),
                 JSON.stringify({
@@ -2337,7 +2337,7 @@ describe("agents routes", () => {
                 runId: "fresh-run",
                 data: {
                     name: "exec_command",
-                    arguments: { cmd: "npm run readable" },
+                    arguments: { cmd: "bun run readable" },
                 },
             }),
             "utf8"
@@ -2372,7 +2372,7 @@ describe("agents routes", () => {
             }>(server, "/api/agents/alias-agent/status");
 
             assert.equal(response.status, 200);
-            assert.equal(response.body.currentActivity, "exec npm run readable");
+            assert.equal(response.body.currentActivity, "exec bun run readable");
         } finally {
             gateway.request = previousGatewayRequest;
             try {
@@ -2846,23 +2846,23 @@ describe("agents routes", () => {
         assert.deepEqual(
             __testing.getTrajectoryActivity({
                 type: "tool.call",
-                data: { name: "exec", arguments: { cmd: "npm test" } },
+                data: { name: "exec", arguments: { cmd: "bun run test" } },
             }),
-            { activity: "exec npm test" }
+            { activity: "exec bun run test" }
         );
         assert.deepEqual(
             __testing.getTrajectoryActivity({
                 type: "tool.result",
-                data: { name: "exec", parameters: { cmd: "npm run build" } },
+                data: { name: "exec", parameters: { cmd: "bun run build" } },
             }),
-            { activity: "exec npm run build" }
+            { activity: "exec bun run build" }
         );
         assert.deepEqual(
             __testing.getTrajectoryActivity({
                 type: "tool.result",
-                data: { name: "exec", input: { cmd: "npm run lint" } },
+                data: { name: "exec", input: { cmd: "bun run lint" } },
             }),
-            { activity: "exec npm run lint" }
+            { activity: "exec bun run lint" }
         );
         assert.equal(
             __testing.getCodexResponseItemActivity({
@@ -2888,16 +2888,16 @@ describe("agents routes", () => {
         assert.deepEqual(
             __testing.getTrajectoryActivity({
                 type: "tool.call",
-                data: { name: "exec", cmd: "npm run flat" },
+                data: { name: "exec", cmd: "bun run flat" },
             }),
-            { activity: "exec npm run flat" }
+            { activity: "exec bun run flat" }
         );
         assert.deepEqual(
             __testing.getTrajectoryActivity({
                 type: "tool.call",
-                data: { name: "exec", parameters: { cmd: "npm run typecheck" } },
+                data: { name: "exec", parameters: { cmd: "bun run typecheck" } },
             }),
-            { activity: "exec npm run typecheck" }
+            { activity: "exec bun run typecheck" }
         );
         assert.deepEqual(
             __testing.getTrajectoryActivity({
@@ -2916,16 +2916,16 @@ describe("agents routes", () => {
         assert.deepEqual(
             __testing.getTrajectoryActivity({
                 type: "tool.result",
-                data: { name: "exec", arguments: { cmd: "npm run result:args" } },
+                data: { name: "exec", arguments: { cmd: "bun run result:args" } },
             }),
-            { activity: "exec npm run result:args" }
+            { activity: "exec bun run result:args" }
         );
         assert.deepEqual(
             __testing.getTrajectoryActivity({
                 type: "tool.result",
-                data: { name: "exec", args: { cmd: "npm run result" } },
+                data: { name: "exec", args: { cmd: "bun run result" } },
             }),
-            { activity: "exec npm run result" }
+            { activity: "exec bun run result" }
         );
         assert.deepEqual(
             __testing.getTrajectoryActivity({
@@ -2937,9 +2937,9 @@ describe("agents routes", () => {
         assert.deepEqual(
             __testing.getTrajectoryActivity({
                 type: "tool.result",
-                data: { name: "exec", cmd: "npm run result:flat" },
+                data: { name: "exec", cmd: "bun run result:flat" },
             }),
-            { activity: "exec npm run result:flat" }
+            { activity: "exec bun run result:flat" }
         );
 
         const sessions = [
@@ -3033,7 +3033,7 @@ describe("agents routes", () => {
             status: "idle" as const,
             model: "unknown",
             currentTask: null,
-            currentActivity: "exec npm test",
+            currentActivity: "exec bun run test",
             lastActivity: null,
             sessionKey: null,
             channel: null,
@@ -3194,7 +3194,7 @@ describe("agents routes", () => {
                         {
                             type: "toolCall",
                             name: "exec",
-                            arguments: { cmd: "npm run active" },
+                            arguments: { cmd: "bun run active" },
                         },
                     ],
                     __openclaw: { mirrorIdentity: "turn-1:assistant" },
@@ -3223,7 +3223,7 @@ describe("agents routes", () => {
         const branchStats = await fs.promises.stat(branchFile);
         assert.deepEqual(await __testing.getLatestActivityFromFile("branch-agent"), {
             task: null,
-            activity: "exec npm run active",
+            activity: "exec bun run active",
             modTime: branchStats.mtimeMs,
         });
 
@@ -3232,7 +3232,7 @@ describe("agents routes", () => {
         await utimes(oldGroupFile, staleDate, staleDate);
         const activeBranchActivity =
             await __testing.getLatestActivityFromFile("branch-agent");
-        assert.equal(activeBranchActivity?.activity, "exec npm run active");
+        assert.equal(activeBranchActivity?.activity, "exec bun run active");
 
         const mixedGroupFresh = path.join(branchDir, "paired.jsonl");
         const mixedGroupStale = path.join(branchDir, "paired.trajectory.jsonl");

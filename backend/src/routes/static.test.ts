@@ -109,6 +109,6 @@ describe("static routes", () => {
 
         assert.equal(response.status, 503);
         assert.match(body, /Frontend Not Built/u);
-        assert.match(body, /npm run build/u);
+        assert.match(body, /bun run build/u);
     });
 });

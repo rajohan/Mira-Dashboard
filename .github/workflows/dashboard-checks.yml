@@ -24,23 +24,22 @@ jobs:
             - name: Checkout
               uses: actions/checkout@v6
 
-            - name: Set up Node.js
-              uses: actions/setup-node@v6
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@v2
               with:
-                  node-version: 25
-                  cache: npm
+                  bun-version: 1.3.14
 
             - name: Install frontend dependencies
-              run: npm ci --legacy-peer-deps
+              run: bun install --frozen-lockfile
 
             - name: Lint frontend
-              run: npm run lint
+              run: bun run lint
 
             - name: Build frontend
-              run: npm run build
+              run: bun run build
 
             - name: Test frontend coverage
-              run: npm run test:coverage
+              run: bun run test:coverage
 
             - name: Upload frontend coverage artifact
               uses: actions/upload-artifact@v7
@@ -73,30 +72,28 @@ jobs:
             - name: Checkout
               uses: actions/checkout@v6
 
-            - name: Set up Node.js
-              uses: actions/setup-node@v6
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@v2
               with:
-                  node-version: 25
-                  cache: npm
-                  cache-dependency-path: backend/package-lock.json
+                  bun-version: 1.3.14
 
             - name: Install root dependencies
-              run: npm ci --legacy-peer-deps
+              run: bun install --frozen-lockfile
 
             - name: Install backend dependencies
-              run: npm ci
+              run: bun install --frozen-lockfile
               working-directory: backend
 
             - name: Lint backend
-              run: npm run lint
+              run: bun run lint
               working-directory: backend
 
             - name: Build backend
-              run: npm run build
+              run: bun run build
               working-directory: backend
 
             - name: Test backend coverage
-              run: npm run test:coverage
+              run: bun run test:coverage
               working-directory: backend
 
             - name: Prefix backend LCOV paths
@@ -132,21 +129,20 @@ jobs:
             - name: Checkout
               uses: actions/checkout@v6
 
-            - name: Set up Node.js
-              uses: actions/setup-node@v6
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@v2
               with:
-                  node-version: 25
-                  cache: npm
+                  bun-version: 1.3.14
 
             - name: Install frontend dependencies
-              run: npm ci --legacy-peer-deps
+              run: bun install --frozen-lockfile
 
             - name: Install backend dependencies
-              run: npm ci
+              run: bun install --frozen-lockfile
               working-directory: backend
 
             - name: Install Playwright browsers
-              run: npx playwright install --with-deps chromium
+              run: bunx playwright install --with-deps chromium
 
             - name: Run Playwright smoke tests
-              run: npm run test:e2e
+              run: bun run test:e2e

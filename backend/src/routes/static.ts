@@ -44,7 +44,7 @@ export default function staticRoutes(
                 <head><title>Mira Dashboard - Not Built</title></head>
                 <body style="font-family: system-ui; padding: 2rem; background: #1a1a2e; color: #eee;">
                     <h1>🚧 Frontend Not Built</h1>
-                    <p>Run <code style="background: #333; padding: 2px 6px; border-radius: 4px;">npm run build</code> in the frontend directory.</p>
+                    <p>Run <code style="background: #333; padding: 2px 6px; border-radius: 4px;">bun run build</code> in the frontend directory.</p>
                     <p style="color: #888; margin-top: 2rem;">
                         Backend API is available at <code style="background: #333; padding: 2px 6px;">/api/*</code>
                     </p>

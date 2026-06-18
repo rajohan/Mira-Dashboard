@@ -4,6 +4,7 @@
     "description": "Gateway Mirror backend for Mira Dashboard",
     "main": "dist/serverStart.js",
     "type": "module",
+    "packageManager": "bun@1.3.14",
     "engines": {
         "node": ">=25.0.0"
     },
@@ -15,8 +16,8 @@
         "lint:fix": "eslint . --fix",
         "format": "prettier --write '**/*.{ts,js}'",
         "format:check": "prettier --check '**/*.{ts,js}'",
-        "test": "npm run build && node --test-isolation=process --test-concurrency=1 --import ./test/setup-environment.js --import tsx --test \"src/**/*.test.*\" \"test/**/*.test.*\"",
-        "test:coverage": "npm run build && c8 --all --src src --extension=.ts --extension=.js --report-dir coverage --reporter=lcovonly --reporter=text-summary --check-coverage --lines=100 --branches=100 --functions=100 --statements=100 node --test-isolation=process --test-concurrency=1 --import ./test/setup-environment.js --import tsx --test \"src/**/*.test.*\" \"test/**/*.test.*\""
+        "test": "bun run build && node --test-isolation=process --test-concurrency=1 --import ./test/setup-environment.js --import tsx --test \"src/**/*.test.*\" \"test/**/*.test.*\"",
+        "test:coverage": "bun run build && c8 --all --src src --extension=.ts --extension=.js --report-dir coverage --reporter=lcovonly --reporter=text-summary --check-coverage --lines=100 --branches=100 --functions=100 --statements=100 node --test-isolation=process --test-concurrency=1 --import ./test/setup-environment.js --import tsx --test \"src/**/*.test.*\" \"test/**/*.test.*\""
     },
     "dependencies": {
         "dotenv": "^17.4.2",
