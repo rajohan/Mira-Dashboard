@@ -536,6 +536,11 @@ interface RegistryFetchOptions {
     accept?: string;
 }
 
+interface RegistryCredentials {
+    password: string;
+    username: string;
+}
+
 function nowIso(): string {
     const now = new Date();
     return now.toISOString();
@@ -605,6 +610,51 @@ function asRecord(value: unknown): JsonRecord {
     return value && typeof value === "object" && !Array.isArray(value)
         ? (value as JsonRecord)
         : {};
+}
+
+function trimEnv(name: string): string | null {
+    const value = process.env[name]?.trim();
+    return value || null;
+}
+
+function registryCredentials(registry: string): RegistryCredentials | null {
+    if (["docker.io", "registry.docker.io", "registry-1.docker.io"].includes(registry)) {
+        const username = trimEnv("DOCKER_LOGIN");
+        const password = trimEnv("DOCKER_TOKEN");
+        return username && password ? { username, password } : null;
+    }
+    if (registry === "ghcr.io" || registry === "lscr.io") {
+        const username = trimEnv("MIRA_GITHUB_USERNAME");
+        const password = trimEnv("MIRA_GITHUB_TOKEN");
+        return username && password ? { username, password } : null;
+    }
+    return null;
+}
+
+function registryHostFromUrl(url: string): string {
+    try {
+        const parsedUrl = new URL(url);
+        return parsedUrl.hostname;
+    } catch {
+        return imageRegistry(url);
+    }
+}
+
+function isTrustedTokenRealm(registry: string, tokenUrl: URL): boolean {
+    const hostname = tokenUrl.hostname.toLowerCase();
+    if (["docker.io", "registry.docker.io", "registry-1.docker.io"].includes(registry)) {
+        return ["auth.docker.io", "registry.docker.io", "registry-1.docker.io"].includes(
+            hostname
+        );
+    }
+    if (registry === "lscr.io") {
+        return hostname === "lscr.io" || hostname === "ghcr.io";
+    }
+    return hostname === registry;
+}
+
+function basicAuthorization(credentials: RegistryCredentials): string {
+    return `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toBase64()}`;
 }
 
 async function fetchJson(url: string, headers: Record<string, string> = {}) {
@@ -681,9 +731,14 @@ async function fetchRegistryResponse(
         const tokenUrl = new URL(challenge.realm);
         if (challenge.service) tokenUrl.searchParams.set("service", challenge.service);
         if (challenge.scope) tokenUrl.searchParams.set("scope", challenge.scope);
+        const registry = registryHostFromUrl(url);
+        const credentials = isTrustedTokenRealm(registry, tokenUrl)
+            ? registryCredentials(registry)
+            : null;
         const tokenResponse = await fetch(tokenUrl, {
             headers: {
                 Accept: "application/json",
+                ...(credentials && { Authorization: basicAuthorization(credentials) }),
                 "User-Agent": "mira-dashboard-docker-updater/1.0",
             },
             signal: controller.signal,
@@ -2171,6 +2226,9 @@ export const __testing = {
     parseBearerChallenge,
     parseNextLink,
     pruneDanglingImagesBestEffort,
+    registryCredentials,
+    registryHostFromUrl,
+    isTrustedTokenRealm,
     setNestedValue,
     shouldBlockGlobalUpdateForDiscoveryFailure,
     shouldBlockManualUpdateForDiscoveryFailure,

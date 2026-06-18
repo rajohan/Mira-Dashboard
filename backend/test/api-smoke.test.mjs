@@ -199,8 +199,9 @@ test("health and loopback session endpoints are available", async () => {
 
     const session = await request("/api/auth/session");
     assert.equal(session.response.status, 200);
-    assert.equal(session.body.authenticated, true);
-    assert.equal(session.body.user.username, "mira-local");
+    assert.equal(session.body.authenticated, false);
+    assert.equal(session.body.bootstrapRequired, true);
+    assert.equal(session.body.user, JSON.parse("null"));
 });
 
 test("task lifecycle API supports create, update, move, progress, and delete", async () => {

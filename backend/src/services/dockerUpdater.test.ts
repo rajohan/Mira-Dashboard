@@ -582,6 +582,47 @@ process.stdout.write("updated\n");
         });
     });
 
+    it("derives registry hosts from fetch URLs with parser fallback", async () => {
+        const updater = await import(`./dockerUpdater.js?registry-host=${Date.now()}`);
+
+        assert.equal(
+            updater.__testing.registryHostFromUrl("https://ghcr.io/v2/repo/tags/list"),
+            "ghcr.io"
+        );
+        assert.equal(
+            updater.__testing.registryHostFromUrl("registry-1.docker.io/library/nginx"),
+            "registry-1.docker.io"
+        );
+        assert.equal(
+            updater.__testing.isTrustedTokenRealm(
+                "registry-1.docker.io",
+                new URL("https://auth.docker.io/token")
+            ),
+            true
+        );
+        assert.equal(
+            updater.__testing.isTrustedTokenRealm(
+                "registry-1.docker.io",
+                new URL("https://evil.example/token")
+            ),
+            false
+        );
+        assert.equal(
+            updater.__testing.isTrustedTokenRealm(
+                "lscr.io",
+                new URL("https://ghcr.io/token")
+            ),
+            true
+        );
+        assert.equal(
+            updater.__testing.isTrustedTokenRealm(
+                "lscr.io",
+                new URL("https://evil.example/token")
+            ),
+            false
+        );
+    });
+
     it("reports malformed compose files while registering successful discoveries", async () => {
         const appsRoot = path.join(tempDir, "apps");
         const goodDir = path.join(appsRoot, "good");
@@ -4965,6 +5006,125 @@ setTimeout(() => {
         );
         assert.ok(authFetchUrls.some((url) => url.startsWith("https://ghcr.io/token")));
 
+        await withEnv(
+            { MIRA_GITHUB_USERNAME: "mira", MIRA_GITHUB_TOKEN: "github-token" },
+            async () => {
+                const tokenAuthHeaders: string[] = [];
+                mockFetch(async (input: string | URL | Request, init?: RequestInit) => {
+                    const url = typeof input === "string" ? input : input.toString();
+                    const headers = new Headers(init?.headers);
+                    if (url.startsWith("https://ghcr.io/token")) {
+                        tokenAuthHeaders.push(headers.get("authorization") || "");
+                        return {
+                            ok: true,
+                            headers: new Headers(),
+                            json: async () => ({ token: "registry-token" }),
+                        } as Response;
+                    }
+                    if (!headers.get("authorization")) {
+                        return {
+                            ok: false,
+                            status: 401,
+                            headers: new Headers({
+                                "www-authenticate":
+                                    'Bearer realm="https://ghcr.io/token"',
+                            }),
+                            json: async () => ({}),
+                        } as Response;
+                    }
+                    return {
+                        ok: true,
+                        headers: new Headers(),
+                        json: async () => ({ tags: ["1"] }),
+                    } as Response;
+                });
+                await updater.__testing.fetchRegistryJson(
+                    "https://ghcr.io/v2/owner/app/tags/list"
+                );
+                assert.deepEqual(tokenAuthHeaders, [
+                    `Basic ${Buffer.from("mira:github-token").toBase64()}`,
+                ]);
+            }
+        );
+
+        await withEnv(
+            { DOCKER_LOGIN: "docker-user", DOCKER_TOKEN: "docker-token" },
+            async () => {
+                assert.deepEqual(updater.__testing.registryCredentials("docker.io"), {
+                    username: "docker-user",
+                    password: "docker-token",
+                });
+                assert.deepEqual(
+                    updater.__testing.registryCredentials("registry.docker.io"),
+                    {
+                        username: "docker-user",
+                        password: "docker-token",
+                    }
+                );
+                delete process.env.DOCKER_TOKEN;
+                assert.equal(updater.__testing.registryCredentials("docker.io"), null);
+                process.env.DOCKER_TOKEN = "docker-token";
+                assert.equal(updater.__testing.registryCredentials("example.com"), null);
+            }
+        );
+
+        await withEnv(
+            { MIRA_GITHUB_USERNAME: "mira", MIRA_GITHUB_TOKEN: "github-token" },
+            async () => {
+                assert.deepEqual(updater.__testing.registryCredentials("lscr.io"), {
+                    username: "mira",
+                    password: "github-token",
+                });
+            }
+        );
+        await withEnv(
+            { MIRA_GITHUB_USERNAME: "mira", MIRA_GITHUB_TOKEN: " ".repeat(3) },
+            async () => {
+                assert.equal(updater.__testing.registryCredentials("ghcr.io"), null);
+            }
+        );
+
+        await withEnv(
+            { MIRA_GITHUB_USERNAME: "mira", MIRA_GITHUB_TOKEN: "github-token" },
+            async () => {
+                const tokenAuthHeaders: string[] = [];
+                mockFetch(async (input: string | URL | Request, init?: RequestInit) => {
+                    const url = typeof input === "string" ? input : input.toString();
+                    const headers = new Headers(init?.headers);
+                    if (url.startsWith("https://evil.example/token")) {
+                        tokenAuthHeaders.push(headers.get("authorization") || "");
+                        return {
+                            ok: true,
+                            headers: new Headers(),
+                            json: async () => ({ token: "registry-token" }),
+                        } as Response;
+                    }
+                    if (!headers.get("authorization")) {
+                        return {
+                            ok: false,
+                            status: 401,
+                            headers: new Headers({
+                                "www-authenticate":
+                                    'Bearer realm="https://evil.example/token",service="ghcr.io"',
+                            }),
+                            json: async () => ({}),
+                        } as Response;
+                    }
+                    return {
+                        ok: true,
+                        headers: new Headers(),
+                        json: async () => ({ tags: ["1"] }),
+                    } as Response;
+                });
+
+                await updater.__testing.fetchRegistryJson(
+                    "https://registry.example/v2/owner/app/tags/list"
+                );
+
+                assert.deepEqual(tokenAuthHeaders, [""]);
+            }
+        );
+
         mockFetch(async (input: string | URL | Request, init?: RequestInit) => {
             const url = typeof input === "string" ? input : input.toString();
             if (url.startsWith("https://ghcr.io/token")) {
@@ -4998,6 +5158,49 @@ setTimeout(() => {
                 "https://ghcr.io/v2/owner/app/tags/list"
             ),
             { tags: ["1"] }
+        );
+
+        await withEnv(
+            { MIRA_GITHUB_USERNAME: "mira", MIRA_GITHUB_TOKEN: "github-token" },
+            async () => {
+                const tokenAuthHeaders: string[] = [];
+                mockFetch(async (input: string | URL | Request, init?: RequestInit) => {
+                    const url = typeof input === "string" ? input : input.toString();
+                    const headers = new Headers(init?.headers);
+                    if (url.startsWith("https://ghcr.io/token")) {
+                        tokenAuthHeaders.push(headers.get("authorization") || "");
+                        return {
+                            ok: true,
+                            headers: new Headers(),
+                            json: async () => ({ token: "registry-token" }),
+                        } as Response;
+                    }
+                    if (!headers.get("authorization")) {
+                        return {
+                            ok: false,
+                            status: 401,
+                            headers: new Headers({
+                                "www-authenticate":
+                                    'Bearer realm="https://ghcr.io/token",service="ghcr.io"',
+                            }),
+                            json: async () => ({}),
+                        } as Response;
+                    }
+                    return {
+                        ok: true,
+                        headers: new Headers(),
+                        json: async () => ({ tags: ["1"] }),
+                    } as Response;
+                });
+
+                await updater.__testing.fetchRegistryJson(
+                    "https://lscr.io/v2/linuxserver/swag/tags/list"
+                );
+
+                assert.deepEqual(tokenAuthHeaders, [
+                    `Basic ${Buffer.from("mira:github-token").toBase64()}`,
+                ]);
+            }
         );
 
         const exactGhcrUrls: string[] = [];

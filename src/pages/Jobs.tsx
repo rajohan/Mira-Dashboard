@@ -118,7 +118,7 @@ function ScheduledJobList({
             <div className="border-primary-700 text-primary-200 border-b px-3 py-2 text-sm font-semibold sm:px-4 sm:py-3">
                 Dashboard jobs
             </div>
-            <div className="max-h-80 flex-1 overflow-auto p-2 xl:max-h-none">
+            <div className="min-h-0 flex-1 overflow-visible p-2 xl:overflow-auto">
                 {jobs.map((job) => {
                     const isSelected =
                         job.id === selectedId || (!selectedId && job.id === currentJobId);

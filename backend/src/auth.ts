@@ -85,10 +85,54 @@ function isLoopbackAddress(address?: string | null): boolean {
     return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address);
 }
 
+function headerValue(value: string | string[] | undefined): string | undefined {
+    return Array.isArray(value) ? value[0] : value;
+}
+
+function forwardedAddresses(forwardedFor: string): string[] {
+    return forwardedFor
+        .split(",")
+        .map((address) => address.trim())
+        .filter(Boolean);
+}
+
+function clientAddressFromTrustedChain(
+    peerAddress: string | undefined,
+    forwardedFor: string
+): string | undefined {
+    let clientAddress = peerAddress;
+    const forwardedChain = forwardedAddresses(forwardedFor);
+    for (let index = forwardedChain.length - 1; index >= 0; index -= 1) {
+        const address = forwardedChain[index];
+        clientAddress = address;
+        if (!isLoopbackAddress(address)) {
+            break;
+        }
+    }
+
+    return clientAddress;
+}
+
+function remoteAddress(request: express.Request | IncomingMessage): string | undefined {
+    return request.socket?.remoteAddress ?? request.connection?.remoteAddress;
+}
+
 /** Returns whether loopback request. */
 export function isLoopbackRequest(request: express.Request | IncomingMessage): boolean {
-    const remoteAddress = request.socket?.remoteAddress;
-    return isLoopbackAddress(remoteAddress);
+    const peerAddress = remoteAddress(request);
+    const trustForwardedHeaders = isLoopbackAddress(peerAddress);
+    const headers = request.headers ?? {};
+    const realIp = headerValue(headers["x-real-ip"]);
+    if (trustForwardedHeaders && realIp) {
+        return isLoopbackAddress(realIp.trim());
+    }
+    const forwardedFor = headerValue(headers["x-forwarded-for"]);
+    if (trustForwardedHeaders && forwardedFor) {
+        return isLoopbackAddress(
+            clientAddressFromTrustedChain(peerAddress, forwardedFor)
+        );
+    }
+    return isLoopbackAddress(peerAddress);
 }
 
 /** Performs hash password. */

@@ -74,7 +74,10 @@ describe("cache hooks", () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
             status: 200,
-            json: async () => ({ ok: true, entry: { key: "moltbook.home" } }),
+            json: async () => ({
+                ok: true,
+                entry: { key: "moltbook.home", data: { refreshed: true } },
+            }),
         });
         vi.stubGlobal("fetch", fetchMock);
         const queryClient = createTestQueryClient();
@@ -103,5 +106,9 @@ describe("cache hooks", () => {
             queryKey: cacheKeys.entry("system.host"),
         });
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["moltbook"] });
+        expect(queryClient.getQueryData(cacheKeys.entry("moltbook.home"))).toEqual({
+            key: "moltbook.home",
+            data: { refreshed: true },
+        });
     });
 });

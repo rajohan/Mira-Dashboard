@@ -25,11 +25,14 @@ export function CronJobList({
     onSelect,
 }: CronJobListProps) {
     return (
-        <Card variant="bordered" className="min-w-0 p-0">
+        <Card
+            variant="bordered"
+            className="flex min-w-0 flex-col p-0 xl:max-h-[calc(100vh-10rem)]"
+        >
             <div className="border-primary-700 text-primary-200 border-b px-3 py-2 text-sm font-semibold sm:px-4 sm:py-3">
                 Cron jobs
             </div>
-            <div className="max-h-80 overflow-auto p-2 xl:max-h-[70vh]">
+            <div className="min-h-0 flex-1 overflow-visible p-2 xl:overflow-auto">
                 {jobs.map((job) => {
                     const id = getCronJobId(job);
                     const isSelected =
