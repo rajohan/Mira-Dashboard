@@ -47,7 +47,8 @@
       "paths": [],
       "archiveOnly": true,
       "archivePaths": [
-        "/opt/docker/data/jackett/Jackett/log.txt.[0-9]*.txt"
+        "/opt/docker/data/jackett/Jackett/log.txt.[0-9]*.txt",
+        "/opt/docker/data/jackett/Jackett/log.txt.[0-9]*.txt.gz"
       ],
       "archiveRetentionScope": "directory",
       "archiveMinAgeMinutes": 60,
