@@ -38,12 +38,20 @@ describe("format utils", () => {
 
         expect(formatUtcTimeOfDayInAppTimeZone("02:10", summerReference)).toBe("04:10");
         expect(formatUtcTimeOfDayInAppTimeZone("03:10", winterReference)).toBe("04:10");
+        expect(formatUtcTimeOfDayInAppTimeZone("23:30", "2026-03-28T23:30:00.000Z")).toBe(
+            "00:30"
+        );
+        expect(formatUtcTimeOfDayInAppTimeZone("00:00", 0)).toBe("01:00");
         expect(formatUtcTimeOfDayInAppTimeZone("02:10")).toMatch(/^\d{2}:\d{2}$/u);
         expect(formatUtcTimeOfDayInAppTimeZone("02:10", "not-a-date")).toMatch(
             /^\d{2}:\d{2}$/u
         );
         expect(appTimeOfDayToUtcTimeOfDay("04:10", summerReference)).toBe("02:10");
         expect(appTimeOfDayToUtcTimeOfDay("04:10", winterReference)).toBe("03:10");
+        expect(appTimeOfDayToUtcTimeOfDay("01:00", 0)).toBe("00:00");
+        expect(appTimeOfDayToUtcTimeOfDay("04:10", "not-a-date")).toMatch(
+            /^\d{2}:\d{2}$/u
+        );
         expect(appTimeOfDayToUtcTimeOfDay("04:10")).toMatch(/^\d{2}:\d{2}$/u);
         expect(formatUtcTimeOfDayInAppTimeZone(null)).toBe("--:--");
         expect(formatUtcTimeOfDayInAppTimeZone("bad-time")).toBe("--:--");

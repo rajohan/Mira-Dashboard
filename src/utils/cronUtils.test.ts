@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CronJob } from "../hooks";
 import {
+    cronExpressionIsValid,
     formatCronLastStatus,
     formatCronTimestamp,
     getCronJobId,
@@ -48,6 +49,32 @@ describe("cron utils", () => {
             getCronStateValue({ state: null } as unknown as CronJob, "lastRunStatus")
         ).toBeUndefined();
         expect(getCronStateValue({} as CronJob, "lastRunStatus")).toBeUndefined();
+    });
+
+    it.each(["0 4 * * *", "*/15 1-5 * * 1,2", "5/15 10 * * *", "0 9 1-31 * 0-7"])(
+        "accepts supported cron expression %s",
+        (expression) => {
+            expect(cronExpressionIsValid(expression)).toBe(true);
+        }
+    );
+
+    it.each([
+        "",
+        "not cron",
+        "60 * * * *",
+        "* 24 * * *",
+        "* * 0 * *",
+        "* * * 13 *",
+        "* * * * 8",
+        "*/0 * * * *",
+        "1/0 * * * *",
+        "1/2/3 * * * *",
+        "5-1 * * * *",
+        "1-2-3 * * * *",
+        "1,,2 * * * *",
+        "a * * * *",
+    ])("rejects unsupported cron expression %s", (expression) => {
+        expect(cronExpressionIsValid(expression)).toBe(false);
     });
 
     it("formats timestamps and statuses", () => {

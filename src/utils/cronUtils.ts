@@ -24,6 +24,49 @@ export function sortCronJobs(jobs: CronJob[]): CronJob[] {
     });
 }
 
+function cronFieldIsValid(field: string, minimum: number, maximum: number): boolean {
+    return field.split(",").every((part) => {
+        if (!part) return false;
+        const stepPieces = part.split("/");
+        if (stepPieces.length > 2) return false;
+        const [rangePart = "", stepPart] = stepPieces;
+        const step = stepPart === undefined ? 1 : Number(stepPart);
+        if (!Number.isSafeInteger(step) || step < 1) return false;
+        const rangePieces = rangePart.split("-");
+        if (rangePieces.length > 2) return false;
+        const [start, end] =
+            rangePart === "*"
+                ? [minimum, maximum]
+                : rangePart.includes("-")
+                  ? rangePieces.map(Number)
+                  : [
+                        Number(rangePart),
+                        stepPart === undefined ? Number(rangePart) : maximum,
+                    ];
+        return (
+            Number.isSafeInteger(start) &&
+            Number.isSafeInteger(end) &&
+            start >= minimum &&
+            end <= maximum &&
+            start <= end
+        );
+    });
+}
+
+/** Returns whether an expression matches the supported five-field cron syntax. */
+export function cronExpressionIsValid(expression: string): boolean {
+    const fields = expression.trim().split(/\s+/u);
+    if (fields.length !== 5) return false;
+    const [minute = "", hour = "", dayOfMonth = "", month = "", dayOfWeek = ""] = fields;
+    return (
+        cronFieldIsValid(minute, 0, 59) &&
+        cronFieldIsValid(hour, 0, 23) &&
+        cronFieldIsValid(dayOfMonth, 1, 31) &&
+        cronFieldIsValid(month, 1, 12) &&
+        cronFieldIsValid(dayOfWeek, 0, 7)
+    );
+}
+
 /** Returns cron state value. */
 export function getCronStateValue(job: CronJob, key: string): unknown {
     const state = job.state;

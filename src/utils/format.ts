@@ -1,7 +1,7 @@
-import { format, formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow } from "date-fns";
 import { enUS } from "date-fns/locale";
 
-import { appTimeZoneParts, appZonedDate } from "./date";
+import { appTimeZoneParts, appTimeZoneShortMonth, appTimeZoneShortWeekday } from "./date";
 
 const appLocale = enUS;
 
@@ -11,13 +11,20 @@ function toDateValue(date: Date | string | number): Date {
     return date instanceof Date ? date : new Date(date);
 }
 
+function pad2(value: number): string {
+    return String(value).padStart(2, "0");
+}
+
 // Date & time formatting
 /** Formats a date/time value with app timezone date and time fields. */
 export function formatDate(date: Date | string | number): string {
     try {
         const d = toDateValue(date);
         if (Number.isNaN(d.getTime())) return String(date);
-        return format(appZonedDate(d), "dd.MM.yyyy, HH:mm", { locale: appLocale });
+        const parts = appTimeZoneParts(d);
+        return `${pad2(parts.day)}.${pad2(parts.month)}.${parts.year}, ${pad2(
+            parts.hour
+        )}:${pad2(parts.minute)}`;
     } catch {
         return String(date);
     }
@@ -28,7 +35,8 @@ export function formatOsloClock(date: Date | string | number): string {
     try {
         const d = toDateValue(date);
         if (Number.isNaN(d.getTime())) return "--:--";
-        return format(appZonedDate(d), "HH:mm", { locale: appLocale });
+        const parts = appTimeZoneParts(d);
+        return `${pad2(parts.hour)}:${pad2(parts.minute)}`;
     } catch {
         return "--:--";
     }
@@ -38,7 +46,8 @@ export function formatOsloClock(date: Date | string | number): string {
 export function formatDateStamp(date: Date = new Date()): string {
     try {
         if (Number.isNaN(date.getTime())) return "unknown-date";
-        return format(appZonedDate(date), "yyyy-MM-dd", { locale: appLocale });
+        const parts = appTimeZoneParts(date);
+        return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
     } catch {
         return "unknown-date";
     }
@@ -48,7 +57,8 @@ export function formatDateStamp(date: Date = new Date()): string {
 export function formatOsloTime(date: Date): string {
     try {
         if (Number.isNaN(date.getTime())) return "--:--:--";
-        return format(appZonedDate(date), "HH:mm:ss", { locale: appLocale });
+        const parts = appTimeZoneParts(date);
+        return `${pad2(parts.hour)}:${pad2(parts.minute)}:${pad2(parts.second)}`;
     } catch {
         return "--:--:--";
     }
@@ -58,9 +68,10 @@ export function formatOsloTime(date: Date): string {
 export function formatOsloDate(date: Date): string {
     try {
         if (Number.isNaN(date.getTime())) return "Unknown date";
-        return format(appZonedDate(date), "EEEE dd. MMM yyyy", {
-            locale: appLocale,
-        });
+        const parts = appTimeZoneParts(date);
+        return `${parts.weekday} ${pad2(parts.day)}. ${appTimeZoneShortMonth(date)} ${
+            parts.year
+        }`;
     } catch {
         return "Unknown date";
     }
@@ -70,7 +81,7 @@ export function formatOsloDate(date: Date): string {
 export function formatWeekdayShort(date: Date): string {
     try {
         if (Number.isNaN(date.getTime())) return "---";
-        return format(appZonedDate(date), "EEE", { locale: appLocale });
+        return appTimeZoneShortWeekday(date);
     } catch {
         return "---";
     }
@@ -102,8 +113,18 @@ function zonedDateTimeToUtcDate(
 }
 
 function referenceDateParts(referenceDate?: Date | string | number | null) {
-    const reference = referenceDate ? new Date(referenceDate) : new Date();
+    const reference = new Date(referenceDate ?? Date.now());
     return appTimeZoneParts(Number.isNaN(reference.getTime()) ? new Date() : reference);
+}
+
+function referenceUtcDateParts(referenceDate?: Date | string | number | null) {
+    const reference = new Date(referenceDate ?? Date.now());
+    const validReference = Number.isNaN(reference.getTime()) ? new Date() : reference;
+    return {
+        day: validReference.getUTCDate(),
+        month: validReference.getUTCMonth() + 1,
+        year: validReference.getUTCFullYear(),
+    };
 }
 
 /** Converts a UTC HH:mm daily schedule value to app-timezone HH:mm. */
@@ -115,7 +136,7 @@ export function formatUtcTimeOfDayInAppTimeZone(
         return "--:--";
     }
     const [hour = "0", minute = "0"] = timeOfDay.split(":", 2);
-    const parts = referenceDateParts(referenceDate);
+    const parts = referenceUtcDateParts(referenceDate);
     const utcDate = new Date(
         Date.UTC(parts.year, parts.month - 1, parts.day, Number(hour), Number(minute))
     );

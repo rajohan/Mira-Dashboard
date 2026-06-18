@@ -22,7 +22,7 @@ import {
     useUpdateCronJob,
     useUpdateScheduledJob,
 } from "../hooks";
-import { getCronJobId, sortCronJobs } from "../utils/cronUtils";
+import { cronExpressionIsValid, getCronJobId, sortCronJobs } from "../utils/cronUtils";
 import {
     appTimeOfDayToUtcTimeOfDay,
     formatDate,
@@ -111,11 +111,14 @@ function ScheduledJobList({
     onSelect,
 }: ScheduledJobListProps) {
     return (
-        <Card variant="bordered" className="min-w-0 p-0">
+        <Card
+            variant="bordered"
+            className="flex min-w-0 flex-col p-0 xl:max-h-[calc(100vh-10rem)]"
+        >
             <div className="border-primary-700 text-primary-200 border-b px-3 py-2 text-sm font-semibold sm:px-4 sm:py-3">
                 Dashboard jobs
             </div>
-            <div className="max-h-80 overflow-auto p-2 xl:max-h-[70vh]">
+            <div className="max-h-80 flex-1 overflow-auto p-2 xl:max-h-none">
                 {jobs.map((job) => {
                     const isSelected =
                         job.id === selectedId || (!selectedId && job.id === currentJobId);
@@ -205,7 +208,7 @@ function ScheduledJobDetails({
         scheduleTypeDraft === "interval" && !parsePositiveInteger(intervalDraft);
     const dailyInvalid =
         scheduleTypeDraft === "daily" && !/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(timeDraft);
-    const cronInvalid = scheduleTypeDraft === "cron" && cronDraft.trim().length === 0;
+    const cronInvalid = scheduleTypeDraft === "cron" && !cronExpressionIsValid(cronDraft);
     const saveDisabled =
         updatePending || intervalInvalid || dailyInvalid || cronInvalid || runPending;
     const [timeHour = "00", timeMinute = "00"] = /^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(
@@ -362,7 +365,7 @@ function ScheduledJobDetails({
                 ) : null}
                 {cronInvalid ? (
                     <p className="mt-2 text-xs text-red-400">
-                        Cron schedules require an expression.
+                        Cron schedules require a valid five-field expression.
                     </p>
                 ) : null}
                 {editError ? (
@@ -567,6 +570,17 @@ export function Jobs() {
         }
     }
 
+    function getDailyTimeOfDayPatch(job: ScheduledJob): string | null {
+        if (scheduleTypeDraft !== "daily") return null;
+        if (
+            job.timeOfDay &&
+            timeDraft === formatUtcTimeOfDayInAppTimeZone(job.timeOfDay, job.nextRunAt)
+        ) {
+            return job.timeOfDay;
+        }
+        return appTimeOfDayToUtcTimeOfDay(timeDraft, job.nextRunAt);
+    }
+
     async function handleScheduledSave(job: ScheduledJob) {
         const patch: ScheduledJobPatch = {
             scheduleType: scheduleTypeDraft,
@@ -574,10 +588,7 @@ export function Jobs() {
                 scheduleTypeDraft === "interval"
                     ? Number(intervalDraft)
                     : job.intervalSeconds,
-            timeOfDay:
-                scheduleTypeDraft === "daily"
-                    ? appTimeOfDayToUtcTimeOfDay(timeDraft, job.nextRunAt || new Date())
-                    : null,
+            timeOfDay: getDailyTimeOfDayPatch(job),
             cronExpression:
                 scheduleTypeDraft === "cron" ? cronExpressionDraft.trim() : null,
         };

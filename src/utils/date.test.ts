@@ -4,7 +4,7 @@ import {
     APP_LOCALE_CODE,
     APP_TIME_ZONE,
     appTimeZoneParts,
-    appZonedDate,
+    appZonedUtcDate,
     currentIsoString,
     currentYear,
     isoStringFromDate,
@@ -38,7 +38,7 @@ describe("date utils", () => {
     });
 
     it("returns the current calendar year", () => {
-        const expectedYear = appZonedDate(new Date()).getFullYear();
+        const expectedYear = appTimeZoneParts(new Date()).year;
         expect(currentYear()).toBe(expectedYear);
     });
 
@@ -53,12 +53,24 @@ describe("date utils", () => {
             minute: 30,
             month: 6,
             second: 45,
+            weekday: "Thursday",
             year: 2026,
         });
-        expect(appZonedDate(date).getFullYear()).toBe(2026);
-        expect(appZonedDate(date).getMonth()).toBe(5);
-        expect(appZonedDate(date).getDate()).toBe(18);
-        expect(appZonedDate(date).getHours()).toBe(0);
-        expect(appZonedDate(date).getMinutes()).toBe(30);
+        expect(appZonedUtcDate(date).toISOString()).toBe("2026-06-18T00:30:45.000Z");
+    });
+
+    it("returns exact app timezone midnight without normalizing to 24:00", () => {
+        const date = new Date("2026-06-17T22:00:00.000Z");
+
+        expect(appTimeZoneParts(date)).toEqual({
+            day: 18,
+            hour: 0,
+            minute: 0,
+            month: 6,
+            second: 0,
+            weekday: "Thursday",
+            year: 2026,
+        });
+        expect(appZonedUtcDate(date).toISOString()).toBe("2026-06-18T00:00:00.000Z");
     });
 });
