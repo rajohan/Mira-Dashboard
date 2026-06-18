@@ -647,6 +647,9 @@ function isTrustedTokenRealm(registry: string, tokenUrl: URL): boolean {
             hostname
         );
     }
+    if (registry === "lscr.io") {
+        return hostname === "lscr.io" || hostname === "ghcr.io";
+    }
     return hostname === registry;
 }
 

@@ -14,6 +14,7 @@ dist
 backend/data/
 data/
 .test-openclaw/
+.test-data
 dist-ssr
 *.local
 

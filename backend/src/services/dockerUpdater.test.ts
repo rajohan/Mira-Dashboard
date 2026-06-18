@@ -607,6 +607,20 @@ process.stdout.write("updated\n");
             ),
             false
         );
+        assert.equal(
+            updater.__testing.isTrustedTokenRealm(
+                "lscr.io",
+                new URL("https://ghcr.io/token")
+            ),
+            true
+        );
+        assert.equal(
+            updater.__testing.isTrustedTokenRealm(
+                "lscr.io",
+                new URL("https://evil.example/token")
+            ),
+            false
+        );
     });
 
     it("reports malformed compose files while registering successful discoveries", async () => {
@@ -5144,6 +5158,49 @@ setTimeout(() => {
                 "https://ghcr.io/v2/owner/app/tags/list"
             ),
             { tags: ["1"] }
+        );
+
+        await withEnv(
+            { MIRA_GITHUB_USERNAME: "mira", MIRA_GITHUB_TOKEN: "github-token" },
+            async () => {
+                const tokenAuthHeaders: string[] = [];
+                mockFetch(async (input: string | URL | Request, init?: RequestInit) => {
+                    const url = typeof input === "string" ? input : input.toString();
+                    const headers = new Headers(init?.headers);
+                    if (url.startsWith("https://ghcr.io/token")) {
+                        tokenAuthHeaders.push(headers.get("authorization") || "");
+                        return {
+                            ok: true,
+                            headers: new Headers(),
+                            json: async () => ({ token: "registry-token" }),
+                        } as Response;
+                    }
+                    if (!headers.get("authorization")) {
+                        return {
+                            ok: false,
+                            status: 401,
+                            headers: new Headers({
+                                "www-authenticate":
+                                    'Bearer realm="https://ghcr.io/token",service="ghcr.io"',
+                            }),
+                            json: async () => ({}),
+                        } as Response;
+                    }
+                    return {
+                        ok: true,
+                        headers: new Headers(),
+                        json: async () => ({ tags: ["1"] }),
+                    } as Response;
+                });
+
+                await updater.__testing.fetchRegistryJson(
+                    "https://lscr.io/v2/linuxserver/swag/tags/list"
+                );
+
+                assert.deepEqual(tokenAuthHeaders, [
+                    `Basic ${Buffer.from("mira:github-token").toBase64()}`,
+                ]);
+            }
         );
 
         const exactGhcrUrls: string[] = [];
