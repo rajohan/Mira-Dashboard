@@ -253,7 +253,7 @@ describe("Terminal page", () => {
     it("uses tab completion and command history navigation", async () => {
         const user = userEvent.setup();
         terminal.history = [
-            makeHistoryEntry("npm test"),
+            makeHistoryEntry("bun run test"),
             makeHistoryEntry("git status"),
             makeHistoryEntry(undefined as never),
         ];
@@ -428,7 +428,7 @@ describe("Terminal page", () => {
 
         const { rerender } = render(<Terminal />);
 
-        await user.type(screen.getByPlaceholderText("Enter command..."), "npm run dev");
+        await user.type(screen.getByPlaceholderText("Enter command..."), "bun run dev");
         await user.click(screen.getByRole("button", { name: /Run/ }));
         rerender(<Terminal />);
 
@@ -465,11 +465,11 @@ describe("Terminal page", () => {
             })
         );
 
-        await user.type(screen.getByPlaceholderText("Enter command..."), "npm test");
+        await user.type(screen.getByPlaceholderText("Enter command..."), "bun run test");
         await user.click(screen.getByRole("button", { name: /Run/ }));
         expect(terminal.addCommand).toHaveBeenCalledWith(
             expect.objectContaining({
-                command: "npm test",
+                command: "bun run test",
                 code: 1,
                 status: "error",
                 stderr: "Failed to start command",
@@ -496,7 +496,7 @@ describe("Terminal page", () => {
 
         render(<Terminal />);
 
-        await user.type(screen.getByPlaceholderText("Enter command..."), "npm run dev");
+        await user.type(screen.getByPlaceholderText("Enter command..."), "bun run dev");
         await user.click(screen.getByRole("button", { name: /Run/ }));
 
         await waitFor(() => {

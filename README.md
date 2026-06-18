@@ -28,26 +28,26 @@ vite.config.ts           Vite config, React Compiler preset, dev proxy, and buil
 Install frontend dependencies from the repo root:
 
 ```bash
-npm install
+bun install
 ```
 
 Install backend dependencies separately:
 
 ```bash
 cd backend
-npm install
+bun install
 ```
 
 Run the frontend dev server:
 
 ```bash
-npm run dev
+bun run dev
 ```
 
 Run the backend dev server from `backend/`:
 
 ```bash
-npm run dev
+bun run dev
 ```
 
 The backend scripts use Doppler (`rajohan` / `prd`) for runtime secrets. Do not commit `.env` files, tokens, database dumps, or generated runtime state.
@@ -57,24 +57,24 @@ The backend scripts use Doppler (`rajohan` / `prd`) for runtime secrets. Do not 
 From the repo root:
 
 ```bash
-npm run lint
-npm run build
-npm test
-npm run test:coverage
-npm run format:check
+bun run lint
+bun run build
+bun run test
+bun run test:coverage
+bun run format:check
 ```
 
 From `backend/`:
 
 ```bash
-npm run lint
-npm run build
-npm run format:check
+bun run lint
+bun run build
+bun run format:check
 ```
 
 Use the smallest meaningful gate for the change you are making. For docs-only changes, `git diff --check` is usually enough; for frontend/backend code changes, prefer lint plus the relevant build.
 
-Frontend `npm test` and `npm run test:coverage` use the chunked Vitest runner to avoid one large resource-heavy Vitest process. Coverage LCOV files are written under `coverage/chunks/chunk-*/lcov.info` and uploaded to Codecov from CI for PR status, diff coverage, and trend visibility.
+Frontend `bun run test` and `bun run test:coverage` use the chunked Vitest runner to avoid one large resource-heavy Vitest process. Coverage LCOV files are written under `coverage/chunks/chunk-*/lcov.info` and uploaded to Codecov from CI for PR status, diff coverage, and trend visibility.
 
 ## Runtime notes
 

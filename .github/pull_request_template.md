@@ -6,13 +6,13 @@
 
 <!-- Check everything you ran. Leave unchecked with a short reason if not applicable. -->
 
-- [ ] Frontend lint: `npm run lint`
-- [ ] Frontend tests/coverage: `npm run test:coverage`
-- [ ] Frontend build: `npm run build`
-- [ ] Backend lint: `npm run lint` from `backend/`
-- [ ] Backend tests/coverage: `npm run test:coverage` from `backend/`
-- [ ] Backend build: `npm run build` from `backend/`
-- [ ] Playwright smoke tests: `npm run test:e2e`
+- [ ] Frontend lint: `bun run lint`
+- [ ] Frontend tests/coverage: `bun run test:coverage`
+- [ ] Frontend build: `bun run build`
+- [ ] Backend lint: `bun run lint` from `backend/`
+- [ ] Backend tests/coverage: `bun run test:coverage` from `backend/`
+- [ ] Backend build: `bun run build` from `backend/`
+- [ ] Playwright smoke tests: `bun run test:e2e`
 - [ ] Manual UI/API smoke check, if relevant
 
 ## Risk checklist

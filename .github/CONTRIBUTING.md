@@ -15,15 +15,15 @@ Thanks for helping improve Mira Dashboard.
 Run the relevant checks locally when possible:
 
 ```bash
-npm run lint
-npm run build
-npm test
+bun run lint
+bun run build
+bun run test
 ```
 
 For browser-facing changes, also run the relevant Playwright tests:
 
 ```bash
-npm run test:e2e
+bun run test:e2e
 ```
 
 If a check cannot be run locally, mention that in the pull request notes.

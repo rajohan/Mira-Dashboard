@@ -744,12 +744,12 @@ process.exit(1);
     );
 
     await writeExecutable(
-        path.join(binDir, "npm"),
+        path.join(binDir, "bun"),
         String.raw`#!${process.execPath}
-if (process.env.FAKE_NPM_LOG_FILE) {
-  require("node:fs").appendFileSync(process.env.FAKE_NPM_LOG_FILE, process.argv.slice(2).join(" ") + "\n");
+if (process.env.FAKE_BUN_LOG_FILE) {
+  require("node:fs").appendFileSync(process.env.FAKE_BUN_LOG_FILE, process.cwd() + " :: " + process.argv.slice(2).join(" ") + "\n");
 }
-process.stdout.write("npm " + process.argv.slice(2).join(" ") + "\n");
+process.stdout.write("bun " + process.argv.slice(2).join(" ") + "\n");
 `
     );
 
@@ -778,6 +778,7 @@ async function startServer(tempDir: string): Promise<TestServer> {
     process.env.MIRA_DASHBOARD_ROOT = tempDir;
     process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(tempDir, "worktrees");
     process.env.MIRA_DASHBOARD_DB_PATH = path.join(tempDir, "data", "mira-dashboard.db");
+    await mkdir(path.join(tempDir, "backend"), { recursive: true });
     let server: http.Server | undefined;
     try {
         const { default: pullRequestsRoutes } = await import(
@@ -2143,10 +2144,14 @@ describe("pull request routes", () => {
     });
 
     it("approves, rejects, and deploys Mira pull requests", async () => {
-        const npmLogFile = path.join(tempDir, "npm-commands.log");
-        const restoreNpmEnv = saveEnv(["FAKE_NPM_LOG_FILE"]);
-        process.env.FAKE_NPM_LOG_FILE = npmLogFile;
-        await rm(npmLogFile, { force: true });
+        const bunLogFile = path.join(tempDir, "bun-commands.log");
+        const restoreBunEnv = saveEnv(["FAKE_BUN_LOG_FILE"]);
+        process.env.FAKE_BUN_LOG_FILE = bunLogFile;
+        await rm(bunLogFile, { force: true });
+        const rootStaleModule = path.join(tempDir, "node_modules", "stale");
+        const backendStaleModule = path.join(tempDir, "backend", "node_modules", "stale");
+        await mkdir(rootStaleModule, { recursive: true });
+        await mkdir(backendStaleModule, { recursive: true });
         let deployId: string | null = null;
 
         try {
@@ -2206,15 +2211,21 @@ describe("pull request routes", () => {
                 finishedDeploy.note,
                 "Build passed; restart + health check scheduled"
             );
-            const npmCommands = await readFile(npmLogFile, "utf8");
-            assert.deepEqual(npmCommands.trim().split("\n"), [
-                "ci --legacy-peer-deps --include=dev",
-                "run build",
-                "--prefix backend ci --include=dev",
-                "--prefix backend run build",
+            const bunCommands = await readFile(bunLogFile, "utf8");
+            assert.deepEqual(bunCommands.trim().split("\n"), [
+                `${tempDir} :: install --frozen-lockfile`,
+                `${tempDir} :: run build`,
+                `${path.join(tempDir, "backend")} :: install --frozen-lockfile`,
+                `${path.join(tempDir, "backend")} :: run build`,
             ]);
+            await assert.rejects(stat(rootStaleModule), {
+                code: "ENOENT",
+            });
+            await assert.rejects(stat(backendStaleModule), {
+                code: "ENOENT",
+            });
         } finally {
-            restoreNpmEnv();
+            restoreBunEnv();
             if (deployId) {
                 releaseDeploymentLockInDb(deployId, tempDir);
                 await waitForDeploymentLockReleased(tempDir);

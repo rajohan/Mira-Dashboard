@@ -358,7 +358,7 @@ describe("useChatRuntimeEvents", () => {
                 event: "session.tool",
                 payload: {
                     data: {
-                        args: { command: "npm test" },
+                        args: { command: "bun run test" },
                         name: "functions.exec",
                         phase: "start",
                     },
@@ -373,7 +373,7 @@ describe("useChatRuntimeEvents", () => {
         expect(result.current.activeStreams["session-a"]).toEqual(
             expect.objectContaining({
                 runId: "run-tool",
-                statusText: "Exec: npm test",
+                statusText: "Exec: bun run test",
             })
         );
 
@@ -1675,9 +1675,9 @@ describe("useChatRuntimeEvents", () => {
             "Updating next steps"
         );
 
-        emitRuntimeEvent("approval", { command: "npm run build" }, "run-approval");
+        emitRuntimeEvent("approval", { command: "bun run build" }, "run-approval");
         expect(result.current.activeStreams["session-a"]?.statusText).toBe(
-            "npm run build"
+            "bun run build"
         );
 
         emitRuntimeEvent("patch", { summary: "Applying test fixes" }, "run-patch");
@@ -1687,11 +1687,11 @@ describe("useChatRuntimeEvents", () => {
 
         emitRuntimeEvent(
             "command_output",
-            { exitCode: 1, name: "functions.exec", phase: "end", title: "npm test" },
+            { exitCode: 1, name: "functions.exec", phase: "end", title: "bun run test" },
             "run-command"
         );
         expect(result.current.activeStreams["session-a"]?.statusText).toBe(
-            "Exec: exit 1: npm test"
+            "Exec: exit 1: bun run test"
         );
 
         emitRuntimeEvent("compaction", { phase: "start" }, "run-compaction");
@@ -2055,7 +2055,11 @@ describe("useChatRuntimeEvents", () => {
             emit({
                 event: "session.tool",
                 payload: {
-                    data: { args: "npm test", name: "functions.exec", phase: "start" },
+                    data: {
+                        args: "bun run test",
+                        name: "functions.exec",
+                        phase: "start",
+                    },
                     sessionKey: "session-a",
                     stream: "tool",
                 },
