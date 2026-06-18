@@ -488,6 +488,11 @@ export function Jobs() {
     const [selectedScheduledJobId, setSelectedScheduledJobId] = useState("");
     const [selectedCronJobId, setSelectedCronJobId] = useState(getInitialCronJobId);
     const lastScheduledDraftJobId = useRef<string | null>(null);
+    const dailyTimeDraftSource = useRef<null | {
+        displayTimeOfDay: string;
+        jobId: string;
+        utcTimeOfDay: string;
+    }>(null);
     const [lastCronRunAt, setLastCronRunAt] = useState<Record<string, number>>({});
     const [cronNameDraft, setCronNameDraft] = useState("");
     const [cronScheduleDraft, setCronScheduleDraft] = useState("{}");
@@ -538,14 +543,20 @@ export function Jobs() {
         lastScheduledDraftJobId.current = currentScheduledJob.id;
         setScheduleTypeDraft(currentScheduledJob.scheduleType);
         setIntervalDraft(String(currentScheduledJob.intervalSeconds));
-        setTimeDraft(
-            currentScheduledJob.timeOfDay
-                ? formatUtcTimeOfDayInAppTimeZone(
-                      currentScheduledJob.timeOfDay,
-                      currentScheduledJob.nextRunAt
-                  )
-                : ""
-        );
+        const displayTimeOfDay = currentScheduledJob.timeOfDay
+            ? formatUtcTimeOfDayInAppTimeZone(
+                  currentScheduledJob.timeOfDay,
+                  currentScheduledJob.nextRunAt
+              )
+            : "";
+        dailyTimeDraftSource.current = currentScheduledJob.timeOfDay
+            ? {
+                  displayTimeOfDay,
+                  jobId: currentScheduledJob.id,
+                  utcTimeOfDay: currentScheduledJob.timeOfDay,
+              }
+            : null;
+        setTimeDraft(displayTimeOfDay);
         setCronExpressionDraft(currentScheduledJob.cronExpression || "");
         setScheduledEditError(null);
     }, [currentScheduledJob]);
@@ -572,11 +583,9 @@ export function Jobs() {
 
     function getDailyTimeOfDayPatch(job: ScheduledJob): string | null {
         if (scheduleTypeDraft !== "daily") return null;
-        if (
-            job.timeOfDay &&
-            timeDraft === formatUtcTimeOfDayInAppTimeZone(job.timeOfDay, job.nextRunAt)
-        ) {
-            return job.timeOfDay;
+        const draftSource = dailyTimeDraftSource.current;
+        if (draftSource?.jobId === job.id && timeDraft === draftSource.displayTimeOfDay) {
+            return draftSource.utcTimeOfDay;
         }
         return appTimeOfDayToUtcTimeOfDay(timeDraft, job.nextRunAt);
     }

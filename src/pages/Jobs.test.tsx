@@ -780,6 +780,53 @@ describe("Jobs page", () => {
         });
     });
 
+    it("preserves daily UTC schedules when next run changes after draft init", async () => {
+        const user = userEvent.setup();
+        const dailyJob = {
+            actionKey: "backup.run",
+            actionPayload: { target: "kopia" },
+            createdAt: "2026-03-27T20:00:00.000Z",
+            cronExpression: null,
+            description: "Run nightly backup",
+            enabled: true,
+            id: "backup.kopia",
+            intervalSeconds: 86_400,
+            isRunning: false,
+            lastRun: null,
+            name: "Backup",
+            nextRunAt: "2026-03-28T02:10:00.000Z",
+            scheduleType: "daily",
+            timeOfDay: "02:10",
+            updatedAt: "2026-03-27T21:00:10.000Z",
+        };
+        mockScheduledJobs({ data: [dailyJob] });
+
+        const { rerender } = render(<Jobs />);
+
+        expect(
+            screen.getByRole("button", { name: "Time of day hour: 03" })
+        ).toBeInTheDocument();
+        mockScheduledJobs({
+            data: [
+                {
+                    ...dailyJob,
+                    nextRunAt: "2026-03-29T02:10:00.000Z",
+                    updatedAt: "2026-03-28T21:00:10.000Z",
+                },
+            ],
+        });
+        rerender(<Jobs />);
+        await user.click(screen.getByRole("button", { name: "Save schedule" }));
+
+        expect(hooks.updateScheduledJob).toHaveBeenCalledWith({
+            id: "backup.kopia",
+            patch: expect.objectContaining({
+                scheduleType: "daily",
+                timeOfDay: "02:10",
+            }),
+        });
+    });
+
     it("saves new daily schedules without an original UTC time", async () => {
         const user = userEvent.setup();
         mockScheduledJobs({

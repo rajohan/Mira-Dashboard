@@ -25,24 +25,37 @@ export function sortCronJobs(jobs: CronJob[]): CronJob[] {
 }
 
 function cronFieldIsValid(field: string, minimum: number, maximum: number): boolean {
+    const parseCronNumber = (value: string): number | null => {
+        if (!/^\d+$/u.test(value)) return null;
+        const number = Number(value);
+        return Number.isSafeInteger(number) ? number : null;
+    };
+
     return field.split(",").every((part) => {
         if (!part) return false;
         const stepPieces = part.split("/");
         if (stepPieces.length > 2) return false;
         const [rangePart = "", stepPart] = stepPieces;
-        const step = stepPart === undefined ? 1 : Number(stepPart);
+        const step = stepPart === undefined ? 1 : parseCronNumber(stepPart);
+        if (step === null) return false;
         if (!Number.isSafeInteger(step) || step < 1) return false;
         const rangePieces = rangePart.split("-");
         if (rangePieces.length > 2) return false;
-        const [start, end] =
-            rangePart === "*"
-                ? [minimum, maximum]
-                : rangePart.includes("-")
-                  ? rangePieces.map(Number)
-                  : [
-                        Number(rangePart),
-                        stepPart === undefined ? Number(rangePart) : maximum,
-                    ];
+        let start = minimum;
+        let end = maximum;
+        if (rangePart !== "*") {
+            if (rangePart.includes("-")) {
+                const [parsedStart, parsedEnd] = rangePieces.map(parseCronNumber);
+                if (parsedStart === null || parsedEnd === null) return false;
+                start = parsedStart;
+                end = parsedEnd;
+            } else {
+                const parsedValue = parseCronNumber(rangePart);
+                if (parsedValue === null) return false;
+                start = parsedValue;
+                end = stepPart === undefined ? parsedValue : maximum;
+            }
+        }
         return (
             Number.isSafeInteger(start) &&
             Number.isSafeInteger(end) &&
