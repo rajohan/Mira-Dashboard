@@ -23,7 +23,11 @@ import {
     useUpdateScheduledJob,
 } from "../hooks";
 import { getCronJobId, sortCronJobs } from "../utils/cronUtils";
-import { formatDate } from "../utils/format";
+import {
+    appTimeOfDayToUtcTimeOfDay,
+    formatDate,
+    formatUtcTimeOfDayInAppTimeZone,
+} from "../utils/format";
 import { validateJsonString } from "../utils/json";
 
 type JobsView = "scheduled" | "openclaw";
@@ -33,10 +37,20 @@ const scheduleTypeOptions = [
     { value: "daily", label: "Daily", description: "Run once per day" },
     { value: "cron", label: "Cron", description: "Use a five-field cron expression" },
 ];
+const hourOptions = Array.from({ length: 24 }, (_value, index) => {
+    const value = String(index).padStart(2, "0");
+    return { value, label: value };
+});
+const minuteOptions = Array.from({ length: 60 }, (_value, index) => {
+    const value = String(index).padStart(2, "0");
+    return { value, label: value };
+});
 
 function formatScheduledJobSchedule(job: ScheduledJob): string {
     if (!job.enabled) return "Disabled";
-    if (job.scheduleType === "daily") return `Daily at ${job.timeOfDay || "--:--"}`;
+    if (job.scheduleType === "daily") {
+        return `Daily at ${formatUtcTimeOfDayInAppTimeZone(job.timeOfDay, job.nextRunAt)}`;
+    }
     if (job.scheduleType === "cron") return job.cronExpression || "Cron schedule";
     if (job.intervalSeconds < 60) return `Every ${job.intervalSeconds}s`;
     const minutes = Math.round(job.intervalSeconds / 60);
@@ -194,6 +208,14 @@ function ScheduledJobDetails({
     const cronInvalid = scheduleTypeDraft === "cron" && cronDraft.trim().length === 0;
     const saveDisabled =
         updatePending || intervalInvalid || dailyInvalid || cronInvalid || runPending;
+    const [timeHour = "00", timeMinute = "00"] = /^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(
+        timeDraft
+    )
+        ? timeDraft.split(":", 2)
+        : ["00", "00"];
+    const updateTimePart = (nextHour: string, nextMinute: string) => {
+        onTimeChange(`${nextHour}:${nextMinute}`);
+    };
 
     return (
         <Card variant="bordered" className="min-w-0 space-y-3 p-3 sm:space-y-4 sm:p-4">
@@ -282,12 +304,27 @@ function ScheduledJobDetails({
                             <label className="text-primary-300 mb-1 block text-xs">
                                 Time of day
                             </label>
-                            <Input
-                                aria-label="Time of day"
-                                type="time"
-                                value={timeDraft}
-                                onChange={(event) => onTimeChange(event.target.value)}
-                            />
+                            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                                <Select
+                                    ariaLabel="Time of day hour"
+                                    value={timeHour}
+                                    options={hourOptions}
+                                    onChange={(value) =>
+                                        updateTimePart(value, timeMinute)
+                                    }
+                                    width="w-full"
+                                    menuWidth="w-24"
+                                />
+                                <span className="text-primary-400 text-sm">:</span>
+                                <Select
+                                    ariaLabel="Time of day minute"
+                                    value={timeMinute}
+                                    options={minuteOptions}
+                                    onChange={(value) => updateTimePart(timeHour, value)}
+                                    width="w-full"
+                                    menuWidth="w-24"
+                                />
+                            </div>
                         </div>
                     ) : null}
                     {scheduleTypeDraft === "cron" ? (
@@ -307,7 +344,7 @@ function ScheduledJobDetails({
                         size="sm"
                         disabled={saveDisabled}
                         onClick={onSave}
-                        className="w-full lg:w-auto"
+                        className="h-9 w-full lg:w-auto"
                     >
                         <Save className="h-4 w-4" />
                         {updatePending ? "Saving..." : "Save schedule"}
@@ -498,7 +535,14 @@ export function Jobs() {
         lastScheduledDraftJobId.current = currentScheduledJob.id;
         setScheduleTypeDraft(currentScheduledJob.scheduleType);
         setIntervalDraft(String(currentScheduledJob.intervalSeconds));
-        setTimeDraft(currentScheduledJob.timeOfDay || "");
+        setTimeDraft(
+            currentScheduledJob.timeOfDay
+                ? formatUtcTimeOfDayInAppTimeZone(
+                      currentScheduledJob.timeOfDay,
+                      currentScheduledJob.nextRunAt
+                  )
+                : ""
+        );
         setCronExpressionDraft(currentScheduledJob.cronExpression || "");
         setScheduledEditError(null);
     }, [currentScheduledJob]);
@@ -530,7 +574,10 @@ export function Jobs() {
                 scheduleTypeDraft === "interval"
                     ? Number(intervalDraft)
                     : job.intervalSeconds,
-            timeOfDay: scheduleTypeDraft === "daily" ? timeDraft : null,
+            timeOfDay:
+                scheduleTypeDraft === "daily"
+                    ? appTimeOfDayToUtcTimeOfDay(timeDraft, job.nextRunAt || new Date())
+                    : null,
             cronExpression:
                 scheduleTypeDraft === "cron" ? cronExpressionDraft.trim() : null,
         };

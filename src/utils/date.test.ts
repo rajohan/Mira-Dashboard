@@ -6,6 +6,7 @@ import {
     isoStringFromDate,
     timestampFromDateString,
 } from "./date";
+import { APP_TIME_ZONE } from "./format";
 
 describe("date utils", () => {
     it("returns the current timestamp in ISO 8601 format", () => {
@@ -34,7 +35,11 @@ describe("date utils", () => {
     });
 
     it("returns the current calendar year", () => {
-        const date = new Date();
-        expect(currentYear()).toBe(date.getFullYear());
+        const formatter = new Intl.DateTimeFormat("en", {
+            timeZone: APP_TIME_ZONE,
+            year: "numeric",
+        });
+        const expectedYear = Number(formatter.format(new Date()));
+        expect(currentYear()).toBe(expectedYear);
     });
 });

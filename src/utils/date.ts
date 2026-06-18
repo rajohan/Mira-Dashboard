@@ -1,3 +1,5 @@
+import { APP_TIME_ZONE } from "./format";
+
 /** Returns the current timestamp as an ISO string. */
 export function currentIsoString(): string {
     const date = new Date();
@@ -22,6 +24,10 @@ export function timestampFromDateString(value: string): number | null {
 
 /** Returns the current calendar year. */
 export function currentYear(): number {
-    const date = new Date();
-    return date.getFullYear();
+    const formatter = new Intl.DateTimeFormat("en", {
+        timeZone: APP_TIME_ZONE,
+        year: "numeric",
+    });
+    const year = formatter.format(new Date());
+    return Number(year);
 }
