@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 
 /** Provides props for page state. */
-interface PageStateProps {
+interface PageStateProperties {
     isLoading?: boolean;
     loading?: ReactNode;
-    error?: string | null;
+    error?: string | undefined;
     errorView?: ReactNode;
     isEmpty?: boolean;
     empty?: ReactNode;
@@ -20,17 +20,17 @@ export function PageState({
     isEmpty = false,
     empty,
     children,
-}: PageStateProps) {
+}: PageStateProperties) {
     if (isLoading) {
-        return <>{loading ?? null}</>;
+        return <>{loading ?? undefined}</>;
     }
 
     if (error) {
-        return <>{errorView ?? null}</>;
+        return <>{errorView ?? undefined}</>;
     }
 
     if (isEmpty) {
-        return <>{empty ?? null}</>;
+        return <>{empty ?? undefined}</>;
     }
 
     return <>{children}</>;

@@ -10,21 +10,22 @@ import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { useSessionActions } from "../hooks/useSessionActions";
 import { type Session } from "../types/session";
-import { sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
+import { liveQueryRows } from "../utils/liveQueryRows";
+import { sortSessionsByTypeAndActivity } from "../utils/sessionUtilities";
 
 /** Renders the sessions UI. */
 export function Sessions() {
     const { isConnected, error } = useOpenClawSocket();
     const sessionActions = useSessionActions();
-    const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
-    const [deleteError, setDeleteError] = useState<string | null>(null);
+    const [deleteTarget, setDeleteTarget] = useState<Session | undefined>(undefined);
+    const [deleteError, setDeleteError] = useState<string | undefined>(undefined);
     const [typeFilter, setTypeFilter] = useState<string>("ALL");
 
     const { data: sessions = [] } = useLiveQuery((q) =>
         q.from({ session: sessionsCollection })
     );
 
-    const sessionRows = Array.isArray(sessions) ? sessions : [];
+    const sessionRows = liveQueryRows<Session>(sessions);
     const sortedSessions = sortSessionsByTypeAndActivity(sessionRows);
     const filteredSessions =
         typeFilter === "ALL"
@@ -36,8 +37,8 @@ export function Sessions() {
         if (!deleteTarget || !deleteTarget.key || sessionActions.isDeleting) return;
 
         const target = deleteTarget;
-        setDeleteError(null);
-        setDeleteTarget(null);
+        setDeleteError(undefined);
+        setDeleteTarget(undefined);
 
         try {
             await sessionActions.remove(target.key);
@@ -92,7 +93,7 @@ export function Sessions() {
                 confirmLoadingLabel="Deleting..."
                 loading={sessionActions.isDeleting}
                 danger
-                onCancel={() => setDeleteTarget(null)}
+                onCancel={() => setDeleteTarget(undefined)}
                 onConfirm={() => {
                     void handleDeleteConfirm();
                 }}

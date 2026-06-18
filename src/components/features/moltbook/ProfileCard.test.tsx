@@ -38,7 +38,7 @@ describe("ProfileCard", () => {
     it("falls back to the username and icon when display name/avatar are missing", () => {
         render(
             <ProfileCard
-                profile={{ ...profile, avatar_url: null, display_name: "" }}
+                profile={{ ...profile, avatar_url: undefined, display_name: "" }}
                 unreadCount={0}
             />
         );

@@ -52,7 +52,7 @@ describe("GitOverviewCard", () => {
                             key: "workspace",
                             name: "Mira Workspace",
                             branch: "main",
-                            remote: null,
+                            remote: undefined,
                             dirty: false,
                             statusSummary: {
                                 staged: 0,
@@ -67,8 +67,8 @@ describe("GitOverviewCard", () => {
                         {
                             key: "dashboard",
                             name: "Mira Dashboard",
-                            branch: null,
-                            remote: null,
+                            branch: undefined,
+                            remote: undefined,
                             dirty: true,
                             statusSummary: {
                                 staged: 0,
@@ -84,7 +84,7 @@ describe("GitOverviewCard", () => {
                             key: "n8n",
                             name: "n8n",
                             branch: "main",
-                            remote: null,
+                            remote: undefined,
                             dirty: true,
                             statusSummary: {
                                 staged: 0,
@@ -128,7 +128,7 @@ describe("GitOverviewCard", () => {
                             key: "dashboard",
                             name: "Mira Dashboard",
                             branch: "feature-branch",
-                            remote: null,
+                            remote: undefined,
                             dirty: false,
                             statusSummary: {
                                 staged: 0,

@@ -5,7 +5,7 @@ import {
     formatSessionType,
     getTypeSortOrder,
     sortSessionsByTypeAndActivity,
-} from "./sessionUtils";
+} from "./sessionUtilities";
 
 function session(overrides: Partial<Session>): Session {
     return {
@@ -32,7 +32,7 @@ describe("session utils", () => {
         expect(getTypeSortOrder("HOOK")).toBe(2);
         expect(getTypeSortOrder("CRON")).toBe(3);
         expect(getTypeSortOrder("OTHER")).toBe(4);
-        expect(getTypeSortOrder(null)).toBe(4);
+        expect(getTypeSortOrder(undefined)).toBe(4);
     });
 
     it("sorts default chat first, then type, then recent activity", () => {

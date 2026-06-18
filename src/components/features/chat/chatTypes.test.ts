@@ -46,7 +46,7 @@ function historyMessage(overrides: Partial<ChatHistoryMessage>): ChatHistoryMess
 describe("chat type normalizers", () => {
     it("extracts images, thinking blocks, and tool calls from content blocks", () => {
         const content = [
-            null,
+            undefined,
             { type: "image", data: "abc" },
             { type: "thinking", thinking: "considering" },
             { type: "thinking", text: "fallback thought" },
@@ -98,7 +98,7 @@ describe("chat type normalizers", () => {
     it("normalizes text, media directives, inline files, and timestamps", () => {
         const normalized = normalizeChatHistoryMessage({
             role: "assistant",
-            timestamp: 1778407200000,
+            timestamp: 1_778_407_200_000,
             content:
                 "hello\nMEDIA:   \nMEDIA:/tmp/archive.unknown\nMEDIA:/tmp/picture.png\n" +
                 "MEDIA:/tmp/README\n" +
@@ -263,7 +263,7 @@ describe("chat type normalizers", () => {
         expect(normalizeText("hello")).toBe("hello");
         expect(normalizeText({ text: "object text" })).toBe("object text");
         expect(normalizeText(42)).toBe("");
-        expect(normalizeText(["a", { text: "b" }, { type: "image" }, null])).toBe(
+        expect(normalizeText(["a", { text: "b" }, { type: "image" }, undefined])).toBe(
             "a\n\nb\n\n[image]"
         );
         expect(normalizeText({ nope: true })).toBe("");

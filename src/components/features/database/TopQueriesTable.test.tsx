@@ -26,8 +26,10 @@ const topQueries: DatabaseOverviewResponse["topQueries"] = [
     },
 ];
 
-function renderTable(props: Partial<React.ComponentProps<typeof TopQueriesTable>> = {}) {
-    return render(<TopQueriesTable enabled data={topQueries} {...props} />);
+function renderTable(
+    properties: Partial<React.ComponentProps<typeof TopQueriesTable>> = {}
+) {
+    return render(<TopQueriesTable enabled data={topQueries} {...properties} />);
 }
 
 function restoreClipboard(descriptor: PropertyDescriptor | undefined) {
@@ -69,7 +71,7 @@ describe("TopQueriesTable", () => {
             expect(screen.getByText("Calls: 12")).toBeInTheDocument();
 
             setTimeoutSpy = vi
-                .spyOn(window, "setTimeout")
+                .spyOn(globalThis, "setTimeout")
                 .mockImplementationOnce((handler) => {
                     if (typeof handler === "function") {
                         resetCopied = handler as () => void;

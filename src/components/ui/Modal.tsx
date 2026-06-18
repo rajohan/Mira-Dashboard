@@ -6,7 +6,7 @@ import { cn } from "../../utils/cn";
 import { Button } from "./Button";
 
 /** Provides props for modal. */
-interface ModalProps {
+interface ModalProperties {
     isOpen: boolean;
     onClose: () => void;
     title?: string;
@@ -24,7 +24,13 @@ const SIZE_CLASSES = {
 };
 
 /** Renders the modal UI. */
-export function Modal({ isOpen, onClose, title, children, size = "md" }: ModalProps) {
+export function Modal({
+    isOpen,
+    onClose,
+    title,
+    children,
+    size = "md",
+}: ModalProperties) {
     return (
         <Dialog open={isOpen} onClose={onClose} className="relative z-50">
             <DialogBackdrop

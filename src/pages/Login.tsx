@@ -17,8 +17,10 @@ interface BootstrapResponse {
 /** Renders the login UI. */
 export function Login() {
     const navigate = useNavigate();
-    const [bootstrapState, setBootstrapState] = useState<BootstrapResponse | null>(null);
-    const [error, setError] = useState<string | null>(null);
+    const [bootstrapState, setBootstrapState] = useState<BootstrapResponse | undefined>(
+        undefined
+    );
+    const [error, setError] = useState<string | undefined>(undefined);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
@@ -43,7 +45,7 @@ export function Login() {
         defaultValues: { username: "", password: "", gatewayToken: "" },
         onSubmit: async ({ value }) => {
             const bootstrapRequired = bootstrapState?.bootstrapRequired ?? false;
-            setError(null);
+            setError(undefined);
             setIsSubmitting(true);
 
             try {
@@ -119,11 +121,11 @@ export function Login() {
                     <Alert className="mb-2" variant="error">
                         {error}
                     </Alert>
-                ) : null}
+                ) : undefined}
 
                 <form
-                    onSubmit={(e) => {
-                        e.preventDefault();
+                    onSubmit={(event_) => {
+                        event_.preventDefault();
                         void form.handleSubmit();
                     }}
                     className="space-y-4"
@@ -134,7 +136,9 @@ export function Login() {
                                 type="text"
                                 label="Username"
                                 value={field.state.value}
-                                onChange={(e) => field.handleChange(e.target.value)}
+                                onChange={(event_) =>
+                                    field.handleChange(event_.target.value)
+                                }
                                 placeholder="Enter your username"
                                 autoComplete="username"
                             />
@@ -147,7 +151,9 @@ export function Login() {
                                 type="password"
                                 label="Password"
                                 value={field.state.value}
-                                onChange={(e) => field.handleChange(e.target.value)}
+                                onChange={(event_) =>
+                                    field.handleChange(event_.target.value)
+                                }
                                 placeholder="Enter your password"
                                 autoComplete={
                                     bootstrapRequired
@@ -165,13 +171,15 @@ export function Login() {
                                     type="password"
                                     label="Gateway Token"
                                     value={field.state.value}
-                                    onChange={(e) => field.handleChange(e.target.value)}
+                                    onChange={(event_) =>
+                                        field.handleChange(event_.target.value)
+                                    }
                                     placeholder="Enter your OpenClaw gateway token"
                                     autoComplete="off"
                                 />
                             )}
                         </form.Field>
-                    ) : null}
+                    ) : undefined}
 
                     <Button type="submit" className="w-full" disabled={isSubmitting}>
                         {isSubmitting

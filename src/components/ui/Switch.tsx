@@ -3,7 +3,7 @@ import { Description, Field, Label, Switch as HeadlessSwitch } from "@headlessui
 import { cn } from "../../utils/cn";
 
 /** Provides props for switch. */
-interface SwitchProps {
+interface SwitchProperties {
     checked: boolean;
     onChange: (checked: boolean) => void;
     label?: string;
@@ -20,7 +20,7 @@ export function Switch({
     description,
     disabled,
     className,
-}: SwitchProps) {
+}: SwitchProperties) {
     return (
         <Field
             className={cn("flex items-center justify-between gap-3", className)}

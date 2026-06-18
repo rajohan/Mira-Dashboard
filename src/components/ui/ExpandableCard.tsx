@@ -4,7 +4,7 @@ import { ChevronDown } from "lucide-react";
 import { Card, CardTitle } from "../ui/Card";
 
 /** Provides props for expandable card. */
-interface ExpandableCardProps {
+interface ExpandableCardProperties {
     title: string;
     icon: React.ComponentType<{ size?: number; className?: string }>;
     children: React.ReactNode;
@@ -17,7 +17,7 @@ export function ExpandableCard({
     icon: Icon,
     children,
     defaultExpanded = false,
-}: ExpandableCardProps) {
+}: ExpandableCardProperties) {
     return (
         <Card variant="bordered" className="mb-3 p-3 sm:mb-4 sm:p-4">
             <Disclosure defaultOpen={defaultExpanded} as="div">
@@ -50,7 +50,7 @@ export function ReadOnlyField({
         <div className="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             <span className="text-primary-400 text-sm">{label}</span>
             <span className="text-primary-100 font-mono text-sm break-all sm:text-right">
-                {value === undefined || value === null ? "—" : String(value)}
+                {value === undefined || value === undefined ? "—" : String(value)}
             </span>
         </div>
     );

@@ -1,7 +1,7 @@
 import { Card } from "./Card";
 
 /** Provides props for metric card. */
-interface MetricCardProps {
+interface MetricCardProperties {
     title: string;
     value?: string | number;
     subtitle?: string;
@@ -28,6 +28,13 @@ const barColorClasses = {
     red: "bg-rose-500",
 };
 
+function getMetricColor(percent: number): "green" | "blue" | "orange" | "red" {
+    if (percent < 50) return "green";
+    if (percent < 75) return "blue";
+    if (percent < 90) return "orange";
+    return "red";
+}
+
 /** Renders the metric card UI. */
 export function MetricCard({
     title,
@@ -38,16 +45,8 @@ export function MetricCard({
     showPercentLabel = true,
     color = "blue",
     icon,
-}: MetricCardProps) {
-    /** Returns color. */
-    const getColor = (p: number): "green" | "blue" | "orange" | "red" => {
-        if (p < 50) return "green";
-        if (p < 75) return "blue";
-        if (p < 90) return "orange";
-        return "red";
-    };
-
-    const effectiveColor = percent === undefined ? color : getColor(percent);
+}: MetricCardProperties) {
+    const effectiveColor = percent === undefined ? color : getMetricColor(percent);
 
     return (
         <Card>
@@ -61,7 +60,9 @@ export function MetricCard({
             </div>
             <div className="flex items-end justify-between">
                 <div>
-                    {showValue ? <div className="text-2xl font-bold">{value}</div> : null}
+                    {showValue ? (
+                        <div className="text-2xl font-bold">{value}</div>
+                    ) : undefined}
                     {subtitle ? (
                         <div
                             className={
@@ -72,7 +73,7 @@ export function MetricCard({
                         >
                             {subtitle}
                         </div>
-                    ) : null}
+                    ) : undefined}
                 </div>
                 {percent !== undefined && showPercentLabel && (
                     <div className="text-primary-300 text-lg font-semibold">

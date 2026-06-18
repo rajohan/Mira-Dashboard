@@ -22,7 +22,7 @@ const job = {
 function renderDetails(
     overrides: Partial<React.ComponentProps<typeof CronJobDetails>> = {}
 ) {
-    const props = {
+    const properties = {
         job,
         togglePending: false,
         runPending: false,
@@ -35,17 +35,17 @@ function renderDetails(
         onEditModeChange: vi.fn(),
         nameDraft: "Dashboard autopilot",
         onNameDraftChange: vi.fn(),
-        scheduleDraft: JSON.stringify(job.schedule, null, 2),
+        scheduleDraft: JSON.stringify(job.schedule, undefined, 2),
         onScheduleDraftChange: vi.fn(),
-        payloadDraft: JSON.stringify(job.payload, null, 2),
+        payloadDraft: JSON.stringify(job.payload, undefined, 2),
         onPayloadDraftChange: vi.fn(),
-        deliveryDraft: JSON.stringify(job.delivery, null, 2),
+        deliveryDraft: JSON.stringify(job.delivery, undefined, 2),
         onDeliveryDraftChange: vi.fn(),
-        scheduleValidation: { valid: true, error: null },
-        payloadValidation: { valid: true, error: null },
-        deliveryValidation: { valid: true, error: null },
+        scheduleValidation: { valid: true, error: undefined },
+        payloadValidation: { valid: true, error: undefined },
+        deliveryValidation: { valid: true, error: undefined },
         hasInvalidJson: false,
-        editError: null,
+        editError: undefined,
         onSave: vi.fn(),
         formatDate: (value: number) => {
             const date = new Date(value);
@@ -55,8 +55,8 @@ function renderDetails(
     } satisfies React.ComponentProps<typeof CronJobDetails>;
 
     return {
-        ...render(<CronJobDetails {...props} />),
-        props,
+        ...render(<CronJobDetails {...properties} />),
+        props: properties,
     };
 }
 
@@ -157,7 +157,7 @@ describe("CronJobDetails", () => {
             updatePending: true,
             deletePending: true,
             hasInvalidJson: true,
-            payloadValidation: { valid: false, error: null },
+            payloadValidation: { valid: false, error: undefined },
             deliveryValidation: { valid: false, error: "missing mode" },
             onEditModeChange,
         });
@@ -192,8 +192,8 @@ describe("CronJobDetails", () => {
                 {...props}
                 job={emptyConfigJob}
                 isEditMode
-                deliveryValidation={{ valid: false, error: null }}
-                scheduleValidation={{ valid: false, error: null }}
+                deliveryValidation={{ valid: false, error: undefined }}
+                scheduleValidation={{ valid: false, error: undefined }}
             />
         );
 

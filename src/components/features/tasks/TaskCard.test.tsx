@@ -6,7 +6,9 @@ import type { Task } from "../../../types/task";
 import { TaskCard } from "./TaskCard";
 
 const sortable = vi.hoisted(() => ({
-    transform: null as null | { x: number; y: number; scaleX: number; scaleY: number },
+    transform: undefined as
+        | undefined
+        | { x: number; y: number; scaleX: number; scaleY: number },
 }));
 
 vi.mock("@dnd-kit/sortable", () => ({
@@ -42,7 +44,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 
 describe("TaskCard", () => {
     beforeEach(() => {
-        sortable.transform = null;
+        sortable.transform = undefined;
     });
 
     it("renders task metadata and calls onClick", async () => {

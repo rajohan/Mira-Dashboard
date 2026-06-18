@@ -18,22 +18,22 @@ import { ConfirmModal } from "../../ui/ConfirmModal";
 
 /** Defines backup snapshot. */
 type BackupSnapshot = {
-    id: string | null;
-    path: string | null;
-    description: string | null;
-    startTime: string | null;
-    endTime: string | null;
-    fileCount: number | null;
-    totalSize: number | null;
-    errorCount: number | null;
-    ignoredErrorCount: number | null;
+    id: string | undefined;
+    path: string | undefined;
+    description: string | undefined;
+    startTime: string | undefined;
+    endTime: string | undefined;
+    fileCount: number | undefined;
+    totalSize: number | undefined;
+    errorCount: number | undefined;
+    ignoredErrorCount: number | undefined;
     retentionReason: string[];
 };
 
 /** Defines backup snapshot group. */
 type BackupSnapshotGroup = {
-    path: string | null;
-    latest: BackupSnapshot | null;
+    path: string | undefined;
+    latest: BackupSnapshot | undefined;
     snapshots: BackupSnapshot[];
     snapshotCount: number;
 };
@@ -44,28 +44,28 @@ type BackupCacheData = {
     tool?: string;
     latest?: BackupSnapshot[];
     snapshotsByPath?: BackupSnapshotGroup[];
-    stale?: Array<{ path: string | null; endTime: string | null }>;
+    stale?: Array<{ path: string | undefined; endTime: string | undefined }>;
     ok?: boolean;
 };
 
 /** Defines walg backup. */
 type WalgBackup = {
-    backupName?: string | null;
-    modified?: string | null;
-    time?: string | null;
-    startTime?: string | null;
-    finishTime?: string | null;
-    walFileName?: string | null;
-    storageName?: string | null;
+    backupName?: string | undefined;
+    modified?: string | undefined;
+    time?: string | undefined;
+    startTime?: string | undefined;
+    finishTime?: string | undefined;
+    walFileName?: string | undefined;
+    storageName?: string | undefined;
 };
 
 /** Defines walg cache data. */
 type WalgCacheData = {
     checkedAt?: string;
     tool?: string;
-    latest?: WalgBackup | null;
+    latest?: WalgBackup | undefined;
     backupCount?: number;
-    latestAgeHours?: number | null;
+    latestAgeHours?: number | undefined;
     stale?: boolean;
     ok?: boolean;
 };
@@ -79,7 +79,7 @@ function getVariant(status?: string, ok?: boolean) {
 }
 
 /** Formats path for display. */
-function formatPath(path: string | null | undefined) {
+function formatPath(path: string | undefined | undefined) {
     if (!path) return "Unknown source";
     if (path === "/source/docker") return "Docker";
     if (path === "/source/projects") return "Projects";
@@ -110,12 +110,14 @@ export function BackupOverviewCard() {
         (sum, group) => sum + group.snapshotCount,
         0
     );
-    const runningJob = backupState?.job?.status === "running" ? backupState.job : null;
-    const runningWalgJob = walgState?.job?.status === "running" ? walgState.job : null;
+    const runningJob =
+        backupState?.job?.status === "running" ? backupState.job : undefined;
+    const runningWalgJob =
+        walgState?.job?.status === "running" ? walgState.job : undefined;
     const attentionJob =
-        backupState?.job?.status === "needs_attention" ? backupState.job : null;
+        backupState?.job?.status === "needs_attention" ? backupState.job : undefined;
     const attentionWalgJob =
-        walgState?.job?.status === "needs_attention" ? walgState.job : null;
+        walgState?.job?.status === "needs_attention" ? walgState.job : undefined;
     const isRunning = Boolean(runningJob);
     const isWalgRunning = Boolean(runningWalgJob);
     const isBlocked = isRunning || Boolean(attentionJob);
@@ -237,9 +239,9 @@ export function BackupOverviewCard() {
                                 {runningWalgJob.stdout}
                             </pre>
                         </div>
-                    ) : null}
+                    ) : undefined}
                 </div>
-            ) : null}
+            ) : undefined}
 
             {attentionWalgJob ? (
                 <div className="mb-4 rounded-lg border border-yellow-400/40 bg-yellow-400/10 p-3 text-sm text-yellow-100">
@@ -272,9 +274,9 @@ export function BackupOverviewCard() {
                                 {attentionWalgJob.stderr}
                             </pre>
                         </div>
-                    ) : null}
+                    ) : undefined}
                 </div>
-            ) : null}
+            ) : undefined}
 
             {runningJob ? (
                 <div className="border-accent-500/30 bg-accent-500/10 text-accent-100 mb-4 rounded-lg border p-3 text-sm">
@@ -289,9 +291,9 @@ export function BackupOverviewCard() {
                         <div className="bg-primary-950/50 text-primary-200 mt-2 max-h-24 overflow-y-auto rounded p-2 font-mono text-xs">
                             <pre className="whitespace-pre-wrap">{runningJob.stdout}</pre>
                         </div>
-                    ) : null}
+                    ) : undefined}
                 </div>
-            ) : null}
+            ) : undefined}
 
             {attentionJob ? (
                 <div className="mb-4 rounded-lg border border-yellow-400/40 bg-yellow-400/10 p-3 text-sm text-yellow-100">
@@ -324,9 +326,9 @@ export function BackupOverviewCard() {
                                 {attentionJob.stderr}
                             </pre>
                         </div>
-                    ) : null}
+                    ) : undefined}
                 </div>
-            ) : null}
+            ) : undefined}
 
             <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="border-primary-700 bg-primary-900/30 rounded-lg border p-3">
@@ -418,7 +420,7 @@ export function BackupOverviewCard() {
                 <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300">
                     {entry.errorMessage}
                 </div>
-            ) : null}
+            ) : undefined}
 
             {isLoading ? (
                 <div className="text-primary-400 flex min-h-[22rem] items-center justify-center">
@@ -497,7 +499,7 @@ export function BackupOverviewCard() {
                                                                 )
                                                             )}
                                                         </div>
-                                                    ) : null}
+                                                    ) : undefined}
                                                 </div>
                                                 <div className="text-primary-300 text-right">
                                                     <div>

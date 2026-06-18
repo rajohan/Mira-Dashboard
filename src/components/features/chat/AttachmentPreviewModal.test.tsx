@@ -6,7 +6,7 @@ import type { ChatPreviewItem } from "./chatTypes";
 
 describe("AttachmentPreviewModal", () => {
     it("stays closed without a preview item", () => {
-        render(<AttachmentPreviewModal previewItem={null} onClose={vi.fn()} />);
+        render(<AttachmentPreviewModal previewItem={undefined} onClose={vi.fn()} />);
 
         expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });

@@ -24,7 +24,7 @@ function renderComposer(
     overrides: Partial<React.ComponentProps<typeof ChatComposer>> = {}
 ) {
     const fileInputReference = createRef<HTMLInputElement>();
-    const props = {
+    const properties = {
         attachments: [] as ChatSendAttachment[],
         canSend: true,
         draft: "",
@@ -47,8 +47,8 @@ function renderComposer(
 
     return {
         fileInputReference,
-        props,
-        ...render(<ChatComposer {...props} />),
+        props: properties,
+        ...render(<ChatComposer {...properties} />),
     };
 }
 
@@ -122,7 +122,7 @@ describe("ChatComposer", () => {
         await user.keyboard("{Enter}");
         expect(onSend).toHaveBeenCalledTimes(1);
 
-        vi.stubGlobal("matchMedia", vi.fn().mockReturnValue(null));
+        vi.stubGlobal("matchMedia", vi.fn().mockReturnValue(undefined));
         rerender(<ChatComposer {...props} draft="again" onSend={onSend} />);
         screen
             .getByPlaceholderText("Message, attach files, or use / commands (try /help)")

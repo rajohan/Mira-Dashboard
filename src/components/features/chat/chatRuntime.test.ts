@@ -51,8 +51,8 @@ describe("chat runtime helpers", () => {
         expect(isSameSessionKey("agent:main", "main")).toBe(false);
         expect(isSameSessionKey("agent::rest", "rest")).toBe(false);
         expect(isSameSessionKey("agent:main:", "main")).toBe(false);
-        expect(parseAgentSessionKey("agent::rest")).toBeNull();
-        expect(parseAgentSessionKey("agent:main:")).toBeNull();
+        expect(parseAgentSessionKey("agent::rest")).toBeUndefined();
+        expect(parseAgentSessionKey("agent:main:")).toBeUndefined();
     });
 
     it("normalizes assistant payloads and final stream messages", () => {

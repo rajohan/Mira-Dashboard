@@ -28,7 +28,7 @@ export function AppErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
                         <RotateCw className="h-4 w-4" />
                         Try again
                     </Button>
-                    <Button variant="ghost" onClick={() => window.location.reload()}>
+                    <Button variant="ghost" onClick={() => location.reload()}>
                         <RefreshCw className="h-4 w-4" />
                         Full reload
                     </Button>

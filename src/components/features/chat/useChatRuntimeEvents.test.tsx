@@ -6,7 +6,7 @@ import type { ActiveChatStreams } from "./chatRuntime";
 import type { ChatHistoryMessage } from "./chatTypes";
 import {
     compactStatusText,
-    detailFromArgs,
+    detailFromArguments as detailFromArguments,
     formatToolName,
     isNewRunForStream,
     isRuntimeWorkEvent,
@@ -18,7 +18,7 @@ import {
 
 type ChatRequest = <T = unknown>(
     method: string,
-    params?: Record<string, unknown>
+    parameters?: Record<string, unknown>
 ) => Promise<T>;
 
 /** Renders the runtime event hook with controllable Gateway event input. */
@@ -66,11 +66,13 @@ function renderRuntimeEvents(
                 overrides.activeStreams ?? {}
             );
             const [messages, setMessages] = useState<ChatHistoryMessage[]>([]);
-            const [sendError, setSendError] = useState<string | null>(null);
+            const [sendError, setSendError] = useState<string | undefined>(undefined);
             const [isAtBottom, setIsAtBottom] = useState(false);
             const [historyLoadVersion, setHistoryLoadVersion] = useState(0);
             const activeStreamsReference = useRef(activeStreams);
-            const liveHistoryRefreshTimerReference = useRef<number | null>(null);
+            const liveHistoryRefreshTimerReference = useRef<number | undefined>(
+                undefined
+            );
             const shouldStickToBottomReference = useRef(
                 overrides.shouldStickToBottom ?? true
             );
@@ -137,10 +139,10 @@ describe("runtime event formatting helpers", () => {
         expect(stringValue(123)).toBeUndefined();
         expect(formatToolName("functions.web_search-query")).toBe("Web search query");
         expect(formatToolName(" ".repeat(3))).toBe("");
-        expect(detailFromArgs("raw detail")).toBe("raw detail");
-        expect(detailFromArgs({ unused: "nope" })).toBeUndefined();
-        expect(detailFromArgs({ message: " hello " })).toBe("hello");
-        expect(normalizeRuntimeStream(null)).toBe("");
+        expect(detailFromArguments("raw detail")).toBe("raw detail");
+        expect(detailFromArguments({ unused: "nope" })).toBeUndefined();
+        expect(detailFromArguments({ message: " hello " })).toBe("hello");
+        expect(normalizeRuntimeStream(undefined)).toBe("");
         expect(normalizeRuntimeStream("command_output")).toBe("command-output");
         expect(normalizeRuntimeStream("tool")).toBe("tool");
     });
@@ -1299,7 +1301,7 @@ describe("useChatRuntimeEvents", () => {
     });
 
     it("coalesces queued Gateway v4 deltas onto one flush timer", async () => {
-        const setTimeoutSpy = vi.spyOn(window, "setTimeout");
+        const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
         const { emit, result } = renderRuntimeEvents({
             activeStreams: {
                 "session-a": {
@@ -1961,7 +1963,7 @@ describe("useChatRuntimeEvents", () => {
             });
         });
 
-        expect(result.current.sendError).toBeNull();
+        expect(result.current.sendError).toBeUndefined();
         expect(result.current.activeStreams["session-b"]).toBeUndefined();
     });
 
@@ -2039,7 +2041,7 @@ describe("useChatRuntimeEvents", () => {
                 },
                 type: "event",
             });
-            emit({ event: "session.tool", payload: null, type: "event" });
+            emit({ event: "session.tool", payload: undefined, type: "event" });
             await vi.advanceTimersByTimeAsync(600);
         });
 
@@ -2218,7 +2220,7 @@ describe("useChatRuntimeEvents", () => {
             });
         });
 
-        expect(result.current.sendError).toBeNull();
+        expect(result.current.sendError).toBeUndefined();
         expect(result.current.activeStreams["session-b"]).toBeUndefined();
     });
 
@@ -2286,7 +2288,7 @@ describe("useChatRuntimeEvents", () => {
             });
         });
 
-        expect(result.current.sendError).toBeNull();
+        expect(result.current.sendError).toBeUndefined();
         expect(result.current.activeStreams["session-a"]?.text).toBe("Partial");
     });
 

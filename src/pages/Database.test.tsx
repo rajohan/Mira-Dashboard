@@ -45,7 +45,7 @@ describe("Database page", () => {
     it("renders loading state", () => {
         hooks.useDatabaseOverview.mockReturnValue({
             data: undefined,
-            error: null,
+            error: undefined,
             isLoading: true,
         });
 
@@ -79,7 +79,7 @@ describe("Database page", () => {
                 pgbouncerStats: [],
                 topQueries: [{ query: "select 1" }, { query: "select 2" }],
             },
-            error: null,
+            error: undefined,
             isLoading: false,
         });
 

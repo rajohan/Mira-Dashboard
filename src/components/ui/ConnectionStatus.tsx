@@ -3,7 +3,7 @@ import { Wifi, WifiOff } from "lucide-react";
 import { cn } from "../../utils/cn";
 
 /** Provides props for connection status. */
-interface ConnectionStatusProps {
+interface ConnectionStatusProperties {
     isConnected: boolean;
     connectedText?: string;
     disconnectedText?: string;
@@ -16,7 +16,7 @@ export function ConnectionStatus({
     connectedText = "Connected",
     disconnectedText = "Disconnected",
     className,
-}: ConnectionStatusProps) {
+}: ConnectionStatusProperties) {
     return (
         <span
             className={cn(

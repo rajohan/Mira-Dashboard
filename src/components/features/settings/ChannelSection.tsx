@@ -14,14 +14,14 @@ interface ChannelSummary {
 }
 
 /** Provides props for channel section. */
-interface ChannelSectionProps {
+interface ChannelSectionProperties {
     channels: ChannelSummary[];
     onSave: (channels: ChannelSummary[]) => Promise<void>;
     saving: boolean;
 }
 
 /** Renders the channel section UI. */
-export function ChannelSection({ channels, onSave, saving }: ChannelSectionProps) {
+export function ChannelSection({ channels, onSave, saving }: ChannelSectionProperties) {
     const [draftChannels, setDraftChannels] = useState(channels);
 
     useEffect(() => {

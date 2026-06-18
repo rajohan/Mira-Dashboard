@@ -12,7 +12,7 @@ import {
     messageDeleteKey,
     messageIdentity,
     readFileAsDataUrl,
-} from "./chatUtils";
+} from "./chatUtilities";
 
 /** Creates a normalized chat history message for utility tests. */
 function message(overrides: Partial<ChatHistoryMessage>): ChatHistoryMessage {
@@ -102,7 +102,7 @@ describe("chat utils", () => {
                     toolCalls: [{ id: "tool-empty", name: "noop" }],
                 })
             )
-        ).toBe("assistant::tool-calls::tool-empty::noop::null");
+        ).toBe("assistant::tool-calls::tool-empty::noop::");
 
         const thinking = message({
             role: "assistant",
@@ -457,22 +457,22 @@ describe("chat utils", () => {
         const OriginalFileReader = FileReader;
         try {
             class NonStringFileReader extends EventTarget {
-                result: ArrayBuffer | null = new ArrayBuffer(0);
-                error: Error | null = null;
+                result: ArrayBuffer | undefined = new ArrayBuffer(0);
+                error: Error | undefined = undefined;
                 readAsDataURL() {
                     this.dispatchEvent(new Event("load"));
                 }
             }
             class ErrorFileReader extends EventTarget {
-                result: string | null = null;
-                error: Error | null = new Error("reader failed");
+                result: string | undefined = undefined;
+                error: Error | undefined = new Error("reader failed");
                 readAsDataURL() {
                     this.dispatchEvent(new Event("error"));
                 }
             }
             class EmptyErrorFileReader extends EventTarget {
-                result: string | null = null;
-                error: Error | null = null;
+                result: string | undefined = undefined;
+                error: Error | undefined = undefined;
                 readAsDataURL() {
                     this.dispatchEvent(new Event("error"));
                 }

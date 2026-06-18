@@ -8,7 +8,7 @@ export interface MiraProfile {
     following_count: number;
     posts_count: number;
     comments_count: number;
-    avatar_url: string | null;
+    avatar_url: string | undefined;
 }
 
 /** Represents mira post. */

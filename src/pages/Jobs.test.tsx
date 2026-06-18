@@ -67,7 +67,7 @@ vi.mock("../components/features/cron", () => ({
         scheduleDraft,
     }: {
         deliveryDraft: string;
-        editError: string | null;
+        editError: string | undefined;
         hasInvalidJson: boolean;
         job: MockCronJob;
         lastTriggeredAt?: number;
@@ -92,7 +92,7 @@ vi.mock("../components/features/cron", () => ({
             <div>delivery draft: {deliveryDraft}</div>
             <div>invalid: {String(hasInvalidJson)}</div>
             <div>last run: {lastTriggeredAt ? "set" : "unset"}</div>
-            {editError ? <div>{editError}</div> : null}
+            {editError ? <div>{editError}</div> : undefined}
             <button type="button" onClick={() => onEditModeChange(true)}>
                 Edit
             </button>
@@ -174,7 +174,7 @@ function mockCronJobs(overrides = {}) {
                 schedule: { everyMs: 60_000, kind: "every" },
             },
         ],
-        error: null,
+        error: undefined,
         isLoading: false,
         refetch: hooks.refetch,
         ...overrides,
@@ -188,7 +188,7 @@ function mockScheduledJobs(overrides = {}) {
                 actionKey: "cache.prune",
                 actionPayload: { cache: "deployments" },
                 createdAt: "2026-06-17T20:00:00.000Z",
-                cronExpression: null,
+                cronExpression: undefined,
                 description: "Trim expired cache entries",
                 enabled: true,
                 id: "cache.cleanup",
@@ -198,7 +198,7 @@ function mockScheduledJobs(overrides = {}) {
                     finishedAt: "2026-06-17T21:00:10.000Z",
                     id: 7,
                     jobId: "cache.cleanup",
-                    message: null,
+                    message: undefined,
                     output: { deleted: 4 },
                     startedAt: "2026-06-17T21:00:00.000Z",
                     status: "success",
@@ -207,20 +207,20 @@ function mockScheduledJobs(overrides = {}) {
                 name: "Cache cleanup",
                 nextRunAt: "2026-06-17T22:00:00.000Z",
                 scheduleType: "interval",
-                timeOfDay: null,
+                timeOfDay: undefined,
                 updatedAt: "2026-06-17T21:00:10.000Z",
             },
             {
                 actionKey: "backup.run",
                 actionPayload: { target: "kopia" },
                 createdAt: "2026-06-17T20:00:00.000Z",
-                cronExpression: null,
+                cronExpression: undefined,
                 description: "Run nightly backup",
                 enabled: false,
                 id: "backup.kopia",
                 intervalSeconds: 86_400,
                 isRunning: false,
-                lastRun: null,
+                lastRun: undefined,
                 name: "Backup",
                 nextRunAt: "2026-06-18T02:10:00.000Z",
                 scheduleType: "daily",
@@ -228,7 +228,7 @@ function mockScheduledJobs(overrides = {}) {
                 updatedAt: "2026-06-17T21:00:10.000Z",
             },
         ],
-        error: null,
+        error: undefined,
         isLoading: false,
         refetch: hooks.refetch,
         ...overrides,
@@ -244,7 +244,7 @@ function mockScheduledRuns(overrides = {}) {
                           finishedAt: "2026-06-17T21:00:10.000Z",
                           id: 7,
                           jobId: "cache.cleanup",
-                          message: null,
+                          message: undefined,
                           output: { deleted: 4 },
                           startedAt: "2026-06-17T21:00:00.000Z",
                           status: "success",
@@ -259,7 +259,7 @@ function mockScheduledRuns(overrides = {}) {
                           id: 8,
                           jobId: "cache.fast",
                           message: "Timed out",
-                          output: null,
+                          output: undefined,
                           startedAt: "2026-06-17T21:00:00.000Z",
                           status: "failed",
                           triggerType: "manual",
@@ -269,11 +269,11 @@ function mockScheduledRuns(overrides = {}) {
             ...(id === "jobs.running"
                 ? [
                       {
-                          finishedAt: null,
+                          finishedAt: undefined,
                           id: 9,
                           jobId: "jobs.running",
-                          message: null,
-                          output: null,
+                          message: undefined,
+                          output: undefined,
                           startedAt: "2026-06-17T21:00:00.000Z",
                           status: "running",
                           triggerType: "schedule",
@@ -281,7 +281,7 @@ function mockScheduledRuns(overrides = {}) {
                   ]
                 : []),
         ],
-        error: null,
+        error: undefined,
         isLoading: false,
         refetch: hooks.scheduledRunsRefetch,
         ...overrides,
@@ -294,7 +294,7 @@ async function switchToOpenClawCron(user: ReturnType<typeof userEvent.setup>) {
 
 describe("Jobs page", () => {
     beforeEach(() => {
-        window.history.replaceState(null, "", "/jobs");
+        history.replaceState(undefined, "", "/jobs");
         hooks.refetch.mockReset();
         hooks.deleteJob.mockResolvedValue(Promise.resolve({}));
         hooks.runNow.mockResolvedValue(Promise.resolve({}));
@@ -342,7 +342,7 @@ describe("Jobs page", () => {
         mockScheduledJobs({ data: [], isLoading: true });
         hooks.useCronJobs.mockReturnValue({
             data: [],
-            error: null,
+            error: undefined,
             isLoading: true,
             refetch: hooks.refetch,
         });
@@ -356,7 +356,7 @@ describe("Jobs page", () => {
         });
         hooks.useCronJobs.mockReturnValue({
             data: [],
-            error: null,
+            error: undefined,
             isLoading: false,
             refetch: hooks.refetch,
         });
@@ -365,10 +365,10 @@ describe("Jobs page", () => {
         await user.click(screen.getByRole("button", { name: "Retry" }));
         expect(hooks.refetch).toHaveBeenCalledTimes(1);
 
-        mockScheduledJobs({ data: [], error: null, isLoading: false });
+        mockScheduledJobs({ data: [], error: undefined, isLoading: false });
         hooks.useCronJobs.mockReturnValue({
             data: [],
-            error: null,
+            error: undefined,
             isLoading: false,
             refetch: hooks.refetch,
         });
@@ -378,7 +378,7 @@ describe("Jobs page", () => {
 
     it("shows empty and error states only for the active tab", async () => {
         const user = userEvent.setup();
-        mockScheduledJobs({ data: [], error: null, isLoading: false });
+        mockScheduledJobs({ data: [], error: undefined, isLoading: false });
 
         const { rerender } = render(<Jobs />);
 
@@ -474,7 +474,7 @@ describe("Jobs page", () => {
                     actionKey: "cache.fast",
                     actionPayload: {},
                     createdAt: "2026-06-17T20:00:00.000Z",
-                    cronExpression: null,
+                    cronExpression: undefined,
                     description: "",
                     enabled: true,
                     id: "cache.fast",
@@ -485,15 +485,15 @@ describe("Jobs page", () => {
                         id: 8,
                         jobId: "cache.fast",
                         message: "Timed out",
-                        output: null,
+                        output: undefined,
                         startedAt: "2026-06-17T21:00:00.000Z",
                         status: "failed",
                         triggerType: "manual",
                     },
                     name: "Fast interval",
-                    nextRunAt: null,
+                    nextRunAt: undefined,
                     scheduleType: "interval",
-                    timeOfDay: null,
+                    timeOfDay: undefined,
                     updatedAt: "2026-06-17T21:00:10.000Z",
                 },
                 {
@@ -506,29 +506,29 @@ describe("Jobs page", () => {
                     id: "jobs.cron",
                     intervalSeconds: 3600,
                     isRunning: false,
-                    lastRun: null,
+                    lastRun: undefined,
                     name: "Cron fallback",
-                    nextRunAt: null,
+                    nextRunAt: undefined,
                     scheduleType: "cron",
-                    timeOfDay: null,
+                    timeOfDay: undefined,
                     updatedAt: "2026-06-17T21:00:10.000Z",
                 },
                 {
                     actionKey: "jobs.running",
                     actionPayload: {},
                     createdAt: "2026-06-17T20:00:00.000Z",
-                    cronExpression: null,
+                    cronExpression: undefined,
                     description: "Currently active",
                     enabled: true,
                     id: "jobs.running",
                     intervalSeconds: 3600,
                     isRunning: true,
                     lastRun: {
-                        finishedAt: null,
+                        finishedAt: undefined,
                         id: 9,
                         jobId: "jobs.running",
-                        message: null,
-                        output: null,
+                        message: undefined,
+                        output: undefined,
                         startedAt: "2026-06-17T21:00:00.000Z",
                         status: "running",
                         triggerType: "schedule",
@@ -543,68 +543,68 @@ describe("Jobs page", () => {
                     actionKey: "jobs.daily",
                     actionPayload: {},
                     createdAt: "2026-06-17T20:00:00.000Z",
-                    cronExpression: null,
+                    cronExpression: undefined,
                     description: "",
                     enabled: true,
                     id: "jobs.daily",
                     intervalSeconds: 3600,
                     isRunning: false,
-                    lastRun: null,
+                    lastRun: undefined,
                     name: "Daily fallback",
-                    nextRunAt: null,
+                    nextRunAt: undefined,
                     scheduleType: "daily",
-                    timeOfDay: null,
+                    timeOfDay: undefined,
                     updatedAt: "2026-06-17T21:00:10.000Z",
                 },
                 {
                     actionKey: "jobs.duplicate",
                     actionPayload: {},
                     createdAt: "2026-06-17T20:00:00.000Z",
-                    cronExpression: null,
+                    cronExpression: undefined,
                     description: "",
                     enabled: true,
                     id: "duplicate.b",
                     intervalSeconds: 3600,
                     isRunning: false,
-                    lastRun: null,
+                    lastRun: undefined,
                     name: "Duplicate",
-                    nextRunAt: null,
+                    nextRunAt: undefined,
                     scheduleType: "interval",
-                    timeOfDay: null,
+                    timeOfDay: undefined,
                     updatedAt: "2026-06-17T21:00:10.000Z",
                 },
                 {
                     actionKey: "jobs.duplicate",
                     actionPayload: {},
                     createdAt: "2026-06-17T20:00:00.000Z",
-                    cronExpression: null,
+                    cronExpression: undefined,
                     description: "",
                     enabled: true,
                     id: "duplicate.a",
                     intervalSeconds: 3600,
                     isRunning: false,
-                    lastRun: null,
+                    lastRun: undefined,
                     name: "Duplicate",
-                    nextRunAt: null,
+                    nextRunAt: undefined,
                     scheduleType: "interval",
-                    timeOfDay: null,
+                    timeOfDay: undefined,
                     updatedAt: "2026-06-17T21:00:10.000Z",
                 },
                 {
                     actionKey: "jobs.minutes",
                     actionPayload: {},
                     createdAt: "2026-06-17T20:00:00.000Z",
-                    cronExpression: null,
+                    cronExpression: undefined,
                     description: "",
                     enabled: true,
                     id: "jobs.minutes",
                     intervalSeconds: 90,
                     isRunning: false,
-                    lastRun: null,
+                    lastRun: undefined,
                     name: "Minute interval",
-                    nextRunAt: null,
+                    nextRunAt: undefined,
                     scheduleType: "interval",
-                    timeOfDay: null,
+                    timeOfDay: undefined,
                     updatedAt: "2026-06-17T21:00:10.000Z",
                 },
             ],
@@ -678,7 +678,7 @@ describe("Jobs page", () => {
         expect(hooks.updateScheduledJob).toHaveBeenCalledWith({
             id: "backup.kopia",
             patch: expect.objectContaining({
-                cronExpression: null,
+                cronExpression: undefined,
                 scheduleType: "daily",
                 timeOfDay: "03:15",
             }),
@@ -701,7 +701,7 @@ describe("Jobs page", () => {
             patch: expect.objectContaining({
                 cronExpression: "0 4 * * *",
                 scheduleType: "cron",
-                timeOfDay: null,
+                timeOfDay: undefined,
             }),
         });
     });
@@ -714,15 +714,15 @@ describe("Jobs page", () => {
                     actionKey: "backup.run",
                     actionPayload: { target: "kopia" },
                     createdAt: "2026-06-17T20:00:00.000Z",
-                    cronExpression: null,
+                    cronExpression: undefined,
                     description: "Run nightly backup",
                     enabled: true,
                     id: "backup.kopia",
                     intervalSeconds: 86_400,
                     isRunning: false,
-                    lastRun: null,
+                    lastRun: undefined,
                     name: "Backup",
-                    nextRunAt: null,
+                    nextRunAt: undefined,
                     scheduleType: "daily",
                     timeOfDay: "04:10",
                     updatedAt: "2026-06-17T21:00:10.000Z",
@@ -750,13 +750,13 @@ describe("Jobs page", () => {
                     actionKey: "backup.run",
                     actionPayload: { target: "kopia" },
                     createdAt: "2026-10-24T20:00:00.000Z",
-                    cronExpression: null,
+                    cronExpression: undefined,
                     description: "Run nightly backup",
                     enabled: true,
                     id: "backup.kopia",
                     intervalSeconds: 86_400,
                     isRunning: false,
-                    lastRun: null,
+                    lastRun: undefined,
                     name: "Backup",
                     nextRunAt: "2026-10-25T00:30:00.000Z",
                     scheduleType: "daily",
@@ -791,13 +791,13 @@ describe("Jobs page", () => {
             actionKey: "backup.run",
             actionPayload: { target: "kopia" },
             createdAt: "2026-03-27T20:00:00.000Z",
-            cronExpression: null,
+            cronExpression: undefined,
             description: "Run nightly backup",
             enabled: true,
             id: "backup.kopia",
             intervalSeconds: 86_400,
             isRunning: false,
-            lastRun: null,
+            lastRun: undefined,
             name: "Backup",
             nextRunAt: "2026-03-28T02:10:00.000Z",
             scheduleType: "daily",
@@ -840,17 +840,17 @@ describe("Jobs page", () => {
                     actionKey: "jobs.daily",
                     actionPayload: {},
                     createdAt: "2026-06-17T20:00:00.000Z",
-                    cronExpression: null,
+                    cronExpression: undefined,
                     description: "",
                     enabled: true,
                     id: "jobs.daily",
                     intervalSeconds: 3600,
                     isRunning: false,
-                    lastRun: null,
+                    lastRun: undefined,
                     name: "Daily fallback",
                     nextRunAt: "2026-06-18T03:15:00.000Z",
                     scheduleType: "daily",
-                    timeOfDay: null,
+                    timeOfDay: undefined,
                     updatedAt: "2026-06-17T21:00:10.000Z",
                 },
             ],
@@ -889,13 +889,13 @@ describe("Jobs page", () => {
                     actionKey: "backup.run",
                     actionPayload: { target: "kopia" },
                     createdAt: "2026-06-17T20:00:00.000Z",
-                    cronExpression: null,
+                    cronExpression: undefined,
                     description: "Run nightly backup",
                     enabled: false,
                     id: "backup.kopia",
                     intervalSeconds: 86_400,
                     isRunning: true,
-                    lastRun: null,
+                    lastRun: undefined,
                     name: "Backup",
                     nextRunAt: "2026-06-18T02:10:00.000Z",
                     scheduleType: "daily",
@@ -910,7 +910,7 @@ describe("Jobs page", () => {
     });
 
     it("opens OpenClaw cron from jobs deep links", () => {
-        window.history.replaceState(null, "", "/jobs?view=openclaw&job=cleanup");
+        history.replaceState(undefined, "", "/jobs?view=openclaw&job=cleanup");
 
         render(<Jobs />);
 
@@ -922,7 +922,7 @@ describe("Jobs page", () => {
         const user = userEvent.setup();
         hooks.useCronJobs.mockReturnValue({
             data: [],
-            error: null,
+            error: undefined,
             isLoading: false,
             refetch: hooks.refetch,
         });

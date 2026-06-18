@@ -9,7 +9,7 @@ import {
     isImageFile,
     isJsonFile,
     isMarkdownFile,
-} from "./fileUtils";
+} from "./fileUtilities";
 
 describe("file utils", () => {
     it("extracts extensions safely", () => {

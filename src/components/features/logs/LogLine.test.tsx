@@ -28,8 +28,8 @@ describe("LogLine", () => {
                 log={
                     {
                         id: "2",
-                        level: null,
-                        subsystem: null,
+                        level: undefined,
+                        subsystem: undefined,
                         msg: { structured: true },
                         raw: "fallback raw",
                     } as unknown as LogEntry

@@ -16,7 +16,7 @@ vi.mock("@dnd-kit/sortable", () => ({
         listeners: {},
         setActivatorNodeRef: vi.fn(),
         setNodeRef: vi.fn(),
-        transform: null,
+        transform: undefined,
     }),
     verticalListSortingStrategy: vi.fn(),
 }));
@@ -34,7 +34,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
         labels: [{ name: "todo" }, { name: "priority-low" }],
         assignees: [{ login: "mira-2026" }],
         createdAt: "2026-05-10T08:00:00.000Z",
-        updatedAt: isoStringFromNowOffset(-5_000),
+        updatedAt: isoStringFromNowOffset(-5000),
         url: "https://example.com/tasks/3",
         ...overrides,
     };

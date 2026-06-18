@@ -25,7 +25,7 @@ export interface OpsActionDefinition {
 
 /** Represents the exec API response. */
 export interface ExecResponse {
-    code: number | null;
+    code: number | undefined;
     stdout: string;
     stderr: string;
 }
@@ -35,7 +35,7 @@ export interface ExecJobResponse extends ExecResponse {
     jobId: string;
     status: "running" | "done";
     startedAt: number;
-    endedAt: number | null;
+    endedAt: number | undefined;
 }
 
 /** Defines ops actions. */
@@ -86,7 +86,7 @@ export const OPS_ACTIONS: OpsActionDefinition[] = [
         label: "Cleanup OpenClaw",
         description: "Clean old OpenClaw data",
         command:
-            "find $HOME/.openclaw/agents -type f -path '*/sessions/*' -mtime +14 -delete 2>/dev/null || true; find $HOME/.openclaw/agents -type d -path '*/sessions/*' -empty -delete 2>/dev/null || true; find $HOME/.openclaw/media -type f -mtime +14 -delete 2>/dev/null || true; find $HOME/.openclaw/workspace/images -type f -mtime +30 -delete 2>/dev/null || true; find $HOME/.openclaw/tmp -type f -mtime +7 -delete 2>/dev/null || true; find $HOME/.openclaw/delivery-queue/failed -type f -mtime +14 -delete 2>/dev/null || true; find $HOME/.openclaw/completions -type f -mtime +14 -delete 2>/dev/null || true; find $HOME/.openclaw/cron/runs -type f -mtime +30 -delete 2>/dev/null || true; find $HOME/.openclaw/logs -type f -mtime +14 -delete 2>/dev/null || true",
+            "find $HOME/.openclaw/agents -type f -path '*/sessions/*' -mtime +14 -delete 2>/dev/undefined || true; find $HOME/.openclaw/agents -type d -path '*/sessions/*' -empty -delete 2>/dev/undefined || true; find $HOME/.openclaw/media -type f -mtime +14 -delete 2>/dev/undefined || true; find $HOME/.openclaw/workspace/images -type f -mtime +30 -delete 2>/dev/undefined || true; find $HOME/.openclaw/tmp -type f -mtime +7 -delete 2>/dev/undefined || true; find $HOME/.openclaw/delivery-queue/failed -type f -mtime +14 -delete 2>/dev/undefined || true; find $HOME/.openclaw/completions -type f -mtime +14 -delete 2>/dev/undefined || true; find $HOME/.openclaw/cron/runs -type f -mtime +30 -delete 2>/dev/undefined || true; find $HOME/.openclaw/logs -type f -mtime +14 -delete 2>/dev/undefined || true",
         confirmLabel: "Run OpenClaw cleanup",
         confirmMessage:
             "Run OpenClaw cleanup now? This removes old OpenClaw session/media/log/queue/temp artifacts.",
@@ -115,7 +115,7 @@ export function useStartOpsAction() {
 }
 
 /** Provides exec job. */
-export function useExecJob(jobId: string | null) {
+export function useExecJob(jobId: string | undefined) {
     return useQuery({
         queryKey: ["exec-job", jobId],
         queryFn: () =>

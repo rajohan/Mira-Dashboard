@@ -76,16 +76,21 @@ function formatMemoryUsedMb(value: string | undefined): string {
 /** Returns health rank. */
 function getHealthRank(health: string): number {
     switch (health) {
-        case "healthy":
+        case "healthy": {
             return 0;
-        case "starting":
+        }
+        case "starting": {
             return 1;
-        case "unknown":
+        }
+        case "unknown": {
             return 2;
-        case "unhealthy":
+        }
+        case "unhealthy": {
             return 3;
-        default:
+        }
+        default: {
             return 4;
+        }
     }
 }
 
@@ -110,25 +115,32 @@ function getStateVariant(state: string): "success" | "warning" | "error" | "defa
 /** Returns state rank. */
 function getStateRank(state: string): number {
     switch (state) {
-        case "running":
+        case "running": {
             return 0;
-        case "restarting":
+        }
+        case "restarting": {
             return 1;
-        case "created":
+        }
+        case "created": {
             return 2;
-        case "paused":
+        }
+        case "paused": {
             return 3;
-        case "exited":
+        }
+        case "exited": {
             return 4;
-        case "dead":
+        }
+        case "dead": {
             return 5;
-        default:
+        }
+        default: {
             return 6;
+        }
     }
 }
 
 /** Provides props for Docker containers table. */
-interface DockerContainersTableProps {
+interface DockerContainersTableProperties {
     containers: DockerContainer[];
     onDetails: (containerId: string) => void;
     onLogs: (containerId: string) => void;
@@ -145,7 +157,7 @@ export function DockerContainersTable({
     onConsole,
     onRestart,
     onRestartStack,
-}: DockerContainersTableProps) {
+}: DockerContainersTableProperties) {
     const [sorting, setSorting] = useState<SortingState>([]);
 
     const columns = [
@@ -164,10 +176,10 @@ export function DockerContainersTable({
                         <div className="text-primary-500 mt-1 flex flex-wrap gap-2 text-xs">
                             {container.service ? (
                                 <span>service: {container.service}</span>
-                            ) : null}
+                            ) : undefined}
                             {container.project ? (
                                 <span>project: {container.project}</span>
-                            ) : null}
+                            ) : undefined}
                         </div>
                     </div>
                 );
@@ -384,7 +396,7 @@ export function DockerContainersTable({
                                 <div className="text-primary-400 mt-3 text-xs break-words">
                                     Ports: {container.ports.join(", ")}
                                 </div>
-                            ) : null}
+                            ) : undefined}
                             <div
                                 className="mt-3 grid grid-cols-3 gap-2"
                                 onClick={(event) => event.stopPropagation()}
@@ -443,7 +455,7 @@ export function DockerContainersTable({
                                                     ) : header.column.getIsSorted() ===
                                                       "desc" ? (
                                                         <ChevronDown className="h-3 w-3 rotate-180" />
-                                                    ) : null}
+                                                    ) : undefined}
                                                 </span>
                                             </button>
                                         ) : (

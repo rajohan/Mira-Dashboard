@@ -20,29 +20,29 @@ describe("quota hooks", () => {
                 remaining: 400,
                 tier: "starter",
                 percentUsed: 20,
-                resetAt: null,
+                resetAt: undefined,
             },
             synthetic: {
                 subscription: {
                     limit: 1000,
                     requests: 100,
                     remaining: 900,
-                    renewsAt: null,
+                    renewsAt: undefined,
                     percentUsed: 10,
                 },
                 searchHourly: {
                     limit: 50,
                     requests: 5,
                     remaining: 45,
-                    renewsAt: null,
+                    renewsAt: undefined,
                     percentUsed: 10,
                 },
-                weeklyTokenLimit: { percentRemaining: 80, nextRegenAt: null },
+                weeklyTokenLimit: { percentRemaining: 80, nextRegenAt: undefined },
                 rollingFiveHourLimit: {
                     remaining: 100,
                     max: 200,
                     limited: false,
-                    nextTickAt: null,
+                    nextTickAt: undefined,
                     percentUsed: 50,
                 },
             },
@@ -51,10 +51,10 @@ describe("quota hooks", () => {
                 model: "codex",
                 fiveHourLeftPercent: 80,
                 weeklyLeftPercent: 90,
-                fiveHourReset: null,
-                weeklyReset: null,
+                fiveHourReset: undefined,
+                weeklyReset: undefined,
                 percentUsed: 15,
-                resetAt: null,
+                resetAt: undefined,
             },
             checkedAt: Date.now(),
             cacheAgeMs: 0,
@@ -85,6 +85,6 @@ describe("quota hooks", () => {
         expect(hasQuotaStatus({ status: "error" })).toBe(true);
         expect(hasQuotaStatus({ status: "ok" })).toBe(false);
         expect(hasQuotaStatus({ usage: 10, totalCredits: 100 })).toBe(false);
-        expect(hasQuotaStatus(null)).toBe(false);
+        expect(hasQuotaStatus(undefined)).toBe(false);
     });
 });

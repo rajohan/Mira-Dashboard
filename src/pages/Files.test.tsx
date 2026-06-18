@@ -33,14 +33,14 @@ vi.mock("../components/features/files", () => ({
         selectedPath,
         syntaxClass,
     }: {
-        fileContent: null | { path: string };
+        fileContent: undefined | { path: string };
         isEditable: boolean;
         onCodePreviewChange: (preview: boolean) => void;
         onContentChange: (content: string) => void;
         onJsonPreviewChange: (enabled: boolean) => void;
         onMarkdownPreviewChange: (enabled: boolean) => void;
         onSave: () => void;
-        selectedPath: string | null;
+        selectedPath: string | undefined;
         syntaxClass: string;
     }) => (
         <section data-testid="file-editor">
@@ -94,7 +94,7 @@ function mockFileState(overrides = {}) {
         codeEditMode: false,
         contentLoading: false,
         editedContent: "# Hello",
-        error: null,
+        error: undefined,
         expandedPaths: new Set(["src"]),
         fileContent: {
             content: "# Hello",
@@ -111,8 +111,8 @@ function mockFileState(overrides = {}) {
         hasChanges: false,
         isJsonEditing: false,
         jsonPreview: false,
-        jsonValidation: { error: null, isValid: true },
-        largeFileWarning: null,
+        jsonValidation: { error: undefined, isValid: true },
+        largeFileWarning: undefined,
         markdownPreview: false,
         rootLoading: false,
         saveMutation: { isPending: false },
@@ -183,11 +183,11 @@ describe("Files page", () => {
 
         expect(screen.getByText("Unable to load file")).toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: "" }));
-        expect(hooks.setError).toHaveBeenCalledWith(null);
+        expect(hooks.setError).toHaveBeenCalledWith(undefined);
     });
 
     it("renders empty syntax when no file is selected", () => {
-        mockFileState({ fileContent: null, selectedPath: null });
+        mockFileState({ fileContent: undefined, selectedPath: undefined });
 
         render(<Files />);
 

@@ -5,7 +5,7 @@ import { forwardRef } from "react";
 import { cn } from "../../utils/cn";
 
 /** Provides props for textarea. */
-interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
+interface TextareaProperties extends TextareaHTMLAttributes<HTMLTextAreaElement> {
     label?: string;
     description?: string;
     error?: string;
@@ -13,8 +13,11 @@ interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
 }
 
 /** Renders the textarea UI. */
-export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
-    ({ className, label, description, error, variant = "default", ...props }, ref) => {
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProperties>(
+    (
+        { className, label, description, error, variant = "default", ...properties },
+        reference
+    ) => {
         return (
             <Field className={cn(variant === "code" && "h-full")}>
                 {label && (
@@ -28,7 +31,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
                     </Description>
                 )}
                 <textarea
-                    ref={ref}
+                    ref={reference}
                     className={cn(
                         variant === "default" && [
                             "border-primary-600 bg-primary-700 w-full rounded-lg border px-3 py-2",
@@ -44,7 +47,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
                         error && "border-red-500",
                         className
                     )}
-                    {...props}
+                    {...properties}
                 />
                 {error && <p className="mt-1 text-sm text-red-400">{error}</p>}
             </Field>

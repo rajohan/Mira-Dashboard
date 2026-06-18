@@ -8,7 +8,7 @@ import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
 import { Modal } from "../../ui/Modal";
 import { DatabaseTableShell } from "./DatabaseTableShell";
-import { truncateQuery } from "./databaseUtils";
+import { truncateQuery } from "./databaseUtilities";
 
 const columnHelper = createColumnHelper<DatabaseOverviewResponse["topQueries"][number]>();
 
@@ -52,8 +52,8 @@ export function TopQueriesTable({
     data: DatabaseOverviewResponse["topQueries"];
 }) {
     const [selectedQuery, setSelectedQuery] = useState<
-        DatabaseOverviewResponse["topQueries"][number] | null
-    >(null);
+        DatabaseOverviewResponse["topQueries"][number] | undefined
+    >(undefined);
     const [copied, setCopied] = useState(false);
 
     if (!enabled) {
@@ -69,7 +69,7 @@ export function TopQueriesTable({
         try {
             await navigator.clipboard.writeText(query);
             setCopied(true);
-            window.setTimeout(() => setCopied(false), 1500);
+            setTimeout(() => setCopied(false), 1500);
         } catch (error_) {
             setCopied(false);
             console.error("Failed to copy query", error_);
@@ -116,7 +116,7 @@ export function TopQueriesTable({
             <Modal
                 isOpen={!!selectedQuery}
                 onClose={() => {
-                    setSelectedQuery(null);
+                    setSelectedQuery(undefined);
                     setCopied(false);
                 }}
                 title="Query details"
@@ -147,7 +147,7 @@ export function TopQueriesTable({
                             <code>{selectedQuery.query}</code>
                         </pre>
                     </div>
-                ) : null}
+                ) : undefined}
             </Modal>
         </>
     );

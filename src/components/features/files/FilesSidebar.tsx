@@ -6,10 +6,10 @@ import { ConfigSection } from "./ConfigSection";
 import { FileTreeItem } from "./FileTreeItem";
 
 /** Provides props for files sIDebar. */
-interface FilesSidebarProps {
+interface FilesSidebarProperties {
     files: FileNode[];
     rootLoading: boolean;
-    selectedPath: string | null;
+    selectedPath: string | undefined;
     expandedPaths: Set<string>;
     onSelect: (path: string) => void;
     onToggle: (path: string) => void;
@@ -23,7 +23,7 @@ export function FilesSidebar({
     expandedPaths,
     onSelect,
     onToggle,
-}: FilesSidebarProps) {
+}: FilesSidebarProperties) {
     return (
         <div className="w-full lg:w-72 lg:flex-shrink-0">
             <Card
@@ -43,7 +43,7 @@ export function FilesSidebar({
                         <div className="text-primary-400 p-2 text-sm">No files found</div>
                     ) : (
                         files
-                            .sort((a, b) => {
+                            .toSorted((a, b) => {
                                 if (a.type !== b.type)
                                     return a.type === "directory" ? -1 : 1;
                                 return a.name.localeCompare(b.name);

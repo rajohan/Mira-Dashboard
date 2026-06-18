@@ -16,6 +16,17 @@ function toBase64(text: string): string {
     return encoder.encode(text).toBase64();
 }
 
+let audioErrorListener: (() => void) | undefined;
+
+class ErrorAudioMock {
+    pause = vi.fn();
+    play = vi.fn().mockResolvedValue(undefined);
+
+    addEventListener(type: string, listener: () => void) {
+        if (type === "error") audioErrorListener = listener;
+    }
+}
+
 vi.mock("./ChatMarkdown", () => ({
     ChatMarkdown: ({ text }: { text: string }) => (
         <div data-testid="markdown">{text}</div>
@@ -33,8 +44,8 @@ vi.mock("./ChatMessageDetails", () => ({
         <div data-testid="message-details">
             {visibility.showThinking
                 ? message.thinking?.map((item) => item.text).join(",")
-                : null}
-            {visibility.showTools ? message.toolResult?.content : null}
+                : undefined}
+            {visibility.showTools ? message.toolResult?.content : undefined}
         </div>
     ),
 }));
@@ -109,7 +120,7 @@ function makeRows(): ChatRow[] {
 }
 
 /** Creates default ChatMessagesList props for tests. */
-function makeProps(
+function makeProperties(
     overrides: Partial<React.ComponentProps<typeof ChatMessagesList>> = {}
 ) {
     const rows = makeRows();
@@ -135,8 +146,8 @@ function makeProps(
 function renderMessages(
     overrides: Partial<React.ComponentProps<typeof ChatMessagesList>> = {}
 ) {
-    const props = makeProps(overrides);
-    return { props, ...render(<ChatMessagesList {...props} />) };
+    const properties = makeProperties(overrides);
+    return { props: properties, ...render(<ChatMessagesList {...properties} />) };
 }
 
 describe("ChatMessagesList helpers", () => {
@@ -156,7 +167,7 @@ describe("ChatMessagesList helpers", () => {
         expect(base64ToText("not valid base64 🚫")).toBeUndefined();
         expect(
             previewFromAttachment({ fileName: "empty.txt", id: "empty", kind: "text" })
-        ).toBeNull();
+        ).toBeUndefined();
         expect(
             previewFromAttachment({
                 dataUrl: "data:text/plain;base64,bm90ZXM=",
@@ -203,7 +214,7 @@ describe("ChatMessagesList", () => {
         class MockAudio {
             addEventListener = vi.fn();
             pause = vi.fn();
-            play = vi.fn().mockResolvedValue(null);
+            play = vi.fn().mockResolvedValue(undefined);
         }
 
         vi.stubGlobal("Audio", MockAudio);
@@ -227,7 +238,7 @@ describe("ChatMessagesList", () => {
 
         rerender(
             <ChatMessagesList
-                {...makeProps({
+                {...makeProperties({
                     chatRows: [],
                     messagesVirtualizer: makeVirtualizer(0),
                 })}
@@ -242,7 +253,7 @@ describe("ChatMessagesList", () => {
         const rows = makeRows();
         rerender(
             <ChatMessagesList
-                {...makeProps({
+                {...makeProperties({
                     chatRows: rows,
                     isAtBottom: false,
                     messagesVirtualizer: makeVirtualizer(rows.length),
@@ -449,7 +460,7 @@ describe("ChatMessagesList", () => {
         });
         rerender(
             <ChatMessagesList
-                {...makeProps({
+                {...makeProperties({
                     chatRows: rows,
                     messagesVirtualizer: makeVirtualizer(rows.length),
                     onTtsError,
@@ -478,25 +489,18 @@ describe("ChatMessagesList", () => {
     it("reports generated audio playback errors", async () => {
         const user = userEvent.setup();
         const onTtsError = vi.fn();
-        let errorListener: (() => void) | undefined;
-        class ErrorAudio {
-            addEventListener = vi.fn((type: string, listener: () => void) => {
-                if (type === "error") errorListener = listener;
-            });
-            pause = vi.fn();
-            play = vi.fn().mockResolvedValue(null);
-        }
-        vi.stubGlobal("Audio", ErrorAudio);
+        audioErrorListener = undefined;
+        vi.stubGlobal("Audio", ErrorAudioMock);
 
         renderMessages({ onTtsError });
 
         await user.click(
             screen.getByRole("button", { name: "Read assistant message aloud" })
         );
-        await waitFor(() => expect(errorListener).toBeDefined());
+        await waitFor(() => expect(audioErrorListener).toBeDefined());
 
         act(() => {
-            errorListener?.();
+            audioErrorListener?.();
         });
 
         expect(onTtsError).toHaveBeenCalledWith("Failed to play generated speech.");

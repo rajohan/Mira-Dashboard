@@ -3,14 +3,14 @@ import { Loader2, Plus, X } from "lucide-react";
 
 import { TASK_ASSIGNEES, type TaskAssigneeId } from "../../../constants/taskActors";
 import type { TaskAutomation } from "../../../types/task";
-import { PRIORITY_COLORS } from "../../../utils/taskUtils";
+import { PRIORITY_COLORS } from "../../../utils/taskUtilities";
 import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";
 import { Modal } from "../../ui/Modal";
 import { Textarea } from "../../ui/Textarea";
 
 /** Provides props for new task modal. */
-interface NewTaskModalProps {
+interface NewTaskModalProperties {
     isOpen: boolean;
     onClose: () => void;
     onSubmit: (
@@ -26,7 +26,7 @@ interface NewTaskModalProps {
 }
 
 /** Renders the new task modal UI. */
-export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
+export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProperties) {
     const form = useForm({
         defaultValues: {
             title: "",
@@ -62,8 +62,8 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
     return (
         <Modal isOpen={isOpen} onClose={onClose} size="lg">
             <form
-                onSubmit={(e) => {
-                    e.preventDefault();
+                onSubmit={(event_) => {
+                    event_.preventDefault();
                     form.handleSubmit();
                 }}
                 className="space-y-4"
@@ -88,7 +88,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                             label="Title"
                             type="text"
                             value={field.state.value}
-                            onChange={(e) => field.handleChange(e.target.value)}
+                            onChange={(event_) => field.handleChange(event_.target.value)}
                             placeholder="Task title..."
                             autoFocus
                         />
@@ -100,7 +100,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                         <Textarea
                             label="Description (optional)"
                             value={field.state.value}
-                            onChange={(e) => field.handleChange(e.target.value)}
+                            onChange={(event_) => field.handleChange(event_.target.value)}
                             placeholder="Task description..."
                             rows={4}
                             className="resize-none"
@@ -195,7 +195,9 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                             <Input
                                 label="Cron job ID"
                                 value={field.state.value}
-                                onChange={(e) => field.handleChange(e.target.value)}
+                                onChange={(event_) =>
+                                    field.handleChange(event_.target.value)
+                                }
                                 placeholder="1ae8a485-..."
                             />
                         )}
@@ -206,7 +208,9 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                                 <Input
                                     label="Schedule summary"
                                     value={field.state.value}
-                                    onChange={(e) => field.handleChange(e.target.value)}
+                                    onChange={(event_) =>
+                                        field.handleChange(event_.target.value)
+                                    }
                                     placeholder="Twice daily at 09:30 and 18:30"
                                 />
                             )}
@@ -216,7 +220,9 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProps) {
                                 <Input
                                     label="Session target"
                                     value={field.state.value}
-                                    onChange={(e) => field.handleChange(e.target.value)}
+                                    onChange={(event_) =>
+                                        field.handleChange(event_.target.value)
+                                    }
                                     placeholder="session:dashboard-autopilot"
                                 />
                             )}

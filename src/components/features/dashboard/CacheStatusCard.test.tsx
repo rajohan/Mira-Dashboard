@@ -29,7 +29,7 @@ describe("CacheStatusCard", () => {
                         key: "git.workspace",
                         status: "error",
                         errorMessage: "git failed",
-                        updatedAt: null,
+                        updatedAt: undefined,
                     },
                     {
                         key: "weather.spydeberg",

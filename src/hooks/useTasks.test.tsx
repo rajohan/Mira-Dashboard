@@ -52,7 +52,7 @@ describe("task hooks", () => {
         const fetchMock = vi.fn();
         vi.stubGlobal("fetch", fetchMock);
 
-        const { result } = renderHook(() => useTaskUpdates(null), {
+        const { result } = renderHook(() => useTaskUpdates(undefined), {
             wrapper: createQueryWrapper(),
         });
 

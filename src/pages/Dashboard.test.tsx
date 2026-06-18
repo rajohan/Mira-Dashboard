@@ -55,7 +55,7 @@ vi.mock("../components/features/dashboard", () => ({
 }));
 
 function mockDashboardData(overrides = {}) {
-    hooks.useOpenClawSocket.mockReturnValue({ error: null });
+    hooks.useOpenClawSocket.mockReturnValue({ error: undefined });
     hooks.useMetrics.mockReturnValue({
         data: {
             cpu: { loadAvg: [0.1, 0.2, 0.3], loadPercent: 12 },
@@ -144,7 +144,7 @@ describe("Dashboard page", () => {
         mockDashboardData({
             socket: { error: "WebSocket disconnected" },
             weather: {
-                data: null,
+                data: undefined,
                 isError: true,
                 isLoading: false,
             },
@@ -161,9 +161,9 @@ describe("Dashboard page", () => {
 
     it("renders loading fallbacks when metrics and weather are missing", () => {
         mockDashboardData({
-            metrics: { data: null },
-            quotas: { data: null },
-            weather: { data: null, isError: false, isLoading: true },
+            metrics: { data: undefined },
+            quotas: { data: undefined },
+            weather: { data: undefined, isError: false, isLoading: true },
         });
 
         render(<Dashboard />);
@@ -208,7 +208,7 @@ describe("Dashboard page", () => {
                         {
                             date: "2026-05-13",
                             description,
-                            maxTempC: null,
+                            maxTempC: undefined,
                             minTempC: undefined,
                         },
                     ],

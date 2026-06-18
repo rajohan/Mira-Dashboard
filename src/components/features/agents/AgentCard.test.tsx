@@ -40,10 +40,10 @@ describe("AgentCard", () => {
                 id="ops"
                 status="idle"
                 model="glm51"
-                currentTask={null}
-                currentActivity={null}
-                lastActivity={null}
-                channel={null}
+                currentTask={undefined}
+                currentActivity={undefined}
+                lastActivity={undefined}
+                channel={undefined}
             />
         );
 
@@ -58,10 +58,10 @@ describe("AgentCard", () => {
                 id="builder"
                 status="active"
                 model="provider/"
-                currentTask={null}
-                currentActivity={null}
-                lastActivity={null}
-                channel={null}
+                currentTask={undefined}
+                currentActivity={undefined}
+                lastActivity={undefined}
+                channel={undefined}
             />
         );
 

@@ -35,10 +35,9 @@ async function updateTask(
         title?: string;
         body?: string;
         labels?: string[];
-        automation?: Pick<
-            TaskAutomation,
-            "cronJobId" | "scheduleSummary" | "sessionTarget"
-        > | null;
+        automation?:
+            | Pick<TaskAutomation, "cronJobId" | "scheduleSummary" | "sessionTarget">
+            | undefined;
     }
 ): Promise<Task> {
     return apiPatchRequired<Task>(`/tasks/${number}`, updates);
@@ -142,10 +141,12 @@ export function useUpdateTask() {
                 title?: string;
                 body?: string;
                 labels?: string[];
-                automation?: Pick<
-                    TaskAutomation,
-                    "cronJobId" | "scheduleSummary" | "sessionTarget"
-                > | null;
+                automation?:
+                    | Pick<
+                          TaskAutomation,
+                          "cronJobId" | "scheduleSummary" | "sessionTarget"
+                      >
+                    | undefined;
             };
         }) => updateTask(number, updates),
         onSuccess: () => {
@@ -198,12 +199,12 @@ export function useDeleteTask() {
 }
 
 /** Provides task updates. */
-export function useTaskUpdates(taskId: number | null) {
+export function useTaskUpdates(taskId: number | undefined) {
     return useQuery({
-        queryKey: taskId === null ? taskKeys.all : taskKeys.updates(taskId),
+        queryKey: taskId === undefined ? taskKeys.all : taskKeys.updates(taskId),
         queryFn: () => fetchTaskUpdates(taskId!),
-        enabled: taskId !== null,
-        staleTime: 5_000,
+        enabled: taskId !== undefined,
+        staleTime: 5000,
         refetchInterval: AUTO_REFRESH_MS,
     });
 }

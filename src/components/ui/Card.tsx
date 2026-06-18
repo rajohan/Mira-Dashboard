@@ -3,16 +3,16 @@ import { forwardRef, type HTMLAttributes } from "react";
 import { cn } from "../../utils/cn";
 
 /** Provides props for card. */
-interface CardProps extends HTMLAttributes<HTMLDivElement> {
+interface CardProperties extends HTMLAttributes<HTMLDivElement> {
     variant?: "default" | "bordered";
 }
 
 /** Renders the card UI. */
-export const Card = forwardRef<HTMLDivElement, CardProps>(
-    ({ className, variant = "default", children, ...props }, ref) => {
+export const Card = forwardRef<HTMLDivElement, CardProperties>(
+    ({ className, variant = "default", children, ...properties }, reference) => {
         return (
             <div
-                ref={ref}
+                ref={reference}
                 className={cn(
                     "bg-primary-800 rounded-lg p-4",
                     {
@@ -20,7 +20,7 @@ export const Card = forwardRef<HTMLDivElement, CardProps>(
                     },
                     className
                 )}
-                {...props}
+                {...properties}
             >
                 {children}
             </div>
@@ -34,12 +34,12 @@ Card.displayName = "Card";
 export const CardTitle = forwardRef<
     HTMLHeadingElement,
     HTMLAttributes<HTMLHeadingElement>
->(({ className, children, ...props }, ref) => {
+>(({ className, children, ...properties }, reference) => {
     return (
         <h3
-            ref={ref}
+            ref={reference}
             className={cn("text-primary-50 text-lg font-semibold", className)}
-            {...props}
+            {...properties}
         >
             {children}
         </h3>

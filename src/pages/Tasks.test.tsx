@@ -37,49 +37,46 @@ const hooks = vi.hoisted(() => ({
     useUpdateTaskUpdate: vi.fn(),
 }));
 
-const taskModule = vi.hoisted(() => {
-    const hasLabel = (task: { labels: Array<{ name: string }> }, label: string) =>
-        task.labels.some((taskLabel) => taskLabel.name === label);
-
-    return {
-        columnConfig: [
-            {
-                id: "todo",
-                label: "todo",
-                filter: (task: { labels: Array<{ name: string }> }) =>
-                    hasLabel(task, "todo"),
-            },
-            {
-                id: "in-progress",
-                label: "in-progress",
-                filter: (task: { labels: Array<{ name: string }> }) =>
-                    hasLabel(task, "in-progress"),
-            },
-            {
-                id: "blocked",
-                label: "blocked",
-                filter: (task: { labels: Array<{ name: string }> }) =>
-                    hasLabel(task, "blocked"),
-            },
-            {
-                id: "done",
-                label: "done",
-                filter: (task: { labels: Array<{ name: string }> }) =>
-                    hasLabel(task, "done"),
-            },
-        ],
-    };
-});
+const taskModule = vi.hoisted(() => ({
+    columnConfig: [
+        {
+            id: "todo",
+            label: "todo",
+            filter: (task: { labels: Array<{ name: string }> }) =>
+                task.labels.some((taskLabel) => taskLabel.name === "todo"),
+        },
+        {
+            id: "in-progress",
+            label: "in-progress",
+            filter: (task: { labels: Array<{ name: string }> }) =>
+                task.labels.some((taskLabel) => taskLabel.name === "in-progress"),
+        },
+        {
+            id: "blocked",
+            label: "blocked",
+            filter: (task: { labels: Array<{ name: string }> }) =>
+                task.labels.some((taskLabel) => taskLabel.name === "blocked"),
+        },
+        {
+            id: "done",
+            label: "done",
+            filter: (task: { labels: Array<{ name: string }> }) =>
+                task.labels.some((taskLabel) => taskLabel.name === "done"),
+        },
+    ],
+}));
 
 const dndMocks = vi.hoisted(() => ({
-    handlers: null as null | {
-        onDragEnd: (event: {
-            active: { id: string };
-            over: null | { id: string };
-        }) => Promise<void> | void;
-        onDragOver: (event: { over: null | { id: string } }) => void;
-        onDragStart: (event: { active: { id: string } }) => void;
-    },
+    handlers: undefined as
+        | undefined
+        | {
+              onDragEnd: (event: {
+                  active: { id: string };
+                  over: undefined | { id: string };
+              }) => Promise<void> | void;
+              onDragOver: (event: { over: undefined | { id: string } }) => void;
+              onDragStart: (event: { active: { id: string } }) => void;
+          },
 }));
 
 vi.mock("@dnd-kit/core", () => ({
@@ -92,9 +89,9 @@ vi.mock("@dnd-kit/core", () => ({
         children: React.ReactNode;
         onDragEnd: (event: {
             active: { id: string };
-            over: null | { id: string };
+            over: undefined | { id: string };
         }) => Promise<void> | void;
-        onDragOver: (event: { over: null | { id: string } }) => void;
+        onDragOver: (event: { over: undefined | { id: string } }) => void;
         onDragStart: (event: { active: { id: string } }) => void;
     }) => {
         dndMocks.handlers = { onDragEnd, onDragOver, onDragStart };
@@ -124,9 +121,13 @@ vi.mock("../components/features/tasks", () => ({
         if (typeof value === "string") {
             return taskModule.columnConfig.some((column) => column.id === value)
                 ? value
-                : null;
+                : undefined;
         }
-        return taskModule.columnConfig.find((column) => column.filter(value))?.id || null;
+        return (
+            taskModule.columnConfig.find((column) =>
+                Reflect.apply(column.filter, undefined, [value])
+            )?.id || undefined
+        );
     },
     NewTaskModal: ({
         onClose,
@@ -138,7 +139,7 @@ vi.mock("../components/features/tasks", () => ({
             body: string,
             priority: string,
             assignee: string,
-            automation: null | { cronJobId: string }
+            automation: undefined | { cronJobId: string }
         ) => Promise<void>;
     }) => (
         <section data-testid="new-task-modal">
@@ -157,7 +158,7 @@ vi.mock("../components/features/tasks", () => ({
             </button>
             <button
                 type="button"
-                onClick={() => void onSubmit("Default task", "", "", "", null)}
+                onClick={() => void onSubmit("Default task", "", "", "", undefined)}
             >
                 Submit default task
             </button>
@@ -265,7 +266,7 @@ vi.mock("../components/ui/ConfirmModal", () => ({
                     Confirm {title}
                 </button>
             </section>
-        ) : null,
+        ) : undefined,
 }));
 
 function task(overrides: Partial<MockTask>): MockTask {
@@ -295,7 +296,7 @@ function mockTaskHooks(overrides = {}) {
                 title: "Ship dashboard",
             }),
         ],
-        error: null,
+        error: undefined,
         isLoading: false,
         refetch: hooks.refetch,
         ...overrides,
@@ -305,7 +306,7 @@ function mockTaskHooks(overrides = {}) {
 describe("Tasks page", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        dndMocks.handlers = null;
+        dndMocks.handlers = undefined;
         hooks.assignTask.mockResolvedValue(task({ number: 1, title: "Assigned" }));
         hooks.createTask.mockResolvedValue(task({ number: 3, title: "New task" }));
         hooks.createTaskUpdate.mockResolvedValue(Promise.resolve());
@@ -343,7 +344,7 @@ describe("Tasks page", () => {
 
         hooks.useTasks.mockReturnValue({
             data: [],
-            error: null,
+            error: undefined,
             isLoading: true,
             refetch: hooks.refetch,
         });
@@ -587,7 +588,7 @@ describe("Tasks page", () => {
 
         expect(hooks.createTask).toHaveBeenLastCalledWith({
             assignee: "mira-2026",
-            automation: null,
+            automation: undefined,
             body: "",
             labels: [],
             title: "Default task",
@@ -668,14 +669,14 @@ describe("Tasks page", () => {
             expect(screen.queryByTestId("task-overlay")).not.toBeInTheDocument();
 
             act(() => {
-                handlers.onDragOver({ over: null });
+                handlers.onDragOver({ over: undefined });
                 handlers.onDragOver({ over: { id: "missing" } });
                 handlers.onDragOver({ over: { id: "1" } });
             });
             expect(screen.getByTestId("column-todo")).toHaveTextContent("over");
 
             await act(async () => {
-                await handlers.onDragEnd({ active: { id: "1" }, over: null });
+                await handlers.onDragEnd({ active: { id: "1" }, over: undefined });
                 await handlers.onDragEnd({ active: { id: "1" }, over: { id: "1" } });
                 await handlers.onDragEnd({
                     active: { id: "1" },

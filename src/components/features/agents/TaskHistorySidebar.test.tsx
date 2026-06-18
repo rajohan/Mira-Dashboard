@@ -42,7 +42,7 @@ describe("TaskHistorySidebar", () => {
                     {
                         id: "2",
                         agentId: "ops",
-                        completedAt: null,
+                        completedAt: undefined,
                         task: "Checked heartbeat",
                         status: "archived",
                     },

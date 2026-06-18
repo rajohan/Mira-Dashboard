@@ -53,7 +53,7 @@ describe("format utils", () => {
             /^\d{2}:\d{2}$/u
         );
         expect(appTimeOfDayToUtcTimeOfDay("04:10")).toMatch(/^\d{2}:\d{2}$/u);
-        expect(formatUtcTimeOfDayInAppTimeZone(null)).toBe("--:--");
+        expect(formatUtcTimeOfDayInAppTimeZone(undefined)).toBe("--:--");
         expect(formatUtcTimeOfDayInAppTimeZone("bad-time")).toBe("--:--");
         expect(appTimeOfDayToUtcTimeOfDay("bad-time")).toBe("bad-time");
     });
@@ -78,7 +78,7 @@ describe("format utils", () => {
     });
 
     it("formats durations safely", () => {
-        expect(formatDuration(null)).toBe("Unknown");
+        expect(formatDuration(undefined)).toBe("Unknown");
         const missingTimestamp: number | undefined = undefined;
         expect(formatDuration(missingTimestamp)).toBe("Unknown");
         expect(formatDuration(Date.now())).toMatch(/less than a minute|minute/u);
@@ -86,10 +86,10 @@ describe("format utils", () => {
 
     it("formats system values", () => {
         expect(formatUptime(59)).toBe("0m");
-        expect(formatUptime(3_600 + 120)).toBe("1h 2m");
-        expect(formatUptime(86_400 + 7_200)).toBe("1d 2h");
+        expect(formatUptime(3600 + 120)).toBe("1h 2m");
+        expect(formatUptime(86_400 + 7200)).toBe("1d 2h");
         expect(formatSize(512)).toBe("512 B");
-        expect(formatSize(2_048)).toBe("2.0 KB");
+        expect(formatSize(2048)).toBe("2.0 KB");
         expect(formatSize(2 * 1024 * 1024)).toBe("2.0 MB");
         expect(formatSize(5 * 1024 * 1024 * 1024)).toBe("5.0 GB");
         expect(formatSize(3 * 1024 * 1024 * 1024 * 1024)).toBe("3.0 TB");
@@ -105,7 +105,7 @@ describe("format utils", () => {
         expect(formatTokenCount(12_345)).toBe("12.3K");
         expect(formatTokenCount(1_234_567)).toBe("1.23M");
         expect(getTokenPercent(void 0, 100)).toBe(0);
-        expect(getTokenPercent(null, 100)).toBe(0);
+        expect(getTokenPercent(undefined, 100)).toBe(0);
         expect(getTokenPercent(50, 100)).toBe(50);
         expect(getTokenPercent(150, 100)).toBe(100);
         expect(getTokenPercent(50, 0)).toBe(0);

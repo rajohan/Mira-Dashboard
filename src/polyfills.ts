@@ -4,7 +4,7 @@
 (() => {
     if (
         typeof window !== "undefined" &&
-        typeof window.crypto?.randomUUID === "function"
+        typeof globalThis.crypto?.randomUUID === "function"
     ) {
         return;
     }
@@ -19,7 +19,7 @@
         }) as ReturnType<Crypto["randomUUID"]>;
     };
 
-    const windowContainer = window as unknown as { crypto?: Crypto };
+    const windowContainer = globalThis as unknown as { crypto?: Crypto };
     if (!windowContainer.crypto) {
         windowContainer.crypto = {} as Crypto;
     }

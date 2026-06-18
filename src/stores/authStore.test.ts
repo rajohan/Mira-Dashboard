@@ -14,7 +14,7 @@ describe("authStore", () => {
         vi.unstubAllGlobals();
         act(() => {
             authStore.setState(() => ({
-                user: null,
+                user: undefined,
                 isAuthenticated: false,
                 isInitialized: false,
                 bootstrapRequired: false,
@@ -24,7 +24,7 @@ describe("authStore", () => {
 
     it("starts with default state", () => {
         const state = authStore.state;
-        expect(state.user).toBe(null);
+        expect(state.user).toBe(undefined);
         expect(state.isAuthenticated).toBe(false);
         expect(state.isInitialized).toBe(false);
         expect(state.bootstrapRequired).toBe(false);
@@ -46,7 +46,7 @@ describe("authStore", () => {
         authActions.setSession({
             authenticated: false,
             bootstrapRequired: true,
-            user: null,
+            user: undefined,
         });
         expect(authStore.state.bootstrapRequired).toBe(true);
     });
@@ -59,7 +59,7 @@ describe("authStore", () => {
         });
         authActions.clearSession();
         expect(authStore.state.isAuthenticated).toBe(false);
-        expect(authStore.state.user).toBe(null);
+        expect(authStore.state.user).toBe(undefined);
         expect(authStore.state.isInitialized).toBe(true);
     });
 

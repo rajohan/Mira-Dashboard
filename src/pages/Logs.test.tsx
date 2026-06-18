@@ -32,6 +32,11 @@ const mocks = vi.hoisted(() => ({
     writeInsert: vi.fn(),
 }));
 
+function createDeferredLogContent() {
+    const { promise, resolve } = Promise.withResolvers<{ data: string }>();
+    return { promise, resolve };
+}
+
 vi.mock("@tanstack/react-db", () => ({
     useLiveQuery: (select: (query: { from: () => typeof mocks.liveLogs }) => unknown) => {
         const data = select({ from: () => mocks.liveLogs });
@@ -50,7 +55,7 @@ vi.mock("@tanstack/react-virtual", () => ({
         count: number;
         estimateSize: () => number;
         getItemKey: (index: number) => string | number;
-        getScrollElement: () => Element | null;
+        getScrollElement: () => Element | undefined;
         measureElement: (element: Element) => number;
     }) => {
         getScrollElement();
@@ -182,10 +187,10 @@ describe("Logs helpers", () => {
     it("recognizes named log files and sorts names descending", () => {
         expect(isNamedLogFile({ name: "openclaw.log" })).toBe(true);
         expect(isNamedLogFile({ name: " ".repeat(3) })).toBe(false);
-        expect(isNamedLogFile(null)).toBe(false);
+        expect(isNamedLogFile(undefined)).toBe(false);
         expect(isNamedLogFile({ name: 123 })).toBe(false);
         expect(
-            [{ name: "a.log" }, { name: "c.log" }, { name: undefined }].sort(
+            [{ name: "a.log" }, { name: "c.log" }, { name: undefined }].toSorted(
                 compareLogFileNamesDescending
             )
         ).toEqual([{ name: "c.log" }, { name: "a.log" }, { name: undefined }]);
@@ -195,10 +200,10 @@ describe("Logs helpers", () => {
     });
 
     it("checks and scrolls log viewports defensively", () => {
-        expect(isLogViewportAtBottom(null)).toBe(false);
-        expect(scrollLogViewportToBottom(null)).toBe(false);
+        expect(isLogViewportAtBottom(undefined)).toBe(false);
+        expect(scrollLogViewportToBottom(undefined)).toBe(false);
         const onScrolled = vi.fn();
-        expect(scrollLogViewportToBottomAndReport(null, onScrolled)).toBe(false);
+        expect(scrollLogViewportToBottomAndReport(undefined, onScrolled)).toBe(false);
         expect(onScrolled).not.toHaveBeenCalled();
 
         const viewport = {
@@ -452,13 +457,13 @@ describe("Logs page", () => {
         const user = userEvent.setup();
         const animationFrames: FrameRequestCallback[] = [];
         const requestAnimationFrameSpy = vi
-            .spyOn(window, "requestAnimationFrame")
+            .spyOn(globalThis, "requestAnimationFrame")
             .mockImplementation((callback) => {
                 animationFrames.push(callback);
                 return animationFrames.length;
             });
         const cancelAnimationFrameSpy = vi
-            .spyOn(window, "cancelAnimationFrame")
+            .spyOn(globalThis, "cancelAnimationFrame")
             .mockImplementation(() => {});
 
         try {
@@ -515,7 +520,7 @@ describe("Logs page", () => {
             "openclaw-2099-01-02.log"
         );
 
-        mockLogs({ liveLogs: null, logFiles: { data: null } });
+        mockLogs({ liveLogs: undefined, logFiles: { data: undefined } });
         rerender(<Logs />);
         expect(screen.getByText("Waiting for logs...")).toBeInTheDocument();
     });
@@ -549,7 +554,7 @@ describe("Logs page", () => {
 
     it("ignores stale log reload responses", async () => {
         const user = userEvent.setup();
-        let resolveFirstReload: (value: { data: string }) => void = () => {};
+        const firstReload = createDeferredLogContent();
 
         render(<Logs />);
 
@@ -557,11 +562,7 @@ describe("Logs page", () => {
         mocks.refetchContent.mockReset();
         mocks.writeInsert.mockClear();
         mocks.refetchContent
-            .mockReturnValueOnce(
-                new Promise((resolve) => {
-                    resolveFirstReload = resolve;
-                })
-            )
+            .mockReturnValueOnce(firstReload.promise)
             .mockResolvedValueOnce({ data: "ERROR fresh reload" });
 
         await user.click(screen.getByRole("button", { name: "Reload" }));
@@ -574,7 +575,7 @@ describe("Logs page", () => {
 
         mocks.writeInsert.mockClear();
         await act(async () => {
-            resolveFirstReload({ data: "INFO stale reload" });
+            firstReload.resolve({ data: "INFO stale reload" });
             await Promise.resolve();
         });
 
@@ -638,8 +639,8 @@ describe("Logs page", () => {
         const user = userEvent.setup();
         mockLogs({
             liveLogs: [
-                { id: "3", level: null, msg: "fallback msg" },
-                { id: "4", level: null, msg: "" },
+                { id: "3", level: undefined, msg: "fallback msg" },
+                { id: "4", level: undefined, msg: "" },
             ],
             logFiles: { data: [] },
             logContent: { isFetching: true, refetch: mocks.refetchContent },

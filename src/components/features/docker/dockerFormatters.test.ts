@@ -31,28 +31,28 @@ describe("docker formatters", () => {
     });
 
     it("formats timestamps and keeps invalid input visible", () => {
-        expect(formatTimestamp(null)).toBe("—");
+        expect(formatTimestamp(undefined)).toBe("—");
         expect(formatTimestamp("not-a-date")).toBe("not-a-date");
         expect(formatTimestamp("2026-05-10T10:00:00.000Z")).toContain("2026");
     });
 
     it("formats image version transitions from tags and digests", () => {
         expect(formatVersionDisplay("v1", "sha256:abcdef")).toBe("v1");
-        expect(formatVersionDisplay(null, "sha256:abcdef1234567890")).toBe(
+        expect(formatVersionDisplay(undefined, "sha256:abcdef1234567890")).toBe(
             "sha256:abcde"
         );
-        expect(formatVersionDisplay(null, null)).toBe("—");
+        expect(formatVersionDisplay(undefined, undefined)).toBe("—");
 
         expect(formatFullVersionDisplay("v2", "sha256:def")).toBe("v2 (sha256:def)");
-        expect(formatFullVersionDisplay("v2", null)).toBe("v2");
-        expect(formatFullVersionDisplay(null, "sha256:def")).toBe("sha256:def");
-        expect(formatFullVersionDisplay(null, null)).toBe("—");
+        expect(formatFullVersionDisplay("v2", undefined)).toBe("v2");
+        expect(formatFullVersionDisplay(undefined, "sha256:def")).toBe("sha256:def");
+        expect(formatFullVersionDisplay(undefined, undefined)).toBe("—");
 
         expect(
             formatUpdaterTransition({
                 fromTag: "v1",
-                toTag: null,
-                fromDigest: null,
+                toTag: undefined,
+                fromDigest: undefined,
                 toDigest: "sha256:abcdef1234567890",
             })
         ).toBe("v1 → sha256:abcde");

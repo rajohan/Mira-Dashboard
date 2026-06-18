@@ -25,9 +25,9 @@ describe("moltbook hooks", () => {
             unreadMessageCount: 0,
             activityOnYourPostsCount: 0,
             activityOnYourPosts: [],
-            latestAnnouncement: null,
-            postsFromAccountsYouFollowCount: null,
-            exploreCount: null,
+            latestAnnouncement: undefined,
+            postsFromAccountsYouFollowCount: undefined,
+            exploreCount: undefined,
             nextActions: [],
             fetchedAt: "2026-01-01",
         };

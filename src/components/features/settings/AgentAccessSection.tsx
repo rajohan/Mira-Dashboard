@@ -10,7 +10,7 @@ import { Switch } from "../../ui/Switch";
 import { TOOL_CATALOG, TOOL_RISK_LABELS, type ToolRisk } from "./toolCatalog";
 
 /** Provides props for agent access section. */
-interface AgentAccessSectionProps {
+interface AgentAccessSectionProperties {
     agents: AgentConfig[];
     onSave: (agents: AgentConfig[]) => Promise<void>;
     saving: boolean;
@@ -32,7 +32,7 @@ function toolEnabled(agent: AgentConfig, toolId: string): boolean {
 /** Performs update tool. */
 function updateTool(agent: AgentConfig, toolId: string, enabled: boolean): AgentConfig {
     const deny = new Set(agent.tools?.deny || []);
-    const allow = agent.tools?.allow ? new Set(agent.tools.allow) : null;
+    const allow = agent.tools?.allow ? new Set(agent.tools.allow) : undefined;
 
     if (enabled) {
         deny.delete(toolId);
@@ -48,9 +48,9 @@ function updateTool(agent: AgentConfig, toolId: string, enabled: boolean): Agent
         tools: {
             ...agent.tools,
             allow: allow
-                ? [...allow].sort((left, right) => left.localeCompare(right))
+                ? [...allow].toSorted((left, right) => left.localeCompare(right))
                 : agent.tools?.allow,
-            deny: [...deny].sort((left, right) => left.localeCompare(right)),
+            deny: [...deny].toSorted((left, right) => left.localeCompare(right)),
         },
     };
 }
@@ -63,7 +63,11 @@ const riskStyles: Record<ToolRisk, string> = {
 };
 
 /** Renders the agent access section UI. */
-export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectionProps) {
+export function AgentAccessSection({
+    agents,
+    onSave,
+    saving,
+}: AgentAccessSectionProperties) {
     const [activeAgentId, setActiveAgentId] = useState(agents[0]?.id || "");
     const [toolFilter, setToolFilter] = useState("");
     const [draftAgents, setDraftAgents] = useState(() => agents);
@@ -153,7 +157,7 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
                                     (tool) => tool.risk === risk
                                 );
                                 if (riskTools.length === 0) {
-                                    return null;
+                                    return;
                                 }
 
                                 const enabledCount = riskTools.filter((tool) =>
@@ -224,7 +228,7 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
                             })}
                         </div>
                     </div>
-                ) : null}
+                ) : undefined}
 
                 <div className="flex justify-end">
                     <Button

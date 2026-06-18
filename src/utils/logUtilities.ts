@@ -14,7 +14,7 @@ function safeJsonParse(value: string): unknown {
     try {
         return JSON.parse(value);
     } catch {
-        return null;
+        return undefined;
     }
 }
 
@@ -34,24 +34,24 @@ function normalizeSubsystemCandidate(value: string): string {
 }
 
 /** Extracts subsystem and message. */
-function extractSubsystemAndMessage(msg: string): { subsystem: string; msg: string } {
-    const bracketMatch = msg.match(/^\[([^\]]+)\]\s*/);
+function extractSubsystemAndMessage(message: string): { subsystem: string; msg: string } {
+    const bracketMatch = message.match(/^\[([^\]]+)\]\s*/);
     if (bracketMatch) {
         return {
             subsystem: normalizeSubsystemCandidate(bracketMatch[1]!),
-            msg: msg.slice(bracketMatch[0].length),
+            msg: message.slice(bracketMatch[0].length),
         };
     }
 
-    const colonMatch = msg.match(/^([a-zA-Z][\w/-]*):\s*/);
+    const colonMatch = message.match(/^([a-zA-Z][\w/-]*):\s*/);
     if (colonMatch) {
         return {
             subsystem: normalizeSubsystemCandidate(colonMatch[1]!),
-            msg: msg.slice(colonMatch[0].length),
+            msg: message.slice(colonMatch[0].length),
         };
     }
 
-    return { subsystem: "", msg };
+    return { subsystem: "", msg: message };
 }
 
 /** Normalizes structured message. */
@@ -64,7 +64,7 @@ function normalizeStructuredMessage(parsed: Record<string, unknown>): {
     const positionalTwo = parsed[2] ?? parsed["2"];
 
     let subsystem = "";
-    let msg = "";
+    let message = "";
 
     if (typeof positionalZero === "string") {
         const trimmed = positionalZero.trim();
@@ -86,52 +86,52 @@ function normalizeStructuredMessage(parsed: Record<string, unknown>): {
                     nestedRecord[0] ??
                     nestedRecord["0"];
                 if (typeof nestedMessage === "string" && nestedMessage.trim()) {
-                    msg = nestedMessage;
-                } else if (nestedMessage != null && String(nestedMessage).trim()) {
-                    msg = stringifyCompact(nestedMessage);
+                    message = nestedMessage;
+                } else if (nestedMessage != undefined && String(nestedMessage).trim()) {
+                    message = stringifyCompact(nestedMessage);
                 } else if (!subsystem) {
-                    msg = positionalZero;
+                    message = positionalZero;
                 }
             } else {
-                msg = positionalZero;
+                message = positionalZero;
             }
         } else {
-            msg = positionalZero;
+            message = positionalZero;
         }
-    } else if (positionalZero != null && String(positionalZero) !== "") {
-        msg = stringifyCompact(positionalZero);
+    } else if (positionalZero != undefined && String(positionalZero) !== "") {
+        message = stringifyCompact(positionalZero);
     }
 
-    if (!msg && typeof positionalOne === "string") {
-        msg = positionalOne;
-    } else if (!msg && positionalOne != null && String(positionalOne) !== "") {
-        msg = stringifyCompact(positionalOne);
+    if (!message && typeof positionalOne === "string") {
+        message = positionalOne;
+    } else if (!message && positionalOne != undefined && String(positionalOne) !== "") {
+        message = stringifyCompact(positionalOne);
     }
 
-    if (!msg && typeof positionalTwo === "string") {
-        msg = positionalTwo;
+    if (!message && typeof positionalTwo === "string") {
+        message = positionalTwo;
     }
 
-    if (!msg) {
+    if (!message) {
         const fallback = parsed.msg ?? parsed.message;
         if (typeof fallback === "string") {
-            msg = fallback;
-        } else if (fallback != null) {
-            msg = stringifyCompact(fallback);
+            message = fallback;
+        } else if (fallback != undefined) {
+            message = stringifyCompact(fallback);
         }
     }
 
-    if (!msg.trim()) {
-        msg = stringifyCompact(parsed);
+    if (!message.trim()) {
+        message = stringifyCompact(parsed);
     }
 
     if (!subsystem) {
-        const extracted = extractSubsystemAndMessage(msg);
+        const extracted = extractSubsystemAndMessage(message);
         subsystem = extracted.subsystem;
-        msg = extracted.msg;
+        message = extracted.msg;
     }
 
-    return { subsystem, msg };
+    return { subsystem, msg: message };
 }
 
 /** Builds dedupe key. */
@@ -152,21 +152,21 @@ function buildDedupeKey(entry: {
 }
 
 /** Parses log line. */
-export function parseLogLine(line: string, index?: number): LogEntry | null {
-    if (!line || !line.trim()) return null;
+export function parseLogLine(line: string, index?: number): LogEntry | undefined {
+    if (!line || !line.trim()) return undefined;
 
-    let jsonStr = line;
+    let jsonString = line;
 
     if (!line.startsWith("{")) {
-        const braceIdx = line.indexOf("{");
-        if (braceIdx !== -1) {
-            jsonStr = line.slice(braceIdx);
+        const braceIndex = line.indexOf("{");
+        if (braceIndex !== -1) {
+            jsonString = line.slice(braceIndex);
         }
     }
 
     try {
-        const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
-        const meta = typeof parsed._meta === "object" ? parsed._meta : null;
+        const parsed = JSON.parse(jsonString) as Record<string, unknown>;
+        const meta = typeof parsed._meta === "object" ? parsed._meta : undefined;
         const levelSource =
             meta && "logLevelName" in meta
                 ? (meta as Record<string, unknown>).logLevelName
@@ -199,18 +199,18 @@ export function parseLogLine(line: string, index?: number): LogEntry | null {
         };
     } catch {
         const extracted = extractSubsystemAndMessage(line);
-        const msg = extracted.msg || line;
+        const message = extracted.msg || line;
         const dedupeKey = buildDedupeKey({
             level: undefined,
             subsystem: extracted.subsystem,
-            msg,
+            msg: message,
         });
         const errorId = `${dedupeKey}-${index ?? logIdCounter++}`;
         return {
             id: errorId,
             dedupeKey,
             subsystem: extracted.subsystem,
-            msg,
+            msg: message,
             raw: line,
         };
     }

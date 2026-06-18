@@ -37,8 +37,8 @@ function setupHooks() {
     hooks.clearKopiaAttention.mockResolvedValue({});
     hooks.clearWalgAttention.mockReset();
     hooks.clearWalgAttention.mockResolvedValue({});
-    hooks.useKopiaBackup.mockReturnValue({ data: { job: null } });
-    hooks.useWalgBackup.mockReturnValue({ data: { job: null } });
+    hooks.useKopiaBackup.mockReturnValue({ data: { job: undefined } });
+    hooks.useWalgBackup.mockReturnValue({ data: { job: undefined } });
     hooks.useClearKopiaBackupAttention.mockReturnValue({
         isPending: false,
         mutateAsync: hooks.clearKopiaAttention,
@@ -80,7 +80,7 @@ function setupHooks() {
                     ok: false,
                     snapshotsByPath: [
                         {
-                            latest: null,
+                            latest: undefined,
                             path: "/source/docker",
                             snapshotCount: 2,
                             snapshots: [
@@ -295,7 +295,10 @@ describe("BackupOverviewCard", () => {
 
     it("renders loading and empty states", () => {
         hooks.useCacheEntry.mockImplementation((key: string) => ({
-            data: key === "backup.walg.status" ? { data: {}, status: "missing" } : null,
+            data:
+                key === "backup.walg.status"
+                    ? { data: {}, status: "missing" }
+                    : undefined,
             isLoading: key === "backup.kopia.status",
         }));
 
@@ -311,11 +314,11 @@ describe("BackupOverviewCard", () => {
                 return {
                     data: {
                         data: {
-                            backupCount: null,
+                            backupCount: undefined,
                             latest: {
-                                backupName: null,
-                                modified: null,
-                                walFileName: null,
+                                backupName: undefined,
+                                modified: undefined,
+                                walFileName: undefined,
                             },
                             ok: false,
                         },
@@ -331,33 +334,33 @@ describe("BackupOverviewCard", () => {
                         ok: true,
                         snapshotsByPath: [
                             {
-                                latest: null,
-                                path: null,
+                                latest: undefined,
+                                path: undefined,
                                 snapshotCount: 1,
                                 snapshots: [
                                     {
-                                        description: null,
+                                        description: undefined,
                                         endTime: "2026-05-10T10:00:00.000Z",
-                                        errorCount: null,
-                                        fileCount: null,
-                                        id: null,
-                                        ignoredErrorCount: null,
-                                        path: null,
+                                        errorCount: undefined,
+                                        fileCount: undefined,
+                                        id: undefined,
+                                        ignoredErrorCount: undefined,
+                                        path: undefined,
                                         retentionReason: ["latest"],
-                                        startTime: null,
-                                        totalSize: null,
+                                        startTime: undefined,
+                                        totalSize: undefined,
                                     },
                                     {
-                                        description: null,
-                                        endTime: null,
-                                        errorCount: null,
-                                        fileCount: null,
+                                        description: undefined,
+                                        endTime: undefined,
+                                        errorCount: undefined,
+                                        fileCount: undefined,
                                         id: "snapshot-without-retention",
-                                        ignoredErrorCount: null,
-                                        path: null,
+                                        ignoredErrorCount: undefined,
+                                        path: undefined,
                                         retentionReason: [],
-                                        startTime: null,
-                                        totalSize: null,
+                                        startTime: undefined,
+                                        totalSize: undefined,
                                     },
                                 ],
                             },
@@ -399,19 +402,19 @@ describe("BackupOverviewCard", () => {
                         ok: true,
                         snapshotsByPath: [
                             {
-                                latest: null,
+                                latest: undefined,
                                 path: "/source/projects",
                                 snapshotCount: 1,
                                 snapshots: [],
                             },
                             {
-                                latest: null,
+                                latest: undefined,
                                 path: "/source/openclaw",
                                 snapshotCount: 1,
                                 snapshots: [],
                             },
                             {
-                                latest: null,
+                                latest: undefined,
                                 path: "/mnt/custom",
                                 snapshotCount: 1,
                                 snapshots: [],

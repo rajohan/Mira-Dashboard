@@ -3,8 +3,8 @@ import { Modal } from "../../ui/Modal";
 import type { ChatPreviewItem } from "./chatTypes";
 
 /** Provides props for attachment preview modal. */
-interface AttachmentPreviewModalProps {
-    previewItem: ChatPreviewItem | null;
+interface AttachmentPreviewModalProperties {
+    previewItem: ChatPreviewItem | undefined;
     onClose: () => void;
 }
 
@@ -12,7 +12,7 @@ interface AttachmentPreviewModalProps {
 export function AttachmentPreviewModal({
     previewItem,
     onClose,
-}: AttachmentPreviewModalProps) {
+}: AttachmentPreviewModalProperties) {
     return (
         <Modal
             isOpen={Boolean(previewItem)}
@@ -55,7 +55,7 @@ export function AttachmentPreviewModal({
                         </div>
                     )}
                 </div>
-            ) : null}
+            ) : undefined}
         </Modal>
     );
 }

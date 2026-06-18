@@ -7,9 +7,9 @@ function setWindowLocation(location: {
     hostname: string;
     port: string;
 }) {
-    Object.defineProperty(globalThis, "window", {
+    Object.defineProperty(globalThis, "location", {
         configurable: true,
-        value: { location },
+        value: location,
     });
 }
 

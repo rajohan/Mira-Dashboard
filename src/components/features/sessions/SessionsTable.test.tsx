@@ -136,7 +136,7 @@ describe("SessionsTable", () => {
             maxTokens: 0,
             model: "",
             tokenCount: 0,
-            updatedAt: null,
+            updatedAt: undefined,
         };
         renderTable({ sessions: [fallbackSession] });
 
@@ -162,7 +162,7 @@ describe("SessionsTable", () => {
     });
 
     it("treats non-array session data as empty", () => {
-        renderTable({ sessions: null as unknown as Session[] });
+        renderTable({ sessions: undefined as unknown as Session[] });
 
         expect(screen.getByText("No sessions found")).toBeInTheDocument();
     });

@@ -6,19 +6,19 @@ import path from "node:path";
 const ROOT = process.cwd();
 const DEFAULT_CHUNK_SIZE = 30;
 
-const passthroughArgs = [];
+const passthroughArguments = [];
 let chunkLimit = Infinity;
 let chunkSize = DEFAULT_CHUNK_SIZE;
 
-for (const arg of process.argv.slice(2)) {
-    if (arg.startsWith("--chunk-size=")) {
-        const value = Number(arg.slice("--chunk-size=".length));
+for (const argument of process.argv.slice(2)) {
+    if (argument.startsWith("--chunk-size=")) {
+        const value = Number(argument.slice("--chunk-size=".length));
         if (Number.isSafeInteger(value) && value > 0) chunkSize = value;
-    } else if (arg.startsWith("--limit-chunks=")) {
-        const value = Number(arg.slice("--limit-chunks=".length));
+    } else if (argument.startsWith("--limit-chunks=")) {
+        const value = Number(argument.slice("--limit-chunks=".length));
         if (Number.isSafeInteger(value) && value > 0) chunkLimit = value;
     } else {
-        passthroughArgs.push(arg);
+        passthroughArguments.push(argument);
     }
 }
 
@@ -56,13 +56,13 @@ function chunk(files) {
 }
 
 /** Detects whether the current Vitest invocation should emit coverage. */
-function hasCoverageEnabled(args) {
-    return args.some((arg) =>
-        ["--coverage", "--coverage.enabled", "--coverage.enabled=true"].includes(arg)
+function hasCoverageEnabled(arguments_) {
+    return arguments_.some((argument) =>
+        ["--coverage", "--coverage.enabled", "--coverage.enabled=true"].includes(argument)
     );
 }
 
-const testFiles = collectTests(path.join(ROOT, "src")).sort((left, right) =>
+const testFiles = collectTests(path.join(ROOT, "src")).toSorted((left, right) =>
     left.localeCompare(right)
 );
 
@@ -72,7 +72,7 @@ if (testFiles.length === 0) {
 }
 
 const chunks = chunk(testFiles).slice(0, chunkLimit);
-const coverageEnabled = hasCoverageEnabled(passthroughArgs);
+const coverageEnabled = hasCoverageEnabled(passthroughArguments);
 const coverageRoot = path.join(ROOT, "coverage", "chunks");
 
 if (coverageEnabled) {
@@ -88,11 +88,11 @@ const start = Date.now();
 
 for (const [index, files] of chunks.entries()) {
     const label = `${index + 1}/${chunks.length}`;
-    const chunkArgs = [...passthroughArgs];
+    const chunkArguments = [...passthroughArguments];
 
     if (coverageEnabled) {
         // Per-chunk coverage is partial, so merged LCOV thresholds are checked after all chunks.
-        chunkArgs.push(
+        chunkArguments.push(
             `--coverage.reportsDirectory=coverage/chunks/chunk-${index + 1}`,
             "--coverage.thresholds.lines=0",
             "--coverage.thresholds.functions=0",
@@ -112,7 +112,7 @@ for (const [index, files] of chunks.entries()) {
             "--pool=forks",
             "--maxWorkers=4",
             "--reporter=dot",
-            ...chunkArgs,
+            ...chunkArguments,
         ],
         {
             cwd: ROOT,

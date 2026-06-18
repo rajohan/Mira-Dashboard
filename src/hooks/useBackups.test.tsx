@@ -21,7 +21,7 @@ describe("backup hooks", () => {
             .mockResolvedValueOnce({
                 ok: true,
                 status: 200,
-                json: async () => ({ job: null }),
+                json: async () => ({ job: undefined }),
             })
             .mockResolvedValueOnce({
                 ok: true,
@@ -32,7 +32,7 @@ describe("backup hooks", () => {
         const wrapper = createQueryWrapper();
 
         const { result: kopia } = renderHook(() => useKopiaBackup(), { wrapper });
-        await waitFor(() => expect(kopia.current.data?.job).toBeNull());
+        await waitFor(() => expect(kopia.current.data?.job).toBeUndefined());
 
         const { result: walg } = renderHook(() => useWalgBackup(), { wrapper });
         await waitFor(() => expect(walg.current.data?.job?.id).toBe("walg"));

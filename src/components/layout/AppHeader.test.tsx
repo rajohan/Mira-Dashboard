@@ -86,7 +86,7 @@ describe("AppHeader", () => {
     it("shows disconnected indicators when WS and backend are down", async () => {
         hooks.useOpenClawSocket.mockReturnValue({ isConnected: false });
         hooks.useHealth.mockReturnValue({
-            data: null,
+            data: undefined,
             isError: true,
         });
 

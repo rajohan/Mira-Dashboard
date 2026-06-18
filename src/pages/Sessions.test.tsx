@@ -8,13 +8,15 @@ const mocks = vi.hoisted(() => ({
     compact: vi.fn(),
     remove: vi.fn(),
     reset: vi.fn(),
-    sessions: [] as Array<{
-        displayLabel?: string;
-        displayName?: string;
-        key: string;
-        lastActivityAt?: string;
-        type?: string;
-    }> | null,
+    sessions: [] as
+        | Array<{
+              displayLabel?: string;
+              displayName?: string;
+              key: string;
+              lastActivityAt?: string;
+              type?: string;
+          }>
+        | undefined,
     useOpenClawSocket: vi.fn(),
     useSessionActions: vi.fn(),
 }));
@@ -63,7 +65,7 @@ vi.mock("../components/ui/ConfirmModal", () => ({
                     Confirm delete
                 </button>
             </section>
-        ) : null,
+        ) : undefined,
 }));
 
 vi.mock("../components/features/sessions", () => ({
@@ -121,7 +123,7 @@ function mockSessions(
         },
     ];
     mocks.useOpenClawSocket.mockReturnValue({
-        error: null,
+        error: undefined,
         isConnected: true,
     });
     mocks.useSessionActions.mockReturnValue({
@@ -132,7 +134,7 @@ function mockSessions(
     });
 
     if ("sessions" in overrides) {
-        mocks.sessions = overrides.sessions ?? null;
+        mocks.sessions = overrides.sessions ?? undefined;
     }
     if (overrides.socket) {
         mocks.useOpenClawSocket.mockReturnValue(overrides.socket);
@@ -197,7 +199,7 @@ describe("Sessions page", () => {
     it("shows connecting and socket error states", () => {
         const { rerender } = render(<Sessions />);
 
-        mockSessions({ socket: { error: null, isConnected: false } });
+        mockSessions({ socket: { error: undefined, isConnected: false } });
         rerender(<Sessions />);
         expect(screen.getByText("Connecting to OpenClaw...")).toBeInTheDocument();
 
@@ -208,7 +210,7 @@ describe("Sessions page", () => {
 
     it("handles empty collection data", () => {
         mockSessions({
-            sessions: null,
+            sessions: undefined,
         });
 
         render(<Sessions />);

@@ -45,10 +45,10 @@ function formatSchedule(job: ScheduledJob | undefined): string {
         : `Every ${minutes}m`;
 }
 
-function formatJobNextRunTime(job: ScheduledJob): string | null {
-    if (!job.nextRunAt) return null;
+function formatJobNextRunTime(job: ScheduledJob): string | undefined {
+    if (!job.nextRunAt) return undefined;
     const formatted = formatOsloClock(job.nextRunAt);
-    return formatted === "--:--" ? null : formatted;
+    return formatted === "--:--" ? undefined : formatted;
 }
 
 function formatCronSchedule(job: ScheduledJob, expression: string): string {
@@ -161,10 +161,10 @@ export function LogRotationCard() {
                         Last {lastAction.result?.dryRun ? "dry-run" : "real run"} output
                     </div>
                     <pre className="text-primary-100 max-h-52 overflow-auto rounded-lg bg-black/40 p-3 text-xs">
-                        {JSON.stringify(lastAction, null, 2)}
+                        {JSON.stringify(lastAction, undefined, 2)}
                     </pre>
                 </div>
-            ) : null}
+            ) : undefined}
         </Card>
     );
 }

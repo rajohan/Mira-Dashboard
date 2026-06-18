@@ -39,13 +39,13 @@ import { formatDate } from "../utils/format";
 
 /** Defines pending action. */
 type PendingAction =
-    | null
+    | undefined
     | { type: "merge"; pr: PullRequestSummary }
     | { type: "merge-deploy"; pr: PullRequestSummary }
     | { type: "review-approve"; pr: PullRequestSummary }
     | { type: "reject"; pr: PullRequestSummary }
     | { type: "deploy" };
-type PendingActionType = Exclude<PendingAction, null>["type"];
+type PendingActionType = Exclude<PendingAction, undefined>["type"];
 type UnhandledPendingActionType = Exclude<
     PendingActionType,
     "deploy" | "merge" | "merge-deploy" | "reject" | "review-approve"
@@ -137,12 +137,15 @@ function reviewDecisionLabel(pr: PullRequestSummary) {
     const value = pr.reviewDecision;
     const normalized = (value || "").toUpperCase();
     switch (normalized) {
-        case "CHANGES_REQUESTED":
+        case "CHANGES_REQUESTED": {
             return "Changes requested";
-        case "REVIEW_REQUIRED":
+        }
+        case "REVIEW_REQUIRED": {
             return "Review required";
-        default:
+        }
+        default: {
             return value ? value.replaceAll("_", " ") : "Review pending";
+        }
     }
 }
 
@@ -270,7 +273,7 @@ function checkoutLabel(checkout: ProductionCheckoutStatus | undefined) {
 /** Performs checkout message. */
 function checkoutMessage(
     checkout: ProductionCheckoutStatus | undefined,
-    error: Error | null
+    error: Error | undefined
 ) {
     if (error) return error.message;
     if (!checkout) return "Loading checkout status…";
@@ -318,34 +321,44 @@ function canConfiguredReviewerApproveReview(pr: PullRequestSummary): boolean {
 }
 
 /** Performs action label. */
-function actionLabel(action: Exclude<PendingAction, null>) {
+function actionLabel(action: Exclude<PendingAction, undefined>) {
     switch (action.type) {
-        case "merge":
+        case "merge": {
             return "Merge PR";
-        case "merge-deploy":
+        }
+        case "merge-deploy": {
             return "Merge + deploy";
-        case "review-approve":
+        }
+        case "review-approve": {
             return "Approve PR";
-        case "reject":
+        }
+        case "reject": {
             return "Reject PR";
-        case "deploy":
+        }
+        case "deploy": {
             return `Deploy latest ${DEFAULT_BASE}`;
+        }
     }
 }
 
 /** Performs action message. */
-function actionMessage(action: Exclude<PendingAction, null>) {
+function actionMessage(action: Exclude<PendingAction, undefined>) {
     switch (action.type) {
-        case "merge":
+        case "merge": {
             return `Merge PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge the PR and delete the remote branch. It will not deploy.`;
-        case "merge-deploy":
+        }
+        case "merge-deploy": {
             return `Merge and deploy PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge, sync the production checkout to ${DEFAULT_BASE}, build frontend/backend from there, schedule a service restart, and run a health check.`;
-        case "review-approve":
+        }
+        case "review-approve": {
             return `Approve PR #${action.pr.number}: ${action.pr.title}?\n\nThis approves the PR on GitHub. It does not merge or deploy.`;
-        case "reject":
+        }
+        case "reject": {
             return `Reject PR #${action.pr.number}: ${action.pr.title}?\n\nThis closes the PR with a dashboard rejection comment. It does not delete the branch.`;
-        case "deploy":
+        }
+        case "deploy": {
             return `Deploy latest ${DEFAULT_BASE}?\n\nThis will sync the production checkout to ${DEFAULT_BASE}, build frontend/backend from there, schedule a mira-dashboard.service restart, and run a health check.`;
+        }
     }
 }
 
@@ -375,9 +388,9 @@ function PullRequestDescription({ body }: { body: string }) {
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeRaw, rehypeSanitize]}
                     components={{
-                        a: ({ node, ...props }) => {
+                        a: ({ node, ...properties }) => {
                             void node;
-                            return <a {...props} target="_blank" rel="noreferrer" />;
+                            return <a {...properties} target="_blank" rel="noreferrer" />;
                         },
                     }}
                 >
@@ -433,14 +446,14 @@ function PullRequestCard({
                         {pr.mergeStateStatus || "state unknown"}
                     </Badge>
                     <Badge variant={checks.variant}>{checks.label}</Badge>
-                    {pr.isDraft ? <Badge variant="warning">Draft</Badge> : null}
+                    {pr.isDraft ? <Badge variant="warning">Draft</Badge> : undefined}
                     <Badge variant={reviewDecisionVariant(pr)}>
                         {reviewDecisionLabel(pr)}
                     </Badge>
                 </div>
             </div>
 
-            {pr.body ? <PullRequestDescription body={pr.body} /> : null}
+            {pr.body ? <PullRequestDescription body={pr.body} /> : undefined}
 
             <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">{actions}</div>
         </Card>
@@ -496,7 +509,7 @@ function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
                                 <p className="text-primary-400 mt-2 text-xs">
                                     {deployment.note}
                                 </p>
-                            ) : null}
+                            ) : undefined}
                         </div>
                     ))}
                 </div>
@@ -521,9 +534,9 @@ export function PullRequests() {
     const rejectPullRequest = useRejectPullRequest();
     const updatePullRequestBranch = useUpdatePullRequestBranch();
     const deployDashboard = useDeployDashboard();
-    const [pendingAction, setPendingAction] = useState<PendingAction>(null);
-    const [lastResult, setLastResult] = useState<string | null>(null);
-    const [actionError, setActionError] = useState<string | null>(null);
+    const [pendingAction, setPendingAction] = useState<PendingAction>(undefined);
+    const [lastResult, setLastResult] = useState<string | undefined>(undefined);
+    const [actionError, setActionError] = useState<string | undefined>(undefined);
     const isActionPending =
         approvePullRequest.isPending ||
         approvePullRequestReview.isPending ||
@@ -531,12 +544,14 @@ export function PullRequests() {
         updatePullRequestBranch.isPending ||
         deployDashboard.isPending;
     const isProductionActionBlocked = !productionCheckout?.isSafeForDeploy;
-    const miraPullRequests = pullRequests.filter(isMiraPullRequest);
+    const miraPullRequests = pullRequests.filter((pullRequest) =>
+        isMiraPullRequest(pullRequest)
+    );
     const externalPullRequests = pullRequests.filter((pr) => !isMiraPullRequest(pr));
 
     /** Performs confirm action. */
-    async function confirmAction(action: Exclude<PendingAction, null>) {
-        setActionError(null);
+    async function confirmAction(action: Exclude<PendingAction, undefined>) {
+        setActionError(undefined);
         try {
             switch (action.type) {
                 case "merge": {
@@ -565,7 +580,7 @@ export function PullRequests() {
                         number: action.pr.number,
                     });
                     setLastResult(result.message);
-                    setPendingAction(null);
+                    setPendingAction(undefined);
                     return;
                 }
 
@@ -584,7 +599,7 @@ export function PullRequests() {
                 }
             }
 
-            setPendingAction(null);
+            setPendingAction(undefined);
         } catch (error_) {
             setActionError(error_ instanceof Error ? error_.message : "Action failed");
         }
@@ -618,7 +633,7 @@ export function PullRequests() {
                 } else if (isProductionActionBlocked) {
                     mergeDisabledReason = checkoutMessage(
                         productionCheckout,
-                        productionCheckoutError
+                        productionCheckoutError ?? undefined
                     );
                 }
             } else {
@@ -640,7 +655,7 @@ export function PullRequests() {
                     >
                         {mergeDisabledReason}
                     </p>
-                ) : null}
+                ) : undefined}
                 {canConfiguredReviewerApproveReview(pr) ? (
                     <Button
                         variant="secondary"
@@ -650,7 +665,7 @@ export function PullRequests() {
                         <CheckCircle className="h-4 w-4" />
                         Approve PR
                     </Button>
-                ) : null}
+                ) : undefined}
                 {canUpdateBranch ? (
                     <Button
                         variant="secondary"
@@ -660,7 +675,7 @@ export function PullRequests() {
                                     number: pr.number,
                                 });
                                 setLastResult(result.message);
-                                setActionError(null);
+                                setActionError(undefined);
                             } catch (error_) {
                                 setActionError(
                                     error_ instanceof Error
@@ -676,7 +691,7 @@ export function PullRequests() {
                             ? "Updating..."
                             : "Update branch"}
                     </Button>
-                ) : null}
+                ) : undefined}
                 <Button
                     variant="primary"
                     onClick={() => setPendingAction({ type: "merge-deploy", pr })}
@@ -711,7 +726,7 @@ export function PullRequests() {
         <PageState
             isLoading={isLoading}
             loading={<LoadingState message="Loading pull requests..." size="lg" />}
-            error={error?.message ?? null}
+            error={error?.message ?? undefined}
             errorView={
                 <div className="flex h-full min-h-0 flex-col items-center justify-center gap-4 p-3 sm:p-6">
                     <p className="text-red-400">{error?.message}</p>
@@ -756,13 +771,13 @@ export function PullRequests() {
                             {lastResult}
                         </p>
                     </Card>
-                ) : null}
+                ) : undefined}
 
                 {actionError ? (
                     <Card variant="bordered" className="border-red-500/30 bg-red-500/10">
                         <p className="text-sm text-red-300">{actionError}</p>
                     </Card>
-                ) : null}
+                ) : undefined}
 
                 <Card variant="bordered" className="space-y-3">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -773,7 +788,7 @@ export function PullRequests() {
                             <p className="text-primary-400 mt-1 text-sm">
                                 {checkoutMessage(
                                     productionCheckout,
-                                    productionCheckoutError
+                                    productionCheckoutError ?? undefined
                                 )}
                             </p>
                         </div>
@@ -792,7 +807,7 @@ export function PullRequests() {
                                 >
                                     {productionCheckout.branch}
                                 </Badge>
-                            ) : null}
+                            ) : undefined}
                             {productionCheckout ? (
                                 <Badge
                                     variant={
@@ -801,7 +816,7 @@ export function PullRequests() {
                                 >
                                     {productionCheckout.isClean ? "Clean" : "Dirty"}
                                 </Badge>
-                            ) : null}
+                            ) : undefined}
                         </div>
                     </div>
                     {productionCheckout ? (
@@ -815,7 +830,7 @@ export function PullRequests() {
                             <div>HEAD: {productionCheckout.head}</div>
                             <div>Upstream: {productionCheckout.upstream || "none"}</div>
                         </div>
-                    ) : null}
+                    ) : undefined}
                 </Card>
 
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
@@ -828,7 +843,7 @@ export function PullRequests() {
                                     review.
                                 </p>
                             </Card>
-                        ) : null}
+                        ) : undefined}
 
                         {miraPullRequests.length > 0 ? (
                             <section className="space-y-3" aria-label="Mira-authored PRs">
@@ -851,7 +866,7 @@ export function PullRequests() {
                                     ))}
                                 </div>
                             </section>
-                        ) : null}
+                        ) : undefined}
 
                         {externalPullRequests.length > 0 ? (
                             <section
@@ -877,7 +892,7 @@ export function PullRequests() {
                                     ))}
                                 </div>
                             </section>
-                        ) : null}
+                        ) : undefined}
                     </div>
                     <div className={pullRequests.length > 0 ? "xl:pt-[60px]" : undefined}>
                         <RecentDeploysCard deployments={deployments} />
@@ -898,8 +913,8 @@ export function PullRequests() {
                                 return;
                             }
 
-                            setPendingAction(null);
-                            setActionError(null);
+                            setPendingAction(undefined);
+                            setActionError(undefined);
                         }}
                         onConfirm={() => {
                             void confirmAction(pendingAction);

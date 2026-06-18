@@ -22,37 +22,37 @@ function parseThreshold(metricName, rawValue) {
 }
 
 /** Parses CLI flags for coverage threshold checks. */
-function parseArgs(args) {
+function parseArguments(arguments_) {
     const options = {
         coverageDir: DEFAULT_COVERAGE_DIR,
         thresholds: { ...DEFAULT_THRESHOLDS },
     };
 
-    for (const arg of args) {
-        if (arg.startsWith("--coverage-dir=")) {
-            options.coverageDir = arg.slice("--coverage-dir=".length);
-        } else if (arg.startsWith("--branches=")) {
+    for (const argument of arguments_) {
+        if (argument.startsWith("--coverage-dir=")) {
+            options.coverageDir = argument.slice("--coverage-dir=".length);
+        } else if (argument.startsWith("--branches=")) {
             options.thresholds.branches = parseThreshold(
                 "branches",
-                arg.slice("--branches=".length)
+                argument.slice("--branches=".length)
             );
-        } else if (arg.startsWith("--functions=")) {
+        } else if (argument.startsWith("--functions=")) {
             options.thresholds.functions = parseThreshold(
                 "functions",
-                arg.slice("--functions=".length)
+                argument.slice("--functions=".length)
             );
-        } else if (arg.startsWith("--lines=")) {
+        } else if (argument.startsWith("--lines=")) {
             options.thresholds.lines = parseThreshold(
                 "lines",
-                arg.slice("--lines=".length)
+                argument.slice("--lines=".length)
             );
-        } else if (arg.startsWith("--statements=")) {
+        } else if (argument.startsWith("--statements=")) {
             options.thresholds.statements = parseThreshold(
                 "statements",
-                arg.slice("--statements=".length)
+                argument.slice("--statements=".length)
             );
-        } else if (arg.startsWith("--")) {
-            throw new Error(`Unknown argument: ${arg}`);
+        } else if (argument.startsWith("--")) {
+            throw new Error(`Unknown argument: ${argument}`);
         }
     }
 
@@ -75,7 +75,7 @@ function collectCoverageFiles(directory, fileName) {
         }
     }
 
-    return files.sort((left, right) => left.localeCompare(right));
+    return files.toSorted((left, right) => left.localeCompare(right));
 }
 
 /** Creates an empty coverage record for one source file. */
@@ -133,7 +133,7 @@ function statementKey(statementId, location) {
 
 /** Merges one LCOV report into the aggregate coverage map. */
 function mergeLcovFile(coverageByFile, lcovFile) {
-    let currentCoverage = null;
+    let currentCoverage;
     let functionDefinitions = new Map();
     let functionHitsByName = new Map();
 
@@ -174,7 +174,7 @@ function mergeLcovFile(coverageByFile, lcovFile) {
                 parseTaken(taken)
             );
         } else if (line === "end_of_record") {
-            currentCoverage = null;
+            currentCoverage = undefined;
             resetRecordState();
         }
     }
@@ -259,7 +259,7 @@ function checkThresholds(summary, thresholds) {
     return failures;
 }
 
-const { coverageDir, thresholds } = parseArgs(process.argv.slice(2));
+const { coverageDir, thresholds } = parseArguments(process.argv.slice(2));
 const coveragePath = path.resolve(process.cwd(), coverageDir);
 const lcovFiles = collectCoverageFiles(coveragePath, "lcov.info");
 const jsonCoverageFiles = collectCoverageFiles(coveragePath, "coverage-final.json");

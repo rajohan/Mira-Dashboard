@@ -22,9 +22,9 @@ const rows: Row[] = [
 ];
 
 function renderShell(
-    props: Partial<React.ComponentProps<typeof DatabaseTableShell<Row>>> = {}
+    properties: Partial<React.ComponentProps<typeof DatabaseTableShell<Row>>> = {}
 ) {
-    return render(<DatabaseTableShell data={rows} columns={columns} {...props} />);
+    return render(<DatabaseTableShell data={rows} columns={columns} {...properties} />);
 }
 
 describe("DatabaseTableShell", () => {

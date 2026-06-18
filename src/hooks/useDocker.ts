@@ -15,15 +15,15 @@ export interface DockerContainer {
     imageId: string;
     command: string;
     createdAt: string;
-    startedAt: string | null;
-    finishedAt: string | null;
+    startedAt: string | undefined;
+    finishedAt: string | undefined;
     runningFor: string;
     state: string;
     status: string;
     health: string;
     restartCount: number;
-    service: string | null;
-    project: string | null;
+    service: string | undefined;
+    project: string | undefined;
     ports: string[];
     ipAddresses: Record<string, string>;
     mounts: Array<{
@@ -34,14 +34,16 @@ export interface DockerContainer {
         readOnly: boolean;
         name?: string;
     }>;
-    stats: null | {
-        cpu: string;
-        memory: string;
-        memoryPercent: string;
-        netIO: string;
-        blockIO: string;
-        pids: string;
-    };
+    stats:
+        | undefined
+        | {
+              cpu: string;
+              memory: string;
+              memoryPercent: string;
+              netIO: string;
+              blockIO: string;
+              pids: string;
+          };
 }
 
 /** Represents Docker container details. */
@@ -85,11 +87,11 @@ export interface DockerExecJob {
     jobId: string;
     containerId: string;
     status: "running" | "done";
-    code: number | null;
+    code: number | undefined;
     stdout: string;
     stderr: string;
     startedAt: number;
-    endedAt: number | null;
+    endedAt: number | undefined;
 }
 
 /** Represents Docker updater service. */
@@ -97,18 +99,18 @@ export interface DockerUpdaterService {
     id: number;
     appSlug: string;
     serviceName: string;
-    composeImageRef: string | null;
+    composeImageRef: string | undefined;
     imageRepo: string;
-    currentTag: string | null;
-    currentDigest: string | null;
-    latestTag: string | null;
-    latestDigest: string | null;
+    currentTag: string | undefined;
+    currentDigest: string | undefined;
+    latestTag: string | undefined;
+    latestDigest: string | undefined;
     policy: string;
     pinMode: string;
     enabled: boolean;
-    lastCheckedAt: string | null;
-    lastUpdatedAt: string | null;
-    lastStatus: string | null;
+    lastCheckedAt: string | undefined;
+    lastUpdatedAt: string | undefined;
+    lastStatus: string | undefined;
     updateAvailable: boolean;
     metadata: Record<string, unknown>;
 }
@@ -120,11 +122,11 @@ export interface DockerUpdaterEvent {
     appSlug: string;
     serviceName: string;
     eventType: string;
-    fromTag: string | null;
-    toTag: string | null;
-    fromDigest: string | null;
-    toDigest: string | null;
-    message: string | null;
+    fromTag: string | undefined;
+    toTag: string | undefined;
+    fromDigest: string | undefined;
+    toDigest: string | undefined;
+    message: string | undefined;
     details: Record<string, unknown>;
     createdAt: string;
 }
@@ -190,7 +192,7 @@ export const dockerKeys = {
         ["docker", "container-logs", containerId, tail] as const,
     images: ["docker", "images"] as const,
     volumes: ["docker", "volumes"] as const,
-    execJob: (jobId: string | null) => ["docker", "exec", jobId] as const,
+    execJob: (jobId: string | undefined) => ["docker", "exec", jobId] as const,
     updaterServices: ["docker", "updater", "services"] as const,
     updaterEvents: (limit: number) => ["docker", "updater", "events", limit] as const,
 };
@@ -260,14 +262,14 @@ export function useDockerContainers() {
         queryKey: dockerKeys.containers,
         queryFn: fetchContainers,
         placeholderData: keepPreviousData,
-        staleTime: 5_000,
+        staleTime: 5000,
         refetchInterval: 10_000,
         refetchOnWindowFocus: false,
     });
 }
 
 /** Provides Docker container. */
-export function useDockerContainer(containerId: string | null) {
+export function useDockerContainer(containerId: string | undefined) {
     return useQuery({
         queryKey: dockerKeys.container(containerId || ""),
         queryFn: () => fetchContainer(containerId!),
@@ -278,7 +280,7 @@ export function useDockerContainer(containerId: string | null) {
 
 /** Provides Docker container logs. */
 export function useDockerContainerLogs(
-    containerId: string | null,
+    containerId: string | undefined,
     tail: number,
     enabled = true
 ) {
@@ -286,7 +288,7 @@ export function useDockerContainerLogs(
         queryKey: dockerKeys.containerLogs(containerId || "", tail),
         queryFn: () => fetchContainerLogs(containerId!, tail),
         enabled: enabled && Boolean(containerId),
-        refetchInterval: 5_000,
+        refetchInterval: 5000,
     });
 }
 
@@ -315,7 +317,7 @@ export function useDockerVolumes() {
 }
 
 /** Provides Docker exec job. */
-export function useDockerExecJob(jobId: string | null) {
+export function useDockerExecJob(jobId: string | undefined) {
     return useQuery({
         queryKey: dockerKeys.execJob(jobId),
         queryFn: () => fetchDockerExecJob(jobId!),

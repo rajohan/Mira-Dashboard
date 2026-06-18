@@ -9,7 +9,10 @@ describe("json utils", () => {
     });
 
     it("validates strict JSON", () => {
-        expect(validateJsonString('{"ok":true}')).toEqual({ valid: true, error: null });
+        expect(validateJsonString('{"ok":true}')).toEqual({
+            valid: true,
+            error: undefined,
+        });
 
         const result = validateJsonString("{ok:true}");
         expect(result.valid).toBe(false);
@@ -19,7 +22,7 @@ describe("json utils", () => {
     it("validates JSON5 when requested", () => {
         expect(validateJsonString("{ok:true, trailing: 'yes'}", "json5")).toEqual({
             valid: true,
-            error: null,
+            error: undefined,
         });
 
         const result = validateJsonString("{invalid json5", "json5");

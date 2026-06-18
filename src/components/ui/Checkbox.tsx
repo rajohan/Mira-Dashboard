@@ -9,7 +9,7 @@ import { Check } from "lucide-react";
 import { cn } from "../../utils/cn";
 
 /** Provides props for checkbox. */
-interface CheckboxProps {
+interface CheckboxProperties {
     checked: boolean;
     onChange: (checked: boolean) => void;
     label?: string;
@@ -26,7 +26,7 @@ export function Checkbox({
     description,
     disabled,
     className,
-}: CheckboxProps) {
+}: CheckboxProperties) {
     return (
         <Field className={cn("flex items-center gap-2", className)} disabled={disabled}>
             <HeadlessCheckbox

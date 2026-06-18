@@ -29,7 +29,7 @@ vi.mock("../lib/queryClient", () => ({
     queryClient: {},
 }));
 
-vi.mock("../utils/logUtils", () => ({
+vi.mock("../utils/logUtilities", () => ({
     parseLogLine: mocks.parseLogLine,
 }));
 
@@ -79,7 +79,7 @@ describe("logs collection", () => {
             // Suppress expected parser error noise for this negative-path assertion.
         });
 
-        mocks.parseLogLine.mockReturnValueOnce(null);
+        mocks.parseLogLine.mockReturnValueOnce(undefined);
         writeLogFromWebSocket("ignored");
         expect(mocks.collection.utils.writeUpsert).not.toHaveBeenCalled();
 

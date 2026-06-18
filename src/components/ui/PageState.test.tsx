@@ -21,7 +21,7 @@ describe("PageState", () => {
         expect(screen.queryByText("Content")).not.toBeInTheDocument();
     });
 
-    it("renders null fallbacks when state slots are omitted", () => {
+    it("renders undefined fallbacks when state slots are omitted", () => {
         const { container, rerender } = render(<PageState isLoading>Content</PageState>);
         expect(container).toBeEmptyDOMElement();
 

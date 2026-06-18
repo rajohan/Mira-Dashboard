@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatRow } from "../components/features/chat/chatTypes";
+import type { ReactElementReference } from "../utils/reactReferences";
 import {
     Chat,
     historyHasNewerAssistantMessage,
@@ -47,36 +48,49 @@ interface ChatTestMocks {
                   status: string;
               }>;
           };
-    confirmModalHandlers: null | {
-        isOpen: boolean;
-        onCancel: () => void;
-        onConfirm: () => void;
-    };
+    confirmModalHandlers:
+        | undefined
+        | {
+              isOpen: boolean;
+              onCancel: () => void;
+              onConfirm: () => void;
+          };
     isConnected: boolean;
     liveSessions: MockLiveSession[] | undefined;
     request: ReturnType<typeof vi.fn>;
-    runtimeEventsOptions: null | {
-        connectionId: number;
-        isConnected: boolean;
-        liveHistoryRefreshTimerReference: { current: number | null };
-        updateActiveStreams: (
-            updater: (previous: Record<string, unknown>) => Record<string, unknown>
-        ) => void;
-    };
+    runtimeEventsOptions:
+        | undefined
+        | {
+              connectionId: number;
+              isConnected: boolean;
+              liveHistoryRefreshTimerReference: { current: number | undefined };
+              updateActiveStreams: (
+                  updater: (previous: Record<string, unknown>) => Record<string, unknown>
+              ) => void;
+          };
     skipComposerFileInputRef: boolean;
     skipMessagesContainerRef: boolean;
     slashCommand: ReturnType<typeof vi.fn>;
-    slashCommandOptions: null | { confirmResetSession: () => Promise<boolean> };
-    socketError: string | null;
+    slashCommandOptions: undefined | { confirmResetSession: () => Promise<boolean> };
+    socketError: string | undefined;
     subscribe: ReturnType<typeof vi.fn>;
-    virtualizerOptions: ChatVirtualizerOptions | null;
+    virtualizerOptions: ChatVirtualizerOptions | undefined;
+}
+
+function createDeferred<T>() {
+    const { promise, reject, resolve } = Promise.withResolvers<T>();
+    return { promise, reject, resolve };
+}
+
+function unsupportedMediaRecorderType() {
+    return false;
 }
 
 const mocks = vi.hoisted<ChatTestMocks>(() => ({
     request: vi.fn(),
     subscribe: vi.fn(),
     slashCommand: vi.fn(),
-    socketError: null as string | null,
+    socketError: undefined as string | undefined,
     isConnected: true,
     liveSessions: [
         {
@@ -107,12 +121,12 @@ const mocks = vi.hoisted<ChatTestMocks>(() => ({
             },
         ],
     },
-    runtimeEventsOptions: null,
-    confirmModalHandlers: null,
+    runtimeEventsOptions: undefined,
+    confirmModalHandlers: undefined,
     skipComposerFileInputRef: false,
     skipMessagesContainerRef: false,
-    slashCommandOptions: null,
-    virtualizerOptions: null,
+    slashCommandOptions: undefined,
+    virtualizerOptions: undefined,
 }));
 
 function getVirtualizerOptions(): ChatVirtualizerOptions & {
@@ -186,7 +200,7 @@ vi.mock("../components/features/chat/useChatRuntimeEvents", () => ({
         (options: {
             connectionId: number;
             isConnected: boolean;
-            liveHistoryRefreshTimerReference: { current: number | null };
+            liveHistoryRefreshTimerReference: { current: number | undefined };
             updateActiveStreams: (
                 updater: (previous: Record<string, unknown>) => Record<string, unknown>
             ) => void;
@@ -208,7 +222,7 @@ vi.mock("../components/features/chat/AttachmentPreviewModal", () => ({
         previewItem,
         onClose,
     }: {
-        previewItem: null | { title: string };
+        previewItem: undefined | { title: string };
         onClose: () => void;
     }) =>
         previewItem ? (
@@ -218,7 +232,7 @@ vi.mock("../components/features/chat/AttachmentPreviewModal", () => ({
                     close preview
                 </button>
             </div>
-        ) : null,
+        ) : undefined,
 }));
 
 vi.mock("../components/features/chat/ChatHeader", () => ({
@@ -294,8 +308,8 @@ vi.mock("../components/features/chat/ChatMessagesList", () => ({
         chatRows: ChatRow[];
         isAtBottom: boolean;
         isLoadingHistory: boolean;
-        messagesBottomReference: React.RefObject<HTMLDivElement | null>;
-        messagesContainerReference: React.RefObject<HTMLDivElement | null>;
+        messagesBottomReference: ReactElementReference<HTMLDivElement>;
+        messagesContainerReference: ReactElementReference<HTMLDivElement>;
         onDeleteMessage: (messageKey: string) => void;
         onDynamicContentLoad: () => void;
         onFollow: () => void;
@@ -321,7 +335,7 @@ vi.mock("../components/features/chat/ChatMessagesList", () => ({
                         <button type="button" onClick={() => onDeleteMessage(row.key)}>
                             delete {row.key}
                         </button>
-                    ) : null}
+                    ) : undefined}
                 </article>
             ))}
             <div ref={messagesBottomReference} data-testid="messages-bottom" />
@@ -361,12 +375,12 @@ vi.mock("../components/features/chat/ChatComposer", () => ({
         attachments: Array<{ id: string; fileName: string }>;
         canSend: boolean;
         draft: string;
-        fileInputReference: React.RefObject<HTMLInputElement | null>;
+        fileInputReference: ReactElementReference<HTMLInputElement>;
         isConnected: boolean;
         isRecording: boolean;
         isTranscribing: boolean;
         onApplySlashSuggestion: (value: string) => void;
-        onAttachFiles: (files: FileList | null) => void;
+        onAttachFiles: (files: FileList | undefined) => void;
         onChangeDraft: (draft: string) => void;
         onRemoveAttachment: (id: string) => void;
         onSend: () => void;
@@ -397,7 +411,7 @@ vi.mock("../components/features/chat/ChatComposer", () => ({
                     ref={mocks.skipComposerFileInputRef ? undefined : fileInputReference}
                     type="file"
                     multiple
-                    onChange={(event) => onAttachFiles(event.target.files)}
+                    onChange={(event) => onAttachFiles(event.target.files ?? undefined)}
                 />
             </label>
             {attachments.map((attachment) => (
@@ -418,7 +432,7 @@ vi.mock("../components/features/chat/ChatComposer", () => ({
                 >
                     apply first slash suggestion
                 </button>
-            ) : null}
+            ) : undefined}
             <button type="button" onClick={onToggleRecording}>
                 toggle recording
             </button>
@@ -453,7 +467,7 @@ vi.mock("../components/ui/ConfirmModal", () => ({
                     {title === "Delete message" ? "confirm delete" : "confirm reset"}
                 </button>
             </div>
-        ) : null;
+        ) : undefined;
     },
 }));
 
@@ -461,11 +475,11 @@ vi.mock("../components/ui/ConfirmModal", () => ({
 function installLocalStorageMock() {
     const store = new Map<string, string>();
 
-    Object.defineProperty(window, "localStorage", {
+    Object.defineProperty(globalThis, "localStorage", {
         configurable: true,
         value: {
             clear: vi.fn(() => store.clear()),
-            getItem: vi.fn((key: string) => store.get(key) ?? null),
+            getItem: vi.fn((key: string) => store.get(key) ?? undefined),
             removeItem: vi.fn((key: string) => store.delete(key)),
             setItem: vi.fn((key: string, value: string) => store.set(key, value)),
         },
@@ -509,7 +523,7 @@ function setupRequest() {
 describe("Chat helpers", () => {
     beforeEach(() => {
         installLocalStorageMock();
-        Object.defineProperty(window, "MediaRecorder", {
+        Object.defineProperty(globalThis, "MediaRecorder", {
             configurable: true,
             value: undefined,
         });
@@ -518,27 +532,25 @@ describe("Chat helpers", () => {
     it("stores deleted message keys and tolerates invalid storage", () => {
         expect(readDeletedMessageKeys("")).toEqual(new Set());
 
-        window.localStorage.setItem(
+        localStorage.setItem(
             "openclaw:deleted:session-a",
             JSON.stringify(["one", 2, "two"])
         );
         expect(readDeletedMessageKeys("session-a")).toEqual(new Set(["one", "two"]));
 
-        window.localStorage.setItem("openclaw:deleted:session-a", "not json");
+        localStorage.setItem("openclaw:deleted:session-a", "not json");
         expect(readDeletedMessageKeys("session-a")).toEqual(new Set());
 
-        window.localStorage.setItem("openclaw:deleted:session-a", '{"one":true}');
+        localStorage.setItem("openclaw:deleted:session-a", '{"one":true}');
         expect(readDeletedMessageKeys("session-a")).toEqual(new Set());
 
         writeDeletedMessageKeys("session-a", new Set(["three"]));
-        expect(window.localStorage.getItem("openclaw:deleted:session-a")).toBe(
-            '["three"]'
-        );
+        expect(localStorage.getItem("openclaw:deleted:session-a")).toBe('["three"]');
         writeDeletedMessageKeys("", new Set(["ignored"]));
     });
 
     it("falls back when deleted-message storage is unavailable", () => {
-        Object.defineProperty(window, "localStorage", {
+        Object.defineProperty(globalThis, "localStorage", {
             configurable: true,
             value: {
                 getItem: vi.fn(() => {
@@ -568,7 +580,7 @@ describe("Chat helpers", () => {
             tools: true,
         });
 
-        window.localStorage.setItem(
+        localStorage.setItem(
             "mira-dashboard-chat-diagnostic-visibility",
             JSON.stringify({ thinking: true, tools: "yes" })
         );
@@ -577,10 +589,7 @@ describe("Chat helpers", () => {
             tools: false,
         });
 
-        window.localStorage.setItem(
-            "mira-dashboard-chat-diagnostic-visibility",
-            "not json"
-        );
+        localStorage.setItem("mira-dashboard-chat-diagnostic-visibility", "not json");
         expect(readStoredChatDiagnosticVisibility()).toEqual({
             thinking: false,
             tools: false,
@@ -588,7 +597,7 @@ describe("Chat helpers", () => {
     });
 
     it("uses diagnostic visibility defaults when browser storage is unavailable", () => {
-        Object.defineProperty(window, "localStorage", {
+        Object.defineProperty(globalThis, "localStorage", {
             configurable: true,
             value: {
                 getItem: vi.fn(() => {
@@ -633,12 +642,12 @@ describe("Chat helpers", () => {
 
     it("normalizes timestamps and detects recovered assistant history", () => {
         expect(sessionTimestampMs(42)).toBe(42);
-        expect(sessionTimestampMs(Number("NaN"))).toBeNull();
+        expect(sessionTimestampMs(Number("NaN"))).toBeUndefined();
         expect(sessionTimestampMs("2026-05-11T00:00:00.000Z")).toBe(
             Date.parse("2026-05-11T00:00:00.000Z")
         );
-        expect(sessionTimestampMs("not-a-date")).toBeNull();
-        expect(sessionTimestampMs({})).toBeNull();
+        expect(sessionTimestampMs("not-a-date")).toBeUndefined();
+        expect(sessionTimestampMs({})).toBeUndefined();
 
         expect(historyHasNewerAssistantMessage([])).toBe(false);
         expect(
@@ -700,7 +709,7 @@ describe("Chat helpers", () => {
     it("selects the first supported recorder mime type", () => {
         expect(supportedAudioRecordingMimeType()).toBeUndefined();
 
-        Object.defineProperty(window, "MediaRecorder", {
+        Object.defineProperty(globalThis, "MediaRecorder", {
             configurable: true,
             value: {
                 isTypeSupported: vi.fn((mimeType: string) => mimeType === "audio/mp4"),
@@ -711,7 +720,7 @@ describe("Chat helpers", () => {
     });
 
     it("returns undefined when no recorder mime types are supported", () => {
-        Object.defineProperty(window, "MediaRecorder", {
+        Object.defineProperty(globalThis, "MediaRecorder", {
             configurable: true,
             value: {
                 isTypeSupported: vi.fn(() => false),
@@ -726,7 +735,7 @@ describe("Chat", () => {
     beforeEach(() => {
         installLocalStorageMock();
         mocks.isConnected = true;
-        mocks.socketError = null;
+        mocks.socketError = undefined;
         mocks.liveSessions = [
             {
                 key: "",
@@ -767,18 +776,18 @@ describe("Chat", () => {
         mocks.slashCommand.mockResolvedValue(false);
         mocks.subscribe.mockReturnValue(vi.fn());
         mocks.request.mockReset();
-        mocks.confirmModalHandlers = null;
-        mocks.slashCommandOptions = null;
-        mocks.runtimeEventsOptions = null;
+        mocks.confirmModalHandlers = undefined;
+        mocks.slashCommandOptions = undefined;
+        mocks.runtimeEventsOptions = undefined;
         mocks.skipComposerFileInputRef = false;
         mocks.skipMessagesContainerRef = false;
-        mocks.virtualizerOptions = null;
+        mocks.virtualizerOptions = undefined;
         setupRequest();
         Object.defineProperty(navigator, "mediaDevices", {
             configurable: true,
             value: undefined,
         });
-        Object.defineProperty(window, "MediaRecorder", {
+        Object.defineProperty(globalThis, "MediaRecorder", {
             configurable: true,
             value: undefined,
         });
@@ -1327,9 +1336,9 @@ describe("Chat", () => {
             )
         );
         const verbosePatchCall = mocks.request.mock.calls.findIndex(
-            ([method, params]) =>
+            ([method, parameters]) =>
                 method === "sessions.patch" &&
-                (params as { verboseLevel?: string })?.verboseLevel === "full"
+                (parameters as { verboseLevel?: string })?.verboseLevel === "full"
         );
         const chatSendCall = mocks.request.mock.calls.findIndex(
             ([method]) => method === "chat.send"
@@ -1475,7 +1484,7 @@ describe("Chat", () => {
     it("renders runtime stream rows and clears them when disconnected", async () => {
         const { rerender } = render(<Chat />);
         await screen.findByText("old user message");
-        const clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
+        const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
 
         try {
             act(() => {
@@ -1513,7 +1522,7 @@ describe("Chat", () => {
             expect(await screen.findByText("streaming answer")).toBeInTheDocument();
             expect(screen.getByText("Using tools")).toBeInTheDocument();
 
-            const liveRefreshTimer = window.setTimeout(vi.fn(), 1000);
+            const liveRefreshTimer = setTimeout(vi.fn(), 1000);
             mocks.runtimeEventsOptions!.liveHistoryRefreshTimerReference.current =
                 liveRefreshTimer;
             mocks.isConnected = false;
@@ -1537,7 +1546,7 @@ describe("Chat", () => {
 
     it("computes virtual row keys, sizes typing rows, and follows bottom changes", async () => {
         const requestAnimationFrameSpy = vi
-            .spyOn(window, "requestAnimationFrame")
+            .spyOn(globalThis, "requestAnimationFrame")
             .mockImplementation((callback: FrameRequestCallback) => {
                 callback(0);
                 return 1;
@@ -1900,7 +1909,7 @@ describe("Chat", () => {
 
     it("leaves acknowledged sends alone when the optimistic stream was already cleared", async () => {
         const user = userEvent.setup();
-        let resolveSend: (value: { runId: string }) => void = () => {};
+        const sendResponse = createDeferred<{ runId: string }>();
         mocks.request.mockImplementation((method: string) => {
             if (method === "models.list") {
                 return Promise.resolve({ models: [{ id: "codex", label: "Codex" }] });
@@ -1920,9 +1929,7 @@ describe("Chat", () => {
             }
 
             if (method === "chat.send") {
-                return new Promise((resolve) => {
-                    resolveSend = resolve;
-                });
+                return sendResponse.promise;
             }
 
             return Promise.resolve({});
@@ -1938,7 +1945,7 @@ describe("Chat", () => {
             mocks.runtimeEventsOptions?.updateActiveStreams(() => ({}));
         });
         await act(async () => {
-            resolveSend({ runId: "run-after-clear" });
+            sendResponse.resolve({ runId: "run-after-clear" });
         });
 
         expect(screen.getByText("ack later")).toBeInTheDocument();
@@ -2069,9 +2076,10 @@ describe("Chat", () => {
         );
 
         const verbosePatchCallsBeforeSteer = mocks.request.mock.calls.filter(
-            ([method, params]) =>
+            ([method, parameters]) =>
                 method === "sessions.patch" &&
-                (params as undefined | { verboseLevel?: string })?.verboseLevel === "full"
+                (parameters as undefined | { verboseLevel?: string })?.verboseLevel ===
+                    "full"
         ).length;
 
         await user.type(screen.getByLabelText("Draft"), "/steer keep the patch small");
@@ -2090,10 +2098,10 @@ describe("Chat", () => {
         );
         expect(
             mocks.request.mock.calls.filter(
-                ([method, params]) =>
+                ([method, parameters]) =>
                     method === "sessions.patch" &&
-                    (params as undefined | { verboseLevel?: string })?.verboseLevel ===
-                        "full"
+                    (parameters as undefined | { verboseLevel?: string })
+                        ?.verboseLevel === "full"
             )
         ).toHaveLength(verbosePatchCallsBeforeSteer);
         expect(sendResolvers).toHaveLength(2);
@@ -2144,7 +2152,7 @@ describe("Chat", () => {
         });
 
         expect(screen.getByText("old user message")).toBeInTheDocument();
-        expect(window.localStorage.getItem("openclaw:deleted:session-a")).toBeNull();
+        expect(localStorage.getItem("openclaw:deleted:session-a")).toBeUndefined();
     });
 
     it("resolves reset confirmation choices from the app modal", async () => {
@@ -2208,7 +2216,7 @@ describe("Chat", () => {
         );
         await user.click(screen.getByRole("button", { name: "confirm delete" }));
         expect(screen.queryByText("old user message")).not.toBeInTheDocument();
-        expect(window.localStorage.getItem("openclaw:deleted:session-a")).toContain(
+        expect(localStorage.getItem("openclaw:deleted:session-a")).toContain(
             "old user message"
         );
 
@@ -2379,13 +2387,8 @@ describe("Chat", () => {
     });
 
     it("blocks duplicate slash submits while slash handling is in flight", async () => {
-        let resolveSlash: (handled: boolean) => void = () => {};
-        mocks.slashCommand.mockImplementationOnce(
-            () =>
-                new Promise<boolean>((resolve) => {
-                    resolveSlash = resolve;
-                })
-        );
+        const slashResponse = createDeferred<boolean>();
+        mocks.slashCommand.mockImplementationOnce(() => slashResponse.promise);
 
         render(<Chat />);
         await screen.findByText("old user message");
@@ -2409,7 +2412,7 @@ describe("Chat", () => {
         );
 
         await act(async () => {
-            resolveSlash(true);
+            slashResponse.resolve(true);
         });
     });
 
@@ -2420,7 +2423,7 @@ describe("Chat", () => {
         mocks.request.mockClear();
 
         fireEvent.change(screen.getByLabelText("Attach file"), {
-            target: { files: null },
+            target: { files: undefined },
         });
         fireEvent.change(screen.getByLabelText("Attach file"), {
             target: {
@@ -2668,12 +2671,8 @@ describe("Chat", () => {
     });
 
     it("cleans up voice file input safely after unmount", async () => {
-        let resolveFetch: (value: Response) => void = () => {};
-        vi.mocked(fetch).mockReturnValue(
-            new Promise((resolve) => {
-                resolveFetch = resolve;
-            }) as Promise<Response>
-        );
+        const fetchResponse = createDeferred<Response>();
+        vi.mocked(fetch).mockReturnValue(fetchResponse.promise);
         const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
         try {
@@ -2691,7 +2690,7 @@ describe("Chat", () => {
             unmount();
 
             await act(async () => {
-                resolveFetch({
+                fetchResponse.resolve({
                     json: async () => ({ text: "late voice" }),
                     ok: true,
                 } as Response);
@@ -2712,11 +2711,13 @@ describe("Chat", () => {
             json: async () => ({ text: "recorded text" }),
             ok: true,
         } as Response);
-        let recorder: null | {
-            listeners: Record<string, Array<(event?: { data: Blob }) => void>>;
-            mimeType: string;
-            stop: () => void;
-        } = null;
+        let recorder:
+            | undefined
+            | {
+                  listeners: Record<string, Array<(event?: { data: Blob }) => void>>;
+                  mimeType: string;
+                  stop: () => void;
+              };
         const MediaRecorderMock = vi.fn(function (this: typeof recorder) {
             recorder = {
                 listeners: {},
@@ -2757,11 +2758,14 @@ describe("Chat", () => {
             configurable: true,
             value: {
                 getUserMedia: vi.fn().mockResolvedValue({
-                    getTracks: () => [{ stop: stopTrack }],
+                    getTracks() {
+                        const tracks = [{ stop: stopTrack }];
+                        return tracks;
+                    },
                 }),
             },
         });
-        Object.defineProperty(window, "MediaRecorder", {
+        Object.defineProperty(globalThis, "MediaRecorder", {
             configurable: true,
             value: MediaRecorderMock,
         });
@@ -2796,11 +2800,13 @@ describe("Chat", () => {
             json: async () => ({ text: "non-empty chunk" }),
             ok: true,
         } as Response);
-        let recorder: null | {
-            listeners: Record<string, Array<(event?: { data: Blob }) => void>>;
-            mimeType: string;
-            stop: () => void;
-        } = null;
+        let recorder:
+            | undefined
+            | {
+                  listeners: Record<string, Array<(event?: { data: Blob }) => void>>;
+                  mimeType: string;
+                  stop: () => void;
+              };
         const MediaRecorderMock = vi.fn(function (this: typeof recorder) {
             recorder = {
                 listeners: {},
@@ -2841,7 +2847,7 @@ describe("Chat", () => {
                 }),
             },
         });
-        Object.defineProperty(window, "MediaRecorder", {
+        Object.defineProperty(globalThis, "MediaRecorder", {
             configurable: true,
             value: MediaRecorderMock,
         });
@@ -2865,7 +2871,7 @@ describe("Chat", () => {
     it("reports an empty recording when no audio chunks are captured", async () => {
         const user = userEvent.setup();
         const stopTrack = vi.fn();
-        let stopListener: (() => void) | null = null;
+        let stopListener: (() => void) | undefined;
         const MediaRecorderMock = vi.fn(function () {
             return {
                 addEventListener: (type: string, listener: () => void) => {
@@ -2887,7 +2893,7 @@ describe("Chat", () => {
                 }),
             },
         });
-        Object.defineProperty(window, "MediaRecorder", {
+        Object.defineProperty(globalThis, "MediaRecorder", {
             configurable: true,
             value: MediaRecorderMock,
         });
@@ -2906,12 +2912,12 @@ describe("Chat", () => {
     it("shows the HTTPS recording fallback when the page is not secure", async () => {
         const user = userEvent.setup();
         const originalIsSecureContextDescriptor = Object.getOwnPropertyDescriptor(
-            window,
+            globalThis,
             "isSecureContext"
         );
 
         try {
-            Object.defineProperty(window, "isSecureContext", {
+            Object.defineProperty(globalThis, "isSecureContext", {
                 configurable: true,
                 value: false,
             });
@@ -2929,12 +2935,12 @@ describe("Chat", () => {
         } finally {
             if (originalIsSecureContextDescriptor) {
                 Object.defineProperty(
-                    window,
+                    globalThis,
                     "isSecureContext",
                     originalIsSecureContextDescriptor
                 );
             } else {
-                Reflect.deleteProperty(window, "isSecureContext");
+                Reflect.deleteProperty(globalThis, "isSecureContext");
             }
         }
     });
@@ -2942,12 +2948,12 @@ describe("Chat", () => {
     it("shows the generic recording fallback in secure unsupported contexts", async () => {
         const user = userEvent.setup();
         const originalIsSecureContextDescriptor = Object.getOwnPropertyDescriptor(
-            window,
+            globalThis,
             "isSecureContext"
         );
 
         try {
-            Object.defineProperty(window, "isSecureContext", {
+            Object.defineProperty(globalThis, "isSecureContext", {
                 configurable: true,
                 value: true,
             });
@@ -2963,12 +2969,12 @@ describe("Chat", () => {
         } finally {
             if (originalIsSecureContextDescriptor) {
                 Object.defineProperty(
-                    window,
+                    globalThis,
                     "isSecureContext",
                     originalIsSecureContextDescriptor
                 );
             } else {
-                Reflect.deleteProperty(window, "isSecureContext");
+                Reflect.deleteProperty(globalThis, "isSecureContext");
             }
         }
     });
@@ -3027,7 +3033,7 @@ describe("Chat", () => {
     it("polls visible history while connected and following the bottom", async () => {
         const intervalCallbacks: Array<() => void> = [];
         const setIntervalSpy = vi
-            .spyOn(window, "setInterval")
+            .spyOn(globalThis, "setInterval")
             .mockImplementation((callback: TimerHandler) => {
                 intervalCallbacks.push(callback as () => void);
                 return intervalCallbacks.length as unknown as ReturnType<
@@ -3061,7 +3067,7 @@ describe("Chat", () => {
     it("skips live history polling while hidden, unfollowed, or already refreshing", async () => {
         const intervalCallbacks: Array<() => void> = [];
         const setIntervalSpy = vi
-            .spyOn(window, "setInterval")
+            .spyOn(globalThis, "setInterval")
             .mockImplementation((callback: TimerHandler) => {
                 intervalCallbacks.push(callback as () => void);
                 return intervalCallbacks.length as unknown as ReturnType<
@@ -3072,7 +3078,7 @@ describe("Chat", () => {
             document,
             "visibilityState"
         );
-        let resolveHistory: (value: unknown) => void = () => {};
+        const historyResponse = createDeferred<unknown>();
 
         try {
             render(<Chat />);
@@ -3108,9 +3114,7 @@ describe("Chat", () => {
             fireEvent.click(screen.getByRole("button", { name: "follow bottom" }));
             mocks.request.mockImplementation((method: string) =>
                 method === "chat.history"
-                    ? new Promise((resolve) => {
-                          resolveHistory = resolve;
-                      })
+                    ? historyResponse.promise
                     : Promise.resolve({ models: [] })
             );
 
@@ -3121,7 +3125,7 @@ describe("Chat", () => {
             expect(mocks.request).toHaveBeenCalledTimes(1);
 
             await act(async () => {
-                resolveHistory({ messages: [] });
+                historyResponse.resolve({ messages: [] });
             });
         } finally {
             setIntervalSpy.mockRestore();
@@ -3134,7 +3138,7 @@ describe("Chat", () => {
     it("ignores live history polling responses after unmount", async () => {
         const intervalCallbacks: Array<() => void> = [];
         const setIntervalSpy = vi
-            .spyOn(window, "setInterval")
+            .spyOn(globalThis, "setInterval")
             .mockImplementation((callback: TimerHandler) => {
                 intervalCallbacks.push(callback as () => void);
                 return intervalCallbacks.length as unknown as ReturnType<
@@ -3196,10 +3200,10 @@ describe("Chat", () => {
             resolve: (value: unknown) => void;
         }> = [];
         mocks.request.mockImplementation(
-            (method: string, params?: Record<string, unknown>) =>
+            (method: string, parameters?: Record<string, unknown>) =>
                 method === "chat.history"
                     ? new Promise((resolve, reject) => {
-                          historyRequests.push({ params, reject, resolve });
+                          historyRequests.push({ params: parameters, reject, resolve });
                       })
                     : Promise.resolve({ models: [] })
         );
@@ -3262,12 +3266,10 @@ describe("Chat", () => {
     });
 
     it("ignores rejected history responses after unmount", async () => {
-        let rejectHistory: (error: Error) => void = () => {};
+        const historyResponse = createDeferred<unknown>();
         mocks.request.mockImplementation((method: string) =>
             method === "chat.history"
-                ? new Promise((_resolve, reject) => {
-                      rejectHistory = reject;
-                  })
+                ? historyResponse.promise
                 : Promise.resolve({ models: [] })
         );
 
@@ -3282,19 +3284,17 @@ describe("Chat", () => {
         unmount();
 
         await act(async () => {
-            rejectHistory(new Error("late history failure"));
+            historyResponse.reject(new Error("late history failure"));
         });
 
         expect(screen.queryByText("late history failure")).not.toBeInTheDocument();
     });
 
     it("ignores resolved history responses after unmount", async () => {
-        let resolveHistory: (value: unknown) => void = () => {};
+        const historyResponse = createDeferred<unknown>();
         mocks.request.mockImplementation((method: string) =>
             method === "chat.history"
-                ? new Promise((resolve) => {
-                      resolveHistory = resolve;
-                  })
+                ? historyResponse.promise
                 : Promise.resolve({ models: [] })
         );
 
@@ -3309,7 +3309,7 @@ describe("Chat", () => {
         unmount();
 
         await act(async () => {
-            resolveHistory({
+            historyResponse.resolve({
                 messages: [{ role: "assistant", text: "late resolved history" }],
             });
         });
@@ -3334,7 +3334,7 @@ describe("Chat", () => {
                 getUserMedia: vi.fn().mockRejectedValue(new Error("microphone denied")),
             },
         });
-        Object.defineProperty(window, "MediaRecorder", {
+        Object.defineProperty(globalThis, "MediaRecorder", {
             configurable: true,
             value: vi.fn(),
         });
@@ -3369,13 +3369,13 @@ describe("Chat", () => {
             },
         });
         class MediaRecorderMock {
-            static isTypeSupported = vi.fn(() => false);
+            static isTypeSupported = vi.fn(unsupportedMediaRecorderType);
 
             constructor() {
                 throw new Error("recorder unavailable");
             }
         }
-        Object.defineProperty(window, "MediaRecorder", {
+        Object.defineProperty(globalThis, "MediaRecorder", {
             configurable: true,
             value: MediaRecorderMock,
         });

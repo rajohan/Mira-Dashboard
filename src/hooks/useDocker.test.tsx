@@ -106,14 +106,17 @@ describe("docker hooks", () => {
         });
         await waitFor(() => expect(updaterEvents.current.data?.[0]?.id).toBe(1));
 
-        const { result: disabledContainer } = renderHook(() => useDockerContainer(null), {
-            wrapper,
-        });
+        const { result: disabledContainer } = renderHook(
+            () => useDockerContainer(undefined),
+            {
+                wrapper,
+            }
+        );
         const { result: disabledLogs } = renderHook(
-            () => useDockerContainerLogs(null, 10),
+            () => useDockerContainerLogs(undefined, 10),
             { wrapper }
         );
-        const { result: disabledExec } = renderHook(() => useDockerExecJob(null), {
+        const { result: disabledExec } = renderHook(() => useDockerExecJob(undefined), {
             wrapper,
         });
         expect(disabledContainer.current.fetchStatus).toBe("idle");
@@ -128,7 +131,7 @@ describe("docker hooks", () => {
             .mockResolvedValueOnce({
                 ok: true,
                 status: 200,
-                json: async () => ({ content: null }),
+                json: async () => ({ content: undefined }),
             })
             .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) })
             .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) })

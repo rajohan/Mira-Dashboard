@@ -37,7 +37,7 @@ describe("ConfigSection", () => {
         const user = userEvent.setup();
         const onSelect = vi.fn();
 
-        render(<ConfigSection selectedPath={null} onSelect={onSelect} />);
+        render(<ConfigSection selectedPath={undefined} onSelect={onSelect} />);
 
         await user.tab();
         expect(screen.getByRole("button", { name: "hooks" })).toHaveFocus();

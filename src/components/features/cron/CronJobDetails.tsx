@@ -9,7 +9,7 @@ import {
     getCronJobName,
     getCronStateValue,
     getCronStatusVariant,
-} from "../../../utils/cronUtils";
+} from "../../../utils/cronUtilities";
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { Card, CardTitle } from "../../ui/Card";
@@ -20,11 +20,11 @@ import { Textarea } from "../../ui/Textarea";
 /** Represents JSON valIDation state. */
 interface JsonValidationState {
     valid: boolean;
-    error: string | null;
+    error: string | undefined;
 }
 
 /** Provides props for cron job details. */
-interface CronJobDetailsProps {
+interface CronJobDetailsProperties {
     job: CronJob;
     lastTriggeredAt?: number;
     togglePending: boolean;
@@ -48,7 +48,7 @@ interface CronJobDetailsProps {
     payloadValidation: JsonValidationState;
     deliveryValidation: JsonValidationState;
     hasInvalidJson: boolean;
-    editError: string | null;
+    editError: string | undefined;
     onSave: (job: CronJob) => void;
     formatDate: (value: number) => string;
 }
@@ -81,7 +81,7 @@ export function CronJobDetails({
     editError,
     onSave,
     formatDate,
-}: CronJobDetailsProps) {
+}: CronJobDetailsProperties) {
     const fieldId = useId();
     const nameInputId = `${fieldId}-name`;
     const scheduleTextareaId = `${fieldId}-schedule`;
@@ -148,7 +148,7 @@ export function CronJobDetails({
                         <span className="text-primary-400 text-xs">
                             Triggered {formatDate(lastTriggeredAt)}
                         </span>
-                    ) : null}
+                    ) : undefined}
                 </div>
             </div>
 
@@ -204,7 +204,7 @@ export function CronJobDetails({
                                 <X size={14} />
                                 Cancel
                             </Button>
-                        ) : null}
+                        ) : undefined}
                         <Button
                             size="sm"
                             variant="secondary"
@@ -225,7 +225,9 @@ export function CronJobDetails({
                     </div>
                 </div>
 
-                {editError ? <p className="text-xs text-red-400">{editError}</p> : null}
+                {editError ? (
+                    <p className="text-xs text-red-400">{editError}</p>
+                ) : undefined}
 
                 {isEditMode ? (
                     <>
@@ -337,7 +339,7 @@ export function CronJobDetails({
                                 Schedule
                             </div>
                             <pre className="text-primary-200 text-xs break-words whitespace-pre-wrap">
-                                {JSON.stringify(job.schedule || {}, null, 2)}
+                                {JSON.stringify(job.schedule || {}, undefined, 2)}
                             </pre>
                         </Card>
                         <Card className="bg-primary-900/40 min-w-0 p-3 sm:p-4">
@@ -345,7 +347,7 @@ export function CronJobDetails({
                                 Payload
                             </div>
                             <pre className="text-primary-200 text-xs break-words whitespace-pre-wrap">
-                                {JSON.stringify(job.payload || {}, null, 2)}
+                                {JSON.stringify(job.payload || {}, undefined, 2)}
                             </pre>
                         </Card>
                         <Card className="bg-primary-900/40 min-w-0 p-3 sm:p-4">
@@ -353,7 +355,7 @@ export function CronJobDetails({
                                 Delivery
                             </div>
                             <pre className="text-primary-200 text-xs break-words whitespace-pre-wrap">
-                                {JSON.stringify(job.delivery || {}, null, 2)}
+                                {JSON.stringify(job.delivery || {}, undefined, 2)}
                             </pre>
                         </Card>
                     </div>

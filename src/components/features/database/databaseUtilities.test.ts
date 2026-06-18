@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { formatBytes, formatNumber, truncateQuery } from "./databaseUtils";
+import { formatBytes, formatNumber, truncateQuery } from "./databaseUtilities";
 
 describe("database utils", () => {
     it("formats numbers and byte sizes", () => {
-        expect(formatNumber(1234567)).toBe("1,234,567");
+        expect(formatNumber(1_234_567)).toBe("1,234,567");
         expect(formatNumber(Number("NaN"))).toBe("0");
         expect(formatNumber(Infinity)).toBe("0");
         expect(formatNumber(-Infinity)).toBe("0");

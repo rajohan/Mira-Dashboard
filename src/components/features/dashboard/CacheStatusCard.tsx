@@ -14,7 +14,7 @@ interface CacheStatusCardItem {
 }
 
 /** Provides props for cache status card. */
-interface CacheStatusCardProps {
+interface CacheStatusCardProperties {
     title: string;
     items: CacheStatusCardItem[];
 }
@@ -27,7 +27,7 @@ function getVariant(status?: string): "success" | "warning" | "error" | "default
     return "default";
 }
 
-function formatCacheUpdateTime(value?: string | null): string {
+function formatCacheUpdateTime(value?: string | undefined): string {
     if (!value) {
         return "Never";
     }
@@ -41,7 +41,7 @@ function formatCacheUpdateTime(value?: string | null): string {
 }
 
 /** Renders the cache status card UI. */
-export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
+export function CacheStatusCard({ title, items }: CacheStatusCardProperties) {
     const { data } = useCacheHeartbeat(30_000);
     const refreshCache = useRefreshCacheEntry();
 
@@ -102,7 +102,7 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
                                         >
                                             {entry.errorMessage}
                                         </div>
-                                    ) : null}
+                                    ) : undefined}
                                 </div>
                                 <button
                                     type="button"

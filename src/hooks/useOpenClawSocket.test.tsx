@@ -26,11 +26,16 @@ vi.mock("../utils/websocket", () => ({
 }));
 
 vi.mock("../lib/socket/socketMessageRouter", () => ({
-    handleSocketMessage: vi.fn(() => null),
+    handleSocketMessage: vi.fn(() => {}),
 }));
 
 function createWrapper({ children }: { children: ReactNode }) {
-    return createElement(OpenClawSocketProvider, null, children);
+    return createElement(OpenClawSocketProvider, undefined, children);
+}
+
+function createDeferredHeartbeat() {
+    const { promise, reject } = Promise.withResolvers<void>();
+    return { promise, reject };
 }
 
 describe("useOpenClawSocket", () => {
@@ -73,7 +78,7 @@ describe("useOpenClawSocket", () => {
             wrapper: createWrapper,
         });
         expect(result.current.isConnected).toBe(false);
-        expect(result.current.error).toBe(null);
+        expect(result.current.error).toBe(undefined);
         expect(typeof result.current.connect).toBe("function");
         expect(typeof result.current.disconnect).toBe("function");
         expect(typeof result.current.subscribe).toBe("function");
@@ -175,8 +180,8 @@ describe("useOpenClawSocket", () => {
         let onMessageCallback: ((data: unknown) => void) | undefined;
         const { createSocketClient } = await import("../lib/socket/socketClient");
         (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
-            (opts: Record<string, unknown>) => {
-                onMessageCallback = opts.onMessage as (data: unknown) => void;
+            (options: Record<string, unknown>) => {
+                onMessageCallback = options.onMessage as (data: unknown) => void;
                 return mockClient;
             }
         );
@@ -206,8 +211,8 @@ describe("useOpenClawSocket", () => {
         let onMessageCallback: ((data: unknown) => void) | undefined;
         const { createSocketClient } = await import("../lib/socket/socketClient");
         (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
-            (opts: Record<string, unknown>) => {
-                onMessageCallback = opts.onMessage as (data: unknown) => void;
+            (options: Record<string, unknown>) => {
+                onMessageCallback = options.onMessage as (data: unknown) => void;
                 return mockClient;
             }
         );
@@ -224,7 +229,7 @@ describe("useOpenClawSocket", () => {
 
         expect(result.current.isConnected).toBe(true);
 
-        (handleSocketMessage as ReturnType<typeof vi.fn>).mockReturnValue(null);
+        (handleSocketMessage as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
     });
 
     it("updates state from socket lifecycle callbacks", async () => {
@@ -233,8 +238,8 @@ describe("useOpenClawSocket", () => {
         let options: Record<string, unknown> = {};
         const { createSocketClient } = await import("../lib/socket/socketClient");
         (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
-            (opts: Record<string, unknown>) => {
-                options = opts;
+            (options_: Record<string, unknown>) => {
+                options = options_;
                 return mockClient;
             }
         );
@@ -251,7 +256,7 @@ describe("useOpenClawSocket", () => {
         });
 
         await waitFor(() => expect(result.current.isConnected).toBe(true));
-        expect(result.current.error).toBeNull();
+        expect(result.current.error).toBeUndefined();
         expect(result.current.connectionId).toBe(1);
         expect(onConnect).toHaveBeenCalled();
         expect(mockClient.request).toHaveBeenCalledWith("sessions.list");
@@ -275,8 +280,8 @@ describe("useOpenClawSocket", () => {
         let options: Record<string, unknown> = {};
         const { createSocketClient } = await import("../lib/socket/socketClient");
         (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
-            (opts: Record<string, unknown>) => {
-                options = opts;
+            (options_: Record<string, unknown>) => {
+                options = options_;
                 return mockClient;
             }
         );
@@ -320,8 +325,8 @@ describe("useOpenClawSocket", () => {
         let onMessageCallback: ((data: unknown) => void) | undefined;
         const { createSocketClient } = await import("../lib/socket/socketClient");
         (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
-            (opts: Record<string, unknown>) => {
-                onMessageCallback = opts.onMessage as (data: unknown) => void;
+            (options: Record<string, unknown>) => {
+                onMessageCallback = options.onMessage as (data: unknown) => void;
                 return mockClient;
             }
         );
@@ -343,8 +348,8 @@ describe("useOpenClawSocket", () => {
         let options: Record<string, unknown> = {};
         const { createSocketClient } = await import("../lib/socket/socketClient");
         (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
-            (opts: Record<string, unknown>) => {
-                options = opts;
+            (options_: Record<string, unknown>) => {
+                options = options_;
                 return mockClient;
             }
         );
@@ -371,8 +376,8 @@ describe("useOpenClawSocket", () => {
         let options: Record<string, unknown> = {};
         const { createSocketClient } = await import("../lib/socket/socketClient");
         (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
-            (opts: Record<string, unknown>) => {
-                options = opts;
+            (options_: Record<string, unknown>) => {
+                options = options_;
                 return mockClient;
             }
         );
@@ -394,13 +399,13 @@ describe("useOpenClawSocket", () => {
         vi.useFakeTimers();
         mockUseIsAuthenticated.mockReturnValue(true);
         mockClient.isOpen.mockReturnValue(true);
-        let rejectHeartbeat: (error: Error) => void = () => {};
+        const heartbeat = createDeferredHeartbeat();
 
         let options: Record<string, unknown> = {};
         const { createSocketClient } = await import("../lib/socket/socketClient");
         (createSocketClient as ReturnType<typeof vi.fn>).mockImplementation(
-            (opts: Record<string, unknown>) => {
-                options = opts;
+            (options_: Record<string, unknown>) => {
+                options = options_;
                 return mockClient;
             }
         );
@@ -412,11 +417,7 @@ describe("useOpenClawSocket", () => {
             (options.onOpen as () => void)();
         });
         mockClient.connect.mockClear();
-        mockClient.request.mockReturnValueOnce(
-            new Promise((_, reject) => {
-                rejectHeartbeat = reject;
-            })
-        );
+        mockClient.request.mockReturnValueOnce(heartbeat.promise);
 
         await act(async () => {
             await vi.advanceTimersByTimeAsync(10_000);
@@ -425,7 +426,7 @@ describe("useOpenClawSocket", () => {
             result.current.disconnect();
         });
         await act(async () => {
-            rejectHeartbeat(new Error("late heartbeat failure"));
+            heartbeat.reject(new Error("late heartbeat failure"));
             await Promise.resolve();
         });
 
@@ -443,8 +444,8 @@ describe("useOpenClawSocket", () => {
             configurable: true,
             value: "visible",
         });
-        window.dispatchEvent(new Event("focus"));
-        window.dispatchEvent(new Event("online"));
+        dispatchEvent(new Event("focus"));
+        dispatchEvent(new Event("online"));
         document.dispatchEvent(new Event("visibilitychange"));
 
         await waitFor(() =>
@@ -465,7 +466,7 @@ describe("useOpenClawSocket", () => {
         });
 
         await act(async () => {
-            window.dispatchEvent(new Event("focus"));
+            dispatchEvent(new Event("focus"));
             await Promise.resolve();
         });
 
@@ -493,7 +494,7 @@ describe("useOpenClawSocket", () => {
             configurable: true,
             value: "visible",
         });
-        window.dispatchEvent(new Event("focus"));
+        dispatchEvent(new Event("focus"));
         expect(mockClient.connect).toHaveBeenCalledTimes(1);
         expect(mockClient.request).not.toHaveBeenCalled();
     });

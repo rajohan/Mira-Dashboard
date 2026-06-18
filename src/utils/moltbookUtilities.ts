@@ -4,8 +4,8 @@ import { enUS } from "date-fns/locale";
 const MOLTBOOK_URL = "https://www.moltbook.com";
 
 /** Formats time for display. */
-export function formatTime(dateStr: string): string {
-    const date = new Date(dateStr);
+export function formatTime(dateString: string): string {
+    const date = new Date(dateString);
     const timestamp = date.getTime();
     if (!Number.isFinite(timestamp)) {
         return "Unknown";
@@ -18,9 +18,9 @@ export function formatTime(dateStr: string): string {
 }
 
 /** Performs truncate. */
-export function truncate(text: string, maxLen: number): string {
-    if (text.length <= maxLen) return text;
-    return text.slice(0, maxLen) + "...";
+export function truncate(text: string, maxLength: number): string {
+    if (text.length <= maxLength) return text;
+    return text.slice(0, maxLength) + "...";
 }
 
 /** Returns moltbook URL. */

@@ -21,14 +21,14 @@ export interface SocketClient {
     disconnect: () => void;
     request: <T = unknown>(
         method: string,
-        params?: Record<string, unknown>
+        parameters?: Record<string, unknown>
     ) => Promise<T>;
     isOpen: () => boolean;
 }
 
 /** Creates socket client. */
 export function createSocketClient(options: SocketClientOptions): SocketClient {
-    let ws: WebSocket | null = null;
+    let ws: WebSocket | undefined = undefined;
     let shouldReconnect = true;
     let requestId = 0;
     const pendingRequests = new Map<string, PendingRequest>();
@@ -91,7 +91,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
     const disconnect = () => {
         shouldReconnect = false;
         ws?.close(1000, "Intentional disconnect");
-        ws = null;
+        ws = undefined;
 
         for (const pending of pendingRequests.values()) {
             pending.reject(new Error("WebSocket disconnected"));
@@ -102,7 +102,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
     /** Performs request. */
     const request = <T = unknown>(
         method: string,
-        params?: Record<string, unknown>
+        parameters?: Record<string, unknown>
     ): Promise<T> => {
         return new Promise((resolve, reject) => {
             if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -121,7 +121,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                     type: "req",
                     id,
                     method,
-                    params,
+                    params: parameters,
                 })
             );
 

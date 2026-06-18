@@ -35,7 +35,7 @@ const baseFile: FileContent = {
 
 function renderViewer(overrides: Partial<Parameters<typeof FileContentViewer>[0]> = {}) {
     const onContentChange = vi.fn();
-    const props: Parameters<typeof FileContentViewer>[0] = {
+    const properties: Parameters<typeof FileContentViewer>[0] = {
         codeEditMode: false,
         editedContent: "hello",
         fileContent: baseFile,
@@ -48,7 +48,7 @@ function renderViewer(overrides: Partial<Parameters<typeof FileContentViewer>[0]
         ...overrides,
     };
 
-    render(<FileContentViewer {...props} />);
+    render(<FileContentViewer {...properties} />);
     return { onContentChange };
 }
 

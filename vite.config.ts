@@ -70,7 +70,7 @@ export default defineConfig({
                                 ) {
                                     return "syntax";
                                 }
-                                return null;
+                                return;
                             },
                         },
                     ],

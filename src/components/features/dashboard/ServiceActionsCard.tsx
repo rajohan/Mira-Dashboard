@@ -10,6 +10,7 @@ import {
     useStartOpsAction,
 } from "../../../hooks";
 import { formatDate } from "../../../utils/format";
+import { emptyElementReference } from "../../../utils/reactReferences";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 import { ConfirmModal } from "../../ui/ConfirmModal";
@@ -19,20 +20,31 @@ export function ServiceActionsCard() {
     const startAction = useStartOpsAction();
     const refreshCache = useRefreshCacheEntry();
     const { data: systemHost } = useCacheEntry<{
-        version?: { current: string; latest: string | null; updateAvailable: boolean };
+        version?: {
+            current: string;
+            latest: string | undefined;
+            updateAvailable: boolean;
+        };
     }>("system.host", 60_000);
     const versionInfo = systemHost?.data.version;
 
-    const [pendingAction, setPendingAction] = useState<OpsActionDefinition | null>(null);
-    const [runningActionId, setRunningActionId] = useState<string | null>(null);
-    const [runningActionLabel, setRunningActionLabel] = useState<string | null>(null);
-    const [runningJobId, setRunningJobId] = useState<string | null>(null);
-    const [result, setResult] = useState<null | {
-        action: string;
-        response: ExecResponse;
-        ranAt: number;
-    }>(null);
-    const outputRef = useRef<HTMLPreElement | null>(null);
+    const [pendingAction, setPendingAction] = useState<OpsActionDefinition | undefined>(
+        undefined
+    );
+    const [runningActionId, setRunningActionId] = useState<string | undefined>(undefined);
+    const [runningActionLabel, setRunningActionLabel] = useState<string | undefined>(
+        undefined
+    );
+    const [runningJobId, setRunningJobId] = useState<string | undefined>(undefined);
+    const [result, setResult] = useState<
+        | undefined
+        | {
+              action: string;
+              response: ExecResponse;
+              ranAt: number;
+          }
+    >(undefined);
+    const outputReference = useRef(emptyElementReference<HTMLPreElement>());
     const [shouldAutoFollowOutput, setShouldAutoFollowOutput] = useState(true);
 
     const execJob = useExecJob(runningJobId);
@@ -54,9 +66,9 @@ export function ServiceActionsCard() {
             ranAt: execJob.data.endedAt || Date.now(),
         });
 
-        setRunningActionId(null);
-        setRunningActionLabel(null);
-        setRunningJobId(null);
+        setRunningActionId(undefined);
+        setRunningActionLabel(undefined);
+        setRunningJobId(undefined);
 
         if (completedActionId === "openclaw_update") {
             void (async () => {
@@ -76,7 +88,7 @@ export function ServiceActionsCard() {
         }
 
         const actionToRun = pendingAction;
-        setPendingAction(null);
+        setPendingAction(undefined);
         setRunningActionId(actionToRun.id);
         setRunningActionLabel(actionToRun.label);
 
@@ -84,15 +96,15 @@ export function ServiceActionsCard() {
             const started = await startAction.mutateAsync(actionToRun);
             setRunningJobId(started.jobId);
         } catch {
-            setRunningActionId(null);
-            setRunningActionLabel(null);
-            setRunningJobId(null);
+            setRunningActionId(undefined);
+            setRunningActionLabel(undefined);
+            setRunningJobId(undefined);
         }
     }
 
     const liveLogs = execJob.data
         ? [execJob.data.stdout, execJob.data.stderr].filter(Boolean).join("\n").trim()
-        : null;
+        : undefined;
 
     const finishedLogs = result
         ? [result.response.stdout, result.response.stderr]
@@ -107,7 +119,7 @@ export function ServiceActionsCard() {
         ? {
               action: runningActionLabel || "Running action",
               ranAt: execJob.data.startedAt,
-              code: execJob.data.status === "done" ? execJob.data.code : null,
+              code: execJob.data.status === "done" ? execJob.data.code : undefined,
               running: execJob.data.status === "running",
           }
         : result
@@ -117,16 +129,16 @@ export function ServiceActionsCard() {
                 code: result.response.code,
                 running: false,
             }
-          : null;
+          : undefined;
 
     const isAnyActionPending = startAction.isPending || Boolean(runningActionId);
 
     useEffect(() => {
-        if (!shouldAutoFollowOutput || !outputRef.current) {
+        if (!shouldAutoFollowOutput || !outputReference.current) {
             return;
         }
 
-        outputRef.current.scrollTop = outputRef.current.scrollHeight;
+        outputReference.current.scrollTop = outputReference.current.scrollHeight;
     }, [logs, shouldAutoFollowOutput]);
 
     useEffect(() => {
@@ -152,7 +164,7 @@ export function ServiceActionsCard() {
                             {versionInfo.latest}).
                         </div>
                     </div>
-                ) : null}
+                ) : undefined}
 
                 <div className="grid grid-cols-1 gap-3">
                     {(["system", "openclaw"] as const).map((scope) => (
@@ -183,7 +195,7 @@ export function ServiceActionsCard() {
                                             </span>
                                             {action.danger ? (
                                                 <Badge variant="error">Caution</Badge>
-                                            ) : null}
+                                            ) : undefined}
                                         </div>
                                         <div className="text-primary-400 min-h-[2.5rem] text-xs">
                                             {action.description}
@@ -220,7 +232,7 @@ export function ServiceActionsCard() {
                             Output
                         </div>
                         <pre
-                            ref={outputRef}
+                            ref={outputReference}
                             onScroll={(event) => {
                                 const element = event.currentTarget;
                                 const distanceFromBottom =
@@ -248,7 +260,7 @@ export function ServiceActionsCard() {
                 danger={pendingAction?.danger}
                 onCancel={() => {
                     if (!startAction.isPending) {
-                        setPendingAction(null);
+                        setPendingAction(undefined);
                     }
                 }}
                 onConfirm={() => {

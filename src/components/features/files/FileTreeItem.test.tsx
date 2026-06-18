@@ -65,7 +65,7 @@ describe("FileTreeItem", () => {
         render(
             <FileTreeItem
                 node={tree}
-                selectedPath={null}
+                selectedPath={undefined}
                 expandedPaths={new Set(["/repo"])}
                 onSelect={onSelect}
                 onToggle={onToggle}
@@ -92,7 +92,7 @@ describe("FileTreeItem", () => {
         render(
             <FileTreeItem
                 node={{ name: "archive.bin", path: "/repo/archive.bin", type: "file" }}
-                selectedPath={null}
+                selectedPath={undefined}
                 expandedPaths={new Set()}
                 onSelect={vi.fn()}
                 onToggle={vi.fn()}
@@ -114,7 +114,7 @@ describe("FileTreeItem", () => {
         const { rerender } = render(
             <FileTreeItem
                 node={tree}
-                selectedPath={null}
+                selectedPath={undefined}
                 expandedPaths={new Set(["/repo"])}
                 onSelect={vi.fn()}
                 onToggle={vi.fn()}
@@ -129,7 +129,7 @@ describe("FileTreeItem", () => {
         rerender(
             <FileTreeItem
                 node={loadingDirectory}
-                selectedPath={null}
+                selectedPath={undefined}
                 expandedPaths={new Set(["/loading"])}
                 onSelect={vi.fn()}
                 onToggle={vi.fn()}
@@ -156,7 +156,7 @@ describe("FileTreeItem", () => {
         render(
             <FileTreeItem
                 node={node}
-                selectedPath={null}
+                selectedPath={undefined}
                 expandedPaths={new Set(["/repo"])}
                 onSelect={vi.fn()}
                 onToggle={vi.fn()}
@@ -177,7 +177,7 @@ describe("FileTreeItem", () => {
             render(
                 <FileTreeItem
                     node={tree}
-                    selectedPath={null}
+                    selectedPath={undefined}
                     expandedPaths={new Set()}
                     onSelect={vi.fn()}
                     onToggle={vi.fn()}

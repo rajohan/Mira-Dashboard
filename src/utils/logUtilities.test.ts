@@ -5,12 +5,12 @@ import {
     getLevelColor,
     getSubsystemColor,
     parseLogLine,
-} from "./logUtils";
+} from "./logUtilities";
 
 describe("log utils", () => {
     it("ignores blank log lines", () => {
-        expect(parseLogLine("")).toBeNull();
-        expect(parseLogLine(" ".repeat(3))).toBeNull();
+        expect(parseLogLine("")).toBeUndefined();
+        expect(parseLogLine(" ".repeat(3))).toBeUndefined();
     });
 
     it("parses structured JSON logs", () => {
@@ -111,7 +111,7 @@ describe("log utils", () => {
 
     it("parses JSON with positional-two fallback", () => {
         const entry = parseLogLine(
-            JSON.stringify({ "0": null, "1": null, "2": "third arg message" }),
+            JSON.stringify({ "0": undefined, "1": undefined, "2": "third arg message" }),
             16
         );
 

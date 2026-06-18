@@ -5,9 +5,9 @@ import { queryClient } from "../lib/queryClient";
 import type { Session } from "../types/session";
 
 /** Returns session collection key. */
-function getSessionCollectionKey(item: Partial<Session>): string | null {
+function getSessionCollectionKey(item: Partial<Session>): string | undefined {
     const key = item.key || item.id;
-    return typeof key === "string" && key.trim().length > 0 ? key : null;
+    return typeof key === "string" && key.trim().length > 0 ? key : undefined;
 }
 
 /** Returns whether writable session. */
@@ -15,7 +15,7 @@ function isWritableSession(item: unknown): item is Session {
     return (
         !!item &&
         typeof item === "object" &&
-        getSessionCollectionKey(item as Partial<Session>) !== null
+        getSessionCollectionKey(item as Partial<Session>) !== undefined
     );
 }
 

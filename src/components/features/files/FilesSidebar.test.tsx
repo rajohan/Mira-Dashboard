@@ -17,7 +17,7 @@ describe("FilesSidebar", () => {
             <FilesSidebar
                 files={[]}
                 rootLoading
-                selectedPath={null}
+                selectedPath={undefined}
                 expandedPaths={new Set()}
                 onSelect={vi.fn()}
                 onToggle={vi.fn()}
@@ -30,7 +30,7 @@ describe("FilesSidebar", () => {
             <FilesSidebar
                 files={[]}
                 rootLoading={false}
-                selectedPath={null}
+                selectedPath={undefined}
                 expandedPaths={new Set()}
                 onSelect={vi.fn()}
                 onToggle={vi.fn()}

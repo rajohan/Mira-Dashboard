@@ -10,7 +10,7 @@ interface FilterOption<T extends string> {
 }
 
 /** Provides props for filter button group. */
-interface FilterButtonGroupProps<T extends string> {
+interface FilterButtonGroupProperties<T extends string> {
     options: readonly FilterOption<T>[];
     value: T;
     onChange: (value: T) => void;
@@ -23,7 +23,7 @@ export function FilterButtonGroup<T extends string>({
     value,
     onChange,
     className,
-}: FilterButtonGroupProps<T>) {
+}: FilterButtonGroupProperties<T>) {
     return (
         <div className={"flex flex-wrap gap-1.5 " + (className || "")}>
             {options.map((option) => (

@@ -5,7 +5,7 @@ import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { useFileExplorerState } from "../hooks/useFileExplorerState";
-import { getSyntaxClass } from "../utils/fileUtils";
+import { getSyntaxClass } from "../utils/fileUtilities";
 
 /** Renders the files UI. */
 export function Files() {
@@ -60,7 +60,7 @@ export function Files() {
                         variant="ghost"
                         size="sm"
                         className="ml-auto"
-                        onClick={() => setError(null)}
+                        onClick={() => setError(undefined)}
                     >
                         <X size={16} />
                     </Button>

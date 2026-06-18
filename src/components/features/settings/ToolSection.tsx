@@ -21,7 +21,7 @@ interface ToolSettings {
 }
 
 /** Provides props for tool section. */
-interface ToolSectionProps extends ToolSettings {
+interface ToolSectionProperties extends ToolSettings {
     onSave: (values: ToolSettings) => Promise<void>;
     saving: boolean;
 }
@@ -39,7 +39,7 @@ export function ToolSection({
     sessionsVisibility,
     onSave,
     saving,
-}: ToolSectionProps) {
+}: ToolSectionProperties) {
     const [draft, setDraft] = useState<ToolSettings>({
         profile,
         webSearchEnabled,

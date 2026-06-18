@@ -6,7 +6,7 @@ import {
     isCodeFile,
     isJsonFile,
     isMarkdownFile,
-} from "../../../utils/fileUtils";
+} from "../../../utils/fileUtilities";
 import { formatDate } from "../../../utils/format";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
@@ -14,8 +14,8 @@ import { FileContentViewer } from "./FileContentViewer";
 import { PreviewToggle } from "./PreviewToggle";
 
 /** Provides props for file editor panel. */
-interface FileEditorPanelProps {
-    selectedPath: string | null;
+interface FileEditorPanelProperties {
+    selectedPath: string | undefined;
     fileContent?: FileContent;
     contentLoading: boolean;
     isEditable: boolean;
@@ -28,7 +28,7 @@ interface FileEditorPanelProps {
     codeEditMode: boolean;
     syntaxClass: string;
     isJsonEditing: boolean;
-    jsonValidation: { valid: boolean; error: string | null };
+    jsonValidation: { valid: boolean; error: string | undefined };
     onSave: () => void;
     onContentChange: (value: string) => void;
     onMarkdownPreviewChange: (value: boolean) => void;
@@ -57,7 +57,7 @@ export function FileEditorPanel({
     onMarkdownPreviewChange,
     onJsonPreviewChange,
     onCodePreviewChange,
-}: FileEditorPanelProps) {
+}: FileEditorPanelProperties) {
     return (
         <Card
             variant="bordered"

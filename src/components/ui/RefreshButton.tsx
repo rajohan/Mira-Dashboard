@@ -3,7 +3,7 @@ import { RefreshCw } from "lucide-react";
 import { Button } from "./Button";
 
 /** Provides props for refresh button. */
-interface RefreshButtonProps {
+interface RefreshButtonProperties {
     onClick: () => void;
     isLoading?: boolean;
     disabled?: boolean;
@@ -20,7 +20,7 @@ export function RefreshButton({
     label = "Refresh",
     size = "sm",
     variant = "secondary",
-}: RefreshButtonProps) {
+}: RefreshButtonProperties) {
     return (
         <Button
             variant={variant}
@@ -30,7 +30,7 @@ export function RefreshButton({
             disabled={disabled || isLoading}
         >
             <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-            {label ? <span>{label}</span> : null}
+            {label ? <span>{label}</span> : undefined}
         </Button>
     );
 }

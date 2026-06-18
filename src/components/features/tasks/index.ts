@@ -3,7 +3,7 @@ export {
     getColumnId,
     getPriority,
     PRIORITY_COLORS,
-} from "../../../utils/taskUtils";
+} from "../../../utils/taskUtilities";
 export { NewTaskModal } from "./NewTaskModal";
 export { TaskCard } from "./TaskCard";
 export { TaskColumn } from "./TaskColumn";

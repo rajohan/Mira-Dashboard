@@ -1,17 +1,21 @@
 import { Mic, Paperclip, Send, Smile, Square, X } from "lucide-react";
 import {
     type KeyboardEvent as ReactKeyboardEvent,
-    type RefObject,
     useEffect,
     useRef,
     useState,
 } from "react";
 
 import { formatSize } from "../../../utils/format";
+import {
+    emptyElementReference,
+    optionalInputFiles,
+    type ReactElementReference,
+} from "../../../utils/reactReferences";
 import { Button } from "../../ui/Button";
 import { Textarea } from "../../ui/Textarea";
 import type { ChatPreviewItem, ChatSendAttachment } from "./chatTypes";
-import { base64ToText } from "./chatUtils";
+import { base64ToText } from "./chatUtilities";
 import type { SlashCommandSuggestion } from "./slashCommands";
 
 const CHAT_EMOJIS = [
@@ -52,16 +56,16 @@ function shouldSendFromEnter(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
         return false;
     }
 
-    const coarsePointerQuery = window.matchMedia?.("(pointer: coarse)") ?? null;
+    const coarsePointerQuery = globalThis.matchMedia?.("(pointer: coarse)") ?? undefined;
     return !coarsePointerQuery?.matches;
 }
 
 /** Provides props for chat composer. */
-interface ChatComposerProps {
+interface ChatComposerProperties {
     attachments: ChatSendAttachment[];
     canSend: boolean;
     draft: string;
-    fileInputReference: RefObject<HTMLInputElement | null>;
+    fileInputReference: ReactElementReference<HTMLInputElement>;
     isConnected: boolean;
     isRecording: boolean;
     isSending: boolean;
@@ -69,7 +73,7 @@ interface ChatComposerProps {
     selectedSessionKey: string;
     slashCommandSuggestions: SlashCommandSuggestion[];
     onApplySlashSuggestion: (value: string) => void;
-    onAttachFiles: (files: FileList | null) => void;
+    onAttachFiles: (files: FileList | undefined) => void;
     onChangeDraft: (value: string) => void;
     onPreview: (preview: ChatPreviewItem) => void;
     onRemoveAttachment: (attachmentId: string) => void;
@@ -96,11 +100,11 @@ export function ChatComposer({
     onRemoveAttachment,
     onSend,
     onToggleRecording,
-}: ChatComposerProps) {
+}: ChatComposerProperties) {
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const [slashSuggestionsDismissed, setSlashSuggestionsDismissed] = useState(false);
-    const composerReference = useRef<HTMLDivElement | null>(null);
-    const textareaReference = useRef<HTMLTextAreaElement | null>(null);
+    const composerReference = useRef(emptyElementReference<HTMLDivElement>());
+    const textareaReference = useRef(emptyElementReference<HTMLTextAreaElement>());
     const visibleSlashCommandSuggestions = slashSuggestionsDismissed
         ? []
         : slashCommandSuggestions;
@@ -192,7 +196,7 @@ export function ChatComposer({
         onChangeDraft(nextDraft);
         setShowEmojiPicker(false);
 
-        window.setTimeout(() => {
+        setTimeout(() => {
             textarea?.focus();
             textarea?.setSelectionRange(nextCursor, nextCursor);
         }, 0);
@@ -256,7 +260,7 @@ export function ChatComposer({
                         </div>
                     ))}
                 </div>
-            ) : null}
+            ) : undefined}
 
             <div className="flex flex-col gap-2 sm:gap-3 md:flex-row">
                 <input
@@ -264,7 +268,7 @@ export function ChatComposer({
                     type="file"
                     multiple
                     className="hidden"
-                    onChange={(event) => onAttachFiles(event.target.files)}
+                    onChange={(event) => onAttachFiles(optionalInputFiles(event.target))}
                 />
                 <div className="relative min-w-0 flex-1">
                     {visibleSlashCommandSuggestions.length > 0 ? (
@@ -294,7 +298,7 @@ export function ChatComposer({
                                 ))}
                             </div>
                         </div>
-                    ) : null}
+                    ) : undefined}
                     {showEmojiPicker ? (
                         <div className="border-primary-700 bg-primary-900 absolute right-0 bottom-full left-0 z-30 mb-2 rounded-xl border p-2 shadow-2xl sm:left-auto sm:w-80">
                             <div className="text-primary-400 mb-2 flex items-center justify-between px-1 text-xs font-medium tracking-wide uppercase">
@@ -322,7 +326,7 @@ export function ChatComposer({
                                 ))}
                             </div>
                         </div>
-                    ) : null}
+                    ) : undefined}
                     <Textarea
                         ref={textareaReference}
                         value={draft}

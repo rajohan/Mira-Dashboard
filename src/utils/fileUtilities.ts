@@ -3,25 +3,25 @@ export { formatSize } from "./format";
 /** Returns file extension. */
 export function getFileExtension(filename: string): string {
     const parts = filename.split(".");
-    return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : "";
+    return parts.length > 1 ? parts.at(-1)!.toLowerCase() : "";
 }
 
 /** Returns whether markdown file. */
 export function isMarkdownFile(filename: string): boolean {
-    const ext = getFileExtension(filename);
-    return ext === "md" || ext === "markdown";
+    const extension = getFileExtension(filename);
+    return extension === "md" || extension === "markdown";
 }
 
 /** Returns whether JSON file. */
 export function isJsonFile(filename: string): boolean {
-    const ext = getFileExtension(filename);
-    return ext === "json" || ext === "json5";
+    const extension = getFileExtension(filename);
+    return extension === "json" || extension === "json5";
 }
 
 /** Returns whether code file. */
 export function isCodeFile(filename: string): boolean {
-    const ext = getFileExtension(filename);
-    const codeExts = [
+    const extension = getFileExtension(filename);
+    const codeExtensions = [
         "js",
         "jsx",
         "ts",
@@ -49,12 +49,12 @@ export function isCodeFile(filename: string): boolean {
         "graphql",
         "proto",
     ];
-    return codeExts.includes(ext);
+    return codeExtensions.includes(extension);
 }
 
 /** Returns language. */
 export function getLanguage(filename: string): string {
-    const ext = getFileExtension(filename);
+    const extension = getFileExtension(filename);
     const langMap: Record<string, string> = {
         js: "javascript",
         jsx: "javascript",
@@ -92,19 +92,19 @@ export function getLanguage(filename: string): string {
         css: "css",
         scss: "scss",
     };
-    return langMap[ext] || "text";
+    return langMap[extension] || "text";
 }
 
 /** Returns whether image file. */
 export function isImageFile(filename: string): boolean {
-    const ext = getFileExtension(filename);
-    return ["png", "jpg", "jpeg", "gif", "webp", "svg", "ico"].includes(ext);
+    const extension = getFileExtension(filename);
+    return ["png", "jpg", "jpeg", "gif", "webp", "svg", "ico"].includes(extension);
 }
 
 /** Returns whether binary file. */
 export function isBinaryFile(filename: string): boolean {
-    const ext = getFileExtension(filename);
-    const binaryExts = [
+    const extension = getFileExtension(filename);
+    const binaryExtensions = [
         "png",
         "jpg",
         "jpeg",
@@ -128,12 +128,12 @@ export function isBinaryFile(filename: string): boolean {
         "avi",
         "mov",
     ];
-    return binaryExts.includes(ext);
+    return binaryExtensions.includes(extension);
 }
 
 /** Returns syntax class. */
 export function getSyntaxClass(filename: string): string {
-    const ext = getFileExtension(filename);
+    const extension = getFileExtension(filename);
     const syntaxMap: Record<string, string> = {
         js: "text-yellow-400",
         jsx: "text-yellow-400",
@@ -151,5 +151,5 @@ export function getSyntaxClass(filename: string): string {
         yml: "text-purple-400",
         yaml: "text-purple-400",
     };
-    return syntaxMap[ext] || "text-primary-300";
+    return syntaxMap[extension] || "text-primary-300";
 }

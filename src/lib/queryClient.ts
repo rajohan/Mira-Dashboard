@@ -1,7 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 
 /** Defines auto refresh milliseconds. */
-export const AUTO_REFRESH_MS = 5_000;
+export const AUTO_REFRESH_MS = 5000;
 
 /** Defines query client. */
 export const queryClient = new QueryClient({

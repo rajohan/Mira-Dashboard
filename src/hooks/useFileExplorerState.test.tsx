@@ -8,12 +8,12 @@ import { useFileExplorerState } from "./useFileExplorerState";
 vi.mock("../utils/json", () => ({
     validateJsonString: (s: string) => {
         if (s === "missing error") {
-            return { valid: false, error: null };
+            return { valid: false, error: undefined };
         }
 
         try {
             JSON.parse(s);
-            return { valid: true, error: null };
+            return { valid: true, error: undefined };
         } catch (error) {
             return { valid: false, error: (error as Error).message };
         }
@@ -148,7 +148,7 @@ describe("useFileExplorerState", () => {
     });
 
     it("expands directory and loads children", async () => {
-        const dirFiles = [
+        const directoryFiles = [
             { path: "/root", type: "directory", loaded: false },
             { path: "/root/other.txt", type: "file", loaded: false },
         ];
@@ -162,7 +162,7 @@ describe("useFileExplorerState", () => {
             .mockResolvedValueOnce({
                 ok: true,
                 status: 200,
-                json: async () => ({ files: dirFiles }),
+                json: async () => ({ files: directoryFiles }),
             })
             .mockResolvedValueOnce({
                 ok: true,
@@ -394,7 +394,7 @@ describe("useFileExplorerState", () => {
         await act(async () => {
             await result.current.handleSave();
         });
-        expect(result.current.error).toBeNull();
+        expect(result.current.error).toBeUndefined();
     });
 
     it("validates json5 editing mode", async () => {
@@ -592,13 +592,13 @@ describe("useFileExplorerState", () => {
 
     it("handles directory toggle failure gracefully", async () => {
         const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-        const dirFiles = [{ path: "/fail", type: "directory", loaded: false }];
+        const directoryFiles = [{ path: "/fail", type: "directory", loaded: false }];
         const fetchMock = vi
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
                 status: 200,
-                json: async () => ({ files: dirFiles }),
+                json: async () => ({ files: directoryFiles }),
             })
             .mockRejectedValueOnce(new Error("Failed to load directory"));
         vi.stubGlobal("fetch", fetchMock);

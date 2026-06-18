@@ -26,6 +26,11 @@ function jsonResponse(payload: unknown, init?: ResponseInit) {
     });
 }
 
+function createDeferredResponse() {
+    const { promise, resolve } = Promise.withResolvers<Response>();
+    return { promise, resolve };
+}
+
 describe("Login page", () => {
     beforeEach(() => {
         mocks.fetch.mockReset();
@@ -37,16 +42,12 @@ describe("Login page", () => {
 
     it("loads standard login mode and submits credentials", async () => {
         const user = userEvent.setup();
-        let resolveLogin: (value: Response) => void = () => {};
+        const loginResponse = createDeferredResponse();
         mocks.fetch
             .mockResolvedValueOnce(
                 jsonResponse({ bootstrapRequired: false, hasGatewayToken: true })
             )
-            .mockReturnValueOnce(
-                new Promise<Response>((resolve) => {
-                    resolveLogin = resolve;
-                })
-            );
+            .mockReturnValueOnce(loginResponse.promise);
 
         render(<Login />);
 
@@ -58,7 +59,7 @@ describe("Login page", () => {
         await user.type(screen.getByPlaceholderText("Enter your password"), "secret");
         await user.click(screen.getByRole("button", { name: "Log in" }));
         expect(screen.getByRole("button", { name: "Logging in..." })).toBeDisabled();
-        resolveLogin(jsonResponse({ ok: true }));
+        loginResponse.resolve(jsonResponse({ ok: true }));
 
         await waitFor(() => {
             expect(mocks.navigate).toHaveBeenCalledWith({ to: "/" });
@@ -76,16 +77,12 @@ describe("Login page", () => {
 
     it("loads bootstrap mode and submits the gateway token", async () => {
         const user = userEvent.setup();
-        let resolveBootstrap: (value: Response) => void = () => {};
+        const bootstrapResponse = createDeferredResponse();
         mocks.fetch
             .mockResolvedValueOnce(
                 jsonResponse({ bootstrapRequired: true, hasGatewayToken: false })
             )
-            .mockReturnValueOnce(
-                new Promise<Response>((resolve) => {
-                    resolveBootstrap = resolve;
-                })
-            );
+            .mockReturnValueOnce(bootstrapResponse.promise);
 
         render(<Login />);
 
@@ -108,7 +105,7 @@ describe("Login page", () => {
         expect(
             screen.getByRole("button", { name: "Creating account..." })
         ).toBeDisabled();
-        resolveBootstrap(jsonResponse({ ok: true }));
+        bootstrapResponse.resolve(jsonResponse({ ok: true }));
 
         await waitFor(() => {
             expect(mocks.navigate).toHaveBeenCalledWith({ to: "/" });
@@ -219,13 +216,9 @@ describe("Login page", () => {
 
     it("submits with default login mode before bootstrap state resolves", async () => {
         const user = userEvent.setup();
-        let resolveBootstrap: (value: Response) => void = () => {};
+        const bootstrapResponse = createDeferredResponse();
         mocks.fetch
-            .mockReturnValueOnce(
-                new Promise<Response>((resolve) => {
-                    resolveBootstrap = resolve;
-                })
-            )
+            .mockReturnValueOnce(bootstrapResponse.promise)
             .mockRejectedValueOnce("network down")
             .mockResolvedValueOnce(
                 jsonResponse({ bootstrapRequired: false, hasGatewayToken: true })
@@ -244,7 +237,7 @@ describe("Login page", () => {
         );
 
         await act(async () => {
-            resolveBootstrap(
+            bootstrapResponse.resolve(
                 jsonResponse({ bootstrapRequired: false, hasGatewayToken: true })
             );
         });

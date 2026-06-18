@@ -42,7 +42,7 @@ const updates: TaskUpdate[] = [
 function renderModal(
     overrides: Partial<React.ComponentProps<typeof TaskDetailModal>> = {}
 ) {
-    const props: React.ComponentProps<typeof TaskDetailModal> = {
+    const properties: React.ComponentProps<typeof TaskDetailModal> = {
         task: makeTask(),
         onClose: vi.fn(),
         onMove: vi.fn(async () => {}),
@@ -58,22 +58,22 @@ function renderModal(
         ...overrides,
     };
 
-    render(<TaskDetailModal {...props} />);
-    return props;
+    render(<TaskDetailModal {...properties} />);
+    return properties;
 }
 
 describe("TaskDetailModal", () => {
     it("normalizes missing task columns for badge and movement state", () => {
-        expect(formatTaskColumnBadge(null)).toBe("UNASSIGNED");
+        expect(formatTaskColumnBadge(undefined)).toBe("UNASSIGNED");
         expect(formatTaskColumnBadge()).toBe("UNASSIGNED");
         expect(formatTaskColumnBadge("in-progress")).toBe("IN-PROGRESS");
-        expect(normalizeTaskDetailColumn(null)).toBe("todo");
+        expect(normalizeTaskDetailColumn(undefined)).toBe("todo");
         expect(normalizeTaskDetailColumn()).toBe("todo");
         expect(normalizeTaskDetailColumn("done")).toBe("done");
     });
 
     it("renders nothing without a selected task", () => {
-        renderModal({ task: null });
+        renderModal({ task: undefined });
 
         expect(
             screen.queryByText(/Review dashboard task coverage/)
@@ -81,8 +81,8 @@ describe("TaskDetailModal", () => {
     });
 
     it("opens cleanly after rendering with no selected task", async () => {
-        const props: React.ComponentProps<typeof TaskDetailModal> = {
-            task: null,
+        const properties: React.ComponentProps<typeof TaskDetailModal> = {
+            task: undefined,
             onClose: vi.fn(),
             onMove: vi.fn(async () => {}),
             onAssign: vi.fn(async () => {}),
@@ -96,7 +96,7 @@ describe("TaskDetailModal", () => {
             onDeleteUpdate: vi.fn(async () => {}),
         };
 
-        const { rerender } = render(<TaskDetailModal {...props} />);
+        const { rerender } = render(<TaskDetailModal {...properties} />);
 
         expect(
             screen.queryByText(/Review dashboard task coverage/)
@@ -104,7 +104,7 @@ describe("TaskDetailModal", () => {
 
         rerender(
             <TaskDetailModal
-                {...props}
+                {...properties}
                 task={makeTask({ title: "Opened after idle state" })}
             />
         );
@@ -116,7 +116,7 @@ describe("TaskDetailModal", () => {
 
     it("resets edit drafts when switching selected tasks", async () => {
         const user = userEvent.setup();
-        const props: React.ComponentProps<typeof TaskDetailModal> = {
+        const properties: React.ComponentProps<typeof TaskDetailModal> = {
             task: makeTask({ number: 88, title: "First task" }),
             onClose: vi.fn(),
             onMove: vi.fn(async () => {}),
@@ -128,7 +128,7 @@ describe("TaskDetailModal", () => {
             onEditUpdate: vi.fn(async () => {}),
             onDeleteUpdate: vi.fn(async () => {}),
         };
-        const { rerender } = render(<TaskDetailModal {...props} />);
+        const { rerender } = render(<TaskDetailModal {...properties} />);
 
         await user.click(screen.getAllByRole("button", { name: "Edit" }).at(-1)!);
         await user.clear(screen.getByLabelText("Title"));
@@ -144,7 +144,7 @@ describe("TaskDetailModal", () => {
 
         rerender(
             <TaskDetailModal
-                {...props}
+                {...properties}
                 task={makeTask({ number: 89, title: "Second task" })}
             />
         );
@@ -173,7 +173,7 @@ describe("TaskDetailModal", () => {
                 sessionTarget: "session:original",
             },
         });
-        const props: React.ComponentProps<typeof TaskDetailModal> = {
+        const properties: React.ComponentProps<typeof TaskDetailModal> = {
             task,
             onClose: vi.fn(),
             onMove: vi.fn(async () => {}),
@@ -185,7 +185,7 @@ describe("TaskDetailModal", () => {
             onEditUpdate: vi.fn(async () => {}),
             onDeleteUpdate: vi.fn(async () => {}),
         };
-        const { rerender } = render(<TaskDetailModal {...props} />);
+        const { rerender } = render(<TaskDetailModal {...properties} />);
 
         await user.click(screen.getAllByRole("button", { name: "Edit" }).at(-1)!);
         await user.clear(screen.getByLabelText("Title"));
@@ -206,7 +206,7 @@ describe("TaskDetailModal", () => {
 
         rerender(
             <TaskDetailModal
-                {...props}
+                {...properties}
                 task={makeTask({
                     ...task,
                     title: "Server refreshed title",
@@ -231,7 +231,7 @@ describe("TaskDetailModal", () => {
 
         await user.click(screen.getByRole("button", { name: "Save Changes" }));
 
-        expect(props.onUpdate).toHaveBeenCalledWith(
+        expect(properties.onUpdate).toHaveBeenCalledWith(
             expect.objectContaining({
                 labels: ["in-progress", "priority-high"],
             })
@@ -291,7 +291,7 @@ describe("TaskDetailModal", () => {
 
     it("moves, assigns, deletes, adds, edits, and deletes progress updates", async () => {
         const user = userEvent.setup();
-        const props = renderModal({
+        const properties = renderModal({
             task: makeTask({ assignees: [{ login: "rajohan" }] }),
         });
 
@@ -328,13 +328,13 @@ describe("TaskDetailModal", () => {
 
         await user.click(screen.getAllByRole("button", { name: "Delete" }).at(-1)!);
 
-        expect(props.onMove).toHaveBeenNthCalledWith(1, "todo");
-        expect(props.onMove).toHaveBeenNthCalledWith(2, "done");
-        expect(props.onAssign).toHaveBeenCalledWith("mira-2026");
-        expect(props.onAddUpdate).toHaveBeenCalledWith("New progress note");
-        expect(props.onEditUpdate).toHaveBeenCalledWith(31, "Edited progress");
-        expect(props.onDeleteUpdate).toHaveBeenCalledWith(31);
-        expect(props.onDelete).toHaveBeenCalledTimes(1);
+        expect(properties.onMove).toHaveBeenNthCalledWith(1, "todo");
+        expect(properties.onMove).toHaveBeenNthCalledWith(2, "done");
+        expect(properties.onAssign).toHaveBeenCalledWith("mira-2026");
+        expect(properties.onAddUpdate).toHaveBeenCalledWith("New progress note");
+        expect(properties.onEditUpdate).toHaveBeenCalledWith(31, "Edited progress");
+        expect(properties.onDeleteUpdate).toHaveBeenCalledWith(31);
+        expect(properties.onDelete).toHaveBeenCalledTimes(1);
     });
 
     it("gives progress update edit controls distinct accessible names", async () => {
@@ -371,7 +371,7 @@ describe("TaskDetailModal", () => {
 
     it("handles remaining move, assign, and edit cancel controls", async () => {
         const user = userEvent.setup();
-        const props = renderModal({
+        const properties = renderModal({
             task: makeTask({ assignees: [], labels: [{ name: "todo" }] }),
         });
 
@@ -381,10 +381,10 @@ describe("TaskDetailModal", () => {
         await user.click(screen.getAllByRole("button", { name: "Edit" }).at(-1)!);
         await user.click(screen.getByRole("button", { name: "Cancel Edit" }));
 
-        expect(props.onMove).toHaveBeenNthCalledWith(1, "in-progress");
-        expect(props.onMove).toHaveBeenNthCalledWith(2, "blocked");
-        expect(props.onAssign).toHaveBeenCalledWith("rajohan");
-        expect(props.onUpdate).not.toHaveBeenCalled();
+        expect(properties.onMove).toHaveBeenNthCalledWith(1, "in-progress");
+        expect(properties.onMove).toHaveBeenNthCalledWith(2, "blocked");
+        expect(properties.onAssign).toHaveBeenCalledWith("rajohan");
+        expect(properties.onUpdate).not.toHaveBeenCalled();
     });
 
     it("uses the new column for tasks without a column label", async () => {
@@ -444,7 +444,7 @@ describe("TaskDetailModal", () => {
     });
 
     it("renders scheduled automation duration fallbacks", async () => {
-        const baseProps: React.ComponentProps<typeof TaskDetailModal> = {
+        const baseProperties: React.ComponentProps<typeof TaskDetailModal> = {
             task: makeTask({
                 labels: [],
                 automation: {
@@ -465,7 +465,7 @@ describe("TaskDetailModal", () => {
             onEditUpdate: vi.fn(),
             onDeleteUpdate: vi.fn(),
         };
-        const { rerender } = render(<TaskDetailModal {...baseProps} />);
+        const { rerender } = render(<TaskDetailModal {...baseProperties} />);
 
         expect(await screen.findByText("TODO")).toBeInTheDocument();
         expect(await screen.findByText("SCHEDULED")).toBeInTheDocument();
@@ -473,7 +473,7 @@ describe("TaskDetailModal", () => {
 
         rerender(
             <TaskDetailModal
-                {...baseProps}
+                {...baseProperties}
                 task={makeTask({
                     automation: {
                         type: "cron",
@@ -664,7 +664,7 @@ describe("TaskDetailModal", () => {
             title: "Refined task title",
             body: "Updated body",
             labels: ["todo", "custom-label", "priority-low"],
-            automation: null,
+            automation: undefined,
         });
     });
 });

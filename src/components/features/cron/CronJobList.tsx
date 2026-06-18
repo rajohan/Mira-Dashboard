@@ -4,13 +4,13 @@ import {
     getCronJobId,
     getCronJobName,
     getCronStateValue,
-} from "../../../utils/cronUtils";
+} from "../../../utils/cronUtilities";
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 
 /** Provides props for cron job list. */
-interface CronJobListProps {
+interface CronJobListProperties {
     jobs: CronJob[];
     selectedId: string;
     currentJobId: string;
@@ -23,7 +23,7 @@ export function CronJobList({
     selectedId,
     currentJobId,
     onSelect,
-}: CronJobListProps) {
+}: CronJobListProperties) {
     return (
         <Card
             variant="bordered"

@@ -20,6 +20,6 @@ describe("Badge", () => {
         expect(getSessionTypeVariant("CRON")).toBe("cron");
         expect(getSessionTypeVariant("SUBAGENT")).toBe("subagent");
         expect(getSessionTypeVariant("unknown")).toBe("default");
-        expect(getSessionTypeVariant(null)).toBe("default");
+        expect(getSessionTypeVariant(undefined)).toBe("default");
     });
 });

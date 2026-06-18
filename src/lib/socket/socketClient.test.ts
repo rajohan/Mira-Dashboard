@@ -253,7 +253,7 @@ describe("socketClient", () => {
         expect(mockSocketInstances).toHaveLength(1);
 
         mockSocketInstances[0]?.emitClose();
-        await vi.advanceTimersByTimeAsync(2_000);
+        await vi.advanceTimersByTimeAsync(2000);
         expect(mockSocketInstances).toHaveLength(2);
     });
 
@@ -265,7 +265,7 @@ describe("socketClient", () => {
 
         mockSocketInstances[0]?.emitClose();
         client.disconnect();
-        await vi.advanceTimersByTimeAsync(2_000);
+        await vi.advanceTimersByTimeAsync(2000);
 
         expect(mockSocketInstances).toHaveLength(1);
     });
@@ -278,7 +278,7 @@ describe("socketClient", () => {
 
         client.disconnect();
         socket?.emitClose();
-        await vi.advanceTimersByTimeAsync(2_000);
+        await vi.advanceTimersByTimeAsync(2000);
 
         expect(mockSocketInstances).toHaveLength(1);
     });

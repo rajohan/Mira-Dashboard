@@ -39,11 +39,11 @@ describe("ops actions hooks", () => {
                 json: async () => ({
                     jobId: "",
                     status: "running",
-                    code: null,
+                    code: undefined,
                     stdout: "",
                     stderr: "",
                     startedAt: 1,
-                    endedAt: null,
+                    endedAt: undefined,
                 }),
             });
         vi.stubGlobal("fetch", fetchMock);
@@ -65,7 +65,9 @@ describe("ops actions hooks", () => {
         const { result: job } = renderHook(() => useExecJob("j1"), { wrapper });
         await waitFor(() => expect(job.current.data?.status).toBe("done"));
 
-        const { result: disabledJob } = renderHook(() => useExecJob(null), { wrapper });
+        const { result: disabledJob } = renderHook(() => useExecJob(undefined), {
+            wrapper,
+        });
         expect(disabledJob.current.fetchStatus).toBe("idle");
         await act(async () => {
             await disabledJob.current.refetch();

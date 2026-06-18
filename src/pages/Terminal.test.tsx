@@ -16,12 +16,12 @@ const terminal = vi.hoisted(() => ({
     clearHistory: vi.fn(),
     getCompletions: vi.fn(),
     history: [] as Array<{
-        code: number | null;
+        code: number | undefined;
         command: string;
         cwd: string;
-        endedAt: number | null;
+        endedAt: number | undefined;
         id: string;
-        jobId: string | null;
+        jobId: string | undefined;
         startedAt: number;
         status: string;
         stderr: string;
@@ -50,10 +50,10 @@ function makeHistoryEntry(command: string, overrides = {}) {
         code: 0,
         command,
         cwd: "~",
-        endedAt: 2_000,
+        endedAt: 2000,
         id: `history-${terminal.nextId++}`,
-        jobId: null,
-        startedAt: 1_000,
+        jobId: undefined,
+        startedAt: 1000,
         status: "done",
         stderr: "",
         stdout: "",
@@ -94,7 +94,7 @@ describe("Terminal page", () => {
             history: terminal.history,
             updateCommand: terminal.updateCommand,
         }));
-        terminal.useTerminalJob.mockReturnValue({ data: null });
+        terminal.useTerminalJob.mockReturnValue({ data: undefined });
     });
 
     it("renders welcome copy and disables run/clear until input or history exists", () => {
@@ -112,7 +112,7 @@ describe("Terminal page", () => {
     });
 
     it("checks terminal output bottom state defensively", () => {
-        expect(isTerminalOutputAtBottom(null)).toBe(false);
+        expect(isTerminalOutputAtBottom(undefined)).toBe(false);
         expect(
             isTerminalOutputAtBottom({
                 clientHeight: 100,
@@ -130,9 +130,9 @@ describe("Terminal page", () => {
     });
 
     it("scrolls terminal output to the bottom defensively", () => {
-        expect(scrollTerminalOutputToBottom(null)).toBe(false);
+        expect(scrollTerminalOutputToBottom(undefined)).toBe(false);
         const onScrolled = vi.fn();
-        expect(scrollTerminalOutputToBottomAndReport(null, onScrolled)).toBe(false);
+        expect(scrollTerminalOutputToBottomAndReport(undefined, onScrolled)).toBe(false);
         expect(onScrolled).not.toHaveBeenCalled();
 
         const output = {
@@ -329,16 +329,16 @@ describe("Terminal page", () => {
             newCwd: "/tmp",
             success: true,
         });
-        terminal.useTerminalJob.mockImplementation((jobId: string | null) => ({
+        terminal.useTerminalJob.mockImplementation((jobId: string | undefined) => ({
             data: jobId
                 ? {
                       code: 0,
-                      endedAt: 3_000,
+                      endedAt: 3000,
                       stderr: "",
                       stdout: "done stdout",
                       status: "done",
                   }
-                : null,
+                : undefined,
         }));
 
         const { rerender } = render(<Terminal />);
@@ -355,7 +355,7 @@ describe("Terminal page", () => {
                 expect.any(String),
                 expect.objectContaining({
                     code: 0,
-                    endedAt: 3_000,
+                    endedAt: 3000,
                     stdout: "done stdout",
                     status: "done",
                 })
@@ -367,28 +367,28 @@ describe("Terminal page", () => {
     it("renders terminal output states and current detached job output", () => {
         terminal.history = [
             makeHistoryEntry("running", {
-                code: null,
-                endedAt: null,
+                code: undefined,
+                endedAt: undefined,
                 jobId: "job-running",
                 status: "running",
                 stdout: "still working",
             }),
             makeHistoryEntry("failed", {
-                code: null,
-                endedAt: null,
+                code: undefined,
+                endedAt: undefined,
                 status: "error",
                 stderr: "spawn failed",
             }),
             makeHistoryEntry("unknown exit", {
-                code: null,
-                endedAt: null,
+                code: undefined,
+                endedAt: undefined,
                 status: "done",
             }),
         ];
         terminal.useTerminalJob.mockReturnValue({
             data: {
-                code: null,
-                endedAt: null,
+                code: undefined,
+                endedAt: undefined,
                 stderr: "detached stderr",
                 stdout: "detached stdout",
                 status: "running",
@@ -414,16 +414,16 @@ describe("Terminal page", () => {
             history: [],
             updateCommand: terminal.updateCommand,
         }));
-        terminal.useTerminalJob.mockImplementation((jobId: string | null) => ({
+        terminal.useTerminalJob.mockImplementation((jobId: string | undefined) => ({
             data: jobId
                 ? {
-                      code: null,
-                      endedAt: null,
+                      code: undefined,
+                      endedAt: undefined,
                       stderr: "detached stderr",
                       stdout: "detached stdout",
                       status: "running",
                   }
-                : null,
+                : undefined,
         }));
 
         const { rerender } = render(<Terminal />);
@@ -482,16 +482,16 @@ describe("Terminal page", () => {
 
     it("updates running job output and stops jobs", async () => {
         const user = userEvent.setup();
-        terminal.useTerminalJob.mockImplementation((jobId: string | null) => ({
+        terminal.useTerminalJob.mockImplementation((jobId: string | undefined) => ({
             data: jobId
                 ? {
-                      code: null,
-                      endedAt: null,
+                      code: undefined,
+                      endedAt: undefined,
                       stderr: "watch stderr",
                       stdout: "watch stdout",
                       status: "running",
                   }
-                : null,
+                : undefined,
         }));
 
         render(<Terminal />);
@@ -517,16 +517,16 @@ describe("Terminal page", () => {
     it("ignores stop failures when running jobs finish before stop resolves", async () => {
         const user = userEvent.setup();
         terminal.stopTerminalJob.mockRejectedValueOnce(new Error("already stopped"));
-        terminal.useTerminalJob.mockImplementation((jobId: string | null) => ({
+        terminal.useTerminalJob.mockImplementation((jobId: string | undefined) => ({
             data: jobId
                 ? {
-                      code: null,
-                      endedAt: null,
+                      code: undefined,
+                      endedAt: undefined,
                       stderr: "",
                       stdout: "still running",
                       status: "running",
                   }
-                : null,
+                : undefined,
         }));
 
         render(<Terminal />);

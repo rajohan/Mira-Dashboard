@@ -17,7 +17,7 @@ describe("ProgressBar", () => {
             <ProgressBar percent={60} className="extra-track" />
         );
         const track = container.firstElementChild;
-        const bar = track?.firstElementChild as HTMLElement | null;
+        const bar = track?.firstElementChild as HTMLElement | undefined;
 
         expect(track).toHaveClass("h-2", "extra-track");
         expect(bar).toHaveClass("bg-blue-500");
@@ -29,7 +29,7 @@ describe("ProgressBar", () => {
             <ProgressBar percent={150} color="purple" size="sm" />
         );
         const track = container.firstElementChild;
-        const bar = track?.firstElementChild as HTMLElement | null;
+        const bar = track?.firstElementChild as HTMLElement | undefined;
 
         expect(track).toHaveClass("h-1.5");
         expect(bar).toHaveClass("bg-purple-500");

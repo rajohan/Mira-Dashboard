@@ -3,14 +3,14 @@ import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
 
 import type { Task } from "../../../types/task";
-import { formatCronLastStatus, getCronStatusVariant } from "../../../utils/cronUtils";
+import { formatCronLastStatus, getCronStatusVariant } from "../../../utils/cronUtilities";
 import { timestampFromDateString } from "../../../utils/date";
 import { formatDuration } from "../../../utils/format";
-import { getPriority, PRIORITY_COLORS } from "../../../utils/taskUtils";
+import { getPriority, PRIORITY_COLORS } from "../../../utils/taskUtilities";
 import { Badge } from "../../ui/Badge";
 
 /** Provides props for task card. */
-interface TaskCardProps {
+interface TaskCardProperties {
     task: Task;
     isDragging?: boolean;
     onClick: () => void;
@@ -19,7 +19,7 @@ interface TaskCardProps {
 /** Returns compact live automation status for task cards. */
 function getTaskAutomationStatusBadge(automation: Task["automation"]) {
     if (!automation?.recurring) {
-        return null;
+        return;
     }
 
     if (automation.runningAtMs) {
@@ -37,11 +37,11 @@ function getTaskAutomationStatusBadge(automation: Task["automation"]) {
         };
     }
 
-    return null;
+    return;
 }
 
 /** Renders the task card UI. */
-export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
+export function TaskCard({ task, isDragging, onClick }: TaskCardProperties) {
     const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform } =
         useSortable({
             id: String(task.number),
@@ -75,7 +75,7 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProps) {
                 {...listeners}
                 aria-label={`Drag task #${task.number}`}
                 className="text-primary-500 hover:text-primary-300 focus:ring-accent-400 md:text-primary-600 absolute top-1/2 left-1.5 -translate-y-1/2 cursor-grab rounded transition-opacity focus:opacity-100 focus:ring-2 focus:outline-none md:opacity-0 md:group-hover:opacity-100"
-                onClick={(e) => e.stopPropagation()}
+                onClick={(event_) => event_.stopPropagation()}
             >
                 <GripVertical className="h-4 w-4" />
             </button>

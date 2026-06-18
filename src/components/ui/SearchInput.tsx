@@ -1,7 +1,7 @@
 import { Search, X } from "lucide-react";
 
 /** Provides props for search input. */
-interface SearchInputProps {
+interface SearchInputProperties {
     value: string;
     onChange: (value: string) => void;
     label?: string;
@@ -16,7 +16,7 @@ export function SearchInput({
     label,
     placeholder = "Search...",
     clearLabel,
-}: SearchInputProps) {
+}: SearchInputProperties) {
     const normalizedLabel = label?.trim() || undefined;
     const normalizedPlaceholder = placeholder.trim() || undefined;
     const accessibleLabel = normalizedLabel ?? normalizedPlaceholder ?? "Search";
@@ -44,7 +44,7 @@ export function SearchInput({
                 >
                     <X aria-hidden="true" className="h-4 w-4" />
                 </button>
-            ) : null}
+            ) : undefined}
         </div>
     );
 }

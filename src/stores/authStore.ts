@@ -8,7 +8,7 @@ export interface AuthUser {
 
 /** Represents auth state. */
 interface AuthState {
-    user: AuthUser | null;
+    user: AuthUser | undefined;
     isAuthenticated: boolean;
     isInitialized: boolean;
     bootstrapRequired: boolean;
@@ -18,7 +18,7 @@ interface AuthState {
 interface SessionResponse {
     authenticated: boolean;
     bootstrapRequired: boolean;
-    user: AuthUser | null;
+    user: AuthUser | undefined;
 }
 
 /** Represents auth actions. */
@@ -31,7 +31,7 @@ interface AuthActions {
 }
 
 const initialState: AuthState = {
-    user: null,
+    user: undefined,
     isAuthenticated: false,
     isInitialized: false,
     bootstrapRequired: false,
@@ -40,7 +40,7 @@ const initialState: AuthState = {
 /** Defines auth store. */
 export const authStore = new Store<AuthState>(initialState);
 
-let initializePromise: Promise<void> | null = null;
+let initializePromise: Promise<void> | undefined;
 
 /** Fetches session. */
 async function fetchSession(): Promise<SessionResponse> {
@@ -68,7 +68,7 @@ export const authActions: AuthActions = {
                         isInitialized: true,
                     }));
                 } finally {
-                    initializePromise = null;
+                    initializePromise = undefined;
                 }
             })();
         }
@@ -121,7 +121,7 @@ export function useAuthStore(): AuthState & AuthActions {
 }
 
 /** Provides auth user. */
-export function useAuthUser(): AuthUser | null {
+export function useAuthUser(): AuthUser | undefined {
     return useStore(authStore, (state) => state.user);
 }
 

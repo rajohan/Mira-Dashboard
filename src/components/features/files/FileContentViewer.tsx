@@ -8,7 +8,7 @@ import {
     isCodeFile,
     isJsonFile,
     isMarkdownFile,
-} from "../../../utils/fileUtils";
+} from "../../../utils/fileUtilities";
 import { Textarea } from "../../ui/Textarea";
 
 const MarkdownPreview = lazy(async () => {
@@ -27,7 +27,7 @@ const CodePreview = lazy(async () => {
 });
 
 /** Provides props for file content viewer. */
-interface FileContentViewerProps {
+interface FileContentViewerProperties {
     fileContent: FileContent;
     editedContent: string;
     onContentChange: (value: string) => void;
@@ -50,7 +50,7 @@ export function FileContentViewer({
     jsonPreview,
     codeEditMode,
     syntaxClass,
-}: FileContentViewerProps) {
+}: FileContentViewerProperties) {
     return (
         <div className="flex h-full min-h-0 flex-col">
             {largeFileWarning && (
@@ -104,7 +104,7 @@ export function FileContentViewer({
                         variant="code"
                         className={syntaxClass}
                         value={editedContent}
-                        onChange={(e) => onContentChange(e.target.value)}
+                        onChange={(event_) => onContentChange(event_.target.value)}
                         spellCheck={false}
                     />
                 ) : (
@@ -124,7 +124,7 @@ export function FileContentViewer({
                     variant="code"
                     className={syntaxClass}
                     value={editedContent}
-                    onChange={(e) => onContentChange(e.target.value)}
+                    onChange={(event_) => onContentChange(event_.target.value)}
                     spellCheck={false}
                 />
             ) : (

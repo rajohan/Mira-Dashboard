@@ -21,7 +21,7 @@ function renderPanel(overrides: Partial<Parameters<typeof FileEditorPanel>[0]> =
         onMarkdownPreviewChange: vi.fn(),
         onSave: vi.fn(),
     };
-    const props: Parameters<typeof FileEditorPanel>[0] = {
+    const properties: Parameters<typeof FileEditorPanel>[0] = {
         codeEditMode: false,
         contentLoading: false,
         editedContent: '{"ok":true}',
@@ -30,7 +30,7 @@ function renderPanel(overrides: Partial<Parameters<typeof FileEditorPanel>[0]> =
         isEditable: true,
         isJsonEditing: true,
         jsonPreview: false,
-        jsonValidation: { error: null, valid: true },
+        jsonValidation: { error: undefined, valid: true },
         largeFileWarning: false,
         markdownPreview: false,
         savePending: false,
@@ -40,13 +40,13 @@ function renderPanel(overrides: Partial<Parameters<typeof FileEditorPanel>[0]> =
         ...overrides,
     };
 
-    const view = render(<FileEditorPanel {...props} />);
+    const view = render(<FileEditorPanel {...properties} />);
     return { ...view, handlers };
 }
 
 describe("FileEditorPanel", () => {
     it("renders empty, loading, and failed states", () => {
-        const { rerender } = renderPanel({ selectedPath: null });
+        const { rerender } = renderPanel({ selectedPath: undefined });
 
         expect(screen.getByText("Select a file to view")).toBeInTheDocument();
 
@@ -60,7 +60,7 @@ describe("FileEditorPanel", () => {
                 isEditable={false}
                 isJsonEditing={false}
                 jsonPreview={false}
-                jsonValidation={{ error: null, valid: true }}
+                jsonValidation={{ error: undefined, valid: true }}
                 largeFileWarning={false}
                 markdownPreview={false}
                 onCodePreviewChange={vi.fn()}
@@ -85,7 +85,7 @@ describe("FileEditorPanel", () => {
                 isEditable={false}
                 isJsonEditing={false}
                 jsonPreview={false}
-                jsonValidation={{ error: null, valid: true }}
+                jsonValidation={{ error: undefined, valid: true }}
                 largeFileWarning={false}
                 markdownPreview={false}
                 onCodePreviewChange={vi.fn()}
@@ -129,7 +129,7 @@ describe("FileEditorPanel", () => {
                 isEditable
                 isJsonEditing
                 jsonPreview={false}
-                jsonValidation={{ error: null, valid: true }}
+                jsonValidation={{ error: undefined, valid: true }}
                 largeFileWarning={false}
                 markdownPreview={false}
                 onCodePreviewChange={handlers.onCodePreviewChange}
@@ -164,7 +164,7 @@ describe("FileEditorPanel", () => {
                 isEditable
                 isJsonEditing
                 jsonPreview={false}
-                jsonValidation={{ error: null, valid: true }}
+                jsonValidation={{ error: undefined, valid: true }}
                 largeFileWarning={false}
                 markdownPreview={false}
                 onCodePreviewChange={vi.fn()}
@@ -214,7 +214,7 @@ describe("FileEditorPanel", () => {
                 isEditable
                 isJsonEditing={false}
                 jsonPreview={false}
-                jsonValidation={{ error: null, valid: true }}
+                jsonValidation={{ error: undefined, valid: true }}
                 largeFileWarning={false}
                 markdownPreview={false}
                 onCodePreviewChange={handlers.onCodePreviewChange}
@@ -235,7 +235,7 @@ describe("FileEditorPanel", () => {
 
     it("uses the generic parse error title when JSON validation has no message", () => {
         renderPanel({
-            jsonValidation: { error: null, valid: false },
+            jsonValidation: { error: undefined, valid: false },
         });
 
         expect(screen.getByText("Invalid JSON")).toHaveAttribute(

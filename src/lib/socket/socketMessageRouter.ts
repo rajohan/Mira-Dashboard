@@ -34,7 +34,7 @@ function extractSessionsFromPayload(payload: unknown): Session[] {
 }
 
 /** Performs read gateway connection state. */
-function readGatewayConnectionState(data: SocketEnvelope): boolean | null {
+function readGatewayConnectionState(data: SocketEnvelope): boolean | undefined {
     if (data.type === "state" || data.type === "connected") {
         return data.gatewayConnected ?? true;
     }
@@ -43,14 +43,14 @@ function readGatewayConnectionState(data: SocketEnvelope): boolean | null {
         return false;
     }
 
-    return null;
+    return undefined;
 }
 
 /** Responds to socket message events. */
-export function handleSocketMessage(raw: unknown): boolean | null {
+export function handleSocketMessage(raw: unknown): boolean | undefined {
     const validated = socketEnvelopeSchema.safeParse(raw);
     if (!validated.success) {
-        return null;
+        return undefined;
     }
 
     const data = raw as SocketEnvelope;

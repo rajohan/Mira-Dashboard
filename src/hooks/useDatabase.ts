@@ -82,7 +82,7 @@ export function useDatabaseOverview() {
         queryKey: ["database", "overview"],
         queryFn: () => apiFetchRequired<DatabaseOverviewResponse>("/database/overview"),
         refetchInterval: 15_000,
-        staleTime: 5_000,
+        staleTime: 5000,
         refetchOnWindowFocus: false,
     });
 }

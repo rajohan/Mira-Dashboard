@@ -13,7 +13,7 @@ function makeContainer({
     return {
         command: "node server.js",
         createdAt: "2026-05-10T09:00:00.000Z",
-        finishedAt: null,
+        finishedAt: undefined,
         health: "healthy",
         id,
         image: "ghcr.io/example/comet:latest",
@@ -49,7 +49,7 @@ function renderTable(
     tableContainers: DockerContainer[],
     handlers: Partial<React.ComponentProps<typeof DockerContainersTable>> = {}
 ) {
-    const props = {
+    const properties = {
         containers: tableContainers,
         onConsole: vi.fn(),
         onDetails: vi.fn(),
@@ -60,8 +60,8 @@ function renderTable(
     } satisfies React.ComponentProps<typeof DockerContainersTable>;
 
     return {
-        ...render(<DockerContainersTable {...props} />),
-        props,
+        ...render(<DockerContainersTable {...properties} />),
+        props: properties,
     };
 }
 
@@ -273,16 +273,16 @@ describe("DockerContainersTable", () => {
         expect(screen.getAllByText("-7.5%")[0]).toBeInTheDocument();
     });
 
-    it("renders null stats and less common rank fallbacks", async () => {
+    it("renders undefined stats and less common rank fallbacks", async () => {
         const user = userEvent.setup();
 
         renderTable([
             makeContainer({
                 health: "starting",
-                id: "null-stats",
-                name: "null-stats",
+                id: "undefined-stats",
+                name: "undefined-stats",
                 state: "paused",
-                stats: null,
+                stats: undefined,
                 status: "Paused",
             }),
             makeContainer({

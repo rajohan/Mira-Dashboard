@@ -7,7 +7,7 @@ import {
     getPriority,
     getTaskUpdatedAtMs,
     taskMatchesSearch,
-} from "./taskUtils";
+} from "./taskUtilities";
 
 /** Builds a task fixture with focused overrides for utility tests. */
 function task(overrides: Partial<Task> = {}): Task {
@@ -40,7 +40,7 @@ describe("task utils", () => {
         expect(getColumnId("in-progress")).toBe("in-progress");
         expect(getColumnId("blocked")).toBe("blocked");
         expect(getColumnId("done")).toBe("done");
-        expect(getColumnId("unknown")).toBeNull();
+        expect(getColumnId("unknown")).toBeUndefined();
     });
 
     it("maps tasks to columns by state and labels", () => {
@@ -104,7 +104,14 @@ describe("task utils", () => {
         ];
 
         for (const column of COLUMN_CONFIG) {
-            const filteredIds = tasks.filter(column.filter).map((item) => item.number);
+            const filteredTasks = [];
+            for (const taskItem of tasks) {
+                const matchesColumn = Reflect.apply(column.filter, undefined, [
+                    taskItem,
+                ]) as boolean;
+                if (matchesColumn) filteredTasks.push(taskItem);
+            }
+            const filteredIds = filteredTasks.map((item) => item.number);
             const mappedIds = tasks
                 .filter((item) => getColumnId(item) === column.id)
                 .map((item) => item.number);

@@ -44,10 +44,12 @@ const hooks = vi.hoisted(() => ({
 }));
 
 const confirmModalMock = vi.hoisted(() => ({
-    props: null as null | {
-        onCancel: () => void;
-        onConfirm: () => void;
-    },
+    props: undefined as
+        | undefined
+        | {
+              onCancel: () => void;
+              onConfirm: () => void;
+          },
 }));
 
 vi.mock("../../../hooks", () => ({
@@ -87,14 +89,14 @@ vi.mock("../../ui/ConfirmModal", () => ({
                     {confirmLabel}
                 </button>
             </section>
-        ) : null;
+        ) : undefined;
     },
 }));
 
 function setupHooks() {
     hooks.startAction.mockReset();
     hooks.refreshCache.mockReset();
-    confirmModalMock.props = null;
+    confirmModalMock.props = undefined;
     hooks.refreshCache.mockResolvedValue({});
     hooks.useCacheEntry.mockReturnValue({
         data: {
@@ -112,7 +114,7 @@ function setupHooks() {
         mutateAsync: hooks.startAction,
     });
     hooks.useRefreshCacheEntry.mockReturnValue({ mutateAsync: hooks.refreshCache });
-    hooks.useExecJob.mockReturnValue({ data: null });
+    hooks.useExecJob.mockReturnValue({ data: undefined });
 }
 
 describe("ServiceActionsCard", () => {
@@ -171,18 +173,18 @@ describe("ServiceActionsCard", () => {
     it("keeps output visible while an action is running and tracks manual scroll state", async () => {
         setupHooks();
         hooks.startAction.mockResolvedValue({ jobId: "job-cleanup" });
-        hooks.useExecJob.mockImplementation((jobId: string | null) => ({
+        hooks.useExecJob.mockImplementation((jobId: string | undefined) => ({
             data: jobId
                 ? {
-                      code: null,
-                      endedAt: null,
+                      code: undefined,
+                      endedAt: undefined,
                       jobId,
                       startedAt: Date.UTC(2026, 4, 10, 18, 59, 0),
                       status: "running",
                       stderr: "stderr line",
                       stdout: "stdout line",
                   }
-                : null,
+                : undefined,
         }));
         const user = userEvent.setup();
 
@@ -223,7 +225,7 @@ describe("ServiceActionsCard", () => {
         const user = userEvent.setup();
         hooks.refreshCache.mockRejectedValueOnce(new Error("cache offline"));
         hooks.startAction.mockResolvedValue({ jobId: "job-update" });
-        hooks.useExecJob.mockImplementation((jobId: string | null) => ({
+        hooks.useExecJob.mockImplementation((jobId: string | undefined) => ({
             data: jobId
                 ? {
                       code: 0,
@@ -234,7 +236,7 @@ describe("ServiceActionsCard", () => {
                       stderr: "",
                       stdout: "updated successfully",
                   }
-                : null,
+                : undefined,
         }));
 
         render(<ServiceActionsCard />);
@@ -258,25 +260,25 @@ describe("ServiceActionsCard", () => {
                 data: {
                     version: {
                         current: "2026.5.5",
-                        latest: null,
+                        latest: undefined,
                         updateAvailable: false,
                     },
                 },
             },
         });
         hooks.startAction.mockResolvedValue({ jobId: "job-cleanup" });
-        hooks.useExecJob.mockImplementation((jobId: string | null) => ({
+        hooks.useExecJob.mockImplementation((jobId: string | undefined) => ({
             data: jobId
                 ? {
                       code: 0,
-                      endedAt: null,
+                      endedAt: undefined,
                       jobId,
                       startedAt: Date.UTC(2026, 4, 10, 18, 59, 0),
                       status: "done",
                       stderr: "",
                       stdout: "",
                   }
-                : null,
+                : undefined,
         }));
 
         render(<ServiceActionsCard />);
@@ -298,8 +300,8 @@ describe("ServiceActionsCard", () => {
         setupHooks();
         hooks.useExecJob.mockReturnValue({
             data: {
-                code: null,
-                endedAt: null,
+                code: undefined,
+                endedAt: undefined,
                 jobId: "external-job",
                 startedAt: Date.UTC(2026, 4, 10, 18, 59, 0),
                 status: "running",

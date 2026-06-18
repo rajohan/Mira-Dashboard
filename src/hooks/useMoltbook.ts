@@ -22,15 +22,17 @@ export interface MoltbookHome {
     unreadMessageCount: number;
     activityOnYourPostsCount: number;
     activityOnYourPosts: unknown[];
-    latestAnnouncement: null | {
-        postId: string | null;
-        title: string | null;
-        authorName: string | null;
-        createdAt: string | null;
-        preview: string | null;
-    };
-    postsFromAccountsYouFollowCount: number | null;
-    exploreCount: number | null;
+    latestAnnouncement:
+        | undefined
+        | {
+              postId: string | undefined;
+              title: string | undefined;
+              authorName: string | undefined;
+              createdAt: string | undefined;
+              preview: string | undefined;
+          };
+    postsFromAccountsYouFollowCount: number | undefined;
+    exploreCount: number | undefined;
     nextActions: string[];
     fetchedAt: string;
 }
@@ -124,14 +126,14 @@ export function useMoltbookData(sort: "hot" | "new" = "hot") {
     return {
         home: home.data?.data,
         homeCache: home.data,
-        posts: (feed.data?.data.posts || []).map(transformPost),
-        profile: profile.data?.data.agent || null,
+        posts: (feed.data?.data.posts || []).map((post) => transformPost(post)),
+        profile: profile.data?.data.agent || undefined,
         myContent: {
             posts: myContent.data?.data.posts || [],
             comments: myContent.data?.data.comments || [],
         } as MiraContent,
         isLoading,
-        error: error?.message || null,
+        error: error?.message || undefined,
         refetch: () => {
             home.refetch();
             feed.refetch();

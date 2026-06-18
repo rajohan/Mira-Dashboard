@@ -32,7 +32,7 @@ describe("ChatHeader", () => {
 
         render(
             <ChatHeader
-                selectedSession={null}
+                selectedSession={undefined}
                 selectedAgentId=""
                 selectedSessionKey=""
                 sessionOptions={[{ label: "Main", value: "agent:main:main" }]}

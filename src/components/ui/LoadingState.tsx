@@ -1,7 +1,7 @@
 import { RefreshCw } from "lucide-react";
 
 /** Provides props for loading state. */
-interface LoadingStateProps {
+interface LoadingStateProperties {
     message?: string;
     size?: "sm" | "md" | "lg" | "fullscreen";
 }
@@ -21,7 +21,7 @@ const iconSizes = {
 };
 
 /** Renders the loading state UI. */
-export function LoadingState({ message, size = "md" }: LoadingStateProps) {
+export function LoadingState({ message, size = "md" }: LoadingStateProperties) {
     return (
         <div className={`flex ${sizeClasses[size]} items-center justify-center`}>
             <div className="flex flex-col items-center gap-2">

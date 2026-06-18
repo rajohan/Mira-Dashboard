@@ -28,14 +28,14 @@ vi.mock("@tanstack/react-router", () => ({
         to,
         children,
         className,
-        ...props
+        ...properties
     }: {
         to: string;
         children: React.ReactNode;
         className?: string;
         [key: string]: unknown;
     }) => (
-        <a href={to} className={className} data-testid="nav-link" {...props}>
+        <a href={to} className={className} data-testid="nav-link" {...properties}>
             {children}
         </a>
     ),
@@ -68,7 +68,7 @@ beforeEach(() => {
     hooks.deleteNotification.mockReset();
     hooks.markAllRead.mockReset();
     hooks.markNotificationRead.mockReset();
-    hooks.useCacheEntry.mockReturnValue({ data: null });
+    hooks.useCacheEntry.mockReturnValue({ data: undefined });
     hooks.useClearReadNotifications.mockReturnValue({ mutate: hooks.clearRead });
     hooks.useDeleteNotification.mockReturnValue({ mutate: hooks.deleteNotification });
     hooks.useHealth.mockReturnValue({
@@ -163,7 +163,7 @@ describe("Layout", () => {
     });
 
     it("shows version unknown when cache has no version data", async () => {
-        hooks.useCacheEntry.mockReturnValue({ data: null });
+        hooks.useCacheEntry.mockReturnValue({ data: undefined });
 
         render(
             <Layout>

@@ -57,7 +57,7 @@ vi.mock("../components/ui/Modal", () => ({
                 </button>
                 {children}
             </section>
-        ) : null,
+        ) : undefined,
 }));
 
 vi.mock("../components/features/settings", () => ({
@@ -279,11 +279,11 @@ describe("Settings helpers", () => {
         ]);
 
         expect(numberFromDuration(42, 5)).toBe(42);
-        expect(numberFromDuration(null, 5)).toBe(5);
+        expect(numberFromDuration(undefined, 5)).toBe(5);
         expect(numberFromDuration("bad", 5)).toBe(5);
         expect(numberFromDuration("2m", 5)).toBe(120);
         expect(numberFromDuration("2h", 5)).toBe(7200);
-        expect(numberFromDuration("3d", 5)).toBe(259200);
+        expect(numberFromDuration("3d", 5)).toBe(259_200);
         expect(numberFromDuration("15", 5)).toBe(15);
         expect(errorMessage(new Error("Specific failure"), "Fallback")).toBe(
             "Specific failure"
@@ -307,7 +307,7 @@ describe("Settings helpers", () => {
             expect(setSuccess).toHaveBeenCalledWith("Saved");
 
             vi.advanceTimersByTime(3000);
-            expect(setSuccess).toHaveBeenLastCalledWith(null);
+            expect(setSuccess).toHaveBeenLastCalledWith(undefined);
         } finally {
             vi.useRealTimers();
         }
@@ -317,30 +317,31 @@ describe("Settings helpers", () => {
         vi.useFakeTimers();
         const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
         try {
-            const timerRef: { current: ReturnType<typeof setTimeout> | null } = {
-                current: null,
-            };
+            const timerReference: { current: ReturnType<typeof setTimeout> | undefined } =
+                {
+                    current: undefined,
+                };
             const setSuccess = vi.fn();
 
-            patchSuccess(setSuccess, "Saved once", timerRef);
-            const firstTimer = timerRef.current;
+            patchSuccess(setSuccess, "Saved once", timerReference);
+            const firstTimer = timerReference.current;
             expect(firstTimer).not.toBeNull();
 
             vi.advanceTimersByTime(1000);
 
-            patchSuccess(setSuccess, "Saved twice", timerRef);
+            patchSuccess(setSuccess, "Saved twice", timerReference);
             expect(clearTimeoutSpy).toHaveBeenCalledWith(firstTimer);
-            expect(timerRef.current).not.toBe(firstTimer);
+            expect(timerReference.current).not.toBe(firstTimer);
 
             setSuccess.mockClear();
             vi.advanceTimersByTime(2000);
 
-            expect(setSuccess).not.toHaveBeenCalledWith(null);
+            expect(setSuccess).not.toHaveBeenCalledWith(undefined);
 
             vi.advanceTimersByTime(1000);
 
-            expect(setSuccess).toHaveBeenLastCalledWith(null);
-            expect(timerRef.current).toBeNull();
+            expect(setSuccess).toHaveBeenLastCalledWith(undefined);
+            expect(timerReference.current).toBeUndefined();
         } finally {
             clearTimeoutSpy.mockRestore();
             vi.useRealTimers();
@@ -410,11 +411,11 @@ describe("Settings page", () => {
 
     it("backs up config and confirms gateway restart", async () => {
         const user = userEvent.setup();
-        const originalLocation = window.location;
+        const originalLocation = location;
         const reload = vi.fn();
         let setTimeoutSpy: undefined | { mockRestore: () => void };
         let clearTimeoutSpy: undefined | { mockRestore: () => void };
-        Object.defineProperty(window, "location", {
+        Object.defineProperty(globalThis, "location", {
             configurable: true,
             value: { reload },
         });
@@ -453,13 +454,13 @@ describe("Settings page", () => {
             await Promise.resolve();
             expect(reload).toHaveBeenCalledTimes(1);
 
-            clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
+            clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
             unmount();
             expect(clearTimeoutSpy).toHaveBeenCalled();
         } finally {
             setTimeoutSpy?.mockRestore();
             clearTimeoutSpy?.mockRestore();
-            Object.defineProperty(window, "location", {
+            Object.defineProperty(globalThis, "location", {
                 configurable: true,
                 value: originalLocation,
             });

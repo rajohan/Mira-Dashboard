@@ -32,9 +32,9 @@ describe("ChatMarkdown", () => {
         expect(childrenToText(["alpha", 2, createElement("span", {}, "beta")])).toBe(
             "alpha2beta"
         );
-        expect(childrenToText(null)).toBe("");
+        expect(childrenToText(undefined)).toBe("");
 
-        expect(getPreCodeBlock("raw text")).toBeNull();
+        expect(getPreCodeBlock("raw text")).toBeUndefined();
         expect(
             getPreCodeBlock(
                 createElement("code", { className: "language-ts" }, "const ok = true;\n")
@@ -199,7 +199,7 @@ describe("ChatMarkdown", () => {
     });
 
     it("renders custom raw pre children without a nested code block", () => {
-        const Pre = markdownComponents.pre! as (props: {
+        const Pre = markdownComponents.pre! as (properties: {
             children: ReactNode;
             className?: string;
         }) => ReactElement;

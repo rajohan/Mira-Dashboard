@@ -113,8 +113,10 @@ export function taskMatchesSearch(task: Task, search: string): boolean {
         ...getTaskNumberSearchValues(task.number),
         task.title,
         task.body,
-        ...task.labels.map(getTaskLabelSearchValue),
-        ...task.assignees.flatMap(getTaskAssigneeSearchValues),
+        ...task.labels.map((taskLabel) => getTaskLabelSearchValue(taskLabel)),
+        ...task.assignees.flatMap((taskAssignee) =>
+            getTaskAssigneeSearchValues(taskAssignee)
+        ),
         task.automation?.cronJobId,
         task.automation?.jobName,
         task.automation?.scheduleSummary,
@@ -129,13 +131,13 @@ export function taskMatchesSearch(task: Task, search: string): boolean {
 
 /** Returns column ID. */
 export function getColumnId(taskOrId: Task): ColumnId;
-export function getColumnId(taskOrId: string): ColumnId | null;
-export function getColumnId(taskOrId: Task | string): ColumnId | null {
+export function getColumnId(taskOrId: string): ColumnId | undefined;
+export function getColumnId(taskOrId: Task | string): ColumnId | undefined {
     if (typeof taskOrId === "string") {
         if (["todo", "in-progress", "blocked", "done"].includes(taskOrId)) {
             return taskOrId as ColumnId;
         }
-        return null;
+        return undefined;
     }
 
     const task = taskOrId as Task;

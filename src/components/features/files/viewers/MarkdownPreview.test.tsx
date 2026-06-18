@@ -3,21 +3,25 @@ import { describe, expect, it, vi } from "vitest";
 
 import { MarkdownPreview } from "./MarkdownPreview";
 
+function ReactMarkdownMock({ children }: { children: string }) {
+    return <div data-testid="react-markdown">{children}</div>;
+}
+
+function emptyPlugin() {}
+
 vi.mock("react-markdown", () => ({
     __esModule: true,
-    default: ({ children }: { children: string }) => (
-        <div data-testid="react-markdown">{children}</div>
-    ),
+    default: ReactMarkdownMock,
 }));
 
 vi.mock("remark-gfm", () => ({
     __esModule: true,
-    default: () => () => {},
+    default: () => emptyPlugin,
 }));
 
 vi.mock("remark-frontmatter", () => ({
     __esModule: true,
-    default: () => () => {},
+    default: () => emptyPlugin,
 }));
 
 describe("MarkdownPreview", () => {

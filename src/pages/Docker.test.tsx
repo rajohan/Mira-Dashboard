@@ -6,11 +6,13 @@ import { Docker } from "./Docker";
 
 const docker = vi.hoisted(() => ({
     action: vi.fn(),
-    confirmModalHandlers: null as null | {
-        isOpen: boolean;
-        onConfirm: () => void;
-        title: string;
-    },
+    confirmModalHandlers: undefined as
+        | undefined
+        | {
+              isOpen: boolean;
+              onConfirm: () => void;
+              title: string;
+          },
     deleteImage: vi.fn(),
     deleteVolume: vi.fn(),
     manualUpdate: vi.fn(),
@@ -81,7 +83,7 @@ vi.mock("../components/ui/ConfirmModal", () => ({
                     {confirmLabel}
                 </button>
             </section>
-        ) : null;
+        ) : undefined;
     },
 }));
 
@@ -105,7 +107,7 @@ vi.mock("../components/ui/Modal", () => ({
                 </button>
                 {children}
             </section>
-        ) : null,
+        ) : undefined,
 }));
 
 vi.mock("../components/ui/Select", () => ({
@@ -245,7 +247,7 @@ const containers = [
         id: "c2",
         image: "worker:latest",
         name: "worker",
-        service: null,
+        service: undefined,
         state: "exited",
         status: "Exited",
     },
@@ -254,7 +256,7 @@ const containers = [
 function mockDocker(overrides = {}) {
     docker.useDockerContainers.mockReturnValue({
         data: containers,
-        error: null,
+        error: undefined,
         isError: false,
         isLoading: false,
     });
@@ -365,7 +367,7 @@ function mockDocker(overrides = {}) {
         mutateAsync: docker.manualUpdate,
     });
     docker.useRunDockerUpdater.mockReturnValue({
-        data: null,
+        data: undefined,
         isPending: false,
         mutateAsync: docker.runUpdater,
     });
@@ -397,7 +399,7 @@ describe("Docker page", () => {
         docker.runUpdater.mockResolvedValue({ ok: true });
         docker.startExec.mockResolvedValue({ jobId: "job-1" });
         docker.stopExec.mockResolvedValue(Promise.resolve());
-        docker.confirmModalHandlers = null;
+        docker.confirmModalHandlers = undefined;
         vi.stubGlobal(
             "fetch",
             vi.fn().mockResolvedValue({
@@ -421,7 +423,7 @@ describe("Docker page", () => {
         expect(screen.getByTestId("volumes-table")).toHaveTextContent("volumes: 1");
 
         mockDocker({
-            containers: { data: [], error: null, isError: false, isLoading: true },
+            containers: { data: [], error: undefined, isError: false, isLoading: true },
         });
         rerender(<Docker />);
         expect(screen.getByText("Loading Docker overview...")).toBeInTheDocument();
@@ -445,7 +447,7 @@ describe("Docker page", () => {
         expect(screen.getByText("Docker unavailable")).toBeInTheDocument();
 
         mockDocker({
-            containers: { data: [], error: null, isError: false, isLoading: false },
+            containers: { data: [], error: undefined, isError: false, isLoading: false },
         });
         rerender(<Docker />);
         expect(screen.getByText("No containers found.")).toBeInTheDocument();
@@ -604,7 +606,7 @@ describe("Docker page", () => {
     it("renders fallback details, logs, and console states", async () => {
         const user = userEvent.setup();
         mockDocker({
-            container: { data: null, isLoading: true },
+            container: { data: undefined, isLoading: true },
         });
 
         const { rerender } = render(<Docker />);
@@ -612,7 +614,7 @@ describe("Docker page", () => {
         expect(screen.getByText("Loading container details...")).toBeInTheDocument();
 
         mockDocker({
-            container: { data: null, isLoading: false },
+            container: { data: undefined, isLoading: false },
         });
         rerender(<Docker />);
         expect(screen.getByText("Failed to load container details.")).toBeInTheDocument();
@@ -626,7 +628,7 @@ describe("Docker page", () => {
         await user.click(screen.getByRole("button", { name: "Logs web" }));
         expect(screen.getByText("No logs")).toBeInTheDocument();
 
-        docker.useDockerExecJob.mockReturnValue({ data: null });
+        docker.useDockerExecJob.mockReturnValue({ data: undefined });
         await user.click(screen.getByRole("button", { name: "Console web" }));
         expect(screen.getByText("Run a command to see output.")).toBeInTheDocument();
     });
@@ -739,7 +741,7 @@ describe("Docker page", () => {
         const user = userEvent.setup();
         const sparseContainer = {
             ...containers[0],
-            createdAt: null,
+            createdAt: undefined,
             mounts: [
                 {
                     destination: "/readonly",
@@ -757,7 +759,7 @@ describe("Docker page", () => {
                     name: "empty-net",
                 },
             ],
-            startedAt: null,
+            startedAt: undefined,
             stats: {},
         };
         mockDocker({

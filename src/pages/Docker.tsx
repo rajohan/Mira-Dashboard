@@ -40,26 +40,37 @@ import {
     useDockerVolumes,
     useRunDockerUpdater,
 } from "../hooks/useDocker";
+import { emptyElementReference } from "../utils/reactReferences";
+
 /** Renders the Docker UI. */
 export function Docker() {
-    const [selectedContainerId, setSelectedContainerId] = useState<string | null>(null);
-    const [logsContainerId, setLogsContainerId] = useState<string | null>(null);
-    const [consoleContainerId, setConsoleContainerId] = useState<string | null>(null);
+    const [selectedContainerId, setSelectedContainerId] = useState<string | undefined>(
+        undefined
+    );
+    const [logsContainerId, setLogsContainerId] = useState<string | undefined>(undefined);
+    const [consoleContainerId, setConsoleContainerId] = useState<string | undefined>(
+        undefined
+    );
     const [logsTail, setLogsTail] = useState(200);
     const [consoleCommand, setConsoleCommand] = useState("");
-    const [consoleJobId, setConsoleJobId] = useState<string | null>(null);
+    const [consoleJobId, setConsoleJobId] = useState<string | undefined>(undefined);
     const [dangerousDelete, setDangerousDelete] = useState<
-        | null
+        | undefined
         | { type: "image"; id: string; label: string }
         | { type: "volume"; id: string; label: string }
-    >(null);
-    const [manualUpdateTarget, setManualUpdateTarget] = useState<null | {
-        id: number;
-        label: string;
-    }>(null);
+    >(undefined);
+    const [manualUpdateTarget, setManualUpdateTarget] = useState<
+        | undefined
+        | {
+              id: number;
+              label: string;
+          }
+    >(undefined);
     const [actionOutput, setActionOutput] = useState<string>("");
-    const [pruningTarget, setPruningTarget] = useState<"images" | "volumes" | null>(null);
-    const actionOutputRef = useRef<HTMLDivElement>(null);
+    const [pruningTarget, setPruningTarget] = useState<"images" | "volumes" | undefined>(
+        undefined
+    );
+    const actionOutputReference = useRef(emptyElementReference<HTMLDivElement>());
 
     const containersQuery = useDockerContainers();
     const imagesQuery = useDockerImages();
@@ -88,11 +99,11 @@ export function Docker() {
         containersQuery.isLoading || imagesQuery.isLoading || volumesQuery.isLoading;
 
     const selectedContainer =
-        containers.find((container) => container.id === selectedContainerId) || null;
+        containers.find((container) => container.id === selectedContainerId) || undefined;
     const selectedLogsContainer =
-        containers.find((container) => container.id === logsContainerId) || null;
+        containers.find((container) => container.id === logsContainerId) || undefined;
     const selectedConsoleContainer =
-        containers.find((container) => container.id === consoleContainerId) || null;
+        containers.find((container) => container.id === consoleContainerId) || undefined;
 
     const summary = {
         running: containers.filter((container) => container.state === "running").length,
@@ -118,7 +129,7 @@ export function Docker() {
     function showActionOutput(output: string) {
         setActionOutput(output);
         requestAnimationFrame(() => {
-            actionOutputRef.current?.scrollIntoView({
+            actionOutputReference.current?.scrollIntoView({
                 behavior: "smooth",
                 block: "start",
             });
@@ -192,7 +203,7 @@ export function Docker() {
                 `Failed to remove unused Docker ${target}.\n\n${formatActionError(error)}`
             );
         } finally {
-            setPruningTarget(null);
+            setPruningTarget(undefined);
         }
     }
 
@@ -207,7 +218,7 @@ export function Docker() {
         try {
             const deleteTarget = target.type === "image" ? deleteImage : deleteVolume;
             await deleteTarget.mutateAsync(target.id);
-            setDangerousDelete(null);
+            setDangerousDelete(undefined);
             showActionOutput(`Deleted Docker ${target.type} ${target.label}.`);
         } catch (error) {
             showActionOutput(
@@ -221,7 +232,7 @@ export function Docker() {
         showActionOutput("Running Docker updater...");
         try {
             const result = await runDockerUpdater.mutateAsync();
-            showActionOutput(JSON.stringify(result, null, 2));
+            showActionOutput(JSON.stringify(result, undefined, 2));
         } catch (error) {
             showActionOutput(`Docker updater failed.\n\n${formatActionError(error)}`);
         }
@@ -268,7 +279,7 @@ export function Docker() {
 
             {actionOutput ? (
                 <Card
-                    ref={actionOutputRef}
+                    ref={actionOutputReference}
                     role="status"
                     aria-live="polite"
                     className="p-3 sm:p-4"
@@ -291,7 +302,7 @@ export function Docker() {
                         {actionOutput}
                     </pre>
                 </Card>
-            ) : null}
+            ) : undefined}
 
             <Card className="overflow-hidden">
                 <div className="border-primary-700 border-b px-3 py-3 sm:px-4">
@@ -519,7 +530,7 @@ export function Docker() {
                     onLogs={setLogsContainerId}
                     onConsole={(containerId) => {
                         setConsoleContainerId(containerId);
-                        setConsoleJobId(null);
+                        setConsoleJobId(undefined);
                     }}
                     onRestart={(containerId) => {
                         void handleContainerAction(containerId, "restart");
@@ -564,7 +575,7 @@ export function Docker() {
 
             <Modal
                 isOpen={Boolean(selectedContainerId)}
-                onClose={() => setSelectedContainerId(null)}
+                onClose={() => setSelectedContainerId(undefined)}
                 title={selectedContainer?.name || "Container details"}
                 size="3xl"
             >
@@ -658,7 +669,7 @@ export function Docker() {
 
             <Modal
                 isOpen={Boolean(logsContainerId)}
-                onClose={() => setLogsContainerId(null)}
+                onClose={() => setLogsContainerId(undefined)}
                 title={
                     selectedLogsContainer
                         ? `${selectedLogsContainer.name} logs`
@@ -690,8 +701,8 @@ export function Docker() {
             <Modal
                 isOpen={Boolean(consoleContainerId)}
                 onClose={() => {
-                    setConsoleContainerId(null);
-                    setConsoleJobId(null);
+                    setConsoleContainerId(undefined);
+                    setConsoleJobId(undefined);
                 }}
                 title={
                     selectedConsoleContainer
@@ -726,7 +737,7 @@ export function Docker() {
                             <Square className="h-4 w-4" />
                             Stop
                         </Button>
-                    ) : null}
+                    ) : undefined}
                 </div>
                 <pre className="text-primary-100 max-h-[70vh] overflow-auto rounded-lg bg-black p-3 text-xs sm:p-4">
                     {execJobQuery.data
@@ -741,7 +752,7 @@ export function Docker() {
                     if (deleteImage.isPending || deleteVolume.isPending) {
                         return;
                     }
-                    setDangerousDelete(null);
+                    setDangerousDelete(undefined);
                 }}
                 title={
                     dangerousDelete?.type === "image" ? "Delete image" : "Delete volume"
@@ -765,7 +776,7 @@ export function Docker() {
                     if (dockerManualUpdate.isPending) {
                         return;
                     }
-                    setManualUpdateTarget(null);
+                    setManualUpdateTarget(undefined);
                 }}
                 title="Run manual update"
                 message={`Update ${manualUpdateTarget?.label}? This will update the compose image reference and run docker compose up -d for that service.`}
@@ -781,7 +792,7 @@ export function Docker() {
                         try {
                             await handleManualUpdate(manualUpdateTarget.id);
                         } finally {
-                            setManualUpdateTarget(null);
+                            setManualUpdateTarget(undefined);
                         }
                     })();
                 }}

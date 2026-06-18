@@ -6,7 +6,7 @@ import { createQueryWrapper, createTestQueryClient } from "../test/queryClient";
 import { useFileContent, useFiles, useSaveFile } from "./useFiles";
 
 describe("useFiles hooks", () => {
-    it("fetches file listing and file content, handles null content path", async () => {
+    it("fetches file listing and file content, handles undefined content path", async () => {
         const fetchMock = vi
             .fn()
             .mockResolvedValueOnce({
@@ -28,7 +28,9 @@ describe("useFiles hooks", () => {
         const { result: content } = renderHook(() => useFileContent("/a"), { wrapper });
         await waitFor(() => expect(content.current.data?.content).toBe("hello"));
 
-        const { result: disabled } = renderHook(() => useFileContent(null), { wrapper });
+        const { result: disabled } = renderHook(() => useFileContent(undefined), {
+            wrapper,
+        });
         expect(disabled.current.fetchStatus).toBe("idle");
     });
 

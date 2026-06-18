@@ -71,7 +71,7 @@ export function useLogFiles() {
 }
 
 /** Provides log content. */
-export function useLogContent(file: string | null, lines: number, enabled = true) {
+export function useLogContent(file: string | undefined, lines: number, enabled = true) {
     return useQuery({
         queryKey: logKeys.content(file || "", lines),
         queryFn: () => fetchLogContent(file!, lines),

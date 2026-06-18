@@ -40,11 +40,11 @@ describe("terminal hooks", () => {
                 json: async () => ({
                     jobId: "",
                     status: "running",
-                    code: null,
+                    code: undefined,
                     stdout: "",
                     stderr: "",
                     startedAt: 1,
-                    endedAt: null,
+                    endedAt: undefined,
                 }),
             });
         vi.stubGlobal("fetch", fetchMock);
@@ -67,7 +67,7 @@ describe("terminal hooks", () => {
         const { result: job } = renderHook(() => useTerminalJob("t1"), { wrapper });
         await waitFor(() => expect(job.current.data?.status).toBe("done"));
 
-        const { result: disabledJob } = renderHook(() => useTerminalJob(null), {
+        const { result: disabledJob } = renderHook(() => useTerminalJob(undefined), {
             wrapper,
         });
         expect(disabledJob.current.fetchStatus).toBe("idle");
@@ -85,13 +85,13 @@ describe("terminal hooks", () => {
             id = result.current.addCommand({
                 command: "ls",
                 cwd: "/home",
-                jobId: null,
+                jobId: undefined,
                 status: "pending",
-                code: null,
+                code: undefined,
                 stdout: "",
                 stderr: "",
                 startedAt: 1,
-                endedAt: null,
+                endedAt: undefined,
             });
         });
         expect(result.current.history.length).toBe(1);

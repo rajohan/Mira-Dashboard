@@ -14,6 +14,10 @@ import {
     useTerminalJob,
 } from "../hooks/useTerminal";
 import { cn } from "../utils/cn";
+import {
+    emptyElementReference,
+    optionalElementReference,
+} from "../utils/reactReferences";
 
 const HOME_DIR = "/home/ubuntu";
 
@@ -30,7 +34,7 @@ function shortenPath(path: string): string {
 }
 
 /** Returns whether terminal output is currently scrolled near the bottom. */
-export function isTerminalOutputAtBottom(output: TerminalOutputElement | null) {
+export function isTerminalOutputAtBottom(output: TerminalOutputElement | undefined) {
     if (!output) {
         return false;
     }
@@ -39,7 +43,7 @@ export function isTerminalOutputAtBottom(output: TerminalOutputElement | null) {
 }
 
 /** Scrolls terminal output to the bottom when present. */
-export function scrollTerminalOutputToBottom(output: TerminalOutputElement | null) {
+export function scrollTerminalOutputToBottom(output: TerminalOutputElement | undefined) {
     if (!output) {
         return false;
     }
@@ -50,7 +54,7 @@ export function scrollTerminalOutputToBottom(output: TerminalOutputElement | nul
 
 /** Scrolls terminal output and reports whether scrolling happened. */
 export function scrollTerminalOutputToBottomAndReport(
-    output: TerminalOutputElement | null,
+    output: TerminalOutputElement | undefined,
     onScrolled: () => void
 ) {
     if (!scrollTerminalOutputToBottom(output)) {
@@ -65,11 +69,11 @@ export function scrollTerminalOutputToBottomAndReport(
 export function Terminal() {
     const [command, setCommand] = useState("");
     const [historyIndex, setHistoryIndex] = useState(-1);
-    const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+    const [currentJobId, setCurrentJobId] = useState<string | undefined>(undefined);
     const [cwd, setCwd] = useState(HOME_DIR);
     const [isAtBottom, setIsAtBottom] = useState(true);
-    const outputRef = useRef<HTMLDivElement>(null);
-    const inputRef = useRef<HTMLInputElement>(null);
+    const outputReference = useRef(emptyElementReference<HTMLDivElement>());
+    const inputReference = useRef(emptyElementReference<HTMLInputElement>());
 
     const startCommand = useStartTerminalCommand();
     const { data: jobData } = useTerminalJob(currentJobId);
@@ -78,20 +82,22 @@ export function Terminal() {
     // Stop polling when component unmounts
     useEffect(() => {
         return () => {
-            setCurrentJobId(null);
+            setCurrentJobId(undefined);
         };
     }, []);
 
     // Check if user is near bottom (within 30px)
     /** Performs check is at bottom. */
     const checkIsAtBottom = () => {
-        return isTerminalOutputAtBottom(outputRef.current);
+        return isTerminalOutputAtBottom(
+            optionalElementReference(outputReference.current)
+        );
     };
 
     // Auto-scroll only when user is at bottom
     useEffect(() => {
-        if (outputRef.current && isAtBottom) {
-            outputRef.current.scrollTop = outputRef.current.scrollHeight;
+        if (outputReference.current && isAtBottom) {
+            outputReference.current.scrollTop = outputReference.current.scrollHeight;
         }
     }, [history, jobData?.stdout, jobData?.stderr, isAtBottom]);
 
@@ -99,14 +105,15 @@ export function Terminal() {
     /** Responds to scroll events. */
     const handleScroll = () => {
         const atBottom = checkIsAtBottom();
-        setIsAtBottom((prev) => (prev === atBottom ? prev : atBottom));
+        setIsAtBottom((previous) => (previous === atBottom ? previous : atBottom));
     };
 
     // Scroll to bottom manually
     /** Performs scroll to bottom. */
     const scrollToBottom = () => {
-        scrollTerminalOutputToBottomAndReport(outputRef.current, () =>
-            setIsAtBottom(true)
+        scrollTerminalOutputToBottomAndReport(
+            optionalElementReference(outputReference.current),
+            () => setIsAtBottom(true)
         );
     };
 
@@ -140,7 +147,7 @@ export function Terminal() {
 
         // Refocus input when job completes
         if (jobData.status === "done") {
-            setTimeout(() => inputRef.current?.focus(), 0);
+            setTimeout(() => inputReference.current?.focus(), 0);
         }
     }, [jobData, currentJobId, history, updateCommand]);
 
@@ -183,7 +190,7 @@ export function Terminal() {
                     addCommand({
                         command: trimmedCommand,
                         cwd: shortenPath(cwd),
-                        jobId: null,
+                        jobId: undefined,
                         status: "done",
                         code: 0,
                         stdout: "",
@@ -196,7 +203,7 @@ export function Terminal() {
                     addCommand({
                         command: trimmedCommand,
                         cwd: shortenPath(cwd),
-                        jobId: null,
+                        jobId: undefined,
                         status: "done",
                         code: 1,
                         stdout: "",
@@ -209,7 +216,7 @@ export function Terminal() {
                 addCommand({
                     command: trimmedCommand,
                     cwd: shortenPath(cwd),
-                    jobId: null,
+                    jobId: undefined,
                     status: "error",
                     code: 1,
                     stdout: "",
@@ -221,7 +228,7 @@ export function Terminal() {
 
             setCommand("");
             setHistoryIndex(-1);
-            setTimeout(() => inputRef.current?.focus(), 0);
+            setTimeout(() => inputReference.current?.focus(), 0);
             return;
         }
 
@@ -230,7 +237,7 @@ export function Terminal() {
             addCommand({
                 command: trimmedCommand,
                 cwd: shortenPath(cwd),
-                jobId: null,
+                jobId: undefined,
                 status: "done",
                 code: 0,
                 stdout: cwd,
@@ -241,7 +248,7 @@ export function Terminal() {
             setCommand("");
             setHistoryIndex(-1);
             // Refocus input after pwd
-            setTimeout(() => inputRef.current?.focus(), 0);
+            setTimeout(() => inputReference.current?.focus(), 0);
             return;
         }
 
@@ -249,13 +256,13 @@ export function Terminal() {
             const entryId = addCommand({
                 command: trimmedCommand,
                 cwd: shortenPath(cwd),
-                jobId: null,
+                jobId: undefined,
                 status: "pending",
-                code: null,
+                code: undefined,
                 stdout: "",
                 stderr: "",
                 startedAt: Date.now(),
-                endedAt: null,
+                endedAt: undefined,
             });
 
             setCommand("");
@@ -272,12 +279,12 @@ export function Terminal() {
                 status: "running",
             });
             // Refocus input after command starts
-            setTimeout(() => inputRef.current?.focus(), 0);
+            setTimeout(() => inputReference.current?.focus(), 0);
         } catch {
             const entryId = addCommand({
                 command: trimmedCommand,
                 cwd: shortenPath(cwd),
-                jobId: null,
+                jobId: undefined,
                 status: "error",
                 code: 1,
                 stdout: "",
@@ -287,7 +294,7 @@ export function Terminal() {
             });
             updateCommand(entryId, { status: "error" });
             // Refocus input after error
-            setTimeout(() => inputRef.current?.focus(), 0);
+            setTimeout(() => inputReference.current?.focus(), 0);
         }
     };
 
@@ -303,7 +310,7 @@ export function Terminal() {
         // Handle command history navigation
         if (event.key === "ArrowUp") {
             event.preventDefault();
-            const commands = history.map((h) => h.command).reverse();
+            const commands = history.map((h) => h.command).toReversed();
             if (commands.length > 0) {
                 const newIndex = Math.min(historyIndex + 1, commands.length - 1);
                 setHistoryIndex(newIndex);
@@ -313,7 +320,7 @@ export function Terminal() {
         }
         if (event.key === "ArrowDown") {
             event.preventDefault();
-            const commands = history.map((h) => h.command).reverse();
+            const commands = history.map((h) => h.command).toReversed();
             const newIndex = Math.max(historyIndex - 1, -1);
             setHistoryIndex(newIndex);
             setCommand(newIndex >= 0 ? commands[newIndex] || "" : "");
@@ -326,7 +333,7 @@ export function Terminal() {
             <Card className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
                 {/* Terminal Output */}
                 <div
-                    ref={outputRef}
+                    ref={outputReference}
                     role="log"
                     aria-label="Terminal output"
                     onScroll={handleScroll}
@@ -405,10 +412,10 @@ export function Terminal() {
                     >
                         <div className="min-w-0 flex-1">
                             <Input
-                                ref={inputRef}
+                                ref={inputReference}
                                 type="text"
                                 value={command}
-                                onChange={(e) => setCommand(e.target.value)}
+                                onChange={(event_) => setCommand(event_.target.value)}
                                 onKeyDown={handleKeyDown}
                                 aria-label="Terminal command"
                                 placeholder="Enter command..."

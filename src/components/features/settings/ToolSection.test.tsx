@@ -19,17 +19,17 @@ const defaultProps = {
 } satisfies React.ComponentProps<typeof ToolSection>;
 
 function renderToolSection(
-    props: Partial<React.ComponentProps<typeof ToolSection>> = {}
+    properties: Partial<React.ComponentProps<typeof ToolSection>> = {}
 ) {
-    const mergedProps = {
+    const mergedProperties = {
         ...defaultProps,
         onSave: vi.fn().mockImplementation(async () => {}),
-        ...props,
+        ...properties,
     } satisfies React.ComponentProps<typeof ToolSection>;
 
     return {
-        ...render(<ToolSection {...mergedProps} />),
-        props: mergedProps,
+        ...render(<ToolSection {...mergedProperties} />),
+        props: mergedProperties,
     };
 }
 

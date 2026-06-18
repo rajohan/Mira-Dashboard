@@ -12,7 +12,7 @@ import { useState } from "react";
 
 import type { Session } from "../../../types/session";
 import { formatDuration, formatTokens, getTokenPercent } from "../../../utils/format";
-import { formatSessionType, getTypeSortOrder } from "../../../utils/sessionUtils";
+import { formatSessionType, getTypeSortOrder } from "../../../utils/sessionUtilities";
 import { Badge, getSessionTypeVariant } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 import { ProgressBar } from "../../ui/ProgressBar";
@@ -20,8 +20,18 @@ import { SessionActionsDropdown } from "./SessionActionsDropdown";
 
 const columnHelper = createColumnHelper<Session>();
 
+function getSessionName(session: Session, fallback = "unknown") {
+    return (
+        session.displayLabel ||
+        session.label ||
+        session.displayName ||
+        session.id ||
+        fallback
+    );
+}
+
 /** Provides props for sessions table. */
-interface SessionsTableProps {
+interface SessionsTableProperties {
     sessions: Session[];
     onCompact: (key: string) => void;
     onReset: (key: string) => void;
@@ -34,15 +44,9 @@ export function SessionsTable({
     onCompact,
     onReset,
     onDelete,
-}: SessionsTableProps) {
+}: SessionsTableProperties) {
     const [sorting, setSorting] = useState<SortingState>([]);
     const tableSessions = Array.isArray(sessions) ? sessions : [];
-    const getSessionName = (session: Session, fallback = "unknown") =>
-        session.displayLabel ||
-        session.label ||
-        session.displayName ||
-        session.id ||
-        fallback;
 
     const columns = [
         columnHelper.accessor("type", {
@@ -113,7 +117,10 @@ export function SessionsTable({
             header: "",
             /** Renders the row action menu without selecting the row. */
             cell: ({ row }) => (
-                <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+                <div
+                    className="flex justify-end"
+                    onClick={(event_) => event_.stopPropagation()}
+                >
                     <SessionActionsDropdown
                         ariaLabel={`Actions for ${getSessionName(row.original, "unknown")}`}
                         onCompact={() => onCompact(row.original.key)}
@@ -226,7 +233,7 @@ export function SessionsTable({
                                                     ) : header.column.getIsSorted() ===
                                                       "desc" ? (
                                                         <ChevronDown className="h-3 w-3 rotate-180" />
-                                                    ) : null}
+                                                    ) : undefined}
                                                 </span>
                                             )}
                                         </div>

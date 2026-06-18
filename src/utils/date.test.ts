@@ -32,9 +32,9 @@ describe("date utils", () => {
         expect(() => isoStringFromDate("not a date")).toThrow("Invalid date value");
     });
 
-    it("returns timestamps for valid date strings and null for invalid inputs", () => {
+    it("returns timestamps for valid date strings and undefined for invalid inputs", () => {
         expect(timestampFromDateString("1970-01-01T00:00:00.000Z")).toBe(0);
-        expect(timestampFromDateString("not a date")).toBeNull();
+        expect(timestampFromDateString("not a date")).toBeUndefined();
     });
 
     it("returns the current calendar year", () => {

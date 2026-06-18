@@ -9,7 +9,7 @@ import { useChatSlashCommands } from "./useChatSlashCommands";
 
 type ChatRequest = <T = unknown>(
     method: string,
-    params?: Record<string, unknown>
+    parameters?: Record<string, unknown>
 ) => Promise<T>;
 
 const LOCALLY_HANDLED_COMMANDS = new Set(["/new", "/reset", "/stop"]);
@@ -30,7 +30,7 @@ function renderSlashCommands(
     overrides: {
         attachments?: ChatSendAttachment[];
         request?: ReturnType<typeof vi.fn>;
-        initialSendError?: string | null;
+        initialSendError?: string | undefined;
         selectedSessionKey?: string;
         confirmResetSession?: () => Promise<boolean>;
     } = {}
@@ -44,8 +44,8 @@ function renderSlashCommands(
             { content: "hello", role: "user", text: "hello" },
         ]);
         const [draft, setDraft] = useState("/steer keep going");
-        const [sendError, setSendError] = useState<string | null>(
-            overrides.initialSendError ?? null
+        const [sendError, setSendError] = useState<string | undefined>(
+            overrides.initialSendError ?? undefined
         );
         const [activeStreams, setActiveStreams] = useState<ActiveChatStreams>({
             "session-a": {
@@ -90,7 +90,7 @@ describe("useChatSlashCommands", () => {
 
         expect(request).not.toHaveBeenCalled();
         expect(result.current.messages).toHaveLength(1);
-        expect(result.current.sendError).toBeNull();
+        expect(result.current.sendError).toBeUndefined();
     });
 
     it("passes OpenClaw commands through unless they need a dedicated Dashboard RPC", async () => {
@@ -117,7 +117,7 @@ describe("useChatSlashCommands", () => {
         expect(passThroughCommands).toContain("/steer");
         expect(passThroughCommands).not.toContain("/clear");
         expect(request).not.toHaveBeenCalled();
-        expect(result.current.sendError).toBeNull();
+        expect(result.current.sendError).toBeUndefined();
     });
 
     it("confirms reset commands before passing them through without clearing history", async () => {
@@ -130,7 +130,7 @@ describe("useChatSlashCommands", () => {
 
         expect(confirmResetSession).toHaveBeenCalledTimes(2);
         expect(request).not.toHaveBeenCalled();
-        expect(result.current.sendError).toBeNull();
+        expect(result.current.sendError).toBeUndefined();
         expect(result.current.draft).toBe("");
         expect(result.current.activeStreams["session-a"]).toBeDefined();
         expect(result.current.messages).toEqual([

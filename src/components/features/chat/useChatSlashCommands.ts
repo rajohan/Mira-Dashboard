@@ -2,14 +2,14 @@ import type { Dispatch, SetStateAction } from "react";
 
 import { type ActiveChatStreams, createLocalSystemMessage } from "./chatRuntime";
 import type { ChatHistoryMessage, ChatSendAttachment } from "./chatTypes";
-import { chatErrorMessage } from "./chatUtils";
+import { chatErrorMessage } from "./chatUtilities";
 import { slashCommandCanonicalName } from "./slashCommands";
 
 /** Represents use chat slash commands params. */
-interface UseChatSlashCommandsParams {
+interface UseChatSlashCommandsParameters {
     request: <T = unknown>(
         method: string,
-        params?: Record<string, unknown>
+        parameters?: Record<string, unknown>
     ) => Promise<T>;
     selectedSessionKey: string;
     attachments: ChatSendAttachment[];
@@ -18,7 +18,7 @@ interface UseChatSlashCommandsParams {
     ) => void;
     setMessages: Dispatch<SetStateAction<ChatHistoryMessage[]>>;
     setDraft: Dispatch<SetStateAction<string>>;
-    setSendError: Dispatch<SetStateAction<string | null>>;
+    setSendError: Dispatch<SetStateAction<string | undefined>>;
     confirmResetSession: () => Promise<boolean>;
 }
 
@@ -32,7 +32,7 @@ export function useChatSlashCommands({
     setDraft,
     setSendError,
     confirmResetSession,
-}: UseChatSlashCommandsParams) {
+}: UseChatSlashCommandsParameters) {
     /** Performs add system message. */
     const addSystemMessage = (text: string) => {
         setMessages((previous) => [...previous, createLocalSystemMessage(text)]);
@@ -65,18 +65,18 @@ export function useChatSlashCommands({
 
             if (!confirmed) {
                 setDraft("");
-                setSendError(null);
+                setSendError(undefined);
                 addSystemMessage("Reset cancelled.");
                 return true;
             }
 
             setDraft("");
-            setSendError(null);
+            setSendError(undefined);
             return false;
         }
 
         setDraft("");
-        setSendError(null);
+        setSendError(undefined);
 
         try {
             await request("chat.abort", { sessionKey: selectedSessionKey });

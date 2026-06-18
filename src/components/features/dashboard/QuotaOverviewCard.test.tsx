@@ -22,7 +22,7 @@ const quotas: QuotasResponse = {
         fiveHourReset: "13:45 on 10 May",
         model: "gpt-5.5",
         percentUsed: 85,
-        resetAt: null,
+        resetAt: undefined,
         weeklyLeftPercent: 60,
         weeklyReset: "2026-05-17T10:00:00.000Z",
     },
@@ -46,14 +46,14 @@ const quotas: QuotasResponse = {
             limit: 100,
             percentUsed: 0,
             remaining: 100,
-            renewsAt: null,
+            renewsAt: undefined,
             requests: 0,
         },
         subscription: {
             limit: 100,
             percentUsed: 0,
             remaining: 100,
-            renewsAt: null,
+            renewsAt: undefined,
             requests: 0,
         },
         weeklyTokenLimit: {
@@ -166,7 +166,7 @@ describe("QuotaOverviewCard", () => {
         expect(screen.queryByText("85%")).not.toBeInTheDocument();
     });
 
-    it("renders null percentages and invalid OpenAI-style reset values", () => {
+    it("renders undefined percentages and invalid OpenAI-style reset values", () => {
         const synthetic = quotas.synthetic as SyntheticQuota;
 
         render(
@@ -175,8 +175,8 @@ describe("QuotaOverviewCard", () => {
                     ...quotas,
                     elevenlabs: {
                         ...quotas.elevenlabs,
-                        percentUsed: null,
-                        resetAt: null,
+                        percentUsed: undefined,
+                        resetAt: undefined,
                     },
                     openai: {
                         ...quotas.openai,
@@ -186,20 +186,20 @@ describe("QuotaOverviewCard", () => {
                     },
                     openrouter: {
                         ...quotas.openrouter,
-                        percentUsed: null,
+                        percentUsed: undefined,
                     },
                     synthetic: {
                         ...quotas.synthetic,
                         rollingFiveHourLimit: {
                             ...synthetic.rollingFiveHourLimit,
-                            percentUsed: null,
+                            percentUsed: undefined,
                         },
                         weeklyTokenLimit: {
                             ...synthetic.weeklyTokenLimit,
-                            nextRegenCredits: null,
-                            nextRegenPercent: null,
+                            nextRegenCredits: undefined,
+                            nextRegenPercent: undefined,
                             percentRemaining: -12,
-                            remainingCredits: null,
+                            remainingCredits: undefined,
                         },
                     },
                 }}
@@ -228,8 +228,8 @@ describe("QuotaOverviewCard", () => {
                         },
                         weeklyTokenLimit: {
                             ...synthetic.weeklyTokenLimit,
-                            nextRegenCredits: null,
-                            nextRegenPercent: null,
+                            nextRegenCredits: undefined,
+                            nextRegenPercent: undefined,
                         },
                     },
                 }}
@@ -253,9 +253,9 @@ describe("QuotaOverviewCard", () => {
                         ...quotas.synthetic,
                         weeklyTokenLimit: {
                             ...synthetic.weeklyTokenLimit,
-                            nextRegenPercent: null,
+                            nextRegenPercent: undefined,
                             percentRemaining: 98.3,
-                            remainingCredits: null,
+                            remainingCredits: undefined,
                         },
                     },
                 }}
@@ -315,13 +315,13 @@ describe("QuotaOverviewCard", () => {
 
     it("falls back when OpenAI-style date construction produces an invalid date", () => {
         const RealDate = Date;
-        const MockDate = function (this: Date, ...args: unknown[]) {
-            if (args.length === 7) {
+        const MockDate = function (this: Date, ...arguments_: unknown[]) {
+            if (arguments_.length === 7) {
                 return new RealDate(Number("NaN"));
             }
 
             if (new.target) {
-                return Reflect.construct(RealDate, args, MockDate);
+                return Reflect.construct(RealDate, arguments_, MockDate);
             }
 
             return String(new RealDate());

@@ -75,7 +75,7 @@ describe("sessions collection", () => {
             { key: "keep-session", id: "ignored-id", title: "Keep" },
             { id: "new-session", title: "New" },
             { key: " ".repeat(3), title: "Malformed" },
-            null,
+            undefined,
             "bad",
         ]);
 

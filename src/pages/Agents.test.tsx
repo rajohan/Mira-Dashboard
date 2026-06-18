@@ -31,7 +31,7 @@ describe("Agents page", () => {
     it("renders loading state with task history sidebar", () => {
         hooks.useAgentsStatus.mockReturnValue({
             data: undefined,
-            error: null,
+            error: undefined,
             isLoading: true,
         });
 
@@ -76,7 +76,7 @@ describe("Agents page", () => {
                     { id: "researcher", status: "offline" },
                 ],
             },
-            error: null,
+            error: undefined,
             isLoading: false,
         });
 
@@ -95,7 +95,7 @@ describe("Agents page", () => {
     it("renders empty state when no agents are configured", () => {
         hooks.useAgentsStatus.mockReturnValue({
             data: { agents: [] },
-            error: null,
+            error: undefined,
             isLoading: false,
         });
 

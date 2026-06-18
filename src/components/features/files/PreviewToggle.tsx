@@ -3,7 +3,7 @@ import { Code, Eye } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 
 /** Provides props for preview toggle. */
-interface PreviewToggleProps {
+interface PreviewToggleProperties {
     preview: boolean;
     onToggle: (preview: boolean) => void;
     previewLabel?: string;
@@ -16,7 +16,7 @@ export function PreviewToggle({
     onToggle,
     previewLabel = "Preview",
     editLabel = "Raw",
-}: PreviewToggleProps) {
+}: PreviewToggleProperties) {
     return (
         <div className="bg-primary-700 flex min-w-0 items-center gap-1 rounded p-0.5">
             <Button

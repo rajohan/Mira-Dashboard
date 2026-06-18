@@ -7,11 +7,11 @@ import { apiFetchRequired, apiPost, apiPostRequired } from "./useApi";
 export interface TerminalJobResponse {
     jobId: string;
     status: "running" | "done";
-    code: number | null;
+    code: number | undefined;
     stdout: string;
     stderr: string;
     startedAt: number;
-    endedAt: number | null;
+    endedAt: number | undefined;
 }
 
 /** Represents terminal command. */
@@ -22,7 +22,7 @@ export interface TerminalCommand {
 
 /** Defines terminal keys. */
 export const terminalKeys = {
-    job: (jobId: string | null) => ["terminal", "job", jobId] as const,
+    job: (jobId: string | undefined) => ["terminal", "job", jobId] as const,
     history: ["terminal", "history"] as const,
 };
 
@@ -40,7 +40,7 @@ export function useStartTerminalCommand() {
 }
 
 /** Provides terminal job. */
-export function useTerminalJob(jobId: string | null) {
+export function useTerminalJob(jobId: string | undefined) {
     return useQuery({
         queryKey: terminalKeys.job(jobId),
         queryFn: () =>
@@ -61,13 +61,13 @@ export interface CommandHistoryEntry {
     id: string;
     command: string;
     cwd: string;
-    jobId: string | null;
+    jobId: string | undefined;
     status: "pending" | "running" | "done" | "error";
-    code: number | null;
+    code: number | undefined;
     stdout: string;
     stderr: string;
     startedAt: number;
-    endedAt: number | null;
+    endedAt: number | undefined;
 }
 
 /** Represents completion item. */
@@ -115,14 +115,14 @@ export function useTerminalHistory() {
     /** Performs add command. */
     const addCommand = (entry: Omit<CommandHistoryEntry, "id">) => {
         const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-        setHistory((prev) => [...prev, { ...entry, id }]);
+        setHistory((previous) => [...previous, { ...entry, id }]);
         return id;
     };
 
     /** Performs update command. */
     const updateCommand = (id: string, updates: Partial<CommandHistoryEntry>) => {
-        setHistory((prev) =>
-            prev.map((entry) => (entry.id === id ? { ...entry, ...updates } : entry))
+        setHistory((previous) =>
+            previous.map((entry) => (entry.id === id ? { ...entry, ...updates } : entry))
         );
     };
 

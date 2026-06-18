@@ -62,12 +62,12 @@ describe("App", () => {
     it("navigates to login on global unauthorized events and removes the listener", () => {
         const { unmount } = render(<App />);
 
-        window.dispatchEvent(new Event("openclaw:unauthorized"));
+        dispatchEvent(new Event("openclaw:unauthorized"));
         expect(mocks.navigate).toHaveBeenCalledWith({ to: "/login" });
 
         mocks.navigate.mockClear();
         unmount();
-        window.dispatchEvent(new Event("openclaw:unauthorized"));
+        dispatchEvent(new Event("openclaw:unauthorized"));
         expect(mocks.navigate).not.toHaveBeenCalled();
     });
 });

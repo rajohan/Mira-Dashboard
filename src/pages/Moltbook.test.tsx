@@ -38,7 +38,7 @@ vi.mock("../components/features/moltbook", () => ({
 
 function mockMoltbookData(overrides = {}) {
     hooks.useMoltbookData.mockReturnValue({
-        error: null,
+        error: undefined,
         home: { unreadMessageCount: 3 },
         isLoading: false,
         myContent: {

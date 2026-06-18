@@ -55,7 +55,7 @@ function diagnosticMessageIdentity(message: ChatHistoryMessage): string | undefi
                 [
                     toolCall.id || "no-id-" + fallbackScope + "-" + index,
                     toolCall.name,
-                    JSON.stringify(toolCall.arguments ?? null),
+                    JSON.stringify(toolCall.arguments ?? undefined),
                 ].join("::")
             ),
         ].join("::");
@@ -150,8 +150,8 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
 }
 
 /** Performs message timestamp milliseconds. */
-function messageTimestampMs(message: ChatHistoryMessage): number | null {
-    return message.timestamp ? timestampFromDateString(message.timestamp) : null;
+function messageTimestampMs(message: ChatHistoryMessage): number | undefined {
+    return message.timestamp ? timestampFromDateString(message.timestamp) : undefined;
 }
 
 /** Performs insert messages by timestamp. */
@@ -160,19 +160,19 @@ function insertMessagesByTimestamp(
     messagesToInsert: ChatHistoryMessage[]
 ): ChatHistoryMessage[] {
     const merged = [...baseMessages];
-    const orderedInsertions = [...messagesToInsert].sort((left, right) => {
+    const orderedInsertions = [...messagesToInsert].toSorted((left, right) => {
         const leftTimestamp = messageTimestampMs(left);
         const rightTimestamp = messageTimestampMs(right);
 
-        if (leftTimestamp === null && rightTimestamp === null) {
+        if (leftTimestamp === undefined && rightTimestamp === undefined) {
             return 0;
         }
 
-        if (leftTimestamp === null) {
+        if (leftTimestamp === undefined) {
             return 1;
         }
 
-        if (rightTimestamp === null) {
+        if (rightTimestamp === undefined) {
             return -1;
         }
 
@@ -182,14 +182,14 @@ function insertMessagesByTimestamp(
     for (const message of orderedInsertions) {
         const timestamp = messageTimestampMs(message);
 
-        if (timestamp === null) {
+        if (timestamp === undefined) {
             merged.push(message);
             continue;
         }
 
         const insertionIndex = merged.findIndex((candidate) => {
             const candidateTimestamp = messageTimestampMs(candidate);
-            return candidateTimestamp !== null && candidateTimestamp > timestamp;
+            return candidateTimestamp !== undefined && candidateTimestamp > timestamp;
         });
 
         if (insertionIndex === -1) {
@@ -215,7 +215,9 @@ export function mergeWithRecentOptimisticMessages(
         return previousMessages;
     }
 
-    const nextIdentities = new Set(nextMessages.map(messageIdentity));
+    const nextIdentities = new Set(
+        nextMessages.map((message) => messageIdentity(message))
+    );
     const nextAssistantTexts = nextMessages
         .filter((message) => message.role.toLowerCase() === "assistant")
         .map((message) => message.text);
@@ -260,8 +262,10 @@ export function mergeWithRecentOptimisticMessages(
 
         const timestamp = message.timestamp
             ? timestampFromDateString(message.timestamp)
-            : null;
-        return timestamp !== null && now - timestamp < OPTIMISTIC_MESSAGE_RETENTION_MS;
+            : undefined;
+        return (
+            timestamp !== undefined && now - timestamp < OPTIMISTIC_MESSAGE_RETENTION_MS
+        );
     });
 
     return dedupeMessages(insertMessagesByTimestamp(nextMessages, recentMissingMessages));

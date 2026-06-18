@@ -165,13 +165,13 @@ describe("apiFetch", () => {
             bootstrapRequired: false,
         }));
         const listener = vi.fn();
-        window.addEventListener("openclaw:unauthorized", listener);
+        addEventListener("openclaw:unauthorized", listener);
         mockFetch({ ok: false, status: 401, json: async () => ({}) });
 
         await expect(apiFetch("/private")).rejects.toBeInstanceOf(UnauthorizedError);
 
         expect(authStore.state.isAuthenticated).toBe(false);
         expect(listener).toHaveBeenCalledTimes(1);
-        window.removeEventListener("openclaw:unauthorized", listener);
+        removeEventListener("openclaw:unauthorized", listener);
     });
 });

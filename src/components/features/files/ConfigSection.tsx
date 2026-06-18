@@ -4,14 +4,14 @@ import { useState } from "react";
 import { CONFIG_TOP_FILES, HOOKS_DIR_FILES } from "./fileConstants";
 
 /** Provides props for config section. */
-interface ConfigSectionProps {
-    selectedPath: string | null;
+interface ConfigSectionProperties {
+    selectedPath: string | undefined;
     onSelect: (path: string) => void;
 }
 
 /** Renders the config section UI. */
-export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
-    const [hooksDirExpanded, setHooksDirExpanded] = useState(false);
+export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProperties) {
+    const [hooksDirectoryExpanded, setHooksDirectoryExpanded] = useState(false);
 
     return (
         <div className="p-2">
@@ -19,11 +19,11 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
             <button
                 type="button"
                 aria-label="hooks"
-                aria-expanded={hooksDirExpanded}
+                aria-expanded={hooksDirectoryExpanded}
                 className="text-primary-200 hover:bg-primary-700/50 focus:ring-accent-400 flex w-full min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1.5 text-left text-sm focus:ring-2 focus:outline-none sm:py-1"
-                onClick={() => setHooksDirExpanded(!hooksDirExpanded)}
+                onClick={() => setHooksDirectoryExpanded(!hooksDirectoryExpanded)}
             >
-                {hooksDirExpanded ? (
+                {hooksDirectoryExpanded ? (
                     <ChevronDown size={14} className="text-primary-400 shrink-0" />
                 ) : (
                     <ChevronRight size={14} className="text-primary-400 shrink-0" />
@@ -31,7 +31,7 @@ export function ConfigSection({ selectedPath, onSelect }: ConfigSectionProps) {
                 <Folder size={16} className="flex-shrink-0 text-yellow-400" />
                 <span className="min-w-0 truncate">hooks</span>
             </button>
-            {hooksDirExpanded && (
+            {hooksDirectoryExpanded && (
                 <>
                     <div
                         className="text-primary-200 flex min-w-0 items-center gap-1 px-2 py-1.5 text-sm sm:py-1"

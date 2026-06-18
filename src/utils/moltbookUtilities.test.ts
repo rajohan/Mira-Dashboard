@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatTime, getMoltbookUrl, truncate } from "./moltbookUtils";
+import { formatTime, getMoltbookUrl, truncate } from "./moltbookUtilities";
 
 describe("moltbook utils", () => {
     it("truncates long text only when needed", () => {

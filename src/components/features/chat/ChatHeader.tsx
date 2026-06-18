@@ -2,7 +2,7 @@ import { Brain, type LucideIcon, Wrench } from "lucide-react";
 
 import type { Session } from "../../../types/session";
 import { formatDuration } from "../../../utils/format";
-import { formatSessionType } from "../../../utils/sessionUtils";
+import { formatSessionType } from "../../../utils/sessionUtilities";
 import { Button } from "../../ui/Button";
 import { Select } from "../../ui/Select";
 
@@ -14,7 +14,7 @@ interface Option {
 }
 
 /** Provides props for diagnostic toggle. */
-interface DiagnosticToggleProps {
+interface DiagnosticToggleProperties {
     active: boolean;
     icon: LucideIcon;
     label: string;
@@ -29,7 +29,7 @@ function DiagnosticToggle({
     label,
     title,
     onClick,
-}: DiagnosticToggleProps) {
+}: DiagnosticToggleProperties) {
     return (
         <Button
             type="button"
@@ -52,8 +52,8 @@ function DiagnosticToggle({
 }
 
 /** Provides props for chat header. */
-interface ChatHeaderProps {
-    selectedSession: Session | null;
+interface ChatHeaderProperties {
+    selectedSession: Session | undefined;
     selectedAgentId: string;
     selectedSessionKey: string;
     sessionOptions: Option[];
@@ -67,7 +67,7 @@ interface ChatHeaderProps {
 }
 
 /** Formats header status for display. */
-function formatHeaderStatus(selectedSession: Session | null): string {
+function formatHeaderStatus(selectedSession: Session | undefined): string {
     if (!selectedSession) {
         return "Choose a session to begin";
     }
@@ -90,7 +90,7 @@ export function ChatHeader({
     onToggleTools,
     onSelectAgent,
     onSelectSession,
-}: ChatHeaderProps) {
+}: ChatHeaderProperties) {
     return (
         <div className="border-primary-700 border-b pb-2 sm:pb-3">
             <div className="flex flex-col gap-2 sm:gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -134,7 +134,7 @@ export function ChatHeader({
                                 width="w-full"
                                 menuWidth="max-w-[min(42rem,calc(100vw-2rem))]"
                             />
-                        ) : null}
+                        ) : undefined}
                         <Select
                             value={selectedSessionKey}
                             onChange={onSelectSession}

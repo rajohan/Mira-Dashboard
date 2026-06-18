@@ -6,7 +6,7 @@ import { ExpandableCard, ReadOnlyField } from "../../ui/ExpandableCard";
 import { Input } from "../../ui/Input";
 
 /** Provides props for model section. */
-interface ModelSectionProps {
+interface ModelSectionProperties {
     defaultModel: string;
     fallbacks: string[];
     imageModel?: string;
@@ -31,7 +31,7 @@ export function ModelSection({
     imageGenerationModel,
     onSave,
     saving,
-}: ModelSectionProps) {
+}: ModelSectionProperties) {
     const [primary, setPrimary] = useState(defaultModel);
     const [fallbackText, setFallbackText] = useState(fallbacks.join(", "));
 

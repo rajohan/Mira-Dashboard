@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import type { FileNode } from "../types/file";
-import { getFileExtension, isJsonFile } from "../utils/fileUtils";
+import { getFileExtension, isJsonFile } from "../utils/fileUtilities";
 import { validateJsonString } from "../utils/json";
 import { apiFetchRequired } from "./useApi";
 import { fileKeys, useFileContent, useFiles, useSaveFile } from "./useFiles";
@@ -14,14 +14,14 @@ export const MAX_PREVIEW_SIZE = 100_000;
 export function useFileExplorerState() {
     const [files, setFiles] = useState<FileNode[]>([]);
     const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
-    const [selectedPath, setSelectedPath] = useState<string | null>(null);
+    const [selectedPath, setSelectedPath] = useState<string | undefined>(undefined);
     const [editedContent, setEditedContent] = useState<string>("");
     const [hasChanges, setHasChanges] = useState(false);
     const [largeFileWarning, setLargeFileWarning] = useState(false);
     const [markdownPreview, setMarkdownPreview] = useState(true);
     const [jsonPreview, setJsonPreview] = useState(true);
     const [codeEditMode, setCodeEditMode] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const [error, setError] = useState<string | undefined>(undefined);
 
     const queryClient = useQueryClient();
     const {
@@ -53,23 +53,23 @@ export function useFileExplorerState() {
         setMarkdownPreview(true);
         setJsonPreview(true);
         setCodeEditMode(false);
-        setError(null);
+        setError(undefined);
     }, [fileContent]);
 
     /** Responds to toggle events. */
     const handleToggle = async (path: string) => {
         const isCurrentlyExpanded = expandedPaths.has(path);
         if (isCurrentlyExpanded) {
-            setExpandedPaths((prev) => {
-                const next = new Set(prev);
+            setExpandedPaths((previous) => {
+                const next = new Set(previous);
                 next.delete(path);
                 return next;
             });
             return;
         }
 
-        setExpandedPaths((prev) => {
-            const next = new Set(prev);
+        setExpandedPaths((previous) => {
+            const next = new Set(previous);
             next.add(path);
             return next;
         });
@@ -106,7 +106,7 @@ export function useFileExplorerState() {
                         return n;
                     });
                 };
-                setFiles((prev) => updateNode(prev));
+                setFiles((previous) => updateNode(previous));
             } catch (error_) {
                 console.error("Failed to load directory:", error_);
             }
@@ -117,7 +117,7 @@ export function useFileExplorerState() {
     const handleSelect = (path: string) => {
         setSelectedPath(path);
         setHasChanges(false);
-        setError(null);
+        setError(undefined);
     };
 
     /** Responds to content change events. */
@@ -131,7 +131,7 @@ export function useFileExplorerState() {
         fileContent && getFileExtension(fileContent.path) === "json5" ? "json5" : "json";
     const jsonValidation = isJsonEditing
         ? validateJsonString(editedContent, jsonValidationMode)
-        : { valid: true, error: null };
+        : { valid: true, error: undefined };
 
     /** Responds to save events. */
     const handleSave = async () => {

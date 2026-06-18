@@ -51,14 +51,14 @@ describe("LogRotationCard", () => {
             mutate: dryRunMutate,
         });
         hooks.useRunLogRotationNow.mockReturnValue({
-            data: null,
+            data: undefined,
             isPending: false,
             mutate: realRunMutate,
         });
         hooks.useScheduledJobs.mockReturnValue({
             data: [
                 {
-                    cronExpression: null,
+                    cronExpression: undefined,
                     enabled: true,
                     id: "ops.log-rotation",
                     intervalSeconds: 86_400,
@@ -85,7 +85,7 @@ describe("LogRotationCard", () => {
     });
 
     it("shows empty last-run state when status is loaded", () => {
-        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
+        hooks.useLogRotationStatus.mockReturnValue({ data: undefined, isLoading: false });
         hooks.useRunLogRotationDryRun.mockReturnValue({
             isPending: false,
             mutate: vi.fn(),
@@ -99,7 +99,7 @@ describe("LogRotationCard", () => {
     });
 
     it("shows pending and empty states", () => {
-        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: true });
+        hooks.useLogRotationStatus.mockReturnValue({ data: undefined, isLoading: true });
         hooks.useRunLogRotationDryRun.mockReturnValue({
             isPending: true,
             mutate: vi.fn(),
@@ -115,7 +115,7 @@ describe("LogRotationCard", () => {
     });
 
     it("shows real-run pending and last real-run output states", () => {
-        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
+        hooks.useLogRotationStatus.mockReturnValue({ data: undefined, isLoading: false });
         hooks.useRunLogRotationDryRun.mockReturnValue({
             isPending: false,
             mutate: vi.fn(),
@@ -135,7 +135,7 @@ describe("LogRotationCard", () => {
                     name: "Log rotation",
                     nextRunAt: "2026-05-11T02:10:00.000Z",
                     scheduleType: "cron",
-                    timeOfDay: null,
+                    timeOfDay: undefined,
                 },
             ],
         });
@@ -149,7 +149,7 @@ describe("LogRotationCard", () => {
     });
 
     it("formats scheduled job fallback times in Oslo time", () => {
-        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
+        hooks.useLogRotationStatus.mockReturnValue({ data: undefined, isLoading: false });
         hooks.useRunLogRotationDryRun.mockReturnValue({
             isPending: false,
             mutate: vi.fn(),
@@ -158,7 +158,7 @@ describe("LogRotationCard", () => {
         hooks.useScheduledJobs.mockReturnValue({
             data: [
                 {
-                    cronExpression: null,
+                    cronExpression: undefined,
                     enabled: true,
                     id: "ops.log-rotation",
                     intervalSeconds: 86_400,
@@ -183,7 +183,7 @@ describe("LogRotationCard", () => {
                     name: "Log rotation",
                     nextRunAt: "not-a-date",
                     scheduleType: "cron",
-                    timeOfDay: null,
+                    timeOfDay: undefined,
                 },
             ],
         });
@@ -199,9 +199,9 @@ describe("LogRotationCard", () => {
                     id: "ops.log-rotation",
                     intervalSeconds: 600,
                     name: "Log rotation",
-                    nextRunAt: null,
+                    nextRunAt: undefined,
                     scheduleType: "cron",
-                    timeOfDay: null,
+                    timeOfDay: undefined,
                 },
             ],
         });
@@ -212,12 +212,12 @@ describe("LogRotationCard", () => {
         hooks.useScheduledJobs.mockReturnValue({
             data: [
                 {
-                    cronExpression: null,
+                    cronExpression: undefined,
                     enabled: true,
                     id: "ops.log-rotation",
                     intervalSeconds: 86_400,
                     name: "Log rotation",
-                    nextRunAt: null,
+                    nextRunAt: undefined,
                     scheduleType: "daily",
                     timeOfDay: "bad-time",
                 },
@@ -229,7 +229,7 @@ describe("LogRotationCard", () => {
     });
 
     it("renders disabled and interval scheduled job labels", () => {
-        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
+        hooks.useLogRotationStatus.mockReturnValue({ data: undefined, isLoading: false });
         hooks.useRunLogRotationDryRun.mockReturnValue({
             isPending: false,
             mutate: vi.fn(),
@@ -238,14 +238,14 @@ describe("LogRotationCard", () => {
         hooks.useScheduledJobs.mockReturnValue({
             data: [
                 {
-                    cronExpression: null,
+                    cronExpression: undefined,
                     enabled: false,
                     id: "ops.log-rotation",
                     intervalSeconds: 7200,
                     name: "Log rotation",
-                    nextRunAt: null,
+                    nextRunAt: undefined,
                     scheduleType: "interval",
-                    timeOfDay: null,
+                    timeOfDay: undefined,
                 },
             ],
         });
@@ -256,14 +256,14 @@ describe("LogRotationCard", () => {
         hooks.useScheduledJobs.mockReturnValue({
             data: [
                 {
-                    cronExpression: null,
+                    cronExpression: undefined,
                     enabled: true,
                     id: "ops.log-rotation",
                     intervalSeconds: 7200,
                     name: "Log rotation",
                     nextRunAt: "2026-05-11T02:10:00.000Z",
                     scheduleType: "interval",
-                    timeOfDay: null,
+                    timeOfDay: undefined,
                 },
             ],
         });
@@ -274,14 +274,14 @@ describe("LogRotationCard", () => {
         hooks.useScheduledJobs.mockReturnValue({
             data: [
                 {
-                    cronExpression: null,
+                    cronExpression: undefined,
                     enabled: true,
                     id: "ops.log-rotation",
                     intervalSeconds: 900,
                     name: "Log rotation",
                     nextRunAt: "2026-05-11T02:10:00.000Z",
                     scheduleType: "interval",
-                    timeOfDay: null,
+                    timeOfDay: undefined,
                 },
             ],
         });
@@ -291,7 +291,7 @@ describe("LogRotationCard", () => {
     });
 
     it("does not fall through to interval labels when typed schedules miss details", () => {
-        hooks.useLogRotationStatus.mockReturnValue({ data: null, isLoading: false });
+        hooks.useLogRotationStatus.mockReturnValue({ data: undefined, isLoading: false });
         hooks.useRunLogRotationDryRun.mockReturnValue({
             isPending: false,
             mutate: vi.fn(),
@@ -300,14 +300,14 @@ describe("LogRotationCard", () => {
         hooks.useScheduledJobs.mockReturnValue({
             data: [
                 {
-                    cronExpression: null,
+                    cronExpression: undefined,
                     enabled: true,
                     id: "ops.log-rotation",
                     intervalSeconds: 7200,
                     name: "Log rotation",
                     nextRunAt: "2026-05-11T02:10:00.000Z",
                     scheduleType: "daily",
-                    timeOfDay: null,
+                    timeOfDay: undefined,
                 },
             ],
         });
@@ -319,14 +319,14 @@ describe("LogRotationCard", () => {
         hooks.useScheduledJobs.mockReturnValue({
             data: [
                 {
-                    cronExpression: null,
+                    cronExpression: undefined,
                     enabled: true,
                     id: "ops.log-rotation",
                     intervalSeconds: 7200,
                     name: "Log rotation",
                     nextRunAt: "2026-05-11T02:10:00.000Z",
                     scheduleType: "cron",
-                    timeOfDay: null,
+                    timeOfDay: undefined,
                 },
             ],
         });

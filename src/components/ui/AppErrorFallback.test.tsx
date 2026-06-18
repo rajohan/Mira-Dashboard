@@ -26,8 +26,8 @@ describe("AppErrorFallback", () => {
 
     it("triggers a full page reload", async () => {
         const reload = vi.fn();
-        const originalLocation = window.location;
-        Object.defineProperty(window, "location", {
+        const originalLocation = location;
+        Object.defineProperty(globalThis, "location", {
             configurable: true,
             value: { reload },
         });
@@ -43,7 +43,7 @@ describe("AppErrorFallback", () => {
             await userEvent.click(screen.getByRole("button", { name: "Full reload" }));
             expect(reload).toHaveBeenCalledTimes(1);
         } finally {
-            Object.defineProperty(window, "location", {
+            Object.defineProperty(globalThis, "location", {
                 configurable: true,
                 value: originalLocation,
             });

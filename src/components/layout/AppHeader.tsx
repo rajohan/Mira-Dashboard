@@ -8,7 +8,7 @@ import { Button } from "../ui/Button";
 import { NotificationBell } from "./NotificationBell";
 
 /** Provides props for app header. */
-interface AppHeaderProps {
+interface AppHeaderProperties {
     title: string;
     isSidebarOpen: boolean;
     sidebarId: string;
@@ -21,7 +21,7 @@ export function AppHeader({
     isSidebarOpen,
     sidebarId,
     onToggleSidebar,
-}: AppHeaderProps) {
+}: AppHeaderProperties) {
     const navigate = useNavigate();
     const { isConnected } = useOpenClawSocket();
     const { data: health, isError: isBackendError } = useHealth();

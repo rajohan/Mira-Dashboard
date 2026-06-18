@@ -10,7 +10,7 @@ import {
     getCronStateValue,
     getCronStatusVariant,
     sortCronJobs,
-} from "./cronUtils";
+} from "./cronUtilities";
 
 describe("cron utils", () => {
     it("derives stable ids and display names", () => {
@@ -28,13 +28,21 @@ describe("cron utils", () => {
             { name: "Alpha" },
         ] as CronJob[];
 
-        expect(sortCronJobs(jobs).map(getCronJobName)).toEqual(["Alpha", "Beta", "Zoo"]);
-        expect(jobs.map(getCronJobName)).toEqual(["Zoo", "Beta", "Alpha"]);
+        expect(sortCronJobs(jobs).map((cronJob) => getCronJobName(cronJob))).toEqual([
+            "Alpha",
+            "Beta",
+            "Zoo",
+        ]);
+        expect(jobs.map((cronJob) => getCronJobName(cronJob))).toEqual([
+            "Zoo",
+            "Beta",
+            "Alpha",
+        ]);
         expect(
             sortCronJobs([
                 { name: "Enabled", enabled: true },
                 { name: "Disabled", enabled: false },
-            ] as CronJob[]).map(getCronJobName)
+            ] as CronJob[]).map((cronJob) => getCronJobName(cronJob))
         ).toEqual(["Enabled", "Disabled"]);
     });
 
@@ -46,7 +54,7 @@ describe("cron utils", () => {
             )
         ).toBe("ok");
         expect(
-            getCronStateValue({ state: null } as unknown as CronJob, "lastRunStatus")
+            getCronStateValue({ state: undefined } as unknown as CronJob, "lastRunStatus")
         ).toBeUndefined();
         expect(getCronStateValue({} as CronJob, "lastRunStatus")).toBeUndefined();
     });

@@ -91,13 +91,13 @@ vi.mock("../components/ui/ConfirmModal", () => ({
                     {confirmLabel}
                 </button>
             </section>
-        ) : null,
+        ) : undefined,
 }));
 
 function mockPullRequests(overrides = {}) {
     hooks.usePullRequests.mockReturnValue({
         data: hooks.pullRequests,
-        error: null,
+        error: undefined,
         isLoading: false,
         refetch: hooks.refetch,
     });
@@ -116,7 +116,7 @@ function mockPullRequests(overrides = {}) {
     });
     hooks.useProductionCheckout.mockReturnValue({
         data: hooks.productionCheckout,
-        error: null,
+        error: undefined,
     });
     hooks.useApprovePullRequest.mockReturnValue({
         isPending: false,
@@ -204,7 +204,7 @@ describe("PullRequests page", () => {
         mockPullRequests({
             pullRequests: {
                 data: [],
-                error: null,
+                error: undefined,
                 isLoading: true,
                 refetch: hooks.refetch,
             },
@@ -229,7 +229,7 @@ describe("PullRequests page", () => {
         mockPullRequests({
             pullRequests: {
                 data: [],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -288,7 +288,7 @@ describe("PullRequests page", () => {
                     isClean: false,
                     isSafeForDeploy: false,
                 },
-                error: null,
+                error: undefined,
             },
         });
 
@@ -312,7 +312,7 @@ describe("PullRequests page", () => {
                         title: "Draft dashboard change",
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -338,7 +338,7 @@ describe("PullRequests page", () => {
                         title: "Failing dashboard change",
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -371,7 +371,7 @@ describe("PullRequests page", () => {
                         title: "Needs review",
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -422,7 +422,7 @@ describe("PullRequests page", () => {
                         title: "Already reviewed",
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -437,7 +437,7 @@ describe("PullRequests page", () => {
                             reviewerCanApprove: false,
                         },
                     ],
-                    error: null,
+                    error: undefined,
                     isLoading: false,
                     refetch: hooks.refetch,
                 },
@@ -489,7 +489,7 @@ describe("PullRequests page", () => {
                         statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -517,7 +517,7 @@ describe("PullRequests page", () => {
                         statusCheckRollup: [{ conclusion: "SUCCESS", name: "ci" }],
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -545,7 +545,7 @@ describe("PullRequests page", () => {
                         mergeable: "MERGEABLE",
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -569,7 +569,7 @@ describe("PullRequests page", () => {
                         mergeable: undefined,
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -595,7 +595,7 @@ describe("PullRequests page", () => {
                         mergeable: "MERGEABLE",
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -620,7 +620,7 @@ describe("PullRequests page", () => {
                         mergeable: "MERGEABLE",
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -645,7 +645,7 @@ describe("PullRequests page", () => {
                         mergeable: "MERGEABLE",
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -667,7 +667,7 @@ describe("PullRequests page", () => {
                         mergeable: "DIRTY",
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -692,7 +692,7 @@ describe("PullRequests page", () => {
                         mergeable: undefined,
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -716,7 +716,7 @@ describe("PullRequests page", () => {
                         title: "Waiting for checks",
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -742,7 +742,7 @@ describe("PullRequests page", () => {
                         title: "Needs CI state mapping",
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -767,7 +767,7 @@ describe("PullRequests page", () => {
                         title: "No CI reported",
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -788,7 +788,7 @@ describe("PullRequests page", () => {
                     branch: "fix/gateway-v4-live-streaming",
                     isSafeForDeploy: false,
                 },
-                error: null,
+                error: undefined,
             },
         });
 
@@ -826,7 +826,7 @@ describe("PullRequests page", () => {
                     branch: "feature-branch",
                     isSafeForDeploy: false,
                 },
-                error: null,
+                error: undefined,
             },
             deployments: { data: [] },
             pullRequests: {
@@ -877,7 +877,7 @@ describe("PullRequests page", () => {
                         title: "Malformed checks",
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -907,7 +907,7 @@ describe("PullRequests page", () => {
         const { rerender } = render(<PullRequests />);
 
         mockPullRequests({
-            checkout: { data: undefined, error: null },
+            checkout: { data: undefined, error: undefined },
         });
         rerender(<PullRequests />);
         expect(screen.getByText("Checking production checkout")).toBeInTheDocument();
@@ -922,7 +922,7 @@ describe("PullRequests page", () => {
                     root: "/tmp/wrong",
                     upstream: "",
                 },
-                error: null,
+                error: undefined,
             },
         });
         rerender(<PullRequests />);
@@ -978,25 +978,25 @@ describe("PullRequests page", () => {
             pullRequests: {
                 data: [
                     {
-                        additions: null,
+                        additions: undefined,
                         author: { login: "app/dependabot" },
                         baseRefName: "main",
                         body: String.raw`[Docs](https://example.com)\nLine two`,
-                        changedFiles: null,
-                        deletions: null,
+                        changedFiles: undefined,
+                        deletions: undefined,
                         headRefName: "deps/react",
                         mergeStateStatus: "UNSTABLE",
                         mergeable: "DIRTY",
                         number: 20,
                         reviewDecision: "REVIEW_DISMISSED",
-                        statusCheckRollup: [null, "bad", {}, { status: "QUEUED" }],
+                        statusCheckRollup: [undefined, "bad", {}, { status: "QUEUED" }],
                         title: "Bump React",
                         updatedAt: "2026-05-11T00:00:00.000Z",
                         url: "https://github.com/rajohan/Mira-Dashboard/pull/20",
                     },
                     {
                         ...hooks.pullRequests[0],
-                        author: null,
+                        author: undefined,
                         mergeStateStatus: undefined,
                         mergeable: undefined,
                         number: 21,
@@ -1005,7 +1005,7 @@ describe("PullRequests page", () => {
                         title: "External unknown author",
                     },
                 ],
-                error: null,
+                error: undefined,
                 isLoading: false,
                 refetch: hooks.refetch,
             },
@@ -1079,7 +1079,7 @@ describe("PullRequests page", () => {
             deployment: undefined,
             message: "Merged and deploy started",
         });
-        hooks.deploy.mockResolvedValueOnce({ deployment: null });
+        hooks.deploy.mockResolvedValueOnce({ deployment: undefined });
 
         render(<PullRequests />);
 

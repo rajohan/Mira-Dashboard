@@ -24,9 +24,9 @@ describe("socketMessageRouter", () => {
         vi.mocked(replaceSessionsFromWebSocket).mockClear();
     });
 
-    it("returns null for invalid envelope", () => {
-        expect(handleSocketMessage("not-an-object")).toBeNull();
-        expect(handleSocketMessage(null)).toBeNull();
+    it("returns undefined for invalid envelope", () => {
+        expect(handleSocketMessage("not-an-object")).toBeUndefined();
+        expect(handleSocketMessage(undefined)).toBeUndefined();
     });
 
     it("returns connection state for state type", () => {
@@ -48,10 +48,10 @@ describe("socketMessageRouter", () => {
         expect(handleSocketMessage({ type: "disconnected" })).toBe(false);
     });
 
-    it("returns null for event types without connection state", () => {
+    it("returns undefined for event types without connection state", () => {
         expect(
             handleSocketMessage({ type: "event", event: "other", payload: [] })
-        ).toBeNull();
+        ).toBeUndefined();
     });
 
     it("handles agents event", () => {

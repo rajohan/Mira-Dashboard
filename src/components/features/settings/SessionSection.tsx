@@ -6,14 +6,18 @@ import { ExpandableCard } from "../../ui/ExpandableCard";
 import { Input } from "../../ui/Input";
 
 /** Provides props for session section. */
-interface SessionSectionProps {
+interface SessionSectionProperties {
     idleMinutes: number;
     onSave: (idleMinutes: number) => Promise<void>;
     saving: boolean;
 }
 
 /** Renders the session section UI. */
-export function SessionSection({ idleMinutes, onSave, saving }: SessionSectionProps) {
+export function SessionSection({
+    idleMinutes,
+    onSave,
+    saving,
+}: SessionSectionProperties) {
     const form = useForm({
         defaultValues: { idleMinutes },
         onSubmit: async ({ value }) => {
@@ -24,8 +28,8 @@ export function SessionSection({ idleMinutes, onSave, saving }: SessionSectionPr
     return (
         <ExpandableCard title="Session" icon={Clock}>
             <form
-                onSubmit={(e) => {
-                    e.preventDefault();
+                onSubmit={(event_) => {
+                    event_.preventDefault();
                     form.handleSubmit();
                 }}
                 className="space-y-4"
@@ -39,8 +43,8 @@ export function SessionSection({ idleMinutes, onSave, saving }: SessionSectionPr
                             <Input
                                 type="number"
                                 value={field.state.value}
-                                onChange={(e) =>
-                                    field.handleChange(Number(e.target.value))
+                                onChange={(event_) =>
+                                    field.handleChange(Number(event_.target.value))
                                 }
                                 min={0}
                                 max={1440}

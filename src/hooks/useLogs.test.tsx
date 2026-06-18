@@ -11,7 +11,9 @@ describe("log hooks", () => {
             .mockResolvedValueOnce({
                 ok: true,
                 status: 200,
-                json: async () => ({ logs: [{ name: "app.log" }, { name: "" }, null] }),
+                json: async () => ({
+                    logs: [{ name: "app.log" }, { name: "" }, undefined],
+                }),
             })
             .mockResolvedValueOnce({
                 ok: true,
@@ -47,7 +49,7 @@ describe("log hooks", () => {
             .mockResolvedValueOnce({
                 ok: true,
                 status: 200,
-                json: async () => ({ content: null }),
+                json: async () => ({ content: undefined }),
             });
         vi.stubGlobal("fetch", fetchMock);
         const wrapper = createQueryWrapper();
@@ -71,7 +73,7 @@ describe("log hooks", () => {
         const fetchMock = vi.fn();
         vi.stubGlobal("fetch", fetchMock);
 
-        const { result } = renderHook(() => useLogContent(null, 20), {
+        const { result } = renderHook(() => useLogContent(undefined, 20), {
             wrapper: createQueryWrapper(),
         });
 

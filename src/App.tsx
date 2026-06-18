@@ -20,9 +20,9 @@ function App() {
             void router.navigate({ to: "/login" });
         };
 
-        window.addEventListener("openclaw:unauthorized", onUnauthorized);
+        addEventListener("openclaw:unauthorized", onUnauthorized);
         return () => {
-            window.removeEventListener("openclaw:unauthorized", onUnauthorized);
+            removeEventListener("openclaw:unauthorized", onUnauthorized);
         };
     }, []);
 

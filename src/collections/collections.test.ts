@@ -164,7 +164,7 @@ describe("collections", () => {
         replaceSessionsFromWebSocket([
             { key: "new-session", id: "new-session" },
             { key: "  ", id: "" },
-            null,
+            undefined,
         ]);
 
         expect(mockUtils.writeDelete).toHaveBeenCalledWith("old-session");
