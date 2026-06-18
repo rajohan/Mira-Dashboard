@@ -2690,6 +2690,49 @@ describe("log rotation service", { concurrency: false }, () => {
         await assert.rejects(() => fsPromises.stat(`${retained}.gz`), /ENOENT/u);
     });
 
+    it("applies archive-only retention to Jackett generated log archives", async () => {
+        const root = path.join(tempDir, "jackett", "Jackett");
+        await mkdir(root, { recursive: true });
+        const archives = [
+            "log.txt.20260618.00621.txt",
+            "log.txt.20260618.00620.txt",
+            "log.txt.20260618.00619.txt",
+            "log.txt.20260618.00618.txt",
+            "log.txt.20260618.00617.txt",
+        ].map((name) => path.join(root, name));
+        const activeLog = path.join(root, "log.txt");
+        for (const [index, archive] of archives.entries()) {
+            await writeFile(archive, `archive ${index}`, "utf8");
+            const timestamp = new Date(`2026-06-18T12:0${index}:00.000Z`);
+            await utimes(archive, timestamp, timestamp);
+        }
+        await writeFile(activeLog, "active", "utf8");
+        const config = await writeConfig(tempDir, {
+            version: 1,
+            approvedRoots: [path.join(tempDir, "jackett")],
+            groups: [
+                {
+                    name: "jackett-generated-logs",
+                    archiveOnly: true,
+                    archivePaths: [path.join(root, "log.txt.[0-9]*.txt")],
+                    archiveRetentionScope: "directory",
+                    compress: true,
+                    keep: 3,
+                    keepDays: 7,
+                },
+            ],
+        });
+
+        const summary = await runLogRotationService({ dryRun: true, config });
+
+        assert.equal(summary.ok, true);
+        assert.equal(summary.groups[0]?.checkedFiles, 5);
+        assert.equal(summary.groups[0]?.compressedFiles, 3);
+        assert.equal(summary.groups[0]?.deletedArchives, 2);
+        assert.deepEqual(summary.groups[0]?.name, "jackett-generated-logs");
+        assert.ok(await fsPromises.stat(activeLog));
+    });
+
     it("reports missing literal paths when missingOk is false", async () => {
         const root = path.join(tempDir, "required-logs");
         await mkdir(root);

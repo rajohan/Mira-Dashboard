@@ -40,6 +40,20 @@
       "compress": true,
       "keep": 25,
       "keepDays": 7
+    },
+    {
+      "name": "jackett-generated-logs",
+      "enabled": true,
+      "paths": [],
+      "archiveOnly": true,
+      "archivePaths": [
+        "/opt/docker/data/jackett/Jackett/log.txt.[0-9]*.txt"
+      ],
+      "archiveRetentionScope": "directory",
+      "archiveMinAgeMinutes": 60,
+      "compress": true,
+      "keep": 3,
+      "keepDays": 7
     }
   ]
 }
