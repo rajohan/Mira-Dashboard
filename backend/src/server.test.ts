@@ -53,6 +53,7 @@ let sessionsHandler: (typeof import("./server.js"))["sessionsHandler"];
 let shouldSkipGlobalJsonParser: (typeof import("./server.js"))["shouldSkipGlobalJsonParser"];
 let handleServerListening: (typeof import("./serverStart.js"))["handleServerListening"];
 let isDirectEntrypoint: (typeof import("./serverStart.js"))["isDirectEntrypoint"];
+let resolveGatewayToken: (typeof import("./serverStart.js"))["resolveGatewayToken"];
 let serverStartTesting: (typeof import("./serverStart.js"))["__testing"];
 let shouldStartOnImport: (typeof import("./serverStart.js"))["shouldStartOnImport"];
 let startBackendServer: (typeof import("./serverStart.js"))["startBackendServer"];
@@ -262,6 +263,7 @@ describe("server bootstrap", () => {
                 handleServerListening,
                 __testing: serverStartTesting,
                 isDirectEntrypoint,
+                resolveGatewayToken,
                 shouldStartOnImport,
                 startBackendServer,
             } = await import("./serverStart.js"));
@@ -562,6 +564,7 @@ describe("server bootstrap", () => {
             "listening"
         );
         const originalNodeEnv = process.env.NODE_ENV;
+        const originalOpenClawGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
         const originalToken = process.env.OPENCLAW_TOKEN;
         const originalStartOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT;
         const originalConsoleWarn = console.warn;
@@ -584,9 +587,39 @@ describe("server bootstrap", () => {
             errors.push(args);
         };
         try {
+            delete process.env.OPENCLAW_GATEWAY_TOKEN;
+            assert.equal(
+                resolveGatewayToken(
+                    {
+                        OPENCLAW_GATEWAY_TOKEN: " gateway-token ",
+                        OPENCLAW_TOKEN: "legacy-token",
+                    },
+                    () => "persisted-token"
+                ),
+                "gateway-token"
+            );
+            assert.equal(
+                resolveGatewayToken(
+                    {
+                        OPENCLAW_TOKEN: " legacy-token ",
+                    },
+                    () => "persisted-token"
+                ),
+                "legacy-token"
+            );
+            assert.equal(
+                resolveGatewayToken({}, () => " persisted-token "),
+                "persisted-token"
+            );
             process.env.OPENCLAW_TOKEN = "test-token";
             handleServerListening();
             assert.equal(initializedToken, "test-token");
+            process.env.OPENCLAW_GATEWAY_TOKEN = "runtime-gateway-token";
+            db.prepare(
+                "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+            ).run("stale-persisted-token", dateToISOString(new Date()));
+            handleServerListening();
+            assert.equal(initializedToken, "runtime-gateway-token");
             stopScheduledJobScheduler();
             process.env.NODE_ENV = "production";
             server.emit("close");
@@ -704,7 +737,9 @@ describe("server bootstrap", () => {
             gateway.init = (token: string) => {
                 initializedToken = token;
             };
+            delete process.env.OPENCLAW_GATEWAY_TOKEN;
             delete process.env.OPENCLAW_TOKEN;
+            db.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
             initializedToken = undefined;
             handleServerListening();
             assert.equal(initializedToken, undefined);
@@ -896,6 +931,11 @@ describe("server bootstrap", () => {
             await import(`./serverStart.js?entry=${Date.now()}`);
             assert.equal(listenedPort, 0);
         } finally {
+            if (originalOpenClawGatewayToken === undefined) {
+                delete process.env.OPENCLAW_GATEWAY_TOKEN;
+            } else {
+                process.env.OPENCLAW_GATEWAY_TOKEN = originalOpenClawGatewayToken;
+            }
             if (originalToken === undefined) {
                 delete process.env.OPENCLAW_TOKEN;
             } else {

@@ -80,13 +80,25 @@ function queueQuotaNotificationCheckAfterSeed(
     })();
 }
 
+export function resolveGatewayToken(
+    env = process.env,
+    persistedToken = getPersistedGatewayToken
+): string | undefined {
+    return (
+        env.OPENCLAW_GATEWAY_TOKEN?.trim() ||
+        env.OPENCLAW_TOKEN?.trim() ||
+        persistedToken()?.trim() ||
+        undefined
+    );
+}
+
 /** Starts Gateway and notification monitors after the HTTP server is listening. */
 export function handleServerListening(): void {
     let gatewayStarted = false;
     let scheduledJobSchedulerStarted = false;
     let shouldQueueStartupQuotaCheck = true;
     try {
-        const token = getPersistedGatewayToken() || process.env.OPENCLAW_TOKEN;
+        const token = resolveGatewayToken();
         if (token) {
             gateway.init(token);
             gatewayStarted = true;
