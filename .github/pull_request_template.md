@@ -12,7 +12,6 @@
 - [ ] Backend lint: `bun run lint` from `backend/`
 - [ ] Backend tests/coverage: `bun run test:coverage` from `backend/`
 - [ ] Backend build: `bun run build` from `backend/`
-- [ ] Playwright smoke tests: `bun run test:e2e`
 - [ ] Manual UI/API smoke check, if relevant
 
 ## Risk checklist
