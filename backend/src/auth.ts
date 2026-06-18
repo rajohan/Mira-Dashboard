@@ -98,13 +98,9 @@ function forwardedAddresses(forwardedFor: string): string[] {
 
 function clientAddressFromTrustedChain(
     peerAddress: string | undefined,
-    forwardedFor: string | undefined
+    forwardedFor: string
 ): string | undefined {
     let clientAddress = peerAddress;
-    if (!isLoopbackAddress(clientAddress) || !forwardedFor) {
-        return clientAddress;
-    }
-
     const forwardedChain = forwardedAddresses(forwardedFor);
     for (let index = forwardedChain.length - 1; index >= 0; index -= 1) {
         const address = forwardedChain[index];
@@ -126,15 +122,15 @@ export function isLoopbackRequest(request: express.Request | IncomingMessage): b
     const peerAddress = remoteAddress(request);
     const trustForwardedHeaders = isLoopbackAddress(peerAddress);
     const headers = request.headers ?? {};
+    const realIp = headerValue(headers["x-real-ip"]);
+    if (trustForwardedHeaders && realIp) {
+        return isLoopbackAddress(realIp.trim());
+    }
     const forwardedFor = headerValue(headers["x-forwarded-for"]);
     if (trustForwardedHeaders && forwardedFor) {
         return isLoopbackAddress(
             clientAddressFromTrustedChain(peerAddress, forwardedFor)
         );
-    }
-    const realIp = headerValue(headers["x-real-ip"]);
-    if (trustForwardedHeaders && realIp) {
-        return isLoopbackAddress(realIp.trim());
     }
     return isLoopbackAddress(peerAddress);
 }

@@ -74,6 +74,26 @@ describe("auth helpers", () => {
         );
         assert.equal(
             isLoopbackRequest({
+                headers: {
+                    "x-forwarded-for": "127.0.0.1",
+                    "x-real-ip": "10.0.0.5",
+                },
+                socket: { remoteAddress: "127.0.0.1" },
+            } as never),
+            false
+        );
+        assert.equal(
+            isLoopbackRequest({
+                headers: {
+                    "x-forwarded-for": "10.0.0.5",
+                    "x-real-ip": "127.0.0.1",
+                },
+                socket: { remoteAddress: "127.0.0.1" },
+            } as never),
+            true
+        );
+        assert.equal(
+            isLoopbackRequest({
                 headers: { "x-forwarded-for": ["127.0.0.1", "10.0.0.5"] },
                 socket: { remoteAddress: "10.0.0.5" },
             } as never),
