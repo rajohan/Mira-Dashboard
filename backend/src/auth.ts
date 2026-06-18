@@ -89,6 +89,13 @@ function headerValue(value: string | string[] | undefined): string | undefined {
     return Array.isArray(value) ? value[0] : value;
 }
 
+function lastForwardedAddress(forwardedFor: string): string | undefined {
+    return forwardedFor
+        .split(",")
+        .map((address) => address.trim())
+        .findLast(Boolean);
+}
+
 function remoteAddress(request: express.Request | IncomingMessage): string | undefined {
     return request.socket?.remoteAddress ?? request.connection?.remoteAddress;
 }
@@ -100,7 +107,7 @@ export function isLoopbackRequest(request: express.Request | IncomingMessage): b
     const headers = request.headers ?? {};
     const forwardedFor = headerValue(headers["x-forwarded-for"]);
     if (trustForwardedHeaders && forwardedFor) {
-        return isLoopbackAddress(forwardedFor.split(",", 1)[0]?.trim());
+        return isLoopbackAddress(lastForwardedAddress(forwardedFor));
     }
     const realIp = headerValue(headers["x-real-ip"]);
     if (trustForwardedHeaders && realIp) {
