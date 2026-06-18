@@ -137,6 +137,8 @@ async function startServer() {
             MIRA_DASHBOARD_OPENCLAW_HOME: dashboardOpenClawHome,
             MIRA_DASHBOARD_DISABLE_SCHEDULER: "1",
             OPENCLAW_HOME: openClawHome,
+            OPENCLAW_GATEWAY_TOKEN: "",
+            OPENCLAW_TOKEN: "",
             PORT: String(port),
             WORKSPACE_ROOT: workspaceRoot,
             ...(process.env.NODE_V8_COVERAGE
