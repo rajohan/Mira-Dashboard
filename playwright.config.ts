@@ -17,7 +17,7 @@ export default defineConfig({
     },
     webServer: [
         {
-            command: `npm --prefix backend run build && rm -rf .test-openclaw .test-data && mkdir -p .test-openclaw/media .test-data && MIRA_DASHBOARD_DB_PATH=${e2eDbPath} node --input-type=module -e 'const auth = await import("./backend/dist/auth.js"); auth.createFirstUser("e2e-user", "correct horse battery staple");' && MIRA_DASHBOARD_DB_PATH=${e2eDbPath} MIRA_DASHBOARD_DISABLE_SCHEDULER=1 OPENCLAW_HOME=$PWD/.test-openclaw PORT=${backendPort} node backend/dist/serverStart.js`,
+            command: `npm --prefix backend run build && rm -rf .test-openclaw .test-data && mkdir -p .test-openclaw/media .test-data && MIRA_DASHBOARD_DB_PATH=${e2eDbPath} node --input-type=module -e 'const auth = await import("./backend/dist/auth.js"); auth.createFirstUser("e2e-user", "correct horse battery staple");' && MIRA_DASHBOARD_DB_PATH=${e2eDbPath} MIRA_DASHBOARD_DISABLE_SCHEDULER=1 OPENCLAW_GATEWAY_TOKEN= OPENCLAW_TOKEN= OPENCLAW_HOME=$PWD/.test-openclaw PORT=${backendPort} node backend/dist/serverStart.js`,
             url: `http://127.0.0.1:${backendPort}/api/health`,
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,
