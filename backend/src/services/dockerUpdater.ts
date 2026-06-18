@@ -640,6 +640,16 @@ function registryHostFromUrl(url: string): string {
     }
 }
 
+function isTrustedTokenRealm(registry: string, tokenUrl: URL): boolean {
+    const hostname = tokenUrl.hostname.toLowerCase();
+    if (["docker.io", "registry.docker.io", "registry-1.docker.io"].includes(registry)) {
+        return ["auth.docker.io", "registry.docker.io", "registry-1.docker.io"].includes(
+            hostname
+        );
+    }
+    return hostname === registry;
+}
+
 function basicAuthorization(credentials: RegistryCredentials): string {
     return `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toBase64()}`;
 }
@@ -718,8 +728,10 @@ async function fetchRegistryResponse(
         const tokenUrl = new URL(challenge.realm);
         if (challenge.service) tokenUrl.searchParams.set("service", challenge.service);
         if (challenge.scope) tokenUrl.searchParams.set("scope", challenge.scope);
-        const registry = tokenUrl.searchParams.get("service") || registryHostFromUrl(url);
-        const credentials = registryCredentials(registry);
+        const registry = registryHostFromUrl(url);
+        const credentials = isTrustedTokenRealm(registry, tokenUrl)
+            ? registryCredentials(registry)
+            : null;
         const tokenResponse = await fetch(tokenUrl, {
             headers: {
                 Accept: "application/json",
@@ -2213,6 +2225,7 @@ export const __testing = {
     pruneDanglingImagesBestEffort,
     registryCredentials,
     registryHostFromUrl,
+    isTrustedTokenRealm,
     setNestedValue,
     shouldBlockGlobalUpdateForDiscoveryFailure,
     shouldBlockManualUpdateForDiscoveryFailure,

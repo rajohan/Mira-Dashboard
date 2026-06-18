@@ -89,19 +89,24 @@ function headerValue(value: string | string[] | undefined): string | undefined {
     return Array.isArray(value) ? value[0] : value;
 }
 
+function remoteAddress(request: express.Request | IncomingMessage): string | undefined {
+    return request.socket?.remoteAddress ?? request.connection?.remoteAddress;
+}
+
 /** Returns whether loopback request. */
 export function isLoopbackRequest(request: express.Request | IncomingMessage): boolean {
+    const peerAddress = remoteAddress(request);
+    const trustForwardedHeaders = isLoopbackAddress(peerAddress);
     const headers = request.headers ?? {};
     const forwardedFor = headerValue(headers["x-forwarded-for"]);
-    if (forwardedFor) {
+    if (trustForwardedHeaders && forwardedFor) {
         return isLoopbackAddress(forwardedFor.split(",", 1)[0]?.trim());
     }
     const realIp = headerValue(headers["x-real-ip"]);
-    if (realIp) {
+    if (trustForwardedHeaders && realIp) {
         return isLoopbackAddress(realIp.trim());
     }
-    const remoteAddress = request.socket?.remoteAddress;
-    return isLoopbackAddress(remoteAddress);
+    return isLoopbackAddress(peerAddress);
 }
 
 /** Performs hash password. */
