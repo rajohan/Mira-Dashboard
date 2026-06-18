@@ -222,9 +222,9 @@ function mockScheduledJobs(overrides = {}) {
                 isRunning: false,
                 lastRun: null,
                 name: "Backup",
-                nextRunAt: null,
+                nextRunAt: "2026-06-18T02:10:00.000Z",
                 scheduleType: "daily",
-                timeOfDay: "04:10",
+                timeOfDay: "02:10",
                 updatedAt: "2026-06-17T21:00:10.000Z",
             },
         ],
@@ -413,6 +413,9 @@ describe("Jobs page", () => {
         render(<Jobs />);
 
         expect(screen.getByText("Dashboard jobs")).toBeInTheDocument();
+        expect(screen.getByText("Dashboard jobs").parentElement).toHaveClass(
+            "xl:max-h-[calc(100vh-10rem)]"
+        );
         expect(screen.getAllByText("Backup").length).toBeGreaterThan(0);
         expect(screen.queryByText("OpenClaw unavailable")).not.toBeInTheDocument();
     });
@@ -526,9 +529,9 @@ describe("Jobs page", () => {
                         triggerType: "schedule",
                     },
                     name: "Running job",
-                    nextRunAt: null,
+                    nextRunAt: "2026-06-18T03:30:00.000Z",
                     scheduleType: "daily",
-                    timeOfDay: "05:30",
+                    timeOfDay: "03:30",
                     updatedAt: "2026-06-17T21:00:10.000Z",
                 },
                 {
@@ -618,6 +621,9 @@ describe("Jobs page", () => {
         await user.click(screen.getByRole("button", { name: /Running job/ }));
         expect(screen.getByText("schedule run #9")).toBeInTheDocument();
 
+        await user.click(screen.getByRole("button", { name: /Daily fallback/ }));
+        expect(screen.getByText("Daily schedules require HH:MM.")).toBeInTheDocument();
+
         await user.click(screen.getByRole("button", { name: /Cron fallback/ }));
         expect(screen.getAllByText("Never run").length).toBeGreaterThan(0);
         const cronInput = screen.getByLabelText("Cron expression");
@@ -651,22 +657,37 @@ describe("Jobs page", () => {
 
         render(<Jobs />);
 
-        const timeInput = screen.getByLabelText("Time of day");
-        await user.clear(timeInput);
-        await user.type(timeInput, "05:15");
+        expect(
+            screen.getByRole("button", { name: "Time of day hour: 04" })
+        ).toBeInTheDocument();
+        expect(
+            screen.getByRole("button", { name: "Time of day minute: 10" })
+        ).toBeInTheDocument();
+        expect(screen.queryByText(/AM|PM/u)).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Time of day hour: 04" }));
+        await user.click(screen.getByRole("menuitem", { name: "05" }));
+        await user.click(screen.getByRole("button", { name: "Time of day minute: 10" }));
+        await user.click(screen.getByRole("menuitem", { name: "15" }));
         await user.click(screen.getByRole("button", { name: "Save schedule" }));
         expect(hooks.updateScheduledJob).toHaveBeenCalledWith({
             id: "backup.kopia",
             patch: expect.objectContaining({
                 cronExpression: null,
                 scheduleType: "daily",
-                timeOfDay: "05:15",
+                timeOfDay: "03:15",
             }),
         });
 
         await user.click(screen.getByRole("button", { name: "Schedule type: Daily" }));
         await user.click(screen.getByRole("menuitem", { name: /Cron/ }));
         const cronInput = screen.getByLabelText("Cron expression");
+        await user.type(cronInput, "not cron");
+        expect(
+            screen.getByText("Cron schedules require a valid five-field expression.")
+        ).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Save schedule" })).toBeDisabled();
+        await user.clear(cronInput);
         await user.type(cronInput, "0 4 * * *");
         await user.click(screen.getByRole("button", { name: "Save schedule" }));
 
@@ -676,6 +697,173 @@ describe("Jobs page", () => {
                 cronExpression: "0 4 * * *",
                 scheduleType: "cron",
                 timeOfDay: null,
+            }),
+        });
+    });
+
+    it("saves daily schedules when the next run timestamp is not available", async () => {
+        const user = userEvent.setup();
+        mockScheduledJobs({
+            data: [
+                {
+                    actionKey: "backup.run",
+                    actionPayload: { target: "kopia" },
+                    createdAt: "2026-06-17T20:00:00.000Z",
+                    cronExpression: null,
+                    description: "Run nightly backup",
+                    enabled: true,
+                    id: "backup.kopia",
+                    intervalSeconds: 86_400,
+                    isRunning: false,
+                    lastRun: null,
+                    name: "Backup",
+                    nextRunAt: null,
+                    scheduleType: "daily",
+                    timeOfDay: "04:10",
+                    updatedAt: "2026-06-17T21:00:10.000Z",
+                },
+            ],
+        });
+
+        render(<Jobs />);
+        await user.click(screen.getByRole("button", { name: "Save schedule" }));
+
+        expect(hooks.updateScheduledJob).toHaveBeenCalledWith({
+            id: "backup.kopia",
+            patch: expect.objectContaining({
+                scheduleType: "daily",
+                timeOfDay: "04:10",
+            }),
+        });
+    });
+
+    it("preserves repeated-hour daily UTC schedules when saving unchanged drafts", async () => {
+        const user = userEvent.setup();
+        mockScheduledJobs({
+            data: [
+                {
+                    actionKey: "backup.run",
+                    actionPayload: { target: "kopia" },
+                    createdAt: "2026-10-24T20:00:00.000Z",
+                    cronExpression: null,
+                    description: "Run nightly backup",
+                    enabled: true,
+                    id: "backup.kopia",
+                    intervalSeconds: 86_400,
+                    isRunning: false,
+                    lastRun: null,
+                    name: "Backup",
+                    nextRunAt: "2026-10-25T00:30:00.000Z",
+                    scheduleType: "daily",
+                    timeOfDay: "00:30",
+                    updatedAt: "2026-10-24T21:00:10.000Z",
+                },
+            ],
+        });
+
+        render(<Jobs />);
+
+        expect(
+            screen.getByRole("button", { name: "Time of day hour: 02" })
+        ).toBeInTheDocument();
+        expect(
+            screen.getByRole("button", { name: "Time of day minute: 30" })
+        ).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Save schedule" }));
+
+        expect(hooks.updateScheduledJob).toHaveBeenCalledWith({
+            id: "backup.kopia",
+            patch: expect.objectContaining({
+                scheduleType: "daily",
+                timeOfDay: "00:30",
+            }),
+        });
+    });
+
+    it("preserves daily UTC schedules when next run changes after draft init", async () => {
+        const user = userEvent.setup();
+        const dailyJob = {
+            actionKey: "backup.run",
+            actionPayload: { target: "kopia" },
+            createdAt: "2026-03-27T20:00:00.000Z",
+            cronExpression: null,
+            description: "Run nightly backup",
+            enabled: true,
+            id: "backup.kopia",
+            intervalSeconds: 86_400,
+            isRunning: false,
+            lastRun: null,
+            name: "Backup",
+            nextRunAt: "2026-03-28T02:10:00.000Z",
+            scheduleType: "daily",
+            timeOfDay: "02:10",
+            updatedAt: "2026-03-27T21:00:10.000Z",
+        };
+        mockScheduledJobs({ data: [dailyJob] });
+
+        const { rerender } = render(<Jobs />);
+
+        expect(
+            screen.getByRole("button", { name: "Time of day hour: 03" })
+        ).toBeInTheDocument();
+        mockScheduledJobs({
+            data: [
+                {
+                    ...dailyJob,
+                    nextRunAt: "2026-03-29T02:10:00.000Z",
+                    updatedAt: "2026-03-28T21:00:10.000Z",
+                },
+            ],
+        });
+        rerender(<Jobs />);
+        await user.click(screen.getByRole("button", { name: "Save schedule" }));
+
+        expect(hooks.updateScheduledJob).toHaveBeenCalledWith({
+            id: "backup.kopia",
+            patch: expect.objectContaining({
+                scheduleType: "daily",
+                timeOfDay: "02:10",
+            }),
+        });
+    });
+
+    it("saves new daily schedules without an original UTC time", async () => {
+        const user = userEvent.setup();
+        mockScheduledJobs({
+            data: [
+                {
+                    actionKey: "jobs.daily",
+                    actionPayload: {},
+                    createdAt: "2026-06-17T20:00:00.000Z",
+                    cronExpression: null,
+                    description: "",
+                    enabled: true,
+                    id: "jobs.daily",
+                    intervalSeconds: 3600,
+                    isRunning: false,
+                    lastRun: null,
+                    name: "Daily fallback",
+                    nextRunAt: "2026-06-18T03:15:00.000Z",
+                    scheduleType: "daily",
+                    timeOfDay: null,
+                    updatedAt: "2026-06-17T21:00:10.000Z",
+                },
+            ],
+        });
+
+        render(<Jobs />);
+
+        await user.click(screen.getByRole("button", { name: "Time of day hour: 00" }));
+        await user.click(screen.getByRole("menuitem", { name: "05" }));
+        await user.click(screen.getByRole("button", { name: "Time of day minute: 00" }));
+        await user.click(screen.getByRole("menuitem", { name: "15" }));
+        await user.click(screen.getByRole("button", { name: "Save schedule" }));
+
+        expect(hooks.updateScheduledJob).toHaveBeenCalledWith({
+            id: "jobs.daily",
+            patch: expect.objectContaining({
+                scheduleType: "daily",
+                timeOfDay: "03:15",
             }),
         });
     });
@@ -704,9 +892,9 @@ describe("Jobs page", () => {
                     isRunning: true,
                     lastRun: null,
                     name: "Backup",
-                    nextRunAt: null,
+                    nextRunAt: "2026-06-18T02:10:00.000Z",
                     scheduleType: "daily",
-                    timeOfDay: "04:10",
+                    timeOfDay: "02:10",
                     updatedAt: "2026-06-17T21:01:10.000Z",
                 },
             ],

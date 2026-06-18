@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    APP_LOCALE_CODE,
+    APP_TIME_ZONE,
+    appTimeZoneParts,
+    appZonedUtcDate,
     currentIsoString,
     currentYear,
     isoStringFromDate,
@@ -34,7 +38,39 @@ describe("date utils", () => {
     });
 
     it("returns the current calendar year", () => {
-        const date = new Date();
-        expect(currentYear()).toBe(date.getFullYear());
+        const expectedYear = appTimeZoneParts(new Date()).year;
+        expect(currentYear()).toBe(expectedYear);
+    });
+
+    it("returns app timezone date parts", () => {
+        const date = new Date("2026-06-17T22:30:45.000Z");
+
+        expect(APP_TIME_ZONE).toBe("Europe/Oslo");
+        expect(APP_LOCALE_CODE).toBe("en-US");
+        expect(appTimeZoneParts(date)).toEqual({
+            day: 18,
+            hour: 0,
+            minute: 30,
+            month: 6,
+            second: 45,
+            weekday: "Thursday",
+            year: 2026,
+        });
+        expect(appZonedUtcDate(date).toISOString()).toBe("2026-06-18T00:30:45.000Z");
+    });
+
+    it("returns exact app timezone midnight without normalizing to 24:00", () => {
+        const date = new Date("2026-06-17T22:00:00.000Z");
+
+        expect(appTimeZoneParts(date)).toEqual({
+            day: 18,
+            hour: 0,
+            minute: 0,
+            month: 6,
+            second: 0,
+            weekday: "Thursday",
+            year: 2026,
+        });
+        expect(appZonedUtcDate(date).toISOString()).toBe("2026-06-18T00:00:00.000Z");
     });
 });

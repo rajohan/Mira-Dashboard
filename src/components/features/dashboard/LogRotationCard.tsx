@@ -6,7 +6,11 @@ import {
     useRunLogRotationNow,
 } from "../../../hooks/useLogRotation";
 import { type ScheduledJob, useScheduledJobs } from "../../../hooks/useScheduledJobs";
-import { formatDate, formatOsloClock } from "../../../utils/format";
+import {
+    formatDate,
+    formatOsloClock,
+    formatUtcTimeOfDayInAppTimeZone,
+} from "../../../utils/format";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 
@@ -20,7 +24,7 @@ function formatSchedule(job: ScheduledJob | undefined): string {
     }
 
     if (job.scheduleType === "daily" && job.timeOfDay) {
-        return `${formatJobNextRunTime(job) ?? formatUtcTimeOfDayAsOslo(job.timeOfDay)} daily`;
+        return `${formatJobNextRunTime(job) ?? formatUtcTimeOfDayInAppTimeZone(job.timeOfDay, job.nextRunAt)} daily`;
     }
 
     if (job.scheduleType === "daily") {
@@ -39,14 +43,6 @@ function formatSchedule(job: ScheduledJob | undefined): string {
     return minutes >= 60 && minutes % 60 === 0
         ? `Every ${minutes / 60}h`
         : `Every ${minutes}m`;
-}
-
-function formatUtcTimeOfDayAsOslo(value: string): string {
-    const match = value.match(/^(\d{2}):(\d{2})$/u);
-    if (!match) return value;
-
-    const date = new Date(Date.UTC(2026, 5, 1, Number(match[1]), Number(match[2])));
-    return formatOsloClock(date);
 }
 
 function formatJobNextRunTime(job: ScheduledJob): string | null {

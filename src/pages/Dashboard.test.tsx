@@ -178,7 +178,7 @@ describe("Dashboard page", () => {
 
     it("updates the weather clock on an interval", () => {
         vi.useFakeTimers();
-        vi.setSystemTime(new Date(2026, 4, 11, 10, 0, 0));
+        vi.setSystemTime(new Date("2026-05-11T08:00:00.000Z"));
 
         render(<Dashboard />);
         expect(screen.getByText("10:00:00")).toBeInTheDocument();

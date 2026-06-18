@@ -163,7 +163,7 @@ describe("LogRotationCard", () => {
                     id: "ops.log-rotation",
                     intervalSeconds: 86_400,
                     name: "Log rotation",
-                    nextRunAt: "not-a-date",
+                    nextRunAt: "2026-05-11T03:15:00.000Z",
                     scheduleType: "daily",
                     timeOfDay: "03:15",
                 },
@@ -181,7 +181,7 @@ describe("LogRotationCard", () => {
                     id: "ops.log-rotation",
                     intervalSeconds: 3600,
                     name: "Log rotation",
-                    nextRunAt: null,
+                    nextRunAt: "not-a-date",
                     scheduleType: "cron",
                     timeOfDay: null,
                 },
@@ -225,7 +225,7 @@ describe("LogRotationCard", () => {
         });
 
         rerender(<LogRotationCard />);
-        expect(screen.getByText("bad-time daily")).toBeInTheDocument();
+        expect(screen.getByText("--:-- daily")).toBeInTheDocument();
     });
 
     it("renders disabled and interval scheduled job labels", () => {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    APP_TIME_ZONE,
+    appTimeOfDayToUtcTimeOfDay,
     formatDate,
     formatDateStamp,
     formatDuration,
@@ -12,31 +14,66 @@ import {
     formatTokenCount,
     formatTokens,
     formatUptime,
+    formatUtcTimeOfDayInAppTimeZone,
     formatWeekdayShort,
     getTokenPercent,
 } from "./format";
 
 describe("format utils", () => {
-    const date = new Date(2026, 4, 10, 6, 7, 8);
+    const date = new Date(Date.UTC(2026, 4, 10, 6, 7, 8));
 
     it("formats dates and times", () => {
-        expect(formatDate(date)).toBe("10.05.2026, 06:07");
+        expect(APP_TIME_ZONE).toBe("Europe/Oslo");
+        expect(formatDate(date)).toBe("10.05.2026, 08:07");
         expect(formatOsloClock("2026-05-10T06:07:08.000Z")).toBe("08:07");
         expect(formatDateStamp(date)).toBe("2026-05-10");
-        expect(formatOsloTime(date)).toBe("06:07:08");
+        expect(formatOsloTime(date)).toBe("08:07:08");
         expect(formatOsloDate(date)).toBe("Sunday 10. May 2026");
         expect(formatWeekdayShort(date)).toBe("Sun");
+    });
+
+    it("converts schedule time-of-day values between UTC and Oslo", () => {
+        const summerReference = "2026-06-18T02:10:00.000Z";
+        const winterReference = "2026-01-18T03:10:00.000Z";
+
+        expect(formatUtcTimeOfDayInAppTimeZone("02:10", summerReference)).toBe("04:10");
+        expect(formatUtcTimeOfDayInAppTimeZone("03:10", winterReference)).toBe("04:10");
+        expect(formatUtcTimeOfDayInAppTimeZone("23:30", "2026-03-28T23:30:00.000Z")).toBe(
+            "00:30"
+        );
+        expect(formatUtcTimeOfDayInAppTimeZone("00:00", 0)).toBe("01:00");
+        expect(formatUtcTimeOfDayInAppTimeZone("02:10")).toMatch(/^\d{2}:\d{2}$/u);
+        expect(formatUtcTimeOfDayInAppTimeZone("02:10", "not-a-date")).toMatch(
+            /^\d{2}:\d{2}$/u
+        );
+        expect(appTimeOfDayToUtcTimeOfDay("04:10", summerReference)).toBe("02:10");
+        expect(appTimeOfDayToUtcTimeOfDay("04:10", winterReference)).toBe("03:10");
+        expect(appTimeOfDayToUtcTimeOfDay("01:00", 0)).toBe("00:00");
+        expect(appTimeOfDayToUtcTimeOfDay("04:10", "not-a-date")).toMatch(
+            /^\d{2}:\d{2}$/u
+        );
+        expect(appTimeOfDayToUtcTimeOfDay("04:10")).toMatch(/^\d{2}:\d{2}$/u);
+        expect(formatUtcTimeOfDayInAppTimeZone(null)).toBe("--:--");
+        expect(formatUtcTimeOfDayInAppTimeZone("bad-time")).toBe("--:--");
+        expect(appTimeOfDayToUtcTimeOfDay("bad-time")).toBe("bad-time");
     });
 
     it("handles invalid date inputs gracefully", () => {
         const invalidDate = new Date(Number("NaN"));
         expect(formatDate("not-a-date")).toBe("not-a-date");
+        expect(formatDate(Symbol("bad-date") as unknown as string)).toBe(
+            "Symbol(bad-date)"
+        );
         expect(formatOsloClock("not-a-date")).toBe("--:--");
         expect(formatOsloClock(Symbol("bad-date") as unknown as string)).toBe("--:--");
         expect(formatDate(Infinity)).toBe("Infinity");
         expect(formatDateStamp(invalidDate)).toBe("unknown-date");
+        expect(formatDateStamp("bad-date" as unknown as Date)).toBe("unknown-date");
+        expect(formatOsloTime("bad-date" as unknown as Date)).toBe("--:--:--");
         expect(formatOsloDate(invalidDate)).toBe("Unknown date");
+        expect(formatOsloDate("bad-date" as unknown as Date)).toBe("Unknown date");
         expect(formatWeekdayShort(invalidDate)).toBe("---");
+        expect(formatWeekdayShort("bad-date" as unknown as Date)).toBe("---");
         expect(formatDuration(Number("NaN"))).toBe("Unknown");
     });
 

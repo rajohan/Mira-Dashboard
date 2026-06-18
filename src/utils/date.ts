@@ -1,3 +1,75 @@
+export const APP_TIME_ZONE = "Europe/Oslo";
+export const APP_LOCALE_CODE = "en-US";
+
+const appTimeZonePartsFormatter = new Intl.DateTimeFormat(APP_LOCALE_CODE, {
+    day: "2-digit",
+    hour: "2-digit",
+    hourCycle: "h23",
+    minute: "2-digit",
+    month: "2-digit",
+    second: "2-digit",
+    timeZone: APP_TIME_ZONE,
+    weekday: "long",
+    year: "numeric",
+});
+
+const appTimeZoneShortWeekdayFormatter = new Intl.DateTimeFormat(APP_LOCALE_CODE, {
+    timeZone: APP_TIME_ZONE,
+    weekday: "short",
+});
+
+const appTimeZoneShortMonthFormatter = new Intl.DateTimeFormat(APP_LOCALE_CODE, {
+    month: "short",
+    timeZone: APP_TIME_ZONE,
+});
+
+export function appTimeZoneParts(date: Date): {
+    day: number;
+    hour: number;
+    minute: number;
+    month: number;
+    second: number;
+    weekday: string;
+    year: number;
+} {
+    const parts = appTimeZonePartsFormatter.formatToParts(date);
+    const values = Object.fromEntries(
+        parts.map((part) => [part.type, part.value])
+    ) as Record<Intl.DateTimeFormatPartTypes, string>;
+    return {
+        day: Number(values.day),
+        hour: Number(values.hour),
+        minute: Number(values.minute),
+        month: Number(values.month),
+        second: Number(values.second),
+        weekday: values.weekday,
+        year: Number(values.year),
+    };
+}
+
+export function appTimeZoneShortWeekday(date: Date): string {
+    return appTimeZoneShortWeekdayFormatter.format(date);
+}
+
+export function appTimeZoneShortMonth(date: Date): string {
+    return appTimeZoneShortMonthFormatter.format(date);
+}
+
+export function appZonedUtcDate(date: Date): Date {
+    const parts = appTimeZoneParts(date);
+    return new Date(
+        Date.UTC(
+            parts.year,
+            parts.month - 1,
+            parts.day,
+            parts.hour,
+            parts.minute,
+            parts.second,
+            date.getMilliseconds()
+        )
+    );
+}
+
 /** Returns the current timestamp as an ISO string. */
 export function currentIsoString(): string {
     const date = new Date();
@@ -22,6 +94,5 @@ export function timestampFromDateString(value: string): number | null {
 
 /** Returns the current calendar year. */
 export function currentYear(): number {
-    const date = new Date();
-    return date.getFullYear();
+    return appTimeZoneParts(new Date()).year;
 }

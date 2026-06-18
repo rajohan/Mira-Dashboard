@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CronJob } from "../hooks";
 import {
+    cronExpressionIsValid,
     formatCronLastStatus,
     formatCronTimestamp,
     getCronJobId,
@@ -50,12 +51,42 @@ describe("cron utils", () => {
         expect(getCronStateValue({} as CronJob, "lastRunStatus")).toBeUndefined();
     });
 
+    it.each(["0 4 * * *", "*/15 1-5 * * 1,2", "5/15 10 * * *", "0 9 1-31 * 0-7"])(
+        "accepts supported cron expression %s",
+        (expression) => {
+            expect(cronExpressionIsValid(expression)).toBe(true);
+        }
+    );
+
+    it.each([
+        "",
+        "not cron",
+        "60 * * * *",
+        "* 24 * * *",
+        "* * 0 * *",
+        "* * * 13 *",
+        "* * * * 8",
+        "*/0 * * * *",
+        "*/a * * * *",
+        "1/0 * * * *",
+        "1/2/3 * * * *",
+        "5-1 * * * *",
+        "1-2-3 * * * *",
+        "999999999999999999999 * * * *",
+        "-1 * * * *",
+        "/5 * * * *",
+        "1,,2 * * * *",
+        "a * * * *",
+    ])("rejects unsupported cron expression %s", (expression) => {
+        expect(cronExpressionIsValid(expression)).toBe(false);
+    });
+
     it("formats timestamps and statuses", () => {
         expect(formatCronTimestamp("bad")).toBe("—");
         expect(formatCronTimestamp(Number("NaN"))).toBe("—");
         expect(formatCronTimestamp(Infinity)).toBe("—");
-        const date = new Date(2026, 4, 10, 6, 7);
-        expect(formatCronTimestamp(date.getTime())).toBe("10.05.2026, 06:07");
+        const date = new Date(Date.UTC(2026, 4, 10, 6, 7));
+        expect(formatCronTimestamp(date.getTime())).toBe("10.05.2026, 08:07");
         const missingStatus: string | undefined = undefined;
         expect(formatCronLastStatus(missingStatus)).toBe("UNKNOWN");
         expect(formatCronLastStatus("")).toBe("UNKNOWN");
