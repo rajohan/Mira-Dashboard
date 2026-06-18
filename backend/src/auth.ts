@@ -85,8 +85,21 @@ function isLoopbackAddress(address?: string | null): boolean {
     return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address);
 }
 
+function headerValue(value: string | string[] | undefined): string | undefined {
+    return Array.isArray(value) ? value[0] : value;
+}
+
 /** Returns whether loopback request. */
 export function isLoopbackRequest(request: express.Request | IncomingMessage): boolean {
+    const headers = request.headers ?? {};
+    const forwardedFor = headerValue(headers["x-forwarded-for"]);
+    if (forwardedFor) {
+        return isLoopbackAddress(forwardedFor.split(",", 1)[0]?.trim());
+    }
+    const realIp = headerValue(headers["x-real-ip"]);
+    if (realIp) {
+        return isLoopbackAddress(realIp.trim());
+    }
     const remoteAddress = request.socket?.remoteAddress;
     return isLoopbackAddress(remoteAddress);
 }

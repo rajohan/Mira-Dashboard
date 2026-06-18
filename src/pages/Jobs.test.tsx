@@ -416,6 +416,9 @@ describe("Jobs page", () => {
         expect(screen.getByText("Dashboard jobs").parentElement).toHaveClass(
             "xl:max-h-[calc(100vh-10rem)]"
         );
+        expect(screen.getByText("Dashboard jobs").nextElementSibling).not.toHaveClass(
+            "max-h-80"
+        );
         expect(screen.getAllByText("Backup").length).toBeGreaterThan(0);
         expect(screen.queryByText("OpenClaw unavailable")).not.toBeInTheDocument();
     });

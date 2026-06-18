@@ -173,10 +173,11 @@ export default function authRoutes(
     });
 
     app.get("/api/auth/session", (request, response) => {
-        const user = getAuthUserFromRequest(request);
+        const needsBootstrap = bootstrapRequired();
+        const user = needsBootstrap ? null : getAuthUserFromRequest(request);
         response.json({
             authenticated: Boolean(user),
-            bootstrapRequired: bootstrapRequired(),
+            bootstrapRequired: needsBootstrap,
             user,
         });
     });

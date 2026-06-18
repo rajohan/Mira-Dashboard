@@ -118,6 +118,17 @@ describe("auth first-user bootstrap routes", () => {
     });
 
     it("validates and completes first-user registration", async () => {
+        const sessionBeforeBootstrap = await requestJson<{
+            authenticated: boolean;
+            bootstrapRequired: boolean;
+            user: null;
+        }>(server, "/api/auth/session");
+
+        assert.equal(sessionBeforeBootstrap.status, 200);
+        assert.equal(sessionBeforeBootstrap.body.authenticated, false);
+        assert.equal(sessionBeforeBootstrap.body.bootstrapRequired, true);
+        assert.equal(sessionBeforeBootstrap.body.user, null);
+
         const loginBeforeBootstrap = await requestJson<{ error: string }>(
             server,
             "/api/auth/login",

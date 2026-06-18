@@ -73,11 +73,19 @@ export function useRefreshCacheEntry() {
 
             return { keys, results };
         },
-        onSuccess: async (_result, keysToken) => {
+        onSuccess: async (result, keysToken) => {
             const keys = keysToken
                 .split(",")
                 .map((key) => key.trim())
                 .filter(Boolean);
+            for (const response of result.results) {
+                if (response.entry?.key) {
+                    queryClient.setQueryData(
+                        cacheKeys.entry(response.entry.key),
+                        response.entry
+                    );
+                }
+            }
 
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
