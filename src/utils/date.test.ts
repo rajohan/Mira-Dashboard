@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    APP_LOCALE_CODE,
+    APP_TIME_ZONE,
+    appTimeZoneParts,
+    appZonedDate,
     currentIsoString,
     currentYear,
     isoStringFromDate,
     timestampFromDateString,
 } from "./date";
-import { APP_TIME_ZONE } from "./format";
 
 describe("date utils", () => {
     it("returns the current timestamp in ISO 8601 format", () => {
@@ -35,11 +38,27 @@ describe("date utils", () => {
     });
 
     it("returns the current calendar year", () => {
-        const formatter = new Intl.DateTimeFormat("en", {
-            timeZone: APP_TIME_ZONE,
-            year: "numeric",
-        });
-        const expectedYear = Number(formatter.format(new Date()));
+        const expectedYear = appZonedDate(new Date()).getFullYear();
         expect(currentYear()).toBe(expectedYear);
+    });
+
+    it("returns app timezone date parts", () => {
+        const date = new Date("2026-06-17T22:30:45.000Z");
+
+        expect(APP_TIME_ZONE).toBe("Europe/Oslo");
+        expect(APP_LOCALE_CODE).toBe("en-US");
+        expect(appTimeZoneParts(date)).toEqual({
+            day: 18,
+            hour: 0,
+            minute: 30,
+            month: 6,
+            second: 45,
+            year: 2026,
+        });
+        expect(appZonedDate(date).getFullYear()).toBe(2026);
+        expect(appZonedDate(date).getMonth()).toBe(5);
+        expect(appZonedDate(date).getDate()).toBe(18);
+        expect(appZonedDate(date).getHours()).toBe(0);
+        expect(appZonedDate(date).getMinutes()).toBe(30);
     });
 });

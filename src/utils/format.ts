@@ -1,65 +1,23 @@
-import { formatDistanceToNow, intlFormat } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 import { enUS } from "date-fns/locale";
 
-const defaultLocale = enUS;
-export const APP_TIME_ZONE = "Europe/Oslo";
+import { appTimeZoneParts, appZonedDate } from "./date";
 
-const dateTimeFormatOptions: Intl.DateTimeFormatOptions = {
-    day: "2-digit",
-    hour: "2-digit",
-    hour12: false,
-    minute: "2-digit",
-    month: "2-digit",
-    timeZone: APP_TIME_ZONE,
-    year: "numeric",
-};
-const osloClockFormatOptions: Intl.DateTimeFormatOptions = {
-    hour: "2-digit",
-    hour12: false,
-    minute: "2-digit",
-    timeZone: APP_TIME_ZONE,
-};
-const osloTimeFormatOptions: Intl.DateTimeFormatOptions = {
-    hour: "2-digit",
-    hour12: false,
-    minute: "2-digit",
-    second: "2-digit",
-    timeZone: APP_TIME_ZONE,
-};
-const dateStampFormatOptions: Intl.DateTimeFormatOptions = {
-    day: "2-digit",
-    month: "2-digit",
-    timeZone: APP_TIME_ZONE,
-    year: "numeric",
-};
-const weekdayFormatOptions: Intl.DateTimeFormatOptions = {
-    timeZone: APP_TIME_ZONE,
-    weekday: "short",
-};
-const osloDateFormatter = new Intl.DateTimeFormat("en-US", {
-    day: "2-digit",
-    month: "short",
-    timeZone: APP_TIME_ZONE,
-    weekday: "long",
-    year: "numeric",
-});
-const appTimeZonePartsFormatter = new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    hour: "2-digit",
-    hour12: false,
-    minute: "2-digit",
-    month: "2-digit",
-    timeZone: APP_TIME_ZONE,
-    year: "numeric",
-});
+const appLocale = enUS;
+
+export { APP_TIME_ZONE } from "./date";
+
+function toDateValue(date: Date | string | number): Date {
+    return date instanceof Date ? date : new Date(date);
+}
 
 // Date & time formatting
 /** Formats a date/time value with app timezone date and time fields. */
 export function formatDate(date: Date | string | number): string {
     try {
-        const d = date instanceof Date ? date : new Date(date);
+        const d = toDateValue(date);
         if (Number.isNaN(d.getTime())) return String(date);
-        return intlFormat(d, dateTimeFormatOptions, { locale: "nb-NO" });
+        return format(appZonedDate(d), "dd.MM.yyyy, HH:mm", { locale: appLocale });
     } catch {
         return String(date);
     }
@@ -68,9 +26,9 @@ export function formatDate(date: Date | string | number): string {
 /** Formats a date/time value as an Oslo clock time. */
 export function formatOsloClock(date: Date | string | number): string {
     try {
-        const d = date instanceof Date ? date : new Date(date);
+        const d = toDateValue(date);
         if (Number.isNaN(d.getTime())) return "--:--";
-        return intlFormat(d, osloClockFormatOptions, { locale: "en-GB" });
+        return format(appZonedDate(d), "HH:mm", { locale: appLocale });
     } catch {
         return "--:--";
     }
@@ -80,7 +38,7 @@ export function formatOsloClock(date: Date | string | number): string {
 export function formatDateStamp(date: Date = new Date()): string {
     try {
         if (Number.isNaN(date.getTime())) return "unknown-date";
-        return intlFormat(date, dateStampFormatOptions, { locale: "en-CA" });
+        return format(appZonedDate(date), "yyyy-MM-dd", { locale: appLocale });
     } catch {
         return "unknown-date";
     }
@@ -90,7 +48,7 @@ export function formatDateStamp(date: Date = new Date()): string {
 export function formatOsloTime(date: Date): string {
     try {
         if (Number.isNaN(date.getTime())) return "--:--:--";
-        return intlFormat(date, osloTimeFormatOptions, { locale: "en-GB" });
+        return format(appZonedDate(date), "HH:mm:ss", { locale: appLocale });
     } catch {
         return "--:--:--";
     }
@@ -100,11 +58,9 @@ export function formatOsloTime(date: Date): string {
 export function formatOsloDate(date: Date): string {
     try {
         if (Number.isNaN(date.getTime())) return "Unknown date";
-        const parts = osloDateFormatter.formatToParts(date);
-        const values = Object.fromEntries(
-            parts.map((part) => [part.type, part.value])
-        ) as Record<Intl.DateTimeFormatPartTypes, string>;
-        return `${values.weekday} ${Number(values.day)}. ${values.month} ${values.year}`;
+        return format(appZonedDate(date), "EEEE dd. MMM yyyy", {
+            locale: appLocale,
+        });
     } catch {
         return "Unknown date";
     }
@@ -114,30 +70,10 @@ export function formatOsloDate(date: Date): string {
 export function formatWeekdayShort(date: Date): string {
     try {
         if (Number.isNaN(date.getTime())) return "---";
-        return intlFormat(date, weekdayFormatOptions, { locale: "en-US" });
+        return format(appZonedDate(date), "EEE", { locale: appLocale });
     } catch {
         return "---";
     }
-}
-
-function appTimeZoneParts(date: Date): {
-    day: number;
-    hour: number;
-    minute: number;
-    month: number;
-    year: number;
-} {
-    const parts = appTimeZonePartsFormatter.formatToParts(date);
-    const values = Object.fromEntries(
-        parts.map((part) => [part.type, part.value])
-    ) as Record<Intl.DateTimeFormatPartTypes, string>;
-    return {
-        day: Number(values.day),
-        hour: Number(values.hour),
-        minute: Number(values.minute),
-        month: Number(values.month),
-        year: Number(values.year),
-    };
 }
 
 function zonedDateTimeToUtcDate(
@@ -214,7 +150,7 @@ export function formatDuration(updatedAt: number | null | undefined): string {
     try {
         return formatDistanceToNow(new Date(updatedAt), {
             addSuffix: true,
-            locale: defaultLocale,
+            locale: appLocale,
         });
     } catch {
         return "Unknown";
