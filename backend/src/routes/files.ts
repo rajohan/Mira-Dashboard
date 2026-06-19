@@ -308,6 +308,10 @@ function sendRootedParentError(
     res: express.Response,
     error: NodeJS.ErrnoException
 ): boolean {
+    if (isFileOpenNotFoundErrorCode(error.code)) {
+        res.status(404).json({ error: "File or directory not found" });
+        return true;
+    }
     if (error.code !== "EACCES") {
         return false;
     }

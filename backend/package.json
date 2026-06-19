@@ -10,8 +10,8 @@
     },
     "scripts": {
         "build": "tsc",
-        "start": "NODE_ENV=production doppler run --config prd --project rajohan -- node dist/serverStart.js",
-        "dev": "doppler run --config prd --project rajohan -- tsx watch src/serverStart.ts",
+        "start": "NODE_ENV=production doppler run --config prd --project rajohan -- bun dist/serverStart.js",
+        "dev": "doppler run --config prd --project rajohan -- bun --watch src/serverStart.ts",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
         "format": "prettier --write '**/*.{ts,js}'",

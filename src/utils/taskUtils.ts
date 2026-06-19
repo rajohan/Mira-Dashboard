@@ -70,6 +70,12 @@ export function getPriority(labels: Array<{ name: string }>): "high" | "medium" 
         )
     )
         return "medium";
+    if (
+        labels.some(
+            (l: { name: string }) => l.name === "priority-low" || l.name === "low"
+        )
+    )
+        return "low";
     return "medium";
 }
 

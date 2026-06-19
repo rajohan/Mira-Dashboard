@@ -149,6 +149,11 @@ describe("Mira Dashboard frontend behavior", () => {
 
     it("keeps task classification and search aligned with dashboard behavior", () => {
         const unlabelled = task({ number: 2, title: "Default priority" });
+        const lowPriority = task({
+            number: 4,
+            title: "Low priority task",
+            labels: [{ name: "priority-low" }],
+        });
         const blocked = task({
             number: 3,
             title: "Waiting on deploy",
@@ -162,6 +167,7 @@ describe("Mira Dashboard frontend behavior", () => {
         });
 
         expect(getPriority(unlabelled.labels)).toBe("medium");
+        expect(getPriority(lowPriority.labels)).toBe("low");
         expect(getColumnId(blocked)).toBe("blocked");
         expect(taskMatchesSearch(blocked, "daily-check")).toBe(true);
         expect(taskMatchesSearch(blocked, "#3")).toBe(true);
