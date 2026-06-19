@@ -21,7 +21,6 @@ import {
 } from "./services/scheduledJobs.js";
 
 let isStarting = false;
-let afterBackgroundServicesStartedForTest: (() => void) | undefined;
 let stopSchedulerOnServerClose: (() => void) | undefined;
 
 function isPackagedServerEntrypoint(argvPath = process.argv[1]): boolean {
@@ -122,7 +121,6 @@ export function handleServerListening(): void {
         if (shouldQueueStartupQuotaCheck) {
             queueQuotaNotificationCheckAfterSeed();
         }
-        afterBackgroundServicesStartedForTest?.();
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
         const rollback = (fn: () => void, label: string): void => {

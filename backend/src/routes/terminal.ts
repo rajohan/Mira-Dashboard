@@ -143,7 +143,6 @@ async function getCompletions(
     }
 }
 
-
 /** Registers terminal API routes. */
 export default function terminalRoutes(app: express.Application): void {
     app.post("/api/terminal/complete", express.json(), async (req, res) => {

@@ -102,10 +102,10 @@ function validateOpenclawLeaf(openclawRoot: string): boolean {
     }
 }
 
-let validateOpenclawLeafForWrite = validateOpenclawLeaf;
-let procfsAvailabilityProbe = (): boolean =>
+const validateOpenclawLeafForWrite = validateOpenclawLeaf;
+const procfsAvailabilityProbe = (): boolean =>
     process.platform === "linux" && fs.existsSync("/proc/self/fd");
-let prepareConfigWriteTarget = prepareSafeWriteTargetWithinRoot;
+const prepareConfigWriteTarget = prepareSafeWriteTargetWithinRoot;
 
 function createAccessDeniedError(message: string): NodeJS.ErrnoException {
     const error = new Error(message) as NodeJS.ErrnoException;

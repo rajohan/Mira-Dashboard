@@ -43,8 +43,8 @@ function resolveOpenclawRoot(): string {
     return Path.join(homeDir, ".openclaw");
 }
 
-let prepareAgentMetadataDirForWrite = prepareSafeWriteTargetWithinRoot;
-let procfsAvailabilityProbe = (): boolean =>
+const prepareAgentMetadataDirForWrite = prepareSafeWriteTargetWithinRoot;
+const procfsAvailabilityProbe = (): boolean =>
     process.platform === "linux" && FS.existsSync("/proc/self/fd");
 
 function getOpenclawRoot(): string {
@@ -1439,7 +1439,6 @@ function normalizeGatewaySessionModel(model: string | undefined): string | undef
     }
     return model;
 }
-
 
 /** Registers agents API routes. */
 export default function agentsRoutes(app: express.Application): void {

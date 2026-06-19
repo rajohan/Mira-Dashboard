@@ -68,7 +68,7 @@ const ELEVATED_LOG_ROTATION_MAX_BUFFER = 16 * 1024 * 1024;
 const LOG_ROTATION_JOB_ID = "ops.log-rotation";
 const LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS = 100_000;
 const NODE_EXECUTABLE = process.env.NODE_BINARY || "node";
-let logRotationLockFile = DEFAULT_LOCK_FILE;
+const logRotationLockFile = DEFAULT_LOCK_FILE;
 
 type ExecFileRunner = (
     file: string,
@@ -81,9 +81,9 @@ type ExecFileRunner = (
     }
 ) => Promise<{ stderr: string; stdout: string }>;
 
-let elevatedLogRotationExecFileRunner: ExecFileRunner = execFileAsync as ExecFileRunner;
-let gzipPipeline = pipeline;
-let writeLogRotationCacheSuccess = writeCacheSuccess;
+const elevatedLogRotationExecFileRunner: ExecFileRunner = execFileAsync as ExecFileRunner;
+const gzipPipeline = pipeline;
+const writeLogRotationCacheSuccess = writeCacheSuccess;
 
 function caughtMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -596,7 +596,7 @@ async function unlinkVerified(filePath: string, approvedRoots: string[]): Promis
     }
 }
 
-let archiveOnlyUnlinkVerified = unlinkVerified;
+const archiveOnlyUnlinkVerified = unlinkVerified;
 
 async function createNoFollowFile(
     filePath: string,
@@ -886,7 +886,7 @@ async function compressArchiveIfNeeded(
     }
 }
 
-let archiveOnlyCompressArchiveIfNeeded = compressArchiveIfNeeded;
+const archiveOnlyCompressArchiveIfNeeded = compressArchiveIfNeeded;
 
 function retentionDeleteSet(archives: RetentionArchive[], policy: LogRotationPolicy) {
     const deleteSet = new Map<string, RetentionArchive>();
@@ -1844,7 +1844,6 @@ function elevatedLogRotationEnvironment(): NodeJS.ProcessEnv {
     }
     return env;
 }
-
 
 export async function runLogRotationCli(): Promise<void> {
     try {

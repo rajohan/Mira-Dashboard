@@ -10,7 +10,7 @@ function dateToISOString(date: Date): string {
     return date.toISOString();
 }
 
-let logsDir = "/tmp/openclaw";
+const logsDir = "/tmp/openclaw";
 let logWatcher: NodeJS.Timeout | null = null;
 let logPollInFlight = false;
 let lastLogSize = 0;

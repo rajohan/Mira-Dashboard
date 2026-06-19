@@ -20,7 +20,7 @@ const abortHandlerSettled = new WeakMap<ScheduledJobAbortError, Promise<unknown>
 
 let scheduler: NodeJS.Timeout | null = null;
 let schedulerTickRunning = false;
-let scheduledJobRunTimeoutMs = defaultScheduledJobRunTimeoutMs;
+const scheduledJobRunTimeoutMs = defaultScheduledJobRunTimeoutMs;
 
 export type ScheduledJobScheduleType = "interval" | "daily" | "cron";
 export type ScheduledJobRunStatus = "running" | "success" | "failed";

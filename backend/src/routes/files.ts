@@ -60,8 +60,8 @@ const FILE_OPEN_NOT_FOUND_ERROR_CODES = new Set([
     "ENOTDIR",
     "ERR_INVALID_ARG_VALUE",
 ]);
-let listDirectoryRealpathSync = fs.realpathSync;
-let procSelfFdPath = "/proc/self/fd";
+const listDirectoryRealpathSync = fs.realpathSync;
+const procSelfFdPath = "/proc/self/fd";
 
 function getWorkspaceRoot(): string {
     return resolveWorkspaceRoot();
@@ -317,7 +317,6 @@ function sendRootedParentError(
     res.status(403).json({ error: "Access denied: path outside workspace" });
     return true;
 }
-
 
 /** Registers files API routes. */
 export default function filesRoutes(

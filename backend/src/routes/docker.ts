@@ -26,8 +26,8 @@ import {
 } from "../services/scheduledJobs.js";
 
 const execFileAsync = promisify(execFile);
-let dockerBin = nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
-let runDockerUpdaterServiceForRoutes = runDockerUpdaterService;
+const dockerBin = nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
+const runDockerUpdaterServiceForRoutes = runDockerUpdaterService;
 const MAX_OUTPUT_CHARS = 100_000;
 const MAX_STDOUT_PENDING_CHARS = 16_384;
 const MAX_JOBS = 100;
@@ -35,7 +35,7 @@ const MIN_LOG_TAIL = 50;
 const MAX_LOG_TAIL = 5_000;
 const DOCKER_EXEC_PID_MARKER = "__MIRA_DOCKER_EXEC_PID__=";
 const DEFAULT_DOCKER_EXEC_PID_WAIT_TIMEOUT_MS = 5_000;
-let dockerExecPidWaitTimeoutMs = DEFAULT_DOCKER_EXEC_PID_WAIT_TIMEOUT_MS;
+const dockerExecPidWaitTimeoutMs = DEFAULT_DOCKER_EXEC_PID_WAIT_TIMEOUT_MS;
 const DOCKER_EXEC_PID_WAIT_INTERVAL_MS = 50;
 const DOCKER_REQUEST_TIMEOUT_MS = 30_000;
 const SENSITIVE_ENV_KEY_PATTERN =
@@ -1219,7 +1219,6 @@ function resolveManualUpdateServiceId(
     const serviceId = Number(payload.serviceId || 0);
     return Number.isSafeInteger(serviceId) && serviceId > 0 ? serviceId : null;
 }
-
 
 /** Registers Docker API routes. */
 export default function dockerRoutes(app: express.Application): void {

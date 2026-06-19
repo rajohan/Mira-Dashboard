@@ -67,18 +67,11 @@ function getDefaultOpenClawPackageRoot(): string {
     );
 }
 
-let openClawPackageRootForTest: string | undefined;
-
 function getOpenClawPackageRoot(): string {
-    return openClawPackageRootForTest ?? getDefaultOpenClawPackageRoot();
+    return getDefaultOpenClawPackageRoot();
 }
 
-let openClawBinForTest: string | undefined;
-
 function getOpenClawBin(): string {
-    if (openClawBinForTest !== undefined) {
-        return openClawBinForTest;
-    }
     const homeDir = process.env.HOME?.trim() || os.homedir();
     return (
         process.env.OPENCLAW_BIN?.trim() || path.join(homeDir, ".npm-global/bin/openclaw")

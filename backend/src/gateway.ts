@@ -178,7 +178,7 @@ let currentToken: string | null = null;
 type GatewayClientConstructor = new (
     options: OpenClawGatewayClientOptions
 ) => OpenClawGatewayClientInstance;
-let GatewayClientCtor: GatewayClientConstructor = OpenClawGatewayClient;
+const GatewayClientCtor: GatewayClientConstructor = OpenClawGatewayClient;
 
 function sendPendingRequestError(pending: PendingRequest, error: string): void {
     try {

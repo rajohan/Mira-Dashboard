@@ -245,7 +245,6 @@ function buildDeviceAuthPayloadV3(params: {
     ].join("|");
 }
 
-
 /** Implements open claw gateway client. */
 export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
     private static readonly MAX_PENDING_REQUESTS = 1000;

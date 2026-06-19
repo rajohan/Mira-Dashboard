@@ -104,7 +104,7 @@ export async function runLogRotation(options: {
     return elevatedLogRotationRunner(options);
 }
 
-let elevatedLogRotationRunner: LogRotationRunner = runElevatedLogRotationService;
+const elevatedLogRotationRunner: LogRotationRunner = runElevatedLogRotationService;
 
 /** Registers ops API routes. */
 export default function opsRoutes(app: express.Application): void {

@@ -21,11 +21,11 @@ const BACKUP_ABORT_SIGKILL_GRACE_MS = 10_000;
 const KOPIA_BACKUP_SCRIPT_PATTERN = "/opt/docker/apps/kopia/backup.sh";
 const WALG_BACKUP_SCRIPT_PATTERN = "/usr/local/bin/backup-push.sh";
 const CONTAINER_PGREP_NO_MATCH_MARKER = "__MIRA_CONTAINER_PGREP_NO_MATCH__";
-let spawnBackupProcess = spawn;
-let backupAbortContainerWaitMs = 30_000;
-let backupAbortContainerPollMs = 1_000;
-let backupAbortContainerConfirmAttempts = 3;
-let backupAbortDockerExecTimeoutMs = 5_000;
+const spawnBackupProcess = spawn;
+const backupAbortContainerWaitMs = 30_000;
+const backupAbortContainerPollMs = 1_000;
+const backupAbortContainerConfirmAttempts = 3;
+const backupAbortDockerExecTimeoutMs = 5_000;
 
 interface BackupAbortConfig {
     container: string;
@@ -1008,7 +1008,6 @@ export function registerBackupScheduledJobs(): void {
         throw error;
     }
 }
-
 
 /** Registers backup API routes. */
 export default function backupRoutes(

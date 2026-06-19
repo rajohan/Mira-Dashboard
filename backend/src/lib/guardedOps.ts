@@ -29,10 +29,10 @@ type ReadChunk = (
     position: number
 ) => Promise<{ bytesRead: number }>;
 
-let readChunk: ReadChunk = (file, buffer, offset, length, position) =>
+const readChunk: ReadChunk = (file, buffer, offset, length, position) =>
     file.read(buffer, offset, length, position);
-let lstatSync = (path: Fs.PathLike) => fsOps.lstatSync(path);
-let statSync = (path: Fs.PathLike) => fsOps.statSync(path);
+const lstatSync = (path: Fs.PathLike) => fsOps.lstatSync(path);
+const statSync = (path: Fs.PathLike) => fsOps.statSync(path);
 
 const fsPromiseOps = Fs.promises as unknown as {
     open: typeof Fs.promises.open;
@@ -374,7 +374,6 @@ export function statGuarded(path: GuardedPath): Fs.Stats {
 export function lstatGuarded(path: GuardedPath): Fs.Stats {
     return lstatSync(guardedPathBuffer(path));
 }
-
 
 /** Spawns a validated executable with explicit argument vector semantics. */
 export function spawnGuarded(

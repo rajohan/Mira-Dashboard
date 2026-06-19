@@ -1,5 +1,5 @@
-import * as matchers from "@testing-library/jest-dom/matchers";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import * as matchers from "@testing-library/jest-dom/matchers";
 import { afterEach, expect, jest } from "bun:test";
 
 expect.extend(matchers);

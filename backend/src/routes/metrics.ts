@@ -86,7 +86,6 @@ const metricsDeps = {
     readFileSync,
 };
 
-
 /** Returns network metrics. */
 function getNetworkMetrics(): NetworkMetrics {
     let downloadBytes = 0;

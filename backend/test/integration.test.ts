@@ -1,8 +1,9 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import fs from "node:fs/promises";
+import type http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import type http from "node:http";
+
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 
 let baseUrl = "";
 let server: http.Server;
@@ -128,10 +129,9 @@ describe("Mira Dashboard backend integration", () => {
         expect(list.status).toBe(200);
         expect(list.body.some((task) => task.number === created.body.number)).toBe(true);
 
-        const deleted = await api<{ ok: boolean }>(
-            `/api/tasks/${created.body.number}`,
-            { method: "DELETE" }
-        );
+        const deleted = await api<{ ok: boolean }>(`/api/tasks/${created.body.number}`, {
+            method: "DELETE",
+        });
         expect(deleted.status).toBe(200);
         expect(deleted.body.ok).toBe(true);
     });

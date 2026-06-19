@@ -1024,8 +1024,7 @@ async function getProductionCheckoutStatus(): Promise<ProductionCheckoutStatus> 
     const currentBranch = branch.trim();
     const statusShort = status.trim();
     const isClean = statusShort.length === 0;
-    const isProductionRoot =
-        path.resolve(productionRoot) === path.resolve(dashboardRoot);
+    const isProductionRoot = path.resolve(productionRoot) === path.resolve(dashboardRoot);
 
     return {
         root: productionRoot,

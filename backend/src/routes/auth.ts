@@ -120,7 +120,6 @@ function rollbackCreatedFirstUser(userId: number): void {
     }
 }
 
-
 /** Registers auth API routes. */
 export default function authRoutes(
     app: express.Application,

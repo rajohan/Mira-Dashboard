@@ -4,11 +4,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
 
+import { apiFetch, UnauthorizedError } from "./hooks/useApi";
 import { Tasks } from "./pages/Tasks";
+import { authActions, authStore } from "./stores/authStore";
 import type { Task } from "./types/task";
 import { getColumnId, getPriority, taskMatchesSearch } from "./utils/taskUtils";
-import { apiFetch, UnauthorizedError } from "./hooks/useApi";
-import { authActions, authStore } from "./stores/authStore";
 
 function task(overrides: Partial<Task> & Pick<Task, "number" | "title">): Task {
     return {
@@ -94,9 +94,13 @@ describe("Mira Dashboard frontend behavior", () => {
         window.addEventListener("openclaw:unauthorized", (event) => {
             unauthorizedEvents.push(event);
         });
-        globalThis.fetch = jest.fn(async () =>
-            Response.json({ error: "Unauthorized" }, { status: 401 })
-        ) as typeof fetch;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () =>
+                Response.json({ error: "Unauthorized" }, { status: 401 })
+            ),
+            writable: true,
+        });
 
         await expect(apiFetch("/tasks")).rejects.toBeInstanceOf(UnauthorizedError);
 
@@ -113,7 +117,11 @@ describe("Mira Dashboard frontend behavior", () => {
             }),
         ];
         const fetchMock = createApi(tasks);
-        globalThis.fetch = fetchMock as typeof fetch;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
         const user = userEvent.setup();
 
         renderWithQueryClient(createElement(Tasks));
@@ -123,7 +131,10 @@ describe("Mira Dashboard frontend behavior", () => {
 
         await user.click(screen.getByRole("button", { name: /new task/i }));
         await user.type(screen.getByLabelText("Title"), "Write useful tests");
-        await user.type(screen.getByLabelText("Description (optional)"), "Cover behavior");
+        await user.type(
+            screen.getByLabelText("Description (optional)"),
+            "Cover behavior"
+        );
         await user.click(screen.getByRole("button", { name: "Raymond" }));
         await user.click(screen.getByRole("button", { name: /^Create Task$/i }));
 

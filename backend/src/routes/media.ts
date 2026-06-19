@@ -13,7 +13,6 @@ const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
 let cachedMediaRoot: string | undefined;
 let cachedRealMediaRoot: string | undefined;
 
-
 const MIME_TYPES: Record<string, string> = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
