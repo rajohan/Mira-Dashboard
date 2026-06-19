@@ -4,6 +4,7 @@ import { getPersistedGatewayToken } from "./auth.ts";
 import gateway from "./gateway.ts";
 import { registerBackupScheduledJobs } from "./routes/backups.ts";
 import { resolveListenPort, server } from "./server.ts";
+import { shouldStartScheduledJobs } from "./serverStartPolicy.ts";
 import {
     registerCacheRefreshScheduledJobs,
     waitForLocalCacheSeed,
@@ -26,25 +27,6 @@ const serverStartState: { stopSchedulerOnServerClose?: () => void; isStarting: b
     };
 
 export { runLogRotationCli } from "./services/logRotation.ts";
-
-function isPackagedServerEntrypoint(argvPath = process.argv[1]): boolean {
-    return Boolean(argvPath?.replaceAll("\\", "/").endsWith("/dist/serverStart.js"));
-}
-
-function shouldStartScheduledJobs(
-    nodeEnvironment = process.env.NODE_ENV,
-    disableScheduler = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER,
-    argvPath = process.argv[1]
-): boolean {
-    if (
-        disableScheduler === "1" ||
-        nodeEnvironment === "development" ||
-        nodeEnvironment === "test"
-    ) {
-        return false;
-    }
-    return nodeEnvironment === "production" || isPackagedServerEntrypoint(argvPath);
-}
 
 function installSchedulerCloseCleanup(): void {
     if (serverStartState.stopSchedulerOnServerClose) {
