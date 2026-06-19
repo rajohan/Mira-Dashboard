@@ -1,5 +1,6 @@
 import express from "express";
 import fs from "fs";
+import fsp from "fs/promises";
 import path from "path";
 
 /** Registers static API routes. */
@@ -23,8 +24,44 @@ export default function staticRoutes(
             })
         );
 
-        // SPA fallback - serve index.html for all non-API routes
-        app.get(/^(?!\/api(?:\/|$)).*/, (_req, res) => {
+        app.get(/^(?!\/api(?:\/|$)).*\.[\da-z]+$/i, async (req, res, next) => {
+            if (req.path.includes("/") && req.path !== `/${path.basename(req.path)}`) {
+                next();
+                return;
+            }
+
+            const assetPath = path.join(frontendPath, "assets", path.basename(req.path));
+            try {
+                const stat = await fsp.stat(assetPath);
+                if (!stat.isFile()) {
+                    res.status(404).type("text/plain").send("Not found");
+                    return;
+                }
+            } catch {
+                res.status(404).type("text/plain").send("Not found");
+                return;
+            }
+
+            res.setHeader("Cache-Control", "no-store");
+            res.sendFile(assetPath, (err) => {
+                if (!err) {
+                    return;
+                }
+
+                console.error("[Static] Error serving asset:", err.message);
+                res.status(500).type("text/plain").send("Error loading asset");
+            });
+        });
+
+        // SPA fallback - serve index.html for app routes, but never for asset/file
+        // requests. Browsers enforce module MIME types, so a missing JS chunk must
+        // be a 404 instead of index.html.
+        app.get(/^(?!\/api(?:\/|$)).*/, (req, res) => {
+            if (req.path.startsWith("/assets/") || path.extname(req.path)) {
+                res.status(404).type("text/plain").send("Not found");
+                return;
+            }
+
             const indexPath = path.join(frontendPath, "index.html");
             res.setHeader("Cache-Control", "no-store");
             res.sendFile(indexPath, (err) => {

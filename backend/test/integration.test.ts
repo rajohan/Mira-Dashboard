@@ -87,6 +87,27 @@ describe("Mira Dashboard backend integration", () => {
         });
     });
 
+    it("serves the app shell only for app routes, not missing assets", async () => {
+        const appRoute = await fetch(`${baseUrl}/tasks`);
+        expect(appRoute.status).toBe(200);
+        expect(appRoute.headers.get("content-type")).toContain("text/html");
+
+        const assetsPath = path.resolve("..", "dist", "assets");
+        const builtAssets = await fs.readdir(assetsPath);
+        const builtChunk = builtAssets.find((file) => /^index-.+\.js$/u.test(file));
+        expect(builtChunk).toBeDefined();
+
+        const rootChunk = await fetch(`${baseUrl}/${builtChunk}`);
+        expect(rootChunk.status).toBe(200);
+        expect(rootChunk.headers.get("content-type")).toContain("javascript");
+
+        const missingChunk = await fetch(
+            `${baseUrl}/assets/index-missing-after-deploy.js`
+        );
+        expect(missingChunk.status).toBe(404);
+        expect(missingChunk.headers.get("content-type")).not.toContain("text/html");
+    });
+
     it("creates, moves, updates, and deletes tasks through the API", async () => {
         const created = await api<{
             number: number;

@@ -11,7 +11,7 @@ Mira Dashboard is Raymond's local control surface for Mira/OpenClaw operations. 
 - A backend API on port `3100` with route modules under `backend/src/routes`.
 - A shared WebSocket bridge for live OpenClaw Gateway updates.
 - Local SQLite storage for dashboard tasks, task updates, notifications, auth sessions, quota alert state, OpenClaw alert state, and agent task history.
-- Vite/TanStack Router frontend on port `5173` during development, proxying `/api` to the backend.
+- Bun/TanStack Router frontend on port `5173` during development, proxying `/api` to the backend.
 
 ## Repository layout
 
@@ -20,8 +20,7 @@ src/                     React app, routes, hooks, stores, types, and UI compone
 backend/src/             Express backend, Gateway bridge, route modules, services, DB setup
 backend/data/            Local runtime SQLite databases; do not commit runtime data changes
 dist/                    Bun production frontend build output
-scripts/                 Bun frontend build scripts and React Compiler plugin
-vite.config.ts           Vite dev-server config for local proxying
+scripts/                 Bun frontend build/dev scripts and React Compiler/Tailwind plugins
 ```
 
 ## Local development
@@ -82,7 +81,7 @@ Frontend and backend tests run directly with Bun. Coverage LCOV files are upload
 - Backend default port: `3100`.
 - Frontend dev port: `5173`.
 - Health endpoints: `/health` and `/api/health`.
-- Production frontend builds use Bun's HTML bundler with a Babel React Compiler plugin.
+- Frontend builds and the local frontend dev server use Bun's HTML bundler with Babel React Compiler and Bun Tailwind plugins.
 - Dev server listens on all addresses so the dashboard can be reached over Tailscale when needed.
 - Auth is enforced for API routes after `/api/auth/*`; route modules should assume authenticated access unless explicitly mounted before the auth middleware.
 

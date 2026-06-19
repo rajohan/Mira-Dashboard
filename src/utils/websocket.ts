@@ -6,7 +6,7 @@ export function getWebSocketUrl(): string {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.hostname;
     const port = window.location.port || "3100";
-    const configuredDevPort = process.env.PUBLIC_DASHBOARD_WS_PORT;
-    const effectivePort = port === "5173" ? configuredDevPort || "3100" : port;
+    const configuredDevPort = import.meta.env?.PUBLIC_DASHBOARD_WS_PORT;
+    const effectivePort = port === "5173" ? configuredDevPort || port : port;
     return `${protocol}//${host}:${effectivePort}/ws`;
 }

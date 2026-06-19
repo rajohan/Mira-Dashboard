@@ -28,7 +28,7 @@ export function AppHeader({
 
     const isBackendConnected = !isBackendError && health?.status === "ok";
     const backendCommit = health?.backendCommit || "unknown";
-    const frontendCommit = __APP_COMMIT__;
+    const frontendCommit = typeof __APP_COMMIT__ === "string" ? __APP_COMMIT__ : "dev";
     const hasVersionMismatch =
         backendCommit !== "unknown" &&
         frontendCommit !== "unknown" &&

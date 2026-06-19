@@ -8,7 +8,7 @@ import { OpenClawSocketProvider } from "./hooks/useOpenClawSocket";
 import { queryClient } from "./lib/queryClient";
 import { router } from "./router";
 
-const enableDevtools = process.env.NODE_ENV !== "production";
+const enableDevtools = import.meta.env?.MODE !== "production";
 const DashboardDevtools = enableDevtools
     ? lazy(() => import("./components/devtools/DashboardDevtools"))
     : undefined;
