@@ -71,6 +71,36 @@ function getOpenClawPackageRoot(): string {
     return getDefaultOpenClawPackageRoot();
 }
 
+/** Resolves an absolute path without falling back to filesystem root. */
+function resolveSafeAbsolutePath(candidate: string | undefined): string | null {
+    const rawPath = candidate?.trim();
+    if (!rawPath || !path.isAbsolute(rawPath)) {
+        return null;
+    }
+    const resolvedPath = path.resolve(rawPath);
+    if (resolvedPath === path.parse(resolvedPath).root) {
+        return null;
+    }
+    try {
+        return fs.realpathSync(resolvedPath);
+    } catch {
+        return resolvedPath;
+    }
+}
+
+/** Resolves the configured OpenClaw root for workspace-backed settings. */
+function resolveOpenClawHome(): string | null {
+    const configuredRoot =
+        process.env.OPENCLAW_HOME?.trim() ||
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
+    if (configuredRoot) {
+        return resolveSafeAbsolutePath(configuredRoot);
+    }
+
+    const homeDir = resolveSafeAbsolutePath(process.env.HOME) ?? os.homedir().trim();
+    return resolveSafeAbsolutePath(path.join(homeDir, ".openclaw"));
+}
+
 function getOpenClawBin(): string {
     const homeDir = process.env.HOME?.trim() || os.homedir();
     return (
@@ -147,10 +177,8 @@ function getConfiguredSkillEntries(config?: Record<string, unknown>) {
 function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
     const entries = getConfiguredSkillEntries(config);
     const skillsByName = new Map<string, SkillInfo>();
-    const openClawHome =
-        process.env.OPENCLAW_HOME?.trim() ||
-        process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim() ||
-        path.join(os.homedir(), ".openclaw");
+    const openClawHome = resolveOpenClawHome();
+    const openClawPackageRoot = resolveSafeAbsolutePath(getOpenClawPackageRoot());
 
     /** Adds one discovered skill to the response map with configured state. */
     const addSkill = (skillPath: string, source: SkillSource) => {
@@ -171,16 +199,20 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
         });
     };
 
-    for (const skillPath of collectSkillDirectories(
-        path.join(openClawHome, "workspace/skills")
-    )) {
-        addSkill(skillPath, "workspace");
+    if (openClawHome) {
+        for (const skillPath of collectSkillDirectories(
+            path.join(openClawHome, "workspace/skills")
+        )) {
+            addSkill(skillPath, "workspace");
+        }
     }
 
-    for (const skillPath of collectSkillDirectories(
-        path.join(getOpenClawPackageRoot(), "skills")
-    )) {
-        addSkill(skillPath, "builtin");
+    if (openClawPackageRoot) {
+        for (const skillPath of collectSkillDirectories(
+            path.join(openClawPackageRoot, "skills")
+        )) {
+            addSkill(skillPath, "builtin");
+        }
     }
 
     for (const skillPath of collectExtraSkillDirectories()) {
