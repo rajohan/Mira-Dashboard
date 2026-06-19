@@ -23,6 +23,8 @@ import {
 let isStarting = false;
 let stopSchedulerOnServerClose: (() => void) | undefined;
 
+export { runLogRotationCli } from "./services/logRotation.js";
+
 function isPackagedServerEntrypoint(argvPath = process.argv[1]): boolean {
     return Boolean(argvPath?.replaceAll("\\", "/").endsWith("/dist/serverStart.js"));
 }

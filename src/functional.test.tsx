@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
@@ -135,7 +135,9 @@ describe("Mira Dashboard frontend behavior", () => {
             screen.getByLabelText("Description (optional)"),
             "Cover behavior"
         );
-        await user.click(screen.getByRole("button", { name: "Raymond" }));
+        await user.click(
+            within(screen.getByRole("dialog")).getByRole("button", { name: "Raymond" })
+        );
         await user.click(screen.getByRole("button", { name: /^Create Task$/i }));
 
         await waitFor(() =>

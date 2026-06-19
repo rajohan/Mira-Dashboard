@@ -147,7 +147,10 @@ function getConfiguredSkillEntries(config?: Record<string, unknown>) {
 function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
     const entries = getConfiguredSkillEntries(config);
     const skillsByName = new Map<string, SkillInfo>();
-    const homeDir = process.env.HOME?.trim() || os.homedir();
+    const openClawHome =
+        process.env.OPENCLAW_HOME?.trim() ||
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim() ||
+        path.join(os.homedir(), ".openclaw");
 
     /** Adds one discovered skill to the response map with configured state. */
     const addSkill = (skillPath: string, source: SkillSource) => {
@@ -169,7 +172,7 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
     };
 
     for (const skillPath of collectSkillDirectories(
-        path.join(homeDir, ".openclaw/workspace/skills")
+        path.join(openClawHome, "workspace/skills")
     )) {
         addSkill(skillPath, "workspace");
     }

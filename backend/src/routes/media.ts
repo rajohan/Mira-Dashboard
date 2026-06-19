@@ -5,10 +5,6 @@ import path from "path";
 
 import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
 
-const fallbackOpenClawHome = nonEmptyEnvFallback(
-    "MIRA_DASHBOARD_OPENCLAW_HOME",
-    path.join(os.homedir(), ".openclaw")
-);
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
 let cachedMediaRoot: string | undefined;
 let cachedRealMediaRoot: string | undefined;
@@ -34,6 +30,10 @@ function mimeTypeFromPath(filePath: string): string {
 }
 
 function getMediaRoot(): string {
+    const fallbackOpenClawHome = nonEmptyEnvFallback(
+        "MIRA_DASHBOARD_OPENCLAW_HOME",
+        path.join(os.homedir(), ".openclaw")
+    );
     const openclawHome = nonEmptyEnvFallback("OPENCLAW_HOME", fallbackOpenClawHome);
     return path.resolve(openclawHome, "media");
 }
