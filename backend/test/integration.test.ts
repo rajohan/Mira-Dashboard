@@ -62,7 +62,7 @@ describe("Mira Dashboard backend integration", () => {
         process.env.OPENCLAW_HOME = openclawRoot;
         process.env.TRUST_PROXY = "false";
 
-        const serverModule = await import("../src/server.js");
+        const serverModule = await import("../src/server.ts");
         server = serverModule.server;
         await new Promise<void>((resolve) => {
             server.listen(0, "127.0.0.1", resolve);

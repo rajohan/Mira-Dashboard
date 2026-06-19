@@ -22,6 +22,7 @@ function isWritableSession(item: unknown): item is Session {
 /** Defines sessions collection. */
 export const sessionsCollection = createCollection(
     queryCollectionOptions({
+        id: "sessions",
         queryKey: ["sessions"],
         queryFn: async () => [],
         queryClient,

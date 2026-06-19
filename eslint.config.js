@@ -36,6 +36,7 @@ const eslintConfig = defineConfig(
             globals: {
                 ...globals.browser,
                 ...globals.node,
+                Bun: "readonly",
             },
         },
         plugins: {

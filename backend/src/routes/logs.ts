@@ -3,8 +3,8 @@ import fs from "fs";
 import path from "path";
 import type WebSocket from "ws";
 
-import { errorMessage } from "../lib/errors.js";
-import { guardedPath, openReadNoFollowGuarded } from "../lib/guardedOps.js";
+import { errorMessage } from "../lib/errors.ts";
+import { guardedPath, openReadNoFollowGuarded } from "../lib/guardedOps.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();

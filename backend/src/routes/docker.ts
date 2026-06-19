@@ -4,26 +4,26 @@ import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
 
-import { db } from "../db.js";
-import { asyncRoute as baseAsyncRoute, errorMessage } from "../lib/errors.js";
+import { db } from "../db.ts";
+import { asyncRoute as baseAsyncRoute, errorMessage } from "../lib/errors.ts";
 import {
     arrayFallback,
     nonEmptyEnvFallback,
     nullableString,
     objectFallback,
     stringFallback,
-} from "../lib/values.js";
+} from "../lib/values.ts";
 import {
     type DockerUpdaterStepResult,
     isNonblockingRegistrationFailure,
     runDockerUpdaterService,
-} from "../services/dockerUpdater.js";
+} from "../services/dockerUpdater.ts";
 import {
     createManualScheduledJobRun,
     finishScheduledJobRun,
     getScheduledJob,
     type ScheduledJobRun,
-} from "../services/scheduledJobs.js";
+} from "../services/scheduledJobs.ts";
 
 const execFileAsync = promisify(execFile);
 const dockerBin = nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");

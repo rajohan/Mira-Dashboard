@@ -1,8 +1,8 @@
 import express, { type RequestHandler } from "express";
 
-import { db } from "../db.js";
-import { asyncRoute as baseAsyncRoute } from "../lib/errors.js";
-import { runElevatedLogRotationService } from "../services/logRotation.js";
+import { db } from "../db.ts";
+import { asyncRoute as baseAsyncRoute } from "../lib/errors.ts";
+import { runElevatedLogRotationService } from "../services/logRotation.ts";
 
 const LOG_ROTATION_STATE_KEY = "log_rotation.state";
 

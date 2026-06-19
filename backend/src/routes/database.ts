@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
 
-import { stringFallback } from "../lib/values.js";
+import { stringFallback } from "../lib/values.ts";
 
 const execFileAsync = promisify(execFile);
 const DOCKER_EXEC_TIMEOUT_MS = 30_000;

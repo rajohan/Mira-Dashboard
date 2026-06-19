@@ -12,14 +12,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { createGzip } from "node:zlib";
 
-import { db } from "../db.js";
-import { writeCacheSuccess } from "./cacheEntryWriter.js";
+import { db } from "../db.ts";
+import { writeCacheSuccess } from "./cacheEntryWriter.ts";
 import {
     getScheduledJob,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
     upsertScheduledJob,
-} from "./scheduledJobs.js";
+} from "./scheduledJobs.ts";
 
 function compareStrings(left: string, right: string): number {
     return left.localeCompare(right);
@@ -76,8 +76,7 @@ const ELEVATED_LOG_ROTATION_TIMEOUT_MS = 5 * 60_000;
 const ELEVATED_LOG_ROTATION_MAX_BUFFER = 16 * 1024 * 1024;
 const LOG_ROTATION_JOB_ID = "ops.log-rotation";
 const LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS = 100_000;
-const BUN_EXECUTABLE =
-    process.env.BUN_BINARY || (process.versions.bun ? process.execPath : "bun");
+const BUN_EXECUTABLE = process.env.BUN_BINARY || "bun";
 const logRotationLockFile = DEFAULT_LOCK_FILE;
 
 type ExecFileRunner = (
@@ -1830,12 +1829,10 @@ function buildElevatedLogRotationCliArgs(
         `import { runLogRotationCli } from ${JSON.stringify(pathToFileURL(modulePath).href)};`,
         "await runLogRotationCli();",
     ].join("\n");
-    const loaderArgs = modulePath.endsWith(".ts") ? ["--import", "tsx"] : [];
     return [
         "-n",
         "-E",
-        process.versions.bun ? BUN_EXECUTABLE : process.execPath,
-        ...loaderArgs,
+        BUN_EXECUTABLE,
         "--input-type=module",
         "--eval",
         importLogRotationCli,

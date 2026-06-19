@@ -6,7 +6,7 @@ import fs from "fs";
 import path from "path";
 import { parse as parseShellCommand } from "shell-quote";
 
-import { spawnGuarded } from "../lib/guardedOps.js";
+import { spawnGuarded } from "../lib/guardedOps.ts";
 
 /** Shell commands that first-party ops actions may execute through explicit shell mode. */
 const OPS_SHELL_COMMANDS = new Set([

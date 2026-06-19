@@ -1,6 +1,6 @@
 import express, { type RequestHandler } from "express";
 
-import gateway from "../gateway.js";
+import gateway from "../gateway.ts";
 
 /** Represents cron job. */
 interface CronJob {

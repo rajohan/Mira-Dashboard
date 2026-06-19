@@ -1,8 +1,8 @@
 import express, { type RequestHandler } from "express";
 
-import { db } from "../db.js";
-import { nullableString, objectFallback, stringFallback } from "../lib/values.js";
-import { pruneReadNotifications } from "../services/notificationMaintenance.js";
+import { db } from "../db.ts";
+import { nullableString, objectFallback, stringFallback } from "../lib/values.ts";
+import { pruneReadNotifications } from "../services/notificationMaintenance.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();

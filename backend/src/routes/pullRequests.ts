@@ -6,9 +6,9 @@ import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
 
-import { db, miraDbPath } from "../db.js";
-import { asyncRoute as baseAsyncRoute, errorMessage } from "../lib/errors.js";
-import { nonEmptyEnvFallback } from "../lib/values.js";
+import { db, miraDbPath } from "../db.ts";
+import { asyncRoute as baseAsyncRoute, errorMessage } from "../lib/errors.ts";
+import { nonEmptyEnvFallback } from "../lib/values.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -40,8 +40,7 @@ const PR_LIST_TIMEOUT_MS = 180_000;
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
 const OPINIONATED_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
 const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "restart-scheduled"]);
-const BUN_EXECUTABLE =
-    process.env.BUN_BINARY || (process.versions.bun ? process.execPath : "bun");
+const BUN_EXECUTABLE = process.env.BUN_BINARY || "bun";
 
 function getResolvedRoots() {
     return {

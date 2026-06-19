@@ -6,9 +6,9 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
-import gateway from "../gateway.js";
-import { errorMessage } from "../lib/errors.js";
-import { objectFallback, stringFallback } from "../lib/values.js";
+import gateway from "../gateway.ts";
+import { errorMessage } from "../lib/errors.ts";
+import { objectFallback, stringFallback } from "../lib/values.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -141,8 +141,8 @@ function collectSkillDirectories(root: string): string[] {
 }
 
 /** Finds bundled extension skill directories under the OpenClaw package root. */
-function collectExtraSkillDirectories(): string[] {
-    const extensionsRoot = path.join(getOpenClawPackageRoot(), "dist/extensions");
+function collectExtraSkillDirectories(openClawPackageRoot: string): string[] {
+    const extensionsRoot = path.join(openClawPackageRoot, "dist/extensions");
     try {
         return fs
             .readdirSync(extensionsRoot, { withFileTypes: true })
@@ -215,8 +215,10 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
         }
     }
 
-    for (const skillPath of collectExtraSkillDirectories()) {
-        addSkill(skillPath, "extra");
+    if (openClawPackageRoot) {
+        for (const skillPath of collectExtraSkillDirectories(openClawPackageRoot)) {
+            addSkill(skillPath, "extra");
+        }
     }
 
     for (const [name, value] of Object.entries(entries)) {

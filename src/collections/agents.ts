@@ -7,6 +7,7 @@ import type { AgentInfo } from "../types/session";
 /** Defines agents collection. */
 export const agentsCollection = createCollection(
     queryCollectionOptions({
+        id: "agents",
         queryKey: ["agents"],
         queryFn: async () => [],
         queryClient,

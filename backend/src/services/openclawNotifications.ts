@@ -1,12 +1,12 @@
-import { db } from "../db.js";
-import { fetchCachedSystemHost } from "../lib/systemCache.js";
-import { pruneReadNotifications } from "./notificationMaintenance.js";
+import { db } from "../db.ts";
+import { fetchCachedSystemHost } from "../lib/systemCache.ts";
+import { pruneReadNotifications } from "./notificationMaintenance.ts";
 import {
     getScheduledJob,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
     upsertScheduledJob,
-} from "./scheduledJobs.js";
+} from "./scheduledJobs.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();

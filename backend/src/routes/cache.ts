@@ -5,10 +5,10 @@ import {
     getAllCacheEntries,
     getCacheEntry,
     parseJsonField,
-} from "../lib/cacheStore.js";
-import { errorMessage, httpStatusCode } from "../lib/errors.js";
-import { stringFallback } from "../lib/values.js";
-import { refreshCacheProducer } from "../services/cacheRefresh.js";
+} from "../lib/cacheStore.ts";
+import { errorMessage, httpStatusCode } from "../lib/errors.ts";
+import { stringFallback } from "../lib/values.ts";
+import { refreshCacheProducer } from "../services/cacheRefresh.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();

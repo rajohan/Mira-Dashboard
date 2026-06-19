@@ -3,8 +3,8 @@ import express, { type RequestHandler } from "express";
 import { readdirSync, readFileSync } from "fs";
 import os from "os";
 
-import gateway from "../gateway.js";
-import { stringFallback } from "../lib/values.js";
+import gateway from "../gateway.ts";
+import { stringFallback } from "../lib/values.ts";
 
 /** Represents CPU metrics. */
 interface CpuMetrics {

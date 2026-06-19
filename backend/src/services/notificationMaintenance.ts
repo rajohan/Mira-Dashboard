@@ -1,4 +1,4 @@
-import { db } from "../db.js";
+import { db } from "../db.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import express from "express";
 
-import { guardedPath, readdirGuardedAsync, statGuardedAsync } from "../lib/guardedOps.js";
+import { guardedPath, readdirGuardedAsync, statGuardedAsync } from "../lib/guardedOps.ts";
 
 /** Represents completion request. */
 interface CompletionRequest {

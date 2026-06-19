@@ -1,12 +1,12 @@
 import express, { type RequestHandler } from "express";
 
-import { errorMessage } from "../lib/errors.js";
+import { errorMessage } from "../lib/errors.ts";
 import {
     fetchCachedMoltbookFeed,
     fetchCachedMoltbookHome,
     fetchCachedMoltbookMyContent,
     fetchCachedMoltbookProfile,
-} from "../lib/moltbookCache.js";
+} from "../lib/moltbookCache.ts";
 
 /** Registers moltbook API routes. */
 export default function moltbookRoutes(app: express.Application): void {

@@ -1,7 +1,7 @@
 import express, { type RequestHandler } from "express";
 
-import gateway from "../gateway.js";
-import { stringFallback } from "../lib/values.js";
+import gateway from "../gateway.ts";
+import { stringFallback } from "../lib/values.ts";
 
 function isValidSessionKey(sessionKey: string): boolean {
     return sessionKey.length > 0;

@@ -13,9 +13,9 @@ import {
     persistGatewayToken,
     setSessionCookie,
     verifyPassword,
-} from "../auth.js";
-import { db } from "../db.js";
-import gateway from "../gateway.js";
+} from "../auth.ts";
+import { db } from "../db.ts";
+import gateway from "../gateway.ts";
 
 /** Performs read session ID. */
 function readSessionId(cookieHeader?: string): string | null {

@@ -5,15 +5,15 @@ import Path from "node:path";
 
 import WebSocket from "ws";
 
-import { errorMessage } from "./lib/errors.js";
+import { errorMessage } from "./lib/errors.ts";
 import {
     type DeviceIdentity,
     loadOrCreateDeviceIdentity,
     OpenClawGatewayClient,
     type OpenClawGatewayClientInstance,
     type OpenClawGatewayClientOptions,
-} from "./lib/openclawGatewayClient.js";
-import { nonEmptyEnvFallback, stringFallback } from "./lib/values.js";
+} from "./lib/openclawGatewayClient.ts";
+import { nonEmptyEnvFallback, stringFallback } from "./lib/values.ts";
 
 function validateOpenClawRoot(rootPath: string, envName: string): string {
     const resolved = Path.resolve(rootPath);
@@ -71,7 +71,7 @@ function loadOrCreateDashboardDeviceIdentity(
 import {
     subscribeToLogs as logsSubscribe,
     unsubscribeFromLogs as logsUnsubscribe,
-} from "./routes/logs.js";
+} from "./routes/logs.ts";
 
 /** Represents session. */
 interface Session {

@@ -8,7 +8,7 @@ import {
     mkdirGuarded,
     readTextNoFollowGuarded,
     writeTextNoFollowGuarded,
-} from "../lib/guardedOps.js";
+} from "../lib/guardedOps.ts";
 
 /** Represents settings. */
 interface Settings {

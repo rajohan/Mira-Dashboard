@@ -13,16 +13,16 @@ import {
 import os from "node:os";
 import { promisify } from "node:util";
 
-import { db } from "../db.js";
-import { nonEmptyEnvFallback } from "../lib/values.js";
-import { writeCacheSuccess } from "./cacheEntryWriter.js";
+import { db } from "../db.ts";
+import { nonEmptyEnvFallback } from "../lib/values.ts";
+import { writeCacheSuccess } from "./cacheEntryWriter.ts";
 import {
     getScheduledJob,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
     type ScheduledJob,
     upsertScheduledJob,
-} from "./scheduledJobs.js";
+} from "./scheduledJobs.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -277,7 +277,7 @@ async function acquireCodexTrustConfigLockAsync(
     }
 }
 
-export { writeCacheSuccess } from "./cacheEntryWriter.js";
+export { writeCacheSuccess } from "./cacheEntryWriter.ts";
 
 export function writeCacheFailure(options: CacheFailureOptions): void {
     const timestamp = nowIso();

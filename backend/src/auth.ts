@@ -3,7 +3,7 @@ import type { IncomingMessage } from "node:http";
 
 import type express from "express";
 
-import { db } from "./db.js";
+import { db } from "./db.ts";
 
 const SESSION_COOKIE = "mira_dashboard_session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;

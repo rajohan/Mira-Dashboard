@@ -1,6 +1,6 @@
 import type express from "express";
 
-import { stringFallback } from "../lib/values.js";
+import { stringFallback } from "../lib/values.ts";
 
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const ELEVENLABS_TIMEOUT_MS = 60_000;

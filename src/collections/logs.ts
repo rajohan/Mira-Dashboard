@@ -8,6 +8,7 @@ import { parseLogLine } from "../utils/logUtils";
 /** Defines logs collection. */
 export const logsCollection = createCollection(
     queryCollectionOptions({
+        id: "logs",
         queryKey: ["logs"],
         queryFn: async () => [],
         queryClient,

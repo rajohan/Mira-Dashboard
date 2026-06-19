@@ -3,7 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
-import { asyncRoute } from "../lib/errors.js";
+import { asyncRoute } from "../lib/errors.ts";
 import {
     copyNoFollowGuarded,
     guardedPath,
@@ -11,8 +11,8 @@ import {
     openReadNoFollowGuarded,
     statGuarded,
     writeTextNoFollowGuarded,
-} from "../lib/guardedOps.js";
-import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.js";
+} from "../lib/guardedOps.ts";
+import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.ts";
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit
 const MAX_CONFIG_WRITE_SIZE = 2 * 1024 * 1024; // 2MB write guardrail
 const CONFIG_WRITE_JSON_LIMIT = MAX_CONFIG_WRITE_SIZE * 2;

@@ -4,10 +4,10 @@ import {
     TASK_ASSIGNEE_IDS,
     TASK_ASSIGNEES,
     type TaskAssigneeId,
-} from "../constants/taskActors.js";
-import { db } from "../db.js";
-import gateway from "../gateway.js";
-import { objectFallback } from "../lib/values.js";
+} from "../constants/taskActors.ts";
+import { db } from "../db.ts";
+import gateway from "../gateway.ts";
+import { objectFallback } from "../lib/values.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();

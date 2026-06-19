@@ -5,7 +5,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
-import { asyncRoute } from "../lib/errors.js";
+import { asyncRoute } from "../lib/errors.ts";
 import {
     copyNoFollowGuarded,
     guardedPath,
@@ -14,9 +14,9 @@ import {
     readdirGuarded,
     statGuarded,
     writeTextNoFollowExclusiveGuarded,
-} from "../lib/guardedOps.js";
-import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.js";
-import { stringFallback } from "../lib/values.js";
+} from "../lib/guardedOps.ts";
+import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.ts";
+import { stringFallback } from "../lib/values.ts";
 
 function getDefaultWorkspaceRoot(): string {
     const openclawHome =

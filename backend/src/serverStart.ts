@@ -1,29 +1,29 @@
 import { pathToFileURL } from "node:url";
 
-import { getPersistedGatewayToken } from "./auth.js";
-import gateway from "./gateway.js";
-import { registerBackupScheduledJobs } from "./routes/backups.js";
-import { resolveListenPort, server } from "./server.js";
+import { getPersistedGatewayToken } from "./auth.ts";
+import gateway from "./gateway.ts";
+import { registerBackupScheduledJobs } from "./routes/backups.ts";
+import { resolveListenPort, server } from "./server.ts";
 import {
     registerCacheRefreshScheduledJobs,
     waitForLocalCacheSeed,
-} from "./services/cacheRefresh.js";
-import { registerDockerUpdaterScheduledJobs } from "./services/dockerUpdater.js";
-import { registerLogRotationScheduledJobs } from "./services/logRotation.js";
-import { registerOpenClawNotificationScheduledJobs } from "./services/openclawNotifications.js";
+} from "./services/cacheRefresh.ts";
+import { registerDockerUpdaterScheduledJobs } from "./services/dockerUpdater.ts";
+import { registerLogRotationScheduledJobs } from "./services/logRotation.ts";
+import { registerOpenClawNotificationScheduledJobs } from "./services/openclawNotifications.ts";
 import {
     registerQuotaNotificationScheduledJobs,
     runQuotaNotificationCheck,
-} from "./services/quotaNotifications.js";
+} from "./services/quotaNotifications.ts";
 import {
     startScheduledJobScheduler,
     stopScheduledJobScheduler,
-} from "./services/scheduledJobs.js";
+} from "./services/scheduledJobs.ts";
 
 let isStarting = false;
 let stopSchedulerOnServerClose: (() => void) | undefined;
 
-export { runLogRotationCli } from "./services/logRotation.js";
+export { runLogRotationCli } from "./services/logRotation.ts";
 
 function isPackagedServerEntrypoint(argvPath = process.argv[1]): boolean {
     return Boolean(argvPath?.replaceAll("\\", "/").endsWith("/dist/serverStart.js"));

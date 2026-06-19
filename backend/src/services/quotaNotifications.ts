@@ -1,16 +1,16 @@
-import { db } from "../db.js";
+import { db } from "../db.ts";
 import {
     fetchCachedQuotas,
     hasQuotaStatus,
     type SyntheticQuota,
-} from "../lib/quotasCache.js";
-import { pruneReadNotifications } from "./notificationMaintenance.js";
+} from "../lib/quotasCache.ts";
+import { pruneReadNotifications } from "./notificationMaintenance.ts";
 import {
     getScheduledJob,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
     upsertScheduledJob,
-} from "./scheduledJobs.js";
+} from "./scheduledJobs.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();

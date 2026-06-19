@@ -1,4 +1,4 @@
-import { db } from "../db.js";
+import { db } from "../db.ts";
 
 /** Represents one cache entry row. */
 export interface CacheEntryRow {

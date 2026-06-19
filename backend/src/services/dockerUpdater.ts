@@ -8,15 +8,15 @@ import { parse as parseDotenv } from "dotenv";
 import safeRegex from "safe-regex2";
 import YAML from "yaml";
 
-import { db } from "../db.js";
-import { nonEmptyEnvFallback } from "../lib/values.js";
-import type { ScheduledJob } from "./scheduledJobs.js";
+import { db } from "../db.ts";
+import { nonEmptyEnvFallback } from "../lib/values.ts";
+import type { ScheduledJob } from "./scheduledJobs.ts";
 import {
     getScheduledJob,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
     upsertScheduledJob,
-} from "./scheduledJobs.js";
+} from "./scheduledJobs.ts";
 
 const COMPOSE_FILENAMES = [
     "compose.yaml",

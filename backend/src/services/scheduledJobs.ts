@@ -1,5 +1,5 @@
-import { db } from "../db.js";
-import { errorMessage } from "../lib/errors.js";
+import { db } from "../db.ts";
+import { errorMessage } from "../lib/errors.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();

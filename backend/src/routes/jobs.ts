@@ -4,7 +4,7 @@ import {
     asyncRoute as baseAsyncRoute,
     errorMessage,
     httpStatusCode,
-} from "../lib/errors.js";
+} from "../lib/errors.ts";
 import {
     getScheduledJob,
     isScheduledJobValidationError,
@@ -13,7 +13,7 @@ import {
     runScheduledJob,
     type ScheduledJobScheduleType,
     updateScheduledJob,
-} from "../services/scheduledJobs.js";
+} from "../services/scheduledJobs.ts";
 
 const JOBS_JSON_LIMIT = "2097152b";
 const scheduleTypes = new Set<ScheduledJobScheduleType>(["cron", "daily", "interval"]);

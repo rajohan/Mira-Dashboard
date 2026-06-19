@@ -4,9 +4,9 @@ import JSON5 from "json5";
 import os from "os";
 import Path from "path";
 
-import { db } from "../db.js";
-import gateway from "../gateway.js";
-import { asyncRoute } from "../lib/errors.js";
+import { db } from "../db.ts";
+import gateway from "../gateway.ts";
+import { asyncRoute } from "../lib/errors.ts";
 import {
     guardedPath,
     mkdirGuarded,
@@ -14,8 +14,8 @@ import {
     readTextNoFollowGuarded,
     statGuarded,
     writeTextNoFollowGuarded,
-} from "../lib/guardedOps.js";
-import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.js";
+} from "../lib/guardedOps.ts";
+import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.ts";
 
 function defaultOpenclawRoot(): string {
     return Path.join(process.cwd(), "data", "openclaw");

@@ -3,9 +3,9 @@ import { randomUUID } from "node:crypto";
 
 import express, { type RequestHandler } from "express";
 
-import { db } from "../db.js";
-import { asyncRoute, errorMessage } from "../lib/errors.js";
-import { refreshCacheProducer } from "../services/cacheRefresh.js";
+import { db } from "../db.ts";
+import { asyncRoute, errorMessage } from "../lib/errors.ts";
+import { refreshCacheProducer } from "../services/cacheRefresh.ts";
 import {
     createManualScheduledJobRun,
     finishScheduledJobRun,
@@ -14,7 +14,7 @@ import {
     removeScheduledJobsNotInAction,
     type ScheduledJobRun,
     upsertScheduledJob,
-} from "../services/scheduledJobs.js";
+} from "../services/scheduledJobs.ts";
 const MAX_OUTPUT_CHARS = 100_000;
 const SCHEDULED_BACKUP_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const BACKUP_ABORT_SIGKILL_GRACE_MS = 10_000;

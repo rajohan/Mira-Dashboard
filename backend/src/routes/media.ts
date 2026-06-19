@@ -3,7 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
-import { nonEmptyEnvFallback, stringFallback } from "../lib/values.js";
+import { stringFallback } from "../lib/values.ts";
 
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
 let cachedMediaRoot: string | undefined;
@@ -29,18 +29,41 @@ function mimeTypeFromPath(filePath: string): string {
     return MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream";
 }
 
-function getMediaRoot(): string {
-    const fallbackOpenClawHome = nonEmptyEnvFallback(
-        "MIRA_DASHBOARD_OPENCLAW_HOME",
-        path.join(os.homedir(), ".openclaw")
-    );
-    const openclawHome = nonEmptyEnvFallback("OPENCLAW_HOME", fallbackOpenClawHome);
-    return path.resolve(openclawHome, "media");
+/** Resolves the OpenClaw root without falling back to a root-level path. */
+function resolveOpenclawRoot(): string | null {
+    const configuredRoot =
+        process.env.OPENCLAW_HOME?.trim() ||
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
+    const homeDir = (process.env.HOME?.trim() || os.homedir().trim()).trim();
+    if (
+        !configuredRoot &&
+        (!homeDir || !path.isAbsolute(homeDir) || homeDir === path.parse(homeDir).root)
+    ) {
+        return null;
+    }
+    const openclawRoot = configuredRoot || path.join(homeDir, ".openclaw");
+    const resolvedRoot = path.resolve(openclawRoot);
+    if (
+        !openclawRoot ||
+        !path.isAbsolute(openclawRoot) ||
+        resolvedRoot === path.parse(resolvedRoot).root
+    ) {
+        return null;
+    }
+    try {
+        return fs.realpathSync(resolvedRoot);
+    } catch {
+        return resolvedRoot;
+    }
+}
+
+function getMediaRoot(): string | null {
+    const openclawRoot = resolveOpenclawRoot();
+    return openclawRoot ? path.join(openclawRoot, "media") : null;
 }
 
 /** Resolves and caches the canonical media root after it exists. */
-function getRealMediaRoot(): string | null {
-    const mediaRoot = getMediaRoot();
+function getRealMediaRoot(mediaRoot: string): string | null {
     if (cachedMediaRoot !== mediaRoot) {
         cachedMediaRoot = mediaRoot;
         cachedRealMediaRoot = undefined;
@@ -70,8 +93,14 @@ export default function mediaRoutes(app: express.Application): void {
             return;
         }
 
-        const fullPath = path.resolve(getMediaRoot(), requestedPath);
-        const realMediaRoot = getRealMediaRoot();
+        const mediaRoot = getMediaRoot();
+        if (!mediaRoot) {
+            response.status(404).json({ error: "Media not found" });
+            return;
+        }
+
+        const fullPath = path.resolve(mediaRoot, requestedPath);
+        const realMediaRoot = getRealMediaRoot(mediaRoot);
         if (!realMediaRoot) {
             response.status(404).json({ error: "Media not found" });
             return;
