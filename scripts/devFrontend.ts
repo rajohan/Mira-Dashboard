@@ -8,6 +8,7 @@ const backendWebSocketTarget = apiTarget.replace(/^http/u, "ws");
 interface WebSocketProxyData {
     backend?: WebSocket;
     cookie?: string;
+    pendingMessages: Array<string | ArrayBuffer | Uint8Array>;
 }
 
 async function proxyApi(request: Request): Promise<Response> {
@@ -25,6 +26,21 @@ async function proxyApi(request: Request): Promise<Response> {
     });
 }
 
+function upgradeWebSocket(request: Request): Response {
+    if (
+        server.upgrade(request, {
+            data: {
+                cookie: request.headers.get("cookie") || undefined,
+                pendingMessages: [],
+            },
+        })
+    ) {
+        return new Response(null, { status: 204 });
+    }
+
+    return new Response("WebSocket upgrade failed", { status: 400 });
+}
+
 const server = Bun.serve<WebSocketProxyData>({
     development: {
         console: true,
@@ -33,27 +49,21 @@ const server = Bun.serve<WebSocketProxyData>({
     fetch(request) {
         const url = new URL(request.url);
         if (url.pathname === "/ws") {
-            if (
-                server.upgrade(request, {
-                    data: { cookie: request.headers.get("cookie") || undefined },
-                })
-            ) {
-                return new Response(null, { status: 204 });
-            }
-
-            return new Response("WebSocket upgrade failed", { status: 400 });
+            return upgradeWebSocket(request);
         }
 
         if (url.pathname.startsWith("/api")) {
             return proxyApi(request);
         }
 
-        return dashboard as unknown as Response;
+        return new Response("Not found", { status: 404 });
     },
     hostname: host,
     port,
     routes: {
         "/api/*": proxyApi,
+        "/ws": upgradeWebSocket,
+        "/*": dashboard,
     },
     websocket: {
         close(socket) {
@@ -63,7 +73,9 @@ const server = Bun.serve<WebSocketProxyData>({
             const backend = socket.data.backend;
             if (backend?.readyState === WebSocket.OPEN) {
                 backend.send(message);
+                return;
             }
+            socket.data.pendingMessages.push(message);
         },
         open(socket) {
             const headers: Record<string, string> = {};
@@ -75,6 +87,12 @@ const server = Bun.serve<WebSocketProxyData>({
             });
             socket.data.backend = backend;
 
+            backend.addEventListener("open", () => {
+                for (const message of socket.data.pendingMessages) {
+                    backend.send(message);
+                }
+                socket.data.pendingMessages = [];
+            });
             backend.addEventListener("message", (event) => {
                 if (socket.readyState === WebSocket.OPEN) {
                     socket.send(event.data);
