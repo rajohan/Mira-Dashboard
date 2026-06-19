@@ -70,7 +70,7 @@ export function getPriority(labels: Array<{ name: string }>): "high" | "medium" 
         )
     )
         return "medium";
-    return "low";
+    return "medium";
 }
 
 /** Returns a comparable updated-at timestamp for task ordering. */

@@ -190,8 +190,7 @@ async function fetchCronJobsById(): Promise<Map<string, CronJob>> {
                 .map((job) => [getCronJobId(job), job] as const)
                 .filter(([id]) => id.length > 0)
         );
-    } catch (error) {
-        console.warn("[Tasks] Failed to load cron jobs for task automation:", error);
+    } catch {
         return new Map();
     }
 }
@@ -351,17 +350,6 @@ function recordEvent(taskId: number, eventType: string, payload: unknown) {
 }
 
 /** Defines testing. */
-export const __testing = {
-    derivePriority,
-    formatScheduleSummary,
-    labelsFromTask,
-    normalizeAutomationInput,
-    normalizeCronJobs,
-    normalizeStatus,
-    parseRecordJson,
-    serializeTaskEventPayload,
-    toFrontendTask,
-};
 
 /** Registers tasks API routes. */
 export default function tasksRoutes(

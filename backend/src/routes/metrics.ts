@@ -86,21 +86,6 @@ const metricsDeps = {
     readFileSync,
 };
 
-export const __testing = {
-    getNetworkMetrics,
-    getTokenMetrics,
-    resetNetworkSample(): void {
-        previousNetworkSample = null;
-    },
-    setDepsForTest(deps: Partial<typeof metricsDeps>): void {
-        Object.assign(metricsDeps, deps);
-    },
-    resetDepsForTest(): void {
-        metricsDeps.execSync = execSync;
-        metricsDeps.readdirSync = readdirSync;
-        metricsDeps.readFileSync = readFileSync;
-    },
-};
 
 /** Returns network metrics. */
 function getNetworkMetrics(): NetworkMetrics {

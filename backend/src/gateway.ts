@@ -1103,57 +1103,6 @@ function shutdown(): void {
 }
 
 /** Defines testing. */
-export const __testing = {
-    transformSession,
-    enrichRuntimeEventPayload,
-    hydrateOmittedChatHistoryImages,
-    loadOrCreateDashboardDeviceIdentity,
-    validateOpenClawRoot,
-    readRawTranscriptImageMessages,
-    getTranscriptPath,
-    isPathInsideRoot,
-    resolvePathInsideRoot,
-    normalizeMessageText,
-    normalizeTimestamp,
-    imageBlockHasOmittedData,
-    shouldRetrySessionIndexSubscription,
-    sessionHasRunIdentifier,
-    refreshSessions,
-    forwardRequest,
-    pendingRequestCountForTest: (): number => pendingRequests.size,
-    /** Replaces the in-memory session list for focused gateway tests. */
-    setSessionListForTest(sessions: Session[]): void {
-        sessionList = sessions;
-    },
-    /** Replaces the Gateway client for focused connected-state tests. */
-    setGatewayClientForTest(client: OpenClawGatewayClientInstance | null): void {
-        gatewayClient = client;
-    },
-    /** Replaces the Gateway connected flag for focused connected-state tests. */
-    setGatewayConnectedForTest(connected: boolean): void {
-        isGatewayConnected = connected;
-    },
-    /** Replaces the Gateway client constructor for deterministic init tests. */
-    setGatewayClientConstructorForTest(
-        constructor_: new (
-            options: OpenClawGatewayClientOptions
-        ) => OpenClawGatewayClientInstance
-    ): void {
-        GatewayClientCtor = constructor_;
-    },
-    /** Clears mutable gateway state between tests. */
-    resetGatewayStateForTest(): void {
-        try {
-            shutdown();
-        } finally {
-            subscribers.clear();
-            pendingRequests.clear();
-            sessionList = [];
-            GatewayClientCtor = OpenClawGatewayClient;
-            requestId = 1000;
-        }
-    },
-};
 
 export default {
     init,

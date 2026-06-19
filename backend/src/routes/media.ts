@@ -9,14 +9,10 @@ const fallbackOpenClawHome = nonEmptyEnvFallback(
     "MIRA_DASHBOARD_OPENCLAW_HOME",
     path.join(os.homedir(), ".openclaw")
 );
-const OPENCLAW_HOME = nonEmptyEnvFallback("OPENCLAW_HOME", fallbackOpenClawHome);
-const MEDIA_ROOT = path.resolve(OPENCLAW_HOME, "media");
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
+let cachedMediaRoot: string | undefined;
 let cachedRealMediaRoot: string | undefined;
 
-export const __testing = {
-    mediaRoot: MEDIA_ROOT,
-};
 
 const MIME_TYPES: Record<string, string> = {
     ".png": "image/png",
@@ -38,13 +34,23 @@ function mimeTypeFromPath(filePath: string): string {
     return MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream";
 }
 
+function getMediaRoot(): string {
+    const openclawHome = nonEmptyEnvFallback("OPENCLAW_HOME", fallbackOpenClawHome);
+    return path.resolve(openclawHome, "media");
+}
+
 /** Resolves and caches the canonical media root after it exists. */
 function getRealMediaRoot(): string | null {
+    const mediaRoot = getMediaRoot();
+    if (cachedMediaRoot !== mediaRoot) {
+        cachedMediaRoot = mediaRoot;
+        cachedRealMediaRoot = undefined;
+    }
     if (cachedRealMediaRoot) {
         return cachedRealMediaRoot;
     }
     try {
-        cachedRealMediaRoot = fs.realpathSync(MEDIA_ROOT);
+        cachedRealMediaRoot = fs.realpathSync(mediaRoot);
         return cachedRealMediaRoot;
     } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
@@ -65,7 +71,7 @@ export default function mediaRoutes(app: express.Application): void {
             return;
         }
 
-        const fullPath = path.resolve(MEDIA_ROOT, requestedPath);
+        const fullPath = path.resolve(getMediaRoot(), requestedPath);
         const realMediaRoot = getRealMediaRoot();
         if (!realMediaRoot) {
             response.status(404).json({ error: "Media not found" });

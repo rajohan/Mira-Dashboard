@@ -67,6 +67,7 @@ const ELEVATED_LOG_ROTATION_TIMEOUT_MS = 5 * 60_000;
 const ELEVATED_LOG_ROTATION_MAX_BUFFER = 16 * 1024 * 1024;
 const LOG_ROTATION_JOB_ID = "ops.log-rotation";
 const LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS = 100_000;
+const NODE_EXECUTABLE = process.env.NODE_BINARY || "node";
 let logRotationLockFile = DEFAULT_LOCK_FILE;
 
 type ExecFileRunner = (
@@ -1813,7 +1814,7 @@ function buildElevatedLogRotationCliArgs(
     return [
         "-n",
         "-E",
-        process.execPath,
+        process.versions.bun ? NODE_EXECUTABLE : process.execPath,
         ...loaderArgs,
         "--input-type=module",
         "--eval",
@@ -1844,70 +1845,6 @@ function elevatedLogRotationEnvironment(): NodeJS.ProcessEnv {
     return env;
 }
 
-export const __testing = {
-    acquireLogRotationLock,
-    archiveRetentionKey,
-    assertFileIdentity,
-    assertSafePath,
-    assertSafeNewFileParent,
-    byteLimitFromMb,
-    get defaultConfigPath() {
-        return defaultConfigPath();
-    },
-    createNoFollowFile,
-    gzipFile,
-    globToRegex,
-    hasRotatedInCadence,
-    buildElevatedLogRotationCliArgs,
-    elevatedLogRotationEnvironment,
-    listArchives,
-    mergePolicy,
-    openVerifiedLogFile,
-    readLogRotationState,
-    removeStaleReclaimDir,
-    releaseLogRotationLock,
-    rotateCopyTruncate,
-    resolveGlob,
-    shouldRotate,
-    unlinkVerified,
-    caughtMessage,
-    resetElevatedLogRotationExecFileRunner() {
-        elevatedLogRotationExecFileRunner = execFileAsync as ExecFileRunner;
-    },
-    setElevatedLogRotationExecFileRunner(runner: ExecFileRunner) {
-        elevatedLogRotationExecFileRunner = runner;
-    },
-    resetGzipPipeline() {
-        gzipPipeline = pipeline;
-    },
-    resetArchiveOnlyRetentionRunnersForTests() {
-        archiveOnlyCompressArchiveIfNeeded = compressArchiveIfNeeded;
-        archiveOnlyUnlinkVerified = unlinkVerified;
-    },
-    resetWriteCacheSuccessForTests() {
-        writeLogRotationCacheSuccess = writeCacheSuccess;
-    },
-    setArchiveOnlyCompressArchiveIfNeededForTests(
-        runner: typeof compressArchiveIfNeeded
-    ) {
-        archiveOnlyCompressArchiveIfNeeded = runner;
-    },
-    setArchiveOnlyUnlinkVerifiedForTests(runner: typeof unlinkVerified) {
-        archiveOnlyUnlinkVerified = runner;
-    },
-    setGzipPipelineForTests(runner: typeof pipeline) {
-        gzipPipeline = runner;
-    },
-    setWriteCacheSuccessForTests(runner: typeof writeCacheSuccess) {
-        writeLogRotationCacheSuccess = runner;
-    },
-    resetLogRotationLockFileForTests() {
-        logRotationLockFile = DEFAULT_LOCK_FILE;
-    },
-    setLogRotationLockFileForTests(lockFile: string) {
-        logRotationLockFile = lockFile;
-    },
-};
 
 export async function runLogRotationCli(): Promise<void> {
     try {

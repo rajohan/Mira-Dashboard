@@ -432,18 +432,6 @@ function failExecJob(jobId: string, error: unknown): void {
 }
 
 /** Defines testing. */
-export const __testing = {
-    cleanupJobs,
-    completeExecJob,
-    execErrorResponse,
-    failExecJob,
-    getApprovedShellCommand,
-    jobs,
-    parseDirectCommand,
-    resolveCwd,
-    trimOutput,
-    updateExecJobOutput,
-};
 
 /** Registers exec API routes. */
 export default function execRoutes(

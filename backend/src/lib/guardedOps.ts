@@ -375,20 +375,6 @@ export function lstatGuarded(path: GuardedPath): Fs.Stats {
     return lstatSync(guardedPathBuffer(path));
 }
 
-export const __testing = {
-    setReadChunkForTest(nextReadChunk?: ReadChunk): void {
-        readChunk =
-            nextReadChunk ??
-            ((file, buffer, offset, length, position) =>
-                file.read(buffer, offset, length, position));
-    },
-    setLstatSyncForTest(nextLstatSync?: typeof Fs.lstatSync): void {
-        lstatSync = nextLstatSync ?? ((path) => fsOps.lstatSync(path));
-    },
-    setStatSyncForTest(nextStatSync?: typeof Fs.statSync): void {
-        statSync = nextStatSync ?? ((path) => fsOps.statSync(path));
-    },
-};
 
 /** Spawns a validated executable with explicit argument vector semantics. */
 export function spawnGuarded(

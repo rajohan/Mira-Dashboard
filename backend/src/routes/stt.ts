@@ -165,10 +165,3 @@ export default function sttRoutes(app: express.Express, expressModule: typeof ex
         }) as express.RequestHandler
     );
 }
-
-export const __testing = {
-    audioExtension,
-    readResponseTextFallback,
-    transcribeWithElevenLabs,
-    transcriptTextFromElevenLabs,
-};

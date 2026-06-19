@@ -148,7 +148,3 @@ export function registerOpenClawNotificationScheduledJobs(): void {
         throw error;
     }
 }
-
-export const __testing = {
-    getState,
-};

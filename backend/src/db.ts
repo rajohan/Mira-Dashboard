@@ -1,6 +1,83 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+
+const require = createRequire(import.meta.url);
+const sqliteModule = require(`${process.versions.bun ? "bun" : "node"}:sqlite`) as {
+    Database?: typeof import("bun:sqlite").Database;
+    DatabaseSync?: typeof import("node:sqlite").DatabaseSync;
+};
+type NodeDatabaseSync = typeof import("node:sqlite").DatabaseSync;
+/* eslint-disable unicorn/prefer-minimal-ternary */
+const RawDatabaseSync = (
+    "DatabaseSync" in sqliteModule ? sqliteModule.DatabaseSync : sqliteModule.Database
+) as NodeDatabaseSync;
+/* eslint-enable unicorn/prefer-minimal-ternary */
+
+function normalizeBunSqliteParameters(parameters: unknown[]): unknown[] {
+    return parameters.map((parameter) => {
+        if (
+            !parameter ||
+            typeof parameter !== "object" ||
+            Array.isArray(parameter) ||
+            parameter instanceof Uint8Array
+        ) {
+            return parameter;
+        }
+
+        const normalized: Record<string, unknown> = {
+            ...(parameter as Record<string, unknown>),
+        };
+        for (const [key, value] of Object.entries(parameter)) {
+            if (/^[#:$@]/u.test(key)) {
+                continue;
+            }
+            normalized[`@${key}`] = value;
+            normalized[`:${key}`] = value;
+            normalized[`$${key}`] = value;
+        }
+        return normalized;
+    });
+}
+
+const DatabaseSync: NodeDatabaseSync = (
+    process.versions.bun
+        ? class BunDatabaseSync extends RawDatabaseSync {
+              prepare(sql: string) {
+                  const statement = super.prepare(sql);
+                  return new Proxy(statement, {
+                      get(target, property) {
+                          if (
+                              typeof property === "string" &&
+                              ["get", "run", "all"].includes(property)
+                          ) {
+                              const methodName = property as "get" | "run" | "all";
+                              return (...parameters: unknown[]) => {
+                                  const normalizedParameters =
+                                      normalizeBunSqliteParameters(parameters);
+                                  const statementMethod = target[methodName] as (
+                                      ...arguments_: unknown[]
+                                  ) => unknown;
+                                  const result = Reflect.apply(
+                                      statementMethod,
+                                      target,
+                                      normalizedParameters
+                                  );
+                                  return methodName === "get" && result === null
+                                      ? undefined
+                                      : result;
+                              };
+                          }
+
+                          const value = Reflect.get(target, property, target);
+                          return typeof value === "function" ? value.bind(target) : value;
+                      },
+                  });
+              }
+          }
+        : RawDatabaseSync
+) as NodeDatabaseSync;
+type DatabaseSync = InstanceType<typeof DatabaseSync>;
 
 const configuredDbPath = process.env.MIRA_DASHBOARD_DB_PATH?.trim();
 export const miraDbPath = configuredDbPath
@@ -229,7 +306,7 @@ CREATE INDEX IF NOT EXISTS idx_docker_update_events_created_at
     ON docker_update_events(created_at DESC);
 `;
 
-async function initializeDatabase(): Promise<DatabaseSync> {
+function initializeDatabase(): DatabaseSync {
     const dataDirectory = path.dirname(miraDbPath);
     fs.mkdirSync(dataDirectory, { recursive: true });
 
@@ -242,4 +319,4 @@ async function initializeDatabase(): Promise<DatabaseSync> {
 }
 
 /** Defines db. */
-export const db = await initializeDatabase();
+export const db = initializeDatabase();

@@ -120,13 +120,6 @@ function rollbackCreatedFirstUser(userId: number): void {
     }
 }
 
-export const __testing = {
-    readSessionId,
-    rollbackCreatedFirstUser,
-    rollbackFirstUserBootstrap,
-    validateUsername,
-    validatePassword,
-};
 
 /** Registers auth API routes. */
 export default function authRoutes(

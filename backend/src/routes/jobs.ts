@@ -183,10 +183,3 @@ export default function jobsRoutes(app: express.Application): void {
         })
     );
 }
-
-export const __testing = {
-    httpStatusCode,
-    invalidJobsJsonHandler,
-    invalidPatchField,
-    JOBS_JSON_LIMIT,
-};

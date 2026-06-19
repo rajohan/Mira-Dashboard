@@ -41,10 +41,6 @@ function resolveSettingsDir(home = process.env.HOME): string {
     return settingsDir;
 }
 
-function resolveSettingsFile(): string {
-    return path.join(resolveSettingsDir(), "dashboard-settings.json");
-}
-
 async function withPinnedSettingsFile<T>(
     settingsDir: string,
     callback: (settingsFile: string) => Promise<T> | T
@@ -209,9 +205,3 @@ export default function settingsRoutes(
         }
     }) as RequestHandler);
 }
-
-export const __testing = {
-    resolveSettingsDir,
-    resolveSettingsFile,
-    withPinnedSettingsFile,
-};

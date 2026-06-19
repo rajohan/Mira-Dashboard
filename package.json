@@ -20,8 +20,8 @@
         "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css}\" \"backend/**/*.js\"",
         "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json,css}\" \"backend/**/*.js\"",
         "preview": "vite preview",
-        "test": "bun test --isolate",
-        "test:coverage": "bun test --isolate --coverage"
+        "test": "bun test",
+        "test:coverage": "bun test --coverage"
     },
     "dependencies": {
         "@dnd-kit/core": "^6.3.1",

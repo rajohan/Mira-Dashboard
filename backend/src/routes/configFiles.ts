@@ -68,7 +68,7 @@ function resolveOpenclawRoot(): string | null {
     const configuredRoot =
         process.env.OPENCLAW_HOME?.trim() ||
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
-    const homeDir = os.homedir().trim();
+    const homeDir = (process.env.HOME?.trim() || os.homedir().trim()).trim();
     if (
         !configuredRoot &&
         (!homeDir || !path.isAbsolute(homeDir) || homeDir === path.parse(homeDir).root)
@@ -719,29 +719,3 @@ export default function configFilesRoutes(
         )
     );
 }
-
-export const __testing = {
-    ensureParentDirsForWrite,
-    listConfigFiles,
-    resolveOpenclawRoot,
-    isProcfsAvailable,
-    setValidateOpenclawLeafForTest(
-        nextValidateOpenclawLeaf?: typeof validateOpenclawLeaf
-    ): void {
-        validateOpenclawLeafForWrite = nextValidateOpenclawLeaf ?? validateOpenclawLeaf;
-    },
-    setProcfsAvailabilityProbeForTest(nextProbe?: typeof procfsAvailabilityProbe): void {
-        procfsAvailabilityProbe =
-            nextProbe ??
-            (() => process.platform === "linux" && fs.existsSync("/proc/self/fd"));
-    },
-    setPrepareConfigWriteTargetForTest(
-        nextPrepareConfigWriteTarget?: typeof prepareSafeWriteTargetWithinRoot
-    ): void {
-        prepareConfigWriteTarget =
-            nextPrepareConfigWriteTarget ?? prepareSafeWriteTargetWithinRoot;
-    },
-    hasSymlinkedAncestor,
-    validateOpenclawLeaf,
-    withRootedParentPath,
-};

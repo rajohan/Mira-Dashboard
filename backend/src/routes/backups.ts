@@ -1009,60 +1009,6 @@ export function registerBackupScheduledJobs(): void {
     }
 }
 
-export const __testing = {
-    trimOutput,
-    getCurrentJob,
-    mapJob,
-    backupFailureMessage,
-    getScheduledBackupType,
-    pgrepFullCommandPattern,
-    startKopiaBackupJobForTest: async (signal?: AbortSignal): Promise<BackupJob> =>
-        startKopiaBackupJob(signal),
-    startWalgBackupJobForTest: async (signal?: AbortSignal): Promise<BackupJob> =>
-        startWalgBackupJob(signal),
-    startScheduledBackup,
-    startBackupJobForTest: (
-        type: BackupJob["type"],
-        command: string,
-        signal?: AbortSignal
-    ): BackupJob => startBackupJob(type, command, signal),
-    finishManualScheduledRunWhenCompleteForTest: finishManualScheduledRunWhenComplete,
-    recordBackupNeedsAttentionForTest: (type: BackupJob["type"]): BackupJob =>
-        recordBackupNeedsAttention(type, `${type.toUpperCase()} test attention`),
-    setSpawnBackupProcessForTest(nextSpawn?: typeof spawn): void {
-        spawnBackupProcess = nextSpawn ?? spawn;
-    },
-    setBackupAbortContainerTimeoutsForTest(waitMs: number, pollMs: number): void {
-        backupAbortContainerWaitMs = waitMs;
-        backupAbortContainerPollMs = pollMs;
-    },
-    setBackupAbortContainerConfirmAttemptsForTest(attempts: number): void {
-        backupAbortContainerConfirmAttempts = attempts;
-    },
-    setBackupAbortDockerExecTimeoutForTest(timeoutMs: number): void {
-        backupAbortDockerExecTimeoutMs = timeoutMs;
-    },
-    getBackupJobCountForTest: (): number => backupJobs.size,
-    hasRefreshedBackupStatusForTest(type: BackupJob["type"]): boolean {
-        for (const job of backupJobs.values()) {
-            if (job.type === type && job.statusRefreshed) {
-                return true;
-            }
-        }
-        return false;
-    },
-    markActiveJobNeedsAttentionForTest(type: BackupJob["type"]): void {
-        const job = getCurrentBackupJob(type);
-        if (job) {
-            job.status = "needs_attention";
-        }
-    },
-    resetJobsForTest(): void {
-        backupJobs.clear();
-        activeKopiaJobId = null;
-        activeWalgJobId = null;
-    },
-};
 
 /** Registers backup API routes. */
 export default function backupRoutes(

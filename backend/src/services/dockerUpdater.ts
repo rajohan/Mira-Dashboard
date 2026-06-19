@@ -657,32 +657,6 @@ function basicAuthorization(credentials: RegistryCredentials): string {
     return `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toBase64()}`;
 }
 
-async function fetchJson(url: string, headers: Record<string, string> = {}) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30_000);
-    try {
-        const response = await fetch(url, {
-            signal: controller.signal,
-            headers: {
-                Accept: "application/json",
-                "User-Agent": "mira-dashboard-docker-updater/1.0",
-                ...headers,
-            },
-        });
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status} for ${url}`);
-        }
-        return (await response.json()) as JsonRecord;
-    } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
-            throw new Error(`Request timeout for ${url}`, { cause: error });
-        }
-        throw error;
-    } finally {
-        clearTimeout(timeout);
-    }
-}
-
 function parseBearerChallenge(header: string | null): Record<string, string> | null {
     if (!header?.toLowerCase().startsWith("bearer ")) return null;
     const params = new Map<string, string>();
@@ -769,11 +743,6 @@ async function fetchRegistryResponse(
         clearTimer();
         throw error;
     }
-}
-
-async function fetchRegistryJson(url: string): Promise<JsonRecord> {
-    const { body } = await fetchRegistryJsonWithHeaders(url);
-    return body;
 }
 
 function parseNextLink(header: string | null, baseUrl?: string): string | null {
@@ -925,10 +894,6 @@ function manifestDigestForPlatform(body: JsonRecord, platform: string): string |
     return typeof digest === "string" ? digest : null;
 }
 
-async function lookupDockerHub(service: ManagedServiceRow) {
-    return lookupRegistryV2(service);
-}
-
 async function lookupRegistryV2(service: ManagedServiceRow) {
     const registry = imageRegistry(service.image_repo);
     const registryHost = registry === "docker.io" ? "registry-1.docker.io" : registry;
@@ -983,8 +948,6 @@ async function lookupRegistryV2(service: ManagedServiceRow) {
             (typeof body.digest === "string" ? body.digest : null),
     };
 }
-
-const lookupGhcr = lookupRegistryV2;
 
 async function lookupLatest(service: ManagedServiceRow) {
     if (process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY === "1") {
@@ -2200,40 +2163,3 @@ export function registerDockerUpdaterScheduledJobs(): void {
         throw error;
     }
 }
-
-export const __testing = {
-    applyServiceUpdate,
-    buildTargetImageRef,
-    fetchJson,
-    failedDiscoveryAppSlugs,
-    getDockerAppsRoot,
-    getComposeCommand,
-    imageRegistry,
-    imageMatchesPlatform,
-    hasUpdate,
-    interpolateComposePath,
-    loadComposeProjectEnv,
-    listComposeFiles,
-    lookupDockerHub,
-    lookupGhcr,
-    needsFullTagScan,
-    normalizeDockerHubRepo,
-    normalizeLabels,
-    caughtMessage,
-    fetchRegistryJson,
-    isSafeTagRegexPattern,
-    lookupLatest,
-    parseBearerChallenge,
-    parseNextLink,
-    pruneDanglingImagesBestEffort,
-    registryCredentials,
-    registryHostFromUrl,
-    isTrustedTokenRealm,
-    setNestedValue,
-    shouldBlockGlobalUpdateForDiscoveryFailure,
-    shouldBlockManualUpdateForDiscoveryFailure,
-    servicesFromCompose,
-    stripRegistry,
-    tagMatches,
-    writeFileWithMetadata,
-};

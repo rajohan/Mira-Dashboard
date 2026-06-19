@@ -30,7 +30,7 @@ function getDefaultWorkspaceRoot(): string {
         return path.join(openclawHome, "workspace");
     }
 
-    const homeDir = os.homedir().trim();
+    const homeDir = (process.env.HOME?.trim() || os.homedir().trim()).trim();
     if (!homeDir || !path.isAbsolute(homeDir) || path.parse(homeDir).root === homeDir) {
         throw new Error("Could not resolve a safe workspace root");
     }
@@ -50,7 +50,6 @@ function resolveWorkspaceRoot(): string {
     return workspaceRoot;
 }
 
-const WORKSPACE_ROOT = resolveWorkspaceRoot();
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for preview
 const MAX_BACKUP_COPY_BYTES = 2 * 1024 * 1024;
 const JSON_PARSER_SIZE_HEADROOM = MAX_FILE_SIZE * 2;
@@ -63,6 +62,10 @@ const FILE_OPEN_NOT_FOUND_ERROR_CODES = new Set([
 ]);
 let listDirectoryRealpathSync = fs.realpathSync;
 let procSelfFdPath = "/proc/self/fd";
+
+function getWorkspaceRoot(): string {
+    return resolveWorkspaceRoot();
+}
 
 function isFileOpenNotFoundErrorCode(code: string | undefined): boolean {
     return code !== undefined && FILE_OPEN_NOT_FOUND_ERROR_CODES.has(code);
@@ -149,7 +152,8 @@ function listDirectory(dirPath: string): FileItem[] | null {
     const items: FileItem[] = [];
 
     try {
-        const workspaceRoot = listDirectoryRealpathSync(WORKSPACE_ROOT);
+        const configuredWorkspaceRoot = getWorkspaceRoot();
+        const workspaceRoot = listDirectoryRealpathSync(configuredWorkspaceRoot);
         const fullPath = safePathWithinRoot(dirPath || ".", workspaceRoot);
 
         if (!fullPath) {
@@ -203,7 +207,7 @@ function listDirectory(dirPath: string): FileItem[] | null {
         if (
             !dirPath &&
             (error as NodeJS.ErrnoException).code === "ENOENT" &&
-            path.resolve(WORKSPACE_ROOT) === WORKSPACE_ROOT
+            path.resolve(getWorkspaceRoot()) === getWorkspaceRoot()
         ) {
             return [];
         }
@@ -314,25 +318,6 @@ function sendRootedParentError(
     return true;
 }
 
-export const __testing = {
-    compareNames,
-    decodeRouteFilePath,
-    getDefaultWorkspaceRoot,
-    getImageMimeType,
-    isBinaryFile,
-    isImageFile,
-    listDirectory,
-    resolveWorkspaceRoot,
-    sendRootedParentError,
-    setListDirectoryRealpathSyncForTest(nextRealpathSync?: typeof fs.realpathSync): void {
-        listDirectoryRealpathSync = nextRealpathSync ?? fs.realpathSync;
-    },
-    setProcSelfFdPathForTest(nextPath?: string): void {
-        procSelfFdPath = nextPath ?? "/proc/self/fd";
-    },
-    shouldHideFile,
-    withRootedParentPath,
-};
 
 /** Registers files API routes. */
 export default function filesRoutes(
@@ -364,7 +349,7 @@ export default function filesRoutes(
                     });
                     return;
                 }
-                res.json({ files, root: WORKSPACE_ROOT });
+                res.json({ files, root: getWorkspaceRoot() });
             },
             { fallback: "Files list failed", logLabel: "[Backend] Files list error:" }
         )
@@ -379,7 +364,7 @@ export default function filesRoutes(
 
                 let workspaceRoot: string;
                 try {
-                    workspaceRoot = fs.realpathSync(WORKSPACE_ROOT);
+                    workspaceRoot = fs.realpathSync(getWorkspaceRoot());
                 } catch (error) {
                     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
                         res.status(404).json({ error: "File not found" });
@@ -549,11 +534,11 @@ export default function filesRoutes(
 
                 let workspaceRoot: string;
                 try {
-                    workspaceRoot = fs.realpathSync(WORKSPACE_ROOT);
+                    workspaceRoot = fs.realpathSync(getWorkspaceRoot());
                 } catch (error) {
                     const code = (error as NodeJS.ErrnoException).code;
                     if (code === "ENOENT") {
-                        workspaceRoot = path.resolve(WORKSPACE_ROOT);
+                        workspaceRoot = path.resolve(getWorkspaceRoot());
                     } else {
                         if (sendRootedParentError(res, error as NodeJS.ErrnoException)) {
                             return;

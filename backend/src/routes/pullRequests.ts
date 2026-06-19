@@ -29,16 +29,7 @@ function resolveConfiguredRoot(envName: string, fallback: string): string {
 }
 
 const DASHBOARD_REPO = "rajohan/Mira-Dashboard";
-const DASHBOARD_ROOT = resolveConfiguredRoot(
-    "MIRA_DASHBOARD_ROOT",
-    "/home/ubuntu/projects/mira-dashboard"
-);
-const DASHBOARD_WORKTREE_ROOT = resolveConfiguredRoot(
-    "MIRA_DASHBOARD_WORKTREE_ROOT",
-    "/home/ubuntu/projects/mira-dashboard-worktrees"
-);
 const DASHBOARD_SERVICE = "mira-dashboard.service";
-const MIRA_AUTHOR = "mira-2026";
 const DEFAULT_REVIEWER_AUTHOR = "rajohan";
 const DEFAULT_BASE = "main";
 const DEPLOYMENT_LOCK_STALE_MS = 30 * 60 * 1000;
@@ -52,9 +43,23 @@ const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "restart-scheduled"]);
 
 function getResolvedRoots() {
     return {
-        dashboardRoot: DASHBOARD_ROOT,
-        dashboardWorktreeRoot: DASHBOARD_WORKTREE_ROOT,
+        dashboardRoot: getDashboardRoot(),
+        dashboardWorktreeRoot: getDashboardWorktreeRoot(),
     };
+}
+
+function getDashboardRoot(): string {
+    return resolveConfiguredRoot(
+        "MIRA_DASHBOARD_ROOT",
+        "/home/ubuntu/projects/mira-dashboard"
+    );
+}
+
+function getDashboardWorktreeRoot(): string {
+    return resolveConfiguredRoot(
+        "MIRA_DASHBOARD_WORKTREE_ROOT",
+        "/home/ubuntu/projects/mira-dashboard-worktrees"
+    );
 }
 
 /** Represents command result. */
@@ -281,12 +286,6 @@ function readDeploymentLockRow(): DeploymentLockRow | undefined {
         .get() as DeploymentLockRow | undefined;
 }
 
-/** Reads the active deployment lock job id. */
-function readDeploymentLock(): string | undefined {
-    const row = readDeploymentLockRow();
-    return row?.job_id;
-}
-
 /** Releases the active deploy lock if it still belongs to the given job. */
 function releaseDeploymentLock(jobId: string): void {
     try {
@@ -492,7 +491,7 @@ async function runCommand(
     options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {}
 ): Promise<CommandResult> {
     const { stdout, stderr } = await execFileAsync(command, args, {
-        cwd: options.cwd || DASHBOARD_ROOT,
+        cwd: options.cwd || getDashboardRoot(),
         env: options.env || buildCommandEnv(),
         maxBuffer: MAX_BUFFER,
         timeout: options.timeoutMs || 120_000,
@@ -507,7 +506,7 @@ async function runCommand(
 /** Runs a GitHub CLI command and parses its JSON output. */
 async function runGhJson<T>(args: string[]): Promise<T> {
     const { stdout } = await execFileAsync("gh", args, {
-        cwd: DASHBOARD_ROOT,
+        cwd: getDashboardRoot(),
         env: buildCommandEnv(),
         maxBuffer: MAX_BUFFER,
         timeout: 60_000,
@@ -552,7 +551,7 @@ async function runGhJsonLines<T>(
 ): Promise<T[]> {
     return new Promise((resolve, reject) => {
         const child = spawn("gh", args, {
-            cwd: DASHBOARD_ROOT,
+            cwd: getDashboardRoot(),
             env: buildCommandEnv(),
             stdio: ["ignore", "pipe", "pipe"],
         });
@@ -869,12 +868,13 @@ async function cleanupPullRequestWorktree(
         }
 
         const worktreePath = path.resolve(worktree.path);
-        if (!isPathInsideRoot(worktreePath, DASHBOARD_WORKTREE_ROOT)) {
+        const dashboardWorktreeRoot = getDashboardWorktreeRoot();
+        if (!isPathInsideRoot(worktreePath, dashboardWorktreeRoot)) {
             return {
                 status: "warning",
                 branch,
                 path: worktreePath,
-                message: `Skipped cleanup for ${branch}; worktree path is outside ${DASHBOARD_WORKTREE_ROOT}`,
+                message: `Skipped cleanup for ${branch}; worktree path is outside ${dashboardWorktreeRoot}`,
             };
         }
 
@@ -909,15 +909,6 @@ async function cleanupPullRequestWorktree(
             message: `Worktree cleanup warning for ${branch}: ${errorMessage(error, branch)}`,
         };
     }
-}
-
-/** Validates mira pr can be managed from the dashboard. */
-function validateMiraPr(pr: PullRequestSummary): void {
-    if (pr.author?.login !== MIRA_AUTHOR) {
-        throw new Error("Only Mira-authored pull requests can be managed here");
-    }
-
-    validateDashboardPr(pr);
 }
 
 /** Validates a pull request can be managed from the dashboard. */
@@ -970,11 +961,6 @@ function validateDashboardPrForReviewApproval(pr: PullRequestSummary): void {
     if (pullRequestReviewApproved(pr)) {
         throw new Error("Pull request is already approved");
     }
-}
-
-/** Validates mira pr can be approved and merged from the dashboard. */
-function validateMiraPrForApproval(pr: PullRequestSummary): void {
-    validateDashboardPrForApproval(pr);
 }
 
 /** Returns whether pull request checks are conclusively passing. */
@@ -1033,16 +1019,18 @@ async function getProductionCheckoutStatus(): Promise<ProductionCheckoutStatus> 
     }
 
     const productionRoot = root.trim();
+    const dashboardRoot = getDashboardRoot();
+    const dashboardWorktreeRoot = getDashboardWorktreeRoot();
     const currentBranch = branch.trim();
     const statusShort = status.trim();
     const isClean = statusShort.length === 0;
     const isProductionRoot =
-        path.resolve(productionRoot) === path.resolve(DASHBOARD_ROOT);
+        path.resolve(productionRoot) === path.resolve(dashboardRoot);
 
     return {
         root: productionRoot,
-        expectedRoot: DASHBOARD_ROOT,
-        worktreeRoot: DASHBOARD_WORKTREE_ROOT,
+        expectedRoot: dashboardRoot,
+        worktreeRoot: dashboardWorktreeRoot,
         branch: currentBranch,
         expectedBranch: DEFAULT_BASE,
         head: head.trim(),
@@ -1060,7 +1048,7 @@ async function ensureProductionCheckout(): Promise<void> {
 
     if (!status.isProductionRoot) {
         throw new Error(
-            `Expected production checkout at ${DASHBOARD_ROOT}, got ${status.root}`
+            `Expected production checkout at ${getDashboardRoot()}, got ${status.root}`
         );
     }
 
@@ -1202,13 +1190,14 @@ async function scheduleRestartHealthCheck(job: DeploymentJob): Promise<CommandRe
 /** Runs deployment work after the API has returned a job to the caller. */
 async function runDeploymentJob(job: DeploymentJob): Promise<void> {
     let currentJob = job;
+    const dashboardRoot = getDashboardRoot();
     try {
         currentJob = refreshDeploymentHeartbeat(currentJob);
         await syncMain();
         currentJob = refreshDeploymentHeartbeat(currentJob);
 
         currentJob = refreshDeploymentHeartbeat(currentJob);
-        await rm(path.join(DASHBOARD_ROOT, "node_modules"), {
+        await rm(path.join(dashboardRoot, "node_modules"), {
             force: true,
             recursive: true,
         });
@@ -1218,17 +1207,17 @@ async function runDeploymentJob(job: DeploymentJob): Promise<void> {
         currentJob = refreshDeploymentHeartbeat(currentJob);
         await runCommand("bun", ["run", "build"], { timeoutMs: 180_000 });
         currentJob = refreshDeploymentHeartbeat(currentJob);
-        await rm(path.join(DASHBOARD_ROOT, "backend", "node_modules"), {
+        await rm(path.join(dashboardRoot, "backend", "node_modules"), {
             force: true,
             recursive: true,
         });
         await runCommand("bun", ["install", "--frozen-lockfile"], {
-            cwd: path.join(DASHBOARD_ROOT, "backend"),
+            cwd: path.join(dashboardRoot, "backend"),
             timeoutMs: 120_000,
         });
         currentJob = refreshDeploymentHeartbeat(currentJob);
         await runCommand("bun", ["run", "build"], {
-            cwd: path.join(DASHBOARD_ROOT, "backend"),
+            cwd: path.join(dashboardRoot, "backend"),
             timeoutMs: 120_000,
         });
         currentJob = refreshDeploymentHeartbeat(currentJob);
@@ -1456,6 +1445,8 @@ async function rejectPullRequest(number: number, comment: string) {
 
 /** Registers pull requests API routes. */
 export default function pullRequestsRoutes(app: express.Application): void {
+    getResolvedRoots();
+
     app.get(
         "/api/pull-requests",
         asyncRoute(async (_req, res) => {
@@ -1560,39 +1551,3 @@ export default function pullRequestsRoutes(app: express.Application): void {
         })
     );
 }
-
-export const __testing = {
-    acquireDeploymentLock,
-    buildCommandEnv,
-    buildReviewCommandEnv,
-    clearForceKillTimerIfAllowed,
-    parseGhJsonLine,
-    parseRepoParts,
-    deploymentJobUpdateCommand,
-    isDeploymentJobStale,
-    readDeploymentLock,
-    readDeploymentJob,
-    reportBackgroundDeploymentError,
-    runDeploymentJobAndReportErrors,
-    releaseDeploymentLock,
-    runDeploymentJob,
-    isPathInsideRoot,
-    parseGitWorktrees,
-    runCommand,
-    runGhJson,
-    runGhJsonLines,
-    toGhJsonParseError,
-    validatePrNumber,
-    validateDashboardPr,
-    validateDashboardPrForApproval,
-    validateDashboardPrForBranchUpdate,
-    validateDashboardPrForReviewApproval,
-    validateMiraPr,
-    validateMiraPrForApproval,
-    updatePullRequestBranch,
-    shellQuote,
-    startDeployLatest,
-    trimOutput,
-    getResolvedRoots,
-    writeDeploymentJob,
-};

@@ -26,13 +26,8 @@ import {
 } from "../services/scheduledJobs.js";
 
 const execFileAsync = promisify(execFile);
-const DOCKER_ROOT = nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
 let dockerBin = nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
 let runDockerUpdaterServiceForRoutes = runDockerUpdaterService;
-const DOCKER_COMPOSE_WRAPPER = nonEmptyEnvFallback(
-    "MIRA_DOCKER_COMPOSE_WRAPPER",
-    `${DOCKER_ROOT}/bin/docker-compose-doppler`
-);
 const MAX_OUTPUT_CHARS = 100_000;
 const MAX_STDOUT_PENDING_CHARS = 16_384;
 const MAX_JOBS = 100;
@@ -59,6 +54,17 @@ function redactEnvValue(value: unknown): string {
     }
 
     return `${key}=***`;
+}
+
+function getDockerRoot(): string {
+    return nonEmptyEnvFallback("MIRA_DOCKER_ROOT", "/opt/docker");
+}
+
+function getDockerComposeWrapper(): string {
+    return nonEmptyEnvFallback(
+        "MIRA_DOCKER_COMPOSE_WRAPPER",
+        `${getDockerRoot()}/bin/docker-compose-doppler`
+    );
 }
 
 /** Represents one Docker updater service row. */
@@ -481,7 +487,7 @@ function parseDockerSizeToBytes(sizeRaw: string | undefined): number {
 /** Performs run Docker. */
 async function runDocker(args: string[]): Promise<string> {
     const { stdout } = await execFileAsync(dockerBin, args, {
-        cwd: DOCKER_ROOT,
+        cwd: getDockerRoot(),
         env: process.env,
         maxBuffer: 10 * 1024 * 1024,
         timeout: DOCKER_REQUEST_TIMEOUT_MS,
@@ -492,8 +498,8 @@ async function runDocker(args: string[]): Promise<string> {
 
 /** Performs run compose. */
 async function runCompose(args: string[]): Promise<{ stdout: string; stderr: string }> {
-    const { stdout, stderr } = await execFileAsync(DOCKER_COMPOSE_WRAPPER, args, {
-        cwd: DOCKER_ROOT,
+    const { stdout, stderr } = await execFileAsync(getDockerComposeWrapper(), args, {
+        cwd: getDockerRoot(),
         env: process.env,
         maxBuffer: 20 * 1024 * 1024,
         timeout: DOCKER_REQUEST_TIMEOUT_MS,
@@ -981,7 +987,7 @@ async function runDockerExecCommand(
             dockerBin,
             ["exec", containerId, "sh", "-lc", wrappedCommand],
             {
-                cwd: DOCKER_ROOT,
+                cwd: getDockerRoot(),
                 env: process.env,
                 detached: true,
             }
@@ -1088,7 +1094,7 @@ async function stopDockerExecInContainer(job: DockerExecJob): Promise<void> {
             `kill -TERM -- -${job.inContainerPid} 2>/dev/null || kill -TERM ${job.inContainerPid}`,
         ],
         {
-            cwd: DOCKER_ROOT,
+            cwd: getDockerRoot(),
             env: process.env,
             timeout: 10_000,
             killSignal: "SIGTERM",
@@ -1214,40 +1220,6 @@ function resolveManualUpdateServiceId(
     return Number.isSafeInteger(serviceId) && serviceId > 0 ? serviceId : null;
 }
 
-export const __testing = {
-    asyncRoute,
-    trimOutput,
-    parseJsonLines,
-    parseJsonField,
-    hasUpdaterCandidate,
-    dockerExecJobs,
-    cleanupDockerExecJobs,
-    activeDockerExecJobCount,
-    dockerIdentifierFallback,
-    runDockerExecCommand,
-    setRunDockerUpdaterServiceForTests: (
-        nextRunDockerUpdaterService: typeof runDockerUpdaterService | undefined
-    ) => {
-        runDockerUpdaterServiceForRoutes =
-            nextRunDockerUpdaterService || runDockerUpdaterService;
-    },
-    setDockerBinForTests: (nextDockerBin: string | undefined) => {
-        dockerBin = nextDockerBin || nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
-    },
-    setDockerExecPidWaitTimeoutForTests: (nextTimeoutMs?: number) => {
-        dockerExecPidWaitTimeoutMs =
-            nextTimeoutMs ?? DEFAULT_DOCKER_EXEC_PID_WAIT_TIMEOUT_MS;
-    },
-    updateDockerExecJobOutput,
-    completeDockerExecJob,
-    failDockerExecJob,
-    settleDockerExecJob,
-    parseLabels,
-    parsePorts,
-    parseDockerSizeToBytes,
-    getContainerInspectMap,
-    resolveManualUpdateServiceId,
-};
 
 /** Registers Docker API routes. */
 export default function dockerRoutes(app: express.Application): void {
@@ -1394,7 +1366,7 @@ export default function dockerRoutes(app: express.Application): void {
                 dockerBin,
                 ["logs", "--tail", String(tail), containerId],
                 {
-                    cwd: DOCKER_ROOT,
+                    cwd: getDockerRoot(),
                     env: process.env,
                     maxBuffer: 10 * 1024 * 1024,
                     timeout: DOCKER_REQUEST_TIMEOUT_MS,

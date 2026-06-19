@@ -2,10 +2,7 @@ import express, { type RequestHandler } from "express";
 
 import { db } from "../db.js";
 import { asyncRoute as baseAsyncRoute } from "../lib/errors.js";
-import {
-    __testing as logRotationTesting,
-    runElevatedLogRotationService,
-} from "../services/logRotation.js";
+import { runElevatedLogRotationService } from "../services/logRotation.js";
 
 const LOG_ROTATION_STATE_KEY = "log_rotation.state";
 
@@ -144,14 +141,3 @@ export default function opsRoutes(app: express.Application): void {
         })
     );
 }
-
-export const __testing = {
-    resetLogRotationRunner() {
-        elevatedLogRotationRunner = runElevatedLogRotationService;
-        logRotationTesting.resetElevatedLogRotationExecFileRunner();
-    },
-    setElevatedLogRotationRunner(runner: LogRotationRunner) {
-        elevatedLogRotationRunner = runner;
-    },
-    setLogRotationExecFileRunner: logRotationTesting.setElevatedLogRotationExecFileRunner,
-};

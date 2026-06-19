@@ -194,12 +194,3 @@ export function shouldStartOnImport(
 if (shouldStartOnImport()) {
     startBackendServer();
 }
-
-export const __testing = {
-    queueQuotaNotificationCheckAfterSeed,
-    removeSchedulerCloseCleanup,
-    setAfterBackgroundServicesStartedForTest(callback: (() => void) | undefined): void {
-        afterBackgroundServicesStartedForTest = callback;
-    },
-    shouldStartScheduledJobs,
-};

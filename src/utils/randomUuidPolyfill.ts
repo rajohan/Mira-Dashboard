@@ -1,4 +1,6 @@
-/** Installs crypto.randomUUID for browsers that do not support it. */
+// Polyfill crypto.randomUUID for browsers that don't support it
+// Must be imported before anything that uses crypto
+
 export function installRandomUUIDPolyfill(): void {
     if (
         typeof window !== "undefined" &&
@@ -7,6 +9,7 @@ export function installRandomUUIDPolyfill(): void {
         return;
     }
 
+    /** Performs generate UUID. */
     const generateUUID: Crypto["randomUUID"] = () => {
         return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replaceAll(/[xy]/g, (character) => {
             const randomValue = Math.trunc(Math.random() * 16);
@@ -22,5 +25,13 @@ export function installRandomUUIDPolyfill(): void {
     }
 
     (windowContainer.crypto as Crypto & { randomUUID: Crypto["randomUUID"] }).randomUUID =
+        generateUUID;
+
+    const globalContainer = globalThis as typeof globalThis & { crypto?: Crypto };
+    if (!globalContainer.crypto) {
+        globalContainer.crypto = {} as Crypto;
+    }
+
+    (globalContainer.crypto as Crypto & { randomUUID: Crypto["randomUUID"] }).randomUUID =
         generateUUID;
 }

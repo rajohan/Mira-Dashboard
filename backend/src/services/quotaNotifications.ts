@@ -280,13 +280,3 @@ export function registerQuotaNotificationScheduledJobs(): boolean {
         throw error;
     }
 }
-
-export const __testing = {
-    formatSyntheticWeeklyRemaining,
-    getNotificationPayload,
-    getProviderNotificationPayload,
-    getProviderPercent,
-    getState,
-    handleQuotaBucket,
-    isRunning: () => running,
-};

@@ -143,10 +143,6 @@ async function getCompletions(
     }
 }
 
-export const __testing = {
-    expandPath,
-    getCompletions,
-};
 
 /** Registers terminal API routes. */
 export default function terminalRoutes(app: express.Application): void {

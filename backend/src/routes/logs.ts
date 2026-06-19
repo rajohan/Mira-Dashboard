@@ -268,28 +268,6 @@ export function unsubscribeFromLogs(ws: WebSocket): void {
 }
 
 /** Defines testing. */
-export const __testing = {
-    sendLogHistoryForTest: sendLogHistory,
-    pollLogFileAndLogErrorsForTest: pollLogFileAndLogErrors,
-    pollLogFileForTest: pollLogFile,
-    runLogWatcherTickForTest: runLogWatcherTick,
-    resetLogWatcherForTest(): void {
-        if (logWatcher) {
-            clearInterval(logWatcher);
-        }
-        logWatcher = null;
-        logPollInFlight = false;
-        lastLogSize = 0;
-        lastLogFile = "";
-        logSubscribers.clear();
-    },
-    subscriberCount: (): number => logSubscribers.size,
-    setLogsDirForTest(nextLogsDir: string): void {
-        __testing.resetLogWatcherForTest();
-        const resolvedLogsDir = path.resolve(nextLogsDir);
-        logsDir = resolvedLogsDir;
-    },
-};
 
 /** Registers logs API routes. */
 export default function logsRoutes(app: express.Application): void {

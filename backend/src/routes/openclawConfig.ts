@@ -60,9 +60,10 @@ interface SkillInfo {
 const execFileAsync = promisify(execFile);
 
 function getDefaultOpenClawPackageRoot(): string {
+    const homeDir = process.env.HOME?.trim() || os.homedir();
     return path.resolve(
         process.env.OPENCLAW_PACKAGE_ROOT?.trim() ||
-            path.join(os.homedir(), ".npm-global/lib/node_modules/openclaw")
+            path.join(homeDir, ".npm-global/lib/node_modules/openclaw")
     );
 }
 
@@ -78,9 +79,9 @@ function getOpenClawBin(): string {
     if (openClawBinForTest !== undefined) {
         return openClawBinForTest;
     }
+    const homeDir = process.env.HOME?.trim() || os.homedir();
     return (
-        process.env.OPENCLAW_BIN?.trim() ||
-        path.join(os.homedir(), ".npm-global/bin/openclaw")
+        process.env.OPENCLAW_BIN?.trim() || path.join(homeDir, ".npm-global/bin/openclaw")
     );
 }
 
@@ -153,6 +154,7 @@ function getConfiguredSkillEntries(config?: Record<string, unknown>) {
 function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
     const entries = getConfiguredSkillEntries(config);
     const skillsByName = new Map<string, SkillInfo>();
+    const homeDir = process.env.HOME?.trim() || os.homedir();
 
     /** Adds one discovered skill to the response map with configured state. */
     const addSkill = (skillPath: string, source: SkillSource) => {
@@ -174,7 +176,7 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
     };
 
     for (const skillPath of collectSkillDirectories(
-        path.join(os.homedir(), ".openclaw/workspace/skills")
+        path.join(homeDir, ".openclaw/workspace/skills")
     )) {
         addSkill(skillPath, "workspace");
     }
@@ -315,20 +317,3 @@ export default function openClawConfigRoutes(app: express.Application): void {
         }
     }) as RequestHandler);
 }
-
-export const __testing = {
-    collectExtraSkillDirectories,
-    collectSkillDirectories,
-    getConfiguredSkillEntries,
-    getSkills,
-    isValidSkillName,
-    readSkillDescription,
-    getOpenClawBinForTest: getOpenClawBin,
-    setOpenClawBinForTest: (binPath: string | undefined) => {
-        openClawBinForTest = binPath;
-    },
-    getOpenClawPackageRootForTest: getOpenClawPackageRoot,
-    setOpenClawPackageRootForTest: (packageRoot: string | undefined) => {
-        openClawPackageRootForTest = packageRoot;
-    },
-};

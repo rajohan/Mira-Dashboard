@@ -245,13 +245,6 @@ function buildDeviceAuthPayloadV3(params: {
     ].join("|");
 }
 
-export const __testing = {
-    asError,
-    derivePublicKeyRaw,
-    sanitizeTimerDurationMs,
-    normalizeDeviceMetadataForAuth,
-    buildDeviceAuthPayloadV3,
-};
 
 /** Implements open claw gateway client. */
 export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {

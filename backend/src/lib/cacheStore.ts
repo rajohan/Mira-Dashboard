@@ -135,5 +135,3 @@ export async function getAllCacheEntries(): Promise<CacheEntryRow[]> {
         .map((row) => mapCacheEntry(row))
         .filter((row): row is CacheEntryRow => row !== null);
 }
-
-export const __testing = {};

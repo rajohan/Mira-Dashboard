@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { openSync, renameSync, rmSync, type Stats, statSync } from "node:fs";
+import { type Stats } from "node:fs";
 import {
     type FileHandle,
     mkdir,
@@ -177,24 +177,11 @@ function toCurrencyNumber(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null;
 }
 
-function sleepSync(ms: number): void {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => {
         setTimeout(resolve, ms);
     });
 }
-
-type CodexTrustConfigLockDependencies = {
-    now?: () => number;
-    open?: typeof openSync;
-    remove?: typeof rmSync;
-    rename?: typeof renameSync;
-    sleep?: typeof sleepSync;
-    stat?: typeof statSync;
-};
 
 type CodexTrustConfigFileHandle = Pick<FileHandle, "close">;
 
@@ -215,77 +202,6 @@ function sameFileStat(left: Stats, right: Stats): boolean {
     return (
         left.mtimeMs === right.mtimeMs && left.dev === right.dev && left.ino === right.ino
     );
-}
-
-function acquireCodexTrustConfigLock(
-    lockPath: string,
-    dependencies: CodexTrustConfigLockDependencies = {}
-): number {
-    const now = dependencies.now ?? Date.now;
-    const openFile = dependencies.open ?? openSync;
-    const removeFile = dependencies.remove ?? rmSync;
-    const renameFile = dependencies.rename ?? renameSync;
-    const sleep = dependencies.sleep ?? sleepSync;
-    const statFile = dependencies.stat ?? statSync;
-    const startedAt = now();
-    let staleRecoveryAttempted = false;
-    for (;;) {
-        try {
-            return openFile(lockPath, "wx", 0o600);
-        } catch (error) {
-            if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) {
-                throw error;
-            }
-            const elapsedMs = now() - startedAt;
-            if (elapsedMs < CODEX_TRUST_LOCK_TIMEOUT_MS) {
-                sleep(CODEX_TRUST_LOCK_RETRY_MS);
-                continue;
-            }
-            if (!staleRecoveryAttempted) {
-                staleRecoveryAttempted = true;
-                try {
-                    const stat = statFile(lockPath);
-                    if (now() - stat.mtimeMs > CODEX_TRUST_STALE_LOCK_MS) {
-                        const reclaimedPath = `${lockPath}.reclaimed.${process.pid}`;
-                        try {
-                            renameFile(lockPath, reclaimedPath);
-                            const reclaimedStat = statFile(reclaimedPath);
-                            if (sameFileStat(stat, reclaimedStat)) {
-                                removeFile(reclaimedPath, { force: true });
-                                continue;
-                            }
-                            try {
-                                if (sameFileStat(stat, statFile(reclaimedPath))) {
-                                    renameFile(reclaimedPath, lockPath);
-                                }
-                            } catch {
-                                // Best effort: preserve the live lock path if a newer owner won.
-                            }
-                        } catch (renameError) {
-                            if (
-                                renameError instanceof Error &&
-                                "code" in renameError &&
-                                renameError.code === "ENOENT"
-                            ) {
-                                continue;
-                            }
-                        }
-                        throw error;
-                    }
-                } catch (statError) {
-                    if (
-                        statError instanceof Error &&
-                        "code" in statError &&
-                        statError.code === "ENOENT"
-                    ) {
-                        continue;
-                    }
-                    throw statError;
-                }
-            }
-            throw error;
-        }
-    }
 }
 
 async function acquireCodexTrustConfigLockAsync(
@@ -2197,33 +2113,3 @@ export function registerCacheRefreshScheduledJobs(): void {
         seedMissingLocalCacheEntry(key);
     }
 }
-
-export const __testing = {
-    checkElevenLabsQuota,
-    checkOpenAiQuota,
-    checkOpenRouterQuota,
-    checkSyntheticQuota,
-    buildFallbackHostSummary,
-    buildQuotaMissingProviders,
-    backupStatusTtlHours,
-    cleanPanelText,
-    codexTrustConfigLocks,
-    acquireCodexTrustConfigLock,
-    acquireCodexTrustConfigLockAsync,
-    sleepSync,
-    sleep,
-    ensureCodexTrustConfig,
-    errorMessage,
-    fetchSpydebergWeather,
-    getOpenclawBin,
-    getCodexBin,
-    getQuotaCodexHome,
-    normalizeMoltbookFeed,
-    normalizeMoltbookHome,
-    openMeteoCodeToDescription,
-    parseOpenAiQuotaOutput,
-    sanitizeRemoteUrl,
-    summarizeStatus,
-    toCurrencyNumber,
-    toNullableNumber,
-};

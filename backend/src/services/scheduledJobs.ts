@@ -398,19 +398,19 @@ function latestRunsByJobId(jobIds: string[]): Map<string, ScheduledJobRun> {
         const placeholders = chunk.map(() => "?").join(",");
         const rows = db
             .prepare(
-                `SELECT run.*
-                 FROM scheduled_job_runs run
-                 WHERE run.job_id IN (${placeholders})
-                   AND NOT EXISTS (
-                       SELECT 1
-                       FROM scheduled_job_runs newer
-                       WHERE newer.job_id = run.job_id
-                         AND (
-                             newer.started_at > run.started_at
-                             OR (newer.started_at = run.started_at AND newer.id > run.id)
-                         )
-                   )
-                 ORDER BY run.job_id, run.started_at DESC, run.id DESC`
+                `SELECT *
+                 FROM (
+                     SELECT
+                         run.*,
+                         ROW_NUMBER() OVER (
+                             PARTITION BY run.job_id
+                             ORDER BY run.started_at DESC, run.id DESC
+                         ) AS row_number
+                     FROM scheduled_job_runs run
+                     WHERE run.job_id IN (${placeholders})
+                 )
+                 WHERE row_number = 1
+                 ORDER BY job_id, started_at DESC, id DESC`
             )
             .all(...chunk) as unknown as ScheduledJobRunRow[];
         for (const row of rows) {
@@ -1031,27 +1031,3 @@ export function stopScheduledJobScheduler(): void {
     clearInterval(scheduler);
     scheduler = null;
 }
-
-export const __testing = {
-    clearActionHandlers(): void {
-        actionHandlers.clear();
-    },
-    resetSchedulerState(): void {
-        stopScheduledJobScheduler();
-        runningJobs.clear();
-        scheduledJobRuns.clear();
-        scheduledJobRunTimeoutMs = defaultScheduledJobRunTimeoutMs;
-        schedulerTickRunning = false;
-    },
-    async runDueJobsForTest(): Promise<void> {
-        await runDueJobs();
-        await Promise.allSettled(scheduledJobRuns);
-    },
-    mapRunForTest: (row?: ScheduledJobRunRow): ScheduledJobRun | null => mapRun(row),
-    runSchedulerTickForTest(): void {
-        scheduleTick();
-    },
-    setScheduledJobRunTimeoutMsForTest(timeoutMs: number): void {
-        scheduledJobRunTimeoutMs = timeoutMs;
-    },
-};

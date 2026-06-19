@@ -15,20 +15,6 @@ function dateToISOString(date: Date): string {
 }
 
 type CacheRefreshProducer = (key: string) => Promise<void | { refreshed?: unknown }>;
-let cacheRefreshProducerForTests: CacheRefreshProducer | null = null;
-
-function setCacheRefreshProducerForTests(producer: CacheRefreshProducer | null): void {
-    cacheRefreshProducerForTests = producer;
-}
-
-function resetCacheRefreshForTests(): void {
-    cacheRefreshProducerForTests = null;
-}
-
-export const __testing = {
-    resetCacheRefreshForTests,
-    setCacheRefreshProducerForTests,
-};
 
 /** Parses JSON field or value. */
 export function parseJsonFieldOrValue(value: string) {
@@ -55,7 +41,7 @@ export function mapCacheRowForResponse(row: CacheEntryRow) {
 
 /** Performs refresh cache key. */
 export async function refreshCacheKey(key: string) {
-    const producer = cacheRefreshProducerForTests ?? refreshCacheProducer;
+    const producer: CacheRefreshProducer = refreshCacheProducer;
     const result = await producer(key);
     const refreshed = Array.isArray(result?.refreshed) ? result.refreshed : [];
     if (refreshed.length === 0) {

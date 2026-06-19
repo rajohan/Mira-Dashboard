@@ -1,4 +1,4 @@
-import { Description, Field, Label } from "@headlessui/react";
+import { Description, Field, Label, Textarea as HeadlessTextarea } from "@headlessui/react";
 import type { TextareaHTMLAttributes } from "react";
 import { forwardRef } from "react";
 
@@ -27,7 +27,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
                         {description}
                     </Description>
                 )}
-                <textarea
+                <HeadlessTextarea
                     ref={ref}
                     className={cn(
                         variant === "default" && [

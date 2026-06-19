@@ -32,7 +32,7 @@ function resolveOpenclawRoot(): string {
             : defaultOpenclawRoot();
     }
 
-    const homeDir = os.homedir().trim();
+    const homeDir = (process.env.HOME?.trim() || os.homedir().trim()).trim();
     if (
         homeDir.length === 0 ||
         Path.resolve(homeDir) !== homeDir ||
@@ -43,11 +43,17 @@ function resolveOpenclawRoot(): string {
     return Path.join(homeDir, ".openclaw");
 }
 
-const OPENCLAW_ROOT = resolveOpenclawRoot();
-const AGENTS_DIR = Path.join(OPENCLAW_ROOT, "agents");
 let prepareAgentMetadataDirForWrite = prepareSafeWriteTargetWithinRoot;
 let procfsAvailabilityProbe = (): boolean =>
     process.platform === "linux" && FS.existsSync("/proc/self/fd");
+
+function getOpenclawRoot(): string {
+    return resolveOpenclawRoot();
+}
+
+function getAgentsDir(): string {
+    return Path.join(getOpenclawRoot(), "agents");
+}
 
 export function isProcfsAvailable(): boolean {
     return procfsAvailabilityProbe();
@@ -107,7 +113,7 @@ function getRouteParam(value: string | string[] | undefined): string {
 
 function getRealAgentsDir(): string | null {
     try {
-        return FS.realpathSync(AGENTS_DIR);
+        return FS.realpathSync(getAgentsDir());
     } catch {
         return null;
     }
@@ -115,7 +121,8 @@ function getRealAgentsDir(): string | null {
 
 function ensureRealAgentsDir(): string | null {
     try {
-        const realAgentsDir = FS.realpathSync(AGENTS_DIR);
+        const agentsDir = getAgentsDir();
+        const realAgentsDir = FS.realpathSync(agentsDir);
         const agentsDirStat = FS.statSync(realAgentsDir);
         if (!agentsDirStat.isDirectory()) {
             return null;
@@ -124,7 +131,7 @@ function ensureRealAgentsDir(): string | null {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
             return null;
         }
-        mkdirGuarded(guardedPath(AGENTS_DIR), { recursive: true });
+        mkdirGuarded(guardedPath(getAgentsDir()), { recursive: true });
     }
 
     return getRealAgentsDir();
@@ -136,7 +143,8 @@ function getSafeAgentSessionsDir(agentId: string): string | null {
         return null;
     }
 
-    const sessionsDir = safePathWithinRoot(Path.join(agentId, "sessions"), AGENTS_DIR);
+    const agentsDir = getAgentsDir();
+    const sessionsDir = safePathWithinRoot(Path.join(agentId, "sessions"), agentsDir);
     if (!sessionsDir) {
         return null;
     }
@@ -146,7 +154,7 @@ function getSafeAgentSessionsDir(agentId: string): string | null {
         if (!realAgentsDir) {
             return null;
         }
-        const expectedSessionsDir = Path.join(AGENTS_DIR, agentId, "sessions");
+        const expectedSessionsDir = Path.join(agentsDir, agentId, "sessions");
         const canonicalExpectedSessionsDir = Path.join(
             realAgentsDir,
             agentId,
@@ -182,7 +190,7 @@ function getSafeAgentActivityRoots(agentId: string): ActivityLogRoot[] {
         return [];
     }
     return roots.flatMap((root) => {
-        const rootDir = safePathWithinRoot(root.relative, AGENTS_DIR);
+        const rootDir = safePathWithinRoot(root.relative, getAgentsDir());
         if (!rootDir) {
             return [];
         }
@@ -497,7 +505,7 @@ function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
 
 /** Parses agents.yml into dashboard agent records while tolerating empty or malformed input. */
 function parseAgentsConfig(): AgentsConfig | null {
-    const configPath = Path.join(OPENCLAW_ROOT, "openclaw.json");
+    const configPath = Path.join(getOpenclawRoot(), "openclaw.json");
 
     try {
         if (!FS.existsSync(configPath)) {
@@ -508,7 +516,7 @@ function parseAgentsConfig(): AgentsConfig | null {
         if (configStat.isSymbolicLink() || configStat.nlink > 1) {
             return null;
         }
-        const realRoot = FS.realpathSync(OPENCLAW_ROOT);
+        const realRoot = FS.realpathSync(getOpenclawRoot());
         const realPath = FS.realpathSync(configPath);
         if (realPath !== realRoot && !realPath.startsWith(`${realRoot}${Path.sep}`)) {
             return null;
@@ -1432,51 +1440,6 @@ function normalizeGatewaySessionModel(model: string | undefined): string | undef
     return model;
 }
 
-export const __testing = {
-    ensureRealAgentsDir,
-    getRouteParam,
-    getSafeAgentSessionsDir,
-    getSafeAgentActivityRoots,
-    toDisplayModelName,
-    resolveConfiguredModelName,
-    toTimestamp,
-    cleanTaskText,
-    summarizeToolActivity,
-    normalizeToolName,
-    isVisibleActivityTool,
-    getTrajectoryToolArguments,
-    getCodexResponseItemActivity,
-    getTrajectoryActivity,
-    getLatestActivityFromFile,
-    getSessionFileModTime,
-    getGatewaySessionsForAgents,
-    getAgentMetadata,
-    getAgentSessionsFromFiles,
-    toActivityLogFile,
-    listActivityLogFiles,
-    parseAgentsConfig,
-    getAgentStatus,
-    getChannelFromSessionKey,
-    determineStatus,
-    findBestSessionForAgent,
-    findSessionByKey,
-    isGatewaySessionRunning,
-    applyGatewaySessionStatus,
-    buildAgentStatuses,
-    buildSingleAgentStatus,
-    isProcfsAvailable,
-    mkdirChildFromVerifiedParent,
-    setPrepareAgentMetadataDirForTest(
-        nextPrepare?: typeof prepareSafeWriteTargetWithinRoot
-    ): void {
-        prepareAgentMetadataDirForWrite = nextPrepare ?? prepareSafeWriteTargetWithinRoot;
-    },
-    setProcfsAvailabilityProbeForTest(nextProbe?: typeof procfsAvailabilityProbe): void {
-        procfsAvailabilityProbe =
-            nextProbe ??
-            (() => process.platform === "linux" && FS.existsSync("/proc/self/fd"));
-    },
-};
 
 /** Registers agents API routes. */
 export default function agentsRoutes(app: express.Application): void {
@@ -1584,7 +1547,7 @@ export default function agentsRoutes(app: express.Application): void {
                 }
                 const metadataPath = safePathWithinRoot(
                     Path.join(agentId, "sessions", "metadata.json"),
-                    AGENTS_DIR
+                    getAgentsDir()
                 );
                 if (!metadataPath) {
                     res.status(400).json({ error: "Invalid agent ID" });
@@ -1597,7 +1560,8 @@ export default function agentsRoutes(app: express.Application): void {
                     res.status(400).json({ error: "Invalid agent metadata path" });
                     return;
                 }
-                const expectedSessionsDir = Path.join(AGENTS_DIR, agentId, "sessions");
+                const agentsDir = getAgentsDir();
+                const expectedSessionsDir = Path.join(agentsDir, agentId, "sessions");
                 const canonicalExpectedSessionsDir = Path.join(
                     realAgentsDir,
                     agentId,
@@ -1605,7 +1569,7 @@ export default function agentsRoutes(app: express.Application): void {
                 );
                 const safeSessionsDir = prepareAgentMetadataDirForWrite(
                     expectedSessionsDir,
-                    AGENTS_DIR
+                    agentsDir
                 );
                 if (safeSessionsDir !== canonicalExpectedSessionsDir) {
                     res.status(400).json({ error: "Invalid agent metadata path" });

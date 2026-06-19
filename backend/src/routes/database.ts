@@ -97,15 +97,6 @@ function parseTable<T extends object>(output: string): T[] {
     });
 }
 
-export const __testing = {
-    buildPgBouncerUri,
-    buildPostgresUri,
-    normalizePostgresHost,
-    normalizePostgresPort,
-    numberFrom,
-    parseTable,
-    stringWithDefault,
-};
 
 /** Returns a string value or a fallback using the route's existing falsy-value behavior. */
 function stringWithDefault(value: string | null | undefined, fallback: string): string {
