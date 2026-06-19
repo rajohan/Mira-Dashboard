@@ -7,6 +7,7 @@ const backendWebSocketTarget = apiTarget.replace(/^http/u, "ws");
 
 interface WebSocketProxyData {
     backend?: WebSocket;
+    cookie?: string;
 }
 
 async function proxyApi(request: Request): Promise<Response> {
@@ -32,8 +33,12 @@ const server = Bun.serve<WebSocketProxyData>({
     fetch(request) {
         const url = new URL(request.url);
         if (url.pathname === "/ws") {
-            if (server.upgrade(request, { data: {} })) {
-                return;
+            if (
+                server.upgrade(request, {
+                    data: { cookie: request.headers.get("cookie") || undefined },
+                })
+            ) {
+                return new Response(null, { status: 204 });
             }
 
             return new Response("WebSocket upgrade failed", { status: 400 });
@@ -43,13 +48,12 @@ const server = Bun.serve<WebSocketProxyData>({
             return proxyApi(request);
         }
 
-        return new Response("Not found", { status: 404 });
+        return dashboard as unknown as Response;
     },
     hostname: host,
     port,
     routes: {
         "/api/*": proxyApi,
-        "/*": dashboard,
     },
     websocket: {
         close(socket) {
@@ -62,7 +66,13 @@ const server = Bun.serve<WebSocketProxyData>({
             }
         },
         open(socket) {
-            const backend = new WebSocket(`${backendWebSocketTarget}/ws`);
+            const headers: Record<string, string> = {};
+            if (socket.data.cookie) {
+                headers.cookie = socket.data.cookie;
+            }
+            const backend = new WebSocket(`${backendWebSocketTarget}/ws`, {
+                headers,
+            });
             socket.data.backend = backend;
 
             backend.addEventListener("message", (event) => {

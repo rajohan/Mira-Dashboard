@@ -40,6 +40,8 @@ const PR_LIST_TIMEOUT_MS = 180_000;
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
 const OPINIONATED_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
 const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "restart-scheduled"]);
+const BUN_EXECUTABLE =
+    process.env.BUN_BINARY || (process.versions.bun ? process.execPath : "bun");
 
 function getResolvedRoots() {
     return {
@@ -1086,9 +1088,9 @@ function shellQuote(value: string): string {
 /** Builds a shell command that records deployment status from a detached process. */
 function deploymentJobUpdateCommand(job: DeploymentJob): string {
     const script = `
-const { DatabaseSync } = require("node:sqlite");
+import { Database } from "bun:sqlite";
 const job = JSON.parse(process.env.MIRA_DEPLOYMENT_JOB || "{}");
-const db = new DatabaseSync(process.env.MIRA_DEPLOYMENT_DB);
+const db = new Database(process.env.MIRA_DEPLOYMENT_DB);
 db.exec("PRAGMA foreign_keys = ON");
 db.exec("PRAGMA busy_timeout = 5000");
 try {
@@ -1140,7 +1142,7 @@ try {
     return [
         `MIRA_DEPLOYMENT_DB=${shellQuote(miraDbPath)}`,
         `MIRA_DEPLOYMENT_JOB=${shellQuote(JSON.stringify(job))}`,
-        shellQuote(process.execPath),
+        shellQuote(BUN_EXECUTABLE),
         "-e",
         shellQuote(script),
     ].join(" ");

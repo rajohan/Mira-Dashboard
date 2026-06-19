@@ -39,14 +39,25 @@ describe("Mira Dashboard backend integration", () => {
         tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "mira-dashboard-test-"));
         const workspaceRoot = path.join(tempRoot, "workspace");
         const openclawRoot = path.join(tempRoot, "openclaw");
+        const frontendRoot = path.join(tempRoot, "frontend");
         await fs.mkdir(path.join(openclawRoot, "hooks", "transforms"), {
             recursive: true,
         });
+        await fs.mkdir(path.join(frontendRoot, "assets"), { recursive: true });
         await fs.mkdir(workspaceRoot, { recursive: true });
         await fs.writeFile(path.join(workspaceRoot, "README.md"), "hello workspace\n");
         await fs.writeFile(path.join(openclawRoot, "openclaw.json"), "{}\n");
+        await fs.writeFile(
+            path.join(frontendRoot, "index.html"),
+            '<!doctype html><html><body><div id="root"></div></body></html>'
+        );
+        await fs.writeFile(
+            path.join(frontendRoot, "assets", "index-fixture.js"),
+            "export const ok = true;\n"
+        );
 
         process.env.MIRA_DASHBOARD_DB_PATH = path.join(tempRoot, "dashboard.db");
+        process.env.MIRA_DASHBOARD_FRONTEND_PATH = frontendRoot;
         process.env.WORKSPACE_ROOT = workspaceRoot;
         process.env.OPENCLAW_HOME = openclawRoot;
         process.env.TRUST_PROXY = "false";
@@ -92,7 +103,7 @@ describe("Mira Dashboard backend integration", () => {
         expect(appRoute.status).toBe(200);
         expect(appRoute.headers.get("content-type")).toContain("text/html");
 
-        const assetsPath = path.resolve("..", "dist", "assets");
+        const assetsPath = path.join(tempRoot, "frontend", "assets");
         const builtAssets = await fs.readdir(assetsPath);
         const builtChunk = builtAssets.find((file) => /^index-.+\.js$/u.test(file));
         expect(builtChunk).toBeDefined();

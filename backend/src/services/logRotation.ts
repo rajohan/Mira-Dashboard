@@ -1,5 +1,10 @@
 import { execFile } from "node:child_process";
-import { constants, createReadStream, createWriteStream } from "node:fs";
+import {
+    constants,
+    createReadStream,
+    createWriteStream,
+    existsSync as fsSyncExists,
+} from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -8,7 +13,6 @@ import { promisify } from "node:util";
 import { createGzip } from "node:zlib";
 
 import { db } from "../db.js";
-import { nonEmptyEnvFallback } from "../lib/values.js";
 import { writeCacheSuccess } from "./cacheEntryWriter.js";
 import {
     getScheduledJob,
@@ -56,6 +60,11 @@ const execFileAsync = promisify(execFile);
 const BUNDLED_CONFIG_PATH = fileURLToPath(
     new URL("../../config/log-rotation.json", import.meta.url)
 );
+const CWD_CONFIG_PATH = path.resolve(process.cwd(), "config/log-rotation.json");
+const SOURCE_CONFIG_PATH = path.resolve(
+    process.cwd(),
+    "backend/config/log-rotation.json"
+);
 const DEFAULT_APPROVED_ROOTS = ["/opt/docker/data"];
 const ROTATED_SUFFIX_RE = /\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z(?:\.gz)?$/u;
 const ARCHIVE_FAMILY_SUFFIX_RE =
@@ -67,7 +76,8 @@ const ELEVATED_LOG_ROTATION_TIMEOUT_MS = 5 * 60_000;
 const ELEVATED_LOG_ROTATION_MAX_BUFFER = 16 * 1024 * 1024;
 const LOG_ROTATION_JOB_ID = "ops.log-rotation";
 const LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS = 100_000;
-const NODE_EXECUTABLE = process.env.NODE_BINARY || "node";
+const BUN_EXECUTABLE =
+    process.env.BUN_BINARY || (process.versions.bun ? process.execPath : "bun");
 const logRotationLockFile = DEFAULT_LOCK_FILE;
 
 type ExecFileRunner = (
@@ -90,7 +100,17 @@ function caughtMessage(error: unknown): string {
 }
 
 function defaultConfigPath(): string {
-    return nonEmptyEnvFallback("MIRA_LOG_ROTATION_CONFIG", BUNDLED_CONFIG_PATH);
+    const configured = process.env.MIRA_LOG_ROTATION_CONFIG;
+    if (configured?.trim()) {
+        return configured;
+    }
+    if (fsSyncExists(CWD_CONFIG_PATH)) {
+        return CWD_CONFIG_PATH;
+    }
+    if (fsSyncExists(SOURCE_CONFIG_PATH)) {
+        return SOURCE_CONFIG_PATH;
+    }
+    return BUNDLED_CONFIG_PATH;
 }
 
 interface LogRotationOptions {
@@ -1814,7 +1834,7 @@ function buildElevatedLogRotationCliArgs(
     return [
         "-n",
         "-E",
-        process.versions.bun ? NODE_EXECUTABLE : process.execPath,
+        process.versions.bun ? BUN_EXECUTABLE : process.execPath,
         ...loaderArgs,
         "--input-type=module",
         "--eval",

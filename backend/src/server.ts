@@ -78,7 +78,8 @@ export function parseTrustProxy(value?: string): boolean | number | string {
 export const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-const frontendPath = path.join(__dirname, "..", "..", "dist");
+const frontendPath =
+    process.env.MIRA_DASHBOARD_FRONTEND_PATH || path.join(__dirname, "..", "..", "dist");
 
 type ExecSyncCommand = (
     command: string,
