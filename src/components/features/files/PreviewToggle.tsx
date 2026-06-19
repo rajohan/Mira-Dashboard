@@ -2,7 +2,7 @@ import { Code, Eye } from "lucide-react";
 
 import { Button } from "../../../components/ui/Button";
 
-/** Provides props for isPreview toggle. */
+/** Provides props for preview toggle. */
 interface PreviewToggleProperties {
     isPreview: boolean;
     onToggle: (isPreview: boolean) => void;
@@ -10,7 +10,7 @@ interface PreviewToggleProperties {
     editLabel?: string;
 }
 
-/** Renders the isPreview toggle UI. */
+/** Renders the preview toggle UI. */
 export function PreviewToggle({
     isPreview,
     onToggle,

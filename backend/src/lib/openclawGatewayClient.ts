@@ -20,7 +20,7 @@ export type DeviceIdentity = {
     privateKeyPem: string;
 };
 
-/** Defines gateway hello isOk. */
+/** Defines gateway hello ok payload. */
 export type GatewayHelloOk = {
     type?: string;
     protocol?: number;

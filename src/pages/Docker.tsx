@@ -430,7 +430,7 @@ export function Docker() {
                                                     )}
                                                 </div>
                                                 <div>
-                                                    Last isChecked:{" "}
+                                                    Last checked:{" "}
                                                     {formatTimestamp(
                                                         service.lastCheckedAt
                                                     )}

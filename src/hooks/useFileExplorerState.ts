@@ -7,7 +7,7 @@ import { validateJsonString } from "../utils/json";
 import { apiFetchRequired } from "./useApi";
 import { fileKeys, useFileContent, useFiles, useSaveFile } from "./useFiles";
 
-/** Defines max isPreview size. */
+/** Defines max preview size. */
 export const MAX_PREVIEW_SIZE = 100_000;
 
 /** Provides file explorer state. */

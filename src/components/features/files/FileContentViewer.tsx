@@ -56,7 +56,7 @@ export function FileContentViewer({
             {largeFileWarning && (
                 <div className="flex items-start gap-2 border-b border-yellow-500/50 bg-yellow-500/20 px-3 py-2 text-sm text-yellow-400 sm:items-center sm:px-4">
                     <AlertTriangle size={14} className="mt-0.5 flex-shrink-0 sm:mt-0" />
-                    Large file ({formatSize(fileContent.size)}) - isPreview only, editing
+                    Large file ({formatSize(fileContent.size)}) - preview only, editing
                     disabled
                 </div>
             )}
@@ -85,7 +85,7 @@ export function FileContentViewer({
             ) : isMarkdownFile(fileContent.path) && markdownPreview ? (
                 <Suspense
                     fallback={
-                        <div className="text-primary-400 p-4">Loading isPreview...</div>
+                        <div className="text-primary-400 p-4">Loading preview...</div>
                     }
                 >
                     <MarkdownPreview content={editedContent} />
@@ -93,7 +93,7 @@ export function FileContentViewer({
             ) : isJsonFile(fileContent.path) && jsonPreview ? (
                 <Suspense
                     fallback={
-                        <div className="text-primary-400 p-4">Loading isPreview...</div>
+                        <div className="text-primary-400 p-4">Loading preview...</div>
                     }
                 >
                     <JsonPreview content={editedContent} />
@@ -110,9 +110,7 @@ export function FileContentViewer({
                 ) : (
                     <Suspense
                         fallback={
-                            <div className="text-primary-400 p-4">
-                                Loading isPreview...
-                            </div>
+                            <div className="text-primary-400 p-4">Loading preview...</div>
                         }
                     >
                         <CodePreview

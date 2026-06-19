@@ -64,7 +64,7 @@ export function base64ToText(base64: string): string | undefined {
     }
 }
 
-/** Performs isPreview from attachment. */
+/** Builds preview data from an attachment. */
 export function previewFromAttachment(
     attachment: ChatAttachmentDisplay
 ): ChatPreviewItem | null {
@@ -95,7 +95,7 @@ function AttachmentList({
     onPreview,
 }: {
     attachments: ChatAttachmentDisplay[];
-    onPreview: (isPreview: ChatPreviewItem) => void;
+    onPreview: (preview: ChatPreviewItem) => void;
 }) {
     if (attachments.length === 0) {
         return null;
@@ -104,7 +104,7 @@ function AttachmentList({
     return (
         <div className="mt-1.5 flex min-w-0 flex-wrap gap-1.5">
             {attachments.map((attachment) => {
-                const isPreview = previewFromAttachment(attachment);
+                const preview = previewFromAttachment(attachment);
                 const content = (
                     <>
                         <AttachmentIcon attachment={attachment} />
@@ -117,7 +117,7 @@ function AttachmentList({
                     </>
                 );
 
-                if (!isPreview) {
+                if (!preview) {
                     return (
                         <div
                             key={attachment.id}
@@ -133,7 +133,7 @@ function AttachmentList({
                     <button
                         key={attachment.id}
                         type="button"
-                        onClick={() => onPreview(isPreview)}
+                        onClick={() => onPreview(preview)}
                         className="border-primary-600 bg-primary-900/60 text-primary-100 hover:border-primary-500 hover:bg-primary-800 flex max-w-full min-w-0 items-center gap-2 rounded-lg border px-2 py-1 text-left text-xs"
                         title={attachment.mimeType}
                     >
@@ -467,7 +467,7 @@ export function ChatMessagesList({
                                                             "image/png";
 
                                                         const imageUrl = `data:${imageMime};base64,${imageData}`;
-                                                        const imagePreviewLabel = `Open chat image ${imageIndex + 1} isPreview`;
+                                                        const imagePreviewLabel = `Open chat image ${imageIndex + 1} preview`;
 
                                                         return (
                                                             <button
@@ -483,7 +483,7 @@ export function ChatMessagesList({
                                                                     })
                                                                 }
                                                                 className="focus:ring-accent-400 rounded-lg text-left hover:opacity-90 focus:ring-2 focus:outline-none"
-                                                                title="Open image isPreview"
+                                                                title="Open image preview"
                                                                 aria-label={
                                                                     imagePreviewLabel
                                                                 }
@@ -527,7 +527,7 @@ export function ChatMessagesList({
                                                             }}
                                                             className="focus:ring-accent-400 rounded-lg text-left hover:opacity-90 focus:ring-2 focus:outline-none"
                                                             title={`Open ${attachment.fileName}`}
-                                                            aria-label={`Open ${attachment.fileName} isPreview`}
+                                                            aria-label={`Open ${attachment.fileName} preview`}
                                                         >
                                                             <img
                                                                 src={attachment.dataUrl}

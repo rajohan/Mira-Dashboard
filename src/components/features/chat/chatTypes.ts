@@ -30,7 +30,7 @@ export interface ChatAttachmentDisplay {
     kind: "image" | "text" | "file";
 }
 
-/** Represents chat isPreview item. */
+/** Represents chat preview item. */
 export interface ChatPreviewItem {
     title: string;
     mimeType?: string;

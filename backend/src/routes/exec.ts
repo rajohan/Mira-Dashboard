@@ -216,7 +216,7 @@ function resolveCwd(cwd: string | undefined): string {
 /** Returns an approved first-party shell command or rejects unsafe shell mode. */
 function getApprovedShellCommand(command: string): string {
     // Defense-in-depth: re-validate at execution boundary even though
-    // validateExecRequest already isChecked the whitelist.
+    // validateExecRequest already checked the whitelist.
     if (!OPS_SHELL_COMMANDS.has(command)) {
         throw new ExecValidationError(
             "shell mode is only available for approved ops commands"

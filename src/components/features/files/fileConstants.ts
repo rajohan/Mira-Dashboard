@@ -17,5 +17,5 @@ export const HOOKS_DIR_FILES = [
     },
 ];
 
-/** Defines max isPreview size. */
+/** Defines max preview size. */
 export const MAX_PREVIEW_SIZE = 1024 * 1024;

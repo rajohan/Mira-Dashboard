@@ -35,7 +35,7 @@ export function Checkbox({
                 className={cn(
                     "flex h-5 w-5 items-center justify-center rounded border",
                     "transition-colors",
-                    "data-isChecked:border-accent-500 data-isChecked:bg-accent-500",
+                    "data-checked:border-accent-500 data-checked:bg-accent-500",
                     "data-unchecked:border-primary-600 data-unchecked:bg-primary-800",
                     "data-focus:ring-accent-500 data-focus:ring-offset-primary-900 data-focus:ring-2 data-focus:ring-offset-2",
                     "data-disabled:cursor-not-allowed data-disabled:opacity-50"

@@ -2,13 +2,13 @@ import { formatSize } from "../../../utils/format";
 import { Modal } from "../../ui/Modal";
 import type { ChatPreviewItem } from "./chatTypes";
 
-/** Provides props for attachment isPreview modal. */
+/** Provides props for attachment preview modal. */
 interface AttachmentPreviewModalProperties {
     previewItem: ChatPreviewItem | null;
     onClose: () => void;
 }
 
-/** Renders the attachment isPreview modal UI. */
+/** Renders the attachment preview modal UI. */
 export function AttachmentPreviewModal({
     previewItem,
     onClose,
@@ -17,7 +17,7 @@ export function AttachmentPreviewModal({
         <Modal
             isOpen={Boolean(previewItem)}
             onClose={onClose}
-            title={previewItem?.title || "Attachment isPreview"}
+            title={previewItem?.title || "Attachment preview"}
             size="3xl"
         >
             {previewItem ? (
@@ -51,7 +51,7 @@ export function AttachmentPreviewModal({
                         </div>
                     ) : (
                         <div className="border-primary-700 bg-primary-900/60 text-primary-300 rounded-lg border p-4 text-sm">
-                            This historical attachment has no isPreview data available.
+                            This historical attachment has no preview data available.
                         </div>
                     )}
                 </div>
