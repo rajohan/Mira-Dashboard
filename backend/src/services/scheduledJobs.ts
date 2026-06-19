@@ -1,4 +1,4 @@
-import { database as database } from "../database.ts";
+import { database } from "../database.ts";
 import { errorMessage } from "../lib/errors.ts";
 
 function dateToISOString(date: Date): string {

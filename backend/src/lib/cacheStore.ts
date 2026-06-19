@@ -1,4 +1,4 @@
-import { database as database } from "../database.ts";
+import { database } from "../database.ts";
 
 /** Represents one cache entry row. */
 export interface CacheEntryRow {

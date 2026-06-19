@@ -123,7 +123,7 @@ describe("Mira Dashboard backend integration", () => {
         expect(rootChunk.headers.get("content-type")).toContain("javascript");
 
         const missingChunk = await fetch(
-            `${testState.baseUrl}/assets/index-missing-after-shouldDeploy.js`
+            `${testState.baseUrl}/assets/index-missing-after-deploy.js`
         );
         expect(missingChunk.status).toBe(404);
         expect(missingChunk.headers.get("content-type")).not.toContain("text/html");

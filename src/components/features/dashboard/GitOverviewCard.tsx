@@ -70,7 +70,7 @@ export function GitOverviewCard() {
                     </div>
 
                     <div className="flex items-center justify-between">
-                        <span>Directoryty repos</span>
+                        <span>Dirty repos</span>
                         <span
                             className={
                                 dirtyRepos.length > 0
@@ -113,7 +113,7 @@ export function GitOverviewCard() {
                                         <Badge
                                             variant={repo.dirty ? "warning" : "success"}
                                         >
-                                            {repo.dirty ? "Directoryty" : "Clean"}
+                                            {repo.dirty ? "Dirty" : "Clean"}
                                         </Badge>
                                     </div>
                                 </div>

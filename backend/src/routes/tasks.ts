@@ -5,7 +5,7 @@ import {
     TASK_ASSIGNEES,
     type TaskAssigneeId,
 } from "../constants/taskActors.ts";
-import { database as database } from "../database.ts";
+import { database } from "../database.ts";
 import gateway from "../gateway.ts";
 import { objectFallback } from "../lib/values.ts";
 

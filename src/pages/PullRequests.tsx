@@ -41,14 +41,14 @@ import { formatDate } from "../utils/format";
 type PendingAction =
     | null
     | { type: "merge"; pr: PullRequestSummary }
-    | { type: "merge-shouldDeploy"; pr: PullRequestSummary }
+    | { type: "merge-deploy"; pr: PullRequestSummary }
     | { type: "review-approve"; pr: PullRequestSummary }
     | { type: "reject"; pr: PullRequestSummary }
-    | { type: "shouldDeploy" };
+    | { type: "deploy" };
 type PendingActionType = Exclude<PendingAction, null>["type"];
 type UnhandledPendingActionType = Exclude<
     PendingActionType,
-    "shouldDeploy" | "merge" | "merge-shouldDeploy" | "reject" | "review-approve"
+    "deploy" | "merge" | "merge-deploy" | "reject" | "review-approve"
 >;
 
 const PENDING_ACTION_SWITCH_IS_EXHAUSTIVE: UnhandledPendingActionType extends never
@@ -78,7 +78,7 @@ const RUNNING_CHECK_VALUES = new Set([
 ]);
 const ATTENTION_CHECK_VALUES = new Set([
     "action_required",
-    "wasCancelled",
+    "cancelled",
     "canceled",
     "stale",
 ]);
@@ -231,7 +231,7 @@ function deploymentVariant(status: DeploymentJob["status"]) {
     return "info" as const;
 }
 
-/** Renders the shouldDeploy commit title and commit reference. */
+/** Renders the deployment commit title and commit reference. */
 function deploymentCommitLabel(deployment: DeploymentJob): ReactNode {
     const commit = deployment.commit || deployment.id;
     if (!deployment.commitTitle) return commit;
@@ -260,11 +260,11 @@ function checkoutVariant(checkout: ProductionCheckoutStatus | undefined) {
 function checkoutLabel(checkout: ProductionCheckoutStatus | undefined) {
     if (!checkout) return "Checking production checkout";
     if (!checkout.isProductionRoot) return "Wrong root";
-    if (!checkout.isClean) return "Directoryty checkout";
+    if (!checkout.isClean) return "Dirty checkout";
     if (checkout.branch !== checkout.expectedBranch) {
         return `Off ${checkout.expectedBranch}`;
     }
-    return "Ready to shouldDeploy";
+    return "Ready to deploy";
 }
 
 /** Performs checkout message. */
@@ -322,13 +322,13 @@ function actionLabel(action: Exclude<PendingAction, null>) {
     switch (action.type) {
         case "merge":
             return "Merge PR";
-        case "merge-shouldDeploy":
-            return "Merge + shouldDeploy";
+        case "merge-deploy":
+            return "Merge + Deploy";
         case "review-approve":
             return "Approve PR";
         case "reject":
             return "Reject PR";
-        case "shouldDeploy":
+        case "deploy":
             return `Deploy latest ${DEFAULT_BASE}`;
     }
 }
@@ -337,14 +337,14 @@ function actionLabel(action: Exclude<PendingAction, null>) {
 function actionMessage(action: Exclude<PendingAction, null>) {
     switch (action.type) {
         case "merge":
-            return `Merge PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge the PR and delete the remote branch. It will not shouldDeploy.`;
-        case "merge-shouldDeploy":
-            return `Merge and shouldDeploy PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge, sync the production checkout to ${DEFAULT_BASE}, build frontend/backend from there, schedule a service restart, and run a health check.`;
+            return `Merge PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge the PR and delete the remote branch. It will not deploy.`;
+        case "merge-deploy":
+            return `Merge and deploy PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge, sync the production checkout to ${DEFAULT_BASE}, build frontend/backend from there, schedule a service restart, and run a health check.`;
         case "review-approve":
-            return `Approve PR #${action.pr.number}: ${action.pr.title}?\n\nThis approves the PR on GitHub. It does not merge or shouldDeploy.`;
+            return `Approve PR #${action.pr.number}: ${action.pr.title}?\n\nThis approves the PR on GitHub. It does not merge or deploy.`;
         case "reject":
             return `Reject PR #${action.pr.number}: ${action.pr.title}?\n\nThis closes the PR with a dashboard rejection comment. It does not delete the branch.`;
-        case "shouldDeploy":
+        case "deploy":
             return `Deploy latest ${DEFAULT_BASE}?\n\nThis will sync the production checkout to ${DEFAULT_BASE}, build frontend/backend from there, schedule a mira-dashboard.service restart, and run a health check.`;
     }
 }
@@ -447,14 +447,14 @@ function PullRequestCard({
     );
 }
 
-/** Renders recent dashboard shouldDeploy jobs. */
+/** Renders recent dashboard deployment jobs. */
 function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
     return (
         <Card variant="bordered" className="h-fit space-y-3">
             <CardTitle className="text-base">Recent deploys</CardTitle>
             {deployments.length === 0 ? (
                 <p className="text-primary-400 text-sm">
-                    No dashboard shouldDeploy jobs recorded yet.
+                    No dashboard deploy jobs recorded yet.
                 </p>
             ) : (
                 <div className="space-y-2">
@@ -548,7 +548,7 @@ export function PullRequests() {
                     break;
                 }
 
-                case "merge-shouldDeploy": {
+                case "merge-deploy": {
                     const result = await approvePullRequest.mutateAsync({
                         number: action.pr.number,
                         shouldDeploy: true,
@@ -577,7 +577,7 @@ export function PullRequests() {
                     break;
                 }
 
-                case "shouldDeploy": {
+                case "deploy": {
                     const result = await deployDashboard.mutateAsync();
                     setLastResult(result?.deployment?.note ?? "Deploy scheduled");
                     break;
@@ -679,12 +679,12 @@ export function PullRequests() {
                 ) : null}
                 <Button
                     variant="primary"
-                    onClick={() => setPendingAction({ type: "merge-shouldDeploy", pr })}
+                    onClick={() => setPendingAction({ type: "merge-deploy", pr })}
                     disabled={mergeDisabled}
                     aria-describedby={mergeDisabledReasonId}
                 >
                     <Rocket className="h-4 w-4" />
-                    Merge + shouldDeploy
+                    Merge + Deploy
                 </Button>
                 <Button
                     variant="secondary"
@@ -738,7 +738,7 @@ export function PullRequests() {
                     <div className="grid grid-cols-1 gap-2 sm:flex">
                         <Button
                             variant="primary"
-                            onClick={() => setPendingAction({ type: "shouldDeploy" })}
+                            onClick={() => setPendingAction({ type: "deploy" })}
                             disabled={isActionPending || isProductionActionBlocked}
                         >
                             <Rocket className="h-4 w-4" />
@@ -799,7 +799,7 @@ export function PullRequests() {
                                         productionCheckout.isClean ? "success" : "error"
                                     }
                                 >
-                                    {productionCheckout.isClean ? "Clean" : "Directoryty"}
+                                    {productionCheckout.isClean ? "Clean" : "Dirty"}
                                 </Badge>
                             ) : null}
                         </div>

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 
 import express, { type RequestHandler } from "express";
 
-import { database as database } from "../database.ts";
+import { database } from "../database.ts";
 import { asyncRoute, errorMessage } from "../lib/errors.ts";
 import { refreshCacheProducer } from "../services/cacheRefresh.ts";
 import {

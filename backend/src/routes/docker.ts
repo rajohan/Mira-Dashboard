@@ -4,11 +4,11 @@ import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
 
-import { database as database } from "../database.ts";
+import { database } from "../database.ts";
 import { asyncRoute as baseAsyncRoute, errorMessage } from "../lib/errors.ts";
 import {
     arrayFallback,
-    nonEmptyEnvironmentFallback as nonEmptyEnvironmentFallback,
+    nonEmptyEnvironmentFallback,
     nullableString,
     objectFallback,
     stringFallback,

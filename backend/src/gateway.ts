@@ -13,10 +13,7 @@ import {
     type OpenClawGatewayClientInstance,
     type OpenClawGatewayClientOptions,
 } from "./lib/openclawGatewayClient.ts";
-import {
-    nonEmptyEnvironmentFallback as nonEmptyEnvironmentFallback,
-    stringFallback,
-} from "./lib/values.ts";
+import { nonEmptyEnvironmentFallback, stringFallback } from "./lib/values.ts";
 
 function validateOpenClawRoot(rootPath: string, environmentName: string): string {
     const resolved = Path.resolve(rootPath);

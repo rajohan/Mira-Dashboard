@@ -6,12 +6,9 @@ import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
 
-import {
-    database as database,
-    miraDatabasePath as miraDatabasePath,
-} from "../database.ts";
+import { database, miraDatabasePath } from "../database.ts";
 import { asyncRoute as baseAsyncRoute, errorMessage } from "../lib/errors.ts";
-import { nonEmptyEnvironmentFallback as nonEmptyEnvironmentFallback } from "../lib/values.ts";
+import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -292,7 +289,7 @@ function readDeploymentLockRow(): DeploymentLockRow | undefined {
         .get() as DeploymentLockRow | undefined;
 }
 
-/** Releases the active shouldDeploy lock if it still belongs to the given job. */
+/** Releases the active deploy lock if it still belongs to the given job. */
 function releaseDeploymentLock(jobId: string): void {
     try {
         database
@@ -303,7 +300,7 @@ function releaseDeploymentLock(jobId: string): void {
     }
 }
 
-/** Ensures no active shouldDeploy owns the production checkout. */
+/** Ensures no active deploy owns the production checkout. */
 function ensureNoActiveDeployment(): void {
     const activeLock = readDeploymentLockRow();
     const activeJobId = activeLock?.job_id;
@@ -311,25 +308,21 @@ function ensureNoActiveDeployment(): void {
         const activeJob = readDeploymentJob(activeJobId);
         if (!activeJob) {
             if (!isDeploymentLockStale(activeLock)) {
-                throw new Error(
-                    `Dashboard shouldDeploy already in progress (${activeJobId})`
-                );
+                throw new Error(`Dashboard deploy already in progress (${activeJobId})`);
             }
             database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
         } else if (
             ACTIVE_DEPLOYMENT_STATUSES.has(activeJob.status) &&
             !isDeploymentJobStale(activeJob)
         ) {
-            throw new Error(
-                `Dashboard shouldDeploy already in progress (${activeJob.id})`
-            );
+            throw new Error(`Dashboard deploy already in progress (${activeJob.id})`);
         } else {
             database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
         }
     }
 }
 
-/** Acquires the active shouldDeploy lock for a new deployment job. */
+/** Acquires the active deploy lock for a new deployment job. */
 function acquireDeploymentLock(jobId: string): void {
     ensureNoActiveDeployment();
     try {
@@ -340,7 +333,7 @@ function acquireDeploymentLock(jobId: string): void {
             .run(jobId, dateToISOString(new Date()));
     } catch (error) {
         if (error instanceof Error && /constraint/i.test(error.message)) {
-            throw new Error("Dashboard shouldDeploy already in progress", {
+            throw new Error("Dashboard deploy already in progress", {
                 cause: error,
             });
         }
@@ -348,7 +341,7 @@ function acquireDeploymentLock(jobId: string): void {
     }
 }
 
-/** Refreshes the active shouldDeploy heartbeat while long-running work continues. */
+/** Refreshes the active deploy heartbeat while long-running work continues. */
 function refreshDeploymentHeartbeat(job: DeploymentJob): DeploymentJob {
     const updatedJob = { ...job, updatedAt: dateToISOString(new Date()) };
     writeDeploymentJob(updatedJob);
@@ -1073,19 +1066,17 @@ async function ensureProductionCheckout(): Promise<void> {
     }
 
     if (!status.isClean) {
-        throw new Error(
-            "Production checkout has local changes; refusing shouldDeploy/merge"
-        );
+        throw new Error("Production checkout has local changes; refusing deploy/merge");
     }
 }
 
-/** Performs ensure production ready for shouldDeploy. */
+/** Performs ensure production ready for deploy. */
 async function ensureProductionReadyForDeploy(): Promise<void> {
     const status = await getProductionCheckoutStatus();
 
     if (!status.isSafeForDeploy) {
         throw new Error(
-            `Production checkout must be clean ${DEFAULT_BASE} before shouldDeploy; current branch=${status.branch}, clean=${status.isClean}`
+            `Production checkout must be clean ${DEFAULT_BASE} before deploy; current branch=${status.branch}, clean=${status.isClean}`
         );
     }
 }
@@ -1199,8 +1190,8 @@ async function scheduleRestartHealthCheck(job: DeploymentJob): Promise<CommandRe
         "systemd-run",
         [
             "--user",
-            `--unit=mira-dashboard-shouldDeploy-${job.id}`,
-            "--description=Mira Dashboard shouldDeploy restart + health check",
+            `--unit=mira-dashboard-deploy-${job.id}`,
+            "--description=Mira Dashboard deploy restart + health check",
             "/bin/bash",
             "-lc",
             script,
@@ -1285,7 +1276,7 @@ async function runDeploymentJob(job: DeploymentJob): Promise<void> {
 /** Reports background deployment failures after the API response has returned. */
 function reportBackgroundDeploymentError(error: unknown): void {
     console.error(
-        "[pullRequestsRoutes] Background shouldDeploy failed:",
+        "[pullRequestsRoutes] Background deploy failed:",
         errorMessage(error, "Deploy failed")
     );
 }
@@ -1301,7 +1292,7 @@ async function runDeploymentJobAndReportErrors(
     }
 }
 
-/** Starts shouldDeploy latest in the background. */
+/** Starts deploy latest in the background. */
 function startDeployLatest(lockHeldBy?: string): DeploymentJob {
     const now = dateToISOString(new Date());
     const job: DeploymentJob = {
@@ -1318,7 +1309,7 @@ function startDeployLatest(lockHeldBy?: string): DeploymentJob {
             )
             .run(job.id, now, lockHeldBy);
         if (result.changes !== 1) {
-            throw new Error("Dashboard shouldDeploy lock handoff failed");
+            throw new Error("Dashboard deploy lock handoff failed");
         }
     } else {
         acquireDeploymentLock(job.id);
@@ -1391,9 +1382,9 @@ async function approvePullRequest(number: number, shouldDeploy: boolean) {
         message: syncError
             ? `PR #${number} merged; production sync failed`
             : deployError
-              ? `PR #${number} merged; shouldDeploy failed to start`
+              ? `PR #${number} merged; deploy failed to start`
               : shouldDeploy
-                ? `PR #${number} merged; shouldDeploy started`
+                ? `PR #${number} merged; deploy started`
                 : `PR #${number} merged`,
         deployment,
         deployError,
@@ -1491,7 +1482,7 @@ export default function pullRequestsRoutes(app: express.Application): void {
     );
 
     app.post(
-        "/api/pull-requests/shouldDeploy",
+        "/api/pull-requests/deploy",
         express.json(),
         asyncRoute(async (_request, response) => {
             await ensureProductionCheckout();
@@ -1513,7 +1504,7 @@ export default function pullRequestsRoutes(app: express.Application): void {
                 });
                 return;
             }
-            const isDeploy = request.body?.shouldDeploy === true;
+            const isDeploy = request.body?.deploy === true;
             response.json(await approvePullRequest(number, isDeploy));
         })
     );

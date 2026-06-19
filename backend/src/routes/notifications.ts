@@ -1,6 +1,6 @@
 import express, { type RequestHandler } from "express";
 
-import { database as database } from "../database.ts";
+import { database } from "../database.ts";
 import { nullableString, objectFallback, stringFallback } from "../lib/values.ts";
 import { pruneReadNotifications } from "../services/notificationMaintenance.ts";
 

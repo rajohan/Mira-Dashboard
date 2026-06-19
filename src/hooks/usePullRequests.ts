@@ -133,7 +133,7 @@ async function approvePullRequest(
     return apiPostRequired<PullRequestActionResponse>(
         `/pull-requests/${number}/approve`,
         {
-            shouldDeploy,
+            deploy: shouldDeploy,
         }
     );
 }
@@ -168,10 +168,10 @@ async function updatePullRequestBranch(
     );
 }
 
-/** Performs shouldDeploy dashboard. */
+/** Performs deploy dashboard. */
 async function deployDashboard(): Promise<{ isOk: boolean; deployment: DeploymentJob }> {
     return apiPostRequired<{ isOk: boolean; deployment: DeploymentJob }>(
-        "/pull-requests/shouldDeploy"
+        "/pull-requests/deploy"
     );
 }
 
@@ -290,7 +290,7 @@ export function useRejectPullRequest() {
     });
 }
 
-/** Provides shouldDeploy dashboard. */
+/** Provides deploy dashboard. */
 export function useDeployDashboard() {
     const queryClient = useQueryClient();
 

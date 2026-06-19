@@ -8,8 +8,8 @@ import { parse as parseDotenv } from "dotenv";
 import safeRegex from "safe-regex2";
 import YAML from "yaml";
 
-import { database as database } from "../database.ts";
-import { nonEmptyEnvironmentFallback as nonEmptyEnvironmentFallback } from "../lib/values.ts";
+import { database } from "../database.ts";
+import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 import type { ScheduledJob } from "./scheduledJobs.ts";
 import {
     getScheduledJob,

@@ -2,8 +2,8 @@ import { writeAgentsFromWebSocket } from "../../collections/agents";
 import { writeLogFromWebSocket } from "../../collections/logs";
 import { replaceSessionsFromWebSocket } from "../../collections/sessions";
 import type { AgentInfo, Session } from "../../types/session";
-import type { SocketEnvironmentelope } from "../../types/socket";
-import { sessionsPayloadSchema, socketEnvironmentelopeSchema } from "../../types/socket";
+import type { SocketEnvelope } from "../../types/socket";
+import { sessionsPayloadSchema, socketEnvelopeSchema } from "../../types/socket";
 
 /** Extracts sessions from payload. */
 function extractSessionsFromPayload(payload: unknown): Session[] {
@@ -34,7 +34,7 @@ function extractSessionsFromPayload(payload: unknown): Session[] {
 }
 
 /** Performs read gateway connection state. */
-function readGatewayConnectionState(data: SocketEnvironmentelope): boolean | null {
+function readGatewayConnectionState(data: SocketEnvelope): boolean | null {
     if (data.type === "state" || data.type === "connected") {
         return data.gatewayConnected ?? true;
     }
@@ -48,12 +48,12 @@ function readGatewayConnectionState(data: SocketEnvironmentelope): boolean | nul
 
 /** Responds to socket message events. */
 export function handleSocketMessage(raw: unknown): boolean | null {
-    const validated = socketEnvironmentelopeSchema.safeParse(raw);
+    const validated = socketEnvelopeSchema.safeParse(raw);
     if (!validated.success) {
         return null;
     }
 
-    const data = raw as SocketEnvironmentelope;
+    const data = raw as SocketEnvelope;
 
     if (data.type === "state" && data.sessions) {
         replaceSessionsFromWebSocket(data.sessions);

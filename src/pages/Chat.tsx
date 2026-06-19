@@ -201,10 +201,10 @@ export function nextHistoryBottomState(
 /** Returns the next send error after a history load failure. */
 export function nextHistoryLoadSendError(
     wasPrevious: string | null,
-    wasCancelled: boolean,
+    wasCanceled: boolean,
     historyLoadError: string
 ) {
-    if (wasCancelled) {
+    if (wasCanceled) {
         return wasPrevious;
     }
 
@@ -1130,16 +1130,16 @@ export function Chat() {
         }
 
         const mediaDevices = navigator.mediaDevices as MediaDevices | undefined;
-        const canUseDirectoryectRecorder =
+        const canUseDirectRecorder =
             Boolean(mediaDevices) &&
             typeof mediaDevices?.getUserMedia === "function" &&
             window.MediaRecorder !== undefined;
 
-        if (!canUseDirectoryectRecorder) {
+        if (!canUseDirectRecorder) {
             setSendError(
                 window.isSecureContext
-                    ? "Directoryect voice recording is not supported here. Choose or record an audio file instead."
-                    : "Directoryect voice recording requires HTTPS or localhost. Choose or record an audio file instead."
+                    ? "Direct voice recording is not supported here. Choose or record an audio file instead."
+                    : "Direct voice recording requires HTTPS or localhost. Choose or record an audio file instead."
             );
             voiceFileInputReference.current?.click();
             return;

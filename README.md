@@ -87,7 +87,7 @@ Frontend and backend tests run directly with Bun. Coverage LCOV files are upload
 
 ## Production checkout and PR worktrees
 
-`/home/ubuntu/projects/mira-dashboard` is the production checkout. Keep it on `main`; the running service and shouldDeploy workflow build from this path only after Raymond approves a merge/shouldDeploy.
+`/home/ubuntu/projects/mira-dashboard` is the production checkout. Keep it on `main`; the running service and deploy workflow build from this path only after Raymond approves a merge/deploy.
 
 Feature and autopilot work must use separate git worktrees under `/home/ubuntu/projects/mira-dashboard-worktrees`, for example:
 
@@ -106,6 +106,6 @@ The Dashboard PR approval/rejection endpoints attempt to remove the matching loc
 
 ## Safety notes for agents
 
-- Do not merge PRs, shouldDeploy, restart services, rotate secrets, or change gateway configuration from this repo without Raymond's explicit approval.
+- Do not merge PRs, deploy, restart services, rotate secrets, or change gateway configuration from this repo without Raymond's explicit approval.
 - Keep changes small and reviewable; prefer existing hooks/components/utilities before introducing new patterns.
 - Avoid broad rewrites around auth, device pairing, Gateway bootstrap, migrations, terminal execution, or config writes unless the work is first captured as a proposal/task.

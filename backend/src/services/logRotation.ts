@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { createGzip } from "node:zlib";
 
-import { database as database } from "../database.ts";
+import { database } from "../database.ts";
 import { writeCacheSuccess } from "./cacheEntryWriter.ts";
 import {
     getScheduledJob,

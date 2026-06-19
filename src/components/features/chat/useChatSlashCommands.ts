@@ -66,7 +66,7 @@ export function useChatSlashCommands({
             if (!isConfirmed) {
                 setDraft("");
                 setSendError(null);
-                addSystemMessage("Reset wasCancelled.");
+                addSystemMessage("Reset canceled.");
                 return true;
             }
 

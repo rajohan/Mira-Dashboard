@@ -292,7 +292,7 @@ function mediaUrlFromPath(path: string): string {
 }
 
 /** Extracts media directive attachments. */
-function extractMediaDirectoryectiveAttachments(text: string): ChatAttachmentDisplay[] {
+function extractMediaDirectiveAttachments(text: string): ChatAttachmentDisplay[] {
     const attachments: ChatAttachmentDisplay[] = [];
     const mediaPattern = /^MEDIA:(.+)$/gm;
 
@@ -470,7 +470,7 @@ export function normalizeChatHistoryMessage(
     const normalizedText = normalizeText(content);
     const attachments = [
         ...extractMediaReferenceAttachments(message),
-        ...extractMediaDirectoryectiveAttachments(normalizedText),
+        ...extractMediaDirectiveAttachments(normalizedText),
         ...extractInlineFileAttachments(normalizedText),
     ];
     const text = stripGeneratedMediaOnlyText(

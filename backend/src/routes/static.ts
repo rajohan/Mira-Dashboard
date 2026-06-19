@@ -14,7 +14,7 @@ export default function staticRoutes(
     if (indexExists) {
         // Serve static files. Avoid stale dashboard bundles during active development;
         // hashed asset names still keep payloads stable, but the browser must revalidate
-        // so chat capability fixes land immediately after a shouldDeploy/restart.
+        // so chat capability fixes land immediately after a deploy/restart.
         app.use(
             express.static(frontendPath, {
                 index: false,

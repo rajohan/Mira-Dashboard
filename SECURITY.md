@@ -22,9 +22,9 @@ Security-sensitive areas include:
 
 - Authentication, sessions, pairing, and device tokens
 - OpenClaw Gateway calls and streaming events
-- Terminal/exec, file, Docker, backup, shouldDeploy, and settings actions
+- Terminal/exec, file, Docker, backup, deploy, and settings actions
 - Secrets/config handling and environment variables
-- PR/shouldDeploy automation and GitHub integration
+- PR/deploy automation and GitHub integration
 - Markdown/HTML rendering and other trust boundaries
 
 ## Handling guidelines

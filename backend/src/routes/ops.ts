@@ -1,6 +1,6 @@
 import express, { type RequestHandler } from "express";
 
-import { database as database } from "../database.ts";
+import { database } from "../database.ts";
 import { asyncRoute as baseAsyncRoute } from "../lib/errors.ts";
 import { runElevatedLogRotationService } from "../services/logRotation.ts";
 

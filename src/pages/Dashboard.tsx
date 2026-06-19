@@ -283,7 +283,7 @@ export function Dashboard() {
                         {
                             key: "git.workspace",
                             label: "Git workspace",
-                            description: "Directoryty repo + push state snapshot",
+                            description: "Dirty repo + push state snapshot",
                         },
                         {
                             key: "system.host",

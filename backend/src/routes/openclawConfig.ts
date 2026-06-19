@@ -143,7 +143,7 @@ function collectSkillDirectories(root: string): string[] {
 }
 
 /** Finds bundled extension skill directories under the OpenClaw package root. */
-function collectExtraSkillDirectoryectories(openClawPackageRoot: string): string[] {
+function collectExtraSkillDirectories(openClawPackageRoot: string): string[] {
     const extensionsRoot = path.join(openClawPackageRoot, "dist/extensions");
     try {
         return fs
@@ -220,7 +220,7 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
     }
 
     if (openClawPackageRoot) {
-        for (const skillPath of collectExtraSkillDirectoryectories(openClawPackageRoot)) {
+        for (const skillPath of collectExtraSkillDirectories(openClawPackageRoot)) {
             addSkill(skillPath, "extra");
         }
     }

@@ -1,4 +1,4 @@
-import { database as database } from "../database.ts";
+import { database } from "../database.ts";
 import {
     fetchCachedQuotas,
     hasQuotaStatus,

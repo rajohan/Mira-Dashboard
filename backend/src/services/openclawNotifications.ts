@@ -1,4 +1,4 @@
-import { database as database } from "../database.ts";
+import { database } from "../database.ts";
 import { fetchCachedSystemHost } from "../lib/systemCache.ts";
 import { pruneReadNotifications } from "./notificationMaintenance.ts";
 import {

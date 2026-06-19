@@ -13,8 +13,8 @@ import {
 import os from "node:os";
 import { promisify } from "node:util";
 
-import { database as database } from "../database.ts";
-import { nonEmptyEnvironmentFallback as nonEmptyEnvironmentFallback } from "../lib/values.ts";
+import { database } from "../database.ts";
+import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 import { writeCacheSuccess } from "./cacheEntryWriter.ts";
 import {
     getScheduledJob,

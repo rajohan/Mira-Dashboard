@@ -158,7 +158,7 @@ describe("Mira Dashboard frontend behavior", () => {
         });
         const blocked = task({
             number: 3,
-            title: "Waiting on shouldDeploy",
+            title: "Waiting on deploy",
             labels: [{ name: "blocked" }],
             automation: {
                 type: "cron",
