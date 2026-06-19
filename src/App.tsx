@@ -1,16 +1,17 @@
-import { TanStackDevtools } from "@tanstack/react-devtools";
-import { FormDevtoolsPanel } from "@tanstack/react-form-devtools";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { ReactQueryDevtoolsPanel } from "@tanstack/react-query-devtools";
 import { RouterProvider } from "@tanstack/react-router";
-import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 
 import { AppErrorFallback } from "./components/ui/AppErrorFallback";
 import { OpenClawSocketProvider } from "./hooks/useOpenClawSocket";
 import { queryClient } from "./lib/queryClient";
 import { router } from "./router";
+
+const enableDevtools = process.env.NODE_ENV !== "production";
+const DashboardDevtools = enableDevtools
+    ? lazy(() => import("./components/devtools/DashboardDevtools"))
+    : undefined;
 
 /** Renders the app UI. */
 function App() {
@@ -31,22 +32,11 @@ function App() {
             <QueryClientProvider client={queryClient}>
                 <OpenClawSocketProvider>
                     <RouterProvider router={router} />
-                    <TanStackDevtools
-                        plugins={[
-                            {
-                                name: "TanStack Query",
-                                render: <ReactQueryDevtoolsPanel />,
-                            },
-                            {
-                                name: "TanStack Router",
-                                render: <TanStackRouterDevtoolsPanel />,
-                            },
-                            {
-                                name: "TanStack Form",
-                                render: <FormDevtoolsPanel />,
-                            },
-                        ]}
-                    />
+                    {DashboardDevtools ? (
+                        <Suspense fallback={null}>
+                            <DashboardDevtools />
+                        </Suspense>
+                    ) : undefined}
                 </OpenClawSocketProvider>
             </QueryClientProvider>
         </ErrorBoundary>

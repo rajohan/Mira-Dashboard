@@ -3,7 +3,7 @@
 [![frontend coverage](https://codecov.io/gh/rajohan/Mira-Dashboard/branch/main/graph/badge.svg?flag=frontend)](https://codecov.io/gh/rajohan/Mira-Dashboard)
 [![backend coverage](https://codecov.io/gh/rajohan/Mira-Dashboard/branch/main/graph/badge.svg?flag=backend)](https://codecov.io/gh/rajohan/Mira-Dashboard)
 
-Mira Dashboard is Raymond's local control surface for Mira/OpenClaw operations. It combines a React frontend with a Node/Express backend that mirrors OpenClaw Gateway state, serves operational APIs, and persists dashboard-owned state in SQLite.
+Mira Dashboard is Raymond's local control surface for Mira/OpenClaw operations. It combines a React frontend with a Bun/Express backend that mirrors OpenClaw Gateway state, serves operational APIs, and persists dashboard-owned state in SQLite.
 
 ## What it includes
 
@@ -19,8 +19,9 @@ Mira Dashboard is Raymond's local control surface for Mira/OpenClaw operations. 
 src/                     React app, routes, hooks, stores, types, and UI components
 backend/src/             Express backend, Gateway bridge, route modules, services, DB setup
 backend/data/            Local runtime SQLite databases; do not commit runtime data changes
-dist/                    Production frontend build output
-vite.config.ts           Vite config, React Compiler preset, dev proxy, and build chunking
+dist/                    Bun production frontend build output
+scripts/                 Bun frontend build scripts and React Compiler plugin
+vite.config.ts           Vite dev-server config for local proxying
 ```
 
 ## Local development
@@ -74,14 +75,14 @@ bun run format:check
 
 Use the smallest meaningful gate for the change you are making. For docs-only changes, `git diff --check` is usually enough; for frontend/backend code changes, prefer lint plus the relevant build.
 
-Frontend `bun run test` and `bun run test:coverage` use the chunked Vitest runner to avoid one large resource-heavy Vitest process. Coverage LCOV files are written under `coverage/chunks/chunk-*/lcov.info` and uploaded to Codecov from CI for PR status, diff coverage, and trend visibility.
+Frontend and backend tests run directly with Bun. Coverage LCOV files are uploaded to Codecov from CI for PR status, diff coverage, and trend visibility.
 
 ## Runtime notes
 
 - Backend default port: `3100`.
 - Frontend dev port: `5173`.
 - Health endpoints: `/health` and `/api/health`.
-- Vite is configured with React Compiler via `reactCompilerPreset()`.
+- Production frontend builds use Bun's HTML bundler with a Babel React Compiler plugin.
 - Dev server listens on all addresses so the dashboard can be reached over Tailscale when needed.
 - Auth is enforced for API routes after `/api/auth/*`; route modules should assume authenticated access unless explicitly mounted before the auth middleware.
 

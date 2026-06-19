@@ -9,7 +9,7 @@
         "node": ">=25.0.0"
     },
     "scripts": {
-        "build": "tsc",
+        "build": "tsc --noEmit && bun scripts/build.ts",
         "start": "NODE_ENV=production doppler run --config prd --project rajohan -- bun dist/serverStart.js",
         "dev": "doppler run --config prd --project rajohan -- bun --watch src/serverStart.ts",
         "lint": "eslint .",

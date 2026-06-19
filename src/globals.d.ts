@@ -1,5 +1,7 @@
 declare const __APP_COMMIT__: string;
 
+declare module "*.css";
+
 interface Uint8Array {
     toBase64(): string;
 }
