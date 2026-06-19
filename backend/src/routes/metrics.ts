@@ -74,13 +74,15 @@ interface MetricsResponse extends SystemMetricsResponse {
     tokens: TokenMetrics;
 }
 
-let previousNetworkSample: null | {
-    timestamp: number;
-    downloadBytes: number;
-    uploadBytes: number;
-} = null;
+const metricsRouteState: {
+    previousNetworkSample: null | {
+        timestamp: number;
+        downloadBytes: number;
+        uploadBytes: number;
+    };
+} = { previousNetworkSample: null };
 
-const metricsDeps = {
+const metricsDependencies = {
     execSync,
     readdirSync,
     readFileSync,
@@ -93,7 +95,7 @@ function getNetworkMetrics(): NetworkMetrics {
 
     try {
         const preferredInterface = "enp0s6";
-        const availableInterfaces = metricsDeps.readdirSync("/sys/class/net");
+        const availableInterfaces = metricsDependencies.readdirSync("/sys/class/net");
         const interfaces = availableInterfaces.includes(preferredInterface)
             ? [preferredInterface]
             : availableInterfaces.filter((name) => name !== "lo");
@@ -101,10 +103,10 @@ function getNetworkMetrics(): NetworkMetrics {
         for (const name of interfaces) {
             const basePath = `/sys/class/net/${name}/statistics`;
             const rxBytes = Number(
-                metricsDeps.readFileSync(`${basePath}/rx_bytes`, "utf8").trim()
+                metricsDependencies.readFileSync(`${basePath}/rx_bytes`, "utf8").trim()
             );
             const txBytes = Number(
-                metricsDeps.readFileSync(`${basePath}/tx_bytes`, "utf8").trim()
+                metricsDependencies.readFileSync(`${basePath}/tx_bytes`, "utf8").trim()
             );
 
             if (!Number.isNaN(rxBytes)) {
@@ -121,17 +123,26 @@ function getNetworkMetrics(): NetworkMetrics {
 
     const timestamp = Date.now();
 
-    if (!previousNetworkSample) {
-        previousNetworkSample = { timestamp, downloadBytes, uploadBytes };
+    if (!metricsRouteState.previousNetworkSample) {
+        metricsRouteState.previousNetworkSample = {
+            timestamp,
+            downloadBytes,
+            uploadBytes,
+        };
         return {
             downloadMbps: 0,
             uploadMbps: 0,
         };
     }
 
-    const elapsedSeconds = (timestamp - previousNetworkSample.timestamp) / 1000;
+    const elapsedSeconds =
+        (timestamp - metricsRouteState.previousNetworkSample.timestamp) / 1000;
     if (elapsedSeconds <= 0) {
-        previousNetworkSample = { timestamp, downloadBytes, uploadBytes };
+        metricsRouteState.previousNetworkSample = {
+            timestamp,
+            downloadBytes,
+            uploadBytes,
+        };
         return {
             downloadMbps: 0,
             uploadMbps: 0,
@@ -140,11 +151,14 @@ function getNetworkMetrics(): NetworkMetrics {
 
     const downloadDelta = Math.max(
         0,
-        downloadBytes - previousNetworkSample.downloadBytes
+        downloadBytes - metricsRouteState.previousNetworkSample.downloadBytes
     );
-    const uploadDelta = Math.max(0, uploadBytes - previousNetworkSample.uploadBytes);
+    const uploadDelta = Math.max(
+        0,
+        uploadBytes - metricsRouteState.previousNetworkSample.uploadBytes
+    );
 
-    previousNetworkSample = { timestamp, downloadBytes, uploadBytes };
+    metricsRouteState.previousNetworkSample = { timestamp, downloadBytes, uploadBytes };
 
     return {
         downloadMbps:
@@ -172,7 +186,7 @@ function getSystemMetrics(): SystemMetricsResponse {
     let diskPercent = 0;
 
     try {
-        const dfOutput = metricsDeps.execSync("df -B1 / | tail -1", {
+        const dfOutput = metricsDependencies.execSync("df -B1 / | tail -1", {
             encoding: "utf8",
         });
         const parts = dfOutput.trim().split(/\s+/);
@@ -269,17 +283,17 @@ function getTokenMetrics(): TokenMetrics {
 
 /** Registers metrics API routes. */
 export default function metricsRoutes(app: express.Application): void {
-    app.get("/api/metrics", (async (_req, res) => {
+    app.get("/api/metrics", (async (_request, response) => {
         try {
             const system = getSystemMetrics();
             const tokens = getTokenMetrics();
 
-            res.json({
+            response.json({
                 ...system,
                 tokens,
             } satisfies MetricsResponse);
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            response.status(500).json({ error: (error as Error).message });
         }
     }) as RequestHandler);
 }

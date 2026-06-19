@@ -144,7 +144,7 @@ export interface DockerManualUpdateResult {
     success: boolean;
     service: DockerUpdaterService;
     result: {
-        ok: boolean;
+        isOk: boolean;
         workflow: string;
         mode: string;
         summary: {
@@ -171,7 +171,7 @@ export interface DockerManualUpdateResult {
 /** Represents Docker updater run step. */
 export interface DockerUpdaterRunStep {
     step: string;
-    ok: boolean;
+    isOk: boolean;
     stdout: string;
     stderr: string;
 }
@@ -280,12 +280,12 @@ export function useDockerContainer(containerId: string | null) {
 export function useDockerContainerLogs(
     containerId: string | null,
     tail: number,
-    enabled = true
+    isEnabled = true
 ) {
     return useQuery({
         queryKey: dockerKeys.containerLogs(containerId || "", tail),
         queryFn: () => fetchContainerLogs(containerId!, tail),
-        enabled: enabled && Boolean(containerId),
+        enabled: isEnabled && Boolean(containerId),
         refetchInterval: 5_000,
     });
 }
@@ -456,8 +456,7 @@ export function useDockerPrune() {
         onSuccess: async (_, target) => {
             if (target === "images") {
                 await queryClient.invalidateQueries({ queryKey: dockerKeys.images });
-            }
-            if (target === "volumes") {
+            } else if (target === "volumes") {
                 await queryClient.invalidateQueries({ queryKey: dockerKeys.volumes });
             }
             await queryClient.invalidateQueries({ queryKey: dockerKeys.containers });

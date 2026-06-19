@@ -1,16 +1,16 @@
 import { MessageSquare } from "lucide-react";
 
 import { type MoltbookPost } from "../../../hooks/useMoltbook";
-import { formatTime, getMoltbookUrl } from "../../../utils/moltbookUtils";
+import { formatTime, getMoltbookUrl } from "../../../utils/moltbookUtilities";
 import { Card } from "../../ui/Card";
 
 /** Provides props for feed post card. */
-interface FeedPostCardProps {
+interface FeedPostCardProperties {
     post: MoltbookPost;
 }
 
 /** Renders the feed post card UI. */
-export function FeedPostCard({ post }: FeedPostCardProps) {
+export function FeedPostCard({ post }: FeedPostCardProperties) {
     return (
         <Card className="p-3 sm:p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start">

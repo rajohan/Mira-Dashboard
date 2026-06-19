@@ -74,46 +74,46 @@ export async function refreshCacheKey(key: string) {
 
 /** Registers cache API routes. */
 export default function cacheRoutes(app: express.Application): void {
-    app.get("/api/cache/heartbeat", (async (_req, res) => {
+    app.get("/api/cache/heartbeat", (async (_request, response) => {
         const cacheEntries = await getAllCacheEntries();
         const mapped = cacheEntries.map(mapCacheRowForResponse);
-        res.json({
+        response.json({
             generatedAt: dateToISOString(new Date()),
             count: mapped.length,
             entries: mapped,
         });
     }) as RequestHandler);
 
-    app.post("/api/cache/:key/refresh", (async (req, res) => {
-        const key = stringFallback(req.params.key).trim();
+    app.post("/api/cache/:key/refresh", (async (request, response) => {
+        const key = stringFallback(request.params.key).trim();
         if (!key) {
-            res.status(400).json({ error: "Missing cache key" });
+            response.status(400).json({ error: "Missing cache key" });
             return;
         }
 
         try {
             const entry = await refreshCacheKey(key);
-            res.json({ ok: true, entry });
+            response.json({ isOk: true, entry });
         } catch (error) {
-            res.status(httpStatusCode(error)).json({
+            response.status(httpStatusCode(error)).json({
                 error: errorMessage(error, "Cache refresh failed"),
             });
         }
     }) as RequestHandler);
 
-    app.get("/api/cache/:key", (async (req, res) => {
-        const key = stringFallback(req.params.key).trim();
+    app.get("/api/cache/:key", (async (request, response) => {
+        const key = stringFallback(request.params.key).trim();
         if (!key) {
-            res.status(400).json({ error: "Missing cache key" });
+            response.status(400).json({ error: "Missing cache key" });
             return;
         }
 
         const row = await getCacheEntry(key);
         if (!row) {
-            res.status(404).json({ error: "Cache key not found", key });
+            response.status(404).json({ error: "Cache key not found", key });
             return;
         }
 
-        res.json(mapCacheRowForResponse(row));
+        response.json(mapCacheRowForResponse(row));
     }) as RequestHandler);
 }

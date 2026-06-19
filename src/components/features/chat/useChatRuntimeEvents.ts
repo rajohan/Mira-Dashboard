@@ -6,12 +6,12 @@ import {
     createChatVisibility,
     createLocalSystemMessage,
     finalMessageFromPayload,
+    isCommandMessagePayload,
     isRecord,
     isSameSessionKey,
     mergeStreamMessage,
     mergeStreamText,
     normalizeAssistantPayload,
-    payloadIsCommandMessage,
     uniqueStrings,
     visibleHistoryMessages,
 } from "./chatRuntime";
@@ -26,7 +26,7 @@ import {
     CHAT_HISTORY_LIMIT,
     dedupeMessages,
     mergeWithRecentOptimisticMessages,
-} from "./chatUtils";
+} from "./chatUtilities";
 
 /** Represents mutable reference. */
 interface MutableReference<T> {
@@ -87,8 +87,7 @@ export function formatToolName(value: string): string {
         ? value.slice("functions.".length)
         : value;
     const normalized = withoutNamespace
-        .replaceAll("_", " ")
-        .replaceAll("-", " ")
+        .replaceAll(/[_-]/g, " ")
         .replaceAll(/\s+/g, " ")
         .trim();
 
@@ -98,7 +97,7 @@ export function formatToolName(value: string): string {
 }
 
 /** Performs detail from args. */
-export function detailFromArgs(value: unknown): string | undefined {
+export function detailFromArguments(value: unknown): string | undefined {
     if (!isRecord(value)) {
         return stringValue(value);
     }
@@ -153,7 +152,7 @@ export function runtimeProgressText(
         }
 
         const detail =
-            detailFromArgs(data.args) ||
+            detailFromArguments(data.args) ||
             stringValue(data.title) ||
             stringValue(data.summary) ||
             stringValue(data.progressText);
@@ -300,7 +299,7 @@ function runtimeToolMessages(
         stringValue(data.toolCallId) ||
         stringValue(data.tool_call_id) ||
         stringValue(data.callId);
-    const args = data.args ?? data.arguments ?? data.input;
+    const arguments_ = data.args ?? data.arguments ?? data.input;
     const result = data.result ?? data.output ?? data.content ?? data.text ?? data.error;
     const phase = stringValue(data.phase);
     const hasResult =
@@ -312,7 +311,7 @@ function runtimeToolMessages(
     const timestamp = currentIsoString();
     const messages: ChatHistoryMessage[] = [];
 
-    if (args !== undefined || !hasResult) {
+    if (arguments_ !== undefined || !hasResult) {
         messages.push({
             role: "assistant",
             content: "",
@@ -323,7 +322,7 @@ function runtimeToolMessages(
                 {
                     id,
                     name,
-                    arguments: args,
+                    arguments: arguments_,
                 },
             ],
             timestamp,
@@ -386,12 +385,12 @@ function hasActiveStreamContent(message: ChatHistoryMessage): boolean {
 }
 
 /** Represents use chat runtime events paramilliseconds. */
-interface UseChatRuntimeEventsParams {
+interface UseChatRuntimeEventsParameters {
     connectionId: number;
     isConnected: boolean;
     request: <T = unknown>(
         method: string,
-        params?: Record<string, unknown>
+        parameters?: Record<string, unknown>
     ) => Promise<T>;
     subscribe: (listener: (data: unknown) => void) => () => void;
     selectedSessionKey: string;
@@ -401,7 +400,7 @@ interface UseChatRuntimeEventsParams {
     liveHistoryRefreshTimerReference: MutableReference<number | null>;
     shouldStickToBottomReference: MutableReference<boolean>;
     updateActiveStreams: (
-        updater: (previous: ActiveChatStreams) => ActiveChatStreams
+        updater: (wasPrevious: ActiveChatStreams) => ActiveChatStreams
     ) => void;
     setMessages: Dispatch<SetStateAction<ChatHistoryMessage[]>>;
     setSendError: Dispatch<SetStateAction<string | null>>;
@@ -426,7 +425,7 @@ export function useChatRuntimeEvents({
     setSendError,
     setIsAtBottom,
     setHistoryLoadVersion,
-}: UseChatRuntimeEventsParams) {
+}: UseChatRuntimeEventsParameters) {
     const pendingDeltaUpdatesReference = useRef<Record<string, PendingDeltaUpdate>>({});
     const pendingDeltaFlushTimerReference = useRef<number | null>(null);
     const selectedSessionKeyReference = useRef(selectedSessionKey);
@@ -441,7 +440,7 @@ export function useChatRuntimeEvents({
     }, [selectedSessionKey]);
 
     useEffect(() => {
-        let cancelled = false;
+        let isCancelled = false;
 
         /** Performs flush pending delta updates. */
         const flushPendingDeltaUpdates = () => {
@@ -462,18 +461,18 @@ export function useChatRuntimeEvents({
             for (const [streamSessionKey, pending] of Object.entries(pendingUpdates)) {
                 const existing = next[streamSessionKey];
                 const incomingRunId = pending.runId;
-                const startsNewRun = isNewRunForStream(existing, incomingRunId);
-                const runId = startsNewRun
+                const isStartsNewRun = isNewRunForStream(existing, incomingRunId);
+                const runId = isStartsNewRun
                     ? incomingRunId
                     : existing?.runId || incomingRunId;
                 const promotesProvisionalRun =
-                    startsNewRun &&
+                    isStartsNewRun &&
                     existing &&
                     isProvisionalRunId(streamSessionKey, existing.runId);
                 let text =
-                    startsNewRun && !promotesProvisionalRun ? "" : existing?.text || "";
+                    isStartsNewRun && !promotesProvisionalRun ? "" : existing?.text || "";
                 let message =
-                    startsNewRun && !promotesProvisionalRun
+                    isStartsNewRun && !promotesProvisionalRun
                         ? undefined
                         : existing?.message;
 
@@ -486,7 +485,7 @@ export function useChatRuntimeEvents({
                     sessionKey: streamSessionKey,
                     runId,
                     aliases: uniqueStrings([
-                        ...(startsNewRun ? [] : existing?.aliases || []),
+                        ...(isStartsNewRun ? [] : existing?.aliases || []),
                         ...pending.aliases,
                         runId,
                     ]),
@@ -553,7 +552,7 @@ export function useChatRuntimeEvents({
             liveHistoryRefreshTimerReference.current = window.setTimeout(async () => {
                 liveHistoryRefreshTimerReference.current = null;
 
-                if (cancelled || !shouldStickToBottomReference.current) {
+                if (isCancelled || !shouldStickToBottomReference.current) {
                     return;
                 }
 
@@ -567,16 +566,16 @@ export function useChatRuntimeEvents({
                     );
 
                     const shouldApplyResult =
-                        !cancelled &&
+                        !isCancelled &&
                         isSameSessionKey(
                             sessionKeyAtCall,
                             selectedSessionKeyReference.current
                         );
 
                     if (shouldApplyResult) {
-                        setMessages((previous) =>
+                        setMessages((wasPrevious) =>
                             mergeWithRecentOptimisticMessages(
-                                previous,
+                                wasPrevious,
                                 visibleHistoryMessages(
                                     result.messages,
                                     createChatVisibility(
@@ -588,7 +587,7 @@ export function useChatRuntimeEvents({
                         );
 
                         setIsAtBottom(shouldStickToBottomReference.current);
-                        setHistoryLoadVersion((previous) => previous + 1);
+                        setHistoryLoadVersion((wasPrevious) => wasPrevious + 1);
                     }
                 } catch {
                     // Keep existing live state if an opportunistic refresh fails.
@@ -631,18 +630,18 @@ export function useChatRuntimeEvents({
 
             if (isTerminalLifecycleEvent) {
                 flushPendingDeltaUpdates();
-                updateActiveStreamsReference.current((previous) => {
-                    const existing = previous[selectedSessionKey];
+                updateActiveStreamsReference.current((wasPrevious) => {
+                    const existing = wasPrevious[selectedSessionKey];
                     if (
                         !existing ||
                         (eventRunId &&
                             existing.runId !== eventRunId &&
                             !existing.aliases.includes(eventRunId))
                     ) {
-                        return previous;
+                        return wasPrevious;
                     }
 
-                    const next = { ...previous };
+                    const next = { ...wasPrevious };
                     delete next[selectedSessionKey];
                     return next;
                 });
@@ -653,8 +652,8 @@ export function useChatRuntimeEvents({
             if (eventName === "session.tool" && showToolOutput) {
                 const toolMessages = runtimeToolMessages(data, eventRunId);
                 if (toolMessages.length > 0) {
-                    setMessages((previous) =>
-                        dedupeMessages([...previous, ...toolMessages])
+                    setMessages((wasPrevious) =>
+                        dedupeMessages([...wasPrevious, ...toolMessages])
                     );
                 }
             }
@@ -679,8 +678,8 @@ export function useChatRuntimeEvents({
 
             if (runtimeMessage && !runtimeMessageToApply) {
                 flushPendingDeltaUpdates();
-                updateActiveStreamsReference.current((previous) => {
-                    const existing = previous[selectedSessionKey];
+                updateActiveStreamsReference.current((wasPrevious) => {
+                    const existing = wasPrevious[selectedSessionKey];
                     const incomingRunId = eventRunId;
                     if (
                         !existing ||
@@ -688,10 +687,10 @@ export function useChatRuntimeEvents({
                             existing.runId !== incomingRunId &&
                             !existing.aliases.includes(incomingRunId))
                     ) {
-                        return previous;
+                        return wasPrevious;
                     }
 
-                    const next = { ...previous };
+                    const next = { ...wasPrevious };
                     delete next[selectedSessionKey];
                     return next;
                 });
@@ -702,43 +701,43 @@ export function useChatRuntimeEvents({
                     flushPendingDeltaUpdates();
                 }
 
-                updateActiveStreamsReference.current((previous) => {
-                    const existing = previous[selectedSessionKey];
+                updateActiveStreamsReference.current((wasPrevious) => {
+                    const existing = wasPrevious[selectedSessionKey];
                     const incomingRunId =
                         eventRunId || existing?.runId || selectedSessionKey;
-                    const startsNewRun = isNewRunForStream(existing, eventRunId);
-                    const runId = startsNewRun
+                    const isStartsNewRun = isNewRunForStream(existing, eventRunId);
+                    const runId = isStartsNewRun
                         ? incomingRunId
                         : existing?.runId || incomingRunId;
                     const text = runtimeMessageToApply
                         ? runtimeMessageToApply.text
-                        : startsNewRun
+                        : isStartsNewRun
                           ? ""
                           : existing?.text || "";
                     const nextStatusText = shouldTrackActivity
                         ? statusText ||
-                          (startsNewRun ? undefined : existing?.statusText) ||
+                          (isStartsNewRun ? undefined : existing?.statusText) ||
                           "Thinking"
                         : statusText;
                     return {
-                        ...previous,
+                        ...wasPrevious,
                         [selectedSessionKey]: {
                             sessionKey: selectedSessionKey,
                             runId,
                             aliases: uniqueStrings([
-                                ...(startsNewRun ? [] : existing?.aliases || []),
+                                ...(isStartsNewRun ? [] : existing?.aliases || []),
                                 eventRunId,
                                 runId,
                             ]),
                             text,
                             message: runtimeMessageToApply
                                 ? mergeStreamMessage(
-                                      startsNewRun ? undefined : existing?.message,
+                                      isStartsNewRun ? undefined : existing?.message,
                                       runtimeMessageToApply,
                                       text,
                                       runId
                                   )
-                                : startsNewRun
+                                : isStartsNewRun
                                   ? undefined
                                   : existing?.message,
                             statusText: nextStatusText,
@@ -858,14 +857,14 @@ export function useChatRuntimeEvents({
                             nextText,
                             runId
                         );
-                        const startsNewRun = isNewRunForStream(existing, payload.runId);
-                        updateActiveStreamsReference.current((previous) => ({
-                            ...previous,
+                        const isStartsNewRun = isNewRunForStream(existing, payload.runId);
+                        updateActiveStreamsReference.current((wasPrevious) => ({
+                            ...wasPrevious,
                             [streamSessionKey]: {
                                 sessionKey: streamSessionKey,
                                 runId,
                                 aliases: uniqueStrings([
-                                    ...(startsNewRun ? [] : existing?.aliases || []),
+                                    ...(isStartsNewRun ? [] : existing?.aliases || []),
                                     payload.runId,
                                     runId,
                                 ]),
@@ -884,7 +883,7 @@ export function useChatRuntimeEvents({
             /** Performs refresh history after terminal event. */
             const refreshHistoryAfterTerminalEvent = (sessionKey: string) => {
                 window.setTimeout(async () => {
-                    if (cancelled || !shouldStickToBottomReference.current) {
+                    if (isCancelled || !shouldStickToBottomReference.current) {
                         return;
                     }
 
@@ -897,16 +896,16 @@ export function useChatRuntimeEvents({
                         });
 
                         const shouldApplyResult =
-                            !cancelled &&
+                            !isCancelled &&
                             isSameSessionKey(
                                 sessionKey,
                                 selectedSessionKeyReference.current
                             );
 
                         if (shouldApplyResult) {
-                            setMessages((previous) =>
+                            setMessages((wasPrevious) =>
                                 mergeWithRecentOptimisticMessages(
-                                    previous,
+                                    wasPrevious,
                                     visibleHistoryMessages(
                                         result.messages,
                                         createChatVisibility(
@@ -917,7 +916,7 @@ export function useChatRuntimeEvents({
                                 )
                             );
                             setIsAtBottom(shouldStickToBottomReference.current);
-                            setHistoryLoadVersion((previous) => previous + 1);
+                            setHistoryLoadVersion((wasPrevious) => wasPrevious + 1);
                         }
                     } catch {
                         // Keep local stream/final state if history refresh is unavailable.
@@ -930,7 +929,7 @@ export function useChatRuntimeEvents({
                 const finalMessage = finalMessageFromPayload(payload);
                 const bufferedText =
                     activeStreamsReference.current[streamSessionKey]?.text || "";
-                const messageToAppend = payloadIsCommandMessage(payload.message)
+                const messageToAppend = isCommandMessagePayload(payload.message)
                     ? createLocalSystemMessage(finalMessage.text)
                     : isRenderableChatHistoryMessage(
                             finalMessage,
@@ -950,13 +949,13 @@ export function useChatRuntimeEvents({
                         : null;
 
                 if (messageToAppend && eventMatchesSelected) {
-                    setMessages((previous) =>
-                        dedupeMessages([...previous, messageToAppend])
+                    setMessages((wasPrevious) =>
+                        dedupeMessages([...wasPrevious, messageToAppend])
                     );
                 }
 
-                updateActiveStreamsReference.current((previous) => {
-                    const next = { ...previous };
+                updateActiveStreamsReference.current((wasPrevious) => {
+                    const next = { ...wasPrevious };
                     delete next[streamSessionKey];
                     return next;
                 });
@@ -969,9 +968,9 @@ export function useChatRuntimeEvents({
                 const bufferedText =
                     activeStreamsReference.current[streamSessionKey]?.text || "";
                 if (bufferedText.trim() && eventMatchesSelected) {
-                    setMessages((previous) =>
+                    setMessages((wasPrevious) =>
                         dedupeMessages([
-                            ...previous,
+                            ...wasPrevious,
                             {
                                 role: "assistant",
                                 content: bufferedText,
@@ -984,8 +983,8 @@ export function useChatRuntimeEvents({
                         ])
                     );
                 }
-                updateActiveStreamsReference.current((previous) => {
-                    const next = { ...previous };
+                updateActiveStreamsReference.current((wasPrevious) => {
+                    const next = { ...wasPrevious };
                     delete next[streamSessionKey];
                     return next;
                 });
@@ -998,8 +997,8 @@ export function useChatRuntimeEvents({
                 if (eventMatchesSelected) {
                     setSendError(payload.errorMessage || "Chat request failed");
                 }
-                updateActiveStreamsReference.current((previous) => {
-                    const next = { ...previous };
+                updateActiveStreamsReference.current((wasPrevious) => {
+                    const next = { ...wasPrevious };
                     delete next[streamSessionKey];
                     return next;
                 });
@@ -1007,7 +1006,7 @@ export function useChatRuntimeEvents({
         });
 
         return () => {
-            cancelled = true;
+            isCancelled = true;
             flushPendingDeltaUpdates();
             unsubscribe();
             if (liveHistoryRefreshTimerReference.current !== null) {

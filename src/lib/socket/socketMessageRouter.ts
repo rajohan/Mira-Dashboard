@@ -2,8 +2,8 @@ import { writeAgentsFromWebSocket } from "../../collections/agents";
 import { writeLogFromWebSocket } from "../../collections/logs";
 import { replaceSessionsFromWebSocket } from "../../collections/sessions";
 import type { AgentInfo, Session } from "../../types/session";
-import type { SocketEnvelope } from "../../types/socket";
-import { sessionsPayloadSchema, socketEnvelopeSchema } from "../../types/socket";
+import type { SocketEnvironmentelope } from "../../types/socket";
+import { sessionsPayloadSchema, socketEnvironmentelopeSchema } from "../../types/socket";
 
 /** Extracts sessions from payload. */
 function extractSessionsFromPayload(payload: unknown): Session[] {
@@ -34,7 +34,7 @@ function extractSessionsFromPayload(payload: unknown): Session[] {
 }
 
 /** Performs read gateway connection state. */
-function readGatewayConnectionState(data: SocketEnvelope): boolean | null {
+function readGatewayConnectionState(data: SocketEnvironmentelope): boolean | null {
     if (data.type === "state" || data.type === "connected") {
         return data.gatewayConnected ?? true;
     }
@@ -48,12 +48,12 @@ function readGatewayConnectionState(data: SocketEnvelope): boolean | null {
 
 /** Responds to socket message events. */
 export function handleSocketMessage(raw: unknown): boolean | null {
-    const validated = socketEnvelopeSchema.safeParse(raw);
+    const validated = socketEnvironmentelopeSchema.safeParse(raw);
     if (!validated.success) {
         return null;
     }
 
-    const data = raw as SocketEnvelope;
+    const data = raw as SocketEnvironmentelope;
 
     if (data.type === "state" && data.sessions) {
         replaceSessionsFromWebSocket(data.sessions);
@@ -75,7 +75,7 @@ export function handleSocketMessage(raw: unknown): boolean | null {
         writeLogFromWebSocket(data.line);
     }
 
-    if (data.type === "res") {
+    if (data.type === "response") {
         const sessions = extractSessionsFromPayload(data.payload);
         if (sessions.length > 0) {
             replaceSessionsFromWebSocket(sessions);

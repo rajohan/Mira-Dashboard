@@ -59,25 +59,25 @@ async function getCompletions(
     // Extract the path part being completed (after last space for commands)
     const lastSpaceIndex = trimmed.lastIndexOf(" ");
     const pathPart = lastSpaceIndex === -1 ? trimmed : trimmed.slice(lastSpaceIndex + 1);
-    const prefix = lastSpaceIndex >= 0 ? trimmed.slice(0, lastSpaceIndex + 1) : "";
+    const prefix = lastSpaceIndex === -1 ? "" : trimmed.slice(0, lastSpaceIndex + 1);
 
     // Determine directory to search in
-    let searchDir: string;
+    let searchDirectory: string;
     let searchPrefix: string;
-    let dirPart = "";
+    let directoryPart = "";
 
     if (pathPart.includes("/")) {
         const lastSlashIndex = pathPart.lastIndexOf("/");
-        dirPart = pathPart.slice(0, lastSlashIndex + 1);
+        directoryPart = pathPart.slice(0, lastSlashIndex + 1);
         searchPrefix = pathPart.slice(lastSlashIndex + 1);
-        searchDir = expandPath(dirPart, cwd);
+        searchDirectory = expandPath(directoryPart, cwd);
     } else {
-        searchDir = cwd;
+        searchDirectory = cwd;
         searchPrefix = pathPart;
     }
 
     try {
-        const entries = await readdirGuardedAsync(guardedPath(searchDir), {
+        const entries = await readdirGuardedAsync(guardedPath(searchDirectory), {
             withFileTypes: true,
         });
         const matches: CompletionItem[] = [];
@@ -88,7 +88,7 @@ async function getCompletions(
                 continue;
             }
 
-            const fullPath = path.join(searchDir, name);
+            const fullPath = path.join(searchDirectory, name);
             let type: "file" | "directory" | "executable" = "file";
 
             if (entry.isDirectory()) {
@@ -104,7 +104,8 @@ async function getCompletions(
                 }
             }
 
-            const completion = prefix + (pathPart.includes("/") ? dirPart + name : name);
+            const completion =
+                prefix + (pathPart.includes("/") ? directoryPart + name : name);
 
             matches.push({
                 completion,
@@ -126,14 +127,14 @@ async function getCompletions(
         let commonPrefix = "";
         if (matches.length > 0) {
             const first = matches[0].completion;
-            let i = first.length;
-            while (i > searchPrefix.length) {
-                const candidate = first.slice(0, i);
+            let index = first.length;
+            while (index > searchPrefix.length) {
+                const candidate = first.slice(0, index);
                 if (matches.every((m) => m.completion.startsWith(candidate))) {
                     commonPrefix = candidate;
                     break;
                 }
-                i--;
+                index--;
             }
         }
 
@@ -145,10 +146,10 @@ async function getCompletions(
 
 /** Registers terminal API routes. */
 export default function terminalRoutes(app: express.Application): void {
-    app.post("/api/terminal/complete", express.json(), async (req, res) => {
-        const body = req.body;
+    app.post("/api/terminal/complete", express.json(), async (request, response) => {
+        const body = request.body;
         if (!body || typeof body !== "object") {
-            res.status(400).json({ error: "Missing or invalid body" });
+            response.status(400).json({ error: "Missing or invalid body" });
             return;
         }
 
@@ -159,7 +160,7 @@ export default function terminalRoutes(app: express.Application): void {
             partial.length === 0 ||
             partial.includes("\0")
         ) {
-            res.status(400).json({ error: "Missing or invalid partial" });
+            response.status(400).json({ error: "Missing or invalid partial" });
             return;
         }
         const trimmedCwd = typeof cwd === "string" ? cwd.trim() : undefined;
@@ -167,20 +168,20 @@ export default function terminalRoutes(app: express.Application): void {
             cwd !== undefined &&
             (typeof cwd !== "string" || !trimmedCwd || trimmedCwd.includes("\0"))
         ) {
-            res.status(400).json({ error: "Missing or invalid cwd" });
+            response.status(400).json({ error: "Missing or invalid cwd" });
             return;
         }
         const resolvedCwd = trimmedCwd || HOME_DIR;
         const result = await getCompletions(partial, resolvedCwd);
-        res.json(result);
+        response.json(result);
     });
 
-    app.post("/api/terminal/cd", express.json(), async (req, res) => {
-        const { path: targetPath, cwd } = req.body as CdRequest;
+    app.post("/api/terminal/cd", express.json(), async (request, response) => {
+        const { path: targetPath, cwd } = request.body as CdRequest;
         const resolvedCwd = cwd || HOME_DIR;
 
         if (!targetPath || typeof targetPath !== "string" || targetPath.includes("\0")) {
-            res.status(400).json({
+            response.status(400).json({
                 success: false,
                 newCwd: resolvedCwd,
                 error: "Missing or invalid path",
@@ -215,16 +216,16 @@ export default function terminalRoutes(app: express.Application): void {
         try {
             const stats = await statGuardedAsync(guardedPath(newPath));
             if (!stats.isDirectory()) {
-                res.status(400).json({
+                response.status(400).json({
                     success: false,
                     newCwd: resolvedCwd,
                     error: `Not a directory: ${targetPath}`,
                 } satisfies CdResponse);
                 return;
             }
-            res.json({ success: true, newCwd: newPath } satisfies CdResponse);
+            response.json({ success: true, newCwd: newPath } satisfies CdResponse);
         } catch {
-            res.status(400).json({
+            response.status(400).json({
                 success: false,
                 newCwd: resolvedCwd,
                 error: `No such file or directory: ${targetPath}`,

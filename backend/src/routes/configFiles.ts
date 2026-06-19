@@ -29,7 +29,7 @@ function isMissingPathErrorCode(code: string | undefined): boolean {
 interface ConfigFile {
     name: string;
     path: string;
-    relPath: string;
+    relativePath: string;
     type: "file";
     size: number;
     modified: string;
@@ -38,7 +38,7 @@ interface ConfigFile {
 /** Represents the config file API response. */
 interface ConfigFileResponse {
     path: string;
-    relPath: string;
+    relativePath: string;
     content: string;
     size: number;
     modified: string;
@@ -50,15 +50,15 @@ interface ConfigFileResponse {
 interface WriteResponse {
     success: boolean;
     path: string;
-    relPath: string;
+    relativePath: string;
     size: number;
     modified: string;
 }
 
 /** Returns whether binary file. */
 function isBinaryFile(content: string): boolean {
-    for (let i = 0; i < Math.min(content.length, 8000); i++) {
-        if (content.codePointAt(i) === 0) return true;
+    for (let index = 0; index < Math.min(content.length, 8000); index++) {
+        if (content.codePointAt(index) === 0) return true;
     }
     return false;
 }
@@ -68,14 +68,16 @@ function resolveOpenclawRoot(): string | null {
     const configuredRoot =
         process.env.OPENCLAW_HOME?.trim() ||
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
-    const homeDir = (process.env.HOME?.trim() || os.homedir().trim()).trim();
+    const homeDirectory = (process.env.HOME?.trim() || os.homedir().trim()).trim();
     if (
         !configuredRoot &&
-        (!homeDir || !path.isAbsolute(homeDir) || homeDir === path.parse(homeDir).root)
+        (!homeDirectory ||
+            !path.isAbsolute(homeDirectory) ||
+            homeDirectory === path.parse(homeDirectory).root)
     ) {
         return null;
     }
-    const openclawRoot = configuredRoot || path.join(homeDir, ".openclaw");
+    const openclawRoot = configuredRoot || path.join(homeDirectory, ".openclaw");
     const resolvedRoot = path.resolve(openclawRoot);
     if (
         !openclawRoot ||
@@ -91,7 +93,7 @@ function resolveOpenclawRoot(): string | null {
     }
 }
 
-function validateOpenclawLeaf(openclawRoot: string): boolean {
+function isOpenclawLeafValid(openclawRoot: string): boolean {
     try {
         if (fs.lstatSync(openclawRoot).isSymbolicLink()) {
             return false;
@@ -102,8 +104,8 @@ function validateOpenclawLeaf(openclawRoot: string): boolean {
     }
 }
 
-const validateOpenclawLeafForWrite = validateOpenclawLeaf;
-const procfsAvailabilityProbe = (): boolean =>
+const isOpenclawLeafValidForWrite = isOpenclawLeafValid;
+const hasProcfsAvailabilityProbe = (): boolean =>
     process.platform === "linux" && fs.existsSync("/proc/self/fd");
 const prepareConfigWriteTarget = prepareSafeWriteTargetWithinRoot;
 
@@ -145,7 +147,7 @@ function hasSymlinkedAncestor(targetPath: string, rootPath: string): boolean {
 }
 
 export function isProcfsAvailable(): boolean {
-    return procfsAvailabilityProbe();
+    return hasProcfsAvailabilityProbe();
 }
 
 function decodeConfigPath(encodedPath: string): string | null {
@@ -198,11 +200,11 @@ async function withRootedParentPath<T>(
                 rootedPath = path.join(realParent, path.basename(safePath));
             }
             const relativeParent = path.relative(realRoot, realParent);
-            const parentEscapesRoot = [
+            const isParentEscapesRoot = [
                 relativeParent.startsWith(".."),
                 path.isAbsolute(relativeParent),
             ].includes(true);
-            if (parentEscapesRoot) {
+            if (isParentEscapesRoot) {
                 throw createAccessDeniedError("Parent path validation failed");
             }
         } catch (error) {
@@ -220,7 +222,7 @@ async function withRootedParentPath<T>(
     }
 }
 
-async function ensureParentDirsForWrite(
+async function ensureParentDirectoryectoriesForWrite(
     safePath: string,
     rootPath: string
 ): Promise<void> {
@@ -276,8 +278,8 @@ function listConfigFiles(openclawRoot: string): ConfigFile[] {
         return files;
     }
 
-    for (const relPath of ALLOWED_CONFIG_FILES) {
-        const fullPath = path.join(openclawRoot, relPath);
+    for (const relativePath of ALLOWED_CONFIG_FILES) {
+        const fullPath = path.join(openclawRoot, relativePath);
         try {
             const lexicalStat = fs.lstatSync(fullPath);
             if (lexicalStat.isSymbolicLink()) {
@@ -295,9 +297,9 @@ function listConfigFiles(openclawRoot: string): ConfigFile[] {
                 continue;
             }
             files.push({
-                name: path.basename(relPath),
-                path: "config:" + relPath, // Prefix to distinguish from workspace files
-                relPath: relPath,
+                name: path.basename(relativePath),
+                path: "config:" + relativePath, // Prefix to distinguish from workspace files
+                relativePath: relativePath,
                 type: "file",
                 size: stat.size,
                 modified: stat.mtime.toISOString(),
@@ -315,16 +317,16 @@ export default function configFilesRoutes(
     app: express.Application,
     _express: typeof express
 ): void {
-    app.use((req, res, next) => {
+    app.use((request, response, next) => {
         if (
-            (req.method === "GET" || req.method === "PUT") &&
-            req.originalUrl.startsWith("/api/config-files/")
+            (request.method === "GET" || request.method === "PUT") &&
+            request.originalUrl.startsWith("/api/config-files/")
         ) {
-            const rawPath = req.originalUrl
+            const rawPath = request.originalUrl
                 .slice("/api/config-files/".length)
                 .split("?", 1)[0];
             if (decodeConfigPath(rawPath) === null) {
-                res.status(400).json({ error: "Malformed config file path" });
+                response.status(400).json({ error: "Malformed config file path" });
                 return;
             }
         }
@@ -335,19 +337,22 @@ export default function configFilesRoutes(
     app.get(
         "/api/config-files",
         asyncRoute(
-            async (_req, res) => {
+            async (_request, response) => {
                 const openclawRoot = resolveOpenclawRoot();
                 if (!openclawRoot) {
-                    res.status(500).json({
+                    response.status(500).json({
                         error: "Server misconfigured: HOME is not configured",
                     });
                     return;
                 }
 
                 const files = listConfigFiles(openclawRoot);
-                res.json({ files, root: openclawRoot });
+                response.json({ files, root: openclawRoot });
             },
-            { fallback: "Config file list failed", logLabel: "[ConfigFiles] List error:" }
+            {
+                fallback: "Config file list failed",
+                logLabel: "[ConfigFiles] List error:",
+            }
         )
     );
 
@@ -355,12 +360,12 @@ export default function configFilesRoutes(
     app.get(
         /^\/api\/config-files\/(.*)$/,
         asyncRoute(
-            async (req, res) => {
-                const filePath = req.params[0];
+            async (request, response) => {
+                const filePath = request.params[0];
 
                 // Check if file is in whitelist
                 if (!ALLOWED_CONFIG_FILES.has(filePath)) {
-                    res.status(403).json({
+                    response.status(403).json({
                         error: "Access denied: file not in allowed list",
                     });
                     return;
@@ -368,7 +373,7 @@ export default function configFilesRoutes(
 
                 const openclawRoot = resolveOpenclawRoot();
                 if (!openclawRoot) {
-                    res.status(500).json({
+                    response.status(500).json({
                         error: "Server misconfigured: HOME is not configured",
                     });
                     return;
@@ -383,11 +388,11 @@ export default function configFilesRoutes(
                     } catch (error) {
                         const code = (error as NodeJS.ErrnoException).code;
                         if (isMissingPathErrorCode(code)) {
-                            res.status(404).json({ error: "File not found" });
+                            response.status(404).json({ error: "File not found" });
                             return;
                         }
                     }
-                    res.status(403).json({
+                    response.status(403).json({
                         error: "Access denied: path outside allowed root",
                     });
                     return;
@@ -395,18 +400,18 @@ export default function configFilesRoutes(
 
                 try {
                     if (hasSymlinkedAncestor(fullPathCandidate, openclawRoot)) {
-                        res.status(404).json({ error: "File not found" });
+                        response.status(404).json({ error: "File not found" });
                         return;
                     }
                     const lexicalStat = fs.lstatSync(fullPath);
                     if (lexicalStat.isSymbolicLink()) {
-                        res.status(404).json({ error: "File not found" });
+                        response.status(404).json({ error: "File not found" });
                         return;
                     }
                 } catch (error) {
                     const code = (error as NodeJS.ErrnoException).code;
                     if (isMissingPathErrorCode(code)) {
-                        res.status(404).json({ error: "File not found" });
+                        response.status(404).json({ error: "File not found" });
                         return;
                     }
                     throw error;
@@ -420,7 +425,7 @@ export default function configFilesRoutes(
                 } catch (error) {
                     const code = (error as NodeJS.ErrnoException).code;
                     if (isMissingPathErrorCode(code)) {
-                        res.status(404).json({ error: "File not found" });
+                        response.status(404).json({ error: "File not found" });
                         return;
                     }
                     throw error;
@@ -438,7 +443,7 @@ export default function configFilesRoutes(
                             openedStat.dev !== targetStat.dev ||
                             openedStat.ino !== targetStat.ino
                         ) {
-                            res.status(403).json({
+                            response.status(403).json({
                                 error: "Access denied: path outside allowed root",
                             });
                             return;
@@ -449,7 +454,7 @@ export default function configFilesRoutes(
                         realOpenedPath !== realOpenclawRoot &&
                         !realOpenedPath.startsWith(realOpenclawRoot + path.sep)
                     ) {
-                        res.status(403).json({
+                        response.status(403).json({
                             error: "Access denied: path outside allowed root",
                         });
                         return;
@@ -458,14 +463,14 @@ export default function configFilesRoutes(
                     const stat = fs.fstatSync(fd);
 
                     if (stat.isDirectory()) {
-                        res.status(400).json({
+                        response.status(400).json({
                             error: "Path is a directory, not a file",
                         });
                         return;
                     }
 
                     if (stat.nlink > 1) {
-                        res.status(403).json({
+                        response.status(403).json({
                             error: "Hard-linked files are not allowed",
                         });
                         return;
@@ -482,9 +487,9 @@ export default function configFilesRoutes(
                         const content = buffer.toString("utf8", 0, bytesRead);
                         const isBinary = isBinaryFile(content);
 
-                        res.json({
+                        response.json({
                             path: "config:" + filePath,
-                            relPath: filePath,
+                            relativePath: filePath,
                             content: isBinary ? "[Binary file]" : content,
                             size: stat.size,
                             modified: stat.mtime.toISOString(),
@@ -497,9 +502,9 @@ export default function configFilesRoutes(
                     const content = await file.readFile("utf8");
                     const isBinary = isBinaryFile(content);
 
-                    res.json({
+                    response.json({
                         path: "config:" + filePath,
-                        relPath: filePath,
+                        relativePath: filePath,
                         content: isBinary ? "[Binary file]" : content,
                         size: stat.size,
                         modified: stat.mtime.toISOString(),
@@ -510,7 +515,10 @@ export default function configFilesRoutes(
                 }
                 return;
             },
-            { fallback: "Config file read failed", logLabel: "[ConfigFiles] Read error:" }
+            {
+                fallback: "Config file read failed",
+                logLabel: "[ConfigFiles] Read error:",
+            }
         )
     );
 
@@ -519,16 +527,16 @@ export default function configFilesRoutes(
         /^\/api\/config-files\/(.*)$/,
         express.json({ limit: `${CONFIG_WRITE_JSON_LIMIT}b` }),
         asyncRoute(
-            async (req, res) => {
-                if (!req.body || typeof req.body !== "object") {
-                    res.status(400).json({ error: "Content required" });
+            async (request, response) => {
+                if (!request.body || typeof request.body !== "object") {
+                    response.status(400).json({ error: "Content required" });
                     return;
                 }
-                const filePath = req.params[0];
-                const { content } = req.body as { content?: unknown };
+                const filePath = request.params[0];
+                const { content } = request.body as { content?: unknown };
 
                 if (content === undefined) {
-                    res.status(400).json({ error: "Content required" });
+                    response.status(400).json({ error: "Content required" });
                     return;
                 }
 
@@ -536,13 +544,13 @@ export default function configFilesRoutes(
                     typeof content !== "string" ||
                     Buffer.byteLength(content, "utf8") > MAX_CONFIG_WRITE_SIZE
                 ) {
-                    res.status(400).json({ error: "Invalid content" });
+                    response.status(400).json({ error: "Invalid content" });
                     return;
                 }
 
                 // Check if file is in whitelist
                 if (!ALLOWED_CONFIG_FILES.has(filePath)) {
-                    res.status(403).json({
+                    response.status(403).json({
                         error: "Access denied: file not in allowed list",
                     });
                     return;
@@ -550,7 +558,7 @@ export default function configFilesRoutes(
 
                 const openclawRoot = resolveOpenclawRoot();
                 if (!openclawRoot) {
-                    res.status(500).json({
+                    response.status(500).json({
                         error: "Server misconfigured: HOME is not configured",
                     });
                     return;
@@ -558,7 +566,7 @@ export default function configFilesRoutes(
 
                 const fullPathCandidate = path.resolve(openclawRoot, filePath);
                 if (hasSymlinkedAncestor(fullPathCandidate, openclawRoot)) {
-                    res.status(403).json({
+                    response.status(403).json({
                         error: "Access denied: path outside allowed root",
                     });
                     return;
@@ -568,29 +576,32 @@ export default function configFilesRoutes(
                     openclawRoot
                 );
                 if (!safeFullPath) {
-                    res.status(403).json({
+                    response.status(403).json({
                         error: "Access denied: path outside allowed root",
                     });
                     return;
                 }
-                const allowMissingDefaultRoot =
-                    validateOpenclawLeafForWrite === validateOpenclawLeaf &&
+                const isAllowMissingDefaultRoot =
+                    isOpenclawLeafValidForWrite === isOpenclawLeafValid &&
                     !fs.existsSync(openclawRoot);
                 if (
-                    !validateOpenclawLeafForWrite(openclawRoot) &&
-                    !allowMissingDefaultRoot
+                    !isOpenclawLeafValidForWrite(openclawRoot) &&
+                    !isAllowMissingDefaultRoot
                 ) {
-                    res.status(403).json({
+                    response.status(403).json({
                         error: "Access denied: path outside allowed root",
                     });
                     return;
                 }
 
                 try {
-                    await ensureParentDirsForWrite(safeFullPath, openclawRoot);
+                    await ensureParentDirectoryectoriesForWrite(
+                        safeFullPath,
+                        openclawRoot
+                    );
                 } catch (error) {
                     if ((error as NodeJS.ErrnoException).code === "EACCES") {
-                        res.status(403).json({
+                        response.status(403).json({
                             error: "Access denied: path outside allowed root",
                         });
                         return;
@@ -652,23 +663,23 @@ export default function configFilesRoutes(
                 } catch (error) {
                     const code = (error as NodeJS.ErrnoException).code;
                     if (code === "EISDIR") {
-                        res.status(400).json({
+                        response.status(400).json({
                             error: "Path is a directory, not a file",
                         });
                         return;
                     }
                     if (code === "EACCES") {
-                        res.status(403).json({ error: "Access denied" });
+                        response.status(403).json({ error: "Access denied" });
                         return;
                     }
                     if (code === "EMLINK") {
-                        res.status(403).json({
+                        response.status(403).json({
                             error: "Hard-linked files are not allowed",
                         });
                         return;
                     }
                     if (code === "EFBIG") {
-                        res.status(413).json({
+                        response.status(413).json({
                             error: "Config file too large to back up",
                         });
                         return;
@@ -694,9 +705,9 @@ export default function configFilesRoutes(
                 } catch (error) {
                     const fileError = error as NodeJS.ErrnoException;
                     if (fileError.code === "EACCES") {
-                        res.status(403).json({ error: "Access denied" });
+                        response.status(403).json({ error: "Access denied" });
                     } else if (fileError.code === "EMLINK") {
-                        res.status(403).json({
+                        response.status(403).json({
                             error: "Hard-linked files are not allowed",
                         });
                     } else {
@@ -704,10 +715,10 @@ export default function configFilesRoutes(
                     }
                     return;
                 }
-                res.json({
+                response.json({
                     success: true,
                     path: "config:" + filePath,
-                    relPath: filePath,
+                    relativePath: filePath,
                     size: stat.size,
                     modified: stat.mtime.toISOString(),
                 } satisfies WriteResponse);

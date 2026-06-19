@@ -2,7 +2,7 @@
 root = "src"
 preload = ["./src/test/setup.ts"]
 coverageReporter = ["text", "lcov"]
-coverageDir = "coverage"
+coverageDirectory = "coverage"
 coverageSkipTestFiles = true
 coveragePathIgnorePatterns = [
     "src/test/**",
@@ -12,4 +12,4 @@ coveragePathIgnorePatterns = [
 
 [serve.static]
 plugins = ["bun-plugin-tailwind", "./scripts/reactCompilerPlugin.ts"]
-env = "PUBLIC_*"
+environment = "PUBLIC_*"

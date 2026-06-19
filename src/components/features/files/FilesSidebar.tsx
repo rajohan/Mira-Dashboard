@@ -6,7 +6,7 @@ import { ConfigSection } from "./ConfigSection";
 import { FileTreeItem } from "./FileTreeItem";
 
 /** Provides props for files sIDebar. */
-interface FilesSidebarProps {
+interface FilesSidebarProperties {
     files: FileNode[];
     rootLoading: boolean;
     selectedPath: string | null;
@@ -23,7 +23,7 @@ export function FilesSidebar({
     expandedPaths,
     onSelect,
     onToggle,
-}: FilesSidebarProps) {
+}: FilesSidebarProperties) {
     return (
         <div className="w-full lg:w-72 lg:flex-shrink-0">
             <Card

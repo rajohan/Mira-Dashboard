@@ -1,4 +1,4 @@
-import { db } from "../db.ts";
+import { database as database } from "../database.ts";
 
 /** Represents one cache entry row. */
 export interface CacheEntryRow {
@@ -65,7 +65,7 @@ function mapCacheEntry(row: SqliteCacheEntryRow | undefined): CacheEntryRow | nu
         return null;
     }
     const expiresAtMs = row.expires_at === "" ? NaN : Date.parse(row.expires_at);
-    const expired =
+    const isExpired =
         row.status === "fresh" &&
         Number.isFinite(expiresAtMs) &&
         expiresAtMs <= Date.now();
@@ -77,7 +77,7 @@ function mapCacheEntry(row: SqliteCacheEntryRow | undefined): CacheEntryRow | nu
         updated_at: row.updated_at,
         last_attempt_at: row.last_attempt_at,
         expires_at: row.expires_at,
-        status: expired ? "stale" : row.status,
+        status: isExpired ? "stale" : row.status,
         error_code: row.error_code ?? "",
         error_message: row.error_message ?? "",
         consecutive_failures: String(row.consecutive_failures),
@@ -87,7 +87,7 @@ function mapCacheEntry(row: SqliteCacheEntryRow | undefined): CacheEntryRow | nu
 
 /** Returns cache entry. */
 export async function getCacheEntry(key: string): Promise<CacheEntryRow | null> {
-    const row = db
+    const row = database
         .prepare(
             `SELECT
                 key,
@@ -112,7 +112,7 @@ export async function getCacheEntry(key: string): Promise<CacheEntryRow | null> 
 
 /** Returns all cache entries. */
 export async function getAllCacheEntries(): Promise<CacheEntryRow[]> {
-    const rows = db
+    const rows = database
         .prepare(
             `SELECT
                 key,

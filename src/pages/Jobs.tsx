@@ -22,7 +22,11 @@ import {
     useUpdateCronJob,
     useUpdateScheduledJob,
 } from "../hooks";
-import { cronExpressionIsValid, getCronJobId, sortCronJobs } from "../utils/cronUtils";
+import {
+    getCronJobId,
+    isCronExpressionValid,
+    sortCronJobs,
+} from "../utils/cronUtilities";
 import {
     appTimeOfDayToUtcTimeOfDay,
     formatDate,
@@ -59,13 +63,13 @@ function formatScheduledJobSchedule(job: ScheduledJob): string {
 }
 
 function getInitialJobsView(): JobsView {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("view") === "openclaw" ? "openclaw" : "scheduled";
+    const parameters = new URLSearchParams(window.location.search);
+    return parameters.get("view") === "openclaw" ? "openclaw" : "scheduled";
 }
 
 function getInitialCronJobId(): string {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("job") || "";
+    const parameters = new URLSearchParams(window.location.search);
+    return parameters.get("job") || "";
 }
 
 function scheduledJobStatusVariant(job: ScheduledJob) {
@@ -97,7 +101,7 @@ function formatRunOutput(output: Record<string, unknown>): string {
     return JSON.stringify(output, null, 2);
 }
 
-interface ScheduledJobListProps {
+interface ScheduledJobListProperties {
     jobs: ScheduledJob[];
     selectedId: string;
     currentJobId: string;
@@ -109,7 +113,7 @@ function ScheduledJobList({
     selectedId,
     currentJobId,
     onSelect,
-}: ScheduledJobListProps) {
+}: ScheduledJobListProperties) {
     return (
         <Card
             variant="bordered"
@@ -168,7 +172,7 @@ function ScheduledJobList({
     );
 }
 
-interface ScheduledJobDetailsProps {
+interface ScheduledJobDetailsProperties {
     job: ScheduledJob;
     scheduleTypeDraft: ScheduledJob["scheduleType"];
     intervalDraft: string;
@@ -181,7 +185,7 @@ interface ScheduledJobDetailsProps {
     onIntervalChange: (value: string) => void;
     onTimeChange: (value: string) => void;
     onCronChange: (value: string) => void;
-    onToggle: (enabled: boolean) => void;
+    onToggle: (isEnabled: boolean) => void;
     onRunNow: () => void;
     onSave: () => void;
 }
@@ -202,15 +206,20 @@ function ScheduledJobDetails({
     onToggle,
     onRunNow,
     onSave,
-}: ScheduledJobDetailsProps) {
+}: ScheduledJobDetailsProperties) {
     const runs = useScheduledJobRuns(job.id);
-    const intervalInvalid =
+    const isIntervalInvalid =
         scheduleTypeDraft === "interval" && !parsePositiveInteger(intervalDraft);
-    const dailyInvalid =
+    const isDailyInvalid =
         scheduleTypeDraft === "daily" && !/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(timeDraft);
-    const cronInvalid = scheduleTypeDraft === "cron" && !cronExpressionIsValid(cronDraft);
+    const isCronInvalid =
+        scheduleTypeDraft === "cron" && !isCronExpressionValid(cronDraft);
     const saveDisabled =
-        updatePending || intervalInvalid || dailyInvalid || cronInvalid || runPending;
+        updatePending ||
+        isIntervalInvalid ||
+        isDailyInvalid ||
+        isCronInvalid ||
+        runPending;
     const [timeHour = "00", timeMinute = "00"] = /^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(
         timeDraft
     )
@@ -244,7 +253,7 @@ function ScheduledJobDetails({
                 </div>
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                     <Switch
-                        checked={job.enabled}
+                        isChecked={job.enabled}
                         onChange={onToggle}
                         label="Enabled"
                         disabled={updatePending}
@@ -280,9 +289,9 @@ function ScheduledJobDetails({
                         <Select
                             value={scheduleTypeDraft}
                             options={scheduleTypeOptions}
-                            onChange={(value) =>
+                            onChange={(isValue) =>
                                 onScheduleTypeChange(
-                                    value as ScheduledJob["scheduleType"]
+                                    isValue as ScheduledJob["scheduleType"]
                                 )
                             }
                             width="w-full"
@@ -312,8 +321,8 @@ function ScheduledJobDetails({
                                     ariaLabel="Time of day hour"
                                     value={timeHour}
                                     options={hourOptions}
-                                    onChange={(value) =>
-                                        updateTimePart(value, timeMinute)
+                                    onChange={(isValue) =>
+                                        updateTimePart(isValue, timeMinute)
                                     }
                                     width="w-full"
                                     menuWidth="w-24"
@@ -323,7 +332,9 @@ function ScheduledJobDetails({
                                     ariaLabel="Time of day minute"
                                     value={timeMinute}
                                     options={minuteOptions}
-                                    onChange={(value) => updateTimePart(timeHour, value)}
+                                    onChange={(isValue) =>
+                                        updateTimePart(timeHour, isValue)
+                                    }
                                     width="w-full"
                                     menuWidth="w-24"
                                 />
@@ -353,17 +364,17 @@ function ScheduledJobDetails({
                         {updatePending ? "Saving..." : "Save schedule"}
                     </Button>
                 </div>
-                {intervalInvalid ? (
+                {isIntervalInvalid ? (
                     <p className="mt-2 text-xs text-red-400">
                         Interval must be a positive number of seconds.
                     </p>
                 ) : null}
-                {dailyInvalid ? (
+                {isDailyInvalid ? (
                     <p className="mt-2 text-xs text-red-400">
                         Daily schedules require HH:MM.
                     </p>
                 ) : null}
-                {cronInvalid ? (
+                {isCronInvalid ? (
                     <p className="mt-2 text-xs text-red-400">
                         Cron schedules require a valid five-field expression.
                     </p>
@@ -561,9 +572,12 @@ export function Jobs() {
         setScheduledEditError(null);
     }, [currentScheduledJob]);
 
-    async function handleScheduledToggle(job: ScheduledJob, enabled: boolean) {
+    async function handleScheduledToggle(job: ScheduledJob, isEnabled: boolean) {
         try {
-            await updateScheduledJob.mutateAsync({ id: job.id, patch: { enabled } });
+            await updateScheduledJob.mutateAsync({
+                id: job.id,
+                patch: { enabled: isEnabled },
+            });
             setActionError(null);
         } catch (error) {
             setActionError(
@@ -610,11 +624,11 @@ export function Jobs() {
         }
     }
 
-    async function handleCronToggle(job: CronJob, enabled: boolean) {
+    async function handleCronToggle(job: CronJob, isEnabled: boolean) {
         const id = getCronJobId(job);
         if (!id) return;
         try {
-            await toggleCronJob.mutateAsync({ id, enabled });
+            await toggleCronJob.mutateAsync({ id, enabled: isEnabled });
             setActionError(null);
         } catch (error) {
             setActionError(getErrorMessage(error, "Failed to update cron job state"));
@@ -626,7 +640,7 @@ export function Jobs() {
         if (!id) return;
         try {
             await runCronNow.mutateAsync({ id });
-            setLastCronRunAt((prev) => ({ ...prev, [id]: Date.now() }));
+            setLastCronRunAt((wasPrevious) => ({ ...wasPrevious, [id]: Date.now() }));
             setActionError(null);
         } catch (error) {
             setActionError(getErrorMessage(error, "Failed to run cron job"));
@@ -753,10 +767,10 @@ export function Jobs() {
                         onIntervalChange={setIntervalDraft}
                         onTimeChange={setTimeDraft}
                         onCronChange={setCronExpressionDraft}
-                        onToggle={(enabled) => {
+                        onToggle={(isEnabled) => {
                             void handleScheduledToggle(
                                 currentScheduledJob as ScheduledJob,
-                                enabled
+                                isEnabled
                             );
                         }}
                         onRunNow={() => {
@@ -789,9 +803,9 @@ export function Jobs() {
                             void handleCronRunNow(job);
                         }}
                         isEditMode={isCronEditMode}
-                        onEditModeChange={(enabled) => {
-                            setIsCronEditMode(enabled);
-                            if (!enabled) setCronEditError(null);
+                        onEditModeChange={(isEnabled) => {
+                            setIsCronEditMode(isEnabled);
+                            if (!isEnabled) setCronEditError(null);
                         }}
                         nameDraft={cronNameDraft}
                         onNameDraftChange={setCronNameDraft}

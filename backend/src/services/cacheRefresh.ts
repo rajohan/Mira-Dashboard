@@ -13,8 +13,8 @@ import {
 import os from "node:os";
 import { promisify } from "node:util";
 
-import { db } from "../db.ts";
-import { nonEmptyEnvFallback } from "../lib/values.ts";
+import { database as database } from "../database.ts";
+import { nonEmptyEnvironmentFallback as nonEmptyEnvironmentFallback } from "../lib/values.ts";
 import { writeCacheSuccess } from "./cacheEntryWriter.ts";
 import {
     getScheduledJob,
@@ -198,7 +198,7 @@ type AsyncCodexTrustConfigLockDependencies = {
     stat?: typeof stat;
 };
 
-function sameFileStat(left: Stats, right: Stats): boolean {
+function isSameFileStat(left: Stats, right: Stats): boolean {
     return (
         left.mtimeMs === right.mtimeMs && left.dev === right.dev && left.ino === right.ino
     );
@@ -215,7 +215,7 @@ async function acquireCodexTrustConfigLockAsync(
     const sleepFor = dependencies.sleep ?? sleep;
     const statFile = dependencies.stat ?? stat;
     const startedAt = now();
-    let staleRecoveryAttempted = false;
+    let isStaleRecoveryAttempted = false;
     for (;;) {
         try {
             return await openFile(lockPath, "wx", 0o600);
@@ -228,8 +228,8 @@ async function acquireCodexTrustConfigLockAsync(
                 await sleepFor(CODEX_TRUST_LOCK_RETRY_MS);
                 continue;
             }
-            if (!staleRecoveryAttempted) {
-                staleRecoveryAttempted = true;
+            if (!isStaleRecoveryAttempted) {
+                isStaleRecoveryAttempted = true;
                 try {
                     const lockStat = await statFile(lockPath);
                     if (now() - lockStat.mtimeMs > CODEX_TRUST_STALE_LOCK_MS) {
@@ -237,13 +237,16 @@ async function acquireCodexTrustConfigLockAsync(
                         try {
                             await renameFile(lockPath, reclaimedPath);
                             const reclaimedStat = await statFile(reclaimedPath);
-                            if (sameFileStat(lockStat, reclaimedStat)) {
+                            if (isSameFileStat(lockStat, reclaimedStat)) {
                                 await removeFile(reclaimedPath, { force: true });
                                 continue;
                             }
                             try {
                                 if (
-                                    sameFileStat(lockStat, await statFile(reclaimedPath))
+                                    isSameFileStat(
+                                        lockStat,
+                                        await statFile(reclaimedPath)
+                                    )
                                 ) {
                                     await renameFile(reclaimedPath, lockPath);
                                 }
@@ -281,8 +284,9 @@ export { writeCacheSuccess } from "./cacheEntryWriter.ts";
 
 export function writeCacheFailure(options: CacheFailureOptions): void {
     const timestamp = nowIso();
-    db.prepare(
-        `INSERT INTO cache_entries (
+    database
+        .prepare(
+            `INSERT INTO cache_entries (
             key, data_json, source, updated_at, last_attempt_at, expires_at,
             status, error_code, error_message, consecutive_failures, metadata_json
          ) VALUES (?, NULL, ?, NULL, ?, ?, 'error', 'check_failed', ?, ?, ?)
@@ -294,15 +298,16 @@ export function writeCacheFailure(options: CacheFailureOptions): void {
             error_message = excluded.error_message,
             consecutive_failures = COALESCE(cache_entries.consecutive_failures, 0) + 1,
             metadata_json = excluded.metadata_json`
-    ).run(
-        options.key,
-        options.source,
-        timestamp,
-        ttlDate(options.ttl, options.ttlUnit),
-        errorMessage(options.error),
-        1,
-        JSON.stringify({ ...options.metadata, lastFailureAt: timestamp })
-    );
+        )
+        .run(
+            options.key,
+            options.source,
+            timestamp,
+            ttlDate(options.ttl, options.ttlUnit),
+            errorMessage(options.error),
+            1,
+            JSON.stringify({ ...options.metadata, lastFailureAt: timestamp })
+        );
 }
 
 async function fetchJson(url: string, headers: Record<string, string> = {}) {
@@ -367,7 +372,7 @@ function normalizeMoltbookHome(value: unknown) {
                       title: announcement.title ?? null,
                       authorName: announcement.author_name ?? null,
                       createdAt: announcement.created_at ?? null,
-                      preview: announcement.preview ?? null,
+                      isPreview: announcement.isPreview ?? null,
                   }
                 : null,
         postsFromAccountsYouFollowCount: Array.isArray(
@@ -547,7 +552,7 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
         );
     }
 
-    db.exec("SAVEPOINT moltbook_cache_write");
+    database.exec("SAVEPOINT moltbook_cache_write");
     try {
         for (const item of writes) {
             writeCacheSuccess({
@@ -559,10 +564,10 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
                 metadata: item.metadata,
             });
         }
-        db.exec("RELEASE SAVEPOINT moltbook_cache_write");
+        database.exec("RELEASE SAVEPOINT moltbook_cache_write");
     } catch (error) {
-        db.exec("ROLLBACK TO SAVEPOINT moltbook_cache_write");
-        db.exec("RELEASE SAVEPOINT moltbook_cache_write");
+        database.exec("ROLLBACK TO SAVEPOINT moltbook_cache_write");
+        database.exec("RELEASE SAVEPOINT moltbook_cache_write");
         throw error;
     }
     if (firstFailure !== undefined) {
@@ -690,8 +695,12 @@ export async function refreshWeatherCache() {
     return { refreshed: ["weather.spydeberg"] };
 }
 
-async function runCommand(file: string, args: string[], cwd?: string): Promise<string> {
-    const { stdout } = await execFileAsync(file, args, {
+async function runCommand(
+    file: string,
+    arguments_: string[],
+    cwd?: string
+): Promise<string> {
+    const { stdout } = await execFileAsync(file, arguments_, {
         cwd,
         encoding: "utf8",
         maxBuffer: 10 * 1024 * 1024,
@@ -701,14 +710,17 @@ async function runCommand(file: string, args: string[], cwd?: string): Promise<s
 }
 
 function getDockerBin(): string {
-    return nonEmptyEnvFallback("MIRA_DOCKER_BIN", "docker");
+    return nonEmptyEnvironmentFallback("MIRA_DOCKER_BIN", "docker");
 }
 
-async function safeGit(repoPath: string, args: string[]) {
+async function safeGit(repoPath: string, arguments_: string[]) {
     try {
-        return { ok: true, output: await runCommand("git", ["-C", repoPath, ...args]) };
+        return {
+            isOk: true,
+            output: await runCommand("git", ["-C", repoPath, ...arguments_]),
+        };
     } catch (error) {
-        return { ok: false, output: errorMessage(error) };
+        return { isOk: false, output: errorMessage(error) };
     }
 }
 
@@ -771,7 +783,7 @@ export async function refreshGitCache() {
     const repos = [];
     for (const repo of gitRepos) {
         const inside = await safeGit(repo.path, ["rev-parse", "--is-inside-work-tree"]);
-        if (!inside.ok) {
+        if (!inside.isOk) {
             repos.push({
                 ...repo,
                 exists: false,
@@ -797,26 +809,26 @@ export async function refreshGitCache() {
             safeGit(repo.path, ["remote", "-v"]),
             safeGit(repo.path, ["status", "--short"]),
         ]);
-        const porcelain = statusShort.ok
+        const porcelain = statusShort.isOk
             ? statusShort.output.split("\n").filter(Boolean)
             : [];
-        const statusSummary = statusShort.ok
+        const statusSummary = statusShort.isOk
             ? summarizeStatus(porcelain)
             : emptyStatusSummary();
-        const dirty = statusShort.ok ? statusSummary.total > 0 : true;
+        const isDirty = statusShort.isOk ? statusSummary.total > 0 : true;
         repos.push({
             ...repo,
             exists: true,
-            branch: branch.ok ? branch.output || null : null,
-            head: head.ok ? head.output || null : null,
-            remote: remote.ok
+            branch: branch.isOk ? branch.output || null : null,
+            head: head.isOk ? head.output || null : null,
+            remote: remote.isOk
                 ? sanitizeRemoteUrl(remote.output.split(/\s+/u, 2)[1] || null)
                 : null,
-            dirty,
+            dirty: isDirty,
             statusSummary,
             statusShort: porcelain.slice(0, 25),
             statusTruncated: porcelain.length > 25,
-            ...(!statusShort.ok && { statusError: statusShort.output }),
+            ...(!statusShort.isOk && { statusError: statusShort.output }),
             checkedAt: nowIso(),
         });
     }
@@ -1097,20 +1109,20 @@ async function refreshKopiaBackupCache() {
         latest,
         snapshotsByPath,
         stale,
-        ok: stale.length === 0 && latest.length >= KOPIA_EXPECTED_SOURCE_PATHS.length,
+        isOk: stale.length === 0 && latest.length >= KOPIA_EXPECTED_SOURCE_PATHS.length,
     };
     writeCacheSuccess({
         key: "backup.kopia.status",
         data: payload,
         source: "backend",
-        ttl: payload.ok
+        ttl: payload.isOk
             ? backupStatusTtlHours(payload.latest.map((snapshot) => snapshot.endTime))
             : BACKUP_STATUS_MAX_TTL_HOURS,
         ttlUnit: "hours",
         metadata: {
             workflow: "Cache Foundation - Kopia Backup Status",
             summary: {
-                ok: payload.ok,
+                isOk: payload.isOk,
                 snapshotCount: payload.latest.length,
                 staleCount: payload.stale.length,
                 stalePaths: payload.stale.map((item) => item.path),
@@ -1171,7 +1183,7 @@ async function refreshWalgBackupCache() {
     const latestAgeHours = Number.isFinite(latestFreshnessMs)
         ? (Date.now() - latestFreshnessMs) / 36e5
         : null;
-    const stale =
+    const isStale =
         !latest || latestAgeHours === null || latestAgeHours > BACKUP_STATUS_STALE_HOURS;
     const payload = {
         checkedAt: nowIso(),
@@ -1180,22 +1192,22 @@ async function refreshWalgBackupCache() {
         backups,
         backupCount: backups.length,
         latestAgeHours,
-        stale,
-        ok: !stale,
+        stale: isStale,
+        isOk: !isStale,
     };
 
     writeCacheSuccess({
         key: "backup.walg.status",
         data: payload,
         source: "backend",
-        ttl: payload.ok
+        ttl: payload.isOk
             ? backupStatusTtlHours([payload.latest?.freshnessTime])
             : BACKUP_STATUS_MAX_TTL_HOURS,
         ttlUnit: "hours",
         metadata: {
             workflow: "Cache Foundation - WAL-G Base Backup Status",
             summary: {
-                ok: payload.ok,
+                isOk: payload.isOk,
                 backupCount: payload.backupCount,
                 latestBackupName: payload.latest?.backupName ?? null,
                 stale: payload.stale,
@@ -1348,11 +1360,14 @@ async function checkSyntheticQuota() {
 }
 
 function getQuotaCodexHome() {
-    return nonEmptyEnvFallback("QUOTAS_CODEX_HOME", "/home/ubuntu/.codex");
+    return nonEmptyEnvironmentFallback("QUOTAS_CODEX_HOME", "/home/ubuntu/.codex");
 }
 
 function getOpenclawBin() {
-    return nonEmptyEnvFallback("OPENCLAW_BIN", "/home/ubuntu/.npm-global/bin/openclaw");
+    return nonEmptyEnvironmentFallback(
+        "OPENCLAW_BIN",
+        "/home/ubuntu/.npm-global/bin/openclaw"
+    );
 }
 
 async function getHostSummary() {
@@ -1408,7 +1423,7 @@ function buildFallbackHostSummary(checkedAt: string) {
 }
 
 function getCodexBin() {
-    return nonEmptyEnvFallback("CODEX_BIN", "/home/ubuntu/.npm-global/bin/codex");
+    return nonEmptyEnvironmentFallback("CODEX_BIN", "/home/ubuntu/.npm-global/bin/codex");
 }
 
 async function ensureCodexTrustConfig(codexHome: string) {
@@ -1442,8 +1457,8 @@ async function updateCodexTrustConfig(codexHome: string) {
             }
         }
         let next = existing;
-        const additions = CODEX_TRUSTED_DIRS.flatMap((dir) => {
-            const header = `[projects.${JSON.stringify(dir)}]`;
+        const additions = CODEX_TRUSTED_DIRS.flatMap((directory) => {
+            const header = `[projects.${JSON.stringify(directory)}]`;
             const normalizedConfig = ensureCodexTrustedSection(next, header);
             if (normalizedConfig === null) {
                 return [`${header}\ntrust_level = "trusted"\n`];
@@ -1454,12 +1469,12 @@ async function updateCodexTrustConfig(codexHome: string) {
         if (additions.length > 0) {
             const prefix = next && !next.endsWith("\n") ? "\n" : "";
             const separator = next ? "\n" : "";
-            next = `${next}${prefix}${separator}${additions.join("\n")}`;
+            next += `${prefix}${separator}${additions.join("\n")}`;
         }
         if (next !== existing) {
-            const tempPath = `${configPath}.${process.pid}.tmp`;
-            await writeFile(tempPath, next, { mode: 0o600 });
-            await rename(tempPath, configPath);
+            const temporaryPath = `${configPath}.${process.pid}.tmp`;
+            await writeFile(temporaryPath, next, { mode: 0o600 });
+            await rename(temporaryPath, configPath);
         }
     } finally {
         if (lockHandle !== null) {
@@ -1567,7 +1582,7 @@ else
     exit 0
   }
 fi
-tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw env CODEX_HOME="$MIRA_QUOTA_CODEX_HOME" CODEX_DISABLE_UPDATE_CHECK=1 NO_UPDATE_NOTIFIER=1 "$MIRA_QUOTA_CODEX_BIN" --cd /home/ubuntu/.openclaw --no-alt-screen
+tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw environment CODEX_HOME="$MIRA_QUOTA_CODEX_HOME" CODEX_DISABLE_UPDATE_CHECK=1 NO_UPDATE_NOTIFIER=1 "$MIRA_QUOTA_CODEX_BIN" --cd /home/ubuntu/.openclaw --no-alt-screen
 	OUT=""
 	has_limits(){ echo "$OUT" | grep -Eiq "5h limit:" && echo "$OUT" | grep -Eiq "Weekly limit:"; }
 	for i in $(seq 1 12); do
@@ -1662,20 +1677,20 @@ async function refreshQuotasCache() {
 }
 
 async function refreshLogRotationStateCache() {
-    const row = db
+    const row = database
         .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
         .get(LOG_ROTATION_STATE_KEY) as undefined | { data_json?: string | null };
     let data: unknown = { version: 1, files: {} };
-    let preserveExistingData = false;
+    let isPreserveExistingData = false;
     if (row?.data_json) {
         try {
             data = JSON.parse(row.data_json) as unknown;
-            preserveExistingData = true;
+            isPreserveExistingData = true;
         } catch {
             data = { version: 1, files: {} };
         }
     } else {
-        preserveExistingData = true;
+        isPreserveExistingData = true;
     }
     writeCacheSuccess({
         key: LOG_ROTATION_STATE_KEY,
@@ -1687,7 +1702,7 @@ async function refreshLogRotationStateCache() {
             producer: "refreshCacheProducer",
             workflow: "Log Rotation - Foundation",
         },
-        preserveExistingData,
+        preserveExistingData: isPreserveExistingData,
     });
     return { refreshed: [LOG_ROTATION_STATE_KEY] };
 }
@@ -1728,30 +1743,31 @@ function isSupportedCacheProducerKey(key: string): boolean {
     );
 }
 
-async function refreshCacheProducerUnlocked(key: string) {
-    const refreshWithFailureRecord = async (
-        refresh: () => Promise<{ refreshed: string[] }>,
-        failureKeys: string[] = [key]
-    ) => {
-        try {
-            return await refresh();
-        } catch (error) {
-            for (const failureKey of failureKeys) {
-                writeCacheFailure({
-                    key: failureKey,
-                    source: "backend",
-                    ttl: 15,
-                    ttlUnit: "minutes",
-                    error,
-                    metadata: {
-                        producer: "refreshCacheProducer",
-                    },
-                });
-            }
-            throw error;
+async function refreshCacheWithFailureRecord(
+    key: string,
+    refresh: () => Promise<{ refreshed: string[] }>,
+    failureKeys: string[] = [key]
+) {
+    try {
+        return await refresh();
+    } catch (error) {
+        for (const failureKey of failureKeys) {
+            writeCacheFailure({
+                key: failureKey,
+                source: "backend",
+                ttl: 15,
+                ttlUnit: "minutes",
+                error,
+                metadata: {
+                    producer: "refreshCacheProducer",
+                },
+            });
         }
-    };
+        throw error;
+    }
+}
 
+async function refreshCacheProducerUnlocked(key: string) {
     if (key === "moltbook") {
         try {
             return await refreshMoltbookCache();
@@ -1775,7 +1791,7 @@ async function refreshCacheProducerUnlocked(key: string) {
         }
     }
     if (MOLTBOOK_CACHE_KEYS.has(key)) {
-        return refreshWithFailureRecord(() =>
+        return refreshCacheWithFailureRecord(key, () =>
             refreshMoltbookCache(key as MoltbookCacheKey)
         );
     }
@@ -1785,28 +1801,28 @@ async function refreshCacheProducerUnlocked(key: string) {
         });
     }
     if (key === "weather.spydeberg") {
-        return refreshWithFailureRecord(refreshWeatherCache);
+        return refreshCacheWithFailureRecord(key, refreshWeatherCache);
     }
     if (key === "git.workspace") {
-        return refreshWithFailureRecord(refreshGitCache);
+        return refreshCacheWithFailureRecord(key, refreshGitCache);
     }
     if (key === "system.host" || key === "system.openclaw") {
-        return refreshWithFailureRecord(refreshSystemCache, [
+        return refreshCacheWithFailureRecord(key, refreshSystemCache, [
             "system.openclaw",
             "system.host",
         ]);
     }
     if (key === "backup.kopia.status") {
-        return refreshWithFailureRecord(refreshKopiaBackupCache);
+        return refreshCacheWithFailureRecord(key, refreshKopiaBackupCache);
     }
     if (key === "backup.walg.status") {
-        return refreshWithFailureRecord(refreshWalgBackupCache);
+        return refreshCacheWithFailureRecord(key, refreshWalgBackupCache);
     }
     if (key === "quotas.summary") {
-        return refreshWithFailureRecord(refreshQuotasCache);
+        return refreshCacheWithFailureRecord(key, refreshQuotasCache);
     }
     if (key === LOG_ROTATION_STATE_KEY) {
-        return refreshWithFailureRecord(refreshLogRotationStateCache);
+        return refreshCacheWithFailureRecord(key, refreshLogRotationStateCache);
     }
     throw Object.assign(
         new Error(`No backend refresh producer configured for cache key: ${key}`),
@@ -2011,14 +2027,14 @@ function getScheduledCacheKey(job: ScheduledJob): string {
     return key;
 }
 
-function cacheEntryIsFresh(key: string): boolean {
+function isCacheEntryFresh(key: string): boolean {
     const keys =
         key === "moltbook"
             ? MOLTBOOK_CACHE_KEY_LIST
             : key === "system.host" || key === "system.openclaw"
               ? ["system.openclaw", "system.host"]
               : [key];
-    const statement = db.prepare(
+    const statement = database.prepare(
         "SELECT status, expires_at FROM cache_entries WHERE key = ? LIMIT 1"
     );
     return keys.every((cacheKey) => {
@@ -2040,7 +2056,7 @@ export function waitForLocalCacheSeed(key: string): Promise<void> {
 }
 
 export function seedMissingLocalCacheEntry(key: string): void {
-    if (cacheEntryIsFresh(key)) {
+    if (isCacheEntryFresh(key)) {
         return;
     }
     const seedPromise = (async () => {
@@ -2075,7 +2091,7 @@ export function registerCacheRefreshScheduledJobs(): void {
         return { key, ...result };
     });
     const seedKeys: string[] = [];
-    db.exec("BEGIN");
+    database.exec("BEGIN");
     try {
         removeScheduledJobsNotInAction(
             "cache.refresh",
@@ -2100,10 +2116,10 @@ export function registerCacheRefreshScheduledJobs(): void {
                 seedKeys.push(job.actionPayload.key);
             }
         }
-        db.exec("COMMIT");
+        database.exec("COMMIT");
     } catch (error) {
         try {
-            db.exec("ROLLBACK");
+            database.exec("ROLLBACK");
         } catch {
             // Preserve the original transaction failure.
         }

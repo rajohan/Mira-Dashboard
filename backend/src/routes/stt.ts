@@ -8,7 +8,7 @@ const ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/speech-to-text";
 const ELEVENLABS_STT_MODEL = process.env.ELEVENLABS_STT_MODEL || "scribe_v2";
 const ELEVENLABS_STT_LANGUAGE = process.env.ELEVENLABS_STT_LANGUAGE || "nor";
 
-let activeTranscription = false;
+const sttRouteState = { isActiveTranscription: false };
 
 /** Performs audio extension. */
 function audioExtension(contentType?: string): string {
@@ -129,7 +129,7 @@ export default function sttRoutes(app: express.Express, expressModule: typeof ex
             limit: MAX_AUDIO_BYTES,
         }),
         (async (request, response) => {
-            if (activeTranscription) {
+            if (sttRouteState.isActiveTranscription) {
                 response
                     .status(429)
                     .json({ error: "Another transcription is already running" });
@@ -141,7 +141,7 @@ export default function sttRoutes(app: express.Express, expressModule: typeof ex
                 return;
             }
 
-            activeTranscription = true;
+            sttRouteState.isActiveTranscription = true;
 
             try {
                 const text = await transcribeWithElevenLabs(
@@ -160,7 +160,7 @@ export default function sttRoutes(app: express.Express, expressModule: typeof ex
                     error: stringFallback(message, "Failed to transcribe audio"),
                 });
             } finally {
-                activeTranscription = false;
+                sttRouteState.isActiveTranscription = false;
             }
         }) as express.RequestHandler
     );

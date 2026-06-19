@@ -10,14 +10,14 @@ import { Switch } from "../../ui/Switch";
 import { TOOL_CATALOG, TOOL_RISK_LABELS, type ToolRisk } from "./toolCatalog";
 
 /** Provides props for agent access section. */
-interface AgentAccessSectionProps {
+interface AgentAccessSectionProperties {
     agents: AgentConfig[];
     onSave: (agents: AgentConfig[]) => Promise<void>;
     saving: boolean;
 }
 
 /** Performs tool enabled. */
-function toolEnabled(agent: AgentConfig, toolId: string): boolean {
+function isToolEnabled(agent: AgentConfig, toolId: string): boolean {
     if (agent.tools?.deny?.includes(toolId)) {
         return false;
     }
@@ -30,11 +30,11 @@ function toolEnabled(agent: AgentConfig, toolId: string): boolean {
 }
 
 /** Performs update tool. */
-function updateTool(agent: AgentConfig, toolId: string, enabled: boolean): AgentConfig {
+function updateTool(agent: AgentConfig, toolId: string, isEnabled: boolean): AgentConfig {
     const deny = new Set(agent.tools?.deny || []);
     const allow = agent.tools?.allow ? new Set(agent.tools.allow) : null;
 
-    if (enabled) {
+    if (isEnabled) {
         deny.delete(toolId);
         allow?.add(toolId);
     } else if (allow) {
@@ -63,15 +63,21 @@ const riskStyles: Record<ToolRisk, string> = {
 };
 
 /** Renders the agent access section UI. */
-export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectionProps) {
+export function AgentAccessSection({
+    agents,
+    onSave,
+    saving,
+}: AgentAccessSectionProperties) {
     const [activeAgentId, setActiveAgentId] = useState(agents[0]?.id || "");
     const [toolFilter, setToolFilter] = useState("");
     const [draftAgents, setDraftAgents] = useState(() => agents);
 
     useEffect(() => {
         setDraftAgents(agents);
-        setActiveAgentId((previous) =>
-            agents.some((agent) => agent.id === previous) ? previous : agents[0]?.id || ""
+        setActiveAgentId((wasPrevious) =>
+            agents.some((agent) => agent.id === wasPrevious)
+                ? wasPrevious
+                : agents[0]?.id || ""
         );
     }, [agents]);
 
@@ -88,8 +94,8 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
         agentId: string,
         updater: (agent: AgentConfig) => AgentConfig
     ) => {
-        setDraftAgents((previous) =>
-            previous.map((agent) => (agent.id === agentId ? updater(agent) : agent))
+        setDraftAgents((wasPrevious) =>
+            wasPrevious.map((agent) => (agent.id === agentId ? updater(agent) : agent))
         );
     };
 
@@ -99,7 +105,7 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
                 <div className="grid gap-2 sm:grid-cols-2 lg:flex lg:flex-wrap">
                     {draftAgents.map((agent) => {
                         const enabledCount = TOOL_CATALOG.filter((tool) =>
-                            toolEnabled(agent, tool.id)
+                            isToolEnabled(agent, tool.id)
                         ).length;
                         return (
                             <button
@@ -157,7 +163,7 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
                                 }
 
                                 const enabledCount = riskTools.filter((tool) =>
-                                    toolEnabled(activeAgent, tool.id)
+                                    isToolEnabled(activeAgent, tool.id)
                                 ).length;
 
                                 return (
@@ -198,19 +204,19 @@ export function AgentAccessSection({ agents, onSave, saving }: AgentAccessSectio
                                                             </div>
                                                         </div>
                                                         <Switch
-                                                            checked={toolEnabled(
+                                                            isChecked={isToolEnabled(
                                                                 activeAgent,
                                                                 tool.id
                                                             )}
                                                             className="self-end sm:self-auto"
-                                                            onChange={(checked) =>
+                                                            onChange={(isChecked) =>
                                                                 updateAgent(
                                                                     activeAgent.id,
                                                                     (agent) =>
                                                                         updateTool(
                                                                             agent,
                                                                             tool.id,
-                                                                            checked
+                                                                            isChecked
                                                                         )
                                                                 )
                                                             }

@@ -121,9 +121,9 @@ export function resolveListenPort(value = process.env.PORT): number {
 // =====================
 
 /** Performs health handler. */
-const healthHandler: express.RequestHandler = (_req, res) => {
-    res.json({
-        status: "ok",
+const healthHandler: express.RequestHandler = (_request, response) => {
+    response.json({
+        status: "isOk",
         gatewayConnected: gateway.isConnected(),
         sessionCount: gateway.getSessions().length,
         backendCommit,
@@ -193,7 +193,7 @@ export function handleWebSocketConnection(
     gateway.handleClient(ws);
 }
 
-function configureServerModule(): true {
+function shouldConfigureServerModule(): true {
     dotenv.config();
     app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
     app.use((request, response, next) => {
@@ -249,4 +249,4 @@ function configureServerModule(): true {
     return true;
 }
 
-export const serverModuleConfigured = configureServerModule();
+export const isServerModuleConfigured = shouldConfigureServerModule();

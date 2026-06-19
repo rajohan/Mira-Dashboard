@@ -5,8 +5,8 @@ import { cacheKeys } from "./useCache";
 
 /** Represents log rotation summary. */
 export interface LogRotationSummary {
-    ok: boolean;
-    dryRun: boolean;
+    isOk: boolean;
+    isDryRun: boolean;
     startedAt: string;
     finishedAt: string | null;
     checkedGroups: number;

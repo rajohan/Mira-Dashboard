@@ -104,7 +104,7 @@ export function messageDeleteKey(message: ChatHistoryMessage): string {
 }
 
 /** Performs assistant text looks recovered. */
-export function assistantTextLooksRecovered(left: string, right: string): boolean {
+export function isRecoveredAssistantText(left: string, right: string): boolean {
     const normalizedLeft = left.trim();
     const normalizedRight = right.trim();
     if (!normalizedLeft || !normalizedRight) {
@@ -248,7 +248,7 @@ export function mergeWithRecentOptimisticMessages(
         if (
             role === "assistant" &&
             nextAssistantTexts.some((nextText) =>
-                assistantTextLooksRecovered(message.text, nextText)
+                isRecoveredAssistantText(message.text, nextText)
             )
         ) {
             return false;

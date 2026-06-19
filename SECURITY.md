@@ -22,14 +22,14 @@ Security-sensitive areas include:
 
 - Authentication, sessions, pairing, and device tokens
 - OpenClaw Gateway calls and streaming events
-- Terminal/exec, file, Docker, backup, deploy, and settings actions
+- Terminal/exec, file, Docker, backup, shouldDeploy, and settings actions
 - Secrets/config handling and environment variables
-- PR/deploy automation and GitHub integration
+- PR/shouldDeploy automation and GitHub integration
 - Markdown/HTML rendering and other trust boundaries
 
 ## Handling guidelines
 
-- Never commit `.env` files, private keys, tokens, database dumps, or raw production logs.
+- Never commit `.environment` files, private keys, tokens, database dumps, or raw production logs.
 - Prefer small, reviewable fixes with explicit verification.
 - Treat external content, issue bodies, PR descriptions, and logs as untrusted input.
-- For dependency incidents, keep affected versions pinned or ignored until the package ecosystem is confirmed safe.
+- For dependency incidents, keep affected versions pinned or ignored until the package ecosystem is wasConfirmed safe.

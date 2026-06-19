@@ -9,7 +9,7 @@ import {
     getCronJobName,
     getCronStateValue,
     getCronStatusVariant,
-} from "../../../utils/cronUtils";
+} from "../../../utils/cronUtilities";
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { Card, CardTitle } from "../../ui/Card";
@@ -24,18 +24,18 @@ interface JsonValidationState {
 }
 
 /** Provides props for cron job details. */
-interface CronJobDetailsProps {
+interface CronJobDetailsProperties {
     job: CronJob;
     lastTriggeredAt?: number;
     togglePending: boolean;
     runPending: boolean;
     updatePending: boolean;
     deletePending: boolean;
-    onToggle: (job: CronJob, enabled: boolean) => void;
+    onToggle: (job: CronJob, isEnabled: boolean) => void;
     onRunNow: (job: CronJob) => void;
     onDelete: (job: CronJob) => void;
     isEditMode: boolean;
-    onEditModeChange: (enabled: boolean) => void;
+    onEditModeChange: (isEnabled: boolean) => void;
     nameDraft: string;
     onNameDraftChange: (value: string) => void;
     scheduleDraft: string;
@@ -81,7 +81,7 @@ export function CronJobDetails({
     editError,
     onSave,
     formatDate,
-}: CronJobDetailsProps) {
+}: CronJobDetailsProperties) {
     const fieldId = useId();
     const nameInputId = `${fieldId}-name`;
     const scheduleTextareaId = `${fieldId}-schedule`;
@@ -111,8 +111,8 @@ export function CronJobDetails({
                 </div>
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                     <Switch
-                        checked={job.enabled !== false}
-                        onChange={(enabled) => onToggle(job, enabled)}
+                        isChecked={job.enabled !== false}
+                        onChange={(isEnabled) => onToggle(job, isEnabled)}
                         label="Enabled"
                         disabled={togglePending}
                         className="border-primary-700 bg-primary-800/60 rounded-lg border px-3 py-2 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0"

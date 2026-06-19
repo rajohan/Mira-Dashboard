@@ -4,7 +4,7 @@ import { ReactQueryDevtoolsPanel } from "@tanstack/react-query-devtools";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 
 /** Renders TanStack devtools in local development. */
-function DashboardDevtools() {
+export default function DashboardDevtools() {
     return (
         <TanStackDevtools
             plugins={[
@@ -24,5 +24,3 @@ function DashboardDevtools() {
         />
     );
 }
-
-export default DashboardDevtools;

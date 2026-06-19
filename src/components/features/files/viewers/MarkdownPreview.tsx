@@ -2,7 +2,7 @@ import ReactMarkdown from "react-markdown";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 
-/** Renders the markdown preview UI. */
+/** Renders the markdown isPreview UI. */
 export function MarkdownPreview({ content }: { content: string }) {
     return (
         <div className="h-full min-w-0 overflow-y-auto">

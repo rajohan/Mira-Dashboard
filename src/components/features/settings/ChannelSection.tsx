@@ -14,14 +14,14 @@ interface ChannelSummary {
 }
 
 /** Provides props for channel section. */
-interface ChannelSectionProps {
+interface ChannelSectionProperties {
     channels: ChannelSummary[];
     onSave: (channels: ChannelSummary[]) => Promise<void>;
     saving: boolean;
 }
 
 /** Renders the channel section UI. */
-export function ChannelSection({ channels, onSave, saving }: ChannelSectionProps) {
+export function ChannelSection({ channels, onSave, saving }: ChannelSectionProperties) {
     const [draftChannels, setDraftChannels] = useState(channels);
 
     useEffect(() => {
@@ -46,12 +46,12 @@ export function ChannelSection({ channels, onSave, saving }: ChannelSectionProps
                         {draftChannels.map((channel) => (
                             <Switch
                                 key={channel.id}
-                                checked={channel.enabled}
-                                onChange={(checked) =>
-                                    setDraftChannels((previous) =>
-                                        previous.map((item) =>
+                                isChecked={channel.enabled}
+                                onChange={(isChecked) =>
+                                    setDraftChannels((wasPrevious) =>
+                                        wasPrevious.map((item) =>
                                             item.id === channel.id
-                                                ? { ...item, enabled: checked }
+                                                ? { ...item, enabled: isChecked }
                                                 : item
                                         )
                                     )

@@ -19,10 +19,10 @@ import {
     formatCronLastStatus,
     formatCronTimestamp,
     getCronStatusVariant,
-} from "../../../utils/cronUtils";
+} from "../../../utils/cronUtilities";
 import { timestampFromDateString } from "../../../utils/date";
 import { formatDate, formatDuration } from "../../../utils/format";
-import { getColumnId, getPriority, PRIORITY_COLORS } from "../../../utils/taskUtils";
+import { getColumnId, getPriority, PRIORITY_COLORS } from "../../../utils/taskUtilities";
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";
@@ -62,7 +62,7 @@ function formatElapsedMs(value: number): string {
 }
 
 /** Provides task data and callbacks used by the task detail modal. */
-interface TaskDetailModalProps {
+interface TaskDetailModalProperties {
     task: Task | null;
     onClose: () => void;
     onMove: (column: ColumnId) => Promise<void>;
@@ -95,7 +95,7 @@ export function TaskDetailModal({
     onAddUpdate,
     onEditUpdate,
     onDeleteUpdate,
-}: TaskDetailModalProps) {
+}: TaskDetailModalProperties) {
     const [isAssigning, setIsAssigning] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
 
@@ -117,11 +117,11 @@ export function TaskDetailModal({
 
     const [editingUpdateId, setEditingUpdateId] = useState<number | null>(null);
     const [editingUpdateMessage, setEditingUpdateMessage] = useState("");
-    const previousTaskNumberRef = useRef<number | null>(task?.number ?? null);
+    const previousTaskNumberReference = useRef<number | null>(task?.number ?? null);
 
     useEffect(() => {
         if (!task) {
-            previousTaskNumberRef.current = null;
+            previousTaskNumberReference.current = null;
             setIsEditingTask(false);
             setProgressMessage("");
             setEditingUpdateId(null);
@@ -129,8 +129,8 @@ export function TaskDetailModal({
             return;
         }
 
-        const previousTaskNumber = previousTaskNumberRef.current;
-        previousTaskNumberRef.current = task.number;
+        const previousTaskNumber = previousTaskNumberReference.current;
+        previousTaskNumberReference.current = task.number;
 
         const isNewTask = previousTaskNumber !== task.number;
 

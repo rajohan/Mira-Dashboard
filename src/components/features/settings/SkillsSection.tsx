@@ -13,9 +13,9 @@ type SkillStatusFilter = "all" | "enabled" | "disabled";
 type SkillSourceFilter = "all" | "workspace" | "builtin" | "extra";
 
 /** Provides props for skills section. */
-interface SkillsSectionProps {
+interface SkillsSectionProperties {
     skills: Skill[];
-    onToggle: (skillName: string, enabled: boolean) => void;
+    onToggle: (skillName: string, isEnabled: boolean) => void;
 }
 
 const sourceLabels: Record<Exclude<SkillSourceFilter, "all">, string> = {
@@ -25,7 +25,7 @@ const sourceLabels: Record<Exclude<SkillSourceFilter, "all">, string> = {
 };
 
 /** Renders the skills section UI. */
-export function SkillsSection({ skills, onToggle }: SkillsSectionProps) {
+export function SkillsSection({ skills, onToggle }: SkillsSectionProperties) {
     const [statusFilter, setStatusFilter] = useState<SkillStatusFilter>("all");
     const [sourceFilter, setSourceFilter] = useState<SkillSourceFilter>("all");
     const [search, setSearch] = useState("");
@@ -146,8 +146,10 @@ export function SkillsSection({ skills, onToggle }: SkillsSectionProps) {
                                     )}
                                 </div>
                                 <Switch
-                                    checked={skill.enabled}
-                                    onChange={(checked) => onToggle(skill.name, checked)}
+                                    isChecked={skill.enabled}
+                                    onChange={(isChecked) =>
+                                        onToggle(skill.name, isChecked)
+                                    }
                                     className="self-end sm:self-auto"
                                 />
                             </div>

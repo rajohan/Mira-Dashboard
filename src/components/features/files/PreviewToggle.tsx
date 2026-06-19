@@ -2,25 +2,25 @@ import { Code, Eye } from "lucide-react";
 
 import { Button } from "../../../components/ui/Button";
 
-/** Provides props for preview toggle. */
-interface PreviewToggleProps {
-    preview: boolean;
-    onToggle: (preview: boolean) => void;
+/** Provides props for isPreview toggle. */
+interface PreviewToggleProperties {
+    isPreview: boolean;
+    onToggle: (isPreview: boolean) => void;
     previewLabel?: string;
     editLabel?: string;
 }
 
-/** Renders the preview toggle UI. */
+/** Renders the isPreview toggle UI. */
 export function PreviewToggle({
-    preview,
+    isPreview,
     onToggle,
     previewLabel = "Preview",
     editLabel = "Raw",
-}: PreviewToggleProps) {
+}: PreviewToggleProperties) {
     return (
         <div className="bg-primary-700 flex min-w-0 items-center gap-1 rounded p-0.5">
             <Button
-                variant={preview ? "primary" : "ghost"}
+                variant={isPreview ? "primary" : "ghost"}
                 size="sm"
                 onClick={() => onToggle(true)}
                 className="rounded px-2 py-1 text-xs"
@@ -29,7 +29,7 @@ export function PreviewToggle({
                 <span>{previewLabel}</span>
             </Button>
             <Button
-                variant={preview ? "ghost" : "primary"}
+                variant={isPreview ? "ghost" : "primary"}
                 size="sm"
                 onClick={() => onToggle(false)}
                 className="rounded px-2 py-1 text-xs"

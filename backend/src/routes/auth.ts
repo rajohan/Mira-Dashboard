@@ -1,7 +1,6 @@
 import type express from "express";
 
 import {
-    bootstrapRequired,
     clearSessionCookie,
     createFirstUser,
     createSession,
@@ -10,11 +9,12 @@ import {
     findUserByUsername,
     getAuthUserFromRequest,
     getPersistedGatewayToken,
+    isBootstrapRequired,
+    isPasswordVerified,
     persistGatewayToken,
     setSessionCookie,
-    verifyPassword,
 } from "../auth.ts";
-import { db } from "../db.ts";
+import { database as database } from "../database.ts";
 import gateway from "../gateway.ts";
 
 /** Performs read session ID. */
@@ -66,21 +66,23 @@ function rollbackFirstUserBootstrap(
     previousGatewayToken: string | null = null,
     persistToken: typeof persistGatewayToken = persistGatewayToken
 ): void {
-    db.exec("BEGIN IMMEDIATE");
+    database.exec("BEGIN IMMEDIATE");
     try {
-        db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
-        db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+        database.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
+        database.prepare("DELETE FROM users WHERE id = ?").run(userId);
         if (previousGatewayToken) {
             persistToken(previousGatewayToken);
         } else {
-            db.prepare(
-                "DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?"
-            ).run(gatewayToken);
+            database
+                .prepare(
+                    "DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?"
+                )
+                .run(gatewayToken);
         }
-        db.exec("COMMIT");
+        database.exec("COMMIT");
     } catch (error) {
         try {
-            db.exec("ROLLBACK");
+            database.exec("ROLLBACK");
         } catch (rollbackError) {
             console.error(
                 "[Auth] First-user rollback transaction rollback failed:",
@@ -97,14 +99,14 @@ function rollbackFirstUserBootstrap(
 }
 
 function rollbackCreatedFirstUser(userId: number): void {
-    db.exec("BEGIN IMMEDIATE");
+    database.exec("BEGIN IMMEDIATE");
     try {
-        db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
-        db.prepare("DELETE FROM users WHERE id = ?").run(userId);
-        db.exec("COMMIT");
+        database.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
+        database.prepare("DELETE FROM users WHERE id = ?").run(userId);
+        database.exec("COMMIT");
     } catch (error) {
         try {
-            db.exec("ROLLBACK");
+            database.exec("ROLLBACK");
         } catch (rollbackError) {
             console.error(
                 "[Auth] First-user cleanup transaction rollback failed:",
@@ -159,17 +161,17 @@ export default function authRoutes(
 
     app.get("/api/auth/bootstrap", (_request, response) => {
         response.json({
-            bootstrapRequired: bootstrapRequired(),
+            isBootstrapRequired: isBootstrapRequired(),
             hasGatewayToken: Boolean(getPersistedAuthGatewayToken()),
         });
     });
 
     app.get("/api/auth/session", (request, response) => {
-        const needsBootstrap = bootstrapRequired();
+        const needsBootstrap = isBootstrapRequired();
         const user = needsBootstrap ? null : getAuthUserFromRequest(request);
         response.json({
             authenticated: Boolean(user),
-            bootstrapRequired: needsBootstrap,
+            isBootstrapRequired: needsBootstrap,
             user,
         });
     });
@@ -216,23 +218,23 @@ export default function authRoutes(
         }
 
         let previousGatewayToken: string | null = null;
-        let attemptedGatewaySwitch = false;
+        let isAttemptedGatewaySwitch = false;
         try {
             previousGatewayToken = getPersistedAuthGatewayToken();
             persistAuthGatewayToken(gatewayToken);
-            attemptedGatewaySwitch = true;
+            isAttemptedGatewaySwitch = true;
             initGateway(gatewayToken);
             const sessionId = createAuthSession(user.id);
             setAuthSessionCookie(response, sessionId, request);
             response.status(201).json({ authenticated: true, user });
         } catch (bootstrapError) {
             console.error("[Auth] First-user bootstrap failed:", bootstrapError);
-            let rollbackFailed = false;
-            if (attemptedGatewaySwitch) {
+            let isRollbackFailed = false;
+            if (isAttemptedGatewaySwitch) {
                 try {
                     rollbackBootstrap(user.id, gatewayToken, previousGatewayToken);
                 } catch (rollbackError) {
-                    rollbackFailed = true;
+                    isRollbackFailed = true;
                     console.error(
                         "[Auth] First-user bootstrap rollback failed:",
                         rollbackError
@@ -242,11 +244,11 @@ export default function authRoutes(
                 try {
                     rollbackCreatedUser(user.id);
                 } catch (rollbackError) {
-                    rollbackFailed = true;
+                    isRollbackFailed = true;
                     console.error("[Auth] First-user cleanup failed:", rollbackError);
                 }
             }
-            if (attemptedGatewaySwitch) {
+            if (isAttemptedGatewaySwitch) {
                 try {
                     shutdownGateway();
                 } catch {
@@ -261,7 +263,7 @@ export default function authRoutes(
                 }
             }
             response.status(500).json({
-                error: rollbackFailed
+                error: isRollbackFailed
                     ? "Failed to roll back first-user bootstrap"
                     : "Failed to complete first-user setup",
             });
@@ -269,7 +271,7 @@ export default function authRoutes(
     });
 
     app.post("/api/auth/login", (request, response) => {
-        if (bootstrapRequired()) {
+        if (isBootstrapRequired()) {
             response
                 .status(409)
                 .json({ error: "Create the first user before logging in" });
@@ -285,7 +287,7 @@ export default function authRoutes(
         }
 
         const user = findUserByUsername(username);
-        if (!user || !verifyPassword(password, user.password_hash)) {
+        if (!user || !isPasswordVerified(password, user.password_hash)) {
             response.status(401).json({ error: "Invalid username or password" });
             return;
         }
@@ -304,6 +306,6 @@ export default function authRoutes(
             deleteSession(sessionId);
         }
         clearSessionCookie(response, request);
-        response.json({ ok: true });
+        response.json({ isOk: true });
     });
 }

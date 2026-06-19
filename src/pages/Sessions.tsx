@@ -10,7 +10,7 @@ import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { useSessionActions } from "../hooks/useSessionActions";
 import { type Session } from "../types/session";
-import { sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
+import { sortSessionsByTypeAndActivity } from "../utils/sessionUtilities";
 
 /** Renders the sessions UI. */
 export function Sessions() {

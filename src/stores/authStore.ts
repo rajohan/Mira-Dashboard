@@ -11,13 +11,13 @@ interface AuthState {
     user: AuthUser | null;
     isAuthenticated: boolean;
     isInitialized: boolean;
-    bootstrapRequired: boolean;
+    isBootstrapRequired: boolean;
 }
 
 /** Represents the session API response. */
 interface SessionResponse {
     authenticated: boolean;
-    bootstrapRequired: boolean;
+    isBootstrapRequired: boolean;
     user: AuthUser | null;
 }
 
@@ -34,13 +34,15 @@ const initialState: AuthState = {
     user: null,
     isAuthenticated: false,
     isInitialized: false,
-    bootstrapRequired: false,
+    isBootstrapRequired: false,
 };
 
 /** Defines auth store. */
 export const authStore = new Store<AuthState>(initialState);
 
-let initializePromise: Promise<void> | null = null;
+const authRuntimeState: { initializePromise: Promise<void> | null } = {
+    initializePromise: null,
+};
 
 /** Fetches session. */
 async function fetchSession(): Promise<SessionResponse> {
@@ -58,8 +60,8 @@ async function fetchSession(): Promise<SessionResponse> {
 /** Defines auth actions. */
 export const authActions: AuthActions = {
     async initialize() {
-        if (!initializePromise) {
-            initializePromise = (async () => {
+        if (!authRuntimeState.initializePromise) {
+            authRuntimeState.initializePromise = (async () => {
                 try {
                     await authActions.refreshSession();
                 } catch {
@@ -68,12 +70,12 @@ export const authActions: AuthActions = {
                         isInitialized: true,
                     }));
                 } finally {
-                    initializePromise = null;
+                    authRuntimeState.initializePromise = null;
                 }
             })();
         }
 
-        return initializePromise;
+        return authRuntimeState.initializePromise;
     },
 
     async refreshSession() {
@@ -87,7 +89,7 @@ export const authActions: AuthActions = {
             user: payload.user,
             isAuthenticated: payload.authenticated,
             isInitialized: true,
-            bootstrapRequired: payload.bootstrapRequired,
+            isBootstrapRequired: payload.isBootstrapRequired,
         }));
     },
 
@@ -126,6 +128,6 @@ export function useAuthUser(): AuthUser | null {
 }
 
 /** Provides is authenticated. */
-export function useIsAuthenticated(): boolean {
+export function isAuthenticationStatus(): boolean {
     return useSelector(authStore, (state) => state.isAuthenticated);
 }

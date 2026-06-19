@@ -2,7 +2,7 @@ import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 /** Provides props for progress bar. */
-interface ProgressBarProps {
+interface ProgressBarProperties {
     percent: number;
     color?: "green" | "blue" | "yellow" | "orange" | "red" | "purple";
     size?: "sm" | "md";
@@ -29,7 +29,7 @@ export function ProgressBar({
     color,
     size = "md",
     className,
-}: ProgressBarProps) {
+}: ProgressBarProperties) {
     const effectiveColor = color || getProgressColor(percent);
 
     return (

@@ -13,7 +13,7 @@ export interface DropdownItem {
 }
 
 /** Provides props for dropdown. */
-interface DropdownProps {
+interface DropdownProperties {
     label?: string;
     ariaLabel?: string;
     icon?: React.ReactNode;
@@ -34,7 +34,7 @@ export function Dropdown({
     align = "right",
     variant = "secondary",
     size = "sm",
-}: DropdownProps) {
+}: DropdownProperties) {
     const variantStyles = {
         primary: "bg-accent-500 text-white hover:bg-accent-600",
         secondary:

@@ -45,7 +45,7 @@ type BackupCacheData = {
     latest?: BackupSnapshot[];
     snapshotsByPath?: BackupSnapshotGroup[];
     stale?: Array<{ path: string | null; endTime: string | null }>;
-    ok?: boolean;
+    isOk?: boolean;
 };
 
 /** Defines walg backup. */
@@ -67,14 +67,14 @@ type WalgCacheData = {
     backupCount?: number;
     latestAgeHours?: number | null;
     stale?: boolean;
-    ok?: boolean;
+    isOk?: boolean;
 };
 
 /** Returns variant. */
-function getVariant(status?: string, ok?: boolean) {
+function getVariant(status?: string, isOk?: boolean) {
     if (status === "error") return "error" as const;
-    if (ok === true) return "success" as const;
-    if (ok === false) return "warning" as const;
+    if (isOk === true) return "success" as const;
+    if (isOk === false) return "warning" as const;
     return "default" as const;
 }
 
@@ -141,10 +141,10 @@ export function BackupOverviewCard() {
                         Kopia snapshots grouped by source
                     </div>
                 </div>
-                <Badge variant={getVariant(entry?.status, entry?.data?.ok)}>
+                <Badge variant={getVariant(entry?.status, entry?.data?.isOk)}>
                     {entry?.status === "error"
                         ? "error"
-                        : entry?.data?.ok
+                        : entry?.data?.isOk
                           ? "healthy"
                           : snapshotGroups.length > 0
                             ? "attention"
@@ -357,10 +357,10 @@ export function BackupOverviewCard() {
                             Daily Postgres backup status stored through WAL-G.
                         </div>
                     </div>
-                    <Badge variant={getVariant(walgEntry?.status, walgEntry?.data?.ok)}>
+                    <Badge variant={getVariant(walgEntry?.status, walgEntry?.data?.isOk)}>
                         {walgEntry?.status === "error"
                             ? "error"
-                            : walgEntry?.data?.ok
+                            : walgEntry?.data?.isOk
                               ? "healthy"
                               : walgEntry?.data?.latest
                                 ? "attention"

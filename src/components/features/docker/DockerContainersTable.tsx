@@ -128,7 +128,7 @@ function getStateRank(state: string): number {
 }
 
 /** Provides props for Docker containers table. */
-interface DockerContainersTableProps {
+interface DockerContainersTableProperties {
     containers: DockerContainer[];
     onDetails: (containerId: string) => void;
     onLogs: (containerId: string) => void;
@@ -145,7 +145,7 @@ export function DockerContainersTable({
     onConsole,
     onRestart,
     onRestartStack,
-}: DockerContainersTableProps) {
+}: DockerContainersTableProperties) {
     const [sorting, setSorting] = useState<SortingState>([]);
 
     const columns = [

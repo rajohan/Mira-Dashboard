@@ -4,7 +4,7 @@
     "/opt/docker/data"
   ],
   "defaults": {
-    "compress": true,
+    "shouldCompress": true,
     "skipEmpty": true,
     "missingOk": true,
     "maxSizeMb": 10,
@@ -37,7 +37,7 @@
       ],
       "archiveRetentionScope": "directory",
       "archiveMinAgeMinutes": 60,
-      "compress": true,
+      "shouldCompress": true,
       "keep": 25,
       "keepDays": 7
     },
@@ -52,7 +52,7 @@
       ],
       "archiveRetentionScope": "directory",
       "archiveMinAgeMinutes": 60,
-      "compress": true,
+      "shouldCompress": true,
       "keep": 3,
       "keepDays": 7
     }

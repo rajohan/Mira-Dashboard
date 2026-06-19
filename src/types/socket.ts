@@ -3,10 +3,10 @@ import { z } from "zod";
 import type { Session } from "./session";
 
 /** Represents socket envelope. */
-export interface SocketEnvelope {
+export interface SocketEnvironmentelope {
     type?: string;
     id?: string;
-    ok?: boolean;
+    isOk?: boolean;
     error?: unknown;
     payload?: unknown;
     event?: string;
@@ -16,7 +16,7 @@ export interface SocketEnvelope {
 }
 
 /** Defines socket envelope schema. */
-export const socketEnvelopeSchema = z.object({
+export const socketEnvironmentelopeSchema = z.object({
     type: z.string(),
 });
 

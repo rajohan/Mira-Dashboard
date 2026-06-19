@@ -1,4 +1,4 @@
-import { db } from "../db.ts";
+import { database as database } from "../database.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -31,7 +31,7 @@ export function writeCacheSuccess(options: CacheWriteOptions): void {
     const metadataJson = JSON.stringify(options.metadata);
     const expiresAt = ttlDate(options.ttl, options.ttlUnit);
     if (options.preserveExistingData) {
-        const result = db
+        const result = database
             .prepare(
                 `UPDATE cache_entries SET
                 source = ?,
@@ -59,8 +59,9 @@ export function writeCacheSuccess(options: CacheWriteOptions): void {
             return;
         }
     }
-    db.prepare(
-        `INSERT INTO cache_entries (
+    database
+        .prepare(
+            `INSERT INTO cache_entries (
             key, data_json, source, updated_at, last_attempt_at, expires_at,
             status, error_code, error_message, consecutive_failures, metadata_json
          ) VALUES (?, ?, ?, ?, ?, ?, 'fresh', NULL, NULL, 0, ?)
@@ -78,14 +79,15 @@ export function writeCacheSuccess(options: CacheWriteOptions): void {
             error_message = NULL,
             consecutive_failures = 0,
             metadata_json = excluded.metadata_json`
-    ).run(
-        options.key,
-        dataJson,
-        options.source,
-        timestamp,
-        timestamp,
-        expiresAt,
-        metadataJson,
-        options.preserveExistingData ? 1 : 0
-    );
+        )
+        .run(
+            options.key,
+            dataJson,
+            options.source,
+            timestamp,
+            timestamp,
+            expiresAt,
+            metadataJson,
+            options.preserveExistingData ? 1 : 0
+        );
 }

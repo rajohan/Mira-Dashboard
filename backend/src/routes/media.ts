@@ -6,8 +6,7 @@ import path from "path";
 import { stringFallback } from "../lib/values.ts";
 
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
-let cachedMediaRoot: string | undefined;
-let cachedRealMediaRoot: string | undefined;
+const mediaRouteState: { cachedMediaRoot?: string; cachedRealMediaRoot?: string } = {};
 
 const MIME_TYPES: Record<string, string> = {
     ".png": "image/png",
@@ -34,14 +33,16 @@ function resolveOpenclawRoot(): string | null {
     const configuredRoot =
         process.env.OPENCLAW_HOME?.trim() ||
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
-    const homeDir = (process.env.HOME?.trim() || os.homedir().trim()).trim();
+    const homeDirectory = (process.env.HOME?.trim() || os.homedir().trim()).trim();
     if (
         !configuredRoot &&
-        (!homeDir || !path.isAbsolute(homeDir) || homeDir === path.parse(homeDir).root)
+        (!homeDirectory ||
+            !path.isAbsolute(homeDirectory) ||
+            homeDirectory === path.parse(homeDirectory).root)
     ) {
         return null;
     }
-    const openclawRoot = configuredRoot || path.join(homeDir, ".openclaw");
+    const openclawRoot = configuredRoot || path.join(homeDirectory, ".openclaw");
     const resolvedRoot = path.resolve(openclawRoot);
     if (
         !openclawRoot ||
@@ -64,16 +65,16 @@ function getMediaRoot(): string | null {
 
 /** Resolves and caches the canonical media root after it exists. */
 function getRealMediaRoot(mediaRoot: string): string | null {
-    if (cachedMediaRoot !== mediaRoot) {
-        cachedMediaRoot = mediaRoot;
-        cachedRealMediaRoot = undefined;
+    if (mediaRouteState.cachedMediaRoot !== mediaRoot) {
+        mediaRouteState.cachedMediaRoot = mediaRoot;
+        mediaRouteState.cachedRealMediaRoot = undefined;
     }
-    if (cachedRealMediaRoot) {
-        return cachedRealMediaRoot;
+    if (mediaRouteState.cachedRealMediaRoot) {
+        return mediaRouteState.cachedRealMediaRoot;
     }
     try {
-        cachedRealMediaRoot = fs.realpathSync(mediaRoot);
-        return cachedRealMediaRoot;
+        mediaRouteState.cachedRealMediaRoot = fs.realpathSync(mediaRoot);
+        return mediaRouteState.cachedRealMediaRoot;
     } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
         if (code !== "ENOENT" && code !== "ENOTDIR") {

@@ -6,7 +6,7 @@ import { cn } from "../../utils/cn";
 type AlertVariant = "error" | "success" | "warning" | "info";
 
 /** Provides props for alert. */
-interface AlertProps {
+interface AlertProperties {
     variant?: AlertVariant;
     title?: string;
     children: React.ReactNode;
@@ -44,7 +44,7 @@ const variants: Record<
 };
 
 /** Renders the alert UI. */
-export function Alert({ variant = "info", title, children, className }: AlertProps) {
+export function Alert({ variant = "info", title, children, className }: AlertProperties) {
     const { border, bg, text, icon } = variants[variant];
 
     return (

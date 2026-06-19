@@ -21,7 +21,7 @@ interface ToolSettings {
 }
 
 /** Provides props for tool section. */
-interface ToolSectionProps extends ToolSettings {
+interface ToolSectionProperties extends ToolSettings {
     onSave: (values: ToolSettings) => Promise<void>;
     saving: boolean;
 }
@@ -39,7 +39,7 @@ export function ToolSection({
     sessionsVisibility,
     onSave,
     saving,
-}: ToolSectionProps) {
+}: ToolSectionProperties) {
     const [draft, setDraft] = useState<ToolSettings>({
         profile,
         webSearchEnabled,
@@ -87,8 +87,8 @@ export function ToolSection({
                         <Input
                             value={draft.profile || ""}
                             onChange={(event) =>
-                                setDraft((previous) => ({
-                                    ...previous,
+                                setDraft((wasPrevious) => ({
+                                    ...wasPrevious,
                                     profile: event.target.value,
                                 }))
                             }
@@ -102,8 +102,8 @@ export function ToolSection({
                         <Select
                             value={draft.execSecurity}
                             onChange={(value) =>
-                                setDraft((previous) => ({
-                                    ...previous,
+                                setDraft((wasPrevious) => ({
+                                    ...wasPrevious,
                                     execSecurity: value,
                                 }))
                             }
@@ -122,7 +122,10 @@ export function ToolSection({
                         <Select
                             value={draft.execAsk}
                             onChange={(value) =>
-                                setDraft((previous) => ({ ...previous, execAsk: value }))
+                                setDraft((wasPrevious) => ({
+                                    ...wasPrevious,
+                                    execAsk: value,
+                                }))
                             }
                             options={[
                                 { value: "off", label: "Off" },
@@ -136,11 +139,11 @@ export function ToolSection({
 
                 <div className="grid gap-3 lg:grid-cols-2">
                     <Switch
-                        checked={draft.webSearchEnabled}
-                        onChange={(checked) =>
-                            setDraft((previous) => ({
-                                ...previous,
-                                webSearchEnabled: checked,
+                        isChecked={draft.webSearchEnabled}
+                        onChange={(isChecked) =>
+                            setDraft((wasPrevious) => ({
+                                ...wasPrevious,
+                                webSearchEnabled: isChecked,
                             }))
                         }
                         label="Web search"
@@ -148,11 +151,11 @@ export function ToolSection({
                         className="border-primary-800 bg-primary-900/50 rounded-lg border p-3"
                     />
                     <Switch
-                        checked={draft.webFetchEnabled}
-                        onChange={(checked) =>
-                            setDraft((previous) => ({
-                                ...previous,
-                                webFetchEnabled: checked,
+                        isChecked={draft.webFetchEnabled}
+                        onChange={(isChecked) =>
+                            setDraft((wasPrevious) => ({
+                                ...wasPrevious,
+                                webFetchEnabled: isChecked,
                             }))
                         }
                         label="Web fetch"
@@ -160,11 +163,11 @@ export function ToolSection({
                         className="border-primary-800 bg-primary-900/50 rounded-lg border p-3"
                     />
                     <Switch
-                        checked={draft.elevatedEnabled}
-                        onChange={(checked) =>
-                            setDraft((previous) => ({
-                                ...previous,
-                                elevatedEnabled: checked,
+                        isChecked={draft.elevatedEnabled}
+                        onChange={(isChecked) =>
+                            setDraft((wasPrevious) => ({
+                                ...wasPrevious,
+                                elevatedEnabled: isChecked,
                             }))
                         }
                         label="Elevated tools"
@@ -172,11 +175,11 @@ export function ToolSection({
                         className="border-primary-800 bg-primary-900/50 rounded-lg border p-3"
                     />
                     <Switch
-                        checked={draft.agentToAgentEnabled}
-                        onChange={(checked) =>
-                            setDraft((previous) => ({
-                                ...previous,
-                                agentToAgentEnabled: checked,
+                        isChecked={draft.agentToAgentEnabled}
+                        onChange={(isChecked) =>
+                            setDraft((wasPrevious) => ({
+                                ...wasPrevious,
+                                agentToAgentEnabled: isChecked,
                             }))
                         }
                         label="Agent-to-agent"
@@ -193,8 +196,8 @@ export function ToolSection({
                         <Input
                             value={draft.webSearchProvider}
                             onChange={(event) =>
-                                setDraft((previous) => ({
-                                    ...previous,
+                                setDraft((wasPrevious) => ({
+                                    ...wasPrevious,
                                     webSearchProvider: event.target.value,
                                 }))
                             }
@@ -208,8 +211,8 @@ export function ToolSection({
                         <Input
                             value={draft.sessionsVisibility || ""}
                             onChange={(event) =>
-                                setDraft((previous) => ({
-                                    ...previous,
+                                setDraft((wasPrevious) => ({
+                                    ...wasPrevious,
                                     sessionsVisibility: event.target.value,
                                 }))
                             }

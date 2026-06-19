@@ -24,7 +24,7 @@ export function sortCronJobs(jobs: CronJob[]): CronJob[] {
     });
 }
 
-function cronFieldIsValid(field: string, minimum: number, maximum: number): boolean {
+function isCronFieldValid(field: string, minimum: number, maximum: number): boolean {
     const parseCronNumber = (value: string): number | null => {
         if (!/^\d+$/u.test(value)) return null;
         const number = Number(value);
@@ -67,16 +67,16 @@ function cronFieldIsValid(field: string, minimum: number, maximum: number): bool
 }
 
 /** Returns whether an expression matches the supported five-field cron syntax. */
-export function cronExpressionIsValid(expression: string): boolean {
+export function isCronExpressionValid(expression: string): boolean {
     const fields = expression.trim().split(/\s+/u);
     if (fields.length !== 5) return false;
     const [minute = "", hour = "", dayOfMonth = "", month = "", dayOfWeek = ""] = fields;
     return (
-        cronFieldIsValid(minute, 0, 59) &&
-        cronFieldIsValid(hour, 0, 23) &&
-        cronFieldIsValid(dayOfMonth, 1, 31) &&
-        cronFieldIsValid(month, 1, 12) &&
-        cronFieldIsValid(dayOfWeek, 0, 7)
+        isCronFieldValid(minute, 0, 59) &&
+        isCronFieldValid(hour, 0, 23) &&
+        isCronFieldValid(dayOfMonth, 1, 31) &&
+        isCronFieldValid(month, 1, 12) &&
+        isCronFieldValid(dayOfWeek, 0, 7)
     );
 }
 
@@ -114,7 +114,7 @@ export function getCronStatusVariant(
     value: string
 ): "success" | "warning" | "error" | "default" {
     const normalized = value.trim().toLowerCase();
-    if (["ok", "success", "succeeded", "completed"].includes(normalized)) {
+    if (["isOk", "success", "succeeded", "completed"].includes(normalized)) {
         return "success";
     }
 

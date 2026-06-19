@@ -1,16 +1,16 @@
 import { MessageSquare } from "lucide-react";
 
 import { type MiraPost } from "../../../types/moltbook";
-import { formatTime, getMoltbookUrl } from "../../../utils/moltbookUtils";
+import { formatTime, getMoltbookUrl } from "../../../utils/moltbookUtilities";
 import { Card } from "../../ui/Card";
 
 /** Provides props for my post card. */
-interface MyPostCardProps {
+interface MyPostCardProperties {
     post: MiraPost;
 }
 
 /** Renders the my post card UI. */
-export function MyPostCard({ post }: MyPostCardProps) {
+export function MyPostCard({ post }: MyPostCardProperties) {
     return (
         <Card className="p-3 sm:p-4">
             <div className="text-primary-500 mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">

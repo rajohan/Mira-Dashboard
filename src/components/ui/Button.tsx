@@ -4,17 +4,20 @@ import { type ButtonHTMLAttributes, forwardRef } from "react";
 import { cn } from "../../utils/cn";
 
 /** Provides props for button. */
-interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+interface ButtonProperties extends ButtonHTMLAttributes<HTMLButtonElement> {
     variant?: "primary" | "secondary" | "danger" | "ghost";
     size?: "sm" | "md" | "lg";
 }
 
 /** Renders the button UI. */
-export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-    ({ className, variant = "primary", size = "md", children, ...props }, ref) => {
+export const Button = forwardRef<HTMLButtonElement, ButtonProperties>(
+    (
+        { className, variant = "primary", size = "md", children, ...properties },
+        reference
+    ) => {
         return (
             <HeadlessButton
-                ref={ref}
+                ref={reference}
                 className={cn(
                     "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors",
                     "cursor-pointer outline-none",
@@ -36,7 +39,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
                     "disabled:cursor-not-allowed disabled:opacity-50 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
                     className
                 )}
-                {...props}
+                {...properties}
             >
                 {children}
             </HeadlessButton>

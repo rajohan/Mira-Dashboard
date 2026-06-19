@@ -3,7 +3,7 @@ import { Shield } from "lucide-react";
 import { ExpandableCard, ReadOnlyField } from "../../ui/ExpandableCard";
 
 /** Provides props for security section. */
-interface SecuritySectionProps {
+interface SecuritySectionProperties {
     authProfiles: number;
     commandRestartEnabled: boolean;
     ownerAllowFrom: string;
@@ -22,7 +22,7 @@ export function SecuritySection({
     execSecurity,
     execAsk,
     redactionMode,
-}: SecuritySectionProps) {
+}: SecuritySectionProperties) {
     return (
         <ExpandableCard title="Security" icon={Shield}>
             <div className="space-y-2">

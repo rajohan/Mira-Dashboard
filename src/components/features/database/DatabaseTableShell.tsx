@@ -12,7 +12,7 @@ import { type KeyboardEvent, type ReactNode, useState } from "react";
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
 
-type DatabaseColumnDef<T extends object> =
+type DatabaseColumnDefinition<T extends object> =
     | ColumnDef<T, string>
     | ColumnDef<T, number>
     | ColumnDef<T, boolean>
@@ -20,9 +20,9 @@ type DatabaseColumnDef<T extends object> =
     | ColumnDef<T, undefined>;
 
 /** Represents props. */
-interface Props<T extends object> {
+interface Properties<T extends object> {
     data: T[];
-    columns: DatabaseColumnDef<T>[];
+    columns: DatabaseColumnDefinition<T>[];
     emptyMessage?: string;
     maxHeight?: string;
     onRowClick?: (row: T) => void;
@@ -45,7 +45,7 @@ export function DatabaseTableShell<T extends object>({
     maxHeight = "420px",
     onRowClick,
     renderMobileCard,
-}: Props<T>) {
+}: Properties<T>) {
     const [sorting, setSorting] = useState<SortingState>([]);
 
     const table = useReactTable({

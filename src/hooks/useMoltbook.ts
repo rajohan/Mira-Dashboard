@@ -27,7 +27,7 @@ export interface MoltbookHome {
         title: string | null;
         authorName: string | null;
         createdAt: string | null;
-        preview: string | null;
+        isPreview: string | null;
     };
     postsFromAccountsYouFollowCount: number | null;
     exploreCount: number | null;

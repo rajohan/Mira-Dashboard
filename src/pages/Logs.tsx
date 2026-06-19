@@ -13,10 +13,10 @@ import { Select } from "../components/ui/Select";
 import { useLogContent, useLogFiles, useOpenClawSocket } from "../hooks";
 import type { LogFile } from "../types/log";
 import { formatDateStamp } from "../utils/format";
-import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtils";
+import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtilities";
 
 const LOG_BOTTOM_THRESHOLD_PX = 24;
-let lastVisibleLogFiles: LogFile[] = [];
+const logsPageState: { lastVisibleLogFiles: LogFile[] } = { lastVisibleLogFiles: [] };
 
 type LogViewportElement = Pick<
     HTMLDivElement,
@@ -87,11 +87,11 @@ export function Logs() {
     const [search, setSearch] = useState("");
     const [isAtBottom, setIsAtBottom] = useState(true);
 
-    const logContainerRef = useRef<HTMLDivElement>(null);
-    const shouldStickToBottomRef = useRef(true);
-    const lastKnownLogScrollTopRef = useRef(0);
-    const subscribedConnectionIdRef = useRef<number | null>(null);
-    const requestSeqRef = useRef(0);
+    const logContainerReference = useRef<HTMLDivElement>(null);
+    const shouldStickToBottomReference = useRef(true);
+    const lastKnownLogScrollTopReference = useRef(0);
+    const subscribedConnectionIdReference = useRef<number | null>(null);
+    const requestSeqReference = useRef(0);
 
     // OpenClaw connection (shared WebSocket)
     const { isConnected, connectionId, request } = useOpenClawSocket();
@@ -102,7 +102,7 @@ export function Logs() {
 
     // Queries
     const [availableLogFiles, setAvailableLogFiles] = useState<LogFile[]>(
-        () => lastVisibleLogFiles
+        () => logsPageState.lastVisibleLogFiles
     );
     const { data: logFiles } = useLogFiles();
     const { refetch: refetchContent, isFetching: isLoadingContent } = useLogContent(
@@ -118,17 +118,18 @@ export function Logs() {
 
         const nextLogFiles = logFiles.filter(isNamedLogFile);
 
-        setAvailableLogFiles((previous) => {
-            if (nextLogFiles.length === 0 && previous.length > 0) {
-                return previous;
+        setAvailableLogFiles((wasPrevious) => {
+            if (nextLogFiles.length === 0 && wasPrevious.length > 0) {
+                return wasPrevious;
             }
 
-            const previousKeys = previous.map((file) => file.name).join("\n");
+            const previousKeys = wasPrevious.map((file) => file.name).join("\n");
             const nextKeys = nextLogFiles.map((file) => file.name).join("\n");
-            const resolvedLogFiles = previousKeys === nextKeys ? previous : nextLogFiles;
+            const resolvedLogFiles =
+                previousKeys === nextKeys ? wasPrevious : nextLogFiles;
 
             if (resolvedLogFiles.length > 0) {
-                lastVisibleLogFiles = resolvedLogFiles;
+                logsPageState.lastVisibleLogFiles = resolvedLogFiles;
             }
 
             return resolvedLogFiles;
@@ -149,34 +150,34 @@ export function Logs() {
 
     // Subscribe to log stream once per connection
     useEffect(() => {
-        if (!(isConnected && subscribedConnectionIdRef.current !== connectionId)) {
+        if (!(isConnected && subscribedConnectionIdReference.current !== connectionId)) {
             return;
         }
 
-        subscribedConnectionIdRef.current = connectionId;
+        subscribedConnectionIdReference.current = connectionId;
         void (async () => {
             try {
                 await request("subscribe", { channel: "logs" });
-            } catch (error_) {
-                console.error("Failed to subscribe to logs:", error_);
-                subscribedConnectionIdRef.current = null;
+            } catch (error) {
+                console.error("Failed to subscribe to logs:", error);
+                subscribedConnectionIdReference.current = null;
             }
         })();
     }, [isConnected, connectionId, request]);
 
     /** Performs load log content. */
     const loadLogContent = async () => {
-        const seq = ++requestSeqRef.current;
+        const seq = ++requestSeqReference.current;
         let result: Awaited<ReturnType<typeof refetchContent>>;
 
         try {
             result = await refetchContent();
-        } catch (error_) {
-            console.error("Failed to load log content:", error_);
+        } catch (error) {
+            console.error("Failed to load log content:", error);
             return;
         }
 
-        if (seq === requestSeqRef.current) {
+        if (seq === requestSeqReference.current) {
             const content = result.data || "";
             const lines = content.split("\n").filter((line) => line.trim());
             const parsedLogs = lines
@@ -203,7 +204,7 @@ export function Logs() {
             return;
         }
 
-        shouldStickToBottomRef.current = true;
+        shouldStickToBottomReference.current = true;
         setIsAtBottom(true);
         void loadLogContent();
     }, [selectedFile, lineCount, availableLogFiles.length]);
@@ -215,11 +216,7 @@ export function Logs() {
         }
 
         const raw = typeof log.raw === "string" ? log.raw : String(log.msg || "");
-        if (search && !raw.toLowerCase().includes(search.toLowerCase())) {
-            return false;
-        }
-
-        return true;
+        return !(search && !raw.toLowerCase().includes(search.toLowerCase()));
     });
 
     /** Performs toggle level. */
@@ -250,7 +247,7 @@ export function Logs() {
 
     const rowVirtualizer = useVirtualizer({
         count: filteredLogs.length,
-        getScrollElement: () => logContainerRef.current,
+        getScrollElement: () => logContainerReference.current,
         estimateSize: () => 22,
         overscan: 15,
         getItemKey: (index) => filteredLogs[index]!.id,
@@ -259,24 +256,26 @@ export function Logs() {
 
     /** Performs check is at bottom. */
     const checkIsAtBottom = () => {
-        return isLogViewportAtBottom(logContainerRef.current);
+        return isLogViewportAtBottom(logContainerReference.current);
     };
 
     /** Updates scroll state when the log viewport scrolls. */
     const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
-        const el = event.currentTarget;
-        lastKnownLogScrollTopRef.current = el.scrollTop;
+        const element = event.currentTarget;
+        lastKnownLogScrollTopReference.current = element.scrollTop;
 
         const atBottom = checkIsAtBottom();
-        shouldStickToBottomRef.current = atBottom;
-        setIsAtBottom((previous) => (previous === atBottom ? previous : atBottom));
+        shouldStickToBottomReference.current = atBottom;
+        setIsAtBottom((wasPrevious) =>
+            wasPrevious === atBottom ? wasPrevious : atBottom
+        );
     };
 
     /** Performs scroll to bottom. */
     const scrollToBottom = () => {
-        scrollLogViewportToBottomAndReport(logContainerRef.current, (scrollTop) => {
-            lastKnownLogScrollTopRef.current = scrollTop;
-            shouldStickToBottomRef.current = true;
+        scrollLogViewportToBottomAndReport(logContainerReference.current, (scrollTop) => {
+            lastKnownLogScrollTopReference.current = scrollTop;
+            shouldStickToBottomReference.current = true;
             setIsAtBottom(true);
         });
     };
@@ -284,15 +283,15 @@ export function Logs() {
     useLayoutEffect(() => {
         if (filteredLogs.length === 0) return;
 
-        if (!shouldStickToBottomRef.current) {
+        if (!shouldStickToBottomReference.current) {
             /** Performs restore scroll top. */
             const restoreScrollTop = () => {
-                const el = logContainerRef.current;
-                if (!el || shouldStickToBottomRef.current) {
+                const element = logContainerReference.current;
+                if (!element || shouldStickToBottomReference.current) {
                     return;
                 }
 
-                el.scrollTop = lastKnownLogScrollTopRef.current;
+                element.scrollTop = lastKnownLogScrollTopReference.current;
             };
 
             restoreScrollTop();
@@ -348,7 +347,7 @@ export function Logs() {
                 <Input
                     placeholder="Search logs..."
                     value={search}
-                    onChange={(e) => setSearch(e.target.value)}
+                    onChange={(event_) => setSearch(event_.target.value)}
                     className="w-full min-w-0 md:col-span-2 lg:col-span-1"
                 />
 
@@ -401,7 +400,7 @@ export function Logs() {
                 variant="bordered"
             >
                 <div
-                    ref={logContainerRef}
+                    ref={logContainerReference}
                     onScroll={handleScroll}
                     className="bg-primary-900/50 relative h-full overflow-y-auto font-mono text-[11px] sm:text-xs"
                     style={{ overflowAnchor: "none" }}

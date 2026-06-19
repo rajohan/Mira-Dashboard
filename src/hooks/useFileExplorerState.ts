@@ -2,12 +2,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import type { FileNode } from "../types/file";
-import { getFileExtension, isJsonFile } from "../utils/fileUtils";
+import { getFileExtension, isJsonFile } from "../utils/fileUtilities";
 import { validateJsonString } from "../utils/json";
 import { apiFetchRequired } from "./useApi";
 import { fileKeys, useFileContent, useFiles, useSaveFile } from "./useFiles";
 
-/** Defines max preview size. */
+/** Defines max isPreview size. */
 export const MAX_PREVIEW_SIZE = 100_000;
 
 /** Provides file explorer state. */
@@ -60,16 +60,16 @@ export function useFileExplorerState() {
     const handleToggle = async (path: string) => {
         const isCurrentlyExpanded = expandedPaths.has(path);
         if (isCurrentlyExpanded) {
-            setExpandedPaths((prev) => {
-                const next = new Set(prev);
+            setExpandedPaths((wasPrevious) => {
+                const next = new Set(wasPrevious);
                 next.delete(path);
                 return next;
             });
             return;
         }
 
-        setExpandedPaths((prev) => {
-            const next = new Set(prev);
+        setExpandedPaths((wasPrevious) => {
+            const next = new Set(wasPrevious);
             next.add(path);
             return next;
         });
@@ -106,7 +106,7 @@ export function useFileExplorerState() {
                         return n;
                     });
                 };
-                setFiles((prev) => updateNode(prev));
+                setFiles((wasPrevious) => updateNode(wasPrevious));
             } catch (error_) {
                 console.error("Failed to load directory:", error_);
             }

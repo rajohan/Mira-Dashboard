@@ -1,4 +1,4 @@
-import { db } from "../db.ts";
+import { database as database } from "../database.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -13,12 +13,13 @@ export function pruneReadNotifications(): void {
         new Date(Date.now() - READ_RETENTION_DAYS * 24 * 60 * 60 * 1000)
     );
 
-    db.prepare("DELETE FROM notifications WHERE is_read = 1 AND occurred_at < ?").run(
-        cutoff
-    );
+    database
+        .prepare("DELETE FROM notifications WHERE is_read = 1 AND occurred_at < ?")
+        .run(cutoff);
 
-    db.prepare(
-        `DELETE FROM notifications
+    database
+        .prepare(
+            `DELETE FROM notifications
          WHERE id IN (
             SELECT id
             FROM notifications
@@ -26,5 +27,6 @@ export function pruneReadNotifications(): void {
             ORDER BY datetime(occurred_at) DESC
             LIMIT -1 OFFSET ?
          )`
-    ).run(MAX_READ_ITEMS);
+        )
+        .run(MAX_READ_ITEMS);
 }

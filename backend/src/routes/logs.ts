@@ -10,11 +10,14 @@ function dateToISOString(date: Date): string {
     return date.toISOString();
 }
 
-const logsDir = "/tmp/openclaw";
-let logWatcher: NodeJS.Timeout | null = null;
-let logPollInFlight = false;
-let lastLogSize = 0;
-let lastLogFile = "";
+const logsDirectory = "/tmp/openclaw";
+const logsRouteState: {
+    logWatcher: NodeJS.Timeout | null;
+    isLogPollInFlight: boolean;
+    lastLogSize: number;
+    lastLogFile: string;
+} = { logWatcher: null, isLogPollInFlight: false, lastLogSize: 0, lastLogFile: "" };
+
 const logSubscribers = new Set<WebSocket>();
 const MIN_LOG_TAIL_BYTES = 64 * 1024;
 const LOG_BYTES_PER_REQUESTED_LINE = 1024;
@@ -42,12 +45,12 @@ function isLogPathUnreadableErrorCode(code: string | undefined): boolean {
     return code !== undefined && LOG_PATH_UNREADABLE_ERROR_CODES.has(code);
 }
 
-function resolveRealLogsDir(): string {
-    return fs.realpathSync(logsDir);
+function resolveRealLogsDirectory(): string {
+    return fs.realpathSync(logsDirectory);
 }
 
 /** Returns today log file. */
-function getTodayLogFile(root = resolveRealLogsDir()): string {
+function getTodayLogFile(root = resolveRealLogsDirectory()): string {
     const today = dateToISOString(new Date()).split("T", 1)[0];
     return path.join(root, "openclaw-" + today + ".log");
 }
@@ -134,31 +137,31 @@ async function pollLogFile(): Promise<void> {
     try {
         const stat = await file.stat();
 
-        if (logFile !== lastLogFile) {
-            lastLogFile = logFile;
-            lastLogSize = stat.size;
+        if (logFile !== logsRouteState.lastLogFile) {
+            logsRouteState.lastLogFile = logFile;
+            logsRouteState.lastLogSize = stat.size;
             return;
         }
 
-        if (stat.size < lastLogSize) {
-            lastLogSize = 0;
+        if (stat.size < logsRouteState.lastLogSize) {
+            logsRouteState.lastLogSize = 0;
         }
 
-        if (stat.size > lastLogSize) {
-            const buffer = Buffer.alloc(stat.size - lastLogSize);
-            await file.read(buffer, 0, buffer.length, lastLogSize);
+        if (stat.size > logsRouteState.lastLogSize) {
+            const buffer = Buffer.alloc(stat.size - logsRouteState.lastLogSize);
+            await file.read(buffer, 0, buffer.length, logsRouteState.lastLogSize);
 
             const lines = buffer
                 .toString("utf8")
                 .split("\n")
                 .filter((l) => l.trim());
-            lastLogSize = stat.size;
+            logsRouteState.lastLogSize = stat.size;
 
             for (const line of lines) {
-                const msg = JSON.stringify({ type: "log", line });
+                const message = JSON.stringify({ type: "log", line });
                 for (const ws of logSubscribers) {
                     try {
-                        ws.send(msg);
+                        ws.send(message);
                     } catch {
                         // Ignore errors from closed connections
                     }
@@ -181,19 +184,19 @@ async function pollLogFileAndLogErrors(poller = pollLogFile): Promise<void> {
 
 /** Performs a single tick of the log watcher. */
 function runLogWatcherTick(): void {
-    if (logPollInFlight) return;
-    logPollInFlight = true;
+    if (logsRouteState.isLogPollInFlight) return;
+    logsRouteState.isLogPollInFlight = true;
     void (async () => {
         await pollLogFileAndLogErrors();
-        logPollInFlight = false;
+        logsRouteState.isLogPollInFlight = false;
     })();
 }
 
 /** Performs start log watcher. */
 function startLogWatcher(): void {
-    if (logWatcher) return;
+    if (logsRouteState.logWatcher) return;
 
-    logWatcher = setInterval(runLogWatcherTick, 1000);
+    logsRouteState.logWatcher = setInterval(runLogWatcherTick, 1000);
 }
 
 /** Performs send log history. */
@@ -272,15 +275,15 @@ export function unsubscribeFromLogs(ws: WebSocket): void {
 /** Registers logs API routes. */
 export default function logsRoutes(app: express.Application): void {
     // Get log files info
-    app.get("/api/logs/info", (async (_req, res) => {
+    app.get("/api/logs/info", (async (_request, response) => {
         try {
             let realRoot: string;
             try {
-                realRoot = resolveRealLogsDir();
+                realRoot = resolveRealLogsDirectory();
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
                 if (isLogNotFoundErrorCode(code)) {
-                    res.json({ logs: [] });
+                    response.json({ logs: [] });
                     return;
                 }
                 throw error;
@@ -292,7 +295,7 @@ export default function logsRoutes(app: express.Application): void {
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
                 if (isLogNotFoundErrorCode(code)) {
-                    res.json({ logs: [] });
+                    response.json({ logs: [] });
                     return;
                 }
                 throw error;
@@ -318,18 +321,18 @@ export default function logsRoutes(app: express.Application): void {
                 })
                 .sort((a, b) => b.modified.getTime() - a.modified.getTime());
 
-            res.json({ logs: files });
+            response.json({ logs: files });
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            response.status(500).json({ error: (error as Error).message });
         }
     }) as RequestHandler);
 
     // Get log file content
-    app.get("/api/logs/content", (async (req, res) => {
-        let logFile = req.query.file as string | undefined;
-        const lines = parsePositiveLineCount(req.query.lines);
-        if (req.query.lines !== undefined && lines === null) {
-            res.status(400).json({ error: "Invalid lines" });
+    app.get("/api/logs/content", (async (request, response) => {
+        let logFile = request.query.file as string | undefined;
+        const lines = parsePositiveLineCount(request.query.lines);
+        if (request.query.lines !== undefined && lines === null) {
+            response.status(400).json({ error: "Invalid lines" });
             return;
         }
 
@@ -342,11 +345,11 @@ export default function logsRoutes(app: express.Application): void {
         try {
             let realRoot: string;
             try {
-                realRoot = resolveRealLogsDir();
+                realRoot = resolveRealLogsDirectory();
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
                 if (isLogNotFoundErrorCode(code)) {
-                    res.status(404).json({ error: "Log file not found" });
+                    response.status(404).json({ error: "Log file not found" });
                     return;
                 }
                 throw error;
@@ -355,12 +358,12 @@ export default function logsRoutes(app: express.Application): void {
             const candidatePath = path.resolve(realRoot, logFile);
 
             if (candidatePath === realRoot) {
-                res.status(404).json({ error: "Log file not found" });
+                response.status(404).json({ error: "Log file not found" });
                 return;
             }
 
             if (!candidatePath.startsWith(realRoot + path.sep)) {
-                res.status(403).json({ error: "Access denied" });
+                response.status(403).json({ error: "Access denied" });
                 return;
             }
 
@@ -370,18 +373,18 @@ export default function logsRoutes(app: express.Application): void {
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
                 if (isLogPathUnreadableErrorCode(code)) {
-                    res.status(404).json({ error: "Log file not found" });
+                    response.status(404).json({ error: "Log file not found" });
                     return;
                 }
                 throw error;
             }
             if (filePath === realRoot) {
-                res.status(404).json({ error: "Log file not found" });
+                response.status(404).json({ error: "Log file not found" });
                 return;
             }
 
             if (!filePath.startsWith(realRoot + path.sep)) {
-                res.status(403).json({ error: "Access denied" });
+                response.status(403).json({ error: "Access denied" });
                 return;
             }
 
@@ -391,11 +394,11 @@ export default function logsRoutes(app: express.Application): void {
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
                 if (isLogPathUnreadableErrorCode(code)) {
-                    res.status(404).json({ error: "Log file not found" });
+                    response.status(404).json({ error: "Log file not found" });
                     return;
                 }
                 console.error("[Logs] Failed to open log file:", error);
-                res.status(500).json({
+                response.status(500).json({
                     detail: "Internal server error",
                     error: "Failed to open log file",
                 });
@@ -406,7 +409,7 @@ export default function logsRoutes(app: express.Application): void {
             try {
                 const stat = await file.stat();
                 if (!stat.isFile()) {
-                    res.status(404).json({ error: "Log file not found" });
+                    response.status(404).json({ error: "Log file not found" });
                     return;
                 }
                 content = await readLogContent(file, stat, lines);
@@ -422,9 +425,9 @@ export default function logsRoutes(app: express.Application): void {
                     .join("\n");
             }
 
-            res.json({ content: content, file: logFile });
+            response.json({ content: content, file: logFile });
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            response.status(500).json({ error: (error as Error).message });
         }
     }) as RequestHandler);
 }

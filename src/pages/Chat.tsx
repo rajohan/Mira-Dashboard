@@ -11,7 +11,7 @@ import { ChatMessagesList } from "../components/features/chat/ChatMessagesList";
 import {
     type ActiveChatStreams,
     createChatVisibility,
-    historyContainsRecoveredStream,
+    hasRecoveredStreamHistory,
     isSameSessionKey,
     shouldShowStreamRow as shouldRenderStreamRow,
     uniqueStrings,
@@ -29,19 +29,19 @@ import {
     type RawChatHistoryMessage,
 } from "../components/features/chat/chatTypes";
 import {
-    assistantTextLooksRecovered,
     CHAT_HISTORY_LIMIT,
     chatErrorMessage,
     type ChatModelOption,
     dataUrlToBase64,
     dedupeMessages,
     displayMimeType,
+    isRecoveredAssistantText,
     MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENTS,
     mergeWithRecentOptimisticMessages,
     messageDeleteKey,
     readFileAsDataUrl,
-} from "../components/features/chat/chatUtils";
+} from "../components/features/chat/chatUtilities";
 import { buildSlashCommandSuggestions } from "../components/features/chat/slashCommands";
 import { useChatRuntimeEvents } from "../components/features/chat/useChatRuntimeEvents";
 import { useChatSlashCommands } from "../components/features/chat/useChatSlashCommands";
@@ -52,7 +52,10 @@ import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import type { Session } from "../types/session";
 import { currentIsoString, timestampFromDateString } from "../utils/date";
 import { formatSize } from "../utils/format";
-import { formatSessionType, sortSessionsByTypeAndActivity } from "../utils/sessionUtils";
+import {
+    formatSessionType,
+    sortSessionsByTypeAndActivity,
+} from "../utils/sessionUtilities";
 
 const CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY =
     "mira-dashboard-chat-diagnostic-visibility";
@@ -162,7 +165,7 @@ export function sessionTimestampMs(value: unknown): number | null {
 }
 
 /** Performs history has newer assistant message. */
-export function historyHasNewerAssistantMessage(
+export function hasNewerAssistantMessageInHistory(
     messages: ChatHistoryMessage[],
     updatedAt?: string
 ): boolean {
@@ -184,7 +187,7 @@ export function historyHasNewerAssistantMessage(
 
 /** Returns the next history-load bottom-following state. */
 export function nextHistoryBottomState(
-    previous: boolean,
+    wasPrevious: boolean,
     isNewSession: boolean,
     shouldStickToBottom: boolean
 ) {
@@ -192,17 +195,17 @@ export function nextHistoryBottomState(
         return true;
     }
 
-    return previous;
+    return wasPrevious;
 }
 
 /** Returns the next send error after a history load failure. */
 export function nextHistoryLoadSendError(
-    previous: string | null,
-    cancelled: boolean,
+    wasPrevious: string | null,
+    wasCancelled: boolean,
     historyLoadError: string
 ) {
-    if (cancelled) {
-        return previous;
+    if (wasCancelled) {
+        return wasPrevious;
     }
 
     return historyLoadError;
@@ -296,9 +299,9 @@ export function Chat() {
     const bottomFollowFrameReference = useRef<number | null>(null);
     const sendInFlightCountReference = useRef(0);
     const sendEpochReference = useRef(0);
-    const resetConfirmResolverReference = useRef<((confirmed: boolean) => void) | null>(
-        null
-    );
+    const resetConfirmResolverReference = useRef<
+        ((wasConfirmed: boolean) => void) | null
+    >(null);
 
     const [selectedSessionKey, setSelectedSessionKey] = useState("");
     const [draft, setDraft] = useState("");
@@ -336,10 +339,10 @@ export function Chat() {
 
     /** Performs update active streamilliseconds. */
     const updateActiveStreams = (
-        updater: (previous: ActiveChatStreams) => ActiveChatStreams
+        updater: (wasPrevious: ActiveChatStreams) => ActiveChatStreams
     ) => {
-        setActiveStreams((previous) => {
-            const next = updater(previous);
+        setActiveStreams((wasPrevious) => {
+            const next = updater(wasPrevious);
             activeStreamsReference.current = next;
             return next;
         });
@@ -370,10 +373,10 @@ export function Chat() {
             isRenderableChatHistoryMessage(message, chatVisibility)
     );
     const selectedStreamUpdatedAt = sessionTimestampMs(selectedStream?.updatedAt);
-    const selectedStreamIsQuiet =
+    const isSelectedStreamIsQuiet =
         selectedStreamUpdatedAt === null ||
         Date.now() - selectedStreamUpdatedAt >= ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
-    const selectedStreamIsRecoveredInMessages = Boolean(
+    const isSelectedStreamIsRecoveredInMessages = Boolean(
         selectedStreamText.trim() &&
         visibleMessagesForRows.some((message) => {
             if (message.role.toLowerCase() !== "assistant") {
@@ -385,17 +388,17 @@ export function Chat() {
             }
 
             return (
-                selectedStreamIsQuiet &&
-                assistantTextLooksRecovered(message.text, selectedStreamText)
+                isSelectedStreamIsQuiet &&
+                isRecoveredAssistantText(message.text, selectedStreamText)
             );
         })
     );
     const shouldShowSelectedStreamRow =
-        !selectedStreamIsRecoveredInMessages &&
+        !isSelectedStreamIsRecoveredInMessages &&
         shouldRenderStreamRow(selectedStreamText, selectedStreamMessage, chatVisibility);
     const shouldShowTypingIndicator = Boolean(
         selectedStream &&
-        !selectedStreamIsRecoveredInMessages &&
+        !isSelectedStreamIsRecoveredInMessages &&
         (selectedStream.statusText || !shouldShowSelectedStreamRow)
     );
     const chatRows: ChatRow[] = visibleMessagesForRows.map((message) => ({
@@ -469,7 +472,7 @@ export function Chat() {
             return;
         }
 
-        let cancelled = false;
+        let isCancelled = false;
 
         /** Performs load models. */
         const loadModels = async () => {
@@ -478,11 +481,11 @@ export function Chat() {
                     view: "configured",
                 })) as { models?: ChatModelOption[] };
 
-                if (!cancelled) {
+                if (!isCancelled) {
                     setChatModelOptions(result.models || []);
                 }
             } catch {
-                if (!cancelled) {
+                if (!isCancelled) {
                     setChatModelOptions([]);
                 }
             }
@@ -491,7 +494,7 @@ export function Chat() {
         void loadModels();
 
         return () => {
-            cancelled = true;
+            isCancelled = true;
         };
     }, [isConnected, request, selectedSessionKey]);
 
@@ -520,7 +523,7 @@ export function Chat() {
             return;
         }
 
-        let cancelled = false;
+        let isCancelled = false;
 
         /** Performs load history. */
         const loadHistory = async () => {
@@ -535,7 +538,7 @@ export function Chat() {
                     messages?: RawChatHistoryMessage[];
                 };
                 const shouldApplyResult =
-                    !cancelled &&
+                    !isCancelled &&
                     selectedSessionKeyReference.current === selectedSessionKey;
                 if (!shouldApplyResult) {
                     return;
@@ -545,35 +548,35 @@ export function Chat() {
                     result.messages,
                     createChatVisibility(showThinkingOutput, showToolOutput)
                 );
-                setMessages((previous) => {
+                setMessages((wasPrevious) => {
                     if (loadedHistorySessionReference.current !== selectedSessionKey) {
                         loadedHistorySessionReference.current = selectedSessionKey;
                         return nextMessages;
                     }
 
-                    return mergeWithRecentOptimisticMessages(previous, nextMessages);
+                    return mergeWithRecentOptimisticMessages(wasPrevious, nextMessages);
                 });
                 if (isNewSession) {
                     shouldStickToBottomReference.current = true;
                 }
-                setIsAtBottom((previous) =>
+                setIsAtBottom((wasPrevious) =>
                     nextHistoryBottomState(
-                        previous,
+                        wasPrevious,
                         isNewSession,
                         shouldStickToBottomReference.current
                     )
                 );
-                setHistoryLoadVersion((previous) => previous + 1);
+                setHistoryLoadVersion((wasPrevious) => wasPrevious + 1);
             } catch (error_) {
                 const historyLoadError = chatErrorMessage(
                     error_,
                     "Failed to load chat history"
                 );
-                setSendError((previous) =>
-                    nextHistoryLoadSendError(previous, cancelled, historyLoadError)
+                setSendError((wasPrevious) =>
+                    nextHistoryLoadSendError(wasPrevious, isCancelled, historyLoadError)
                 );
             } finally {
-                if (!cancelled) {
+                if (!isCancelled) {
                     setIsLoadingHistory(false);
                 }
             }
@@ -582,7 +585,7 @@ export function Chat() {
         void loadHistory();
 
         return () => {
-            cancelled = true;
+            isCancelled = true;
         };
     }, [isConnected, request, selectedSessionKey, showThinkingOutput, showToolOutput]);
     useEffect(() => {
@@ -599,7 +602,7 @@ export function Chat() {
         const abortController = new AbortController();
         backgroundHistoryRefreshAbortReference.current?.abort();
         backgroundHistoryRefreshAbortReference.current = abortController;
-        let cancelled = false;
+        let isCancelled = false;
 
         /** Performs refresh history. */
         const refreshHistory = async () => {
@@ -612,7 +615,7 @@ export function Chat() {
                         messages?: RawChatHistoryMessage[];
                     };
                     const shouldApplyResult =
-                        !cancelled &&
+                        !isCancelled &&
                         !abortController.signal.aborted &&
                         selectedSessionKeyReference.current === requestSessionKey;
                     if (!shouldApplyResult) {
@@ -628,40 +631,40 @@ export function Chat() {
                     const activeStreamUpdatedAt = sessionTimestampMs(
                         activeStream?.updatedAt
                     );
-                    const activeStreamIsQuiet =
+                    const isActiveStreamIsQuiet =
                         activeStreamUpdatedAt === null ||
                         Date.now() - activeStreamUpdatedAt >=
                             ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
-                    const recoveredStreamInHistory = Boolean(
+                    const isRecoveredStreamInHistory = Boolean(
                         activeStream &&
-                        activeStreamIsQuiet &&
+                        isActiveStreamIsQuiet &&
                         ((activeStream.text &&
-                            historyContainsRecoveredStream(
-                                nextMessages,
-                                activeStream.text
-                            )) ||
-                            historyHasNewerAssistantMessage(
+                            hasRecoveredStreamHistory(nextMessages, activeStream.text)) ||
+                            hasNewerAssistantMessageInHistory(
                                 nextMessages,
                                 activeStream.updatedAt
                             ))
                     );
-                    setMessages((previous) => {
-                        const previousLast = previous.at(-1)?.timestamp;
+                    setMessages((wasPrevious) => {
+                        const previousLast = wasPrevious.at(-1)?.timestamp;
                         const nextLast = nextMessages.at(-1)?.timestamp;
 
                         if (
-                            previous.length === nextMessages.length &&
+                            wasPrevious.length === nextMessages.length &&
                             previousLast === nextLast
                         ) {
-                            return previous;
+                            return wasPrevious;
                         }
 
-                        return mergeWithRecentOptimisticMessages(previous, nextMessages);
+                        return mergeWithRecentOptimisticMessages(
+                            wasPrevious,
+                            nextMessages
+                        );
                     });
                     setIsAtBottom(shouldStickToBottomReference.current);
-                    if (recoveredStreamInHistory) {
-                        updateActiveStreams((previous) => {
-                            const next = { ...previous };
+                    if (isRecoveredStreamInHistory) {
+                        updateActiveStreams((wasPrevious) => {
+                            const next = { ...wasPrevious };
                             delete next[requestSessionKey];
                             return next;
                         });
@@ -677,7 +680,7 @@ export function Chat() {
         void refreshHistory();
 
         return () => {
-            cancelled = true;
+            isCancelled = true;
             abortController.abort();
             backgroundHistoryRefreshAbortReference.current = null;
         };
@@ -696,20 +699,20 @@ export function Chat() {
             return;
         }
 
-        let cancelled = false;
-        let refreshInFlight = false;
+        let isCancelled = false;
+        let isRefreshInFlight = false;
 
         /** Performs refresh visible history. */
         const refreshVisibleHistory = async () => {
             if (
-                refreshInFlight ||
+                isRefreshInFlight ||
                 document.visibilityState === "hidden" ||
                 !shouldStickToBottomReference.current
             ) {
                 return;
             }
 
-            refreshInFlight = true;
+            isRefreshInFlight = true;
 
             try {
                 const result = (await request("chat.history", {
@@ -719,7 +722,7 @@ export function Chat() {
                     messages?: RawChatHistoryMessage[];
                 };
                 const shouldApplyResult =
-                    !cancelled &&
+                    !isCancelled &&
                     selectedSessionKeyReference.current === selectedSessionKey;
                 if (!shouldApplyResult) {
                     return;
@@ -730,26 +733,26 @@ export function Chat() {
                     createChatVisibility(showThinkingOutput, showToolOutput)
                 );
 
-                setMessages((previous) => {
-                    const previousLast = previous.at(-1)?.timestamp;
+                setMessages((wasPrevious) => {
+                    const previousLast = wasPrevious.at(-1)?.timestamp;
                     const nextLast = nextMessages.at(-1)?.timestamp;
 
                     if (
-                        previous.length === nextMessages.length &&
+                        wasPrevious.length === nextMessages.length &&
                         previousLast === nextLast
                     ) {
-                        return previous;
+                        return wasPrevious;
                     }
 
-                    return mergeWithRecentOptimisticMessages(previous, nextMessages);
+                    return mergeWithRecentOptimisticMessages(wasPrevious, nextMessages);
                 });
 
                 setIsAtBottom(shouldStickToBottomReference.current);
-                setHistoryLoadVersion((previous) => previous + 1);
+                setHistoryLoadVersion((wasPrevious) => wasPrevious + 1);
             } catch {
                 // Opportunistic live refresh; WebSocket events remain the primary path.
             } finally {
-                refreshInFlight = false;
+                isRefreshInFlight = false;
             }
         };
 
@@ -759,7 +762,7 @@ export function Chat() {
         );
 
         return () => {
-            cancelled = true;
+            isCancelled = true;
             window.clearInterval(interval);
         };
     }, [isConnected, request, selectedSessionKey, showThinkingOutput, showToolOutput]);
@@ -804,7 +807,9 @@ export function Chat() {
 
         const atBottom = checkIsAtBottom();
         shouldStickToBottomReference.current = atBottom;
-        setIsAtBottom((previous) => (previous === atBottom ? previous : atBottom));
+        setIsAtBottom((wasPrevious) =>
+            wasPrevious === atBottom ? wasPrevious : atBottom
+        );
     };
 
     /** Performs scroll messages to bottom. */
@@ -856,10 +861,10 @@ export function Chat() {
     };
 
     useLayoutEffect(() => {
-        const sessionChanged =
+        const isSessionChanged =
             previousSelectedSessionKeyReference.current !== selectedSessionKey;
-        const rowsWereAdded = chatRows.length > previousChatRowsLengthReference.current;
-        const streamTextChanged =
+        const isRowsWereAdded = chatRows.length > previousChatRowsLengthReference.current;
+        const isStreamTextChanged =
             previousSelectedStreamTextReference.current !== selectedStreamText;
 
         previousSelectedSessionKeyReference.current = selectedSessionKey;
@@ -870,7 +875,7 @@ export function Chat() {
             return;
         }
 
-        if (sessionChanged) {
+        if (isSessionChanged) {
             shouldStickToBottomReference.current = true;
             scrollMessagesToBottom();
             return;
@@ -878,7 +883,7 @@ export function Chat() {
 
         if (
             !shouldStickToBottomReference.current ||
-            (!rowsWereAdded && !streamTextChanged)
+            (!isRowsWereAdded && !isStreamTextChanged)
         ) {
             return;
         }
@@ -956,8 +961,8 @@ export function Chat() {
             return;
         }
 
-        setDeletedMessageKeys((previous) => {
-            const next = new Set(previous);
+        setDeletedMessageKeys((wasPrevious) => {
+            const next = new Set(wasPrevious);
             next.add(pendingDeleteMessageKey);
             writeDeletedMessageKeys(selectedSessionKey, next);
             return next;
@@ -966,8 +971,8 @@ export function Chat() {
     };
 
     /** Resolves a pending reset confirmation and hides the modal. */
-    const closeResetConfirm = (confirmed: boolean) => {
-        resetConfirmResolverReference.current?.(confirmed);
+    const closeResetConfirm = (wasConfirmed: boolean) => {
+        resetConfirmResolverReference.current?.(wasConfirmed);
         resetConfirmResolverReference.current = null;
         setIsResetConfirmOpen(false);
     };
@@ -1028,7 +1033,7 @@ export function Chat() {
                 })
             );
 
-            setAttachments((previous) => [...previous, ...nextAttachments]);
+            setAttachments((wasPrevious) => [...wasPrevious, ...nextAttachments]);
         } catch (error_) {
             setSendError(chatErrorMessage(error_, "Failed to read attachment"));
         } finally {
@@ -1040,8 +1045,8 @@ export function Chat() {
 
     /** Performs remove attachment. */
     const removeAttachment = (attachmentId: string) => {
-        setAttachments((previous) =>
-            previous.filter((attachment) => attachment.id !== attachmentId)
+        setAttachments((wasPrevious) =>
+            wasPrevious.filter((attachment) => attachment.id !== attachmentId)
         );
     };
 
@@ -1082,8 +1087,8 @@ export function Chat() {
                 return;
             }
 
-            setDraft((previous) => {
-                const trimmedPrevious = previous.trimEnd();
+            setDraft((wasPrevious) => {
+                const trimmedPrevious = wasPrevious.trimEnd();
                 return trimmedPrevious ? `${trimmedPrevious}\n${text}` : text;
             });
         } catch (error_) {
@@ -1125,16 +1130,16 @@ export function Chat() {
         }
 
         const mediaDevices = navigator.mediaDevices as MediaDevices | undefined;
-        const canUseDirectRecorder =
+        const canUseDirectoryectRecorder =
             Boolean(mediaDevices) &&
             typeof mediaDevices?.getUserMedia === "function" &&
             window.MediaRecorder !== undefined;
 
-        if (!canUseDirectRecorder) {
+        if (!canUseDirectoryectRecorder) {
             setSendError(
                 window.isSecureContext
-                    ? "Direct voice recording is not supported here. Choose or record an audio file instead."
-                    : "Direct voice recording requires HTTPS or localhost. Choose or record an audio file instead."
+                    ? "Directoryect voice recording is not supported here. Choose or record an audio file instead."
+                    : "Directoryect voice recording requires HTTPS or localhost. Choose or record an audio file instead."
             );
             voiceFileInputReference.current?.click();
             return;
@@ -1244,16 +1249,16 @@ export function Chat() {
         const sendEpoch = beginSend();
 
         if (text.startsWith("/")) {
-            let handledCommand: boolean;
+            let isHandledCommand: boolean;
             try {
-                handledCommand = await handleSlashCommand(text);
+                isHandledCommand = await handleSlashCommand(text);
             } catch (error_) {
                 setSendError(chatErrorMessage(error_, "Failed to run slash command"));
                 endSend(sendEpoch);
                 return;
             }
 
-            if (handledCommand) {
+            if (isHandledCommand) {
                 endSend(sendEpoch);
                 return;
             }
@@ -1273,7 +1278,7 @@ export function Chat() {
         };
 
         if (shouldAppendOptimisticMessage) {
-            setMessages((previous) => dedupeMessages([...previous, userMessage]));
+            setMessages((wasPrevious) => dedupeMessages([...wasPrevious, userMessage]));
         }
         setDraft("");
         setAttachments([]);
@@ -1286,8 +1291,8 @@ export function Chat() {
             ? undefined
             : `dashboard-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         if (idempotencyKey) {
-            updateActiveStreams((previous) => ({
-                ...previous,
+            updateActiveStreams((wasPrevious) => ({
+                ...wasPrevious,
                 [selectedSessionKey]: {
                     sessionKey: selectedSessionKey,
                     runId: idempotencyKey,
@@ -1329,22 +1334,22 @@ export function Chat() {
 
             if (isResetCommand) {
                 setMessages([]);
-                updateActiveStreams((previous) => {
-                    const next = { ...previous };
+                updateActiveStreams((wasPrevious) => {
+                    const next = { ...wasPrevious };
                     delete next[selectedSessionKey];
                     return next;
                 });
             } else {
                 const acknowledgedRunId = result?.runId;
                 if (acknowledgedRunId) {
-                    updateActiveStreams((previous) => {
-                        const existing = previous[selectedSessionKey];
+                    updateActiveStreams((wasPrevious) => {
+                        const existing = wasPrevious[selectedSessionKey];
                         if (!existing) {
-                            return previous;
+                            return wasPrevious;
                         }
 
                         return {
-                            ...previous,
+                            ...wasPrevious,
                             [selectedSessionKey]: {
                                 ...existing,
                                 runId: acknowledgedRunId,
@@ -1359,8 +1364,8 @@ export function Chat() {
             }
         } catch (error_) {
             setSendError(chatErrorMessage(error_, "Failed to send message"));
-            updateActiveStreams((previous) => {
-                const next = { ...previous };
+            updateActiveStreams((wasPrevious) => {
+                const next = { ...wasPrevious };
                 delete next[selectedSessionKey];
                 return next;
             });
@@ -1390,12 +1395,14 @@ export function Chat() {
                         selectedSessionKey={selectedSessionKey}
                         sessionOptions={sessionOptions}
                         agentOptions={agentOptions}
-                        showThinking={showThinkingOutput}
-                        showTools={showToolOutput}
+                        shouldShowThinking={showThinkingOutput}
+                        shouldShowTools={showToolOutput}
                         onToggleThinking={() =>
-                            setShowThinkingOutput((previous) => !previous)
+                            setShowThinkingOutput((wasPrevious) => !wasPrevious)
                         }
-                        onToggleTools={() => setShowToolOutput((previous) => !previous)}
+                        onToggleTools={() =>
+                            setShowToolOutput((wasPrevious) => !wasPrevious)
+                        }
                         onSelectAgent={handleSelectAgent}
                         onSelectSession={setSelectedSessionKey}
                     />

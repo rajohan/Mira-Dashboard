@@ -1,7 +1,7 @@
 import { Card } from "./Card";
 
 /** Provides props for metric card. */
-interface MetricCardProps {
+interface MetricCardProperties {
     title: string;
     value?: string | number;
     subtitle?: string;
@@ -38,7 +38,7 @@ export function MetricCard({
     showPercentLabel = true,
     color = "blue",
     icon,
-}: MetricCardProps) {
+}: MetricCardProperties) {
     /** Returns color. */
     const getColor = (p: number): "green" | "blue" | "orange" | "red" => {
         if (p < 50) return "green";

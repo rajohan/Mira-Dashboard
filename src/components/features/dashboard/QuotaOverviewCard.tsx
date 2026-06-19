@@ -10,7 +10,7 @@ import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 
 /** Provides quota cache data rendered by the quota overview card. */
-interface QuotaOverviewCardProps {
+interface QuotaOverviewCardProperties {
     quotas: QuotasResponse | undefined;
 }
 
@@ -179,7 +179,7 @@ function formatSyntheticWeeklyRemaining(
 }
 
 /** Renders the quota overview card UI. */
-export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProps) {
+export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
     if (!quotas) {
         return (
             <Card>

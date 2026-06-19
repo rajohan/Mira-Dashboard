@@ -2,19 +2,19 @@ import type { Dispatch, SetStateAction } from "react";
 
 import { type ActiveChatStreams, createLocalSystemMessage } from "./chatRuntime";
 import type { ChatHistoryMessage, ChatSendAttachment } from "./chatTypes";
-import { chatErrorMessage } from "./chatUtils";
+import { chatErrorMessage } from "./chatUtilities";
 import { slashCommandCanonicalName } from "./slashCommands";
 
 /** Represents use chat slash commands params. */
-interface UseChatSlashCommandsParams {
+interface UseChatSlashCommandsParameters {
     request: <T = unknown>(
         method: string,
-        params?: Record<string, unknown>
+        parameters?: Record<string, unknown>
     ) => Promise<T>;
     selectedSessionKey: string;
     attachments: ChatSendAttachment[];
     updateActiveStreams: (
-        updater: (previous: ActiveChatStreams) => ActiveChatStreams
+        updater: (wasPrevious: ActiveChatStreams) => ActiveChatStreams
     ) => void;
     setMessages: Dispatch<SetStateAction<ChatHistoryMessage[]>>;
     setDraft: Dispatch<SetStateAction<string>>;
@@ -32,10 +32,10 @@ export function useChatSlashCommands({
     setDraft,
     setSendError,
     confirmResetSession,
-}: UseChatSlashCommandsParams) {
+}: UseChatSlashCommandsParameters) {
     /** Performs add system message. */
     const addSystemMessage = (text: string) => {
-        setMessages((previous) => [...previous, createLocalSystemMessage(text)]);
+        setMessages((wasPrevious) => [...wasPrevious, createLocalSystemMessage(text)]);
     };
 
     return async (commandText: string): Promise<boolean> => {
@@ -56,17 +56,17 @@ export function useChatSlashCommands({
         }
 
         if (command === "/reset" || command === "/new") {
-            let confirmed: boolean;
+            let isConfirmed: boolean;
             try {
-                confirmed = await confirmResetSession();
+                isConfirmed = await confirmResetSession();
             } catch {
-                confirmed = false;
+                isConfirmed = false;
             }
 
-            if (!confirmed) {
+            if (!isConfirmed) {
                 setDraft("");
                 setSendError(null);
-                addSystemMessage("Reset cancelled.");
+                addSystemMessage("Reset wasCancelled.");
                 return true;
             }
 
@@ -80,8 +80,8 @@ export function useChatSlashCommands({
 
         try {
             await request("chat.abort", { sessionKey: selectedSessionKey });
-            updateActiveStreams((previous) => {
-                const next = { ...previous };
+            updateActiveStreams((wasPrevious) => {
+                const next = { ...wasPrevious };
                 delete next[selectedSessionKey];
                 return next;
             });

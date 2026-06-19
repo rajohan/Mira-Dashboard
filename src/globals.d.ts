@@ -2,17 +2,17 @@ declare const __APP_COMMIT__: string;
 
 declare module "*.css";
 declare module "*.html" {
-    const route: unknown;
+    const route: Bun.HTMLBundle;
     export default route;
 }
 
-interface ImportMetaEnv {
+interface ImportMetaEnvironment {
     readonly MODE: string;
     readonly PUBLIC_DASHBOARD_WS_PORT?: string;
 }
 
 interface ImportMeta {
-    readonly env: ImportMetaEnv;
+    readonly env: ImportMetaEnvironment;
 }
 
 interface Uint8Array {

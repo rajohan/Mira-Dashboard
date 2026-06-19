@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetchRequired, apiPostRequired } from "./useApi";
 
 /** Represents cache envelope. */
-export interface CacheEnvelope<T> {
+export interface CacheEnvironmentelope<T> {
     key: string;
     source: string;
     status: string;
@@ -21,7 +21,7 @@ export interface CacheEnvelope<T> {
 export interface CacheHeartbeatResponse {
     generatedAt: string;
     count: number;
-    entries: CacheEnvelope<unknown>[];
+    entries: CacheEnvironmentelope<unknown>[];
 }
 
 /** Defines cache keys. */
@@ -46,7 +46,9 @@ export function useCacheEntry<T>(key: string, refreshInterval: number | false = 
     return useQuery({
         queryKey: cacheKeys.entry(key),
         queryFn: () =>
-            apiFetchRequired<CacheEnvelope<T>>(`/cache/${encodeURIComponent(key)}`),
+            apiFetchRequired<CacheEnvironmentelope<T>>(
+                `/cache/${encodeURIComponent(key)}`
+            ),
         refetchInterval: refreshInterval,
         staleTime: 2_000,
     });
@@ -65,9 +67,10 @@ export function useRefreshCacheEntry() {
 
             const results = await Promise.all(
                 keys.map((key) =>
-                    apiPostRequired<{ ok: boolean; entry: CacheEnvelope<unknown> }>(
-                        `/cache/${encodeURIComponent(key)}/refresh`
-                    )
+                    apiPostRequired<{
+                        isOk: boolean;
+                        entry: CacheEnvironmentelope<unknown>;
+                    }>(`/cache/${encodeURIComponent(key)}/refresh`)
                 )
             );
 

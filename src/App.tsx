@@ -8,13 +8,13 @@ import { OpenClawSocketProvider } from "./hooks/useOpenClawSocket";
 import { queryClient } from "./lib/queryClient";
 import { router } from "./router";
 
-const enableDevtools = import.meta.env?.MODE !== "production";
-const DashboardDevtools = enableDevtools
+const isEnableDevtools = import.meta.env?.MODE !== "production";
+const DashboardDevtools = isEnableDevtools
     ? lazy(() => import("./components/devtools/DashboardDevtools"))
     : undefined;
 
 /** Renders the app UI. */
-function App() {
+export default function App() {
     useEffect(() => {
         /** Performs on unauthorized. */
         const onUnauthorized = () => {
@@ -42,5 +42,3 @@ function App() {
         </ErrorBoundary>
     );
 }
-
-export default App;

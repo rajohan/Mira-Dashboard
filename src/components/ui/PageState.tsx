@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 /** Provides props for page state. */
-interface PageStateProps {
+interface PageStateProperties {
     isLoading?: boolean;
     loading?: ReactNode;
     error?: string | null;
@@ -20,7 +20,7 @@ export function PageState({
     isEmpty = false,
     empty,
     children,
-}: PageStateProps) {
+}: PageStateProperties) {
     if (isLoading) {
         return <>{loading ?? null}</>;
     }

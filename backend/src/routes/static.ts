@@ -14,7 +14,7 @@ export default function staticRoutes(
     if (indexExists) {
         // Serve static files. Avoid stale dashboard bundles during active development;
         // hashed asset names still keep payloads stable, but the browser must revalidate
-        // so chat capability fixes land immediately after a deploy/restart.
+        // so chat capability fixes land immediately after a shouldDeploy/restart.
         app.use(
             express.static(frontendPath, {
                 index: false,
@@ -24,59 +24,66 @@ export default function staticRoutes(
             })
         );
 
-        app.get(/^(?!\/api(?:\/|$)).*\.[\da-z]+$/i, async (req, res, next) => {
-            if (req.path.includes("/") && req.path !== `/${path.basename(req.path)}`) {
+        app.get(/^(?!\/api(?:\/|$)).*\.[\da-z]+$/i, async (request, response, next) => {
+            if (
+                request.path.includes("/") &&
+                request.path !== `/${path.basename(request.path)}`
+            ) {
                 next();
                 return;
             }
 
-            const assetPath = path.join(frontendPath, "assets", path.basename(req.path));
+            const assetPath = path.join(
+                frontendPath,
+                "assets",
+                path.basename(request.path)
+            );
             try {
                 const stat = await fsp.stat(assetPath);
                 if (!stat.isFile()) {
-                    res.status(404).type("text/plain").send("Not found");
+                    response.status(404).type("text/plain").send("Not found");
                     return;
                 }
             } catch {
-                res.status(404).type("text/plain").send("Not found");
+                response.status(404).type("text/plain").send("Not found");
                 return;
             }
 
-            res.setHeader("Cache-Control", "no-store");
-            res.sendFile(assetPath, (err) => {
-                if (!err) {
+            response.setHeader("Cache-Control", "no-store");
+            response.sendFile(assetPath, (error) => {
+                if (!error) {
                     return;
                 }
 
-                console.error("[Static] Error serving asset:", err.message);
-                res.status(500).type("text/plain").send("Error loading asset");
+                console.error("[Static] Error serving asset:", error.message);
+                response.status(500).type("text/plain").send("Error loading asset");
             });
         });
 
         // SPA fallback - serve index.html for app routes, but never for asset/file
         // requests. Browsers enforce module MIME types, so a missing JS chunk must
         // be a 404 instead of index.html.
-        app.get(/^(?!\/api(?:\/|$)).*/, (req, res) => {
-            if (req.path.startsWith("/assets/") || path.extname(req.path)) {
-                res.status(404).type("text/plain").send("Not found");
+        app.get(/^(?!\/api(?:\/|$)).*/, (request, response) => {
+            if (request.path.startsWith("/assets/") || path.extname(request.path)) {
+                response.status(404).type("text/plain").send("Not found");
                 return;
             }
 
             const indexPath = path.join(frontendPath, "index.html");
-            res.setHeader("Cache-Control", "no-store");
-            res.sendFile(indexPath, (err) => {
-                if (!err) {
+            response.setHeader("Cache-Control", "no-store");
+            response.sendFile(indexPath, (error) => {
+                if (!error) {
                     return;
                 }
 
-                console.error("[Static] Error serving index.html:", err.message);
-                res.status(500).send("Error loading application");
+                console.error("[Static] Error serving index.html:", error.message);
+                response.status(500).send("Error loading application");
             });
         });
     } else {
         // Frontend not built - serve a placeholder
-        app.get(/^(?!\/api(?:\/|$)).*/, (_req, res) => {
-            res.status(503).send(`
+        app.get(/^(?!\/api(?:\/|$)).*/, (_request, response) => {
+            response.status(503).send(`
                 <html>
                 <head><title>Mira Dashboard - Not Built</title></head>
                 <body style="font-family: system-ui; padding: 2rem; background: #1a1a2e; color: #eee;">

@@ -4,7 +4,7 @@ import JSON5 from "json5";
 import os from "os";
 import Path from "path";
 
-import { db } from "../db.ts";
+import { database as database } from "../database.ts";
 import gateway from "../gateway.ts";
 import { asyncRoute } from "../lib/errors.ts";
 import {
@@ -32,31 +32,31 @@ function resolveOpenclawRoot(): string {
             : defaultOpenclawRoot();
     }
 
-    const homeDir = (process.env.HOME?.trim() || os.homedir().trim()).trim();
+    const homeDirectory = (process.env.HOME?.trim() || os.homedir().trim()).trim();
     if (
-        homeDir.length === 0 ||
-        Path.resolve(homeDir) !== homeDir ||
-        Path.parse(homeDir).root === homeDir
+        homeDirectory.length === 0 ||
+        Path.resolve(homeDirectory) !== homeDirectory ||
+        Path.parse(homeDirectory).root === homeDirectory
     ) {
         return defaultOpenclawRoot();
     }
-    return Path.join(homeDir, ".openclaw");
+    return Path.join(homeDirectory, ".openclaw");
 }
 
-const prepareAgentMetadataDirForWrite = prepareSafeWriteTargetWithinRoot;
-const procfsAvailabilityProbe = (): boolean =>
+const prepareAgentMetadataDirectoryForWrite = prepareSafeWriteTargetWithinRoot;
+const hasProcfsAvailabilityProbe = (): boolean =>
     process.platform === "linux" && FS.existsSync("/proc/self/fd");
 
 function getOpenclawRoot(): string {
     return resolveOpenclawRoot();
 }
 
-function getAgentsDir(): string {
+function getAgentsDirectory(): string {
     return Path.join(getOpenclawRoot(), "agents");
 }
 
 export function isProcfsAvailable(): boolean {
-    return procfsAvailabilityProbe();
+    return hasProcfsAvailabilityProbe();
 }
 
 function mkdirChildFromVerifiedParent(parent: string, childName: string): void {
@@ -107,64 +107,67 @@ export function isValidAgentId(id: string): boolean {
 }
 
 /** Returns the first Express route param value regardless of scalar/array shape. */
-function getRouteParam(value: string | string[] | undefined): string {
+function getRouteParameter(value: string | string[] | undefined): string {
     return Array.isArray(value) ? value[0] || "" : value || "";
 }
 
-function getRealAgentsDir(): string | null {
+function getRealAgentsDirectory(): string | null {
     try {
-        return FS.realpathSync(getAgentsDir());
+        return FS.realpathSync(getAgentsDirectory());
     } catch {
         return null;
     }
 }
 
-function ensureRealAgentsDir(): string | null {
+function ensureRealAgentsDirectory(): string | null {
     try {
-        const agentsDir = getAgentsDir();
-        const realAgentsDir = FS.realpathSync(agentsDir);
-        const agentsDirStat = FS.statSync(realAgentsDir);
-        if (!agentsDirStat.isDirectory()) {
+        const agentsDirectory = getAgentsDirectory();
+        const realAgentsDirectory = FS.realpathSync(agentsDirectory);
+        const agentsDirectoryStat = FS.statSync(realAgentsDirectory);
+        if (!agentsDirectoryStat.isDirectory()) {
             return null;
         }
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
             return null;
         }
-        mkdirGuarded(guardedPath(getAgentsDir()), { recursive: true });
+        mkdirGuarded(guardedPath(getAgentsDirectory()), { recursive: true });
     }
 
-    return getRealAgentsDir();
+    return getRealAgentsDirectory();
 }
 
 /** Returns the canonical sessions directory for a validated agent id. */
-function getSafeAgentSessionsDir(agentId: string): string | null {
+function getSafeAgentSessionsDirectory(agentId: string): string | null {
     if (!isValidAgentId(agentId)) {
         return null;
     }
 
-    const agentsDir = getAgentsDir();
-    const sessionsDir = safePathWithinRoot(Path.join(agentId, "sessions"), agentsDir);
-    if (!sessionsDir) {
+    const agentsDirectory = getAgentsDirectory();
+    const sessionsDirectory = safePathWithinRoot(
+        Path.join(agentId, "sessions"),
+        agentsDirectory
+    );
+    if (!sessionsDirectory) {
         return null;
     }
 
     try {
-        const realAgentsDir = getRealAgentsDir();
-        if (!realAgentsDir) {
+        const realAgentsDirectory = getRealAgentsDirectory();
+        if (!realAgentsDirectory) {
             return null;
         }
-        const expectedSessionsDir = Path.join(agentsDir, agentId, "sessions");
-        const canonicalExpectedSessionsDir = Path.join(
-            realAgentsDir,
+        const expectedSessionsDirectory = Path.join(agentsDirectory, agentId, "sessions");
+        const canonicalExpectedSessionsDirectory = Path.join(
+            realAgentsDirectory,
             agentId,
             "sessions"
         );
-        const realExpectedSessionsDir = FS.realpathSync(expectedSessionsDir);
-        const realSessionsDir = FS.realpathSync(sessionsDir);
-        return realSessionsDir === realExpectedSessionsDir &&
-            realExpectedSessionsDir === canonicalExpectedSessionsDir
-            ? realSessionsDir
+        const realExpectedSessionsDirectory = FS.realpathSync(expectedSessionsDirectory);
+        const realSessionsDirectory = FS.realpathSync(sessionsDirectory);
+        return realSessionsDirectory === realExpectedSessionsDirectory &&
+            realExpectedSessionsDirectory === canonicalExpectedSessionsDirectory
+            ? realSessionsDirectory
             : null;
     } catch {
         return null;
@@ -185,21 +188,21 @@ function getSafeAgentActivityRoots(agentId: string): ActivityLogRoot[] {
         },
     ];
 
-    const realAgentsDir = getRealAgentsDir();
-    if (!realAgentsDir) {
+    const realAgentsDirectory = getRealAgentsDirectory();
+    if (!realAgentsDirectory) {
         return [];
     }
     return roots.flatMap((root) => {
-        const rootDir = safePathWithinRoot(root.relative, getAgentsDir());
-        if (!rootDir) {
+        const rootDirectory = safePathWithinRoot(root.relative, getAgentsDirectory());
+        if (!rootDirectory) {
             return [];
         }
 
         try {
-            const expected = Path.join(realAgentsDir, root.relative);
-            const realRootDir = FS.realpathSync(rootDir);
-            return realRootDir === expected
-                ? [{ dir: realRootDir, recursive: root.recursive }]
+            const expected = Path.join(realAgentsDirectory, root.relative);
+            const realRootDirectory = FS.realpathSync(rootDirectory);
+            return realRootDirectory === expected
+                ? [{ directory: realRootDirectory, recursive: root.recursive }]
                 : [];
         } catch {
             return [];
@@ -428,16 +431,18 @@ function timestampToIso(timestamp: number): string {
 /** Performs close stale active tasks. */
 function closeStaleActiveTasks(): void {
     const cutoff = timestampToIso(Date.now() - TASK_IDLE_TIMEOUT_MS);
-    db.prepare(
-        `UPDATE agent_task_history
+    database
+        .prepare(
+            `UPDATE agent_task_history
          SET status = 'completed_auto', completed_at = ?, last_activity_at = ?
          WHERE status = 'active' AND last_activity_at < ?`
-    ).run(nowIso(), nowIso(), cutoff);
+        )
+        .run(nowIso(), nowIso(), cutoff);
 }
 
 /** Finds the most recent non-finished task in agent history for active-task inference. */
 function getActiveHistoryTask(agentId: string): AgentTaskHistoryItem | null {
-    const row = db
+    const row = database
         .prepare(
             `SELECT id, agent_id, task, status, started_at, completed_at, last_activity_at
          FROM agent_task_history
@@ -474,7 +479,7 @@ function getActiveHistoryTask(agentId: string): AgentTaskHistoryItem | null {
 
 /** Returns recently completed task-history entries for dashboard display. */
 function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
-    const rows = db
+    const rows = database
         .prepare(
             `SELECT id, agent_id, task, status, started_at, completed_at, last_activity_at
          FROM agent_task_history
@@ -550,14 +555,14 @@ function parseAgentsConfig(): AgentsConfig | null {
 // Read agent metadata file for current task
 /** Reads metadata.json for an agent using validated file access. */
 async function getAgentMetadata(agentId: string): Promise<AgentMetadata | null> {
-    const sessionsDir = getSafeAgentSessionsDir(agentId);
-    if (!sessionsDir) {
+    const sessionsDirectory = getSafeAgentSessionsDirectory(agentId);
+    if (!sessionsDirectory) {
         return null;
     }
 
     try {
         const content = await readTextNoFollowGuarded(
-            guardedPath(Path.join(sessionsDir, "metadata.json"))
+            guardedPath(Path.join(sessionsDirectory, "metadata.json"))
         );
         return JSON5.parse(content) as AgentMetadata;
     } catch {
@@ -568,14 +573,14 @@ async function getAgentMetadata(agentId: string): Promise<AgentMetadata | null> 
 // Get sessions from agent's sessions.json file
 /** Loads cached session summaries from the agent sessions directory. */
 async function getAgentSessionsFromFiles(agentId: string): Promise<SessionInfo[]> {
-    const sessionsDir = getSafeAgentSessionsDir(agentId);
-    if (!sessionsDir) {
+    const sessionsDirectory = getSafeAgentSessionsDirectory(agentId);
+    if (!sessionsDirectory) {
         return [];
     }
 
     try {
         const content = await readTextNoFollowGuarded(
-            guardedPath(Path.join(sessionsDir, "sessions.json"))
+            guardedPath(Path.join(sessionsDirectory, "sessions.json"))
         );
         const sessions = JSON5.parse(content);
         return Array.isArray(sessions) ? sessions : [];
@@ -601,7 +606,7 @@ interface ActivityInfo {
 
 /** Describes one activity log root to scan for an agent. */
 interface ActivityLogRoot {
-    dir: string;
+    directory: string;
     recursive: boolean;
 }
 
@@ -622,7 +627,7 @@ function toActivityLogFile(
 ): ActivityLogFile | null {
     try {
         const mtime = statFile(guardedPath(fullPath)).mtimeMs;
-        const group = `${root.dir}:${relativePath
+        const group = `${root.directory}:${relativePath
             .replace(/\.trajectory\.jsonl$/u, "")
             .replace(/\.jsonl$/u, "")}`;
         return { name: relativePath, path: fullPath, mtime, group };
@@ -635,7 +640,7 @@ function toActivityLogFile(
 /** Lists JSONL activity files in a root while preserving paired file grouping. */
 function listActivityLogFiles(root: ActivityLogRoot): ActivityLogFile[] {
     const files: ActivityLogFile[] = [];
-    const pending = [{ dir: root.dir, relativeDir: "", depth: 0 }];
+    const pending = [{ directory: root.directory, relativeDirectory: "", depth: 0 }];
     const maxDepth = root.recursive ? 6 : 0;
 
     while (pending.length > 0) {
@@ -646,22 +651,22 @@ function listActivityLogFiles(root: ActivityLogRoot): ActivityLogFile[] {
 
         let entries: FS.Dirent[];
         try {
-            entries = readdirGuarded(guardedPath(current.dir), {
+            entries = readdirGuarded(guardedPath(current.directory), {
                 withFileTypes: true,
             });
         } catch {
             continue;
         }
         for (const entry of entries) {
-            const fullPath = Path.join(current.dir, entry.name);
-            const relativePath = current.relativeDir
-                ? Path.join(current.relativeDir, entry.name)
+            const fullPath = Path.join(current.directory, entry.name);
+            const relativePath = current.relativeDirectory
+                ? Path.join(current.relativeDirectory, entry.name)
                 : entry.name;
 
             if (entry.isDirectory() && root.recursive && current.depth < maxDepth) {
                 pending.push({
-                    dir: fullPath,
-                    relativeDir: relativePath,
+                    directory: fullPath,
+                    relativeDirectory: relativePath,
                     depth: current.depth + 1,
                 });
             } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
@@ -707,22 +712,22 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
               ? (raw as Record<string, unknown>)
               : {};
 
-    const args =
+    const arguments_ =
         parsed.arguments && typeof parsed.arguments === "object"
             ? (parsed.arguments as Record<string, unknown>)
             : parsed;
 
     const nested =
-        args.parameters && typeof args.parameters === "object"
-            ? (args.parameters as Record<string, unknown>)
+        arguments_.parameters && typeof arguments_.parameters === "object"
+            ? (arguments_.parameters as Record<string, unknown>)
             : {};
 
-    const path = (args.path ||
-        args.file_path ||
-        args.filePath ||
-        (Array.isArray(args.paths) ? args.paths[0] : undefined) ||
-        (args.input && typeof args.input === "object"
-            ? (args.input as Record<string, unknown>).path
+    const path = (arguments_.path ||
+        arguments_.file_path ||
+        arguments_.filePath ||
+        (Array.isArray(arguments_.paths) ? arguments_.paths[0] : undefined) ||
+        (arguments_.input && typeof arguments_.input === "object"
+            ? (arguments_.input as Record<string, unknown>).path
             : undefined) ||
         nested.path ||
         nested.file_path ||
@@ -730,15 +735,17 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
         (Array.isArray(nested.paths) ? nested.paths[0] : undefined)) as
         | string
         | undefined;
-    const command = (args.command || args.cmd || nested.command || nested.cmd) as
-        | string
-        | undefined;
-    const action = (args.action || nested.action) as string | undefined;
-    const message = (args.message || args.text || nested.message || nested.text) as
-        | string
-        | undefined;
-    const url = (args.url || nested.url) as string | undefined;
-    const query = (args.query || nested.query) as string | undefined;
+    const command = (arguments_.command ||
+        arguments_.cmd ||
+        nested.command ||
+        nested.cmd) as string | undefined;
+    const action = (arguments_.action || nested.action) as string | undefined;
+    const message = (arguments_.message ||
+        arguments_.text ||
+        nested.message ||
+        nested.text) as string | undefined;
+    const url = (arguments_.url || nested.url) as string | undefined;
+    const query = (arguments_.query || nested.query) as string | undefined;
 
     // Fallback: parse partialJson/raw string if present
     let fallbackPath: string | undefined;
@@ -948,12 +955,12 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
             .toArray()
             .sort((a, b) => b.modTime - a.modTime);
         const latestGroup = sortedGroups[0];
-        const latestModTime = latestGroup.modTime;
+        const latestModuleTime = latestGroup.modTime;
         const now = Date.now();
 
         // If no session file has been modified in 5 minutes, agent is idle.
-        if (now - latestModTime > STALE_THRESHOLD) {
-            return { task: null, activity: null, modTime: latestModTime };
+        if (now - latestModuleTime > STALE_THRESHOLD) {
+            return { task: null, activity: null, modTime: latestModuleTime };
         }
 
         const getEntryTurnId = (entry: unknown): string | null => {
@@ -1010,9 +1017,9 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
             let fileRunId: string | null = null;
 
             // Scan from end to find most recent user message and visible tool use.
-            for (let i = lines.length - 1; i >= 0; i--) {
+            for (let index = lines.length - 1; index >= 0; index--) {
                 try {
-                    const entry = JSON.parse(lines[i]);
+                    const entry = JSON.parse(lines[index]);
                     const record = entry as { runId?: unknown; type?: string };
                     const entryRunId =
                         typeof record.runId === "string" ? record.runId : null;
@@ -1048,21 +1055,21 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
                         fileActivity = codexActivity;
                     }
 
-                    const msg = entry.message || entry;
+                    const message = entry.message || entry;
 
                     // First user message from end = current task
-                    if (msg.role === "user" && msg.content && !fileTask) {
+                    if (message.role === "user" && message.content && !fileTask) {
                         const text =
-                            typeof msg.content === "string"
-                                ? msg.content
-                                : Array.isArray(msg.content)
-                                  ? msg.content
+                            typeof message.content === "string"
+                                ? message.content
+                                : Array.isArray(message.content)
+                                  ? message.content
                                         .filter(
                                             (c: { type?: string }) => c.type === "text"
                                         )
                                         .map((c: { text?: string }) => c.text)
                                         .join(" ")
-                                  : String(msg.content);
+                                  : String(message.content);
 
                         // Clean metadata and extract actual message
                         fileTask = cleanTaskText(text) || null;
@@ -1071,11 +1078,11 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
 
                     // First visible tool use from end = current activity.
                     if (
-                        msg.role === "assistant" &&
-                        Array.isArray(msg.content) &&
+                        message.role === "assistant" &&
+                        Array.isArray(message.content) &&
                         !fileActivity
                     ) {
-                        const toolCall = msg.content.find(
+                        const toolCall = message.content.find(
                             (c: { type?: string; name?: string }) =>
                                 c.type === "toolCall" &&
                                 typeof c.name === "string" &&
@@ -1120,7 +1127,8 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
             let groupTaskTurnId: string | null = null;
             let groupActivity: string | null = null;
 
-            for (const file of group.files.sort((a, b) => b.mtime - a.mtime)) {
+            const sortedFiles = group.files.sort((a, b) => b.mtime - a.mtime);
+            for (const file of sortedFiles) {
                 const {
                     task: fileTask,
                     taskTurnId: fileTaskTurnId,
@@ -1175,7 +1183,7 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
         return {
             task: pendingTask,
             activity: selectedActivity,
-            modTime: latestModTime,
+            modTime: latestModuleTime,
         };
     } catch {
         return null;
@@ -1183,20 +1191,20 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
 }
 
 /** Returns the modification time for a session file, or null when it cannot be read. */
-function getSessionFileModTime(agentId: string): number | null {
+function getSessionFileModuleTime(agentId: string): number | null {
     const roots = getSafeAgentActivityRoots(agentId);
     if (roots.length === 0) {
         return null;
     }
 
     try {
-        let latestModTime = 0;
+        let latestModuleTime = 0;
         for (const root of roots) {
             for (const file of listActivityLogFiles(root)) {
-                latestModTime = Math.max(latestModTime, file.mtime);
+                latestModuleTime = Math.max(latestModuleTime, file.mtime);
             }
         }
-        return latestModTime > 0 ? latestModTime : null;
+        return latestModuleTime > 0 ? latestModuleTime : null;
     } catch {
         return null;
     }
@@ -1212,11 +1220,11 @@ function getChannelFromSessionKey(sessionKey: string): string | null {
 }
 
 /** Performs determine status. */
-function determineStatus(lastModTime: number | null): "active" | "thinking" | "idle" {
-    if (!lastModTime) return "idle";
+function determineStatus(lastModuleTime: number | null): "active" | "thinking" | "idle" {
+    if (!lastModuleTime) return "idle";
 
     const now = Date.now();
-    const elapsed = now - lastModTime;
+    const elapsed = now - lastModuleTime;
 
     if (elapsed < ACTIVE_THRESHOLD) {
         return "active";
@@ -1302,7 +1310,7 @@ function applyGatewaySessionStatus(
     if (!session) {
         return;
     }
-    status.sessionKey = status.sessionKey || session.key;
+    status.sessionKey ||= session.key;
     status.channel = getChannelFromSessionKey(session.key);
 
     const updatedAt = toTimestamp(session.updatedAt);
@@ -1343,12 +1351,12 @@ async function getAgentStatus(agentId: string): Promise<AgentStatus> {
     const activity = await getLatestActivityFromFile(agentId);
 
     // Determine status from file modification time
-    const fileModTime = activity?.modTime || getSessionFileModTime(agentId);
-    const status = determineStatus(fileModTime);
+    const fileModuleTime = activity?.modTime || getSessionFileModuleTime(agentId);
+    const status = determineStatus(fileModuleTime);
 
     const sessionKey = latestSession?.key || null;
     const channel = sessionKey ? getChannelFromSessionKey(sessionKey) : null;
-    const effectiveModTime = fileModTime || 0;
+    const effectiveModuleTime = fileModuleTime || 0;
 
     const currentTask =
         activeTask?.task || metadata?.currentTask || activity?.task || null;
@@ -1359,7 +1367,8 @@ async function getAgentStatus(agentId: string): Promise<AgentStatus> {
         model: "unknown", // Will be filled from config
         currentTask,
         currentActivity: activity?.activity || null,
-        lastActivity: effectiveModTime > 0 ? timestampToIso(effectiveModTime) : null,
+        lastActivity:
+            effectiveModuleTime > 0 ? timestampToIso(effectiveModuleTime) : null,
         sessionKey,
         channel,
     };
@@ -1448,14 +1457,14 @@ export default function agentsRoutes(app: express.Application): void {
     app.get(
         "/api/agents/config",
         asyncRoute(
-            async (_req, res) => {
+            async (_request, response) => {
                 const config = parseAgentsConfig();
                 if (!config) {
-                    res.status(404).json({ error: "Agent configuration not found" });
+                    response.status(404).json({ error: "Agent configuration not found" });
                     return;
                 }
 
-                res.json(config);
+                response.json(config);
             },
             { fallback: "Agent config failed", logLabel: "[Agents] Config error:" }
         )
@@ -1465,15 +1474,15 @@ export default function agentsRoutes(app: express.Application): void {
     app.get(
         "/api/agents/status",
         asyncRoute(
-            async (_req, res) => {
+            async (_request, response) => {
                 closeStaleActiveTasks();
                 const config = parseAgentsConfig();
                 if (!config) {
-                    res.status(404).json({ error: "Agent configuration not found" });
+                    response.status(404).json({ error: "Agent configuration not found" });
                     return;
                 }
                 const agents = await buildAgentStatuses(config);
-                res.json({ agents, timestamp: Date.now() });
+                response.json({ agents, timestamp: Date.now() });
             },
             { fallback: "Agent status failed", logLabel: "[Agents] Status error:" }
         )
@@ -1483,26 +1492,26 @@ export default function agentsRoutes(app: express.Application): void {
     app.get(
         "/api/agents/:id/status",
         asyncRoute(
-            async (req, res) => {
-                const agentId = getRouteParam(req.params.id);
+            async (request, response) => {
+                const agentId = getRouteParameter(request.params.id);
                 if (!isValidAgentId(agentId)) {
-                    res.status(400).json({ error: "Invalid agent ID" });
+                    response.status(400).json({ error: "Invalid agent ID" });
                     return;
                 }
                 closeStaleActiveTasks();
                 const config = parseAgentsConfig();
                 if (!config) {
-                    res.status(404).json({ error: "Agent configuration not found" });
+                    response.status(404).json({ error: "Agent configuration not found" });
                     return;
                 }
 
                 const status = await buildSingleAgentStatus(agentId, config);
                 if (!status) {
-                    res.status(404).json({ error: `Agent '${agentId}' not found` });
+                    response.status(404).json({ error: `Agent '${agentId}' not found` });
                     return;
                 }
 
-                res.json(status);
+                response.json(status);
             },
             { fallback: "Agent status failed", logLabel: "[Agents] Status error:" }
         )
@@ -1512,11 +1521,11 @@ export default function agentsRoutes(app: express.Application): void {
     app.get(
         "/api/agents/tasks/history",
         asyncRoute(
-            async (req, res) => {
-                const limit = Math.max(1, Math.min(20, Number(req.query.limit) || 8));
+            async (request, response) => {
+                const limit = Math.max(1, Math.min(20, Number(request.query.limit) || 8));
                 closeStaleActiveTasks();
                 const tasks = getLatestCompletedTasks(limit);
-                res.json({ tasks, timestamp: Date.now() });
+                response.json({ tasks, timestamp: Date.now() });
             },
             {
                 fallback: "Agent task history failed",
@@ -1529,94 +1538,104 @@ export default function agentsRoutes(app: express.Application): void {
     app.put(
         "/api/agents/:id/metadata",
         asyncRoute(
-            async (req, res) => {
-                const agentId = getRouteParam(req.params.id);
+            async (request, response) => {
+                const agentId = getRouteParameter(request.params.id);
                 if (!isValidAgentId(agentId)) {
-                    res.status(400).json({ error: "Invalid agent ID" });
+                    response.status(400).json({ error: "Invalid agent ID" });
                     return;
                 }
 
-                const body = req.body as null | { currentTask?: unknown };
+                const body = request.body as null | { currentTask?: unknown };
                 const currentTask =
                     body && typeof body === "object" ? body.currentTask : undefined;
 
                 if (typeof currentTask !== "string" || currentTask.trim().length === 0) {
-                    res.status(400).json({ error: "Provide currentTask" });
+                    response.status(400).json({ error: "Provide currentTask" });
                     return;
                 }
                 const metadataPath = safePathWithinRoot(
                     Path.join(agentId, "sessions", "metadata.json"),
-                    getAgentsDir()
+                    getAgentsDirectory()
                 );
                 if (!metadataPath) {
-                    res.status(400).json({ error: "Invalid agent ID" });
+                    response.status(400).json({ error: "Invalid agent ID" });
                     return;
                 }
-                const metadataDir = Path.dirname(metadataPath as string);
+                const metadataDirectory = Path.dirname(metadataPath as string);
 
-                const realAgentsDir = ensureRealAgentsDir();
-                if (!realAgentsDir) {
-                    res.status(400).json({ error: "Invalid agent metadata path" });
+                const realAgentsDirectory = ensureRealAgentsDirectory();
+                if (!realAgentsDirectory) {
+                    response.status(400).json({ error: "Invalid agent metadata path" });
                     return;
                 }
-                const agentsDir = getAgentsDir();
-                const expectedSessionsDir = Path.join(agentsDir, agentId, "sessions");
-                const canonicalExpectedSessionsDir = Path.join(
-                    realAgentsDir,
+                const agentsDirectory = getAgentsDirectory();
+                const expectedSessionsDirectory = Path.join(
+                    agentsDirectory,
                     agentId,
                     "sessions"
                 );
-                const safeSessionsDir = prepareAgentMetadataDirForWrite(
-                    expectedSessionsDir,
-                    agentsDir
+                const canonicalExpectedSessionsDirectory = Path.join(
+                    realAgentsDirectory,
+                    agentId,
+                    "sessions"
                 );
-                if (safeSessionsDir !== canonicalExpectedSessionsDir) {
-                    res.status(400).json({ error: "Invalid agent metadata path" });
+                const safeSessionsDirectory = prepareAgentMetadataDirectoryForWrite(
+                    expectedSessionsDirectory,
+                    agentsDirectory
+                );
+                if (safeSessionsDirectory !== canonicalExpectedSessionsDirectory) {
+                    response.status(400).json({ error: "Invalid agent metadata path" });
                     return;
                 }
-                const expectedSessionsParent = Path.dirname(safeSessionsDir);
+                const expectedSessionsParent = Path.dirname(safeSessionsDirectory);
                 let realExpectedSessionsParent: string;
                 try {
-                    mkdirChildFromVerifiedParent(realAgentsDir, agentId);
+                    mkdirChildFromVerifiedParent(realAgentsDirectory, agentId);
                     realExpectedSessionsParent = FS.realpathSync(expectedSessionsParent);
                 } catch (error) {
                     if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {
-                        res.status(501).json({ error: "unsupported-platform" });
+                        response.status(501).json({ error: "unsupported-platform" });
                         return;
                     }
                     throw error;
                 }
                 if (
                     realExpectedSessionsParent !==
-                        Path.dirname(canonicalExpectedSessionsDir) ||
+                        Path.dirname(canonicalExpectedSessionsDirectory) ||
                     !FS.statSync(realExpectedSessionsParent).isDirectory()
                 ) {
-                    res.status(400).json({ error: "Invalid agent metadata path" });
+                    response.status(400).json({ error: "Invalid agent metadata path" });
                     return;
                 }
-                let realExpectedSessionsDir: string;
+                let realExpectedSessionsDirectory: string;
                 try {
                     mkdirChildFromVerifiedParent(realExpectedSessionsParent, "sessions");
-                    realExpectedSessionsDir = FS.realpathSync(expectedSessionsDir);
+                    realExpectedSessionsDirectory = FS.realpathSync(
+                        expectedSessionsDirectory
+                    );
                 } catch (error) {
                     if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {
-                        res.status(501).json({ error: "unsupported-platform" });
+                        response.status(501).json({ error: "unsupported-platform" });
                         return;
                     }
                     throw error;
                 }
-                const realMetadataDir = FS.realpathSync(metadataDir);
+                const realMetadataDirectory = FS.realpathSync(metadataDirectory);
                 if (
-                    realMetadataDir !== realExpectedSessionsDir ||
-                    realExpectedSessionsDir !== canonicalExpectedSessionsDir ||
-                    !FS.statSync(realExpectedSessionsDir).isDirectory() ||
-                    !FS.statSync(realMetadataDir).isDirectory()
+                    realMetadataDirectory !== realExpectedSessionsDirectory ||
+                    realExpectedSessionsDirectory !==
+                        canonicalExpectedSessionsDirectory ||
+                    !FS.statSync(realExpectedSessionsDirectory).isDirectory() ||
+                    !FS.statSync(realMetadataDirectory).isDirectory()
                 ) {
-                    res.status(400).json({ error: "Invalid agent metadata path" });
+                    response.status(400).json({ error: "Invalid agent metadata path" });
                     return;
                 }
 
-                const safeMetadataPath = Path.join(realMetadataDir, "metadata.json");
+                const safeMetadataPath = Path.join(
+                    realMetadataDirectory,
+                    "metadata.json"
+                );
 
                 // Read existing metadata or create new (atomic read, no existsSync check)
                 let metadata: AgentMetadata = {};
@@ -1656,15 +1675,15 @@ export default function agentsRoutes(app: express.Application): void {
 
                 metadata.updatedAt = ts;
 
-                const latestMetadataDir = FS.realpathSync(metadataDir);
-                if (latestMetadataDir !== realExpectedSessionsDir) {
-                    res.status(400).json({ error: "Invalid agent metadata path" });
+                const latestMetadataDirectory = FS.realpathSync(metadataDirectory);
+                if (latestMetadataDirectory !== realExpectedSessionsDirectory) {
+                    response.status(400).json({ error: "Invalid agent metadata path" });
                     return;
                 }
 
                 // Write back using O_NOFOLLOW so a swapped final metadata.json symlink is rejected at open time.
                 await writeTextNoFollowGuarded(
-                    guardedPath(Path.join(latestMetadataDir, "metadata.json")),
+                    guardedPath(Path.join(latestMetadataDirectory, "metadata.json")),
                     JSON.stringify(metadata, null, 2)
                 );
 
@@ -1673,31 +1692,39 @@ export default function agentsRoutes(app: express.Application): void {
                     if (safeTask && safeTask.length > 0) {
                         const currentActive = getActiveHistoryTask(agentId);
                         if (!currentActive) {
-                            db.prepare(
-                                `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
+                            database
+                                .prepare(
+                                    `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
                              VALUES (?, ?, 'active', ?, ?)`
-                            ).run(agentId, safeTask, ts, ts);
+                                )
+                                .run(agentId, safeTask, ts, ts);
                         } else if (currentActive.task === safeTask) {
-                            db.prepare(
-                                `UPDATE agent_task_history SET last_activity_at = ? WHERE id = ?`
-                            ).run(ts, currentActive.id);
+                            database
+                                .prepare(
+                                    `UPDATE agent_task_history SET last_activity_at = ? WHERE id = ?`
+                                )
+                                .run(ts, currentActive.id);
                         } else {
-                            db.prepare(
-                                `UPDATE agent_task_history
+                            database
+                                .prepare(
+                                    `UPDATE agent_task_history
                              SET status = 'completed', completed_at = ?, last_activity_at = ?
                              WHERE id = ?`
-                            ).run(ts, ts, currentActive.id);
+                                )
+                                .run(ts, ts, currentActive.id);
 
-                            db.prepare(
-                                `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
+                            database
+                                .prepare(
+                                    `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
                              VALUES (?, ?, 'active', ?, ?)`
-                            ).run(agentId, safeTask, ts, ts);
+                                )
+                                .run(agentId, safeTask, ts, ts);
                         }
                     }
                 } catch (error) {
                     console.error("[Agents] Task history sync failed:", error);
                 }
-                res.json(metadata);
+                response.json(metadata);
             },
             {
                 fallback: "Agent metadata update failed",

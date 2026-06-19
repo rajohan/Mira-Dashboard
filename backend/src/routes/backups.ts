@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 
 import express, { type RequestHandler } from "express";
 
-import { db } from "../db.ts";
+import { database as database } from "../database.ts";
 import { asyncRoute, errorMessage } from "../lib/errors.ts";
 import { refreshCacheProducer } from "../services/cacheRefresh.ts";
 import {
@@ -63,8 +63,13 @@ interface BackupJobResponse {
 }
 
 const backupJobs = new Map<string, BackupJob>();
-let activeKopiaJobId: string | null = null;
-let activeWalgJobId: string | null = null;
+const backupRouteState: {
+    activeKopiaJobId: string | null;
+    activeWalgJobId: string | null;
+} = {
+    activeKopiaJobId: null,
+    activeWalgJobId: null,
+};
 
 /** Performs trim output. */
 function trimOutput(text: string): string {
@@ -94,15 +99,15 @@ function getCurrentJob(activeJobId: string | null, clear: () => void) {
 
 /** Returns current kopia job. */
 function getCurrentKopiaJob() {
-    return getCurrentJob(activeKopiaJobId, () => {
-        activeKopiaJobId = null;
+    return getCurrentJob(backupRouteState.activeKopiaJobId, () => {
+        backupRouteState.activeKopiaJobId = null;
     });
 }
 
 /** Returns current walg job. */
 function getCurrentWalgJob() {
-    return getCurrentJob(activeWalgJobId, () => {
-        activeWalgJobId = null;
+    return getCurrentJob(backupRouteState.activeWalgJobId, () => {
+        backupRouteState.activeWalgJobId = null;
     });
 }
 
@@ -159,11 +164,11 @@ async function clearNeedsAttentionBackupJob(type: BackupJob["type"]) {
         );
     }
     backupJobs.delete(job.id);
-    if (type === "kopia" && activeKopiaJobId === job.id) {
-        activeKopiaJobId = null;
+    if (type === "kopia" && backupRouteState.activeKopiaJobId === job.id) {
+        backupRouteState.activeKopiaJobId = null;
     }
-    if (type === "walg" && activeWalgJobId === job.id) {
-        activeWalgJobId = null;
+    if (type === "walg" && backupRouteState.activeWalgJobId === job.id) {
+        backupRouteState.activeWalgJobId = null;
     }
     await refreshBackupStatus(type, job);
     return job;
@@ -171,7 +176,7 @@ async function clearNeedsAttentionBackupJob(type: BackupJob["type"]) {
 
 function recordBackupNeedsAttention(type: BackupJob["type"], stderr: string): BackupJob {
     const jobId = randomUUID();
-    let resolveCompleted!: (job: BackupJob) => void;
+    const completed = Promise.withResolvers<BackupJob>();
     const now = Date.now();
     const job: BackupJob = {
         id: jobId,
@@ -182,17 +187,15 @@ function recordBackupNeedsAttention(type: BackupJob["type"], stderr: string): Ba
         stderr,
         startedAt: now,
         endedAt: now,
-        completed: new Promise<BackupJob>((resolve) => {
-            resolveCompleted = resolve;
-        }),
+        completed: completed.promise,
     };
     backupJobs.set(jobId, job);
     if (type === "kopia") {
-        activeKopiaJobId = jobId;
+        backupRouteState.activeKopiaJobId = jobId;
     } else {
-        activeWalgJobId = jobId;
+        backupRouteState.activeWalgJobId = jobId;
     }
-    resolveCompleted(job);
+    completed.resolve(job);
     return job;
 }
 
@@ -219,7 +222,7 @@ function startBackupJob(
     evictCompletedBackupJobs(type);
 
     const jobId = randomUUID();
-    let resolveCompleted!: (job: BackupJob) => void;
+    const completed = Promise.withResolvers<BackupJob>();
     const job: BackupJob = {
         id: jobId,
         type,
@@ -229,16 +232,14 @@ function startBackupJob(
         stderr: "",
         startedAt: Date.now(),
         endedAt: null,
-        completed: new Promise<BackupJob>((resolve) => {
-            resolveCompleted = resolve;
-        }),
+        completed: completed.promise,
     };
 
     backupJobs.set(jobId, job);
     if (type === "kopia") {
-        activeKopiaJobId = jobId;
+        backupRouteState.activeKopiaJobId = jobId;
     } else {
-        activeWalgJobId = jobId;
+        backupRouteState.activeWalgJobId = jobId;
     }
 
     let child: ReturnType<typeof spawn>;
@@ -249,38 +250,38 @@ function startBackupJob(
         });
     } catch (error) {
         backupJobs.delete(jobId);
-        if (activeKopiaJobId === jobId) {
-            activeKopiaJobId = null;
+        if (backupRouteState.activeKopiaJobId === jobId) {
+            backupRouteState.activeKopiaJobId = null;
         }
-        if (activeWalgJobId === jobId) {
-            activeWalgJobId = null;
+        if (backupRouteState.activeWalgJobId === jobId) {
+            backupRouteState.activeWalgJobId = null;
         }
         throw error;
     }
 
     job.process = child;
-    let finalized = false;
-    let finalizing = false;
-    let abortRequested = false;
+    let isFinalized = false;
+    let isFinalizing = false;
+    let isAbortRequested = false;
     let hostAbortKillTimer: NodeJS.Timeout | null = null;
     let containerAbortKillTimer: NodeJS.Timeout | null = null;
 
     const finalizeJob = async (code: number, signalName: NodeJS.Signals | null) => {
-        if (finalized || finalizing) {
+        if (isFinalized || isFinalizing) {
             return;
         }
-        finalizing = true;
+        isFinalizing = true;
         if (hostAbortKillTimer) {
             clearTimeout(hostAbortKillTimer);
             hostAbortKillTimer = null;
         }
-        const interrupted = abortRequested || signalName !== null;
-        let needsAttention =
+        const interrupted = isAbortRequested || signalName !== null;
+        let isNeedsAttention =
             interrupted && abortConfig
                 ? !(await waitForContainerProcessExitWithRetries(abortConfig, job))
                 : false;
         if (interrupted && hostAbortPattern) {
-            needsAttention = !(await waitForHostProcessExitWithRetries(
+            isNeedsAttention = !(await waitForHostProcessExitWithRetries(
                 hostAbortPattern,
                 job
             ));
@@ -290,20 +291,20 @@ function startBackupJob(
             containerAbortKillTimer = null;
         }
         const completedCode = interrupted ? 130 : code;
-        job.status = needsAttention ? "needs_attention" : "done";
+        job.status = isNeedsAttention ? "needs_attention" : "done";
         job.code = completedCode;
         job.endedAt = Date.now();
-        finalized = true;
+        isFinalized = true;
         signal?.removeEventListener("abort", abortBackup);
-        resolveCompleted(job);
+        completed.resolve(job);
         await refreshBackupStatus(type, job);
     };
 
     const markNeedsAttention = async () => {
-        if (finalized || finalizing) {
+        if (isFinalized || isFinalizing) {
             return;
         }
-        finalizing = true;
+        isFinalizing = true;
         if (hostAbortKillTimer) {
             clearTimeout(hostAbortKillTimer);
             hostAbortKillTimer = null;
@@ -315,14 +316,14 @@ function startBackupJob(
         job.status = "needs_attention";
         job.code = 130;
         job.endedAt = Date.now();
-        finalized = true;
+        isFinalized = true;
         signal?.removeEventListener("abort", abortBackup);
-        resolveCompleted(job);
+        completed.resolve(job);
         await refreshBackupStatus(type, job);
     };
 
     const abortBackup = () => {
-        abortRequested = true;
+        isAbortRequested = true;
         job.stderr = trimOutput(`${job.stderr}\nBackup aborted by scheduler`.trim());
         if (abortConfig) {
             void terminateContainerProcessSafely(abortConfig, "SIGTERM", job);
@@ -383,10 +384,10 @@ function startBackupJob(
     });
 
     child.on("error", async (error) => {
-        if (finalized || finalizing) {
+        if (isFinalized || isFinalizing) {
             return;
         }
-        finalizing = true;
+        isFinalizing = true;
         if (hostAbortKillTimer) {
             clearTimeout(hostAbortKillTimer);
             hostAbortKillTimer = null;
@@ -395,7 +396,7 @@ function startBackupJob(
             clearTimeout(containerAbortKillTimer);
             containerAbortKillTimer = null;
         }
-        finalized = true;
+        isFinalized = true;
         job.status = "done";
         job.code = 1;
         job.stderr = trimOutput(`${job.stderr}\n${error.message}`.trim());
@@ -403,7 +404,7 @@ function startBackupJob(
         if (signal) {
             signal.removeEventListener("abort", abortBackup);
         }
-        resolveCompleted(job);
+        completed.resolve(job);
         await refreshBackupStatus(type, job);
     });
 
@@ -412,10 +413,10 @@ function startBackupJob(
 
 function runDockerExec(
     container: string,
-    args: readonly string[]
+    arguments_: readonly string[]
 ): Promise<{ code: number; stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
-        const child = spawnBackupProcess("docker", ["exec", container, ...args], {
+        const child = spawnBackupProcess("docker", ["exec", container, ...arguments_], {
             detached: true,
             env: process.env,
         });
@@ -423,7 +424,9 @@ function runDockerExec(
             try {
                 if (typeof child.pid === "number") {
                     process.kill(-child.pid, "SIGKILL");
-                    reject(new Error(`Timed out waiting for docker exec ${args[0]}`));
+                    reject(
+                        new Error(`Timed out waiting for docker exec ${arguments_[0]}`)
+                    );
                     return;
                 }
             } catch {
@@ -434,7 +437,7 @@ function runDockerExec(
             } catch {
                 // The timeout error below is still the actionable failure.
             }
-            reject(new Error(`Timed out waiting for docker exec ${args[0]}`));
+            reject(new Error(`Timed out waiting for docker exec ${arguments_[0]}`));
         }, backupAbortDockerExecTimeoutMs);
         timeout.unref();
         let stdout = "";
@@ -883,11 +886,11 @@ async function finishManualScheduledRunWhenComplete(
 ): Promise<void> {
     try {
         const completedJob = await job.completed;
-        const success = completedJob.status === "done" && completedJob.code === 0;
+        const isSuccess = completedJob.status === "done" && completedJob.code === 0;
         finishScheduledJobRun(
             run,
-            success ? "success" : "failed",
-            success ? null : backupFailureMessage(completedJob),
+            isSuccess ? "success" : "failed",
+            isSuccess ? null : backupFailureMessage(completedJob),
             { backup: mapJob(completedJob) }
         );
     } catch (error) {
@@ -984,7 +987,7 @@ export function registerBackupScheduledJobs(): void {
         },
         { timeoutMs: SCHEDULED_BACKUP_TIMEOUT_MS }
     );
-    db.exec("BEGIN");
+    database.exec("BEGIN");
     try {
         removeScheduledJobsNotInAction(
             "backup.run",
@@ -1002,9 +1005,9 @@ export function registerBackupScheduledJobs(): void {
                 cronExpression: existing?.cronExpression ?? null,
             });
         }
-        db.exec("COMMIT");
+        database.exec("COMMIT");
     } catch (error) {
-        db.exec("ROLLBACK");
+        database.exec("ROLLBACK");
         throw error;
     }
 }
@@ -1014,16 +1017,16 @@ export default function backupRoutes(
     app: express.Application,
     _express: typeof express
 ): void {
-    app.get("/api/backups/kopia", ((_req, res) => {
-        res.json({ job: mapJob(getCurrentKopiaJob()) } satisfies BackupJobResponse);
+    app.get("/api/backups/kopia", ((_request, response) => {
+        response.json({ job: mapJob(getCurrentKopiaJob()) } satisfies BackupJobResponse);
     }) as RequestHandler);
 
     app.post(
         "/api/backups/kopia/run",
         asyncRoute(
-            async (_req, res) => {
+            async (_request, response) => {
                 const job = await startManualBackup("kopia");
-                res.json({ ok: true, job: mapJob(job) });
+                response.json({ isOk: true, job: mapJob(job) });
             },
             { fallback: "Failed to start Kopia backup" }
         )
@@ -1032,24 +1035,24 @@ export default function backupRoutes(
     app.post(
         "/api/backups/kopia/clear-needs-attention",
         asyncRoute(
-            async (_req, res) => {
+            async (_request, response) => {
                 const job = await clearNeedsAttentionBackupJob("kopia");
-                res.json({ ok: true, cleared: mapJob(job) });
+                response.json({ isOk: true, cleared: mapJob(job) });
             },
             { fallback: "Failed to clear Kopia backup attention" }
         )
     );
 
-    app.get("/api/backups/walg", ((_req, res) => {
-        res.json({ job: mapJob(getCurrentWalgJob()) } satisfies BackupJobResponse);
+    app.get("/api/backups/walg", ((_request, response) => {
+        response.json({ job: mapJob(getCurrentWalgJob()) } satisfies BackupJobResponse);
     }) as RequestHandler);
 
     app.post(
         "/api/backups/walg/run",
         asyncRoute(
-            async (_req, res) => {
+            async (_request, response) => {
                 const job = await startManualBackup("walg");
-                res.json({ ok: true, job: mapJob(job) });
+                response.json({ isOk: true, job: mapJob(job) });
             },
             { fallback: "Failed to start WAL-G backup" }
         )
@@ -1058,9 +1061,9 @@ export default function backupRoutes(
     app.post(
         "/api/backups/walg/clear-needs-attention",
         asyncRoute(
-            async (_req, res) => {
+            async (_request, response) => {
                 const job = await clearNeedsAttentionBackupJob("walg");
-                res.json({ ok: true, cleared: mapJob(job) });
+                response.json({ isOk: true, cleared: mapJob(job) });
             },
             { fallback: "Failed to clear WAL-G backup attention" }
         )

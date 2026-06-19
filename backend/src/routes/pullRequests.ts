@@ -6,9 +6,12 @@ import { promisify } from "node:util";
 
 import express, { type RequestHandler } from "express";
 
-import { db, miraDbPath } from "../db.ts";
+import {
+    database as database,
+    miraDatabasePath as miraDatabasePath,
+} from "../database.ts";
 import { asyncRoute as baseAsyncRoute, errorMessage } from "../lib/errors.ts";
-import { nonEmptyEnvFallback } from "../lib/values.ts";
+import { nonEmptyEnvironmentFallback as nonEmptyEnvironmentFallback } from "../lib/values.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -16,14 +19,14 @@ function dateToISOString(date: Date): string {
 
 const execFileAsync = promisify(execFile);
 
-function resolveConfiguredRoot(envName: string, fallback: string): string {
-    const rawValue = nonEmptyEnvFallback(envName, fallback).trim();
+function resolveConfiguredRoot(environmentName: string, fallback: string): string {
+    const rawValue = nonEmptyEnvironmentFallback(environmentName, fallback).trim();
     if (!path.isAbsolute(rawValue)) {
-        throw new Error(`${envName} must be an absolute non-root path`);
+        throw new Error(`${environmentName} must be an absolute non-root path`);
     }
     const value = path.resolve(rawValue);
     if (value === path.parse(value).root) {
-        throw new Error(`${envName} must be an absolute non-root path`);
+        throw new Error(`${environmentName} must be an absolute non-root path`);
     }
     return value;
 }
@@ -92,7 +95,7 @@ interface PullRequestSummary {
     mergeStateStatus?: string;
     reviewDecision?: string;
     reviewerApproved?: boolean;
-    reviewerCanApprove?: boolean;
+    canReviewerApprove?: boolean;
     latestOpinionatedReviews?: PullRequestReviewConnection;
     reviews?: PullRequestReview[];
     statusCheckRollup?: unknown[];
@@ -116,7 +119,7 @@ interface PullRequestReviewConnection {
 /** Represents deployment job. */
 interface DeploymentJob {
     id: string;
-    status: "building" | "restart-scheduled" | "ok" | "failed";
+    status: "building" | "restart-scheduled" | "isOk" | "failed";
     startedAt: string;
     updatedAt: string;
     commit?: string;
@@ -167,8 +170,9 @@ function asyncRoute(handler: RequestHandler): RequestHandler {
 
 /** Performs write deployment job. */
 function writeDeploymentJob(job: DeploymentJob): void {
-    db.prepare(
-        `
+    database
+        .prepare(
+            `
         INSERT INTO deployment_jobs (
             id,
             status,
@@ -191,17 +195,18 @@ function writeDeploymentJob(job: DeploymentJob): void {
             stdout = excluded.stdout,
             stderr = excluded.stderr
         `
-    ).run(
-        job.id,
-        job.status,
-        job.startedAt,
-        job.updatedAt,
-        job.commit ?? null,
-        job.commitTitle ?? null,
-        job.note ?? null,
-        job.stdout ?? null,
-        job.stderr ?? null
-    );
+        )
+        .run(
+            job.id,
+            job.status,
+            job.startedAt,
+            job.updatedAt,
+            job.commit ?? null,
+            job.commitTitle ?? null,
+            job.note ?? null,
+            job.stdout ?? null,
+            job.stderr ?? null
+        );
 }
 
 interface DeploymentJobRow {
@@ -236,7 +241,7 @@ function mapDeploymentJob(row: DeploymentJobRow): DeploymentJob {
 
 /** Reads one deployment job. */
 function readDeploymentJob(jobId: string): DeploymentJob | undefined {
-    const row = db
+    const row = database
         .prepare(
             `
             SELECT
@@ -282,21 +287,23 @@ function isDeploymentLockStale(lock: DeploymentLockRow, now = Date.now()): boole
 
 /** Reads the active deployment lock. */
 function readDeploymentLockRow(): DeploymentLockRow | undefined {
-    return db
+    return database
         .prepare("SELECT job_id, updated_at FROM deployment_lock WHERE id = 1")
         .get() as DeploymentLockRow | undefined;
 }
 
-/** Releases the active deploy lock if it still belongs to the given job. */
+/** Releases the active shouldDeploy lock if it still belongs to the given job. */
 function releaseDeploymentLock(jobId: string): void {
     try {
-        db.prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?").run(jobId);
+        database
+            .prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?")
+            .run(jobId);
     } catch {
         // Best-effort cleanup; stale locks are validated before starting deploys.
     }
 }
 
-/** Ensures no active deploy owns the production checkout. */
+/** Ensures no active shouldDeploy owns the production checkout. */
 function ensureNoActiveDeployment(): void {
     const activeLock = readDeploymentLockRow();
     const activeJobId = activeLock?.job_id;
@@ -304,49 +311,57 @@ function ensureNoActiveDeployment(): void {
         const activeJob = readDeploymentJob(activeJobId);
         if (!activeJob) {
             if (!isDeploymentLockStale(activeLock)) {
-                throw new Error(`Dashboard deploy already in progress (${activeJobId})`);
+                throw new Error(
+                    `Dashboard shouldDeploy already in progress (${activeJobId})`
+                );
             }
-            db.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
         } else if (
             ACTIVE_DEPLOYMENT_STATUSES.has(activeJob.status) &&
             !isDeploymentJobStale(activeJob)
         ) {
-            throw new Error(`Dashboard deploy already in progress (${activeJob.id})`);
+            throw new Error(
+                `Dashboard shouldDeploy already in progress (${activeJob.id})`
+            );
         } else {
-            db.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
         }
     }
 }
 
-/** Acquires the active deploy lock for a new deployment job. */
+/** Acquires the active shouldDeploy lock for a new deployment job. */
 function acquireDeploymentLock(jobId: string): void {
     ensureNoActiveDeployment();
     try {
-        db.prepare(
-            "INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)"
-        ).run(jobId, dateToISOString(new Date()));
+        database
+            .prepare(
+                "INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)"
+            )
+            .run(jobId, dateToISOString(new Date()));
     } catch (error) {
         if (error instanceof Error && /constraint/i.test(error.message)) {
-            throw new Error("Dashboard deploy already in progress", { cause: error });
+            throw new Error("Dashboard shouldDeploy already in progress", {
+                cause: error,
+            });
         }
         throw error;
     }
 }
 
-/** Refreshes the active deploy heartbeat while long-running work continues. */
+/** Refreshes the active shouldDeploy heartbeat while long-running work continues. */
 function refreshDeploymentHeartbeat(job: DeploymentJob): DeploymentJob {
     const updatedJob = { ...job, updatedAt: dateToISOString(new Date()) };
     writeDeploymentJob(updatedJob);
-    db.prepare(
-        "UPDATE deployment_lock SET updated_at = ? WHERE id = 1 AND job_id = ?"
-    ).run(updatedJob.updatedAt, updatedJob.id);
+    database
+        .prepare("UPDATE deployment_lock SET updated_at = ? WHERE id = 1 AND job_id = ?")
+        .run(updatedJob.updatedAt, updatedJob.id);
     return updatedJob;
 }
 
 /** Performs read deployment jobs. */
 function readDeploymentJobs(): DeploymentJob[] {
     return (
-        db
+        database
             .prepare(
                 `
                 SELECT
@@ -383,52 +398,54 @@ function parseRepoParts(repo: string): { owner: string; name: string } {
     return { owner, name };
 }
 
-/** Builds GitHub command env for one token. */
-function buildGithubCommandEnv(githubToken: string): NodeJS.ProcessEnv {
-    const env = { ...process.env };
-    for (const key of Object.keys(env)) {
+/** Builds GitHub command environment for one token. */
+function buildGithubCommandEnvironment(githubToken: string): NodeJS.ProcessEnv {
+    const environment = { ...process.env };
+    for (const key of Object.keys(environment)) {
         if (
             key === "MIRA_GITHUB_TOKEN" ||
             key.startsWith("MIRA_GITHUB_TOKEN_") ||
             key === "RAJOHAN_GITHUB_TOKEN" ||
             key.startsWith("RAJOHAN_GITHUB_TOKEN_")
         ) {
-            delete env[key];
+            delete environment[key];
         }
     }
-    delete env.GITHUB_TOKEN;
+    delete environment.GITHUB_TOKEN;
     if (githubToken) {
-        env.GH_TOKEN = githubToken;
+        environment.GH_TOKEN = githubToken;
     } else {
-        delete env.GH_TOKEN;
+        delete environment.GH_TOKEN;
     }
-    return env;
+    return environment;
 }
 
-/** Builds command env. */
-function buildCommandEnv(): NodeJS.ProcessEnv {
+/** Builds command environment. */
+function buildCommandEnvironment(): NodeJS.ProcessEnv {
     const githubToken =
         process.env.MIRA_GITHUB_TOKEN?.trim() ||
         process.env.GH_TOKEN?.trim() ||
         process.env.GITHUB_TOKEN?.trim() ||
         "";
-    const env = buildGithubCommandEnv(githubToken);
-    const bunBinDir = path.join(
-        nonEmptyEnvFallback("HOME", "/home/ubuntu"),
+    const environment = buildGithubCommandEnvironment(githubToken);
+    const bunBinDirectory = path.join(
+        nonEmptyEnvironmentFallback("HOME", "/home/ubuntu"),
         ".bun",
         "bin"
     );
-    env.PATH = [env.PATH, bunBinDir].filter(Boolean).join(path.delimiter);
-    return env;
+    environment.PATH = [environment.PATH, bunBinDirectory]
+        .filter(Boolean)
+        .join(path.delimiter);
+    return environment;
 }
 
-/** Builds reviewer command env. */
-function buildReviewCommandEnv(): NodeJS.ProcessEnv {
+/** Builds reviewer command environment. */
+function buildReviewCommandEnvironment(): NodeJS.ProcessEnv {
     const githubToken = process.env.RAJOHAN_GITHUB_TOKEN?.trim() || "";
     if (!githubToken) {
         throw new Error("Rajohan GitHub review token is not configured");
     }
-    return buildGithubCommandEnv(githubToken);
+    return buildGithubCommandEnvironment(githubToken);
 }
 
 /** Returns the configured reviewer author. */
@@ -455,7 +472,7 @@ function hasReviewerApproval(pr: PullRequestSummary): boolean {
 }
 
 /** Returns whether the pull request has a dashboard-accepted review approval. */
-function pullRequestReviewApproved(pr: PullRequestSummary): boolean {
+function isPullRequestReviewApproved(pr: PullRequestSummary): boolean {
     return (
         pr.reviewDecision?.toUpperCase() === "APPROVED" ||
         pr.reviewerApproved === true ||
@@ -464,11 +481,11 @@ function pullRequestReviewApproved(pr: PullRequestSummary): boolean {
 }
 
 /** Returns whether the configured reviewer can approve the pull request. */
-function reviewerCanApprove(pr: PullRequestSummary): boolean {
+function canReviewerApprove(pr: PullRequestSummary): boolean {
     return (
         pr.author?.login !== reviewerAuthor() &&
         !pr.isDraft &&
-        !pullRequestReviewApproved(pr)
+        !isPullRequestReviewApproved(pr)
     );
 }
 
@@ -480,20 +497,24 @@ function normalizePullRequest(pr: PullRequestSummary): PullRequestSummary {
 
     return {
         ...rest,
-        reviewerApproved: pullRequestReviewApproved(pr),
-        reviewerCanApprove: reviewerCanApprove(pr),
+        reviewerApproved: isPullRequestReviewApproved(pr),
+        canReviewerApprove: canReviewerApprove(pr),
     };
 }
 
 /** Performs run command. */
 async function runCommand(
     command: string,
-    args: string[],
-    options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {}
+    arguments_: string[],
+    options: {
+        cwd?: string;
+        environment?: NodeJS.ProcessEnv;
+        timeoutMs?: number;
+    } = {}
 ): Promise<CommandResult> {
-    const { stdout, stderr } = await execFileAsync(command, args, {
+    const { stdout, stderr } = await execFileAsync(command, arguments_, {
         cwd: options.cwd || getDashboardRoot(),
-        env: options.env || buildCommandEnv(),
+        env: options.environment || buildCommandEnvironment(),
         maxBuffer: MAX_BUFFER,
         timeout: options.timeoutMs || 120_000,
     });
@@ -505,10 +526,10 @@ async function runCommand(
 }
 
 /** Runs a GitHub CLI command and parses its JSON output. */
-async function runGhJson<T>(args: string[]): Promise<T> {
-    const { stdout } = await execFileAsync("gh", args, {
+async function runGhJson<T>(arguments_: string[]): Promise<T> {
+    const { stdout } = await execFileAsync("gh", arguments_, {
         cwd: getDashboardRoot(),
-        env: buildCommandEnv(),
+        env: buildCommandEnvironment(),
         maxBuffer: MAX_BUFFER,
         timeout: 60_000,
     });
@@ -520,7 +541,7 @@ function parseGhJsonLine<T>(line: string, rows: T[]): void {
     if (!line.trim()) {
         return;
     }
-    if (Buffer.byteLength(String(line), "utf8") > MAX_JSON_LINE_LENGTH) {
+    if (Buffer.byteLength(line, "utf8") > MAX_JSON_LINE_LENGTH) {
         throw new Error("GitHub CLI JSON line was too large");
     }
     rows.push(JSON.parse(line) as T);
@@ -535,10 +556,10 @@ function toGhJsonParseError(error: unknown): Error {
 function clearForceKillTimerIfAllowed(
     forceKillTimer: NodeJS.Timeout | null,
     options: { keepForceKillTimer?: boolean },
-    preserveForceKillTimer: boolean,
+    shouldPreserveForceKillTimer: boolean,
     clearTimer: (timer: NodeJS.Timeout) => void = clearTimeout
 ): NodeJS.Timeout | null {
-    if (!forceKillTimer || options.keepForceKillTimer || preserveForceKillTimer) {
+    if (!forceKillTimer || options.keepForceKillTimer || shouldPreserveForceKillTimer) {
         return forceKillTimer;
     }
     clearTimer(forceKillTimer);
@@ -547,21 +568,21 @@ function clearForceKillTimerIfAllowed(
 
 /** Streams newline-delimited JSON values from a GitHub CLI command. */
 async function runGhJsonLines<T>(
-    args: string[],
+    arguments_: string[],
     options: { timeoutMs?: number } = {}
 ): Promise<T[]> {
     return new Promise((resolve, reject) => {
-        const child = spawn("gh", args, {
+        const child = spawn("gh", arguments_, {
             cwd: getDashboardRoot(),
-            env: buildCommandEnv(),
+            env: buildCommandEnvironment(),
             stdio: ["ignore", "pipe", "pipe"],
         });
         const rows: T[] = [];
         let stdoutBuffer = "";
         let stderr = "";
-        let settled = false;
+        let isSettled = false;
         let forceKillTimer: NodeJS.Timeout | null = null;
-        let preserveForceKillTimer = false;
+        let isPreserveForceKillTimer = false;
         const armForceKillTimer = () => {
             if (forceKillTimer) {
                 return;
@@ -573,7 +594,7 @@ async function runGhJsonLines<T>(
         const timeout = setTimeout(() => {
             child.kill("SIGTERM");
             armForceKillTimer();
-            preserveForceKillTimer = true;
+            isPreserveForceKillTimer = true;
             settle(() => reject(new Error("GitHub CLI command timed out")), {
                 keepForceKillTimer: true,
             });
@@ -583,24 +604,22 @@ async function runGhJsonLines<T>(
             callback: () => void,
             options: { keepForceKillTimer?: boolean } = {}
         ) => {
-            if (settled) {
-                preserveForceKillTimer =
-                    preserveForceKillTimer || Boolean(options.keepForceKillTimer);
+            if (isSettled) {
+                isPreserveForceKillTimer ||= Boolean(options.keepForceKillTimer);
                 forceKillTimer = clearForceKillTimerIfAllowed(
                     forceKillTimer,
                     options,
-                    preserveForceKillTimer
+                    isPreserveForceKillTimer
                 );
                 return;
             }
-            settled = true;
+            isSettled = true;
             clearTimeout(timeout);
-            preserveForceKillTimer =
-                preserveForceKillTimer || Boolean(options.keepForceKillTimer);
+            isPreserveForceKillTimer ||= Boolean(options.keepForceKillTimer);
             forceKillTimer = clearForceKillTimerIfAllowed(
                 forceKillTimer,
                 options,
-                preserveForceKillTimer
+                isPreserveForceKillTimer
             );
             callback();
         };
@@ -638,13 +657,13 @@ async function runGhJsonLines<T>(
         });
 
         child.on("error", (error) => {
-            preserveForceKillTimer = false;
+            isPreserveForceKillTimer = false;
             forceKillTimer = clearForceKillTimerIfAllowed(forceKillTimer, {}, false);
             settle(() => reject(error));
         });
 
         child.on("close", (code) => {
-            preserveForceKillTimer = false;
+            isPreserveForceKillTimer = false;
             forceKillTimer = clearForceKillTimerIfAllowed(forceKillTimer, {}, false);
             settle(() => {
                 if (code !== 0) {
@@ -756,9 +775,9 @@ function shouldRefreshBlockedMergeState(pr: PullRequestSummary): boolean {
     return (
         pr.mergeStateStatus?.toUpperCase() === "BLOCKED" &&
         (mergeable === "MERGEABLE" || mergeable === "DIRTY") &&
-        pullRequestReviewApproved(pr) &&
+        isPullRequestReviewApproved(pr) &&
         !pr.isDraft &&
-        pullRequestChecksPassed(pr.statusCheckRollup)
+        hasPullRequestChecksPassed(pr.statusCheckRollup)
     );
 }
 
@@ -846,10 +865,11 @@ async function findWorktreeForBranch(branch: string): Promise<GitWorktree | null
     const { stdout } = await runCommand("git", ["worktree", "list", "--porcelain"], {
         timeoutMs: 30_000,
     });
-    const expectedRef = `refs/heads/${branch}`;
+    const expectedReference = `refs/heads/${branch}`;
     return (
         parseGitWorktrees(stdout).find(
-            (worktree) => worktree.branch === expectedRef || worktree.branch === branch
+            (worktree) =>
+                worktree.branch === expectedReference || worktree.branch === branch
         ) || null
     );
 }
@@ -945,10 +965,10 @@ function validateDashboardPrForBranchUpdate(pr: PullRequestSummary): void {
 /** Validates mira pr can be approved and merged from the dashboard. */
 function validateDashboardPrForApproval(pr: PullRequestSummary): void {
     validateDashboardPr(pr);
-    if (!pullRequestChecksPassed(pr.statusCheckRollup)) {
+    if (!hasPullRequestChecksPassed(pr.statusCheckRollup)) {
         throw new Error("Pull request CI checks must pass before approval");
     }
-    if (!pullRequestReviewApproved(pr)) {
+    if (!isPullRequestReviewApproved(pr)) {
         throw new Error("Pull request review approval is required before merging");
     }
 }
@@ -959,13 +979,13 @@ function validateDashboardPrForReviewApproval(pr: PullRequestSummary): void {
     if (pr.author?.login === reviewerAuthor()) {
         throw new Error("Rajohan cannot approve his own pull request");
     }
-    if (pullRequestReviewApproved(pr)) {
+    if (isPullRequestReviewApproved(pr)) {
         throw new Error("Pull request is already approved");
     }
 }
 
 /** Returns whether pull request checks are conclusively passing. */
-function pullRequestChecksPassed(checks: unknown[] | undefined): boolean {
+function hasPullRequestChecksPassed(checks: unknown[] | undefined): boolean {
     const records = (checks || []).filter(
         (check): check is Record<string, unknown> =>
             Boolean(check) && typeof check === "object" && !Array.isArray(check)
@@ -1053,17 +1073,19 @@ async function ensureProductionCheckout(): Promise<void> {
     }
 
     if (!status.isClean) {
-        throw new Error("Production checkout has local changes; refusing deploy/merge");
+        throw new Error(
+            "Production checkout has local changes; refusing shouldDeploy/merge"
+        );
     }
 }
 
-/** Performs ensure production ready for deploy. */
+/** Performs ensure production ready for shouldDeploy. */
 async function ensureProductionReadyForDeploy(): Promise<void> {
     const status = await getProductionCheckoutStatus();
 
     if (!status.isSafeForDeploy) {
         throw new Error(
-            `Production checkout must be clean ${DEFAULT_BASE} before deploy; current branch=${status.branch}, clean=${status.isClean}`
+            `Production checkout must be clean ${DEFAULT_BASE} before shouldDeploy; current branch=${status.branch}, clean=${status.isClean}`
         );
     }
 }
@@ -1089,12 +1111,12 @@ function deploymentJobUpdateCommand(job: DeploymentJob): string {
     const script = `
 import { Database } from "bun:sqlite";
 const job = JSON.parse(process.env.MIRA_DEPLOYMENT_JOB || "{}");
-const db = new Database(process.env.MIRA_DEPLOYMENT_DB);
-db.exec("PRAGMA foreign_keys = ON");
-db.exec("PRAGMA busy_timeout = 5000");
+const database = new Database(process.env.MIRA_DEPLOYMENT_DB);
+database.exec("PRAGMA foreign_keys = ON");
+database.exec("PRAGMA busy_timeout = 5000");
 try {
-    db.exec("BEGIN IMMEDIATE");
-    db.prepare(\`
+    database.exec("BEGIN IMMEDIATE");
+    database.prepare(\`
     INSERT INTO deployment_jobs (
         id,
         status,
@@ -1127,19 +1149,19 @@ try {
     job.stdout ?? null,
     job.stderr ?? null
 );
-    db.prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?").run(job.id);
-    db.exec("COMMIT");
+    database.prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?").run(job.id);
+    database.exec("COMMIT");
 } catch (error) {
     try {
-        db.exec("ROLLBACK");
+        database.exec("ROLLBACK");
     } catch {}
     throw error;
 } finally {
-    db.close();
+    database.close();
 }
 `;
     return [
-        `MIRA_DEPLOYMENT_DB=${shellQuote(miraDbPath)}`,
+        `MIRA_DEPLOYMENT_DB=${shellQuote(miraDatabasePath)}`,
         `MIRA_DEPLOYMENT_JOB=${shellQuote(JSON.stringify(job))}`,
         shellQuote(BUN_EXECUTABLE),
         "-e",
@@ -1151,7 +1173,7 @@ try {
 async function scheduleRestartHealthCheck(job: DeploymentJob): Promise<CommandResult> {
     const okJob: DeploymentJob = {
         ...job,
-        status: "ok",
+        status: "isOk",
         updatedAt: dateToISOString(new Date()),
         note: "Restarted service and health check passed",
     };
@@ -1177,8 +1199,8 @@ async function scheduleRestartHealthCheck(job: DeploymentJob): Promise<CommandRe
         "systemd-run",
         [
             "--user",
-            `--unit=mira-dashboard-deploy-${job.id}`,
-            "--description=Mira Dashboard deploy restart + health check",
+            `--unit=mira-dashboard-shouldDeploy-${job.id}`,
+            "--description=Mira Dashboard shouldDeploy restart + health check",
             "/bin/bash",
             "-lc",
             script,
@@ -1263,7 +1285,7 @@ async function runDeploymentJob(job: DeploymentJob): Promise<void> {
 /** Reports background deployment failures after the API response has returned. */
 function reportBackgroundDeploymentError(error: unknown): void {
     console.error(
-        "[pullRequestsRoutes] Background deploy failed:",
+        "[pullRequestsRoutes] Background shouldDeploy failed:",
         errorMessage(error, "Deploy failed")
     );
 }
@@ -1279,7 +1301,7 @@ async function runDeploymentJobAndReportErrors(
     }
 }
 
-/** Starts deploy latest in the background. */
+/** Starts shouldDeploy latest in the background. */
 function startDeployLatest(lockHeldBy?: string): DeploymentJob {
     const now = dateToISOString(new Date());
     const job: DeploymentJob = {
@@ -1290,13 +1312,13 @@ function startDeployLatest(lockHeldBy?: string): DeploymentJob {
         note: "Deploy started",
     };
     if (lockHeldBy) {
-        const result = db
+        const result = database
             .prepare(
                 "UPDATE deployment_lock SET job_id = ?, updated_at = ? WHERE id = 1 AND job_id = ?"
             )
             .run(job.id, now, lockHeldBy);
         if (result.changes !== 1) {
-            throw new Error("Dashboard deploy lock handoff failed");
+            throw new Error("Dashboard shouldDeploy lock handoff failed");
         }
     } else {
         acquireDeploymentLock(job.id);
@@ -1315,13 +1337,13 @@ function startDeployLatest(lockHeldBy?: string): DeploymentJob {
 }
 
 /** Performs approve pull request. */
-async function approvePullRequest(number: number, deploy: boolean) {
+async function approvePullRequest(number: number, shouldDeploy: boolean) {
     await ensureProductionCheckout();
     const pr = await getPullRequest(number);
     validateDashboardPrForApproval(pr);
     const lockId = `approve-${randomUUID()}`;
     acquireDeploymentLock(lockId);
-    let releaseLock = true;
+    let isReleaseLock = true;
 
     let syncError: string | undefined;
     let deployError: string | undefined;
@@ -1350,28 +1372,28 @@ async function approvePullRequest(number: number, deploy: boolean) {
             syncError = errorMessage(error, "Failed to sync main after merge");
         }
 
-        if (deploy && !syncError) {
+        if (shouldDeploy && !syncError) {
             try {
                 deployment = startDeployLatest(lockId);
-                releaseLock = false;
+                isReleaseLock = false;
             } catch (error) {
                 deployError = errorMessage(error, "Deploy failed to start");
             }
         }
     } finally {
-        if (releaseLock) {
+        if (isReleaseLock) {
             releaseDeploymentLock(lockId);
         }
     }
 
     return {
-        ok: true,
+        isOk: true,
         message: syncError
             ? `PR #${number} merged; production sync failed`
             : deployError
-              ? `PR #${number} merged; deploy failed to start`
-              : deploy
-                ? `PR #${number} merged; deploy started`
+              ? `PR #${number} merged; shouldDeploy failed to start`
+              : shouldDeploy
+                ? `PR #${number} merged; shouldDeploy started`
                 : `PR #${number} merged`,
         deployment,
         deployError,
@@ -1388,13 +1410,13 @@ async function approvePullRequestReview(number: number) {
     await runCommand(
         "gh",
         ["pr", "review", String(number), "--approve", "--repo", DASHBOARD_REPO],
-        { env: buildReviewCommandEnv(), timeoutMs: 60_000 }
+        { environment: buildReviewCommandEnvironment(), timeoutMs: 60_000 }
     );
 
     const pullRequest = await getPullRequest(number);
 
     return {
-        ok: true,
+        isOk: true,
         message: `PR #${number} review approved`,
         pullRequest,
     };
@@ -1405,20 +1427,20 @@ async function updatePullRequestBranch(number: number) {
     const pr = await getPullRequest(number);
     validateDashboardPrForBranchUpdate(pr);
     const repo = parseRepoParts(DASHBOARD_REPO);
-    const args = [
+    const arguments_ = [
         "api",
         "-X",
         "PUT",
         `repos/${repo.owner}/${repo.name}/pulls/${number}/update-branch`,
     ];
     if (pr.headRefOid) {
-        args.push("-f", `expected_head_sha=${pr.headRefOid}`);
+        arguments_.push("-f", `expected_head_sha=${pr.headRefOid}`);
     }
 
-    await runCommand("gh", args, { timeoutMs: 60_000 });
+    await runCommand("gh", arguments_, { timeoutMs: 60_000 });
 
     return {
-        ok: true,
+        isOk: true,
         message: `PR #${number} branch update started`,
         pullRequest: await getPullRequest(number),
     };
@@ -1437,7 +1459,7 @@ async function rejectPullRequest(number: number, comment: string) {
     const cleanup = await cleanupPullRequestWorktree(pr.headRefName);
 
     return {
-        ok: true,
+        isOk: true,
         message: `PR #${number} closed`,
         cleanup,
     };
@@ -1449,105 +1471,105 @@ export default function pullRequestsRoutes(app: express.Application): void {
 
     app.get(
         "/api/pull-requests",
-        asyncRoute(async (_req, res) => {
-            res.json({ pullRequests: await listDashboardPullRequests() });
+        asyncRoute(async (_request, response) => {
+            response.json({ pullRequests: await listDashboardPullRequests() });
         })
     );
 
     app.get(
         "/api/pull-requests/deployments",
-        asyncRoute(async (_req, res) => {
-            res.json({ deployments: readDeploymentJobs() });
+        asyncRoute(async (_request, response) => {
+            response.json({ deployments: readDeploymentJobs() });
         })
     );
 
     app.get(
         "/api/pull-requests/production-checkout",
-        asyncRoute(async (_req, res) => {
-            res.json({ checkout: await getProductionCheckoutStatus() });
+        asyncRoute(async (_request, response) => {
+            response.json({ checkout: await getProductionCheckoutStatus() });
         })
     );
 
     app.post(
-        "/api/pull-requests/deploy",
+        "/api/pull-requests/shouldDeploy",
         express.json(),
-        asyncRoute(async (_req, res) => {
+        asyncRoute(async (_request, response) => {
             await ensureProductionCheckout();
             await ensureProductionReadyForDeploy();
-            res.json({ ok: true, deployment: startDeployLatest() });
+            response.json({ isOk: true, deployment: startDeployLatest() });
         })
     );
 
     app.post(
         "/api/pull-requests/:number/approve",
         express.json(),
-        asyncRoute(async (req, res) => {
+        asyncRoute(async (request, response) => {
             let number: number;
             try {
-                number = validatePrNumber(req.params.number);
+                number = validatePrNumber(request.params.number);
             } catch (error) {
-                res.status(400).json({
+                response.status(400).json({
                     error: errorMessage(error, "Invalid pull request number"),
                 });
                 return;
             }
-            const deploy = req.body?.deploy === true;
-            res.json(await approvePullRequest(number, deploy));
+            const isDeploy = request.body?.shouldDeploy === true;
+            response.json(await approvePullRequest(number, isDeploy));
         })
     );
 
     app.post(
         "/api/pull-requests/:number/review-approval",
         express.json(),
-        asyncRoute(async (req, res) => {
+        asyncRoute(async (request, response) => {
             let number: number;
             try {
-                number = validatePrNumber(req.params.number);
+                number = validatePrNumber(request.params.number);
             } catch (error) {
-                res.status(400).json({
+                response.status(400).json({
                     error: errorMessage(error, "Invalid pull request number"),
                 });
                 return;
             }
-            res.json(await approvePullRequestReview(number));
+            response.json(await approvePullRequestReview(number));
         })
     );
 
     app.post(
         "/api/pull-requests/:number/update-branch",
         express.json(),
-        asyncRoute(async (req, res) => {
+        asyncRoute(async (request, response) => {
             let number: number;
             try {
-                number = validatePrNumber(req.params.number);
+                number = validatePrNumber(request.params.number);
             } catch (error) {
-                res.status(400).json({
+                response.status(400).json({
                     error: errorMessage(error, "Invalid pull request number"),
                 });
                 return;
             }
-            res.json(await updatePullRequestBranch(number));
+            response.json(await updatePullRequestBranch(number));
         })
     );
 
     app.post(
         "/api/pull-requests/:number/reject",
         express.json(),
-        asyncRoute(async (req, res) => {
+        asyncRoute(async (request, response) => {
             let number: number;
             try {
-                number = validatePrNumber(req.params.number);
+                number = validatePrNumber(request.params.number);
             } catch (error) {
-                res.status(400).json({
+                response.status(400).json({
                     error: errorMessage(error, "Invalid pull request number"),
                 });
                 return;
             }
             const comment =
-                typeof req.body?.comment === "string" && req.body.comment.trim()
-                    ? req.body.comment.trim()
+                typeof request.body?.comment === "string" && request.body.comment.trim()
+                    ? request.body.comment.trim()
                     : "Closed from Mira Dashboard after Rajohan rejected it.";
-            res.json(await rejectPullRequest(number, comment));
+            response.json(await rejectPullRequest(number, comment));
         })
     );
 }

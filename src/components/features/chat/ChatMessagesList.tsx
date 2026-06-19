@@ -21,10 +21,10 @@ import type {
     ChatVisibilitySettings,
 } from "./chatTypes";
 import { TOOL_ROLE_VARIANTS } from "./chatTypes";
-import { chatErrorMessage } from "./chatUtils";
+import { chatErrorMessage } from "./chatUtilities";
 
 /** Provides props for chat messages list. */
-interface ChatMessagesListProps {
+interface ChatMessagesListProperties {
     isLoadingHistory: boolean;
     isAtBottom: boolean;
     chatRows: ChatRow[];
@@ -33,7 +33,7 @@ interface ChatMessagesListProps {
     messagesVirtualizer: Virtualizer<HTMLDivElement, Element>;
     onDynamicContentLoad: () => void;
     onFollow: () => void;
-    onPreview: (preview: ChatPreviewItem) => void;
+    onPreview: (isPreview: ChatPreviewItem) => void;
     visibility: ChatVisibilitySettings;
     onScroll: () => void;
     onTtsError: (error: string) => void;
@@ -64,7 +64,7 @@ export function base64ToText(base64: string): string | undefined {
     }
 }
 
-/** Performs preview from attachment. */
+/** Performs isPreview from attachment. */
 export function previewFromAttachment(
     attachment: ChatAttachmentDisplay
 ): ChatPreviewItem | null {
@@ -95,7 +95,7 @@ function AttachmentList({
     onPreview,
 }: {
     attachments: ChatAttachmentDisplay[];
-    onPreview: (preview: ChatPreviewItem) => void;
+    onPreview: (isPreview: ChatPreviewItem) => void;
 }) {
     if (attachments.length === 0) {
         return null;
@@ -104,7 +104,7 @@ function AttachmentList({
     return (
         <div className="mt-1.5 flex min-w-0 flex-wrap gap-1.5">
             {attachments.map((attachment) => {
-                const preview = previewFromAttachment(attachment);
+                const isPreview = previewFromAttachment(attachment);
                 const content = (
                     <>
                         <AttachmentIcon attachment={attachment} />
@@ -117,7 +117,7 @@ function AttachmentList({
                     </>
                 );
 
-                if (!preview) {
+                if (!isPreview) {
                     return (
                         <div
                             key={attachment.id}
@@ -133,7 +133,7 @@ function AttachmentList({
                     <button
                         key={attachment.id}
                         type="button"
-                        onClick={() => onPreview(preview)}
+                        onClick={() => onPreview(isPreview)}
                         className="border-primary-600 bg-primary-900/60 text-primary-100 hover:border-primary-500 hover:bg-primary-800 flex max-w-full min-w-0 items-center gap-2 rounded-lg border px-2 py-1 text-left text-xs"
                         title={attachment.mimeType}
                     >
@@ -263,7 +263,7 @@ export function ChatMessagesList({
     onScroll,
     onTtsError,
     onDeleteMessage,
-}: ChatMessagesListProps) {
+}: ChatMessagesListProperties) {
     const audioReference = useRef<HTMLAudioElement | null>(null);
     const audioUrlReference = useRef<string | null>(null);
     const [playingMessageKey, setPlayingMessageKey] = useState<string | null>(null);
@@ -467,7 +467,7 @@ export function ChatMessagesList({
                                                             "image/png";
 
                                                         const imageUrl = `data:${imageMime};base64,${imageData}`;
-                                                        const imagePreviewLabel = `Open chat image ${imageIndex + 1} preview`;
+                                                        const imagePreviewLabel = `Open chat image ${imageIndex + 1} isPreview`;
 
                                                         return (
                                                             <button
@@ -483,7 +483,7 @@ export function ChatMessagesList({
                                                                     })
                                                                 }
                                                                 className="focus:ring-accent-400 rounded-lg text-left hover:opacity-90 focus:ring-2 focus:outline-none"
-                                                                title="Open image preview"
+                                                                title="Open image isPreview"
                                                                 aria-label={
                                                                     imagePreviewLabel
                                                                 }
@@ -527,7 +527,7 @@ export function ChatMessagesList({
                                                             }}
                                                             className="focus:ring-accent-400 rounded-lg text-left hover:opacity-90 focus:ring-2 focus:outline-none"
                                                             title={`Open ${attachment.fileName}`}
-                                                            aria-label={`Open ${attachment.fileName} preview`}
+                                                            aria-label={`Open ${attachment.fileName} isPreview`}
                                                         >
                                                             <img
                                                                 src={attachment.dataUrl}

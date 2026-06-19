@@ -61,7 +61,7 @@ function getWeatherIcon(description?: string) {
 }
 
 /** Formats temp for display. */
-function formatTemp(value: number | null | undefined): string {
+function formatTemporary(value: number | null | undefined): string {
     if (value === null || value === undefined || Number.isNaN(value)) {
         return "--";
     }
@@ -70,12 +70,12 @@ function formatTemp(value: number | null | undefined): string {
 }
 
 /** Provides props for weather time card. */
-interface WeatherTimeCardProps {
+interface WeatherTimeCardProperties {
     className?: string;
 }
 
 /** Renders the weather time card UI. */
-function WeatherTimeCard({ className }: WeatherTimeCardProps) {
+function WeatherTimeCard({ className }: WeatherTimeCardProperties) {
     const [now, setNow] = useState(() => new Date());
     const { data: weather, isLoading, isError } = useWeather(AUTO_REFRESH_MS);
 
@@ -112,7 +112,7 @@ function WeatherTimeCard({ className }: WeatherTimeCardProps) {
                     <CurrentWeatherIcon className="h-7 w-7 text-amber-300" />
                     <div className="min-w-0">
                         <div className="text-primary-50 text-2xl font-semibold">
-                            {formatTemp(weather?.temperatureC)}°C
+                            {formatTemporary(weather?.temperatureC)}°C
                         </div>
                         <div className="text-primary-300 truncate text-xs">
                             {isLoading
@@ -127,7 +127,7 @@ function WeatherTimeCard({ className }: WeatherTimeCardProps) {
                 <span className="border-primary-700 bg-primary-800/40 inline-flex min-w-0 items-center justify-center gap-1 rounded-md border px-1 py-1">
                     <Cloud className="text-primary-400 h-4 w-4 shrink-0" />
                     <span className="truncate">
-                        Feels {formatTemp(weather?.feelsLikeC)}°
+                        Feels {formatTemporary(weather?.feelsLikeC)}°
                     </span>
                 </span>
                 <span className="border-primary-700 bg-primary-800/40 inline-flex min-w-0 items-center justify-center gap-1 rounded-md border px-1 py-1">
@@ -161,7 +161,8 @@ function WeatherTimeCard({ className }: WeatherTimeCardProps) {
                             </span>
                             <span className="text-primary-100 inline-flex min-w-0 items-center gap-0.5 text-[11px] leading-none whitespace-nowrap tabular-nums sm:gap-1 sm:text-xs">
                                 <ForecastIcon className="text-primary-300 h-4 w-4 shrink-0" />
-                                {formatTemp(day.maxTempC)}°/{formatTemp(day.minTempC)}°
+                                {formatTemporary(day.maxTempC)}°/
+                                {formatTemporary(day.minTempC)}°
                             </span>
                         </div>
                     );
@@ -282,7 +283,7 @@ export function Dashboard() {
                         {
                             key: "git.workspace",
                             label: "Git workspace",
-                            description: "Dirty repo + push state snapshot",
+                            description: "Directoryty repo + push state snapshot",
                         },
                         {
                             key: "system.host",

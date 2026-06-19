@@ -1,14 +1,14 @@
 import type { DatabaseOverviewResponse } from "../../../hooks/useDatabase";
 import { Card } from "../../ui/Card";
-import { formatBytes, formatNumber } from "./databaseUtils";
+import { formatBytes, formatNumber } from "./databaseUtilities";
 
 /** Represents props. */
-interface Props {
+interface Properties {
     overview: DatabaseOverviewResponse["overview"];
 }
 
 /** Renders the database overview cards UI. */
-export function DatabaseOverviewCards({ overview }: Props) {
+export function DatabaseOverviewCards({ overview }: Properties) {
     return (
         <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
             <Card className="p-3 sm:p-4">

@@ -59,7 +59,7 @@ export function Docker() {
     }>(null);
     const [actionOutput, setActionOutput] = useState<string>("");
     const [pruningTarget, setPruningTarget] = useState<"images" | "volumes" | null>(null);
-    const actionOutputRef = useRef<HTMLDivElement>(null);
+    const actionOutputReference = useRef<HTMLDivElement>(null);
 
     const containersQuery = useDockerContainers();
     const imagesQuery = useDockerImages();
@@ -118,7 +118,7 @@ export function Docker() {
     function showActionOutput(output: string) {
         setActionOutput(output);
         requestAnimationFrame(() => {
-            actionOutputRef.current?.scrollIntoView({
+            actionOutputReference.current?.scrollIntoView({
                 behavior: "smooth",
                 block: "start",
             });
@@ -268,7 +268,7 @@ export function Docker() {
 
             {actionOutput ? (
                 <Card
-                    ref={actionOutputRef}
+                    ref={actionOutputReference}
                     role="status"
                     aria-live="polite"
                     className="p-3 sm:p-4"
@@ -430,7 +430,7 @@ export function Docker() {
                                                     )}
                                                 </div>
                                                 <div>
-                                                    Last checked:{" "}
+                                                    Last isChecked:{" "}
                                                     {formatTimestamp(
                                                         service.lastCheckedAt
                                                     )}

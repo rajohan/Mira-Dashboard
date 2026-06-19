@@ -3,7 +3,7 @@ import { createCollection } from "@tanstack/react-db";
 
 import { queryClient } from "../lib/queryClient";
 import type { LogEntry } from "../types/log";
-import { parseLogLine } from "../utils/logUtils";
+import { parseLogLine } from "../utils/logUtilities";
 
 /** Defines logs collection. */
 export const logsCollection = createCollection(

@@ -14,7 +14,7 @@ interface LogContentResponse {
     content: string;
 }
 
-let lastKnownLogFiles: LogFile[] = [];
+const logFilesState: { lastKnownLogFiles: LogFile[] } = { lastKnownLogFiles: [] };
 
 // Query keys
 /** Defines log keys. */
@@ -45,7 +45,7 @@ async function fetchLogFiles(): Promise<LogFile[]> {
     const files = Array.isArray(data.logs) ? data.logs.filter(isLogFile) : [];
 
     if (files.length > 0) {
-        lastKnownLogFiles = files;
+        logFilesState.lastKnownLogFiles = files;
     }
 
     return files;
@@ -65,17 +65,17 @@ export function useLogFiles() {
     return useQuery({
         queryKey: logKeys.files(),
         queryFn: fetchLogFiles,
-        placeholderData: () => lastKnownLogFiles,
+        placeholderData: () => logFilesState.lastKnownLogFiles,
         staleTime: 60_000, // 1 minute
     });
 }
 
 /** Provides log content. */
-export function useLogContent(file: string | null, lines: number, enabled = true) {
+export function useLogContent(file: string | null, lines: number, isEnabled = true) {
     return useQuery({
         queryKey: logKeys.content(file || "", lines),
         queryFn: () => fetchLogContent(file!, lines),
-        enabled: enabled && !!file,
+        enabled: isEnabled && !!file,
         staleTime: 0, // Always refetch
     });
 }

@@ -1,6 +1,6 @@
 import express, { type RequestHandler } from "express";
 
-import { db } from "../db.ts";
+import { database as database } from "../database.ts";
 import { asyncRoute as baseAsyncRoute } from "../lib/errors.ts";
 import { runElevatedLogRotationService } from "../services/logRotation.ts";
 
@@ -11,7 +11,7 @@ interface LogRotationResult {
     stderr: string;
 }
 
-type LogRotationRunner = (options: { dryRun: boolean }) => Promise<LogRotationResult>;
+type LogRotationRunner = (options: { isDryRun: boolean }) => Promise<LogRotationResult>;
 
 function normalizeLastRunErrors(run: Record<string, unknown>): unknown[] {
     if (Array.isArray(run.errors)) {
@@ -41,8 +41,8 @@ function normalizeLastRun(value: unknown) {
     }
     const run = value as Record<string, unknown>;
     return {
-        ok: run.ok === true,
-        dryRun: run.dryRun === true,
+        isOk: run.isOk === true,
+        isDryRun: run.isDryRun === true,
         startedAt: typeof run.startedAt === "string" ? run.startedAt : null,
         finishedAt: typeof run.finishedAt === "string" ? run.finishedAt : null,
         checkedGroups: Number.isFinite(Number(run.checkedGroups))
@@ -79,7 +79,7 @@ function asyncRoute(handler: RequestHandler): RequestHandler {
 
 /** Performs read log rotation status. */
 async function readLogRotationStatus() {
-    const row = db
+    const row = database
         .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
         .get(LOG_ROTATION_STATE_KEY) as undefined | { data_json?: string | null };
     const raw = row?.data_json ?? "";
@@ -99,7 +99,7 @@ async function readLogRotationStatus() {
 
 /** Performs run log rotation. */
 export async function runLogRotation(options: {
-    dryRun: boolean;
+    isDryRun: boolean;
 }): Promise<LogRotationResult> {
     return elevatedLogRotationRunner(options);
 }
@@ -110,18 +110,18 @@ const elevatedLogRotationRunner: LogRotationRunner = runElevatedLogRotationServi
 export default function opsRoutes(app: express.Application): void {
     app.get(
         "/api/ops/log-rotation/status",
-        asyncRoute(async (_req, res) => {
-            res.json(await readLogRotationStatus());
+        asyncRoute(async (_request, response) => {
+            response.json(await readLogRotationStatus());
         })
     );
 
     app.post(
         "/api/ops/log-rotation/dry-run",
         express.json(),
-        asyncRoute(async (_req, res) => {
-            const { result, stderr } = await runLogRotation({ dryRun: true });
-            res.json({
-                success: result?.ok === true,
+        asyncRoute(async (_request, response) => {
+            const { result, stderr } = await runLogRotation({ isDryRun: true });
+            response.json({
+                success: result?.isOk === true,
                 result,
                 stderr,
             });
@@ -131,10 +131,10 @@ export default function opsRoutes(app: express.Application): void {
     app.post(
         "/api/ops/log-rotation/run",
         express.json(),
-        asyncRoute(async (_req, res) => {
-            const { result, stderr } = await runLogRotation({ dryRun: false });
-            res.json({
-                success: result?.ok === true,
+        asyncRoute(async (_request, response) => {
+            const { result, stderr } = await runLogRotation({ isDryRun: false });
+            response.json({
+                success: result?.isOk === true,
                 result,
                 stderr,
             });

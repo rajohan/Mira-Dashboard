@@ -39,7 +39,7 @@ function isWithinCanonicalRoot(candidate: string, root: string, normalizedRoot: 
     return candidate === root || candidate.startsWith(normalizedRoot);
 }
 
-function sameFile(left: fs.Stats, right: fs.Stats): boolean {
+function isSameFile(left: fs.Stats, right: fs.Stats): boolean {
     return left.dev === right.dev && left.ino === right.ino;
 }
 
@@ -80,7 +80,7 @@ function createChildDirectoryFromVerifiedParent(
     try {
         const parentStatBefore = fs.fstatSync(parentFd);
         const pathParentStatBefore = fs.statSync(Buffer.from(realParent));
-        if (!sameFile(parentStatBefore, pathParentStatBefore)) {
+        if (!isSameFile(parentStatBefore, pathParentStatBefore)) {
             return null;
         }
 
@@ -96,8 +96,8 @@ function createChildDirectoryFromVerifiedParent(
         const parentStatAfter = fs.fstatSync(parentFd);
         const pathParentStatAfter = fs.statSync(Buffer.from(realParent));
         if (
-            !sameFile(parentStatBefore, parentStatAfter) ||
-            !sameFile(parentStatAfter, pathParentStatAfter)
+            !isSameFile(parentStatBefore, parentStatAfter) ||
+            !isSameFile(parentStatAfter, pathParentStatAfter)
         ) {
             return null;
         }
@@ -125,7 +125,10 @@ function createChildDirectoryFromVerifiedParent(
  *
  * Returns the resolved absolute path if safe, or null if the path escapes root.
  */
-export function safePathWithinRoot(userPath: string, rootDir: string): string | null {
+export function safePathWithinRoot(
+    userPath: string,
+    rootDirectory: string
+): string | null {
     if (!userPath || typeof userPath !== "string") {
         return null;
     }
@@ -136,13 +139,13 @@ export function safePathWithinRoot(userPath: string, rootDir: string): string | 
     }
 
     try {
-        const canonicalRoot = canonicalizePotentialPath(path.resolve(rootDir));
+        const canonicalRoot = canonicalizePotentialPath(path.resolve(rootDirectory));
         if (isFilesystemRoot(canonicalRoot)) {
             return null;
         }
 
         const canonicalResolved = canonicalizePotentialPath(
-            path.resolve(rootDir, userPath)
+            path.resolve(rootDirectory, userPath)
         );
         const normalizedRoot = canonicalRoot + path.sep;
 
@@ -165,14 +168,14 @@ export function safePathWithinRoot(userPath: string, rootDir: string): string | 
  */
 export function prepareSafeWriteTargetWithinRoot(
     fullPath: string,
-    rootDir: string
+    rootDirectory: string
 ): string | null {
     if (!fullPath || fullPath.includes("\0")) {
         return null;
     }
 
     try {
-        const canonicalRoot = canonicalizePotentialPath(path.resolve(rootDir));
+        const canonicalRoot = canonicalizePotentialPath(path.resolve(rootDirectory));
         if (isFilesystemRoot(canonicalRoot)) {
             return null;
         }

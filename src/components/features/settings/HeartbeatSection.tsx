@@ -6,7 +6,7 @@ import { ExpandableCard } from "../../ui/ExpandableCard";
 import { Input } from "../../ui/Input";
 
 /** Provides props for heartbeat section. */
-interface HeartbeatSectionProps {
+interface HeartbeatSectionProperties {
     every: number;
     target: string;
     onSave: (every: number, target: string) => Promise<void>;
@@ -19,7 +19,7 @@ export function HeartbeatSection({
     target,
     onSave,
     saving,
-}: HeartbeatSectionProps) {
+}: HeartbeatSectionProperties) {
     const form = useForm({
         defaultValues: { every, target },
         onSubmit: async ({ value }) => {
@@ -30,8 +30,8 @@ export function HeartbeatSection({
     return (
         <ExpandableCard title="Heartbeat" icon={Heart}>
             <form
-                onSubmit={(e) => {
-                    e.preventDefault();
+                onSubmit={(event_) => {
+                    event_.preventDefault();
                     form.handleSubmit();
                 }}
                 className="space-y-4"
@@ -45,8 +45,8 @@ export function HeartbeatSection({
                             <Input
                                 type="number"
                                 value={field.state.value}
-                                onChange={(e) =>
-                                    field.handleChange(Number(e.target.value))
+                                onChange={(event_) =>
+                                    field.handleChange(Number(event_.target.value))
                                 }
                                 min={60}
                                 max={3600}
@@ -64,7 +64,9 @@ export function HeartbeatSection({
                             <Input
                                 type="text"
                                 value={field.state.value}
-                                onChange={(e) => field.handleChange(e.target.value)}
+                                onChange={(event_) =>
+                                    field.handleChange(event_.target.value)
+                                }
                                 placeholder="Channel ID or name"
                                 className="w-full sm:w-64"
                             />

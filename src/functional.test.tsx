@@ -8,7 +8,7 @@ import { apiFetch, UnauthorizedError } from "./hooks/useApi";
 import { Tasks } from "./pages/Tasks";
 import { authActions, authStore } from "./stores/authStore";
 import type { Task } from "./types/task";
-import { getColumnId, getPriority, taskMatchesSearch } from "./utils/taskUtils";
+import { getColumnId, getPriority, isTaskMatchSearch } from "./utils/taskUtilities";
 
 function task(overrides: Partial<Task> & Pick<Task, "number" | "title">): Task {
     return {
@@ -87,7 +87,7 @@ describe("Mira Dashboard frontend behavior", () => {
     it("handles API authorization failures through the shared auth boundary", async () => {
         authActions.setSession({
             authenticated: true,
-            bootstrapRequired: false,
+            isBootstrapRequired: false,
             user: { id: 1, username: "raymond" },
         });
         const unauthorizedEvents: Event[] = [];
@@ -158,7 +158,7 @@ describe("Mira Dashboard frontend behavior", () => {
         });
         const blocked = task({
             number: 3,
-            title: "Waiting on deploy",
+            title: "Waiting on shouldDeploy",
             labels: [{ name: "blocked" }],
             automation: {
                 type: "cron",
@@ -171,8 +171,8 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(getPriority(unlabelled.labels)).toBe("medium");
         expect(getPriority(lowPriority.labels)).toBe("low");
         expect(getColumnId(blocked)).toBe("blocked");
-        expect(taskMatchesSearch(blocked, "daily-check")).toBe(true);
-        expect(taskMatchesSearch(blocked, "#3")).toBe(true);
-        expect(taskMatchesSearch(blocked, "not-present")).toBe(false);
+        expect(isTaskMatchSearch(blocked, "daily-check")).toBe(true);
+        expect(isTaskMatchSearch(blocked, "#3")).toBe(true);
+        expect(isTaskMatchSearch(blocked, "not-present")).toBe(false);
     });
 });

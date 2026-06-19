@@ -5,15 +5,20 @@ import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 
-let baseUrl = "";
-let server: http.Server;
-let tempRoot = "";
+const testState: {
+    baseUrl: string;
+    server?: http.Server;
+    temporaryRoot: string;
+} = {
+    baseUrl: "",
+    temporaryRoot: "",
+};
 
 async function api<T>(
     endpoint: string,
     options: RequestInit = {}
 ): Promise<{ status: number; body: T }> {
-    const response = await fetch(`${baseUrl}${endpoint}`, {
+    const response = await fetch(`${testState.baseUrl}${endpoint}`, {
         ...options,
         headers: {
             "Content-Type": "application/json",
@@ -36,10 +41,12 @@ function json(method: string, body: unknown): RequestInit {
 
 describe("Mira Dashboard backend integration", () => {
     beforeAll(async () => {
-        tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "mira-dashboard-test-"));
-        const workspaceRoot = path.join(tempRoot, "workspace");
-        const openclawRoot = path.join(tempRoot, "openclaw");
-        const frontendRoot = path.join(tempRoot, "frontend");
+        testState.temporaryRoot = await fs.mkdtemp(
+            path.join(os.tmpdir(), "mira-dashboard-test-")
+        );
+        const workspaceRoot = path.join(testState.temporaryRoot, "workspace");
+        const openclawRoot = path.join(testState.temporaryRoot, "openclaw");
+        const frontendRoot = path.join(testState.temporaryRoot, "frontend");
         await fs.mkdir(path.join(openclawRoot, "hooks", "transforms"), {
             recursive: true,
         });
@@ -53,67 +60,70 @@ describe("Mira Dashboard backend integration", () => {
         );
         await fs.writeFile(
             path.join(frontendRoot, "assets", "index-fixture.js"),
-            "export const ok = true;\n"
+            "export const isOk = true;\n"
         );
 
-        process.env.MIRA_DASHBOARD_DB_PATH = path.join(tempRoot, "dashboard.db");
+        process.env.MIRA_DASHBOARD_DB_PATH = path.join(
+            testState.temporaryRoot,
+            "dashboard.database"
+        );
         process.env.MIRA_DASHBOARD_FRONTEND_PATH = frontendRoot;
         process.env.WORKSPACE_ROOT = workspaceRoot;
         process.env.OPENCLAW_HOME = openclawRoot;
         process.env.TRUST_PROXY = "false";
 
         const serverModule = await import("../src/server.ts");
-        server = serverModule.server;
+        testState.server = serverModule.server;
         await new Promise<void>((resolve) => {
-            server.listen(0, "127.0.0.1", resolve);
+            testState.server?.listen(0, "127.0.0.1", resolve);
         });
-        const address = server.address();
+        const address = testState.server.address();
         if (!address || typeof address === "string") {
             throw new Error("Test server did not bind to a TCP port");
         }
-        baseUrl = `http://127.0.0.1:${address.port}`;
+        testState.baseUrl = `http://127.0.0.1:${address.port}`;
     });
 
     afterAll(async () => {
         await new Promise<void>((resolve, reject) => {
-            server.close((error) => (error ? reject(error) : resolve()));
+            testState.server?.close((error) => (error ? reject(error) : resolve()));
         });
-        await fs.rm(tempRoot, { recursive: true, force: true });
+        await fs.rm(testState.temporaryRoot, { recursive: true, force: true });
     });
 
     it("reports health and auth bootstrap state without production data", async () => {
         const health = await api<{ status: string; sessionCount: number }>("/api/health");
         expect(health.status).toBe(200);
-        expect(health.body.status).toBe("ok");
+        expect(health.body.status).toBe("isOk");
         expect(health.body.sessionCount).toBe(0);
 
         const bootstrap = await api<{
-            bootstrapRequired: boolean;
+            isBootstrapRequired: boolean;
             hasGatewayToken: boolean;
         }>("/api/auth/bootstrap");
         expect(bootstrap.status).toBe(200);
         expect(bootstrap.body).toEqual({
-            bootstrapRequired: true,
+            isBootstrapRequired: true,
             hasGatewayToken: false,
         });
     });
 
     it("serves the app shell only for app routes, not missing assets", async () => {
-        const appRoute = await fetch(`${baseUrl}/tasks`);
+        const appRoute = await fetch(`${testState.baseUrl}/tasks`);
         expect(appRoute.status).toBe(200);
         expect(appRoute.headers.get("content-type")).toContain("text/html");
 
-        const assetsPath = path.join(tempRoot, "frontend", "assets");
+        const assetsPath = path.join(testState.temporaryRoot, "frontend", "assets");
         const builtAssets = await fs.readdir(assetsPath);
         const builtChunk = builtAssets.find((file) => /^index-.+\.js$/u.test(file));
         expect(builtChunk).toBeDefined();
 
-        const rootChunk = await fetch(`${baseUrl}/${builtChunk}`);
+        const rootChunk = await fetch(`${testState.baseUrl}/${builtChunk}`);
         expect(rootChunk.status).toBe(200);
         expect(rootChunk.headers.get("content-type")).toContain("javascript");
 
         const missingChunk = await fetch(
-            `${baseUrl}/assets/index-missing-after-deploy.js`
+            `${testState.baseUrl}/assets/index-missing-after-shouldDeploy.js`
         );
         expect(missingChunk.status).toBe(404);
         expect(missingChunk.headers.get("content-type")).not.toContain("text/html");
@@ -161,11 +171,14 @@ describe("Mira Dashboard backend integration", () => {
         expect(list.status).toBe(200);
         expect(list.body.some((task) => task.number === created.body.number)).toBe(true);
 
-        const deleted = await api<{ ok: boolean }>(`/api/tasks/${created.body.number}`, {
-            method: "DELETE",
-        });
+        const deleted = await api<{ isOk: boolean }>(
+            `/api/tasks/${created.body.number}`,
+            {
+                method: "DELETE",
+            }
+        );
         expect(deleted.status).toBe(200);
-        expect(deleted.body.ok).toBe(true);
+        expect(deleted.body.isOk).toBe(true);
     });
 
     it("uses isolated workspace and config roots for file APIs", async () => {
@@ -173,7 +186,7 @@ describe("Mira Dashboard backend integration", () => {
             "/api/files"
         );
         expect(files.status).toBe(200);
-        expect(files.body.root).toBe(path.join(tempRoot, "workspace"));
+        expect(files.body.root).toBe(path.join(testState.temporaryRoot, "workspace"));
         expect(files.body.files.map((file) => file.path)).toContain("README.md");
 
         const readFile = await api<{ content: string }>("/api/files/README.md");
@@ -193,13 +206,13 @@ describe("Mira Dashboard backend integration", () => {
         const traversal = await api<{ error: string }>("/api/files/..%2Foutside.txt");
         expect(traversal.status).toBe(403);
 
-        const config = await api<{ content: string; relPath: string }>(
+        const config = await api<{ content: string; relativePath: string }>(
             "/api/config-files/openclaw.json"
         );
         expect(config.status).toBe(200);
         expect(config.body).toMatchObject({
             content: "{}\n",
-            relPath: "openclaw.json",
+            relativePath: "openclaw.json",
         });
     });
 });

@@ -26,7 +26,7 @@ export interface PullRequestSummary {
     mergeStateStatus?: string;
     reviewDecision?: string;
     reviewerApproved?: boolean;
-    reviewerCanApprove?: boolean;
+    canReviewerApprove?: boolean;
     statusCheckRollup?: unknown[];
     additions?: number;
     deletions?: number;
@@ -36,7 +36,7 @@ export interface PullRequestSummary {
 /** Represents deployment job. */
 export interface DeploymentJob {
     id: string;
-    status: "building" | "restart-scheduled" | "ok" | "failed";
+    status: "building" | "restart-scheduled" | "isOk" | "failed";
     startedAt: string;
     updatedAt: string;
     commit?: string;
@@ -87,7 +87,7 @@ interface ProductionCheckoutResponse {
 
 /** Represents the pull request action API response. */
 interface PullRequestActionResponse {
-    ok: boolean;
+    isOk: boolean;
     message: string;
     deployment?: DeploymentJob;
     deployError?: string;
@@ -128,12 +128,12 @@ async function fetchProductionCheckout(): Promise<ProductionCheckoutStatus> {
 /** Performs approve pull request. */
 async function approvePullRequest(
     number: number,
-    deploy: boolean
+    shouldDeploy: boolean
 ): Promise<PullRequestActionResponse> {
     return apiPostRequired<PullRequestActionResponse>(
         `/pull-requests/${number}/approve`,
         {
-            deploy,
+            shouldDeploy,
         }
     );
 }
@@ -168,10 +168,10 @@ async function updatePullRequestBranch(
     );
 }
 
-/** Performs deploy dashboard. */
-async function deployDashboard(): Promise<{ ok: boolean; deployment: DeploymentJob }> {
-    return apiPostRequired<{ ok: boolean; deployment: DeploymentJob }>(
-        "/pull-requests/deploy"
+/** Performs shouldDeploy dashboard. */
+async function deployDashboard(): Promise<{ isOk: boolean; deployment: DeploymentJob }> {
+    return apiPostRequired<{ isOk: boolean; deployment: DeploymentJob }>(
+        "/pull-requests/shouldDeploy"
     );
 }
 
@@ -210,8 +210,13 @@ export function useApprovePullRequest() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ number, deploy }: { number: number; deploy: boolean }) =>
-            approvePullRequest(number, deploy),
+        mutationFn: ({
+            number,
+            shouldDeploy,
+        }: {
+            number: number;
+            shouldDeploy: boolean;
+        }) => approvePullRequest(number, shouldDeploy),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: pullRequestKeys.list() });
             void queryClient.invalidateQueries({
@@ -285,7 +290,7 @@ export function useRejectPullRequest() {
     });
 }
 
-/** Provides deploy dashboard. */
+/** Provides shouldDeploy dashboard. */
 export function useDeployDashboard() {
     const queryClient = useQueryClient();
 

@@ -115,14 +115,16 @@ export function useTerminalHistory() {
     /** Performs add command. */
     const addCommand = (entry: Omit<CommandHistoryEntry, "id">) => {
         const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-        setHistory((prev) => [...prev, { ...entry, id }]);
+        setHistory((wasPrevious) => [...wasPrevious, { ...entry, id }]);
         return id;
     };
 
     /** Performs update command. */
     const updateCommand = (id: string, updates: Partial<CommandHistoryEntry>) => {
-        setHistory((prev) =>
-            prev.map((entry) => (entry.id === id ? { ...entry, ...updates } : entry))
+        setHistory((wasPrevious) =>
+            wasPrevious.map((entry) =>
+                entry.id === id ? { ...entry, ...updates } : entry
+            )
         );
     };
 

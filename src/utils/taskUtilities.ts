@@ -98,7 +98,7 @@ function getTaskAssigneeSearchValues(
 }
 
 /** Returns whether one optional task field matches the normalized search query. */
-function taskSearchValueMatches(value: string | undefined, query: string): boolean {
+function isTaskSearchValueMatch(value: string | undefined, query: string): boolean {
     return Boolean(value?.toLowerCase().includes(query));
 }
 
@@ -108,7 +108,7 @@ function getTaskNumberSearchValues(taskNumber: number): string[] {
 }
 
 /** Returns whether a task matches task board search text. */
-export function taskMatchesSearch(task: Task, search: string): boolean {
+export function isTaskMatchSearch(task: Task, search: string): boolean {
     const query = search.trim().toLowerCase();
 
     if (!query) {
@@ -130,7 +130,7 @@ export function taskMatchesSearch(task: Task, search: string): boolean {
         task.automation?.lastRunStatus,
     ];
 
-    return searchableValues.some((value) => taskSearchValueMatches(value, query));
+    return searchableValues.some((value) => isTaskSearchValueMatch(value, query));
 }
 
 /** Returns column ID. */

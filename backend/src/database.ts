@@ -5,10 +5,10 @@ import { Database } from "bun:sqlite";
 
 type DatabaseSync = Database;
 
-const configuredDbPath = process.env.MIRA_DASHBOARD_DB_PATH?.trim();
-export const miraDbPath = configuredDbPath
-    ? path.resolve(configuredDbPath)
-    : path.join(process.cwd(), "data", "mira-dashboard.db");
+const configuredDatabasePath = process.env.MIRA_DASHBOARD_DB_PATH?.trim();
+export const miraDatabasePath = configuredDatabasePath
+    ? path.resolve(configuredDatabasePath)
+    : path.join(process.cwd(), "data", "mira-dashboard.database");
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -233,16 +233,16 @@ CREATE INDEX IF NOT EXISTS idx_docker_update_events_created_at
 `;
 
 function initializeDatabase(): DatabaseSync {
-    const dataDirectory = path.dirname(miraDbPath);
+    const dataDirectory = path.dirname(miraDatabasePath);
     fs.mkdirSync(dataDirectory, { recursive: true });
 
-    const initializedDb = new Database(miraDbPath);
-    initializedDb.exec("PRAGMA foreign_keys = ON");
-    initializedDb.exec("PRAGMA busy_timeout = 5000");
-    initializedDb.exec(SCHEMA_SQL);
+    const initializedDatabase = new Database(miraDatabasePath);
+    initializedDatabase.exec("PRAGMA foreign_keys = ON");
+    initializedDatabase.exec("PRAGMA busy_timeout = 5000");
+    initializedDatabase.exec(SCHEMA_SQL);
 
-    return initializedDb;
+    return initializedDatabase;
 }
 
-/** Defines db. */
-export const db = initializeDatabase();
+/** Defines database. */
+export const database = initializeDatabase();

@@ -10,7 +10,7 @@ import { authActions } from "../stores/authStore";
 
 /** Represents the bootstrap API response. */
 interface BootstrapResponse {
-    bootstrapRequired: boolean;
+    isBootstrapRequired: boolean;
     hasGatewayToken: boolean;
 }
 
@@ -42,12 +42,12 @@ export function Login() {
     const form = useForm({
         defaultValues: { username: "", password: "", gatewayToken: "" },
         onSubmit: async ({ value }) => {
-            const bootstrapRequired = bootstrapState?.bootstrapRequired ?? false;
+            const isBootstrapRequired = bootstrapState?.isBootstrapRequired ?? false;
             setError(null);
             setIsSubmitting(true);
 
             try {
-                const endpoint = bootstrapRequired
+                const endpoint = isBootstrapRequired
                     ? "/api/auth/register-first-user"
                     : "/api/auth/login";
                 const response = await fetch(endpoint, {
@@ -57,7 +57,7 @@ export function Login() {
                     body: JSON.stringify({
                         username: value.username.trim(),
                         password: value.password,
-                        ...(bootstrapRequired && {
+                        ...(isBootstrapRequired && {
                             gatewayToken: value.gatewayToken.trim(),
                         }),
                     }),
@@ -100,7 +100,7 @@ export function Login() {
         },
     });
 
-    const bootstrapRequired = bootstrapState?.bootstrapRequired ?? false;
+    const isBootstrapRequired = bootstrapState?.isBootstrapRequired ?? false;
 
     return (
         <div className="bg-primary-900 flex min-h-screen items-center justify-center p-4">
@@ -109,7 +109,7 @@ export function Login() {
                     <div className="mb-2 text-4xl">👩‍💻</div>
                     <CardTitle className="text-center">Mira Dashboard</CardTitle>
                     <p className="text-primary-400 mt-2">
-                        {bootstrapRequired
+                        {isBootstrapRequired
                             ? "Create the first dashboard user and save the gateway token server-side"
                             : "Log in with your dashboard username and password"}
                     </p>
@@ -122,8 +122,8 @@ export function Login() {
                 ) : null}
 
                 <form
-                    onSubmit={(e) => {
-                        e.preventDefault();
+                    onSubmit={(event_) => {
+                        event_.preventDefault();
                         void form.handleSubmit();
                     }}
                     className="space-y-4"
@@ -134,7 +134,9 @@ export function Login() {
                                 type="text"
                                 label="Username"
                                 value={field.state.value}
-                                onChange={(e) => field.handleChange(e.target.value)}
+                                onChange={(event_) =>
+                                    field.handleChange(event_.target.value)
+                                }
                                 placeholder="Enter your username"
                                 autoComplete="username"
                             />
@@ -147,10 +149,12 @@ export function Login() {
                                 type="password"
                                 label="Password"
                                 value={field.state.value}
-                                onChange={(e) => field.handleChange(e.target.value)}
+                                onChange={(event_) =>
+                                    field.handleChange(event_.target.value)
+                                }
                                 placeholder="Enter your password"
                                 autoComplete={
-                                    bootstrapRequired
+                                    isBootstrapRequired
                                         ? "new-password"
                                         : "current-password"
                                 }
@@ -158,14 +162,16 @@ export function Login() {
                         )}
                     </form.Field>
 
-                    {bootstrapRequired ? (
+                    {isBootstrapRequired ? (
                         <form.Field name="gatewayToken">
                             {(field) => (
                                 <Input
                                     type="password"
                                     label="Gateway Token"
                                     value={field.state.value}
-                                    onChange={(e) => field.handleChange(e.target.value)}
+                                    onChange={(event_) =>
+                                        field.handleChange(event_.target.value)
+                                    }
                                     placeholder="Enter your OpenClaw gateway token"
                                     autoComplete="off"
                                 />
@@ -175,17 +181,17 @@ export function Login() {
 
                     <Button type="submit" className="w-full" disabled={isSubmitting}>
                         {isSubmitting
-                            ? bootstrapRequired
+                            ? isBootstrapRequired
                                 ? "Creating account..."
                                 : "Logging in..."
-                            : bootstrapRequired
+                            : isBootstrapRequired
                               ? "Create first user"
                               : "Log in"}
                     </Button>
                 </form>
 
                 <p className="text-primary-500 mt-4 text-center text-xs">
-                    {bootstrapRequired
+                    {isBootstrapRequired
                         ? "The gateway token is only required once during first-user setup."
                         : "Gateway access stays server-side after bootstrap."}
                 </p>

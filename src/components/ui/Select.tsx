@@ -11,7 +11,7 @@ interface SelectOption {
 }
 
 /** Provides props for select. */
-interface SelectProps {
+interface SelectProperties {
     value: string;
     onChange: (value: string) => void;
     options: SelectOption[];
@@ -34,7 +34,7 @@ export function Select({
     className,
     width = "min-w-[180px]",
     menuWidth,
-}: SelectProps) {
+}: SelectProperties) {
     const selectedOption = options.find((opt) => opt.value === value);
     const selectedLabel = selectedOption?.label || placeholder;
     const buttonLabel = ariaLabel ? `${ariaLabel}: ${selectedLabel}` : undefined;

@@ -73,9 +73,9 @@ function formatCronSchedule(job: ScheduledJob, expression: string): string {
 export function LogRotationCard() {
     const status = useLogRotationStatus(30_000);
     const scheduledJobs = useScheduledJobs();
-    const dryRun = useRunLogRotationDryRun();
+    const isDryRun = useRunLogRotationDryRun();
     const realRun = useRunLogRotationNow();
-    const lastAction = realRun.data || dryRun.data;
+    const lastAction = realRun.data || isDryRun.data;
     const lastRun = status.data?.lastRun;
     const logRotationJob = scheduledJobs.data?.find(
         (job) => job.id === "ops.log-rotation"
@@ -98,18 +98,18 @@ export function LogRotationCard() {
                     <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
                         <Button
                             size="sm"
-                            onClick={() => dryRun.mutate()}
-                            disabled={dryRun.isPending || realRun.isPending}
+                            onClick={() => isDryRun.mutate()}
+                            disabled={isDryRun.isPending || realRun.isPending}
                             className="w-full sm:w-auto"
                         >
                             <FlaskConical className="h-4 w-4" />
-                            {dryRun.isPending ? "Running..." : "Run dry-run now"}
+                            {isDryRun.isPending ? "Running..." : "Run dry-run now"}
                         </Button>
                         <Button
                             size="sm"
                             variant="danger"
                             onClick={() => realRun.mutate()}
-                            disabled={dryRun.isPending || realRun.isPending}
+                            disabled={isDryRun.isPending || realRun.isPending}
                             className="w-full sm:w-auto"
                         >
                             <Play className="h-4 w-4" />
@@ -158,7 +158,7 @@ export function LogRotationCard() {
             {lastAction ? (
                 <div className="border-primary-700 border-t px-4 py-3">
                     <div className="text-primary-400 mb-2 text-xs font-semibold tracking-wide uppercase">
-                        Last {lastAction.result?.dryRun ? "dry-run" : "real run"} output
+                        Last {lastAction.result?.isDryRun ? "dry-run" : "real run"} output
                     </div>
                     <pre className="text-primary-100 max-h-52 overflow-auto rounded-lg bg-black/40 p-3 text-xs">
                         {JSON.stringify(lastAction, null, 2)}

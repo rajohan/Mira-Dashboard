@@ -124,43 +124,43 @@ async function runDockerExec(container: string, command: string[]) {
 }
 
 /** Returns trimmed environment overrides while treating whitespace-only values as missing. */
-function trimmedEnvValue(value: string | undefined): string | undefined {
+function trimmedEnvironmentValue(value: string | undefined): string | undefined {
     const trimmed = value?.trim() ?? "";
     return trimmed === "" ? undefined : trimmed;
 }
 
 /** Returns a fallback only when the value is absent, preserving intentional blanks. */
-function envValueOrDefault(value: string | undefined, fallback: string): string {
+function environmentValueOrDefault(value: string | undefined, fallback: string): string {
     return value === undefined ? fallback : value;
 }
 
 /** Returns a safe PostgreSQL hostname for URI construction. */
 function normalizePostgresHost(value: string | undefined, fallback: string): string {
-    const host = trimmedEnvValue(value) ?? fallback;
-    const validIpv4 =
+    const host = trimmedEnvironmentValue(value) ?? fallback;
+    const isValidIpv4 =
         /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/u.test(host);
-    if (/^(?:\d+\.){3}\d+$/u.test(host) && !validIpv4) {
+    if (/^(?:\d+\.){3}\d+$/u.test(host) && !isValidIpv4) {
         throw Object.assign(new Error("Invalid PostgreSQL host"), { code: "EINVAL" });
     }
     const validIpv6 =
         host.startsWith("[") && host.endsWith("]") && isIP(host.slice(1, -1)) === 6;
-    const rawIpv6 = isIP(host) === 6;
+    const isRawIpv6 = isIP(host) === 6;
     if (
         !/^(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)(?:\.(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?))*$/u.test(
             host
         ) &&
         !validIpv6 &&
-        !validIpv4 &&
-        !rawIpv6
+        !isValidIpv4 &&
+        !isRawIpv6
     ) {
         throw Object.assign(new Error("Invalid PostgreSQL host"), { code: "EINVAL" });
     }
-    return rawIpv6 ? `[${host}]` : host;
+    return isRawIpv6 ? `[${host}]` : host;
 }
 
 /** Returns a safe PostgreSQL port for URI construction. */
 function normalizePostgresPort(value: string | undefined): string {
-    const port = trimmedEnvValue(value) ?? "5432";
+    const port = trimmedEnvironmentValue(value) ?? "5432";
     if (!/^\d+$/u.test(port)) {
         throw Object.assign(new Error("Invalid PostgreSQL port"), { code: "EINVAL" });
     }
@@ -174,29 +174,29 @@ function normalizePostgresPort(value: string | undefined): string {
 /** Builds a PostgreSQL connection URI from environment defaults for the requested database. */
 function buildPostgresUri(database = "postgres") {
     const username = encodeURIComponent(
-        envValueOrDefault(process.env.DATABASE_USERNAME, "postgres")
+        environmentValueOrDefault(process.env.DATABASE_USERNAME, "postgres")
     );
     const password = encodeURIComponent(
-        envValueOrDefault(process.env.DATABASE_PASSWORD, "postgres")
+        environmentValueOrDefault(process.env.DATABASE_PASSWORD, "postgres")
     );
     const host = normalizePostgresHost(process.env.DATABASE_HOST, "postgres");
     const port = normalizePostgresPort(process.env.DATABASE_PORT);
-    const db = encodeURIComponent(database);
-    return `postgresql://${username}:${password}@${host}:${port}/${db}`;
+    const database_ = encodeURIComponent(database);
+    return `postgresql://${username}:${password}@${host}:${port}/${database_}`;
 }
 
 /** Builds a PgBouncer admin connection URI from environment defaults. */
 function buildPgBouncerUri(database = "pgbouncer") {
     const username = encodeURIComponent(
-        envValueOrDefault(process.env.DATABASE_USERNAME, "postgres")
+        environmentValueOrDefault(process.env.DATABASE_USERNAME, "postgres")
     );
     const password = encodeURIComponent(
-        envValueOrDefault(process.env.DATABASE_PASSWORD, "postgres")
+        environmentValueOrDefault(process.env.DATABASE_PASSWORD, "postgres")
     );
     const host = normalizePostgresHost(process.env.PGBOUNCER_HOST, "pgbouncer");
     const port = normalizePostgresPort(process.env.PGBOUNCER_PORT);
-    const db = encodeURIComponent(database);
-    return `postgresql://${username}:${password}@${host}:${port}/${db}`;
+    const database_ = encodeURIComponent(database);
+    return `postgresql://${username}:${password}@${host}:${port}/${database_}`;
 }
 
 /** Executes SQL against Postgres through the postgres container and returns tab-delimited stdout. */
@@ -262,18 +262,20 @@ async function queryAllUserDatabases<T extends object>(sql: string): Promise<T[]
 }
 
 const TORRENT_COUNT_TTL = 60 * 60 * 1000; // 1 hour
-let torrentCountCache: null | {
-    data: { comet: number; bitmagnet: number };
-    timestamp: number;
-} = null;
+const databaseRouteState: {
+    torrentCountCache: null | {
+        data: { comet: number; bitmagnet: number };
+        timestamp: number;
+    };
+} = { torrentCountCache: null };
 
 /** Returns cached torrent counts for Comet and Bitmagnet, refreshing at most once per hour. */
 async function getTorrentCounts() {
     if (
-        torrentCountCache &&
-        Date.now() - torrentCountCache.timestamp < TORRENT_COUNT_TTL
+        databaseRouteState.torrentCountCache &&
+        Date.now() - databaseRouteState.torrentCountCache.timestamp < TORRENT_COUNT_TTL
     ) {
-        return torrentCountCache.data;
+        return databaseRouteState.torrentCountCache.data;
     }
 
     const cometCount = stringFallback(
@@ -294,7 +296,7 @@ async function getTorrentCounts() {
     );
 
     const data = { comet: numberFrom(cometCount), bitmagnet: numberFrom(bitmagnetCount) };
-    torrentCountCache = { data, timestamp: Date.now() };
+    databaseRouteState.torrentCountCache = { data, timestamp: Date.now() };
     return data;
 }
 
@@ -455,17 +457,17 @@ async function getDatabaseOverview() {
 
 /** Registers GET /API/database/overview for aggregated PostgreSQL and PgBouncer monitoring data. */
 export default function databaseRoutes(app: express.Application): void {
-    app.get("/api/database/overview", (async (_req, res) => {
+    app.get("/api/database/overview", (async (_request, response) => {
         try {
             const data = await getDatabaseOverview();
-            res.json(data);
+            response.json(data);
         } catch (error) {
             const safeError = {
                 code: (error as NodeJS.ErrnoException).code,
                 name: (error as Error).name,
             };
             console.error("[databaseRoutes] Failed to load database overview", safeError);
-            res.status(500).json({
+            response.status(500).json({
                 error: "Failed to load database overview",
             });
         }

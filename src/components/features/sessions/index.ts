@@ -2,6 +2,6 @@ export {
     formatSessionType,
     getTypeSortOrder,
     SESSION_TYPES,
-} from "../../../utils/sessionUtils";
+} from "../../../utils/sessionUtilities";
 export { SessionActionsDropdown } from "./SessionActionsDropdown";
 export { SessionsTable } from "./SessionsTable";

@@ -32,18 +32,18 @@ export function asyncRoute(
     handler: RequestHandler,
     { fallback = "Route failed", logLabel }: { fallback?: string; logLabel?: string } = {}
 ): RequestHandler {
-    return async (req, res, next) => {
+    return async (request, response, next) => {
         try {
-            await handler(req, res, next);
+            await handler(request, response, next);
         } catch (error) {
             if (logLabel) {
                 console.error(logLabel, error);
             }
-            if (res.headersSent) {
+            if (response.headersSent) {
                 next(error);
                 return;
             }
-            res.status(httpStatusCode(error)).json({
+            response.status(httpStatusCode(error)).json({
                 error: errorMessage(error, fallback),
             });
         }

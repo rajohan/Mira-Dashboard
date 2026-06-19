@@ -24,24 +24,24 @@ export interface ActiveChatStream {
 export type ActiveChatStreams = Record<string, ActiveChatStream>;
 
 /** Performs merge stream text. */
-export function mergeStreamText(previous: string, next: string): string {
+export function mergeStreamText(wasPrevious: string, next: string): string {
     if (!next.trim()) {
-        return previous;
+        return wasPrevious;
     }
 
-    if (!previous) {
+    if (!wasPrevious) {
         return next;
     }
 
-    if (next.startsWith(previous)) {
+    if (next.startsWith(wasPrevious)) {
         return next;
     }
 
-    if (previous.endsWith(next)) {
-        return previous;
+    if (wasPrevious.endsWith(next)) {
+        return wasPrevious;
     }
 
-    return `${previous}${next}`;
+    return `${wasPrevious}${next}`;
 }
 
 /** Performs unique strings. */
@@ -133,7 +133,7 @@ export function finalMessageFromPayload(
 
 /** Performs merge stream message. */
 export function mergeStreamMessage(
-    previous: ChatHistoryMessage | undefined,
+    wasPrevious: ChatHistoryMessage | undefined,
     next: ChatHistoryMessage,
     text: string,
     runId?: string
@@ -142,13 +142,13 @@ export function mergeStreamMessage(
         role: "assistant",
         content: next.content,
         text,
-        images: next.images?.length ? next.images : previous?.images || [],
+        images: next.images?.length ? next.images : wasPrevious?.images || [],
         attachments: next.attachments?.length
             ? next.attachments
-            : previous?.attachments || [],
-        thinking: next.thinking?.length ? next.thinking : previous?.thinking,
-        toolCalls: next.toolCalls?.length ? next.toolCalls : previous?.toolCalls,
-        toolResult: next.toolResult || previous?.toolResult,
+            : wasPrevious?.attachments || [],
+        thinking: next.thinking?.length ? next.thinking : wasPrevious?.thinking,
+        toolCalls: next.toolCalls?.length ? next.toolCalls : wasPrevious?.toolCalls,
+        toolResult: next.toolResult || wasPrevious?.toolResult,
         timestamp: currentIsoString(),
         runId,
     };
@@ -160,7 +160,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Performs payload is command message. */
-export function payloadIsCommandMessage(value: unknown): boolean {
+export function isCommandMessagePayload(value: unknown): boolean {
     return Boolean(
         value &&
         typeof value === "object" &&
@@ -183,7 +183,7 @@ export function createLocalSystemMessage(text: string): ChatHistoryMessage {
 }
 
 /** Performs text looks like recovered stream. */
-function textLooksLikeRecoveredStream(historyText: string, streamText: string): boolean {
+function isRecoveredStreamText(historyText: string, streamText: string): boolean {
     const normalizedHistoryText = historyText.trim();
     const normalizedStreamText = streamText.trim();
 
@@ -197,14 +197,14 @@ function textLooksLikeRecoveredStream(historyText: string, streamText: string): 
 }
 
 /** Performs history contains recovered stream. */
-export function historyContainsRecoveredStream(
+export function hasRecoveredStreamHistory(
     messages: ChatHistoryMessage[],
     streamText: string
 ): boolean {
     return messages.some(
         (message) =>
             message.role.toLowerCase() === "assistant" &&
-            textLooksLikeRecoveredStream(message.text, streamText)
+            isRecoveredStreamText(message.text, streamText)
     );
 }
 
@@ -218,10 +218,10 @@ export function visibleHistoryMessages(
 
 /** Creates chat visibility. */
 export function createChatVisibility(
-    showThinking: boolean,
-    showTools: boolean
+    shouldShowThinking: boolean,
+    shouldShowTools: boolean
 ): ChatVisibilitySettings {
-    return { showThinking, showTools };
+    return { shouldShowThinking, shouldShowTools };
 }
 
 /** Performs should show stream row. */

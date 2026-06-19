@@ -6,7 +6,7 @@ export interface MoltbookAnnouncement {
     title: string | null;
     authorName: string | null;
     createdAt: string | null;
-    preview: string | null;
+    isPreview: string | null;
 }
 
 /** Represents moltbook home cache. */

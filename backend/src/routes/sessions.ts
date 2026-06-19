@@ -10,18 +10,18 @@ function isValidSessionKey(sessionKey: string): boolean {
 /** Registers sessions API routes. */
 export default function sessionsRoutes(app: express.Application): void {
     // List sessions with optional filtering
-    app.get("/api/sessions/list", (async (req, res) => {
+    app.get("/api/sessions/list", (async (request, response) => {
         try {
             let sessions = gateway.getSessions();
 
             // Filter by type
-            const type = req.query.type as string | undefined;
+            const type = request.query.type as string | undefined;
             if (type) {
                 sessions = sessions.filter((s) => s.type === type);
             }
 
             // Filter by model
-            const model = req.query.model as string | undefined;
+            const model = request.query.model as string | undefined;
             if (model) {
                 sessions = sessions.filter((s) => s.model.includes(model));
             }
@@ -29,63 +29,63 @@ export default function sessionsRoutes(app: express.Application): void {
             // Sort by token count (descending)
             sessions.sort((a, b) => b.tokenCount - a.tokenCount);
 
-            res.json({ sessions });
+            response.json({ sessions });
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            response.status(500).json({ error: (error as Error).message });
         }
     }) as RequestHandler);
 
-    app.post("/api/sessions/:id/action", (async (req, res) => {
-        const sessionKey = stringFallback(req.params.id).trim();
+    app.post("/api/sessions/:id/action", (async (request, response) => {
+        const sessionKey = stringFallback(request.params.id).trim();
         if (!isValidSessionKey(sessionKey)) {
-            res.status(400).json({ error: "Invalid session id" });
+            response.status(400).json({ error: "Invalid session id" });
             return;
         }
-        const action = stringFallback(req.body?.action).trim().toLowerCase();
+        const action = stringFallback(request.body?.action).trim().toLowerCase();
 
         try {
             if (action === "stop") {
                 await gateway.abortSessionRun(sessionKey);
-                res.json({ success: true, action });
+                response.json({ success: true, action });
                 return;
             }
 
             if (action === "compact") {
                 await gateway.sendSessionMessage(sessionKey, "/compact");
-                res.json({ success: true, action });
+                response.json({ success: true, action });
                 return;
             }
 
             if (action === "reset") {
                 await gateway.sendSessionMessage(sessionKey, "/reset");
-                res.json({ success: true, action });
+                response.json({ success: true, action });
                 return;
             }
 
-            res.status(400).json({ error: `Unsupported action: ${action}` });
+            response.status(400).json({ error: `Unsupported action: ${action}` });
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            response.status(500).json({ error: (error as Error).message });
         }
     }) as RequestHandler);
 
     // Delete a session and archive its transcript through OpenClaw.
-    app.delete("/api/sessions/:id", (async (req, res) => {
-        const sessionKey = stringFallback(req.params.id).trim();
+    app.delete("/api/sessions/:id", (async (request, response) => {
+        const sessionKey = stringFallback(request.params.id).trim();
         if (!isValidSessionKey(sessionKey)) {
-            res.status(400).json({ error: "Invalid session id" });
+            response.status(400).json({ error: "Invalid session id" });
             return;
         }
 
         try {
             const result = await gateway.deleteSession(sessionKey);
-            res.json({ success: true, result });
+            response.json({ success: true, result });
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            response.status(500).json({ error: (error as Error).message });
         }
     }) as RequestHandler);
 
     // Get session stats
-    app.get("/api/sessions/stats", (async (_req, res) => {
+    app.get("/api/sessions/stats", (async (_request, response) => {
         try {
             const sessions = gateway.getSessions();
             const now = Date.now();
@@ -116,9 +116,9 @@ export default function sessionsRoutes(app: express.Application): void {
                 }
             }
 
-            res.json(stats);
+            response.json(stats);
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            response.status(500).json({ error: (error as Error).message });
         }
     }) as RequestHandler);
 }

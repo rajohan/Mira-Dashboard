@@ -20,7 +20,7 @@ export type DeviceIdentity = {
     privateKeyPem: string;
 };
 
-/** Defines gateway hello ok. */
+/** Defines gateway hello isOk. */
 export type GatewayHelloOk = {
     type?: string;
     protocol?: number;
@@ -42,7 +42,7 @@ export type GatewayEvent = {
 type GatewayResponse = {
     type?: string;
     id?: string;
-    ok?: boolean;
+    isOk?: boolean;
     payload?: unknown;
     error?: {
         code?: string;
@@ -74,8 +74,8 @@ export type OpenClawGatewayClientOptions = {
     deviceIdentity?: DeviceIdentity;
     requestTimeoutMs?: number;
     onHelloOk?: (payload: GatewayHelloOk) => void;
-    onEvent?: (evt: GatewayEvent) => void;
-    onConnectError?: (err: Error) => void;
+    onEvent?: (event: GatewayEvent) => void;
+    onConnectError?: (error: Error) => void;
     onClose?: (code: number, reason: string) => void;
 };
 
@@ -83,7 +83,7 @@ export type OpenClawGatewayClientOptions = {
 export type OpenClawGatewayClientInstance = {
     start: () => void;
     stop: () => void;
-    request: (method: string, params?: unknown) => Promise<unknown>;
+    request: (method: string, parameters?: unknown) => Promise<unknown>;
 };
 
 /** Performs base64 URL encode. */
@@ -218,7 +218,7 @@ function normalizeDeviceMetadataForAuth(value?: string): string {
 }
 
 /** Builds device auth payload v3. */
-function buildDeviceAuthPayloadV3(params: {
+function buildDeviceAuthPayloadV3(parameters: {
     deviceId: string;
     clientId: string;
     clientMode: string;
@@ -232,16 +232,16 @@ function buildDeviceAuthPayloadV3(params: {
 }): string {
     return [
         "v3",
-        params.deviceId,
-        params.clientId,
-        params.clientMode,
-        params.role,
-        params.scopes.join(","),
-        String(params.signedAtMs),
-        params.token ?? "",
-        params.nonce,
-        normalizeDeviceMetadataForAuth(params.platform),
-        normalizeDeviceMetadataForAuth(params.deviceFamily),
+        parameters.deviceId,
+        parameters.clientId,
+        parameters.clientMode,
+        parameters.role,
+        parameters.scopes.join(","),
+        String(parameters.signedAtMs),
+        parameters.token ?? "",
+        parameters.nonce,
+        normalizeDeviceMetadataForAuth(parameters.platform),
+        normalizeDeviceMetadataForAuth(parameters.deviceFamily),
     ].join("|");
 }
 
@@ -261,7 +261,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
     declare private lastTickAt: number;
 
     /* eslint-disable unicorn/prefer-class-fields -- Constructor assignments avoid emitted class-field coverage counters. */
-    constructor(opts: OpenClawGatewayClientOptions) {
+    constructor(options: OpenClawGatewayClientOptions) {
         this.requestId = 0;
         this.pending = new Map();
         this.ws = null;
@@ -282,7 +282,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             scopes: ["operator.read", "operator.write", "operator.admin"],
             caps: [],
             platform: process.platform,
-            ...opts,
+            ...options,
         };
     }
     /* eslint-enable unicorn/prefer-class-fields */
@@ -389,7 +389,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         if (
             typeof parsed !== "object" ||
             parsed === null ||
-            (parsed as { type?: string }).type !== "res"
+            (parsed as { type?: string }).type !== "response"
         ) {
             return;
         }
@@ -407,12 +407,12 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         clearTimeout(pending.timeout);
         this.pending.delete(response.id);
 
-        if (response.ok) {
+        if (response.isOk) {
             const payload = response.payload;
             if (
                 payload &&
                 typeof payload === "object" &&
-                (payload as GatewayHelloOk).type === "hello-ok"
+                (payload as GatewayHelloOk).type === "hello-isOk"
             ) {
                 this.backoffMs = 1_000;
                 this.lastTickAt = Date.now();
@@ -590,7 +590,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         this.rejectAllPending(new Error("gateway client stopped"));
     }
 
-    request(method: string, params: unknown = {}): Promise<unknown> {
+    request(method: string, parameters: unknown = {}): Promise<unknown> {
         const ws = this.ws;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
             return Promise.reject(new Error("Gateway not connected"));
@@ -604,7 +604,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             type: "req",
             id,
             method,
-            params,
+            params: parameters,
         };
 
         return new Promise((resolve, reject) => {

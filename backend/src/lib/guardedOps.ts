@@ -133,9 +133,9 @@ export async function copyNoFollowGuarded(
         }
         const sourceMode = sourceStat.mode & 0o777;
         const destinationPath = destination as string;
-        const destinationDir = Path.dirname(destinationPath);
-        const tempPath = Path.join(
-            destinationDir,
+        const destinationDirectory = Path.dirname(destinationPath);
+        const temporaryPath = Path.join(
+            destinationDirectory,
             `.${Path.basename(destinationPath)}.${Crypto.randomUUID()}.tmp`
         );
         let destinationFile: Fs.promises.FileHandle | undefined;
@@ -170,9 +170,9 @@ export async function copyNoFollowGuarded(
         } finally {
             await destinationFile?.close();
         }
-        let tempCreated = false;
-        const tempFile = await Fs.promises.open(
-            Buffer.from(tempPath),
+        let isTemporaryCreated = false;
+        const temporaryFile = await Fs.promises.open(
+            Buffer.from(temporaryPath),
             Fs.constants.O_WRONLY |
                 Fs.constants.O_CREAT |
                 Fs.constants.O_EXCL |
@@ -180,9 +180,9 @@ export async function copyNoFollowGuarded(
             sourceMode
         );
         try {
-            tempCreated = true;
+            isTemporaryCreated = true;
             try {
-                await tempFile.chmod(sourceMode);
+                await temporaryFile.chmod(sourceMode);
                 const buffer = Buffer.allocUnsafe(64 * 1024);
                 let position = 0;
                 while (true) {
@@ -204,7 +204,7 @@ export async function copyNoFollowGuarded(
                     }
                     let written = 0;
                     while (written < bytesRead) {
-                        const { bytesWritten } = await tempFile.write(
+                        const { bytesWritten } = await temporaryFile.write(
                             buffer,
                             written,
                             bytesRead - written
@@ -213,21 +213,24 @@ export async function copyNoFollowGuarded(
                     }
                     position += bytesRead;
                 }
-                await tempFile.sync();
+                await temporaryFile.sync();
             } finally {
-                await tempFile.close();
+                await temporaryFile.close();
             }
-            await Fs.promises.rename(tempPath, destinationPath);
-            tempCreated = false;
-            const parentDir = await Fs.promises.open(Buffer.from(destinationDir), "r");
+            await Fs.promises.rename(temporaryPath, destinationPath);
+            isTemporaryCreated = false;
+            const parentDirectory = await Fs.promises.open(
+                Buffer.from(destinationDirectory),
+                "r"
+            );
             try {
-                await parentDir.sync();
+                await parentDirectory.sync();
             } finally {
-                await parentDir.close();
+                await parentDirectory.close();
             }
         } finally {
-            if (tempCreated) {
-                await Fs.promises.rm(tempPath, { force: true });
+            if (isTemporaryCreated) {
+                await Fs.promises.rm(temporaryPath, { force: true });
             }
         }
     } finally {
@@ -259,11 +262,14 @@ export async function writeTextGuarded(
 }
 
 async function syncParentDirectory(filePath: string): Promise<void> {
-    const parentDir = await Fs.promises.open(Buffer.from(Path.dirname(filePath)), "r");
+    const parentDirectory = await Fs.promises.open(
+        Buffer.from(Path.dirname(filePath)),
+        "r"
+    );
     try {
-        await parentDir.sync();
+        await parentDirectory.sync();
     } finally {
-        await parentDir.close();
+        await parentDirectory.close();
     }
 }
 
@@ -276,9 +282,9 @@ export async function writeTextNoFollowGuarded(
     let fileMode = (mode ?? 0o666) & 0o777;
     let shouldApplyMode = mode !== undefined;
     const destinationPath = path as string;
-    const destinationDir = Path.dirname(destinationPath);
-    const tempPath = Path.join(
-        destinationDir,
+    const destinationDirectory = Path.dirname(destinationPath);
+    const temporaryPath = Path.join(
+        destinationDirectory,
         `.${Path.basename(destinationPath)}.${Crypto.randomUUID()}.tmp`
     );
     let file: Fs.promises.FileHandle | undefined;
@@ -310,9 +316,9 @@ export async function writeTextNoFollowGuarded(
         await file?.close();
     }
 
-    let tempCreated = false;
-    const tempFile = await Fs.promises.open(
-        Buffer.from(tempPath),
+    let isTemporaryCreated = false;
+    const temporaryFile = await Fs.promises.open(
+        Buffer.from(temporaryPath),
         Fs.constants.O_WRONLY |
             Fs.constants.O_CREAT |
             Fs.constants.O_EXCL |
@@ -320,22 +326,22 @@ export async function writeTextNoFollowGuarded(
         fileMode
     );
     try {
-        tempCreated = true;
+        isTemporaryCreated = true;
         try {
             if (shouldApplyMode) {
-                await tempFile.chmod(fileMode);
+                await temporaryFile.chmod(fileMode);
             }
-            await tempFile.writeFile(content, "utf8");
-            await tempFile.sync();
+            await temporaryFile.writeFile(content, "utf8");
+            await temporaryFile.sync();
         } finally {
-            await tempFile.close();
+            await temporaryFile.close();
         }
-        await Fs.promises.rename(Buffer.from(tempPath), guardedPathBuffer(path));
-        tempCreated = false;
+        await Fs.promises.rename(Buffer.from(temporaryPath), guardedPathBuffer(path));
+        isTemporaryCreated = false;
         await syncParentDirectory(destinationPath);
     } finally {
-        if (tempCreated) {
-            await Fs.promises.rm(tempPath, { force: true });
+        if (isTemporaryCreated) {
+            await Fs.promises.rm(temporaryPath, { force: true });
         }
     }
 }
@@ -378,12 +384,12 @@ export function lstatGuarded(path: GuardedPath): Fs.Stats {
 /** Spawns a validated executable with explicit argument vector semantics. */
 export function spawnGuarded(
     executable: string,
-    args: string[],
+    arguments_: string[],
     options: ChildProcess.SpawnOptions
 ): ChildProcess.ChildProcess {
     return Reflect.apply(childProcessOps.spawn, childProcessOps, [
         executable,
-        args,
+        arguments_,
         options,
     ]) as ChildProcess.ChildProcess;
 }

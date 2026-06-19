@@ -3,7 +3,7 @@ import { Database, MoreVertical, RotateCcw, Trash2 } from "lucide-react";
 import { Dropdown, type DropdownItem } from "../../ui/Dropdown";
 
 /** Provides props for session actions dropdown. */
-interface SessionActionsDropdownProps {
+interface SessionActionsDropdownProperties {
     ariaLabel?: string;
     onCompact: () => void;
     onReset: () => void;
@@ -18,7 +18,7 @@ export function SessionActionsDropdown({
     onReset,
     onDelete,
     showDelete = true,
-}: SessionActionsDropdownProps) {
+}: SessionActionsDropdownProperties) {
     const items: DropdownItem[] = [
         {
             label: "Compact",

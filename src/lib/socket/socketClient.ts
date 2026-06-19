@@ -1,4 +1,4 @@
-import type { SocketEnvelope } from "../../types/socket";
+import type { SocketEnvironmentelope } from "../../types/socket";
 
 /** Represents pending request. */
 interface PendingRequest {
@@ -12,7 +12,7 @@ interface SocketClientOptions {
     onOpen?: () => void;
     onClose?: () => void;
     onError?: () => void;
-    onMessage?: (data: SocketEnvelope) => void;
+    onMessage?: (data: SocketEnvironmentelope) => void;
 }
 
 /** Represents socket client. */
@@ -21,7 +21,7 @@ export interface SocketClient {
     disconnect: () => void;
     request: <T = unknown>(
         method: string,
-        params?: Record<string, unknown>
+        parameters?: Record<string, unknown>
     ) => Promise<T>;
     isOpen: () => boolean;
 }
@@ -51,13 +51,13 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
 
         ws.addEventListener("message", (event) => {
             try {
-                const data = JSON.parse(event.data) as SocketEnvelope;
+                const data = JSON.parse(event.data) as SocketEnvironmentelope;
 
-                if (data.type === "res" && data.id) {
+                if (data.type === "response" && data.id) {
                     const pending = pendingRequests.get(data.id);
                     if (pending) {
                         pendingRequests.delete(data.id);
-                        if (data.ok) {
+                        if (data.isOk) {
                             pending.resolve(data.payload);
                         } else {
                             pending.reject(data.error);
@@ -102,7 +102,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
     /** Performs request. */
     const request = <T = unknown>(
         method: string,
-        params?: Record<string, unknown>
+        parameters?: Record<string, unknown>
     ): Promise<T> => {
         return new Promise((resolve, reject) => {
             if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -121,7 +121,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                     type: "req",
                     id,
                     method,
-                    params,
+                    params: parameters,
                 })
             );
 

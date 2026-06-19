@@ -3,7 +3,7 @@ import type { IncomingMessage } from "node:http";
 
 import type express from "express";
 
-import { db } from "./db.ts";
+import { database as database } from "./database.ts";
 
 const SESSION_COOKIE = "mira_dashboard_session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
@@ -69,9 +69,9 @@ function normalizeUsername(username: string): string {
 
 /** Returns whether production. */
 function isProduction(request?: IncomingMessage): boolean {
-    const forwardedProto = request?.headers["x-forwarded-proto"];
-    if (typeof forwardedProto === "string") {
-        return forwardedProto.split(",", 1)[0]?.trim() === "https";
+    const forwardedPrototype = request?.headers["x-forwarded-proto"];
+    if (typeof forwardedPrototype === "string") {
+        return forwardedPrototype.split(",", 1)[0]?.trim() === "https";
     }
     return process.env.NODE_ENV === "production";
 }
@@ -120,14 +120,14 @@ function remoteAddress(request: express.Request | IncomingMessage): string | und
 /** Returns whether loopback request. */
 export function isLoopbackRequest(request: express.Request | IncomingMessage): boolean {
     const peerAddress = remoteAddress(request);
-    const trustForwardedHeaders = isLoopbackAddress(peerAddress);
+    const isTrustForwardedHeaders = isLoopbackAddress(peerAddress);
     const headers = request.headers ?? {};
     const realIp = headerValue(headers["x-real-ip"]);
-    if (trustForwardedHeaders && realIp) {
+    if (isTrustForwardedHeaders && realIp) {
         return isLoopbackAddress(realIp.trim());
     }
     const forwardedFor = headerValue(headers["x-forwarded-for"]);
-    if (trustForwardedHeaders && forwardedFor) {
+    if (isTrustForwardedHeaders && forwardedFor) {
         return isLoopbackAddress(
             clientAddressFromTrustedChain(peerAddress, forwardedFor)
         );
@@ -143,7 +143,7 @@ export function hashPassword(password: string): string {
 }
 
 /** Performs verify password. */
-export function verifyPassword(password: string, storedHash: string): boolean {
+export function isPasswordVerified(password: string, storedHash: string): boolean {
     const [algorithm, salt, hash] = storedHash.split(":");
     if (algorithm !== "scrypt" || !salt || !hash) {
         return false;
@@ -161,20 +161,20 @@ export function verifyPassword(password: string, storedHash: string): boolean {
 
 /** Returns user count. */
 export function getUserCount(): number {
-    const row = db.prepare("SELECT COUNT(*) AS count FROM users").get() as {
+    const row = database.prepare("SELECT COUNT(*) AS count FROM users").get() as {
         count: number;
     };
     return row.count;
 }
 
 /** Performs bootstrap reqUIred. */
-export function bootstrapRequired(): boolean {
+export function isBootstrapRequired(): boolean {
     return getUserCount() === 0;
 }
 
 /** Performs find user by username. */
 export function findUserByUsername(username: string): UserRow | null {
-    const row = db
+    const row = database
         .prepare(
             `SELECT id, username, password_hash, created_at, updated_at
              FROM users
@@ -190,7 +190,7 @@ export function createUser(username: string, password: string): AuthUser {
     const timestamp = nowIso();
     const passwordHash = hashPassword(password);
 
-    const result = db
+    const result = database
         .prepare(
             `INSERT INTO users (username, password_hash, created_at, updated_at)
              VALUES (?, ?, ?, ?)`
@@ -210,7 +210,7 @@ export function createFirstUser(username: string, password: string): AuthUser | 
     const passwordHash = hashPassword(password);
     const rollback = (transactionError?: unknown) => {
         try {
-            db.exec("ROLLBACK");
+            database.exec("ROLLBACK");
         } catch (rollbackError) {
             if (transactionError) {
                 throw new AggregateError(
@@ -223,9 +223,9 @@ export function createFirstUser(username: string, password: string): AuthUser | 
         }
     };
 
-    db.exec("BEGIN IMMEDIATE");
+    database.exec("BEGIN IMMEDIATE");
     try {
-        const result = db
+        const result = database
             .prepare(
                 `INSERT INTO users (username, password_hash, created_at, updated_at)
                  SELECT ?, ?, ?, ?
@@ -236,7 +236,7 @@ export function createFirstUser(username: string, password: string): AuthUser | 
             rollback();
             return null;
         }
-        db.exec("COMMIT");
+        database.exec("COMMIT");
         return {
             id: Number(result.lastInsertRowid),
             username: normalizedUsername,
@@ -250,16 +250,18 @@ export function createFirstUser(username: string, password: string): AuthUser | 
 /** Performs persist gateway token. */
 export function persistGatewayToken(token: string): void {
     const timestamp = nowIso();
-    db.prepare(
-        `INSERT INTO app_config (key, value, updated_at)
+    database
+        .prepare(
+            `INSERT INTO app_config (key, value, updated_at)
          VALUES ('gateway_token', ?, ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
-    ).run(token, timestamp);
+        )
+        .run(token, timestamp);
 }
 
 /** Returns persisted gateway token. */
 export function getPersistedGatewayToken(): string | null {
-    const row = db
+    const row = database
         .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
         .get() as undefined | { value: string };
     return row?.value || null;
@@ -272,29 +274,31 @@ export function createSession(userId: number): string {
     const expiresAt = expiresAtDate.toISOString();
     const createdAt = nowIso();
 
-    db.prepare(
-        `INSERT INTO auth_sessions (id, user_id, created_at, expires_at)
+    database
+        .prepare(
+            `INSERT INTO auth_sessions (id, user_id, created_at, expires_at)
          VALUES (?, ?, ?, ?)`
-    ).run(sessionId, userId, createdAt, expiresAt);
+        )
+        .run(sessionId, userId, createdAt, expiresAt);
 
     return sessionId;
 }
 
 /** Performs delete session. */
 export function deleteSession(sessionId: string): void {
-    db.prepare("DELETE FROM auth_sessions WHERE id = ?").run(sessionId);
+    database.prepare("DELETE FROM auth_sessions WHERE id = ?").run(sessionId);
 }
 
 /** Performs cleanup expired sessions. */
 export function cleanupExpiredSessions(): void {
-    db.prepare("DELETE FROM auth_sessions WHERE expires_at <= ?").run(nowIso());
+    database.prepare("DELETE FROM auth_sessions WHERE expires_at <= ?").run(nowIso());
 }
 
 /** Returns auth user from session ID. */
 export function getAuthUserFromSessionId(sessionId: string): AuthUser | null {
     cleanupExpiredSessions();
 
-    const row = db
+    const row = database
         .prepare(
             `SELECT u.id, u.username
              FROM auth_sessions s
@@ -328,7 +332,7 @@ export function setSessionCookie(
     request: express.Request
 ): void {
     const maxAge = Math.floor(SESSION_TTL_MS / 1000);
-    const secure = isProduction(request);
+    const isSecure = isProduction(request);
     const cookieParts = [
         `${SESSION_COOKIE}=${encodeURIComponent(sessionId)}`,
         "Path=/",
@@ -337,7 +341,7 @@ export function setSessionCookie(
         `Max-Age=${maxAge}`,
     ];
 
-    if (secure) {
+    if (isSecure) {
         cookieParts.push("Secure");
     }
 
@@ -349,7 +353,7 @@ export function clearSessionCookie(
     response: express.Response,
     request: express.Request
 ): void {
-    const secure = isProduction(request);
+    const isSecure = isProduction(request);
     const cookieParts = [
         `${SESSION_COOKIE}=`,
         "Path=/",
@@ -358,7 +362,7 @@ export function clearSessionCookie(
         "Max-Age=0",
     ];
 
-    if (secure) {
+    if (isSecure) {
         cookieParts.push("Secure");
     }
 

@@ -56,7 +56,7 @@ export function useCreateNotification() {
 
     return useMutation({
         mutationFn: (payload: CreateNotificationInput) =>
-            apiPostRequired<{ ok: boolean; id: number | null }>(
+            apiPostRequired<{ isOk: boolean; id: number | null }>(
                 "/notifications",
                 payload
             ),
@@ -72,7 +72,7 @@ export function useMarkNotificationRead() {
 
     return useMutation({
         mutationFn: (id: number) =>
-            apiPostRequired<{ ok: boolean }>(`/notifications/${id}/read`),
+            apiPostRequired<{ isOk: boolean }>(`/notifications/${id}/read`),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: ["notifications"] });
         },
@@ -85,7 +85,7 @@ export function useMarkAllNotificationsRead() {
 
     return useMutation({
         mutationFn: () =>
-            apiPostRequired<{ ok: boolean }>("/notifications/mark-all-read"),
+            apiPostRequired<{ isOk: boolean }>("/notifications/mark-all-read"),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: ["notifications"] });
         },
@@ -98,7 +98,7 @@ export function useClearReadNotifications() {
 
     return useMutation({
         mutationFn: () =>
-            apiPostRequired<{ ok: boolean; deleted: number }>(
+            apiPostRequired<{ isOk: boolean; deleted: number }>(
                 "/notifications/clear-read"
             ),
         onSuccess: () => {
@@ -113,7 +113,7 @@ export function useDeleteNotification() {
 
     return useMutation({
         mutationFn: (id: number) =>
-            apiDeleteRequired<{ ok: boolean; deleted: number }>(`/notifications/${id}`),
+            apiDeleteRequired<{ isOk: boolean; deleted: number }>(`/notifications/${id}`),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: ["notifications"] });
         },
