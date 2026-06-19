@@ -140,9 +140,11 @@ function getImageMimeType(filename: string): string {
     return mimeTypes[stringFallback(extension)] || "application/octet-stream";
 }
 
-/** Performs should hIDe file. */
+/** Returns whether a file should be hidden. */
 function shouldHideFile(name: string): boolean {
-    return name.startsWith(".") && name !== ".environment.example";
+    return (
+        name.startsWith(".") && name !== ".env.example" && name !== ".environment.example"
+    );
 }
 
 function compareNames(a: string, b: string): number {

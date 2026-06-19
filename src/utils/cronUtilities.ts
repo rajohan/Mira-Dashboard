@@ -114,7 +114,7 @@ export function getCronStatusVariant(
     value: string
 ): "success" | "warning" | "error" | "default" {
     const normalized = value.trim().toLowerCase();
-    if (["isOk", "success", "succeeded", "completed"].includes(normalized)) {
+    if (["isok", "success", "succeeded", "completed"].includes(normalized)) {
         return "success";
     }
 

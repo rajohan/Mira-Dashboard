@@ -1328,7 +1328,7 @@ function startDeployLatest(lockHeldBy?: string): DeploymentJob {
 }
 
 /** Performs approve pull request. */
-async function approvePullRequest(number: number, shouldDeploy: boolean) {
+async function approvePullRequest(number: number, willDeploy: boolean) {
     await ensureProductionCheckout();
     const pr = await getPullRequest(number);
     validateDashboardPrForApproval(pr);
@@ -1363,7 +1363,7 @@ async function approvePullRequest(number: number, shouldDeploy: boolean) {
             syncError = errorMessage(error, "Failed to sync main after merge");
         }
 
-        if (shouldDeploy && !syncError) {
+        if (willDeploy && !syncError) {
             try {
                 deployment = startDeployLatest(lockId);
                 isReleaseLock = false;
@@ -1383,7 +1383,7 @@ async function approvePullRequest(number: number, shouldDeploy: boolean) {
             ? `PR #${number} merged; production sync failed`
             : deployError
               ? `PR #${number} merged; deploy failed to start`
-              : shouldDeploy
+              : willDeploy
                 ? `PR #${number} merged; deploy started`
                 : `PR #${number} merged`,
         deployment,

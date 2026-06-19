@@ -316,8 +316,8 @@ interface DockerActionRequest {
 
 /** Represents Docker stack action request. */
 interface DockerStackActionRequest {
-    action: "restart";
-    service?: string;
+    action?: unknown;
+    service?: unknown;
 }
 
 /** Represents Docker prune request. */
@@ -968,8 +968,19 @@ async function runContainerAction(
 
 /** Performs run stack action. */
 async function runStackAction(request: DockerStackActionRequest) {
-    const arguments_ = ["restart"];
-    if (request.service) {
+    if (
+        request.action !== "restart" &&
+        request.action !== "start" &&
+        request.action !== "stop"
+    ) {
+        throw new Error("Invalid stack action");
+    }
+
+    const arguments_ = [request.action];
+    if (request.service !== undefined) {
+        if (typeof request.service !== "string") {
+            throw new TypeError("Invalid service name");
+        }
         if (!/^[A-Za-z0-9_-]+$/.test(request.service)) {
             throw new Error("Invalid service name");
         }

@@ -69,11 +69,26 @@ function normalizeUsername(username: string): string {
 
 /** Returns whether production. */
 function isProduction(request?: IncomingMessage): boolean {
+    if (process.env.NODE_ENV === "production") {
+        return true;
+    }
+
     const forwardedProtocol = request?.headers["x-forwarded-proto"];
-    if (typeof forwardedProtocol === "string") {
+    const trustedProxyIps = new Set(
+        (process.env.MIRA_DASHBOARD_TRUSTED_PROXY_IPS || "")
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean)
+    );
+    const peerAddress = request?.socket.remoteAddress;
+    const isTrustedProxy =
+        isLoopbackAddress(peerAddress) ||
+        (peerAddress ? trustedProxyIps.has(peerAddress) : false);
+
+    if (isTrustedProxy && typeof forwardedProtocol === "string") {
         return forwardedProtocol.split(",", 1)[0]?.trim() === "https";
     }
-    return process.env.NODE_ENV === "production";
+    return false;
 }
 
 /** Returns whether loopback address. */

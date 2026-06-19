@@ -20,7 +20,7 @@ export type DeviceIdentity = {
     privateKeyPem: string;
 };
 
-/** Defines gateway hello ok payload. */
+/** Defines gateway hello success payload. */
 export type GatewayHelloOk = {
     type?: string;
     protocol?: number;
@@ -43,7 +43,6 @@ type GatewayResponse = {
     type?: string;
     id?: string;
     isOk?: boolean;
-    ok?: boolean;
     payload?: unknown;
     error?: {
         code?: string;
@@ -408,14 +407,12 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         clearTimeout(pending.timeout);
         this.pending.delete(response.id);
 
-        if (response.isOk || response.ok) {
+        if (response.isOk === true) {
             const payload = response.payload;
             if (
                 payload &&
                 typeof payload === "object" &&
-                ["hello-isOk", "hello-ok"].includes(
-                    (payload as GatewayHelloOk).type || ""
-                )
+                (payload as GatewayHelloOk).type === "hello-isOk"
             ) {
                 this.backoffMs = 1_000;
                 this.lastTickAt = Date.now();

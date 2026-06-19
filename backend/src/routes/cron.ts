@@ -1,6 +1,7 @@
 import express, { type RequestHandler } from "express";
 
 import gateway from "../gateway.ts";
+import { httpStatusCode } from "../lib/errors.ts";
 
 /** Represents cron job. */
 interface CronJob {
@@ -38,6 +39,10 @@ function normalizeJobs(payload: unknown): CronJob[] {
     return [];
 }
 
+function handleCronError(response: express.Response, error: unknown): void {
+    response.status(httpStatusCode(error)).json({ error: "Cron request failed" });
+}
+
 /** Registers cron API routes. */
 export default function cronRoutes(app: express.Application): void {
     app.get("/api/cron/jobs", (async (_request, response) => {
@@ -46,7 +51,7 @@ export default function cronRoutes(app: express.Application): void {
             const jobs = normalizeJobs(payload);
             response.json({ jobs });
         } catch (error) {
-            response.status(500).json({ error: (error as Error).message });
+            handleCronError(response, error);
         }
     }) as RequestHandler);
 
@@ -66,7 +71,7 @@ export default function cronRoutes(app: express.Application): void {
             });
             response.json({ isOk: true });
         } catch (error) {
-            response.status(500).json({ error: (error as Error).message });
+            handleCronError(response, error);
         }
     }) as RequestHandler);
 
@@ -83,7 +88,7 @@ export default function cronRoutes(app: express.Application): void {
             await gateway.request("cron.update", { jobId, patch });
             response.json({ isOk: true });
         } catch (error) {
-            response.status(500).json({ error: (error as Error).message });
+            handleCronError(response, error);
         }
     }) as RequestHandler);
 
@@ -94,7 +99,7 @@ export default function cronRoutes(app: express.Application): void {
             const payload = await gateway.request("cron.run", { jobId });
             response.json({ isOk: true, payload });
         } catch (error) {
-            response.status(500).json({ error: (error as Error).message });
+            handleCronError(response, error);
         }
     }) as RequestHandler);
 
@@ -105,7 +110,7 @@ export default function cronRoutes(app: express.Application): void {
             const payload = await gateway.request("cron.remove", { jobId });
             response.json({ isOk: true, payload });
         } catch (error) {
-            response.status(500).json({ error: (error as Error).message });
+            handleCronError(response, error);
         }
     }) as RequestHandler);
 }

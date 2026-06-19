@@ -128,12 +128,12 @@ async function fetchProductionCheckout(): Promise<ProductionCheckoutStatus> {
 /** Performs approve pull request. */
 async function approvePullRequest(
     number: number,
-    shouldDeploy: boolean
+    willDeploy: boolean
 ): Promise<PullRequestActionResponse> {
     return apiPostRequired<PullRequestActionResponse>(
         `/pull-requests/${number}/approve`,
         {
-            deploy: shouldDeploy,
+            deploy: willDeploy,
         }
     );
 }
@@ -210,13 +210,8 @@ export function useApprovePullRequest() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({
-            number,
-            shouldDeploy,
-        }: {
-            number: number;
-            shouldDeploy: boolean;
-        }) => approvePullRequest(number, shouldDeploy),
+        mutationFn: ({ number, willDeploy }: { number: number; willDeploy: boolean }) =>
+            approvePullRequest(number, willDeploy),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: pullRequestKeys.list() });
             void queryClient.invalidateQueries({

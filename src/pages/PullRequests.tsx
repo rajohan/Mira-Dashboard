@@ -542,7 +542,7 @@ export function PullRequests() {
                 case "merge": {
                     const result = await approvePullRequest.mutateAsync({
                         number: action.pr.number,
-                        shouldDeploy: false,
+                        willDeploy: false,
                     });
                     setLastResult(actionResultMessage(result.message, result.cleanup));
                     break;
@@ -551,7 +551,7 @@ export function PullRequests() {
                 case "merge-deploy": {
                     const result = await approvePullRequest.mutateAsync({
                         number: action.pr.number,
-                        shouldDeploy: true,
+                        willDeploy: true,
                     });
                     const message = result.deployError
                         ? `${result.message}: ${result.deployError}`
