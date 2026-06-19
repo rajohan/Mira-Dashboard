@@ -68,7 +68,7 @@ function resolveOpenclawRoot(): string | null {
     const configuredRoot =
         process.env.OPENCLAW_HOME?.trim() ||
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
-    const homeDirectory = (process.env.HOME?.trim() || os.homedir().trim()).trim();
+    const homeDirectory = process.env.HOME?.trim() || os.homedir().trim();
     if (
         !configuredRoot &&
         (!homeDirectory ||
@@ -200,10 +200,8 @@ async function withRootedParentPath<T>(
                 rootedPath = path.join(realParent, path.basename(safePath));
             }
             const relativeParent = path.relative(realRoot, realParent);
-            const isParentEscapesRoot = [
-                relativeParent.startsWith(".."),
-                path.isAbsolute(relativeParent),
-            ].includes(true);
+            const isParentEscapesRoot =
+                relativeParent.startsWith("..") || path.isAbsolute(relativeParent);
             if (isParentEscapesRoot) {
                 throw createAccessDeniedError("Parent path validation failed");
             }
@@ -222,7 +220,7 @@ async function withRootedParentPath<T>(
     }
 }
 
-async function ensureParentDirectoryectoriesForWrite(
+async function ensureParentDirectoriesForWrite(
     safePath: string,
     rootPath: string
 ): Promise<void> {
@@ -595,10 +593,7 @@ export default function configFilesRoutes(
                 }
 
                 try {
-                    await ensureParentDirectoryectoriesForWrite(
-                        safeFullPath,
-                        openclawRoot
-                    );
+                    await ensureParentDirectoriesForWrite(safeFullPath, openclawRoot);
                 } catch (error) {
                     if ((error as NodeJS.ErrnoException).code === "EACCES") {
                         response.status(403).json({

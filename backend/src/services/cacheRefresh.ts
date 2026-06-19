@@ -1582,7 +1582,7 @@ else
     exit 0
   }
 fi
-tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw environment CODEX_HOME="$MIRA_QUOTA_CODEX_HOME" CODEX_DISABLE_UPDATE_CHECK=1 NO_UPDATE_NOTIFIER=1 "$MIRA_QUOTA_CODEX_BIN" --cd /home/ubuntu/.openclaw --no-alt-screen
+tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw env CODEX_HOME="$MIRA_QUOTA_CODEX_HOME" CODEX_DISABLE_UPDATE_CHECK=1 NO_UPDATE_NOTIFIER=1 "$MIRA_QUOTA_CODEX_BIN" --cd /home/ubuntu/.openclaw --no-alt-screen
 	OUT=""
 	has_limits(){ echo "$OUT" | grep -Eiq "5h limit:" && echo "$OUT" | grep -Eiq "Weekly limit:"; }
 	for i in $(seq 1 12); do

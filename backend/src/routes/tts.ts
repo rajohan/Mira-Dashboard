@@ -5,7 +5,7 @@ const ELEVENLABS_TTS_MODEL = process.env.ELEVENLABS_TTS_MODEL || "eleven_turbo_v
 const ELEVENLABS_TTS_VOICE_ID =
     process.env.ELEVENLABS_TTS_VOICE_ID ||
     process.env.ELEVENLABS_VOICE_ID ||
-    "q7O4dHCU5KzDatabaseUYNsckR";
+    "q7O4dHCU5KzDbUYNsckR";
 const MAX_TTS_TEXT_LENGTH = 4_000;
 
 async function readResponseTextFallback(response: Response): Promise<string> {

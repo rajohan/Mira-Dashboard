@@ -159,7 +159,7 @@ function trimOutput(text: string): string {
 }
 
 /** Parses a non-shell command string into executable and argv tokens. */
-function parseDirectoryectCommand(command: string): {
+function parseDirectCommand(command: string): {
     executable: string;
     args: string[];
 } {
@@ -286,7 +286,7 @@ function runExecCommand(
     } else {
         const commandParts = Array.isArray(args)
             ? { executable: command, args }
-            : parseDirectoryectCommand(command);
+            : parseDirectCommand(command);
         childFactory = () =>
             spawnExec(commandParts.executable, commandParts.args, cwdOption);
     }

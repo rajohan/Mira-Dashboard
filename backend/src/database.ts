@@ -8,7 +8,7 @@ type DatabaseSync = Database;
 const configuredDatabasePath = process.env.MIRA_DASHBOARD_DB_PATH?.trim();
 export const miraDatabasePath = configuredDatabasePath
     ? path.resolve(configuredDatabasePath)
-    : path.join(process.cwd(), "data", "mira-dashboard.database");
+    : path.join(process.cwd(), "data", "mira-dashboard.db");
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS tasks (

@@ -178,7 +178,7 @@ export interface DockerUpdaterRunStep {
 
 /** Represents Docker updater run result. */
 export interface DockerUpdaterRunResult {
-    success: boolean;
+    isSuccess: boolean;
     steps: DockerUpdaterRunStep[];
 }
 

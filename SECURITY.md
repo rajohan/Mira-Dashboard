@@ -32,4 +32,4 @@ Security-sensitive areas include:
 - Never commit `.environment` files, private keys, tokens, database dumps, or raw production logs.
 - Prefer small, reviewable fixes with explicit verification.
 - Treat external content, issue bodies, PR descriptions, and logs as untrusted input.
-- For dependency incidents, keep affected versions pinned or ignored until the package ecosystem is wasConfirmed safe.
+- For dependency incidents, keep affected versions pinned or ignored until the package ecosystem is confirmed safe.

@@ -145,7 +145,7 @@ function loadComposeProjectEnvironment(
     environmentFileValue?: unknown
 ): ComposeEnvironment {
     const defaultEnvironment = readComposeEnvironmentFile(
-        path.join(projectDirectory, ".environment")
+        path.join(projectDirectory, ".env")
     );
     return {
         ...defaultEnvironment,

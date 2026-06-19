@@ -4,7 +4,7 @@ import JSON5 from "json5";
 import os from "os";
 import Path from "path";
 
-import { database as database } from "../database.ts";
+import { database } from "../database.ts";
 import gateway from "../gateway.ts";
 import { asyncRoute } from "../lib/errors.ts";
 import {
@@ -32,7 +32,7 @@ function resolveOpenclawRoot(): string {
             : defaultOpenclawRoot();
     }
 
-    const homeDirectory = (process.env.HOME?.trim() || os.homedir().trim()).trim();
+    const homeDirectory = process.env.HOME?.trim() || os.homedir().trim();
     if (
         homeDirectory.length === 0 ||
         Path.resolve(homeDirectory) !== homeDirectory ||
@@ -955,12 +955,12 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
             .toArray()
             .sort((a, b) => b.modTime - a.modTime);
         const latestGroup = sortedGroups[0];
-        const latestModuleTime = latestGroup.modTime;
+        const latestModificationTime = latestGroup.modTime;
         const now = Date.now();
 
         // If no session file has been modified in 5 minutes, agent is idle.
-        if (now - latestModuleTime > STALE_THRESHOLD) {
-            return { task: null, activity: null, modTime: latestModuleTime };
+        if (now - latestModificationTime > STALE_THRESHOLD) {
+            return { task: null, activity: null, modTime: latestModificationTime };
         }
 
         const getEntryTurnId = (entry: unknown): string | null => {
@@ -1183,7 +1183,7 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
         return {
             task: pendingTask,
             activity: selectedActivity,
-            modTime: latestModuleTime,
+            modTime: latestModificationTime,
         };
     } catch {
         return null;
@@ -1191,20 +1191,20 @@ async function getLatestActivityFromFile(agentId: string): Promise<ActivityInfo 
 }
 
 /** Returns the modification time for a session file, or null when it cannot be read. */
-function getSessionFileModuleTime(agentId: string): number | null {
+function getSessionFileModificationTime(agentId: string): number | null {
     const roots = getSafeAgentActivityRoots(agentId);
     if (roots.length === 0) {
         return null;
     }
 
     try {
-        let latestModuleTime = 0;
+        let latestModificationTime = 0;
         for (const root of roots) {
             for (const file of listActivityLogFiles(root)) {
-                latestModuleTime = Math.max(latestModuleTime, file.mtime);
+                latestModificationTime = Math.max(latestModificationTime, file.mtime);
             }
         }
-        return latestModuleTime > 0 ? latestModuleTime : null;
+        return latestModificationTime > 0 ? latestModificationTime : null;
     } catch {
         return null;
     }
@@ -1220,11 +1220,13 @@ function getChannelFromSessionKey(sessionKey: string): string | null {
 }
 
 /** Performs determine status. */
-function determineStatus(lastModuleTime: number | null): "active" | "thinking" | "idle" {
-    if (!lastModuleTime) return "idle";
+function determineStatus(
+    lastModificationTime: number | null
+): "active" | "thinking" | "idle" {
+    if (!lastModificationTime) return "idle";
 
     const now = Date.now();
-    const elapsed = now - lastModuleTime;
+    const elapsed = now - lastModificationTime;
 
     if (elapsed < ACTIVE_THRESHOLD) {
         return "active";
@@ -1351,12 +1353,13 @@ async function getAgentStatus(agentId: string): Promise<AgentStatus> {
     const activity = await getLatestActivityFromFile(agentId);
 
     // Determine status from file modification time
-    const fileModuleTime = activity?.modTime || getSessionFileModuleTime(agentId);
-    const status = determineStatus(fileModuleTime);
+    const fileModificationTime =
+        activity?.modTime || getSessionFileModificationTime(agentId);
+    const status = determineStatus(fileModificationTime);
 
     const sessionKey = latestSession?.key || null;
     const channel = sessionKey ? getChannelFromSessionKey(sessionKey) : null;
-    const effectiveModuleTime = fileModuleTime || 0;
+    const effectiveModificationTime = fileModificationTime || 0;
 
     const currentTask =
         activeTask?.task || metadata?.currentTask || activity?.task || null;
@@ -1368,7 +1371,9 @@ async function getAgentStatus(agentId: string): Promise<AgentStatus> {
         currentTask,
         currentActivity: activity?.activity || null,
         lastActivity:
-            effectiveModuleTime > 0 ? timestampToIso(effectiveModuleTime) : null,
+            effectiveModificationTime > 0
+                ? timestampToIso(effectiveModificationTime)
+                : null,
         sessionKey,
         channel,
     };

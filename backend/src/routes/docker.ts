@@ -219,7 +219,7 @@ interface DockerInspectRow {
     Created?: string;
     RestartCount?: number;
     Config?: {
-        Environment?: string[];
+        Env?: string[];
         Labels?: Record<string, string>;
     };
     NetworkSettings?: {
@@ -642,7 +642,7 @@ async function getContainerDetails(
 
     return {
         ...summary,
-        env: arrayFallback(inspect.Config?.Environment).map(redactEnvironmentValue),
+        env: arrayFallback(inspect.Config?.Env).map(redactEnvironmentValue),
         labels,
         networks,
     };
@@ -970,6 +970,9 @@ async function runContainerAction(
 async function runStackAction(request: DockerStackActionRequest) {
     const arguments_ = ["restart"];
     if (request.service) {
+        if (!/^[A-Za-z0-9_-]+$/.test(request.service)) {
+            throw new Error("Invalid service name");
+        }
         arguments_.push(request.service);
     }
     const result = await runCompose(arguments_);

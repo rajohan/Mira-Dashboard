@@ -3,7 +3,7 @@ import type { IncomingMessage } from "node:http";
 
 import type express from "express";
 
-import { database as database } from "./database.ts";
+import { database } from "./database.ts";
 
 const SESSION_COOKIE = "mira_dashboard_session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
@@ -69,9 +69,9 @@ function normalizeUsername(username: string): string {
 
 /** Returns whether production. */
 function isProduction(request?: IncomingMessage): boolean {
-    const forwardedPrototype = request?.headers["x-forwarded-proto"];
-    if (typeof forwardedPrototype === "string") {
-        return forwardedPrototype.split(",", 1)[0]?.trim() === "https";
+    const forwardedProtocol = request?.headers["x-forwarded-proto"];
+    if (typeof forwardedProtocol === "string") {
+        return forwardedProtocol.split(",", 1)[0]?.trim() === "https";
     }
     return process.env.NODE_ENV === "production";
 }

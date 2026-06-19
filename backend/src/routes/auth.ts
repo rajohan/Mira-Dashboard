@@ -14,7 +14,7 @@ import {
     persistGatewayToken,
     setSessionCookie,
 } from "../auth.ts";
-import { database as database } from "../database.ts";
+import { database } from "../database.ts";
 import gateway from "../gateway.ts";
 
 /** Performs read session ID. */

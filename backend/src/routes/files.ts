@@ -30,7 +30,7 @@ function getDefaultWorkspaceRoot(): string {
         return path.join(openclawHome, "workspace");
     }
 
-    const homeDirectory = (process.env.HOME?.trim() || os.homedir().trim()).trim();
+    const homeDirectory = process.env.HOME?.trim() || os.homedir().trim();
     if (
         !homeDirectory ||
         !path.isAbsolute(homeDirectory) ||
@@ -54,7 +54,7 @@ function resolveWorkspaceRoot(): string {
     return workspaceRoot;
 }
 
-const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for isPreview
+const MAX_FILE_SIZE = 1024 * 1024; // 1MB preview limit
 const MAX_BACKUP_COPY_BYTES = 2 * 1024 * 1024;
 const JSON_PARSER_SIZE_HEADROOM = MAX_FILE_SIZE * 2;
 const JSON_WRITE_BODY_LIMIT = MAX_FILE_SIZE + JSON_PARSER_SIZE_HEADROOM;
@@ -458,7 +458,7 @@ export default function filesRoutes(
                     if (isImageFile(filename)) {
                         if (stat.size > MAX_FILE_SIZE) {
                             response.status(413).json({
-                                error: "Image file is too large to isPreview",
+                                error: "Image file is too large to preview",
                             });
                             return;
                         }

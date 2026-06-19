@@ -43,6 +43,7 @@ type GatewayResponse = {
     type?: string;
     id?: string;
     isOk?: boolean;
+    ok?: boolean;
     payload?: unknown;
     error?: {
         code?: string;
@@ -389,7 +390,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         if (
             typeof parsed !== "object" ||
             parsed === null ||
-            (parsed as { type?: string }).type !== "response"
+            !["response", "res"].includes((parsed as { type?: string }).type || "")
         ) {
             return;
         }
@@ -407,12 +408,14 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         clearTimeout(pending.timeout);
         this.pending.delete(response.id);
 
-        if (response.isOk) {
+        if (response.isOk || response.ok) {
             const payload = response.payload;
             if (
                 payload &&
                 typeof payload === "object" &&
-                (payload as GatewayHelloOk).type === "hello-isOk"
+                ["hello-isOk", "hello-ok"].includes(
+                    (payload as GatewayHelloOk).type || ""
+                )
             ) {
                 this.backoffMs = 1_000;
                 this.lastTickAt = Date.now();
