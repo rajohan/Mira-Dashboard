@@ -1,8 +1,8 @@
 [test]
-root = ["src", "test"]
+root = "test"
 preload = ["./test/setup.ts"]
 coverageReporter = ["text", "lcov"]
-coverageDirectory = "coverage"
+coverageDir = "coverage"
 coverageSkipTestFiles = true
 coveragePathIgnorePatterns = [
     "dist/**",

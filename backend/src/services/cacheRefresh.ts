@@ -372,7 +372,7 @@ function normalizeMoltbookHome(value: unknown) {
                       title: announcement.title ?? null,
                       authorName: announcement.author_name ?? null,
                       createdAt: announcement.created_at ?? null,
-                      isPreview: announcement.isPreview ?? null,
+                      isPreview: announcement.preview ?? announcement.isPreview ?? null,
                   }
                 : null,
         postsFromAccountsYouFollowCount: Array.isArray(

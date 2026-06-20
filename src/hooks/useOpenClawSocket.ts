@@ -1,3 +1,4 @@
+import { useSelector } from "@tanstack/react-store";
 import {
     createContext,
     createElement,
@@ -10,7 +11,7 @@ import {
 
 import { createSocketClient, type SocketClient } from "../lib/socket/socketClient";
 import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
-import { isAuthenticationStatus } from "../stores/authStore";
+import { authStore } from "../stores/authStore";
 import { getWebSocketUrl } from "../utils/websocket";
 
 /** Represents OpenClaw socket context value. */
@@ -29,9 +30,9 @@ interface OpenClawSocketContextValue {
 
 const OpenClawSocketContext = createContext<OpenClawSocketContextValue | null>(null);
 
-/** Performs OpenClaw socket provIDer. */
+/** Provides OpenClaw socket state. */
 export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
-    const isAuthenticated = isAuthenticationStatus();
+    const isAuthenticated = useSelector(authStore, (state) => state.isAuthenticated);
     const clientReference = useRef<SocketClient | null>(null);
     const listenersReference = useRef(new Set<(data: unknown) => void>());
 

@@ -248,7 +248,7 @@ export default function authRoutes(
                     console.error("[Auth] First-user cleanup failed:", rollbackError);
                 }
             }
-            if (isAttemptedGatewaySwitch) {
+            if (isAttemptedGatewaySwitch && !isRollbackFailed) {
                 try {
                     shutdownGateway();
                 } catch {

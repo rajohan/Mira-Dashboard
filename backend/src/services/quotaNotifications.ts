@@ -30,7 +30,7 @@ function formatSyntheticWeeklyRemaining(
     return `${weeklyTokenLimit.percentRemaining}% left`;
 }
 
-/** Returns provIDer percent. */
+/** Returns provider percent. */
 function getProviderPercent(
     provider: ProviderKey,
     quotas: Awaited<ReturnType<typeof fetchCachedQuotas>>

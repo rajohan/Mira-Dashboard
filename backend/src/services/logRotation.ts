@@ -138,6 +138,7 @@ interface LogRotationPolicy {
     archiveOnly?: boolean;
     archiveRetentionScope?: "directory" | "basename" | "parent";
     archiveMinAgeMinutes?: number;
+    compress?: boolean;
     shouldCompress?: boolean;
     skipEmpty?: boolean;
     missingOk?: boolean;
@@ -183,6 +184,10 @@ function mergePolicy(defaults: LogRotationPolicy, group: LogRotationPolicy) {
         ...defaults,
         ...group,
     };
+}
+
+function shouldCompressPolicy(policy: LogRotationPolicy): boolean {
+    return policy.shouldCompress ?? policy.compress ?? true;
 }
 
 async function loadJsonFile<T>(filePath: string): Promise<T> {
@@ -286,6 +291,7 @@ function validatePolicyTypes(policy: LogRotationPolicy | undefined, label: strin
         "archiveOnly",
         "daily",
         "weekly",
+        "compress",
         "shouldCompress",
         "skipEmpty",
         "missingOk",
@@ -849,8 +855,7 @@ async function listArchives(
         archives.push({
             path: fullPath,
             mtimeMs: stat.mtimeMs,
-            shouldCompress:
-                policy.shouldCompress !== false && !isGzipArchivePath(fullPath),
+            shouldCompress: shouldCompressPolicy(policy) && !isGzipArchivePath(fullPath),
         });
     }
     const archivePatterns = policy.archivePaths ?? [];
@@ -901,7 +906,7 @@ async function addConfiguredArchiveIfInRetentionScope(
     archives.push({
         path: archivePath,
         mtimeMs: stat.mtimeMs,
-        shouldCompress: policy.shouldCompress !== false,
+        shouldCompress: shouldCompressPolicy(policy),
     });
 }
 
@@ -1026,7 +1031,7 @@ async function listArchiveOnlyArchives(
                         archives.set(archivePath, {
                             path: archivePath,
                             mtimeMs: stat.mtimeMs,
-                            shouldCompress: policy.shouldCompress !== false,
+                            shouldCompress: shouldCompressPolicy(policy),
                         });
                     }
                 } else {
@@ -1303,7 +1308,7 @@ async function processRotationCandidate({
             const archivePath = archiveBasePath(filePath, now);
             let rotation: RotationResult;
             if (isDryRun) {
-                const isCompressed = policy.shouldCompress !== false;
+                const isCompressed = shouldCompressPolicy(policy);
                 rotation = {
                     archivePath: isCompressed ? `${archivePath}.gz` : archivePath,
                     compressed: isCompressed,
@@ -1317,14 +1322,14 @@ async function processRotationCandidate({
                                   filePath,
                                   verified,
                                   archivePath,
-                                  policy.shouldCompress !== false,
+                                  shouldCompressPolicy(policy),
                                   approvedRoots
                               )
                             : await rotateCopyTruncate(
                                   filePath,
                                   verified,
                                   archivePath,
-                                  policy.shouldCompress !== false,
+                                  shouldCompressPolicy(policy),
                                   approvedRoots
                               );
                 } finally {

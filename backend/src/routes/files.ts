@@ -376,8 +376,16 @@ export default function filesRoutes(
                 let workspaceRoot: string;
                 try {
                     workspaceRoot = fs.realpathSync(getWorkspaceRoot());
+                    if (!fs.statSync(workspaceRoot).isDirectory()) {
+                        response.status(404).json({ error: "File not found" });
+                        return;
+                    }
                 } catch (error) {
-                    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                    if (
+                        ["ENOENT", "ENOTDIR"].includes(
+                            (error as NodeJS.ErrnoException).code || ""
+                        )
+                    ) {
                         response.status(404).json({ error: "File not found" });
                         return;
                     }

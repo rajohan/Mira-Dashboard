@@ -32,10 +32,11 @@ function resolveOpenclawRoot(): string {
             : defaultOpenclawRoot();
     }
 
-    const homeDirectory = process.env.HOME?.trim() || os.homedir().trim();
+    const rawHomeDirectory = process.env.HOME?.trim() || os.homedir().trim();
+    const homeDirectory = Path.resolve(rawHomeDirectory);
     if (
-        homeDirectory.length === 0 ||
-        Path.resolve(homeDirectory) !== homeDirectory ||
+        rawHomeDirectory.length === 0 ||
+        !Path.isAbsolute(rawHomeDirectory) ||
         Path.parse(homeDirectory).root === homeDirectory
     ) {
         return defaultOpenclawRoot();
@@ -86,6 +87,45 @@ function mkdirChildFromVerifiedParent(parent: string, childName: string): void {
                 throw error;
             }
         }
+    } finally {
+        FS.closeSync(parentFd);
+    }
+}
+
+function realExistingChildDirectoryFromVerifiedParent(
+    parent: string,
+    childName: string
+): string {
+    if (!isValidAgentId(childName)) {
+        throw Object.assign(new Error("Invalid child directory name"), {
+            code: "EINVAL",
+        });
+    }
+
+    const childPath = Path.join(parent, childName);
+    const parentFd = FS.openSync(
+        Buffer.from(parent),
+        FS.constants.O_DIRECTORY | FS.constants.O_RDONLY | FS.constants.O_NOFOLLOW
+    );
+    try {
+        const openedParentStat = FS.fstatSync(parentFd);
+        const realParent = FS.realpathSync(parent);
+        const realParentStat = FS.statSync(realParent);
+        if (
+            openedParentStat.dev !== realParentStat.dev ||
+            openedParentStat.ino !== realParentStat.ino
+        ) {
+            throw Object.assign(new Error("Parent path validation failed"), {
+                code: "EACCES",
+            });
+        }
+        const realChild = FS.realpathSync(childPath);
+        if (!FS.statSync(realChild).isDirectory()) {
+            throw Object.assign(new Error("Child directory is not a directory"), {
+                code: "ENOTDIR",
+            });
+        }
+        return realChild;
     } finally {
         FS.closeSync(parentFd);
     }
@@ -1599,10 +1639,14 @@ export default function agentsRoutes(app: express.Application): void {
                     realExpectedSessionsParent = FS.realpathSync(expectedSessionsParent);
                 } catch (error) {
                     if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {
-                        response.status(501).json({ error: "unsupported-platform" });
-                        return;
+                        realExpectedSessionsParent =
+                            realExistingChildDirectoryFromVerifiedParent(
+                                realAgentsDirectory,
+                                agentId
+                            );
+                    } else {
+                        throw error;
                     }
-                    throw error;
                 }
                 if (
                     realExpectedSessionsParent !==
@@ -1620,10 +1664,14 @@ export default function agentsRoutes(app: express.Application): void {
                     );
                 } catch (error) {
                     if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {
-                        response.status(501).json({ error: "unsupported-platform" });
-                        return;
+                        realExpectedSessionsDirectory =
+                            realExistingChildDirectoryFromVerifiedParent(
+                                realExpectedSessionsParent,
+                                "sessions"
+                            );
+                    } else {
+                        throw error;
                     }
-                    throw error;
                 }
                 const realMetadataDirectory = FS.realpathSync(metadataDirectory);
                 if (

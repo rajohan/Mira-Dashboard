@@ -126,8 +126,3 @@ export function useAuthStore(): AuthState & AuthActions {
 export function useAuthUser(): AuthUser | null {
     return useSelector(authStore, (state) => state.user);
 }
-
-/** Provides is authenticated. */
-export function isAuthenticationStatus(): boolean {
-    return useSelector(authStore, (state) => state.isAuthenticated);
-}

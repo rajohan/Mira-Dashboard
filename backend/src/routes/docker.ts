@@ -1500,6 +1500,10 @@ export default function dockerRoutes(app: express.Application): void {
         express.json(),
         asyncRoute(async (request, response) => {
             const payload = request.body as DockerPruneRequest;
+            if (!payload || typeof payload !== "object") {
+                response.status(400).json({ error: "Invalid prune request" });
+                return;
+            }
 
             if (payload.target === "images") {
                 const output = await runDocker(["image", "prune", "-a", "-f"]);
