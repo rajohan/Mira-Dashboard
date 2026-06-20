@@ -479,7 +479,9 @@ async function assertNoContainerBackupInProgress(
     );
 }
 
-function runHostPgrep(pattern: string): Promise<{ code: number; stderr: string }> {
+function runHostPgrep(
+    pattern: string
+): Promise<{ code: number; stderr: string; stdout: string }> {
     return runProcess("pgrep", ["-f", pattern], {
         env: process.env,
         timeoutMs: backupAbortDockerExecTimeoutMs,

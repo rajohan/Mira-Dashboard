@@ -4,7 +4,7 @@ import path from "node:path";
 
 import gateway from "../gateway.ts";
 import { json, readJson } from "../http.ts";
-import { errorMessage } from "../lib/errors.ts";
+import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import { runProcess } from "../lib/processes.ts";
 import { objectFallback, stringFallback } from "../lib/values.ts";
 
@@ -249,15 +249,14 @@ export const openclawConfigRoutes = {
             }
         },
         PUT: async (request: Request) => {
-            const body = await readJson<unknown>(request);
-            if (!body || typeof body !== "object" || Array.isArray(body)) {
-                return json(
-                    { error: "Invalid config: expected JSON object" },
-                    { status: 400 }
-                );
-            }
-
             try {
+                const body = await readJson<unknown>(request);
+                if (!body || typeof body !== "object" || Array.isArray(body)) {
+                    return json(
+                        { error: "Invalid config: expected JSON object" },
+                        { status: 400 }
+                    );
+                }
                 const result = await patchConfigRaw(JSON.stringify(body));
                 return json({ isOk: true, result });
             } catch (error) {
@@ -349,7 +348,7 @@ export const openclawConfigRoutes = {
             } catch (error) {
                 return json(
                     { error: errorMessage(error, "Failed to update skill") },
-                    { status: 500 }
+                    { status: httpStatusCode(error) }
                 );
             }
         },

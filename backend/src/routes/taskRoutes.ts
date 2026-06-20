@@ -426,9 +426,11 @@ export const taskRoutes = {
                 .prepare("SELECT id, title, assignee FROM tasks WHERE id = ?")
                 .get(id) as undefined | { assignee?: string; id: number; title: string };
             if (!existing) return json({ error: "Task not found" }, { status: 404 });
-            database.prepare("DELETE FROM task_updates WHERE task_id = ?").run(id);
-            database.prepare("DELETE FROM task_events WHERE task_id = ?").run(id);
-            database.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+            database.transaction(() => {
+                database.prepare("DELETE FROM task_updates WHERE task_id = ?").run(id);
+                database.prepare("DELETE FROM task_events WHERE task_id = ?").run(id);
+                database.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+            })();
             if (existing.assignee === TASK_ASSIGNEES.mira.id) {
                 void notifyMira("deleted", existing);
             }

@@ -174,7 +174,8 @@ export const settingsRoutes = {
             try {
                 current = await loadSettings();
             } catch (error) {
-                return json({ error: (error as Error).message }, { status: 500 });
+                console.error("[Settings] Failed to load settings:", error);
+                return json({ error: "Failed to load settings" }, { status: 500 });
             }
 
             try {

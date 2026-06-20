@@ -115,7 +115,7 @@ async function pollLogFile(): Promise<void> {
         if (stat.size > logsRouteState.lastLogSize) {
             const deltaBytes = stat.size - logsRouteState.lastLogSize;
             const readBytes = Math.min(deltaBytes, LOG_TAIL_READ_CHUNK_BYTES);
-            const readOffset = stat.size - readBytes;
+            const readOffset = logsRouteState.lastLogSize;
             const buffer = Buffer.alloc(readBytes);
             await file.read(buffer, 0, buffer.length, readOffset);
 
@@ -123,7 +123,7 @@ async function pollLogFile(): Promise<void> {
                 .toString("utf8")
                 .split("\n")
                 .filter((l) => l.trim());
-            logsRouteState.lastLogSize = stat.size;
+            logsRouteState.lastLogSize = readOffset + readBytes;
 
             for (const line of lines) {
                 const message = JSON.stringify({ type: "log", line });

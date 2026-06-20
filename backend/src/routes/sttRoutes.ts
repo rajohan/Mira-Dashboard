@@ -106,13 +106,21 @@ export const sttRoutes = {
                 );
             }
 
+            let hasTranscriptionLock = false;
             try {
                 const audioBuffer = await readRequestBytes(request, MAX_AUDIO_BYTES);
                 if (audioBuffer.length === 0) {
                     return json({ error: "Missing audio payload" }, { status: 400 });
                 }
 
+                if (sttRouteState.isActiveTranscription) {
+                    return json(
+                        { error: "Another transcription is already running" },
+                        { status: 429 }
+                    );
+                }
                 sttRouteState.isActiveTranscription = true;
+                hasTranscriptionLock = true;
                 const text = await transcribeWithElevenLabs(
                     audioBuffer,
                     request.headers.get("content-type") || undefined
@@ -133,7 +141,9 @@ export const sttRoutes = {
                     { status: 500 }
                 );
             } finally {
-                sttRouteState.isActiveTranscription = false;
+                if (hasTranscriptionLock) {
+                    sttRouteState.isActiveTranscription = false;
+                }
             }
         },
     },

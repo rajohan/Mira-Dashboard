@@ -58,8 +58,19 @@ export function isProcfsAvailable(): boolean {
     return hasProcfsAvailabilityProbe();
 }
 
-function mkdirChildFromVerifiedParent(parent: string, childName: string): void {
-    if (!isValidAgentId(childName)) {
+function isValidChildDirectoryName(name: string): boolean {
+    return (
+        typeof name === "string" &&
+        name.length > 0 &&
+        name.length <= 64 &&
+        name !== "." &&
+        name !== ".." &&
+        SAFE_AGENT_ID_RE.test(name)
+    );
+}
+
+function mkdirChildDirectoryFromVerifiedParent(parent: string, childName: string): void {
+    if (!isValidChildDirectoryName(childName)) {
         throw Object.assign(new Error("Invalid child directory name"), {
             code: "EINVAL",
         });
@@ -94,7 +105,7 @@ function realExistingChildDirectoryFromVerifiedParent(
     parent: string,
     childName: string
 ): string {
-    if (!isValidAgentId(childName)) {
+    if (!isValidChildDirectoryName(childName)) {
         throw Object.assign(new Error("Invalid child directory name"), {
             code: "EINVAL",
         });
@@ -159,14 +170,7 @@ const SAFE_AGENT_ID_RE = /^[a-zA-Z0-9._-]+$/u;
 
 /** Returns whether an agent id is safe for filesystem-backed agent metadata paths. */
 export function isValidAgentId(id: string): boolean {
-    return (
-        typeof id === "string" &&
-        id.length > 0 &&
-        id.length <= 64 &&
-        id !== "." &&
-        id !== ".." &&
-        SAFE_AGENT_ID_RE.test(id)
-    );
+    return isValidChildDirectoryName(id);
 }
 
 function getRealAgentsDirectory(): string | null {
@@ -1638,7 +1642,7 @@ export async function updateAgentCurrentTask(
     const expectedSessionsParent = Path.dirname(safeSessionsDirectory);
     let realExpectedSessionsParent: string;
     try {
-        mkdirChildFromVerifiedParent(realAgentsDirectory, agentId);
+        mkdirChildDirectoryFromVerifiedParent(realAgentsDirectory, agentId);
         realExpectedSessionsParent = FS.realpathSync(expectedSessionsParent);
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {
@@ -1661,7 +1665,7 @@ export async function updateAgentCurrentTask(
 
     let realExpectedSessionsDirectory: string;
     try {
-        mkdirChildFromVerifiedParent(realExpectedSessionsParent, "sessions");
+        mkdirChildDirectoryFromVerifiedParent(realExpectedSessionsParent, "sessions");
         realExpectedSessionsDirectory = FS.realpathSync(expectedSessionsDirectory);
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {

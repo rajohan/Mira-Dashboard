@@ -75,7 +75,7 @@ function optionalStringField(
 
 function validId(value: string | undefined): number | null {
     const id = Number(value);
-    return Number.isFinite(id) && id > 0 ? id : null;
+    return Number.isSafeInteger(id) && Number.isFinite(id) && id > 0 ? id : null;
 }
 
 export const notificationRoutes = {
@@ -174,7 +174,14 @@ export const notificationRoutes = {
                     { status: 500 }
                 );
             }
-            pruneReadNotifications();
+            try {
+                pruneReadNotifications();
+            } catch (error) {
+                console.error(
+                    "[Notifications] Failed to prune read notifications:",
+                    error
+                );
+            }
             return json({ id: row.id, isOk: true });
         },
     },

@@ -139,7 +139,8 @@ export const configFileRoutes = {
             }
             let stat: fs.Stats;
             try {
-                if (fs.lstatSync(fullPath).isSymbolicLink()) {
+                const linkStat = fs.lstatSync(fullPath);
+                if (linkStat.isSymbolicLink()) {
                     return json({ error: "File not found" }, { status: 404 });
                 }
                 stat = fs.statSync(fullPath);
