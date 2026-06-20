@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import {
+    accessSync,
     constants,
     createReadStream,
     createWriteStream,
@@ -110,6 +111,39 @@ function defaultConfigPath(): string {
         return SOURCE_CONFIG_PATH;
     }
     return BUNDLED_CONFIG_PATH;
+}
+
+function resolveExecutableFromPath(executable: string): string | null {
+    if (path.isAbsolute(executable)) {
+        return executable;
+    }
+    if (executable.includes(path.sep)) {
+        return path.resolve(executable);
+    }
+
+    const pathDirectories = (process.env.PATH || "").split(path.delimiter);
+    for (const directory of pathDirectories) {
+        if (!directory) {
+            continue;
+        }
+        const candidate = path.join(directory, executable);
+        try {
+            accessSync(candidate, constants.X_OK);
+            return candidate;
+        } catch {
+            // Keep searching PATH.
+        }
+    }
+
+    return null;
+}
+
+function resolveBunExecutable(): string {
+    const resolved = resolveExecutableFromPath(BUN_EXECUTABLE);
+    if (resolved) {
+        return resolved;
+    }
+    return BUN_EXECUTABLE === "bun" ? process.execPath : BUN_EXECUTABLE;
 }
 
 interface LogRotationOptions {
@@ -1882,7 +1916,7 @@ function buildElevatedLogRotationCliArguments(
     return [
         "-n",
         "-E",
-        BUN_EXECUTABLE,
+        resolveBunExecutable(),
         "--input-type=module",
         "--eval",
         importLogRotationCli,

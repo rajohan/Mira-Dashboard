@@ -579,9 +579,7 @@ export default function configFilesRoutes(
                     });
                     return;
                 }
-                const isAllowMissingDefaultRoot =
-                    isOpenclawLeafValidForWrite === isOpenclawLeafValid &&
-                    !fs.existsSync(openclawRoot);
+                const isAllowMissingDefaultRoot = !fs.existsSync(openclawRoot);
                 if (
                     !isOpenclawLeafValidForWrite(openclawRoot) &&
                     !isAllowMissingDefaultRoot

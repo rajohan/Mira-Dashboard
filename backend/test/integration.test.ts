@@ -47,13 +47,18 @@ describe("Mira Dashboard backend integration", () => {
         const workspaceRoot = path.join(testState.temporaryRoot, "workspace");
         const openclawRoot = path.join(testState.temporaryRoot, "openclaw");
         const frontendRoot = path.join(testState.temporaryRoot, "frontend");
+        const dockerRoot = path.join(testState.temporaryRoot, "docker");
+        const composeWrapper = path.join(testState.temporaryRoot, "compose-wrapper.sh");
         await fs.mkdir(path.join(openclawRoot, "hooks", "transforms"), {
             recursive: true,
         });
         await fs.mkdir(path.join(frontendRoot, "assets"), { recursive: true });
+        await fs.mkdir(dockerRoot, { recursive: true });
         await fs.mkdir(workspaceRoot, { recursive: true });
         await fs.writeFile(path.join(workspaceRoot, "README.md"), "hello workspace\n");
         await fs.writeFile(path.join(openclawRoot, "openclaw.json"), "{}\n");
+        await fs.writeFile(composeWrapper, "#!/bin/sh\nprintf 'compose:%s\\n' \"$*\"\n");
+        await fs.chmod(composeWrapper, 0o755);
         await fs.writeFile(
             path.join(frontendRoot, "index.html"),
             '<!doctype html><html><body><div id="root"></div></body></html>'
@@ -70,6 +75,8 @@ describe("Mira Dashboard backend integration", () => {
         process.env.MIRA_DASHBOARD_FRONTEND_PATH = frontendRoot;
         process.env.WORKSPACE_ROOT = workspaceRoot;
         process.env.OPENCLAW_HOME = openclawRoot;
+        process.env.MIRA_DOCKER_ROOT = dockerRoot;
+        process.env.MIRA_DOCKER_COMPOSE_WRAPPER = composeWrapper;
         process.env.TRUST_PROXY = "false";
 
         const serverModule = await import("../src/server.ts");
@@ -214,5 +221,15 @@ describe("Mira Dashboard backend integration", () => {
             content: "{}\n",
             relativePath: "openclaw.json",
         });
+    });
+
+    it("allows valid dotted Docker Compose service names", async () => {
+        const result = await api<{ output: string }>(
+            "/api/docker/stack/action",
+            json("POST", { action: "restart", service: "api.v1" })
+        );
+
+        expect(result.status).toBe(200);
+        expect(result.body.output).toBe("compose:restart api.v1");
     });
 });
