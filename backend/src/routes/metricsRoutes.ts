@@ -151,14 +151,18 @@ async function getSystemMetrics(): Promise<SystemMetricsResponse> {
     let diskPercent = 0;
 
     try {
-        const { code, stderr, stdout } = await runProcess("df", [
-            "-B1",
-            "--output=size,used,pcent",
-            "/",
-        ]);
+        const isDarwin = os.platform() === "darwin";
+        const dfArguments = isDarwin
+            ? ["-k", "/"]
+            : ["-B1", "--output=size,used,pcent", "/"];
+        const { code, stderr, stdout } = await runProcess("df", dfArguments);
         if (code !== 0) throw new Error(stderr || `df exited ${code}`);
         const parts = (stdout.trim().split("\n").at(-1) ?? "").trim().split(/\s+/u);
-        if (parts.length >= 3) {
+        if (isDarwin && parts.length >= 5) {
+            diskTotal = Number(parts[1]) * 1024;
+            diskUsed = Number(parts[2]) * 1024;
+            diskPercent = Number(parts[4].replace(/%$/u, ""));
+        } else if (!isDarwin && parts.length >= 3) {
             diskTotal = Number(parts[0]);
             diskUsed = Number(parts[1]);
             diskPercent = Number(parts[2].replace(/%$/u, ""));

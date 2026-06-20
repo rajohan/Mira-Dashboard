@@ -80,7 +80,24 @@ type ExecFileRunner = (
     }
 ) => Promise<{ stderr: string; stdout: string }>;
 
-const elevatedLogRotationExecFileRunner: ExecFileRunner = runProcess;
+const elevatedLogRotationExecFileRunner: ExecFileRunner = async (
+    file,
+    arguments_,
+    options
+) => {
+    const result = await runProcess(file, arguments_, {
+        env: options.env,
+        maxBuffer: options.maxBuffer,
+        timeoutMs: options.timeout,
+    });
+    if (result.code !== 0) {
+        throw Object.assign(
+            new Error(result.stderr || `Command exited with code ${result.code}`),
+            { stderr: result.stderr, stdout: result.stdout }
+        );
+    }
+    return { stderr: result.stderr, stdout: result.stdout };
+};
 const writeLogRotationCacheSuccess = writeCacheSuccess;
 
 function caughtMessage(error: unknown): string {

@@ -84,7 +84,7 @@ export async function runProcess(
     const timeoutMs = options.timeoutMs;
     if (timeoutMs !== undefined) {
         timeout = setTimeout(() => {
-            process.kill(options.killSignal ?? "SIGTERM");
+            killProcessGroup(process, options.killSignal ?? "SIGTERM");
         }, timeoutMs);
         timeout.unref();
     }

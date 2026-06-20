@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -33,6 +34,21 @@ function json(method: string, body: unknown): RequestInit {
     return { body: JSON.stringify(body), method };
 }
 
+async function findOpenPort(): Promise<number> {
+    return new Promise((resolve, reject) => {
+        const server = net.createServer();
+        server.once("error", reject);
+        server.listen(0, "127.0.0.1", () => {
+            const address = server.address();
+            if (!address || typeof address === "string") {
+                server.close(() => reject(new Error("Could not allocate test port")));
+                return;
+            }
+            server.close(() => resolve(address.port));
+        });
+    });
+}
+
 describe("Bun-native dashboard backend", () => {
     beforeAll(async () => {
         state.temporaryRoot = await fs.mkdtemp(
@@ -64,11 +80,12 @@ describe("Bun-native dashboard backend", () => {
         const serverScript = path.join(state.temporaryRoot, "native-server.ts");
         const serverModulePath = path.resolve(import.meta.dirname, "../src/server.ts");
         const serverModuleUrl = pathToFileURL(serverModulePath).href;
+        const serverPort = await findOpenPort();
         await fs.writeFile(
             serverScript,
             [
                 `import { createServer } from ${JSON.stringify(serverModuleUrl)};`,
-                "const server = createServer(0);",
+                `const server = createServer(${JSON.stringify(serverPort)});`,
                 "console.log(JSON.stringify({ port: server.port }));",
                 "process.on('SIGTERM', () => { server.stop(true).then(() => process.exit(0)); });",
             ].join("\n")

@@ -5,6 +5,12 @@ import { type AuthUser, getAuthUserFromSessionId } from "./auth.ts";
 const SESSION_COOKIE = "mira_dashboard_session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const DEFAULT_JSON_BODY_LIMIT = 2 * 1024 * 1024;
+const TRUSTED_PROXY_IPS = new Set(
+    (process.env.MIRA_DASHBOARD_TRUSTED_PROXY_IPS || "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean)
+);
 
 type HeaderInput = Record<string, string> | Array<[string, string]>;
 
@@ -103,13 +109,9 @@ export function isLoopbackAddress(address?: string | null): boolean {
 }
 
 export function isTrustedProxyAddress(address?: string | null): boolean {
-    const trustedProxyIps = new Set(
-        (process.env.MIRA_DASHBOARD_TRUSTED_PROXY_IPS || "")
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean)
+    return (
+        isLoopbackAddress(address) || Boolean(address && TRUSTED_PROXY_IPS.has(address))
     );
-    return isLoopbackAddress(address) || Boolean(address && trustedProxyIps.has(address));
 }
 
 function forwardedAddresses(forwardedFor: string): string[] {

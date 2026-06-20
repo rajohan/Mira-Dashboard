@@ -171,7 +171,13 @@ export const fileRoutes = {
     "/api/files/*": {
         GET: async (request: Request) => {
             const relativePath = filePathFromRequest(request);
-            const root = fs.realpathSync(workspaceRoot());
+            let root: string;
+            try {
+                root = fs.realpathSync(workspaceRoot());
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+                root = path.resolve(workspaceRoot());
+            }
             const fullPath = safePathWithinRoot(relativePath, root);
             if (!fullPath) {
                 return json(

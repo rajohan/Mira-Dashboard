@@ -106,7 +106,13 @@ export const pullRequestRoutes = {
         },
     },
     "/api/pull-requests/deployments": {
-        GET: () => json({ deployments: readDeploymentJobs() }),
+        GET: () => {
+            try {
+                return json({ deployments: readDeploymentJobs() });
+            } catch (error) {
+                return routeError(error);
+            }
+        },
     },
     "/api/pull-requests/production-checkout": {
         GET: async () => {

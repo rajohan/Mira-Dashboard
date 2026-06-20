@@ -31,7 +31,7 @@ import { taskRoutes } from "./routes/taskRoutes.ts";
 import { terminalRoutes } from "./routes/terminalRoutes.ts";
 import { ttsRoutes } from "./routes/ttsRoutes.ts";
 
-function backendCommit(): string {
+const BACKEND_COMMIT = (() => {
     try {
         return Bun.spawnSync(["git", "rev-parse", "--short", "HEAD"], {
             cwd: path.join(import.meta.dirname, ".."),
@@ -42,6 +42,10 @@ function backendCommit(): string {
     } catch {
         return "unknown";
     }
+})();
+
+function backendCommit(): string {
+    return BACKEND_COMMIT;
 }
 
 function health() {

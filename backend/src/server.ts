@@ -132,10 +132,13 @@ async function staticResponse(pathname: string): Promise<Response> {
     }
 
     const root = path.resolve(frontendPath);
-    const directPath = path.resolve(
-        root,
-        decodeURIComponent(pathname.replace(/^\/+/u, ""))
-    );
+    let decodedPath: string;
+    try {
+        decodedPath = decodeURIComponent(pathname.replace(/^\/+/u, ""));
+    } catch {
+        return new Response("Bad Request", { status: 400 });
+    }
+    const directPath = path.resolve(root, decodedPath);
     if (directPath.startsWith(`${root}${path.sep}`)) {
         try {
             const stat = await fsp.stat(directPath);

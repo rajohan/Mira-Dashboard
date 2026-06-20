@@ -1,5 +1,5 @@
 import { database } from "../database.ts";
-import { json, readJson } from "../http.ts";
+import { json, readJson, readRequestBytes } from "../http.ts";
 import { nullableString, objectFallback, stringFallback } from "../lib/values.ts";
 import { pruneReadNotifications } from "../services/notificationMaintenance.ts";
 
@@ -206,10 +206,15 @@ export const notificationRoutes = {
         POST: async (request: Request) => {
             const querySource = new URL(request.url).searchParams.get("source");
             let body: { source?: unknown };
-            try {
-                body = await readJson<{ source?: unknown }>(request);
-            } catch {
+            const rawBody = await readRequestBytes(request, 1024);
+            if (rawBody.length === 0) {
                 body = {};
+            } else {
+                try {
+                    body = JSON.parse(rawBody.toString("utf8")) as { source?: unknown };
+                } catch {
+                    return json({ error: "Invalid JSON" }, { status: 400 });
+                }
             }
             const rawSource = body.source ?? querySource;
             if (

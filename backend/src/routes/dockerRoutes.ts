@@ -192,6 +192,12 @@ function dockerIdentifier(value: unknown): string | null {
     return identifier;
 }
 
+function dockerImageIdentifier(value: unknown): string | null {
+    const identifier = stringFallback(value).trim();
+    if (/^sha256:[a-f0-9]{64}$/iu.test(identifier)) return identifier;
+    return dockerIdentifier(identifier);
+}
+
 function invalidDockerIdentifier(label: string): Response {
     return json({ error: `Invalid ${label}` }, { status: 400 });
 }
@@ -863,7 +869,7 @@ export const dockerRoutes = {
     },
     "/api/docker/images/:imageId": {
         DELETE: async (request: Request) => {
-            const imageId = dockerIdentifier(parameters(request).imageId);
+            const imageId = dockerImageIdentifier(parameters(request).imageId);
             if (!imageId) return invalidDockerIdentifier("imageId");
             await runDocker(["image", "rm", imageId]);
             return json({ isSuccess: true });

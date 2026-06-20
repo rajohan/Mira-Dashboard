@@ -1,4 +1,4 @@
-import { json, readRequestBytes } from "../http.ts";
+import { HttpError, json, readRequestBytes } from "../http.ts";
 import { stringFallback } from "../lib/values.ts";
 
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
@@ -106,19 +106,22 @@ export const sttRoutes = {
                 );
             }
 
-            const audioBuffer = await readRequestBytes(request, MAX_AUDIO_BYTES);
-            if (audioBuffer.length === 0) {
-                return json({ error: "Missing audio payload" }, { status: 400 });
-            }
-
             sttRouteState.isActiveTranscription = true;
             try {
+                const audioBuffer = await readRequestBytes(request, MAX_AUDIO_BYTES);
+                if (audioBuffer.length === 0) {
+                    return json({ error: "Missing audio payload" }, { status: 400 });
+                }
+
                 const text = await transcribeWithElevenLabs(
                     audioBuffer,
                     request.headers.get("content-type") || undefined
                 );
                 return json({ provider: "elevenlabs", text });
             } catch (error) {
+                if (error instanceof HttpError) {
+                    return json({ error: error.message }, { status: error.statusCode });
+                }
                 const message =
                     error instanceof Error
                         ? error.message

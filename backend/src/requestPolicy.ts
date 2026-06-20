@@ -18,6 +18,7 @@ type BunRouteEntry =
       };
 
 interface RateLimitBucket {
+    lastSeenAt: number;
     resetAt: number;
     used: number;
 }
@@ -44,6 +45,29 @@ const authRule: RateLimitRule = {
 };
 
 const buckets = new Map<string, RateLimitBucket>();
+const BUCKET_CLEANUP_INTERVAL_MS = 60_000;
+const BUCKET_STALE_MS = Math.max(apiRule.windowMs, authRule.windowMs) * 2;
+const rateLimitState: { bucketCleanupTimer: Timer | null } = {
+    bucketCleanupTimer: null,
+};
+
+function cleanupStaleBuckets(): void {
+    const staleBefore = Date.now() - BUCKET_STALE_MS;
+    for (const [key, bucket] of buckets) {
+        if (bucket.lastSeenAt < staleBefore) {
+            buckets.delete(key);
+        }
+    }
+}
+
+function ensureBucketCleanupTimer(): void {
+    if (rateLimitState.bucketCleanupTimer) return;
+    rateLimitState.bucketCleanupTimer = setInterval(
+        cleanupStaleBuckets,
+        BUCKET_CLEANUP_INTERVAL_MS
+    );
+    rateLimitState.bucketCleanupTimer.unref();
+}
 
 function isApiRoute(pathname: string): boolean {
     return pathname === "/api" || pathname.startsWith("/api/");
@@ -51,6 +75,10 @@ function isApiRoute(pathname: string): boolean {
 
 function isAuthRoute(pathname: string): boolean {
     return pathname === "/api/auth" || pathname.startsWith("/api/auth/");
+}
+
+function isPublicApiRoute(pathname: string): boolean {
+    return pathname === "/api/health";
 }
 
 function rateLimitKey(
@@ -90,13 +118,15 @@ function checkRateLimit(
     rule: RateLimitRule
 ): Response | null {
     const now = Date.now();
+    ensureBucketCleanupTimer();
     const key = rateLimitKey(rule, request, server);
     let bucket = buckets.get(key);
     if (!bucket || bucket.resetAt <= now) {
-        bucket = { resetAt: now + rule.windowMs, used: 0 };
+        bucket = { lastSeenAt: now, resetAt: now + rule.windowMs, used: 0 };
         buckets.set(key, bucket);
     }
 
+    bucket.lastSeenAt = now;
     bucket.used += 1;
     if (bucket.used <= rule.max) {
         return null;
@@ -141,6 +171,7 @@ function secureHandler(routePath: string, handler: BunHandler | Response): BunHa
         if (
             isApiRoute(pathname) &&
             !isAuthRoute(pathname) &&
+            !isPublicApiRoute(pathname) &&
             !authUser(request, server)
         ) {
             return json({ error: "Unauthorized" }, { status: 401 });

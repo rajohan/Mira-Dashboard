@@ -2,6 +2,7 @@ import { database } from "../database.ts";
 import { errorMessage } from "../lib/errors.ts";
 import {
     type BunProcess,
+    killProcessGroup,
     pipeProcessOutput,
     runProcess,
     spawnProcess,
@@ -231,6 +232,7 @@ function startBackupJob(
     let child: BunProcess;
     try {
         child = spawnProcess("bash", ["-lc", command], {
+            detached: true,
             env: process.env,
         });
     } catch (error) {
@@ -321,10 +323,10 @@ function startBackupJob(
             containerAbortKillTimer.unref();
         }
         try {
-            child.kill("SIGTERM");
+            killProcessGroup(child, "SIGTERM");
             hostAbortKillTimer = setTimeout(() => {
                 try {
-                    child.kill("SIGKILL");
+                    killProcessGroup(child, "SIGKILL");
                 } catch (error) {
                     job.stderr = trimOutput(
                         `${job.stderr}\nFailed to force terminate backup process: ${String(error)}`.trim()

@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
@@ -37,6 +38,21 @@ function json(method: string, body: unknown): RequestInit {
         method,
         body: JSON.stringify(body),
     };
+}
+
+async function findOpenPort(): Promise<number> {
+    return new Promise((resolve, reject) => {
+        const server = net.createServer();
+        server.once("error", reject);
+        server.listen(0, "127.0.0.1", () => {
+            const address = server.address();
+            if (!address || typeof address === "string") {
+                server.close(() => reject(new Error("Could not allocate test port")));
+                return;
+            }
+            server.close(() => resolve(address.port));
+        });
+    });
 }
 
 describe("Mira Dashboard backend integration", () => {
@@ -80,7 +96,7 @@ describe("Mira Dashboard backend integration", () => {
         process.env.TRUST_PROXY = "false";
 
         const serverModule = await import("../src/server.ts");
-        testState.server = serverModule.createServer(0);
+        testState.server = serverModule.createServer(await findOpenPort());
         testState.baseUrl = `http://127.0.0.1:${testState.server.port}`;
     });
 
