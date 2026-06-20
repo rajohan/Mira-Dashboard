@@ -232,4 +232,14 @@ describe("Mira Dashboard backend integration", () => {
         expect(result.status).toBe(200);
         expect(result.body.output).toBe("compose:restart api.v1");
     });
+
+    it("rejects Docker Compose service names that look like options", async () => {
+        const result = await api<{ error: string }>(
+            "/api/docker/stack/action",
+            json("POST", { action: "restart", service: "--profile" })
+        );
+
+        expect(result.status).toBe(400);
+        expect(result.body.error).toBe("Invalid service name");
+    });
 });

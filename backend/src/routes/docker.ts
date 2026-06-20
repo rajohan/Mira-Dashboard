@@ -1452,7 +1452,7 @@ export default function dockerRoutes(app: express.Application): void {
             if (
                 payload.service !== undefined &&
                 (typeof payload.service !== "string" ||
-                    !/^[A-Za-z0-9._-]+$/.test(payload.service))
+                    !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(payload.service))
             ) {
                 response.status(400).json({ error: "Invalid service name" });
                 return;
