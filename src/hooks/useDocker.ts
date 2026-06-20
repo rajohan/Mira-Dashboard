@@ -141,7 +141,7 @@ export interface DockerUpdaterSummary {
 
 /** Represents Docker manual update result. */
 export interface DockerManualUpdateResult {
-    success: boolean;
+    isSuccess: boolean;
     service: DockerUpdaterService;
     result: {
         isOk: boolean;
@@ -420,7 +420,7 @@ export function useDeleteDockerImage() {
 
     return useMutation({
         mutationFn: (imageId: string) =>
-            apiDeleteRequired<{ success: boolean }>(
+            apiDeleteRequired<{ isSuccess: boolean }>(
                 `/docker/images/${encodeURIComponent(imageId)}`
             ),
         onSuccess: async () => {
@@ -435,7 +435,7 @@ export function useDeleteDockerVolume() {
 
     return useMutation({
         mutationFn: (volumeName: string) =>
-            apiDeleteRequired<{ success: boolean }>(
+            apiDeleteRequired<{ isSuccess: boolean }>(
                 `/docker/volumes/${encodeURIComponent(volumeName)}`
             ),
         onSuccess: async () => {
@@ -450,7 +450,7 @@ export function useDockerPrune() {
 
     return useMutation({
         mutationFn: (target: "images" | "volumes") =>
-            apiPostRequired<{ success: boolean; output: string }>("/docker/prune", {
+            apiPostRequired<{ isSuccess: boolean; output: string }>("/docker/prune", {
                 target,
             }),
         onSuccess: async (_, target) => {
@@ -474,7 +474,7 @@ export function startDockerExec(containerId: string, command: string) {
 
 /** Performs stop Docker exec. */
 export function stopDockerExec(jobId: string) {
-    return apiPostRequired<{ success: boolean }>(
+    return apiPostRequired<{ isSuccess: boolean }>(
         `/docker/exec/${encodeURIComponent(jobId)}/stop`
     );
 }

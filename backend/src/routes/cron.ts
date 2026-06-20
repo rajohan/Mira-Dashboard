@@ -39,8 +39,12 @@ function normalizeJobs(payload: unknown): CronJob[] {
     return [];
 }
 
-function handleCronError(response: express.Response, error: unknown): void {
-    response.status(httpStatusCode(error)).json({ error: "Cron request failed" });
+function handleCronError(
+    response: express.Response,
+    error: unknown,
+    fallback = "Cron request failed"
+): void {
+    response.status(httpStatusCode(error)).json({ error: fallback });
 }
 
 /** Registers cron API routes. */
@@ -51,7 +55,7 @@ export default function cronRoutes(app: express.Application): void {
             const jobs = normalizeJobs(payload);
             response.json({ jobs });
         } catch (error) {
-            handleCronError(response, error);
+            handleCronError(response, error, "Failed to list cron jobs");
         }
     }) as RequestHandler);
 
@@ -71,7 +75,7 @@ export default function cronRoutes(app: express.Application): void {
             });
             response.json({ isOk: true });
         } catch (error) {
-            handleCronError(response, error);
+            handleCronError(response, error, "Failed to toggle cron job");
         }
     }) as RequestHandler);
 
@@ -88,7 +92,7 @@ export default function cronRoutes(app: express.Application): void {
             await gateway.request("cron.update", { jobId, patch });
             response.json({ isOk: true });
         } catch (error) {
-            handleCronError(response, error);
+            handleCronError(response, error, "Failed to update cron job");
         }
     }) as RequestHandler);
 
@@ -99,7 +103,7 @@ export default function cronRoutes(app: express.Application): void {
             const payload = await gateway.request("cron.run", { jobId });
             response.json({ isOk: true, payload });
         } catch (error) {
-            handleCronError(response, error);
+            handleCronError(response, error, "Failed to run cron job");
         }
     }) as RequestHandler);
 
@@ -110,7 +114,7 @@ export default function cronRoutes(app: express.Application): void {
             const payload = await gateway.request("cron.remove", { jobId });
             response.json({ isOk: true, payload });
         } catch (error) {
-            handleCronError(response, error);
+            handleCronError(response, error, "Failed to delete cron job");
         }
     }) as RequestHandler);
 }

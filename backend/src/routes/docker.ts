@@ -320,6 +320,11 @@ interface DockerStackActionRequest {
     service?: unknown;
 }
 
+interface ValidatedDockerStackActionRequest {
+    action: "restart" | "start" | "stop";
+    service?: string;
+}
+
 /** Represents Docker prune request. */
 interface DockerPruneRequest {
     target: "images" | "volumes";
@@ -967,23 +972,9 @@ async function runContainerAction(
 }
 
 /** Performs run stack action. */
-async function runStackAction(request: DockerStackActionRequest) {
-    if (
-        request.action !== "restart" &&
-        request.action !== "start" &&
-        request.action !== "stop"
-    ) {
-        throw new Error("Invalid stack action");
-    }
-
-    const arguments_ = [request.action];
+async function runStackAction(request: ValidatedDockerStackActionRequest) {
+    const arguments_: string[] = [request.action];
     if (request.service !== undefined) {
-        if (typeof request.service !== "string") {
-            throw new TypeError("Invalid service name");
-        }
-        if (!/^[A-Za-z0-9_-]+$/.test(request.service)) {
-            throw new Error("Invalid service name");
-        }
         arguments_.push(request.service);
     }
     const result = await runCompose(arguments_);
@@ -1446,7 +1437,26 @@ export default function dockerRoutes(app: express.Application): void {
         express.json(),
         asyncRoute(async (request, response) => {
             const payload = request.body as DockerStackActionRequest;
-            const result = await runStackAction(payload);
+            if (
+                payload.action !== "restart" &&
+                payload.action !== "start" &&
+                payload.action !== "stop"
+            ) {
+                response.status(400).json({ error: "Invalid stack action" });
+                return;
+            }
+            if (
+                payload.service !== undefined &&
+                (typeof payload.service !== "string" ||
+                    !/^[A-Za-z0-9_-]+$/.test(payload.service))
+            ) {
+                response.status(400).json({ error: "Invalid service name" });
+                return;
+            }
+            const result = await runStackAction({
+                action: payload.action,
+                service: payload.service,
+            });
             response.json(result);
         })
     );
