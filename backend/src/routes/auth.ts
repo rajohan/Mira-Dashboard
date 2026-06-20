@@ -222,6 +222,7 @@ export default function authRoutes(
         try {
             previousGatewayToken = getPersistedAuthGatewayToken();
             persistAuthGatewayToken(gatewayToken);
+            // Tracks that the token was persisted and must be rolled back if gateway init fails.
             isAttemptedGatewaySwitch = true;
             initGateway(gatewayToken);
             const sessionId = createAuthSession(user.id);

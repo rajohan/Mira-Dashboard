@@ -510,11 +510,9 @@ async function updateAgentMetadataFromVerifiedDirectory({
     );
     try {
         assertOpenedDirectoryMatches(metadataDirectoryFd, realExpectedSessionsDirectory);
-        const safeMetadataPath = Path.join(
-            "/proc/self/fd",
-            String(metadataDirectoryFd),
-            "metadata.json"
-        );
+        const safeMetadataPath = isProcfsAvailable()
+            ? Path.join("/proc/self/fd", String(metadataDirectoryFd), "metadata.json")
+            : Path.join(realMetadataDirectory, "metadata.json");
 
         let metadata: AgentMetadata = {};
         try {
@@ -847,10 +845,22 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
               ? (raw as Record<string, unknown>)
               : {};
 
-    const arguments_ =
-        parsed.arguments && typeof parsed.arguments === "object"
-            ? (parsed.arguments as Record<string, unknown>)
-            : parsed;
+    const parsedArguments =
+        typeof parsed.arguments === "string"
+            ? (() => {
+                  try {
+                      const value = JSON.parse(parsed.arguments) as unknown;
+                      return value && typeof value === "object" && !Array.isArray(value)
+                          ? (value as Record<string, unknown>)
+                          : null;
+                  } catch {
+                      return null;
+                  }
+              })()
+            : parsed.arguments && typeof parsed.arguments === "object"
+              ? (parsed.arguments as Record<string, unknown>)
+              : null;
+    const arguments_ = parsedArguments ?? parsed;
 
     const nested =
         arguments_.parameters && typeof arguments_.parameters === "object"
