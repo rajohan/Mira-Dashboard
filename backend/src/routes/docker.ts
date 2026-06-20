@@ -1437,6 +1437,10 @@ export default function dockerRoutes(app: express.Application): void {
         express.json(),
         asyncRoute(async (request, response) => {
             const payload = request.body as DockerStackActionRequest;
+            if (!payload || typeof payload !== "object") {
+                response.status(400).json({ error: "Invalid stack action" });
+                return;
+            }
             if (
                 payload.action !== "restart" &&
                 payload.action !== "start" &&

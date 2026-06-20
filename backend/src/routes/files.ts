@@ -30,7 +30,7 @@ function getDefaultWorkspaceRoot(): string {
         return path.join(openclawHome, "workspace");
     }
 
-    const homeDirectory = process.env.HOME?.trim() || os.homedir().trim();
+    const homeDirectory = path.resolve(process.env.HOME?.trim() || os.homedir().trim());
     if (
         !homeDirectory ||
         !path.isAbsolute(homeDirectory) ||
