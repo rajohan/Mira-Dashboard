@@ -163,7 +163,8 @@ export const settingsRoutes = {
                 const settings = await loadSettings();
                 return json({ ...settings, gateway: gateway.getStatus() });
             } catch (error) {
-                return json({ error: (error as Error).message }, { status: 500 });
+                console.error("[Settings] Failed to load settings:", error);
+                return json({ error: "Failed to load settings" }, { status: 500 });
             }
         },
         PUT: async (request: Request) => {

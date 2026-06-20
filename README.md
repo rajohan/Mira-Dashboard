@@ -3,7 +3,7 @@
 [![frontend coverage](https://codecov.io/gh/rajohan/Mira-Dashboard/branch/main/graph/badge.svg?flag=frontend)](https://codecov.io/gh/rajohan/Mira-Dashboard)
 [![backend coverage](https://codecov.io/gh/rajohan/Mira-Dashboard/branch/main/graph/badge.svg?flag=backend)](https://codecov.io/gh/rajohan/Mira-Dashboard)
 
-Mira Dashboard is Raymond's local control surface for Mira/OpenClaw operations. It combines a React frontend with a Bun/Express backend that mirrors OpenClaw Gateway state, serves operational APIs, and persists dashboard-owned state in SQLite.
+Mira Dashboard is Raymond's local control surface for Mira/OpenClaw operations. It combines a React frontend with a Bun-native backend that mirrors OpenClaw Gateway state, serves operational APIs, and persists dashboard-owned state in SQLite.
 
 ## What it includes
 
@@ -17,7 +17,7 @@ Mira Dashboard is Raymond's local control surface for Mira/OpenClaw operations. 
 
 ```text
 src/                     React app, routes, hooks, stores, types, and UI components
-backend/src/             Express backend, Gateway bridge, route modules, services, DB setup
+backend/src/             Bun backend, Gateway bridge, route modules, services, DB setup
 backend/data/            Local runtime SQLite databases; do not commit runtime data changes
 dist/                    Bun production frontend build output
 scripts/                 Bun frontend build/dev scripts and React Compiler/Tailwind plugins
@@ -85,7 +85,8 @@ Frontend and backend tests run directly with Bun. Coverage LCOV files are upload
 - Health endpoints: `/health` and `/api/health`.
 - Frontend builds and the local frontend dev server use Bun's HTML bundler with Babel React Compiler and Bun Tailwind plugins.
 - Dev server listens on all addresses so the dashboard can be reached over Tailscale when needed.
-- Auth is enforced for API routes after `/api/auth/*`; route modules should assume authenticated access unless explicitly mounted before the auth middleware.
+- Auth is enforced by the backend request policy for API routes except `/api/auth/*` and `/api/health`; route modules should assume authenticated access unless explicitly public.
+- If `MIRA_DASHBOARD_TRUSTED_PROXY_IPS` is configured, the trusted proxy must overwrite or strip inbound `X-Real-IP` and `X-Forwarded-For` headers from untrusted clients before forwarding to the backend. Dashboard localhost bypass depends on trusted request identity, so forwarding spoofed client headers can turn into an authentication bypass.
 
 ## Production checkout and PR worktrees
 

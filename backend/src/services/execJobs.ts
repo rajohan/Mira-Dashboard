@@ -418,11 +418,12 @@ export function stopExecJob(jobId: string): { isSuccess: boolean; message: strin
     killProcessGroup(job.process, "SIGTERM");
     job.status = "signaled";
 
-    setTimeout(() => {
+    const forceKillTimer = setTimeout(() => {
         if (!job.process || job.status !== "signaled") return;
         killProcessGroup(job.process, "SIGKILL");
         markExecJobForcedKilled(job);
     }, 3000);
+    forceKillTimer.unref();
 
     return { isSuccess: true, message: "Stop signal sent" };
 }

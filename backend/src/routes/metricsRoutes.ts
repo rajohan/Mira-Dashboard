@@ -78,25 +78,29 @@ async function getNetworkMetrics(): Promise<NetworkMetrics> {
     let downloadBytes = 0;
     let uploadBytes = 0;
 
-    try {
-        const preferredInterface = "enp0s6";
-        const availableInterfaces = readdirSync("/sys/class/net");
-        const interfaces = availableInterfaces.includes(preferredInterface)
-            ? [preferredInterface]
-            : availableInterfaces.filter((name) => name !== "lo");
+    if (os.platform() === "linux") {
+        try {
+            const preferredInterface = "enp0s6";
+            const availableInterfaces = readdirSync("/sys/class/net");
+            const interfaces = availableInterfaces.includes(preferredInterface)
+                ? [preferredInterface]
+                : availableInterfaces.filter((name) => name !== "lo");
 
-        for (const name of interfaces) {
-            const basePath = `/sys/class/net/${name}/statistics`;
-            const rxText = await Bun.file(`${basePath}/rx_bytes`).text();
-            const txText = await Bun.file(`${basePath}/tx_bytes`).text();
-            const rxBytes = Number(rxText.trim());
-            const txBytes = Number(txText.trim());
+            for (const name of interfaces) {
+                const basePath = `/sys/class/net/${name}/statistics`;
+                const rxText = await Bun.file(`${basePath}/rx_bytes`).text();
+                const txText = await Bun.file(`${basePath}/tx_bytes`).text();
+                const rxBytes = Number(rxText.trim());
+                const txBytes = Number(txText.trim());
 
-            if (!Number.isNaN(rxBytes)) downloadBytes += rxBytes;
-            if (!Number.isNaN(txBytes)) uploadBytes += txBytes;
+                if (!Number.isNaN(rxBytes)) downloadBytes += rxBytes;
+                if (!Number.isNaN(txBytes)) uploadBytes += txBytes;
+            }
+        } catch (error) {
+            console.error("[Metrics] network error:", (error as Error).message);
         }
-    } catch (error) {
-        console.error("[Metrics] network error:", (error as Error).message);
+    } else {
+        // Network byte counters are currently supported through Linux /sys only.
     }
 
     const timestamp = Date.now();

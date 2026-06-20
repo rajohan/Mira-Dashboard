@@ -277,10 +277,22 @@ export const fileRoutes = {
             if (!fs.existsSync(parent)) {
                 return json({ error: "Path not found" }, { status: 404 });
             }
+            let existingMode: number | undefined;
+            try {
+                const existingStat = lstatGuarded(guardedPath(safeFullPath));
+                if (existingStat.isFile()) {
+                    existingMode = existingStat.mode & 0o777;
+                }
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                    throw error;
+                }
+            }
             const temporaryPath = `${safeFullPath}.${process.pid}.${Date.now()}.${Bun.randomUUIDv7()}.tmp`;
             await writeTextNoFollowExclusiveGuarded(
                 guardedPath(temporaryPath),
-                body.content
+                body.content,
+                existingMode
             );
             try {
                 await fs.promises.rename(temporaryPath, safeFullPath);

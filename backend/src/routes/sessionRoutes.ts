@@ -8,6 +8,11 @@ function isValidSessionKey(sessionKey: string): boolean {
     return sessionKey.length > 0;
 }
 
+function sessionRouteError(error: unknown, fallback = "Internal server error"): Response {
+    console.error("[Sessions] Request failed:", error);
+    return json({ error: fallback }, { status: 500 });
+}
+
 export const sessionRoutes = {
     "/api/sessions/list": {
         GET: (request: Request) => {
@@ -19,12 +24,14 @@ export const sessionRoutes = {
                 if (type) sessions = sessions.filter((session) => session.type === type);
                 if (model)
                     sessions = sessions.filter((session) =>
-                        session.model.includes(model)
+                        typeof session.model === "string"
+                            ? session.model.includes(model)
+                            : false
                     );
                 sessions.sort((a, b) => b.tokenCount - a.tokenCount);
                 return json({ sessions });
             } catch (error) {
-                return json({ error: (error as Error).message }, { status: 500 });
+                return sessionRouteError(error);
             }
         },
     },
@@ -52,7 +59,7 @@ export const sessionRoutes = {
                 }
                 return json({ error: `Unsupported action: ${action}` }, { status: 400 });
             } catch (error) {
-                return json({ error: (error as Error).message }, { status: 500 });
+                return sessionRouteError(error);
             }
         },
     },
@@ -69,7 +76,7 @@ export const sessionRoutes = {
                     result: await gateway.deleteSession(sessionKey),
                 });
             } catch (error) {
-                return json({ error: (error as Error).message }, { status: 500 });
+                return sessionRouteError(error);
             }
         },
     },
@@ -98,7 +105,7 @@ export const sessionRoutes = {
                 }
                 return json(stats);
             } catch (error) {
-                return json({ error: (error as Error).message }, { status: 500 });
+                return sessionRouteError(error);
             }
         },
     },

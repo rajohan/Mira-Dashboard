@@ -38,19 +38,22 @@ async function readLogContent(
     lines: number | null
 ): Promise<string> {
     if (!lines) {
-        return file.readFile("utf8");
+        const byteLength = Math.min(stat.size, MIN_LOG_TAIL_BYTES);
+        const buffer = Buffer.allocUnsafe(byteLength);
+        const offset = Math.max(0, stat.size - byteLength);
+        const { bytesRead } = await file.read(buffer, 0, byteLength, offset);
+        return buffer.subarray(0, bytesRead).toString("utf8");
     }
 
-    const minimumWindowBytes = Math.min(
+    const readWindowBytes = Math.min(
         stat.size,
         Math.max(MIN_LOG_TAIL_BYTES, lines * LOG_BYTES_PER_REQUESTED_LINE)
     );
     const chunks: Buffer[] = [];
     let offset = stat.size;
     let bytesReadTotal = 0;
-    let newlineCount = 0;
 
-    while (offset > 0 && (bytesReadTotal < minimumWindowBytes || newlineCount <= lines)) {
+    while (offset > 0 && bytesReadTotal < readWindowBytes) {
         const chunkBytes = Math.min(LOG_TAIL_READ_CHUNK_BYTES, offset);
         offset -= chunkBytes;
         const buffer = Buffer.allocUnsafe(chunkBytes);
@@ -59,9 +62,6 @@ async function readLogContent(
             break;
         }
         const chunk = buffer.subarray(0, bytesRead);
-        for (const byte of chunk) {
-            if (byte === 10) newlineCount += 1;
-        }
         chunks.unshift(chunk);
         bytesReadTotal += bytesRead;
     }
@@ -113,8 +113,11 @@ async function pollLogFile(): Promise<void> {
         }
 
         if (stat.size > logsRouteState.lastLogSize) {
-            const buffer = Buffer.alloc(stat.size - logsRouteState.lastLogSize);
-            await file.read(buffer, 0, buffer.length, logsRouteState.lastLogSize);
+            const deltaBytes = stat.size - logsRouteState.lastLogSize;
+            const readBytes = Math.min(deltaBytes, LOG_TAIL_READ_CHUNK_BYTES);
+            const readOffset = stat.size - readBytes;
+            const buffer = Buffer.alloc(readBytes);
+            await file.read(buffer, 0, buffer.length, readOffset);
 
             const lines = buffer
                 .toString("utf8")

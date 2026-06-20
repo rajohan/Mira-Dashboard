@@ -61,6 +61,18 @@ function toResponse(row: NotificationRow) {
     };
 }
 
+function optionalStringField(
+    field: string,
+    value: unknown
+): { error?: Response; value?: string } {
+    if (value === undefined || value === null) {
+        return {};
+    }
+    return typeof value === "string"
+        ? { value }
+        : { error: json({ error: `${field} must be a string` }, { status: 400 }) };
+}
+
 function validId(value: string | undefined): number | null {
     const id = Number(value);
     return Number.isFinite(id) && id > 0 ? id : null;
@@ -98,47 +110,23 @@ export const notificationRoutes = {
 
         POST: async (request: Request) => {
             const body = await readJson<Record<string, unknown>>(request);
-            const rawTitle = body.title;
-            if (
-                rawTitle !== undefined &&
-                rawTitle !== null &&
-                typeof rawTitle !== "string"
-            ) {
-                return json({ error: "title must be a string" }, { status: 400 });
-            }
-            const rawDescription = body.description;
-            if (
-                rawDescription !== undefined &&
-                rawDescription !== null &&
-                typeof rawDescription !== "string"
-            ) {
-                return json({ error: "description must be a string" }, { status: 400 });
-            }
-            const rawSource = body.source;
-            if (
-                rawSource !== undefined &&
-                rawSource !== null &&
-                typeof rawSource !== "string"
-            ) {
-                return json({ error: "source must be a string" }, { status: 400 });
-            }
-            const rawDedupeKey = body.dedupeKey;
-            if (
-                rawDedupeKey !== undefined &&
-                rawDedupeKey !== null &&
-                typeof rawDedupeKey !== "string"
-            ) {
-                return json({ error: "dedupeKey must be a string" }, { status: 400 });
-            }
-            const rawType = body.type;
-            if (rawType !== undefined && typeof rawType !== "string") {
+            const titleField = optionalStringField("title", body.title);
+            if (titleField.error) return titleField.error;
+            const descriptionField = optionalStringField("description", body.description);
+            if (descriptionField.error) return descriptionField.error;
+            const sourceField = optionalStringField("source", body.source);
+            if (sourceField.error) return sourceField.error;
+            const dedupeKeyField = optionalStringField("dedupeKey", body.dedupeKey);
+            if (dedupeKeyField.error) return dedupeKeyField.error;
+            const typeField = optionalStringField("type", body.type);
+            if (typeField.error) {
                 return json({ error: "invalid notification type" }, { status: 400 });
             }
-            const title = nullableString((rawTitle ?? "").toString().trim());
-            const description = stringFallback(rawDescription).trim();
-            const source = nullableString((rawSource ?? "").toString().trim());
-            const dedupeKey = nullableString((rawDedupeKey ?? "").toString().trim());
-            const type = rawType === undefined ? "info" : rawType;
+            const title = nullableString((titleField.value ?? "").trim());
+            const description = stringFallback(descriptionField.value).trim();
+            const source = nullableString((sourceField.value ?? "").trim());
+            const dedupeKey = nullableString((dedupeKeyField.value ?? "").trim());
+            const type = typeField.value ?? "info";
             const metadata =
                 body.metadata &&
                 typeof body.metadata === "object" &&

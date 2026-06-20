@@ -1,9 +1,7 @@
 import path from "node:path";
 
-import type { Server } from "bun";
-
 import gateway from "./gateway.ts";
-import { authUser, json } from "./http.ts";
+import { json } from "./http.ts";
 import { withRequestPolicy } from "./requestPolicy.ts";
 import { agentRoutes } from "./routes/agentRoutes.ts";
 import { authRoutes } from "./routes/authRoutes.ts";
@@ -57,10 +55,7 @@ function health() {
     });
 }
 
-function sessions(request: Request, server: Server<unknown>) {
-    if (!authUser(request, server)) {
-        return json({ error: "Unauthorized" }, { status: 401 });
-    }
+function sessions() {
     return json(gateway.getSessions());
 }
 

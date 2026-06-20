@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -83,7 +84,7 @@ function getRealMediaRoot(mediaRoot: string): string | null {
 
 export const mediaRoutes = {
     "/api/media": {
-        GET: (request: Request) => {
+        GET: async (request: Request) => {
             const requestedPath = stringFallback(
                 new URL(request.url).searchParams.get("path")
             );
@@ -103,15 +104,11 @@ export const mediaRoutes = {
                 return json({ error: "Media not found" }, { status: 404 });
             }
 
-            if (!fs.existsSync(fullPath)) {
-                return json({ error: "Media not found" }, { status: 404 });
-            }
-
             let realPath: string;
             let stat: fs.Stats;
             try {
-                realPath = fs.realpathSync(fullPath);
-                stat = fs.statSync(realPath);
+                realPath = await fsp.realpath(fullPath);
+                stat = await fsp.stat(realPath);
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
                 if (code === "ENOENT" || code === "ENOTDIR") {

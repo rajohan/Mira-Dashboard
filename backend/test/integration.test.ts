@@ -55,6 +55,23 @@ async function findOpenPort(): Promise<number> {
     });
 }
 
+async function createTestServer(
+    createServer: (port: number) => Server<unknown>
+): Promise<Server<unknown>> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+            return createServer(await findOpenPort());
+        } catch (error) {
+            lastError = error;
+            if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") {
+                throw error;
+            }
+        }
+    }
+    throw lastError;
+}
+
 describe("Mira Dashboard backend integration", () => {
     beforeAll(async () => {
         testState.temporaryRoot = await fs.mkdtemp(
@@ -96,7 +113,7 @@ describe("Mira Dashboard backend integration", () => {
         process.env.TRUST_PROXY = "false";
 
         const serverModule = await import("../src/server.ts");
-        testState.server = serverModule.createServer(await findOpenPort());
+        testState.server = await createTestServer(serverModule.createServer);
         testState.baseUrl = `http://127.0.0.1:${testState.server.port}`;
     });
 

@@ -939,6 +939,19 @@ function parseSafeTagRegexPattern(pattern: string): SafeTagPatternPart[] | null 
             }
             return null;
         }
+        if (character === "[") {
+            const closeIndex = body.indexOf("]", index + 1);
+            if (closeIndex === -1 || body[closeIndex + 1] !== "+") {
+                return null;
+            }
+            const characterClass = body.slice(index + 1, closeIndex);
+            if (characterClass !== "0-9" && characterClass !== String.raw`\d`) {
+                return null;
+            }
+            parts.push({ kind: "digits" });
+            index = closeIndex + 1;
+            continue;
+        }
         if (/^[A-Za-z0-9._-]$/u.test(character)) {
             parts.push({ kind: "literal", value: character });
             continue;

@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { json, readJson } from "../http.ts";
 import {
+    copyNoFollowGuarded,
     guardedPath,
     openReadNoFollowGuarded,
     readFromOpenFile,
@@ -219,7 +220,10 @@ export const configFileRoutes = {
             await fsp.mkdir(path.dirname(target), { recursive: true });
             try {
                 if (fs.existsSync(target)) {
-                    const stat = fs.statSync(target);
+                    const stat = fs.lstatSync(target);
+                    if (stat.isSymbolicLink()) {
+                        return json({ error: "Access denied" }, { status: 403 });
+                    }
                     if (stat.isDirectory()) {
                         return json(
                             { error: "Path is a directory, not a file" },
@@ -233,7 +237,10 @@ export const configFileRoutes = {
                         );
                     }
                     if (stat.size <= MAX_CONFIG_WRITE_SIZE) {
-                        await fsp.copyFile(target, `${target}.bak`);
+                        await copyNoFollowGuarded(
+                            guardedPath(target),
+                            guardedPath(`${target}.bak`)
+                        );
                     }
                 }
                 await writeTextNoFollowGuarded(guardedPath(target), body.content);

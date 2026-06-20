@@ -226,4 +226,8 @@ export function withRequestPolicy<T extends Record<string, unknown>>(routes: T):
 
 export function resetRequestPolicyForTests(): void {
     buckets.clear();
+    if (rateLimitState.bucketCleanupTimer) {
+        clearInterval(rateLimitState.bucketCleanupTimer);
+        rateLimitState.bucketCleanupTimer = null;
+    }
 }

@@ -97,7 +97,11 @@ export async function readJson<T>(
         request,
         options.maxBytes ?? DEFAULT_JSON_BODY_LIMIT
     );
-    return JSON.parse(body.toString("utf8")) as T;
+    try {
+        return JSON.parse(body.toString("utf8")) as T;
+    } catch {
+        throw new HttpError("Invalid JSON", 400);
+    }
 }
 
 export function requestIp(request: Request, server: Server<unknown>): string | undefined {
@@ -161,7 +165,11 @@ export function sessionIdFromCookie(request: Request): string | null {
     for (const part of cookieHeader.split(";")) {
         const trimmed = part.trim();
         if (trimmed.startsWith(`${SESSION_COOKIE}=`)) {
-            return decodeURIComponent(trimmed.slice(SESSION_COOKIE.length + 1));
+            try {
+                return decodeURIComponent(trimmed.slice(SESSION_COOKIE.length + 1));
+            } catch {
+                return null;
+            }
         }
     }
     return null;

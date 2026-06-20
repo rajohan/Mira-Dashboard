@@ -106,13 +106,13 @@ export const sttRoutes = {
                 );
             }
 
-            sttRouteState.isActiveTranscription = true;
             try {
                 const audioBuffer = await readRequestBytes(request, MAX_AUDIO_BYTES);
                 if (audioBuffer.length === 0) {
                     return json({ error: "Missing audio payload" }, { status: 400 });
                 }
 
+                sttRouteState.isActiveTranscription = true;
                 const text = await transcribeWithElevenLabs(
                     audioBuffer,
                     request.headers.get("content-type") || undefined
