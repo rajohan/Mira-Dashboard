@@ -32,7 +32,7 @@ export function ServiceActionsCard() {
         response: ExecResponse;
         ranAt: number;
     }>(null);
-    const outputRef = useRef<HTMLPreElement | null>(null);
+    const outputReference = useRef<HTMLPreElement | null>(null);
     const [shouldAutoFollowOutput, setShouldAutoFollowOutput] = useState(true);
 
     const execJob = useExecJob(runningJobId);
@@ -122,11 +122,11 @@ export function ServiceActionsCard() {
     const isAnyActionPending = startAction.isPending || Boolean(runningActionId);
 
     useEffect(() => {
-        if (!shouldAutoFollowOutput || !outputRef.current) {
+        if (!shouldAutoFollowOutput || !outputReference.current) {
             return;
         }
 
-        outputRef.current.scrollTop = outputRef.current.scrollHeight;
+        outputReference.current.scrollTop = outputReference.current.scrollHeight;
     }, [logs, shouldAutoFollowOutput]);
 
     useEffect(() => {
@@ -220,7 +220,7 @@ export function ServiceActionsCard() {
                             Output
                         </div>
                         <pre
-                            ref={outputRef}
+                            ref={outputReference}
                             onScroll={(event) => {
                                 const element = event.currentTarget;
                                 const distanceFromBottom =
@@ -228,8 +228,8 @@ export function ServiceActionsCard() {
                                     element.scrollTop -
                                     element.clientHeight;
                                 const isAtBottom = distanceFromBottom <= 8;
-                                setShouldAutoFollowOutput((previous) =>
-                                    previous === isAtBottom ? previous : isAtBottom
+                                setShouldAutoFollowOutput((wasPrevious) =>
+                                    wasPrevious === isAtBottom ? wasPrevious : isAtBottom
                                 );
                             }}
                             className="text-primary-200 max-h-52 overflow-auto rounded bg-black/30 p-2 text-xs whitespace-pre-wrap"

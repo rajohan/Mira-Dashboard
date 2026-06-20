@@ -6,7 +6,7 @@ import {
     isCodeFile,
     isJsonFile,
     isMarkdownFile,
-} from "../../../utils/fileUtils";
+} from "../../../utils/fileUtilities";
 import { formatDate } from "../../../utils/format";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
@@ -14,7 +14,7 @@ import { FileContentViewer } from "./FileContentViewer";
 import { PreviewToggle } from "./PreviewToggle";
 
 /** Provides props for file editor panel. */
-interface FileEditorPanelProps {
+interface FileEditorPanelProperties {
     selectedPath: string | null;
     fileContent?: FileContent;
     contentLoading: boolean;
@@ -31,9 +31,9 @@ interface FileEditorPanelProps {
     jsonValidation: { valid: boolean; error: string | null };
     onSave: () => void;
     onContentChange: (value: string) => void;
-    onMarkdownPreviewChange: (value: boolean) => void;
-    onJsonPreviewChange: (value: boolean) => void;
-    onCodePreviewChange: (preview: boolean) => void;
+    onMarkdownPreviewChange: (isValue: boolean) => void;
+    onJsonPreviewChange: (isValue: boolean) => void;
+    onCodePreviewChange: (isPreview: boolean) => void;
 }
 
 /** Renders the file editor panel UI. */
@@ -57,7 +57,7 @@ export function FileEditorPanel({
     onMarkdownPreviewChange,
     onJsonPreviewChange,
     onCodePreviewChange,
-}: FileEditorPanelProps) {
+}: FileEditorPanelProperties) {
     return (
         <Card
             variant="bordered"
@@ -85,7 +85,7 @@ export function FileEditorPanel({
                                 isMarkdownFile(fileContent.path) &&
                                 isEditable && (
                                     <PreviewToggle
-                                        preview={markdownPreview}
+                                        isPreview={markdownPreview}
                                         onToggle={onMarkdownPreviewChange}
                                     />
                                 )}
@@ -93,7 +93,7 @@ export function FileEditorPanel({
                                 isJsonFile(fileContent.path) &&
                                 isEditable && (
                                     <PreviewToggle
-                                        preview={jsonPreview}
+                                        isPreview={jsonPreview}
                                         onToggle={onJsonPreviewChange}
                                     />
                                 )}
@@ -101,7 +101,7 @@ export function FileEditorPanel({
                                 isCodeFile(fileContent.path) &&
                                 isEditable && (
                                     <PreviewToggle
-                                        preview={!codeEditMode}
+                                        isPreview={!codeEditMode}
                                         onToggle={onCodePreviewChange}
                                         previewLabel="Preview"
                                         editLabel="Edit"

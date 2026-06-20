@@ -8,7 +8,7 @@ import {
     mkdirGuarded,
     readTextNoFollowGuarded,
     writeTextNoFollowGuarded,
-} from "../lib/guardedOps.js";
+} from "../lib/guardedOps.ts";
 
 /** Represents settings. */
 interface Settings {
@@ -19,7 +19,7 @@ interface Settings {
 }
 
 /** Resolves dashboard settings directory from a home directory value. */
-function resolveSettingsDir(home = process.env.HOME): string {
+function resolveSettingsDirectory(home = process.env.HOME): string {
     const normalizedHome = home?.trim() || os.homedir().trim();
     if (
         !normalizedHome ||
@@ -28,9 +28,9 @@ function resolveSettingsDir(home = process.env.HOME): string {
     ) {
         throw new Error("Invalid settings home directory");
     }
-    const settingsDir = path.resolve(path.join(normalizedHome, ".openclaw"));
+    const settingsDirectory = path.resolve(path.join(normalizedHome, ".openclaw"));
     try {
-        if (fs.lstatSync(settingsDir).isSymbolicLink()) {
+        if (fs.lstatSync(settingsDirectory).isSymbolicLink()) {
             throw new Error("Invalid settings directory");
         }
     } catch (error) {
@@ -38,29 +38,25 @@ function resolveSettingsDir(home = process.env.HOME): string {
             throw error;
         }
     }
-    return settingsDir;
-}
-
-function resolveSettingsFile(): string {
-    return path.join(resolveSettingsDir(), "dashboard-settings.json");
+    return settingsDirectory;
 }
 
 async function withPinnedSettingsFile<T>(
-    settingsDir: string,
+    settingsDirectory: string,
     callback: (settingsFile: string) => Promise<T> | T
 ): Promise<T> {
     if (process.platform !== "linux") {
-        return callback(path.join(settingsDir, "dashboard-settings.json"));
+        return callback(path.join(settingsDirectory, "dashboard-settings.json"));
     }
 
     const parentFd = fs.openSync(
-        settingsDir,
+        settingsDirectory,
         fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW
     );
     try {
-        const realSettingsDir = fs.realpathSync(settingsDir);
-        const realPinnedDir = fs.realpathSync(`/proc/self/fd/${parentFd}`);
-        if (realPinnedDir !== realSettingsDir) {
+        const realSettingsDirectory = fs.realpathSync(settingsDirectory);
+        const realPinnedDirectory = fs.realpathSync(`/proc/self/fd/${parentFd}`);
+        if (realPinnedDirectory !== realSettingsDirectory) {
             throw new Error("Invalid settings directory");
         }
 
@@ -79,11 +75,11 @@ const DEFAULT_SETTINGS: Settings = {
 
 /** Performs load settings. */
 async function loadSettings(): Promise<Settings> {
-    const settingsDir = resolveSettingsDir();
+    const settingsDirectory = resolveSettingsDirectory();
     let content: string;
 
     try {
-        content = await withPinnedSettingsFile(settingsDir, (settingsFile) =>
+        content = await withPinnedSettingsFile(settingsDirectory, (settingsFile) =>
             readTextNoFollowGuarded(guardedPath(settingsFile))
         );
     } catch (error) {
@@ -154,9 +150,9 @@ function parseSettingsPatch(input: unknown): Partial<Settings> {
 
 /** Performs save settings. */
 async function saveSettings(settings: Settings): Promise<void> {
-    const settingsDir = resolveSettingsDir();
-    mkdirGuarded(guardedPath(settingsDir), { recursive: true });
-    await withPinnedSettingsFile(settingsDir, (settingsFile) =>
+    const settingsDirectory = resolveSettingsDirectory();
+    mkdirGuarded(guardedPath(settingsDirectory), { recursive: true });
+    await withPinnedSettingsFile(settingsDirectory, (settingsFile) =>
         writeTextNoFollowGuarded(
             guardedPath(settingsFile),
             JSON.stringify(settings, null, 2)
@@ -171,47 +167,41 @@ export default function settingsRoutes(
     getGatewayStatus: () => { gateway: string; sessions: number }
 ): void {
     // Get settings
-    app.get("/api/settings", (async (_req, res) => {
+    app.get("/api/settings", (async (_request, response) => {
         try {
             const settings = await loadSettings();
             const gatewayStatus = getGatewayStatus();
-            res.json({ ...settings, gateway: gatewayStatus });
+            response.json({ ...settings, gateway: gatewayStatus });
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            response.status(500).json({ error: (error as Error).message });
         }
     }) as RequestHandler);
 
     // Update settings
-    app.put("/api/settings", express.json(), (async (req, res) => {
+    app.put("/api/settings", express.json(), (async (request, response) => {
         let current: Settings;
         let updated: Settings;
 
         try {
             current = await loadSettings();
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            response.status(500).json({ error: (error as Error).message });
             return;
         }
 
         try {
-            updated = { ...current, ...parseSettingsPatch(req.body) };
+            updated = { ...current, ...parseSettingsPatch(request.body) };
         } catch (error) {
-            res.status(400).json({ error: (error as Error).message });
+            response.status(400).json({ error: (error as Error).message });
             return;
         }
 
         try {
             await saveSettings(updated);
-            res.json(updated);
+            response.json(updated);
         } catch (error) {
             console.error("[Settings] Save error:", (error as Error).message);
-            res.status(500).json({ error: "Failed to save settings" });
+            response.status(500).json({ error: "Failed to save settings" });
         }
     }) as RequestHandler);
 }
-
-export const __testing = {
-    resolveSettingsDir,
-    resolveSettingsFile,
-    withPinnedSettingsFile,
-};

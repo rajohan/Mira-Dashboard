@@ -1,15 +1,19 @@
 // Config files to show in sidebar (matches backend whitelist)
 /** Defines config top files. */
 export const CONFIG_TOP_FILES = [
-    { path: "config:openclaw.json", label: "openclaw.json", relPath: "openclaw.json" },
+    {
+        path: "config:openclaw.json",
+        label: "openclaw.json",
+        relativePath: "openclaw.json",
+    },
 ];
 
-/** Defines hooks dir files. */
+/** Defines hooks directory files. */
 export const HOOKS_DIR_FILES = [
     {
         path: "config:hooks/transforms/agentmail.ts",
         label: "agentmail.ts",
-        relPath: "hooks/transforms/agentmail.ts",
+        relativePath: "hooks/transforms/agentmail.ts",
     },
 ];
 

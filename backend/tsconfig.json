@@ -1,11 +1,16 @@
 {
     "compilerOptions": {
-        "target": "ES2022",
-        "module": "NodeNext",
-        "moduleResolution": "NodeNext",
-        "lib": ["ES2022", "ES2025.Iterator", "ESNext.TypedArrays"],
+        "target": "ESNext",
+        "module": "Preserve",
+        "moduleResolution": "bundler",
+        "moduleDetection": "force",
+        "lib": ["ESNext"],
+        "types": ["bun", "node"],
         "outDir": "./dist",
-        "rootDir": "./src",
+        "rootDir": ".",
+        "noEmit": true,
+        "allowImportingTsExtensions": true,
+        "verbatimModuleSyntax": true,
         "strict": true,
         "esModuleInterop": true,
         "skipLibCheck": true,
@@ -15,10 +20,11 @@
         "noImplicitAny": true,
         "noImplicitReturns": true,
         "noFallthroughCasesInSwitch": true,
+        "noImplicitOverride": true,
         "declaration": true,
         "declarationMap": true,
         "sourceMap": true
     },
-    "include": ["src/**/*"],
+    "include": ["src/**/*", "scripts/**/*", "test/**/*"],
     "exclude": ["node_modules", "dist"]
 }

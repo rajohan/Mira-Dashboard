@@ -3,9 +3,9 @@ import { Description, Field, Label, Switch as HeadlessSwitch } from "@headlessui
 import { cn } from "../../utils/cn";
 
 /** Provides props for switch. */
-interface SwitchProps {
-    checked: boolean;
-    onChange: (checked: boolean) => void;
+interface SwitchProperties {
+    isChecked: boolean;
+    onChange: (isChecked: boolean) => void;
     label?: string;
     description?: string;
     disabled?: boolean;
@@ -14,13 +14,13 @@ interface SwitchProps {
 
 /** Renders the switch UI. */
 export function Switch({
-    checked,
+    isChecked,
     onChange,
     label,
     description,
     disabled,
     className,
-}: SwitchProps) {
+}: SwitchProperties) {
     return (
         <Field
             className={cn("flex items-center justify-between gap-3", className)}
@@ -41,12 +41,12 @@ export function Switch({
                 </div>
             )}
             <HeadlessSwitch
-                checked={checked}
+                checked={isChecked}
                 onChange={onChange}
                 className={cn(
                     "inline-flex h-6 w-11 shrink-0 items-center rounded-full transition focus:outline-none",
                     "data-focus:ring-accent-500 ring-offset-primary-800 ring-offset-2 data-focus:ring-2",
-                    checked ? "bg-accent-500" : "bg-primary-600",
+                    isChecked ? "bg-accent-500" : "bg-primary-600",
                     disabled ? "cursor-not-allowed opacity-50" : ""
                 )}
             >
@@ -54,7 +54,7 @@ export function Switch({
                 <span
                     className={cn(
                         "size-4 rounded-full bg-white transition",
-                        checked ? "translate-x-6" : "translate-x-1"
+                        isChecked ? "translate-x-6" : "translate-x-1"
                     )}
                 />
             </HeadlessSwitch>

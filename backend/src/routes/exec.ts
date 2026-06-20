@@ -6,7 +6,7 @@ import fs from "fs";
 import path from "path";
 import { parse as parseShellCommand } from "shell-quote";
 
-import { spawnGuarded } from "../lib/guardedOps.js";
+import { spawnGuarded } from "../lib/guardedOps.ts";
 
 /** Shell commands that first-party ops actions may execute through explicit shell mode. */
 const OPS_SHELL_COMMANDS = new Set([
@@ -89,12 +89,12 @@ function validateExecRequest(payload: unknown): ExecRequest {
     }
 
     if (args) {
-        for (const arg of args) {
-            if (typeof arg !== "string") {
+        for (const argument of args) {
+            if (typeof argument !== "string") {
                 throw new ExecValidationError("all args must be strings");
             }
 
-            if (arg.includes("\0")) {
+            if (argument.includes("\0")) {
                 throw new ExecValidationError("args cannot contain null bytes");
             }
         }
@@ -159,7 +159,10 @@ function trimOutput(text: string): string {
 }
 
 /** Parses a non-shell command string into executable and argv tokens. */
-function parseDirectCommand(command: string): { executable: string; args: string[] } {
+function parseDirectCommand(command: string): {
+    executable: string;
+    args: string[];
+} {
     let parsed: ReturnType<typeof parseShellCommand>;
     try {
         parsed = parseShellCommand(command, (key) => `$${key}`);
@@ -180,11 +183,11 @@ function parseDirectCommand(command: string): { executable: string; args: string
         parts.push(part);
     }
 
-    const [executable, ...parsedArgs] = parts;
+    const [executable, ...parsedArguments] = parts;
     if (!executable || !EXECUTABLE_RE.test(executable)) {
         throw new ExecValidationError("command must start with an executable path");
     }
-    return { executable, args: parsedArgs };
+    return { executable, args: parsedArguments };
 }
 
 /** Resolves and validates the working directory used for an exec request. */
@@ -226,10 +229,10 @@ function getApprovedShellCommand(command: string): string {
 /** Spawns a direct executable with shell expansion disabled. */
 function spawnExec(
     executable: string,
-    args: string[],
+    arguments_: string[],
     cwdOption: { cwd: string; env: NodeJS.ProcessEnv; detached: boolean }
 ): ChildProcess {
-    return spawnGuarded(executable, args, { ...cwdOption, shell: false });
+    return spawnGuarded(executable, arguments_, { ...cwdOption, shell: false });
 }
 
 /** Spawns an approved shell command via an explicit shell argv. */
@@ -432,53 +435,41 @@ function failExecJob(jobId: string, error: unknown): void {
 }
 
 /** Defines testing. */
-export const __testing = {
-    cleanupJobs,
-    completeExecJob,
-    execErrorResponse,
-    failExecJob,
-    getApprovedShellCommand,
-    jobs,
-    parseDirectCommand,
-    resolveCwd,
-    trimOutput,
-    updateExecJobOutput,
-};
 
 /** Registers exec API routes. */
 export default function execRoutes(
     app: express.Application,
     _express: typeof express
 ): void {
-    app.post("/api/exec", express.json(), (async (req, res) => {
+    app.post("/api/exec", express.json(), (async (request, response) => {
         try {
-            const payload = validateExecRequest(req.body as ExecRequest);
-            const tempId = randomUUID();
-            const result = await runExecCommand(payload, tempId);
-            res.json({
+            const payload = validateExecRequest(request.body as ExecRequest);
+            const temporaryId = randomUUID();
+            const result = await runExecCommand(payload, temporaryId);
+            response.json({
                 code: result.code,
                 stdout: result.stdout.slice(-10_000),
                 stderr: result.stderr.slice(-10_000),
             } satisfies ExecResponse);
         } catch (error) {
-            const response = execErrorResponse(error);
-            res.status(response.status).json({ error: response.error });
+            const errorResponse = execErrorResponse(error);
+            response.status(errorResponse.status).json({ error: errorResponse.error });
         }
     }) as RequestHandler);
 
-    app.post("/api/exec/start", express.json(), (async (req, res) => {
+    app.post("/api/exec/start", express.json(), (async (request, response) => {
         let payload: ExecRequest;
         try {
-            payload = validateExecRequest(req.body as ExecRequest);
+            payload = validateExecRequest(request.body as ExecRequest);
         } catch (error) {
-            const response = execErrorResponse(error);
-            res.status(response.status).json({ error: response.error });
+            const errorResponse = execErrorResponse(error);
+            response.status(errorResponse.status).json({ error: errorResponse.error });
             return;
         }
 
         cleanupJobs();
         if (jobs.size >= MAX_JOBS) {
-            res.status(429).json({ error: "Too many exec jobs" });
+            response.status(429).json({ error: "Too many exec jobs" });
             return;
         }
 
@@ -505,8 +496,8 @@ export default function execRoutes(
             );
         } catch (error) {
             jobs.delete(jobId);
-            const response = execErrorResponse(error);
-            res.status(response.status).json({ error: response.error });
+            const errorResponse = execErrorResponse(error);
+            response.status(errorResponse.status).json({ error: errorResponse.error });
             return;
         }
 
@@ -519,19 +510,19 @@ export default function execRoutes(
             }
         })();
 
-        res.json({ jobId } satisfies ExecStartResponse);
+        response.json({ jobId } satisfies ExecStartResponse);
     }) as RequestHandler);
 
-    app.post("/api/exec/:jobId/stop", ((req, res) => {
-        const jobId = String(req.params.jobId);
+    app.post("/api/exec/:jobId/stop", ((request, response) => {
+        const jobId = String(request.params.jobId);
         const job = jobs.get(jobId);
         if (!job) {
-            res.status(404).json({ error: "Exec job not found" });
+            response.status(404).json({ error: "Exec job not found" });
             return;
         }
 
         if (job.status !== "running") {
-            res.status(400).json({ error: "Job is not running" });
+            response.status(400).json({ error: "Job is not running" });
             return;
         }
 
@@ -548,7 +539,10 @@ export default function execRoutes(
                 const sent = job.process.kill("SIGTERM");
                 if (!sent) {
                     // Process already gone – close handler will transition to done
-                    res.json({ success: true, message: "Process already terminated" });
+                    response.json({
+                        isSuccess: true,
+                        message: "Process already terminated",
+                    });
                     return;
                 }
             }
@@ -584,22 +578,22 @@ export default function execRoutes(
                 }
             }, 3000);
 
-            res.json({ success: true, message: "Stop signal sent" });
+            response.json({ isSuccess: true, message: "Stop signal sent" });
         } else {
-            res.status(400).json({ error: "Process not available" });
+            response.status(400).json({ error: "Process not available" });
         }
     }) as RequestHandler);
 
-    app.get("/api/exec/:jobId", ((req, res) => {
-        const jobId = String(req.params.jobId);
+    app.get("/api/exec/:jobId", ((request, response) => {
+        const jobId = String(request.params.jobId);
         const job = jobs.get(jobId);
 
         if (!job) {
-            res.status(404).json({ error: "Exec job not found" });
+            response.status(404).json({ error: "Exec job not found" });
             return;
         }
 
-        res.json({
+        response.json({
             jobId: job.id,
             status: job.status,
             code: job.code,

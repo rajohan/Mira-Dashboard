@@ -5,30 +5,16 @@ import {
     getAllCacheEntries,
     getCacheEntry,
     parseJsonField,
-} from "../lib/cacheStore.js";
-import { errorMessage, httpStatusCode } from "../lib/errors.js";
-import { stringFallback } from "../lib/values.js";
-import { refreshCacheProducer } from "../services/cacheRefresh.js";
+} from "../lib/cacheStore.ts";
+import { errorMessage, httpStatusCode } from "../lib/errors.ts";
+import { stringFallback } from "../lib/values.ts";
+import { refreshCacheProducer } from "../services/cacheRefresh.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
 }
 
 type CacheRefreshProducer = (key: string) => Promise<void | { refreshed?: unknown }>;
-let cacheRefreshProducerForTests: CacheRefreshProducer | null = null;
-
-function setCacheRefreshProducerForTests(producer: CacheRefreshProducer | null): void {
-    cacheRefreshProducerForTests = producer;
-}
-
-function resetCacheRefreshForTests(): void {
-    cacheRefreshProducerForTests = null;
-}
-
-export const __testing = {
-    resetCacheRefreshForTests,
-    setCacheRefreshProducerForTests,
-};
 
 /** Parses JSON field or value. */
 export function parseJsonFieldOrValue(value: string) {
@@ -55,7 +41,7 @@ export function mapCacheRowForResponse(row: CacheEntryRow) {
 
 /** Performs refresh cache key. */
 export async function refreshCacheKey(key: string) {
-    const producer = cacheRefreshProducerForTests ?? refreshCacheProducer;
+    const producer: CacheRefreshProducer = refreshCacheProducer;
     const result = await producer(key);
     const refreshed = Array.isArray(result?.refreshed) ? result.refreshed : [];
     if (refreshed.length === 0) {
@@ -88,46 +74,46 @@ export async function refreshCacheKey(key: string) {
 
 /** Registers cache API routes. */
 export default function cacheRoutes(app: express.Application): void {
-    app.get("/api/cache/heartbeat", (async (_req, res) => {
+    app.get("/api/cache/heartbeat", (async (_request, response) => {
         const cacheEntries = await getAllCacheEntries();
         const mapped = cacheEntries.map(mapCacheRowForResponse);
-        res.json({
+        response.json({
             generatedAt: dateToISOString(new Date()),
             count: mapped.length,
             entries: mapped,
         });
     }) as RequestHandler);
 
-    app.post("/api/cache/:key/refresh", (async (req, res) => {
-        const key = stringFallback(req.params.key).trim();
+    app.post("/api/cache/:key/refresh", (async (request, response) => {
+        const key = stringFallback(request.params.key).trim();
         if (!key) {
-            res.status(400).json({ error: "Missing cache key" });
+            response.status(400).json({ error: "Missing cache key" });
             return;
         }
 
         try {
             const entry = await refreshCacheKey(key);
-            res.json({ ok: true, entry });
+            response.json({ isOk: true, entry });
         } catch (error) {
-            res.status(httpStatusCode(error)).json({
+            response.status(httpStatusCode(error)).json({
                 error: errorMessage(error, "Cache refresh failed"),
             });
         }
     }) as RequestHandler);
 
-    app.get("/api/cache/:key", (async (req, res) => {
-        const key = stringFallback(req.params.key).trim();
+    app.get("/api/cache/:key", (async (request, response) => {
+        const key = stringFallback(request.params.key).trim();
         if (!key) {
-            res.status(400).json({ error: "Missing cache key" });
+            response.status(400).json({ error: "Missing cache key" });
             return;
         }
 
         const row = await getCacheEntry(key);
         if (!row) {
-            res.status(404).json({ error: "Cache key not found", key });
+            response.status(404).json({ error: "Cache key not found", key });
             return;
         }
 
-        res.json(mapCacheRowForResponse(row));
+        response.json(mapCacheRowForResponse(row));
     }) as RequestHandler);
 }

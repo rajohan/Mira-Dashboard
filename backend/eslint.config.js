@@ -18,6 +18,7 @@ const eslintConfig = defineConfig(
         languageOptions: {
             globals: {
                 ...globals.node,
+                Bun: "readonly",
             },
         },
     },
@@ -26,6 +27,7 @@ const eslintConfig = defineConfig(
         languageOptions: {
             globals: {
                 ...globals.node,
+                Bun: "readonly",
             },
         },
         plugins: {

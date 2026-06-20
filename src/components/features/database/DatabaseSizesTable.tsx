@@ -35,11 +35,11 @@ function mergeWithPoolData(
     >();
     for (const stat of stats) statsMap.set(stat.database, stat);
 
-    return databases.map((db) => {
-        const pool = poolMap.get(db.datname);
-        const stat = statsMap.get(db.datname);
+    return databases.map((database) => {
+        const pool = poolMap.get(database.datname);
+        const stat = statsMap.get(database.datname);
         return {
-            ...db,
+            ...database,
             cl_active: pool?.cl_active ?? "—",
             cl_waiting: pool?.cl_waiting ?? "—",
             sv_active: pool?.sv_active ?? "—",
@@ -95,14 +95,14 @@ const columns = [
 ];
 
 /** Represents props. */
-interface Props {
+interface Properties {
     databases: DatabaseOverviewResponse["databases"];
     pools: DatabaseOverviewResponse["pgbouncerPools"];
     stats: DatabaseOverviewResponse["pgbouncerStats"];
 }
 
 /** Renders the databases table UI. */
-export function DatabasesTable({ databases, pools, stats }: Props) {
+export function DatabasesTable({ databases, pools, stats }: Properties) {
     const data = mergeWithPoolData(databases, pools, stats);
     return (
         <DatabaseTableShell

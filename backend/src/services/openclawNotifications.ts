@@ -1,12 +1,12 @@
-import { db } from "../db.js";
-import { fetchCachedSystemHost } from "../lib/systemCache.js";
-import { pruneReadNotifications } from "./notificationMaintenance.js";
+import { database } from "../database.ts";
+import { fetchCachedSystemHost } from "../lib/systemCache.ts";
+import { pruneReadNotifications } from "./notificationMaintenance.ts";
 import {
     getScheduledJob,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
     upsertScheduledJob,
-} from "./scheduledJobs.js";
+} from "./scheduledJobs.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -22,7 +22,7 @@ interface AlertState {
 
 /** Returns state. */
 function getState(): AlertState {
-    const row = db
+    const row = database
         .prepare("SELECT is_armed, last_latest FROM openclaw_alert_state WHERE id = 1")
         .get() as AlertState | undefined;
 
@@ -34,14 +34,16 @@ function getState(): AlertState {
 
 /** Performs set state. */
 function setState(state: AlertState): void {
-    db.prepare(
-        `INSERT INTO openclaw_alert_state (id, is_armed, last_latest, updated_at)
+    database
+        .prepare(
+            `INSERT INTO openclaw_alert_state (id, is_armed, last_latest, updated_at)
          VALUES (1, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             is_armed = excluded.is_armed,
             last_latest = excluded.last_latest,
             updated_at = excluded.updated_at`
-    ).run(state.is_armed, state.last_latest, dateToISOString(new Date()));
+        )
+        .run(state.is_armed, state.last_latest, dateToISOString(new Date()));
 }
 
 /** Performs insert update available notification. */
@@ -49,8 +51,9 @@ function insertUpdateAvailableNotification(current: string, latest: string): voi
     const now = dateToISOString(new Date());
     const dedupeKey = `openclaw:update:${latest}`;
 
-    db.prepare(
-        `INSERT INTO notifications (
+    database
+        .prepare(
+            `INSERT INTO notifications (
             title, description, type, source, dedupe_key, metadata_json, is_read, created_at, updated_at, occurred_at
         ) VALUES (?, ?, 'warning', 'openclaw', ?, ?, 0, ?, ?, ?)
         ON CONFLICT(dedupe_key) DO UPDATE SET
@@ -59,27 +62,28 @@ function insertUpdateAvailableNotification(current: string, latest: string): voi
             metadata_json = excluded.metadata_json,
             updated_at = excluded.updated_at,
             occurred_at = excluded.occurred_at`
-    ).run(
-        "OpenClaw update available",
-        `Current ${current} → latest ${latest}.`,
-        dedupeKey,
-        JSON.stringify({ current, latest, updateAvailable: true }),
-        now,
-        now,
-        now
-    );
+        )
+        .run(
+            "OpenClaw update available",
+            `Current ${current} → latest ${latest}.`,
+            dedupeKey,
+            JSON.stringify({ current, latest, updateAvailable: true }),
+            now,
+            now,
+            now
+        );
 
     pruneReadNotifications();
 }
 
-let running = false;
+const openClawNotificationState = { isRunning: false };
 /** Performs run OpenClaw notification check. */
 export async function runOpenClawNotificationCheck(): Promise<boolean> {
-    if (running) {
+    if (openClawNotificationState.isRunning) {
         return true;
     }
 
-    running = true;
+    openClawNotificationState.isRunning = true;
 
     try {
         const cached = await fetchCachedSystemHost();
@@ -111,20 +115,20 @@ export async function runOpenClawNotificationCheck(): Promise<boolean> {
         console.error("[OpenClawNotifications] check failed", error);
         return false;
     } finally {
-        running = false;
+        openClawNotificationState.isRunning = false;
     }
 }
 
 /** Registers OpenClaw update notification checks with the shared scheduler. */
 export function registerOpenClawNotificationScheduledJobs(): void {
     registerScheduledJobAction("notifications.openclaw", async () => {
-        const ok = await runOpenClawNotificationCheck();
-        if (!ok) {
+        const isOk = await runOpenClawNotificationCheck();
+        if (!isOk) {
             throw new Error("OpenClaw notification check failed");
         }
-        return { ok: true };
+        return { isOk: true };
     });
-    db.exec("BEGIN");
+    database.run("BEGIN");
     try {
         removeScheduledJobsNotInAction("notifications.openclaw", [
             OPENCLAW_NOTIFICATION_JOB_ID,
@@ -142,13 +146,9 @@ export function registerOpenClawNotificationScheduledJobs(): void {
             actionKey: "notifications.openclaw",
             actionPayload: {},
         });
-        db.exec("COMMIT");
+        database.run("COMMIT");
     } catch (error) {
-        db.exec("ROLLBACK");
+        database.run("ROLLBACK");
         throw error;
     }
 }
-
-export const __testing = {
-    getState,
-};

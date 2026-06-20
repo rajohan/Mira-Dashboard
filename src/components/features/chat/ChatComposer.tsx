@@ -11,7 +11,7 @@ import { formatSize } from "../../../utils/format";
 import { Button } from "../../ui/Button";
 import { Textarea } from "../../ui/Textarea";
 import type { ChatPreviewItem, ChatSendAttachment } from "./chatTypes";
-import { base64ToText } from "./chatUtils";
+import { base64ToText } from "./chatUtilities";
 import type { SlashCommandSuggestion } from "./slashCommands";
 
 const CHAT_EMOJIS = [
@@ -57,7 +57,7 @@ function shouldSendFromEnter(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
 }
 
 /** Provides props for chat composer. */
-interface ChatComposerProps {
+interface ChatComposerProperties {
     attachments: ChatSendAttachment[];
     canSend: boolean;
     draft: string;
@@ -71,7 +71,7 @@ interface ChatComposerProps {
     onApplySlashSuggestion: (value: string) => void;
     onAttachFiles: (files: FileList | null) => void;
     onChangeDraft: (value: string) => void;
-    onPreview: (preview: ChatPreviewItem) => void;
+    onPreview: (isPreview: ChatPreviewItem) => void;
     onRemoveAttachment: (attachmentId: string) => void;
     onSend: () => void;
     onToggleRecording: () => void;
@@ -96,7 +96,7 @@ export function ChatComposer({
     onRemoveAttachment,
     onSend,
     onToggleRecording,
-}: ChatComposerProps) {
+}: ChatComposerProperties) {
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const [slashSuggestionsDismissed, setSlashSuggestionsDismissed] = useState(false);
     const composerReference = useRef<HTMLDivElement | null>(null);
@@ -359,7 +359,7 @@ export function ChatComposer({
                     />
                     <button
                         type="button"
-                        onClick={() => setShowEmojiPicker((previous) => !previous)}
+                        onClick={() => setShowEmojiPicker((wasPrevious) => !wasPrevious)}
                         disabled={!isConnected || !selectedSessionKey || isSending}
                         className="text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 absolute right-2 bottom-2 rounded-full p-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
                         title="Insert emoji"

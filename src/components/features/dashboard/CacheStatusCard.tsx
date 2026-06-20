@@ -14,7 +14,7 @@ interface CacheStatusCardItem {
 }
 
 /** Provides props for cache status card. */
-interface CacheStatusCardProps {
+interface CacheStatusCardProperties {
     title: string;
     items: CacheStatusCardItem[];
 }
@@ -41,7 +41,7 @@ function formatCacheUpdateTime(value?: string | null): string {
 }
 
 /** Renders the cache status card UI. */
-export function CacheStatusCard({ title, items }: CacheStatusCardProps) {
+export function CacheStatusCard({ title, items }: CacheStatusCardProperties) {
     const { data } = useCacheHeartbeat(30_000);
     const refreshCache = useRefreshCacheEntry();
 

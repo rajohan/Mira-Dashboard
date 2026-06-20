@@ -1,3 +1,4 @@
+import { useSelector } from "@tanstack/react-store";
 import {
     createContext,
     createElement,
@@ -10,7 +11,7 @@ import {
 
 import { createSocketClient, type SocketClient } from "../lib/socket/socketClient";
 import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
-import { useIsAuthenticated } from "../stores/authStore";
+import { authStore } from "../stores/authStore";
 import { getWebSocketUrl } from "../utils/websocket";
 
 /** Represents OpenClaw socket context value. */
@@ -22,18 +23,18 @@ interface OpenClawSocketContextValue {
     disconnect: () => void;
     request: <T = unknown>(
         method: string,
-        params?: Record<string, unknown>
+        parameters?: Record<string, unknown>
     ) => Promise<T>;
     subscribe: (listener: (data: unknown) => void) => () => void;
 }
 
 const OpenClawSocketContext = createContext<OpenClawSocketContextValue | null>(null);
 
-/** Performs OpenClaw socket provIDer. */
+/** Provides OpenClaw socket state. */
 export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
-    const isAuthenticated = useIsAuthenticated();
-    const clientRef = useRef<SocketClient | null>(null);
-    const listenersRef = useRef(new Set<(data: unknown) => void>());
+    const isAuthenticated = useSelector(authStore, (state) => state.isAuthenticated);
+    const clientReference = useRef<SocketClient | null>(null);
+    const listenersReference = useRef(new Set<(data: unknown) => void>());
 
     const [isConnected, setIsConnected] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -46,16 +47,16 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
             return;
         }
 
-        if (!clientRef.current) {
-            clientRef.current = createSocketClient({
+        if (!clientReference.current) {
+            clientReference.current = createSocketClient({
                 url: getWebSocketUrl(),
                 onOpen: () => {
                     setIsConnected(true);
                     setError(null);
-                    setConnectionId((previous) => previous + 1);
+                    setConnectionId((wasPrevious) => wasPrevious + 1);
                     void (async () => {
                         try {
-                            await clientRef.current?.request("sessions.list");
+                            await clientReference.current?.request("sessions.list");
                         } catch {
                             // Best-effort socket resync.
                         }
@@ -73,7 +74,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                         if (connectionState !== null) {
                             setIsConnected(connectionState);
                         }
-                        for (const listener of listenersRef.current) {
+                        for (const listener of listenersReference.current) {
                             listener(data);
                         }
                     } catch (error_) {
@@ -83,26 +84,26 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
             });
         }
 
-        clientRef.current.connect();
+        clientReference.current.connect();
     };
 
     /** Performs disconnect. */
     const disconnect = () => {
-        clientRef.current?.disconnect();
-        clientRef.current = null;
+        clientReference.current?.disconnect();
+        clientReference.current = null;
         setIsConnected(false);
     };
 
     /** Performs request. */
     const request = <T = unknown>(
         method: string,
-        params?: Record<string, unknown>
+        parameters?: Record<string, unknown>
     ): Promise<T> => {
-        if (!clientRef.current) {
+        if (!clientReference.current) {
             return Promise.reject(new Error("WebSocket not connected"));
         }
 
-        return clientRef.current.request<T>(method, params);
+        return clientReference.current.request<T>(method, parameters);
     };
 
     useEffect(() => {
@@ -120,16 +121,16 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
         }
 
         const interval = setInterval(() => {
-            if (!clientRef.current?.isOpen()) {
+            if (!clientReference.current?.isOpen()) {
                 return;
             }
 
-            const client = clientRef.current;
+            const client = clientReference.current;
             void (async () => {
                 try {
                     await client.request("sessions.list");
                 } catch {
-                    if (clientRef.current !== client) {
+                    if (clientReference.current !== client) {
                         return;
                     }
 
@@ -154,14 +155,14 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                 return;
             }
 
-            if (!clientRef.current?.isOpen()) {
+            if (!clientReference.current?.isOpen()) {
                 connect();
                 return;
             }
 
             void (async () => {
                 try {
-                    await clientRef.current?.request("sessions.list");
+                    await clientReference.current?.request("sessions.list");
                 } catch {
                     // Best-effort socket resync.
                 }
@@ -181,16 +182,16 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         return () => {
-            clientRef.current?.disconnect();
-            clientRef.current = null;
+            clientReference.current?.disconnect();
+            clientReference.current = null;
         };
     }, []);
 
     /** Performs subscribe. */
     const subscribe = (listener: (data: unknown) => void) => {
-        listenersRef.current.add(listener);
+        listenersReference.current.add(listener);
         return () => {
-            listenersRef.current.delete(listener);
+            listenersReference.current.delete(listener);
         };
     };
 

@@ -1,11 +1,11 @@
 /** Returns an environment variable when it is set, otherwise a fallback. */
-export function envFallback(name: string, fallback: string): string {
+export function environmentFallback(name: string, fallback: string): string {
     const value = process.env[name];
     return value ?? fallback;
 }
 
 /** Returns an environment variable when it is non-empty, otherwise a fallback. */
-export function nonEmptyEnvFallback(name: string, fallback: string): string {
+export function nonEmptyEnvironmentFallback(name: string, fallback: string): string {
     const value = process.env[name]?.trim();
     return value && value.length > 0 ? value : fallback;
 }

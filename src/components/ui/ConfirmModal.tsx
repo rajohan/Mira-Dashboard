@@ -4,7 +4,7 @@ import { Button } from "./Button";
 import { Modal } from "./Modal";
 
 /** Provides props for confirm modal. */
-interface ConfirmModalProps {
+interface ConfirmModalProperties {
     isOpen: boolean;
     title: string;
     message: string;
@@ -27,7 +27,7 @@ export function ConfirmModal({
     onConfirm,
     onCancel,
     danger = false,
-}: ConfirmModalProps) {
+}: ConfirmModalProperties) {
     return (
         <Modal isOpen={isOpen} onClose={onCancel} title={title} size="md">
             <div className="space-y-4">

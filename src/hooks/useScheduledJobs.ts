@@ -85,7 +85,7 @@ export function useUpdateScheduledJob() {
 
     return useMutation({
         mutationFn: ({ id, patch }: { id: string; patch: ScheduledJobPatch }) =>
-            apiPatchRequired<{ ok: boolean; job: ScheduledJob }>(
+            apiPatchRequired<{ isOk: boolean; job: ScheduledJob }>(
                 `/jobs/${encodeURIComponent(id)}`,
                 { patch }
             ),
@@ -104,10 +104,10 @@ export function useRunScheduledJobNow() {
 
     return useMutation({
         mutationFn: async ({ id }: { id: string }) => {
-            const result = await apiPostRequired<{ ok: boolean; run: ScheduledJobRun }>(
+            const result = await apiPostRequired<{ isOk: boolean; run: ScheduledJobRun }>(
                 `/jobs/${encodeURIComponent(id)}/run`
             );
-            if (!result.ok || result.run.status === "failed") {
+            if (!result.isOk || result.run.status === "failed") {
                 throw new Error(result.run.message || "Scheduled job run failed");
             }
             return result;

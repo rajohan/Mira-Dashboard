@@ -8,7 +8,7 @@ import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
 import { Modal } from "../../ui/Modal";
 import { DatabaseTableShell } from "./DatabaseTableShell";
-import { truncateQuery } from "./databaseUtils";
+import { truncateQuery } from "./databaseUtilities";
 
 const columnHelper = createColumnHelper<DatabaseOverviewResponse["topQueries"][number]>();
 

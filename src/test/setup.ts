@@ -1,39 +1,20 @@
-import "@testing-library/jest-dom/vitest";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import * as matchers from "@testing-library/jest-dom/matchers";
+import { afterEach, expect, jest } from "bun:test";
 
-import { cleanup } from "@testing-library/react";
-import { afterEach } from "vitest";
+expect.extend(matchers);
 
-Object.defineProperties(globalThis, {
-    IS_REACT_ACT_ENVIRONMENT: {
-        configurable: true,
-        value: true,
-        writable: true,
-    },
-    __APP_COMMIT__: {
-        configurable: true,
-        value: "test-commit",
-    },
+GlobalRegistrator.register();
+
+Object.defineProperty(Element.prototype, "getAnimations", {
+    configurable: true,
+    value: () => [],
 });
+
+const { cleanup } = await import("@testing-library/react");
 
 afterEach(() => {
+    jest.restoreAllMocks();
     cleanup();
+    document.body.innerHTML = "";
 });
-
-/** Implements resize observer mock. */
-class ResizeObserverMock implements ResizeObserver {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-}
-
-Object.defineProperty(globalThis, "ResizeObserver", {
-    configurable: true,
-    value: ResizeObserverMock,
-});
-
-if (!Element.prototype.getAnimations) {
-    Object.defineProperty(Element.prototype, "getAnimations", {
-        configurable: true,
-        value: () => [],
-    });
-}

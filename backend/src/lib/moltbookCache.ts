@@ -1,4 +1,4 @@
-import { getCacheEntry, parseJsonField } from "./cacheStore.js";
+import { getCacheEntry, parseJsonField } from "./cacheStore.ts";
 
 /** Represents moltbook announcement. */
 export interface MoltbookAnnouncement {
@@ -6,7 +6,7 @@ export interface MoltbookAnnouncement {
     title: string | null;
     authorName: string | null;
     createdAt: string | null;
-    preview: string | null;
+    previewText: string | null;
 }
 
 /** Represents moltbook home cache. */

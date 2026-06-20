@@ -33,15 +33,15 @@ import { currentIsoString } from "../utils/date";
 export function patchSuccess(
     setSuccess: (value: string | null) => void,
     message: string,
-    timerRef?: { current: ReturnType<typeof setTimeout> | null }
+    timerReference?: { current: ReturnType<typeof setTimeout> | null }
 ) {
-    if (timerRef?.current) clearTimeout(timerRef.current);
+    if (timerReference?.current) clearTimeout(timerReference.current);
     setSuccess(message);
     const timeoutId = setTimeout(() => {
         setSuccess(null);
-        if (timerRef) timerRef.current = null;
+        if (timerReference) timerReference.current = null;
     }, 3000);
-    if (timerRef) timerRef.current = timeoutId;
+    if (timerReference) timerReference.current = timeoutId;
 }
 
 /** Performs configured channels. */
@@ -114,8 +114,10 @@ export function Settings() {
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
     const [showRestartModal, setShowRestartModal] = useState(false);
-    const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const restartReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const successTimerReference = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const restartReloadTimerReference = useRef<ReturnType<typeof setTimeout> | null>(
+        null
+    );
 
     // Queries
     const { data: config, isLoading: configLoading } = useConfig();
@@ -132,9 +134,10 @@ export function Settings() {
 
     useEffect(() => {
         return () => {
-            if (successTimerRef.current) clearTimeout(successTimerRef.current);
-            if (restartReloadTimerRef.current) {
-                clearTimeout(restartReloadTimerRef.current);
+            if (successTimerReference.current)
+                clearTimeout(successTimerReference.current);
+            if (restartReloadTimerReference.current) {
+                clearTimeout(restartReloadTimerReference.current);
             }
         };
     }, []);
@@ -144,7 +147,7 @@ export function Settings() {
         try {
             await restartGateway.mutateAsync();
             setShowRestartModal(false);
-            restartReloadTimerRef.current = setTimeout(
+            restartReloadTimerReference.current = setTimeout(
                 () => window.location.reload(),
                 2000
             );
@@ -172,9 +175,9 @@ export function Settings() {
     }
 
     /** Responds to skill toggle events. */
-    async function handleSkillToggle(skillName: string, enabled: boolean) {
+    async function handleSkillToggle(skillName: string, isEnabled: boolean) {
         try {
-            await toggleSkill.mutateAsync({ name: skillName, enabled });
+            await toggleSkill.mutateAsync({ name: skillName, enabled: isEnabled });
         } catch (error_) {
             setError(errorMessage(error_, "Failed to update skill"));
         }
@@ -187,7 +190,7 @@ export function Settings() {
             await updateConfig.mutateAsync({
                 session: { reset: { idleMinutes } },
             } as OpenClawConfig);
-            patchSuccess(setSuccess, "Session settings saved", successTimerRef);
+            patchSuccess(setSuccess, "Session settings saved", successTimerReference);
         } catch (error_) {
             setError(errorMessage(error_, "Failed to save"));
         }
@@ -223,7 +226,7 @@ export function Settings() {
                 : { heartbeat: { every: nextEvery, target: optionalFormValue(target) } };
 
             await updateConfig.mutateAsync(patch as OpenClawConfig);
-            patchSuccess(setSuccess, "Heartbeat settings saved", successTimerRef);
+            patchSuccess(setSuccess, "Heartbeat settings saved", successTimerReference);
         } catch (error_) {
             setError(errorMessage(error_, "Failed to save"));
         }
@@ -238,7 +241,11 @@ export function Settings() {
                     list: agents,
                 },
             } as OpenClawConfig);
-            patchSuccess(setSuccess, "Agent access settings saved", successTimerRef);
+            patchSuccess(
+                setSuccess,
+                "Agent access settings saved",
+                successTimerReference
+            );
         } catch (error_) {
             setError(errorMessage(error_, "Failed to save"));
         }
@@ -251,7 +258,7 @@ export function Settings() {
             await updateConfig.mutateAsync({
                 agents: { defaults: { model: values } },
             } as OpenClawConfig);
-            patchSuccess(setSuccess, "Model settings saved", successTimerRef);
+            patchSuccess(setSuccess, "Model settings saved", successTimerReference);
         } catch (error_) {
             setError(errorMessage(error_, "Failed to save"));
         }
@@ -282,7 +289,7 @@ export function Settings() {
                     },
                 },
             } as OpenClawConfig);
-            patchSuccess(setSuccess, "Tool settings saved", successTimerRef);
+            patchSuccess(setSuccess, "Tool settings saved", successTimerReference);
         } catch (error_) {
             setError(errorMessage(error_, "Failed to save"));
         }
@@ -297,7 +304,7 @@ export function Settings() {
                     channels.map((channel) => [channel.id, { enabled: channel.enabled }])
                 ),
             } as OpenClawConfig);
-            patchSuccess(setSuccess, "Channel settings saved", successTimerRef);
+            patchSuccess(setSuccess, "Channel settings saved", successTimerReference);
         } catch (error_) {
             setError(errorMessage(error_, "Failed to save"));
         }

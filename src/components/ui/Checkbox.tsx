@@ -9,9 +9,9 @@ import { Check } from "lucide-react";
 import { cn } from "../../utils/cn";
 
 /** Provides props for checkbox. */
-interface CheckboxProps {
-    checked: boolean;
-    onChange: (checked: boolean) => void;
+interface CheckboxProperties {
+    isChecked: boolean;
+    onChange: (isChecked: boolean) => void;
     label?: string;
     description?: string;
     disabled?: boolean;
@@ -20,17 +20,17 @@ interface CheckboxProps {
 
 /** Renders the checkbox UI. */
 export function Checkbox({
-    checked,
+    isChecked,
     onChange,
     label,
     description,
     disabled,
     className,
-}: CheckboxProps) {
+}: CheckboxProperties) {
     return (
         <Field className={cn("flex items-center gap-2", className)} disabled={disabled}>
             <HeadlessCheckbox
-                checked={checked}
+                checked={isChecked}
                 onChange={onChange}
                 className={cn(
                     "flex h-5 w-5 items-center justify-center rounded border",
@@ -41,7 +41,7 @@ export function Checkbox({
                     "data-disabled:cursor-not-allowed data-disabled:opacity-50"
                 )}
             >
-                {checked && <Check className="h-4 w-4 text-white" strokeWidth={3} />}
+                {isChecked && <Check className="h-4 w-4 text-white" strokeWidth={3} />}
             </HeadlessCheckbox>
             {(label || description) && (
                 <div className="flex flex-col">

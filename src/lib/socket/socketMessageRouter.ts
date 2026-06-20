@@ -75,7 +75,7 @@ export function handleSocketMessage(raw: unknown): boolean | null {
         writeLogFromWebSocket(data.line);
     }
 
-    if (data.type === "res") {
+    if (data.type === "response") {
         const sessions = extractSessionsFromPayload(data.payload);
         if (sessions.length > 0) {
             replaceSessionsFromWebSocket(sessions);

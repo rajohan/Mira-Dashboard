@@ -12,7 +12,7 @@ import { useState } from "react";
 
 import type { Session } from "../../../types/session";
 import { formatDuration, formatTokens, getTokenPercent } from "../../../utils/format";
-import { formatSessionType, getTypeSortOrder } from "../../../utils/sessionUtils";
+import { formatSessionType, getTypeSortOrder } from "../../../utils/sessionUtilities";
 import { Badge, getSessionTypeVariant } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 import { ProgressBar } from "../../ui/ProgressBar";
@@ -21,7 +21,7 @@ import { SessionActionsDropdown } from "./SessionActionsDropdown";
 const columnHelper = createColumnHelper<Session>();
 
 /** Provides props for sessions table. */
-interface SessionsTableProps {
+interface SessionsTableProperties {
     sessions: Session[];
     onCompact: (key: string) => void;
     onReset: (key: string) => void;
@@ -34,7 +34,7 @@ export function SessionsTable({
     onCompact,
     onReset,
     onDelete,
-}: SessionsTableProps) {
+}: SessionsTableProperties) {
     const [sorting, setSorting] = useState<SortingState>([]);
     const tableSessions = Array.isArray(sessions) ? sessions : [];
     const getSessionName = (session: Session, fallback = "unknown") =>
@@ -113,7 +113,10 @@ export function SessionsTable({
             header: "",
             /** Renders the row action menu without selecting the row. */
             cell: ({ row }) => (
-                <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+                <div
+                    className="flex justify-end"
+                    onClick={(event_) => event_.stopPropagation()}
+                >
                     <SessionActionsDropdown
                         ariaLabel={`Actions for ${getSessionName(row.original, "unknown")}`}
                         onCompact={() => onCompact(row.original.key)}

@@ -61,10 +61,10 @@ export function ChatMessageDetails({
     visibility: ChatVisibilitySettings;
 }) {
     const shouldShowThinking =
-        visibility.showThinking && (message.thinking?.length || 0) > 0;
+        visibility.shouldShowThinking && (message.thinking?.length || 0) > 0;
     const shouldShowToolCalls =
-        visibility.showTools && (message.toolCalls?.length || 0) > 0;
-    const shouldShowToolResult = visibility.showTools && message.toolResult;
+        visibility.shouldShowTools && (message.toolCalls?.length || 0) > 0;
+    const shouldShowToolResult = visibility.shouldShowTools && message.toolResult;
 
     if (!shouldShowThinking && !shouldShowToolCalls && !shouldShowToolResult) {
         return null;

@@ -68,8 +68,8 @@ export function Terminal() {
     const [currentJobId, setCurrentJobId] = useState<string | null>(null);
     const [cwd, setCwd] = useState(HOME_DIR);
     const [isAtBottom, setIsAtBottom] = useState(true);
-    const outputRef = useRef<HTMLDivElement>(null);
-    const inputRef = useRef<HTMLInputElement>(null);
+    const outputReference = useRef<HTMLDivElement>(null);
+    const inputReference = useRef<HTMLInputElement>(null);
 
     const startCommand = useStartTerminalCommand();
     const { data: jobData } = useTerminalJob(currentJobId);
@@ -85,13 +85,13 @@ export function Terminal() {
     // Check if user is near bottom (within 30px)
     /** Performs check is at bottom. */
     const checkIsAtBottom = () => {
-        return isTerminalOutputAtBottom(outputRef.current);
+        return isTerminalOutputAtBottom(outputReference.current);
     };
 
     // Auto-scroll only when user is at bottom
     useEffect(() => {
-        if (outputRef.current && isAtBottom) {
-            outputRef.current.scrollTop = outputRef.current.scrollHeight;
+        if (outputReference.current && isAtBottom) {
+            outputReference.current.scrollTop = outputReference.current.scrollHeight;
         }
     }, [history, jobData?.stdout, jobData?.stderr, isAtBottom]);
 
@@ -99,13 +99,15 @@ export function Terminal() {
     /** Responds to scroll events. */
     const handleScroll = () => {
         const atBottom = checkIsAtBottom();
-        setIsAtBottom((prev) => (prev === atBottom ? prev : atBottom));
+        setIsAtBottom((wasPrevious) =>
+            wasPrevious === atBottom ? wasPrevious : atBottom
+        );
     };
 
     // Scroll to bottom manually
     /** Performs scroll to bottom. */
     const scrollToBottom = () => {
-        scrollTerminalOutputToBottomAndReport(outputRef.current, () =>
+        scrollTerminalOutputToBottomAndReport(outputReference.current, () =>
             setIsAtBottom(true)
         );
     };
@@ -140,7 +142,7 @@ export function Terminal() {
 
         // Refocus input when job completes
         if (jobData.status === "done") {
-            setTimeout(() => inputRef.current?.focus(), 0);
+            setTimeout(() => inputReference.current?.focus(), 0);
         }
     }, [jobData, currentJobId, history, updateCommand]);
 
@@ -179,7 +181,7 @@ export function Terminal() {
             try {
                 const result = await changeDirectory(targetPath, cwd);
 
-                if (result.success) {
+                if (result.isSuccess) {
                     addCommand({
                         command: trimmedCommand,
                         cwd: shortenPath(cwd),
@@ -221,7 +223,7 @@ export function Terminal() {
 
             setCommand("");
             setHistoryIndex(-1);
-            setTimeout(() => inputRef.current?.focus(), 0);
+            setTimeout(() => inputReference.current?.focus(), 0);
             return;
         }
 
@@ -241,7 +243,7 @@ export function Terminal() {
             setCommand("");
             setHistoryIndex(-1);
             // Refocus input after pwd
-            setTimeout(() => inputRef.current?.focus(), 0);
+            setTimeout(() => inputReference.current?.focus(), 0);
             return;
         }
 
@@ -272,7 +274,7 @@ export function Terminal() {
                 status: "running",
             });
             // Refocus input after command starts
-            setTimeout(() => inputRef.current?.focus(), 0);
+            setTimeout(() => inputReference.current?.focus(), 0);
         } catch {
             const entryId = addCommand({
                 command: trimmedCommand,
@@ -287,7 +289,7 @@ export function Terminal() {
             });
             updateCommand(entryId, { status: "error" });
             // Refocus input after error
-            setTimeout(() => inputRef.current?.focus(), 0);
+            setTimeout(() => inputReference.current?.focus(), 0);
         }
     };
 
@@ -326,7 +328,7 @@ export function Terminal() {
             <Card className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
                 {/* Terminal Output */}
                 <div
-                    ref={outputRef}
+                    ref={outputReference}
                     role="log"
                     aria-label="Terminal output"
                     onScroll={handleScroll}
@@ -405,10 +407,10 @@ export function Terminal() {
                     >
                         <div className="min-w-0 flex-1">
                             <Input
-                                ref={inputRef}
+                                ref={inputReference}
                                 type="text"
                                 value={command}
-                                onChange={(e) => setCommand(e.target.value)}
+                                onChange={(event_) => setCommand(event_.target.value)}
                                 onKeyDown={handleKeyDown}
                                 aria-label="Terminal command"
                                 placeholder="Enter command..."

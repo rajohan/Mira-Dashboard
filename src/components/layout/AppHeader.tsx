@@ -8,7 +8,7 @@ import { Button } from "../ui/Button";
 import { NotificationBell } from "./NotificationBell";
 
 /** Provides props for app header. */
-interface AppHeaderProps {
+interface AppHeaderProperties {
     title: string;
     isSidebarOpen: boolean;
     sidebarId: string;
@@ -21,14 +21,14 @@ export function AppHeader({
     isSidebarOpen,
     sidebarId,
     onToggleSidebar,
-}: AppHeaderProps) {
+}: AppHeaderProperties) {
     const navigate = useNavigate();
     const { isConnected } = useOpenClawSocket();
     const { data: health, isError: isBackendError } = useHealth();
 
-    const isBackendConnected = !isBackendError && health?.status === "ok";
+    const isBackendConnected = !isBackendError && health?.status === "isOk";
     const backendCommit = health?.backendCommit || "unknown";
-    const frontendCommit = __APP_COMMIT__;
+    const frontendCommit = typeof __APP_COMMIT__ === "string" ? __APP_COMMIT__ : "dev";
     const hasVersionMismatch =
         backendCommit !== "unknown" &&
         frontendCommit !== "unknown" &&

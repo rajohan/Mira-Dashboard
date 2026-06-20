@@ -37,7 +37,11 @@ import {
     useUpdateTaskUpdate,
 } from "../hooks";
 import type { ColumnId, Task, TaskAutomation } from "../types/task";
-import { getPriority, getTaskUpdatedAtMs, taskMatchesSearch } from "../utils/taskUtils";
+import {
+    getPriority,
+    getTaskUpdatedAtMs,
+    isTaskMatchSearch,
+} from "../utils/taskUtilities";
 
 const ASSIGNMENT_FILTERS = [
     { value: "all", label: "All" },
@@ -75,7 +79,7 @@ export function Tasks() {
         const matchesFilter =
             filter === "all" ||
             task.assignees.some((a) => (a.login || a.name) === filter);
-        const matchesSearch = taskMatchesSearch(task, search);
+        const matchesSearch = isTaskMatchSearch(task, search);
         return matchesFilter && matchesSearch;
     });
     const hasActiveFilters = search.trim().length > 0 || filter !== "all";

@@ -1,10 +1,10 @@
 import { ChevronDown, ChevronRight, File, Folder, RefreshCw } from "lucide-react";
 
 import type { FileNode } from "../../../types/file";
-import { getFileExtension } from "../../../utils/fileUtils";
+import { getFileExtension } from "../../../utils/fileUtilities";
 
 /** Provides props for file tree item. */
-interface FileTreeItemProps {
+interface FileTreeItemProperties {
     node: FileNode;
     selectedPath: string | null;
     expandedPaths: Set<string>;
@@ -18,7 +18,7 @@ function getFileIcon(filename: string, type: "file" | "directory") {
     if (type === "directory")
         return <Folder size={16} className="flex-shrink-0 text-yellow-400" />;
 
-    const ext = getFileExtension(filename);
+    const extension = getFileExtension(filename);
     const iconMap: Record<string, { icon: string; color: string }> = {
         ts: { icon: "TS", color: "text-blue-400" },
         tsx: { icon: "TSX", color: "text-blue-400" },
@@ -47,7 +47,7 @@ function getFileIcon(filename: string, type: "file" | "directory") {
         webp: { icon: "IMG", color: "text-purple-400" },
     };
 
-    const iconInfo = iconMap[ext];
+    const iconInfo = iconMap[extension];
     if (iconInfo) {
         return (
             <span
@@ -72,7 +72,7 @@ export function FileTreeItem({
     onSelect,
     onToggle,
     depth = 0,
-}: FileTreeItemProps) {
+}: FileTreeItemProperties) {
     const isSelected = selectedPath === node.path;
     const isExpanded = expandedPaths.has(node.path);
     const hasChildren =

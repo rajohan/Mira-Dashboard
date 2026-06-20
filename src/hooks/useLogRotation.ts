@@ -5,8 +5,8 @@ import { cacheKeys } from "./useCache";
 
 /** Represents log rotation summary. */
 export interface LogRotationSummary {
-    ok: boolean;
-    dryRun: boolean;
+    isOk: boolean;
+    isDryRun: boolean;
     startedAt: string;
     finishedAt: string | null;
     checkedGroups: number;
@@ -29,14 +29,14 @@ export interface LogRotationSummary {
 
 /** Represents log rotation run result. */
 export interface LogRotationRunResult {
-    success: boolean;
+    isSuccess: boolean;
     result: LogRotationSummary;
     stderr: string;
 }
 
 /** Represents log rotation status. */
 export interface LogRotationStatus {
-    success: boolean;
+    isSuccess: boolean;
     lastRun: LogRotationSummary | null;
 }
 

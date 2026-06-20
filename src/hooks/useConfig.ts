@@ -148,8 +148,8 @@ async function updateConfig(config: OpenClawConfig): Promise<void> {
 }
 
 /** Performs toggle skill. */
-async function toggleSkill(name: string, enabled: boolean): Promise<void> {
-    await apiPost(`/skills/${name}`, { enabled });
+async function toggleSkill(name: string, isEnabled: boolean): Promise<void> {
+    await apiPost(`/skills/${name}`, { enabled: isEnabled });
 }
 
 /** Performs restart gateway. */

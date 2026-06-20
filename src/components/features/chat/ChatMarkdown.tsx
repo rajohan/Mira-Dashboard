@@ -63,7 +63,7 @@ function normalizeSyntaxLanguage(language: string): string {
 }
 
 /** Performs looks like JSON. */
-function looksLikeJson(code: string): boolean {
+function isJsonLike(code: string): boolean {
     const trimmed = code.trim();
     return (
         (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
@@ -97,7 +97,7 @@ export function getPreCodeBlock(
 
 /** Renders the chat code block UI. */
 function ChatCodeBlock({ code, language }: { code: string; language: string }) {
-    const shouldTryJson = JSON_LANGUAGES.has(language) || looksLikeJson(code);
+    const shouldTryJson = JSON_LANGUAGES.has(language) || isJsonLike(code);
     const parsedJson = shouldTryJson ? parseJsonBlock(code) : null;
 
     if (parsedJson) {
@@ -154,13 +154,13 @@ function ChatCodeBlock({ code, language }: { code: string; language: string }) {
 }
 
 export const markdownComponents: Components = {
-    a(props) {
-        const { node, className, ...anchorProps } = props;
+    a(properties) {
+        const { node, className, ...anchorProperties } = properties;
         void node;
 
         return (
             <a
-                {...anchorProps}
+                {...anchorProperties}
                 target="_blank"
                 rel="noreferrer"
                 className={cn(
@@ -170,13 +170,13 @@ export const markdownComponents: Components = {
             />
         );
     },
-    blockquote(props) {
-        const { node, className, ...blockquoteProps } = props;
+    blockquote(properties) {
+        const { node, className, ...blockquoteProperties } = properties;
         void node;
 
         return (
             <blockquote
-                {...blockquoteProps}
+                {...blockquoteProperties}
                 className={cn(
                     "my-1 border-l-2 border-current/30 pl-2 italic opacity-90",
                     className
@@ -184,13 +184,13 @@ export const markdownComponents: Components = {
             />
         );
     },
-    code(props) {
-        const { node, className, ...codeProps } = props;
+    code(properties) {
+        const { node, className, ...codeProperties } = properties;
         void node;
 
         return (
             <code
-                {...codeProps}
+                {...codeProperties}
                 className={cn(
                     "rounded bg-black/25 px-1 py-0.5 font-mono text-[0.92em]",
                     className
@@ -198,8 +198,8 @@ export const markdownComponents: Components = {
             />
         );
     },
-    img(props) {
-        const { node, src, alt } = props;
+    img(properties) {
+        const { node, src, alt } = properties;
         void node;
 
         if (!src) {
@@ -217,8 +217,8 @@ export const markdownComponents: Components = {
             </a>
         );
     },
-    pre(props) {
-        const { node, className, children, ...preProps } = props;
+    pre(properties) {
+        const { node, className, children, ...preProperties } = properties;
         void node;
 
         const codeBlock = getPreCodeBlock(children);
@@ -227,7 +227,7 @@ export const markdownComponents: Components = {
         }
         return (
             <pre
-                {...preProps}
+                {...preProperties}
                 className={cn(
                     "my-1.5 max-w-full overflow-x-auto rounded-lg border border-white/10 bg-black/25 p-2 font-mono text-[12px] leading-normal",
                     className
@@ -237,14 +237,14 @@ export const markdownComponents: Components = {
             </pre>
         );
     },
-    table(props) {
-        const { node, className, ...tableProps } = props;
+    table(properties) {
+        const { node, className, ...tableProperties } = properties;
         void node;
 
         return (
             <div className="my-1.5 max-w-full overflow-x-auto">
                 <table
-                    {...tableProps}
+                    {...tableProperties}
                     className={cn(
                         "min-w-full border-collapse text-left text-xs",
                         className
@@ -253,24 +253,24 @@ export const markdownComponents: Components = {
             </div>
         );
     },
-    td(props) {
-        const { node, className, ...tdProps } = props;
+    td(properties) {
+        const { node, className, ...tdProperties } = properties;
         void node;
 
         return (
             <td
-                {...tdProps}
+                {...tdProperties}
                 className={cn("border border-current/20 px-1.5 py-0.5", className)}
             />
         );
     },
-    th(props) {
-        const { node, className, ...thProps } = props;
+    th(properties) {
+        const { node, className, ...thProperties } = properties;
         void node;
 
         return (
             <th
-                {...thProps}
+                {...thProperties}
                 className={cn(
                     "border border-current/20 bg-white/5 px-1.5 py-0.5 font-semibold",
                     className

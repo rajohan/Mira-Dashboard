@@ -59,7 +59,7 @@ export function useRunKopiaBackup() {
 
     return useMutation({
         mutationFn: () =>
-            apiPostRequired<{ ok: boolean; job: BackupJob }>("/backups/kopia/run"),
+            apiPostRequired<{ isOk: boolean; job: BackupJob }>("/backups/kopia/run"),
         onSuccess: async () => {
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: backupKeys.kopia() }),
@@ -78,7 +78,7 @@ export function useClearKopiaBackupAttention() {
 
     return useMutation({
         mutationFn: () =>
-            apiPostRequired<{ ok: boolean; cleared: BackupJob }>(
+            apiPostRequired<{ isOk: boolean; cleared: BackupJob }>(
                 "/backups/kopia/clear-needs-attention"
             ),
         onSuccess: async () => {
@@ -98,7 +98,7 @@ export function useRunWalgBackup() {
 
     return useMutation({
         mutationFn: () =>
-            apiPostRequired<{ ok: boolean; job: BackupJob }>("/backups/walg/run"),
+            apiPostRequired<{ isOk: boolean; job: BackupJob }>("/backups/walg/run"),
         onSuccess: async () => {
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: backupKeys.walg() }),
@@ -117,7 +117,7 @@ export function useClearWalgBackupAttention() {
 
     return useMutation({
         mutationFn: () =>
-            apiPostRequired<{ ok: boolean; cleared: BackupJob }>(
+            apiPostRequired<{ isOk: boolean; cleared: BackupJob }>(
                 "/backups/walg/clear-needs-attention"
             ),
         onSuccess: async () => {

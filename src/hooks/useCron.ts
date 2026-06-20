@@ -41,7 +41,7 @@ export function useToggleCronJob() {
 
     return useMutation({
         mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
-            apiPostRequired<{ ok: boolean }>(`/cron/jobs/${id}/toggle`, { enabled }),
+            apiPostRequired<{ isOk: boolean }>(`/cron/jobs/${id}/toggle`, { enabled }),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: cronKeys.jobs() });
         },
@@ -54,7 +54,7 @@ export function useUpdateCronJob() {
 
     return useMutation({
         mutationFn: ({ id, patch }: { id: string; patch: Record<string, unknown> }) =>
-            apiPostRequired<{ ok: boolean }>(`/cron/jobs/${id}/update`, { patch }),
+            apiPostRequired<{ isOk: boolean }>(`/cron/jobs/${id}/update`, { patch }),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: cronKeys.jobs() });
         },
@@ -67,7 +67,7 @@ export function useDeleteCronJob() {
 
     return useMutation({
         mutationFn: ({ id }: { id: string }) =>
-            apiPostRequired<{ ok: boolean }>(`/cron/jobs/${id}/delete`),
+            apiPostRequired<{ isOk: boolean }>(`/cron/jobs/${id}/delete`),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: cronKeys.jobs() });
         },
@@ -80,7 +80,7 @@ export function useRunCronJobNow() {
 
     return useMutation({
         mutationFn: ({ id }: { id: string }) =>
-            apiPostRequired<{ ok: boolean }>(`/cron/jobs/${id}/run`),
+            apiPostRequired<{ isOk: boolean }>(`/cron/jobs/${id}/run`),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: cronKeys.jobs() });
         },

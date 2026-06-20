@@ -17,7 +17,11 @@ import { useMoltbookData } from "../hooks";
 const TAB_OPTIONS = [
     { value: "feed", label: "Feed", icon: <Newspaper className="h-4 w-4" /> },
     { value: "posts", label: "Posts", icon: <MessageSquare className="h-4 w-4" /> },
-    { value: "comments", label: "Comments", icon: <MessageCircle className="h-4 w-4" /> },
+    {
+        value: "comments",
+        label: "Comments",
+        icon: <MessageCircle className="h-4 w-4" />,
+    },
 ] as const;
 
 const SORT_OPTIONS = [

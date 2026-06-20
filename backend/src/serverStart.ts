@@ -1,62 +1,51 @@
 import { pathToFileURL } from "node:url";
 
-import { getPersistedGatewayToken } from "./auth.js";
-import gateway from "./gateway.js";
-import { registerBackupScheduledJobs } from "./routes/backups.js";
-import { resolveListenPort, server } from "./server.js";
+import { getPersistedGatewayToken } from "./auth.ts";
+import gateway from "./gateway.ts";
+import { registerBackupScheduledJobs } from "./routes/backups.ts";
+import { resolveListenPort, server } from "./server.ts";
+import { shouldStartScheduledJobs } from "./serverStartPolicy.ts";
 import {
     registerCacheRefreshScheduledJobs,
     waitForLocalCacheSeed,
-} from "./services/cacheRefresh.js";
-import { registerDockerUpdaterScheduledJobs } from "./services/dockerUpdater.js";
-import { registerLogRotationScheduledJobs } from "./services/logRotation.js";
-import { registerOpenClawNotificationScheduledJobs } from "./services/openclawNotifications.js";
+} from "./services/cacheRefresh.ts";
+import { registerDockerUpdaterScheduledJobs } from "./services/dockerUpdater.ts";
+import { registerLogRotationScheduledJobs } from "./services/logRotation.ts";
+import { registerOpenClawNotificationScheduledJobs } from "./services/openclawNotifications.ts";
 import {
-    registerQuotaNotificationScheduledJobs,
     runQuotaNotificationCheck,
-} from "./services/quotaNotifications.js";
+    shouldRegisterQuotaNotificationScheduledJobs,
+} from "./services/quotaNotifications.ts";
 import {
     startScheduledJobScheduler,
     stopScheduledJobScheduler,
-} from "./services/scheduledJobs.js";
+} from "./services/scheduledJobs.ts";
 
-let isStarting = false;
-let afterBackgroundServicesStartedForTest: (() => void) | undefined;
-let stopSchedulerOnServerClose: (() => void) | undefined;
+const serverStartState: { stopSchedulerOnServerClose?: () => void; isStarting: boolean } =
+    {
+        isStarting: false,
+    };
 
-function isPackagedServerEntrypoint(argvPath = process.argv[1]): boolean {
-    return Boolean(argvPath?.replaceAll("\\", "/").endsWith("/dist/serverStart.js"));
-}
-
-function shouldStartScheduledJobs(
-    nodeEnv = process.env.NODE_ENV,
-    disableScheduler = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER,
-    argvPath = process.argv[1]
-): boolean {
-    if (disableScheduler === "1" || nodeEnv === "development" || nodeEnv === "test") {
-        return false;
-    }
-    return nodeEnv === "production" || isPackagedServerEntrypoint(argvPath);
-}
+export { runLogRotationCli } from "./services/logRotation.ts";
 
 function installSchedulerCloseCleanup(): void {
-    if (stopSchedulerOnServerClose) {
+    if (serverStartState.stopSchedulerOnServerClose) {
         return;
     }
-    stopSchedulerOnServerClose = () => {
+    serverStartState.stopSchedulerOnServerClose = () => {
         stopScheduledJobScheduler();
-        stopSchedulerOnServerClose = undefined;
+        serverStartState.stopSchedulerOnServerClose = undefined;
     };
-    server.once("close", stopSchedulerOnServerClose);
+    server.once("close", serverStartState.stopSchedulerOnServerClose);
 }
 
 function removeSchedulerCloseCleanup(): void {
-    if (!stopSchedulerOnServerClose) {
+    if (!serverStartState.stopSchedulerOnServerClose) {
         return;
     }
 
-    server.removeListener("close", stopSchedulerOnServerClose);
-    stopSchedulerOnServerClose = undefined;
+    server.removeListener("close", serverStartState.stopSchedulerOnServerClose);
+    serverStartState.stopSchedulerOnServerClose = undefined;
 }
 
 function queueQuotaNotificationCheckAfterSeed(
@@ -81,12 +70,12 @@ function queueQuotaNotificationCheckAfterSeed(
 }
 
 export function resolveGatewayToken(
-    env = process.env,
+    environment = process.env,
     persistedToken = getPersistedGatewayToken
 ): string | undefined {
     return (
-        env.OPENCLAW_GATEWAY_TOKEN?.trim() ||
-        env.OPENCLAW_TOKEN?.trim() ||
+        environment.OPENCLAW_GATEWAY_TOKEN?.trim() ||
+        environment.OPENCLAW_TOKEN?.trim() ||
         persistedToken()?.trim() ||
         undefined
     );
@@ -94,14 +83,14 @@ export function resolveGatewayToken(
 
 /** Starts Gateway and notification monitors after the HTTP server is listening. */
 export function handleServerListening(): void {
-    let gatewayStarted = false;
-    let scheduledJobSchedulerStarted = false;
+    let isGatewayStarted = false;
+    let isScheduledJobSchedulerStarted = false;
     let shouldQueueStartupQuotaCheck = true;
     try {
         const token = resolveGatewayToken();
         if (token) {
             gateway.init(token);
-            gatewayStarted = true;
+            isGatewayStarted = true;
         } else {
             console.warn(
                 "[Backend] No gateway token configured yet; waiting for bootstrap registration"
@@ -113,33 +102,32 @@ export function handleServerListening(): void {
             registerCacheRefreshScheduledJobs();
             registerDockerUpdaterScheduledJobs();
             registerLogRotationScheduledJobs();
-            shouldQueueStartupQuotaCheck = registerQuotaNotificationScheduledJobs();
+            shouldQueueStartupQuotaCheck = shouldRegisterQuotaNotificationScheduledJobs();
             registerOpenClawNotificationScheduledJobs();
             startScheduledJobScheduler();
-            scheduledJobSchedulerStarted = true;
+            isScheduledJobSchedulerStarted = true;
             installSchedulerCloseCleanup();
         }
         if (shouldQueueStartupQuotaCheck) {
             queueQuotaNotificationCheckAfterSeed();
         }
-        afterBackgroundServicesStartedForTest?.();
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
-        const rollback = (fn: () => void, label: string): void => {
+        const rollback = (function_: () => void, label: string): void => {
             try {
-                fn();
+                function_();
             } catch (cleanupError) {
                 console.error(label, cleanupError);
             }
         };
-        if (scheduledJobSchedulerStarted) {
+        if (isScheduledJobSchedulerStarted) {
             removeSchedulerCloseCleanup();
             rollback(
                 stopScheduledJobScheduler,
                 "[Backend] Failed to stop scheduled job scheduler:"
             );
         }
-        if (gatewayStarted) {
+        if (isGatewayStarted) {
             rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
         }
         rollback(() => server.close(), "[Backend] Failed to close server:");
@@ -149,18 +137,18 @@ export function handleServerListening(): void {
 
 /** Binds the HTTP server and starts runtime-only background services. */
 export function startBackendServer(port = resolveListenPort()): void {
-    if (server.listening || server.address() !== null || isStarting) {
+    if (server.listening || server.address() !== null || serverStartState.isStarting) {
         return;
     }
-    isStarting = true;
+    serverStartState.isStarting = true;
     const onListening = () => {
         server.removeListener("error", onError);
-        isStarting = false;
+        serverStartState.isStarting = false;
     };
     const onError = (error: Error) => {
         server.removeListener("listening", onListening);
         server.removeListener("error", onError);
-        isStarting = false;
+        serverStartState.isStarting = false;
         console.error("[Backend] Failed to start server:", error);
         process.exitCode = 1;
         server.close();
@@ -172,7 +160,7 @@ export function startBackendServer(port = resolveListenPort()): void {
     } catch (error) {
         server.removeListener("listening", onListening);
         server.removeListener("error", onError);
-        isStarting = false;
+        serverStartState.isStarting = false;
         throw error;
     }
 }
@@ -186,20 +174,11 @@ export function isDirectEntrypoint(
 
 export function shouldStartOnImport(
     startOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT,
-    directEntrypoint = isDirectEntrypoint()
+    isDirect = isDirectEntrypoint()
 ): boolean {
-    return startOnImport === "1" || directEntrypoint;
+    return startOnImport === "1" || isDirect;
 }
 
 if (shouldStartOnImport()) {
     startBackendServer();
 }
-
-export const __testing = {
-    queueQuotaNotificationCheckAfterSeed,
-    removeSchedulerCloseCleanup,
-    setAfterBackgroundServicesStartedForTest(callback: (() => void) | undefined): void {
-        afterBackgroundServicesStartedForTest = callback;
-    },
-    shouldStartScheduledJobs,
-};

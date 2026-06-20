@@ -1,5 +1,5 @@
 import type { Task } from "../../../types/task";
-import { getPriority, PRIORITY_COLORS } from "../../../utils/taskUtils";
+import { getPriority, PRIORITY_COLORS } from "../../../utils/taskUtilities";
 import { Badge } from "../../ui/Badge";
 
 /** Renders the task overlay UI. */

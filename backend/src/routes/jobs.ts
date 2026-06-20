@@ -4,7 +4,7 @@ import {
     asyncRoute as baseAsyncRoute,
     errorMessage,
     httpStatusCode,
-} from "../lib/errors.js";
+} from "../lib/errors.ts";
 import {
     getScheduledJob,
     isScheduledJobValidationError,
@@ -13,7 +13,7 @@ import {
     runScheduledJob,
     type ScheduledJobScheduleType,
     updateScheduledJob,
-} from "../services/scheduledJobs.js";
+} from "../services/scheduledJobs.ts";
 
 const JOBS_JSON_LIMIT = "2097152b";
 const scheduleTypes = new Set<ScheduledJobScheduleType>(["cron", "daily", "interval"]);
@@ -25,15 +25,15 @@ const allowedPatchFields = new Set([
     "timeOfDay",
 ]);
 
-const invalidJobsJsonHandler: ErrorRequestHandler = (error, _req, res, next) => {
+const invalidJobsJsonHandler: ErrorRequestHandler = (error, _request, response, next) => {
     const status = Number((error as { status?: unknown }).status);
     const type = String((error as { type?: unknown }).type ?? "");
     if (status === 413 || type === "entity.too.large") {
-        res.status(413).json({ error: "Scheduled job patch is too large" });
+        response.status(413).json({ error: "Scheduled job patch is too large" });
         return;
     }
     if (error instanceof SyntaxError && status === 400) {
-        res.status(400).json({ error: "Invalid scheduled job patch" });
+        response.status(400).json({ error: "Invalid scheduled job patch" });
         return;
     }
     next(error);
@@ -89,20 +89,20 @@ function invalidPatchField(patch: Record<string, unknown>): string | null {
 export default function jobsRoutes(app: express.Application): void {
     app.get(
         "/api/jobs",
-        asyncRoute((_req, res) => {
-            res.json({ jobs: listScheduledJobs() });
+        asyncRoute((_request, response) => {
+            response.json({ jobs: listScheduledJobs() });
         })
     );
 
     app.get(
         "/api/jobs/:id",
-        asyncRoute((req, res) => {
-            const job = getScheduledJob(String(req.params.id));
+        asyncRoute((request, response) => {
+            const job = getScheduledJob(String(request.params.id));
             if (!job) {
-                res.status(404).json({ error: "Scheduled job not found" });
+                response.status(404).json({ error: "Scheduled job not found" });
                 return;
             }
-            res.json({ job });
+            response.json({ job });
         })
     );
 
@@ -110,19 +110,21 @@ export default function jobsRoutes(app: express.Application): void {
         "/api/jobs/:id",
         express.json({ limit: JOBS_JSON_LIMIT, strict: false }),
         invalidJobsJsonHandler,
-        asyncRoute((req, res) => {
-            const patch = req.body?.patch;
+        asyncRoute((request, response) => {
+            const patch = request.body?.patch;
             if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
-                res.status(400).json({ error: "patch must be an object" });
+                response.status(400).json({ error: "patch must be an object" });
                 return;
             }
             const invalidField = invalidPatchField(patch as Record<string, unknown>);
             if (invalidField) {
-                res.status(400).json({ error: `invalid patch field: ${invalidField}` });
+                response
+                    .status(400)
+                    .json({ error: `invalid patch field: ${invalidField}` });
                 return;
             }
             try {
-                const job = updateScheduledJob(String(req.params.id), {
+                const job = updateScheduledJob(String(request.params.id), {
                     enabled:
                         typeof patch.enabled === "boolean" ? patch.enabled : undefined,
                     cronExpression:
@@ -143,13 +145,13 @@ export default function jobsRoutes(app: express.Application): void {
                             : undefined,
                 });
                 if (!job) {
-                    res.status(404).json({ error: "Scheduled job not found" });
+                    response.status(404).json({ error: "Scheduled job not found" });
                     return;
                 }
-                res.json({ ok: true, job });
+                response.json({ isOk: true, job });
             } catch (error) {
                 if (isScheduledJobValidationError(error)) {
-                    res.status(error.statusCode).json({ error: error.message });
+                    response.status(error.statusCode).json({ error: error.message });
                     return;
                 }
                 throw error;
@@ -159,34 +161,27 @@ export default function jobsRoutes(app: express.Application): void {
 
     app.get(
         "/api/jobs/:id/runs",
-        asyncRoute((req, res) => {
-            const job = getScheduledJob(String(req.params.id));
+        asyncRoute((request, response) => {
+            const job = getScheduledJob(String(request.params.id));
             if (!job) {
-                res.status(404).json({ error: "Scheduled job not found" });
+                response.status(404).json({ error: "Scheduled job not found" });
                 return;
             }
-            res.json({ runs: listScheduledJobRuns(job.id) });
+            response.json({ runs: listScheduledJobRuns(job.id) });
         })
     );
 
     app.post(
         "/api/jobs/:id/run",
-        asyncRoute(async (req, res) => {
+        asyncRoute(async (request, response) => {
             try {
-                const run = await runScheduledJob(String(req.params.id), "manual");
-                res.json({ ok: run.status === "success", run });
+                const run = await runScheduledJob(String(request.params.id), "manual");
+                response.json({ isOk: run.status === "success", run });
             } catch (error) {
-                res.status(httpStatusCode(error)).json({
+                response.status(httpStatusCode(error)).json({
                     error: errorMessage(error, "Scheduled job run failed"),
                 });
             }
         })
     );
 }
-
-export const __testing = {
-    httpStatusCode,
-    invalidJobsJsonHandler,
-    invalidPatchField,
-    JOBS_JSON_LIMIT,
-};

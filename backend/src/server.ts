@@ -8,34 +8,34 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { WebSocket, WebSocketServer } from "ws";
 
-import { getAuthUserFromRequest, requireAuth } from "./auth.js";
-import gateway from "./gateway.js";
-import agentsRoutes from "./routes/agents.js";
-import authRoutes from "./routes/auth.js";
-import backupRoutes from "./routes/backups.js";
-import cacheRoutes from "./routes/cache.js";
-import configFilesRoutes from "./routes/configFiles.js";
-import cronRoutes from "./routes/cron.js";
-import databaseRoutes from "./routes/database.js";
-import dockerRoutes from "./routes/docker.js";
-import execRoutes from "./routes/exec.js";
-import filesRoutes from "./routes/files.js";
-import jobsRoutes from "./routes/jobs.js";
-import logsRoutes from "./routes/logs.js";
-import mediaRoutes from "./routes/media.js";
-import metricsRoutes from "./routes/metrics.js";
-import moltbookRoutes from "./routes/moltbook.js";
-import notificationsRoutes from "./routes/notifications.js";
-import openClawConfigRoutes from "./routes/openclawConfig.js";
-import opsRoutes from "./routes/ops.js";
-import pullRequestsRoutes from "./routes/pullRequests.js";
-import sessionsRoutes from "./routes/sessions.js";
-import settingsRoutes from "./routes/settings.js";
-import staticRoutes from "./routes/static.js";
-import sttRoutes from "./routes/stt.js";
-import tasksRoutes from "./routes/tasks.js";
-import terminalRoutes from "./routes/terminal.js";
-import ttsRoutes from "./routes/tts.js";
+import { getAuthUserFromRequest, requireAuth } from "./auth.ts";
+import gateway from "./gateway.ts";
+import agentsRoutes from "./routes/agents.ts";
+import authRoutes from "./routes/auth.ts";
+import backupRoutes from "./routes/backups.ts";
+import cacheRoutes from "./routes/cache.ts";
+import configFilesRoutes from "./routes/configFiles.ts";
+import cronRoutes from "./routes/cron.ts";
+import databaseRoutes from "./routes/database.ts";
+import dockerRoutes from "./routes/docker.ts";
+import execRoutes from "./routes/exec.ts";
+import filesRoutes from "./routes/files.ts";
+import jobsRoutes from "./routes/jobs.ts";
+import logsRoutes from "./routes/logs.ts";
+import mediaRoutes from "./routes/media.ts";
+import metricsRoutes from "./routes/metrics.ts";
+import moltbookRoutes from "./routes/moltbook.ts";
+import notificationsRoutes from "./routes/notifications.ts";
+import openClawConfigRoutes from "./routes/openclawConfig.ts";
+import opsRoutes from "./routes/ops.ts";
+import pullRequestsRoutes from "./routes/pullRequests.ts";
+import sessionsRoutes from "./routes/sessions.ts";
+import settingsRoutes from "./routes/settings.ts";
+import staticRoutes from "./routes/static.ts";
+import sttRoutes from "./routes/stt.ts";
+import tasksRoutes from "./routes/tasks.ts";
+import terminalRoutes from "./routes/terminal.ts";
+import ttsRoutes from "./routes/tts.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -78,7 +78,8 @@ export function parseTrustProxy(value?: string): boolean | number | string {
 export const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-const frontendPath = path.join(__dirname, "..", "..", "dist");
+const frontendPath =
+    process.env.MIRA_DASHBOARD_FRONTEND_PATH || path.join(__dirname, "..", "..", "dist");
 
 type ExecSyncCommand = (
     command: string,
@@ -120,9 +121,9 @@ export function resolveListenPort(value = process.env.PORT): number {
 // =====================
 
 /** Performs health handler. */
-const healthHandler: express.RequestHandler = (_req, res) => {
-    res.json({
-        status: "ok",
+const healthHandler: express.RequestHandler = (_request, response) => {
+    response.json({
+        status: "isOk",
         gatewayConnected: gateway.isConnected(),
         sessionCount: gateway.getSessions().length,
         backendCommit,
@@ -192,7 +193,7 @@ export function handleWebSocketConnection(
     gateway.handleClient(ws);
 }
 
-function configureServerModule(): true {
+function shouldConfigureServerModule(): true {
     dotenv.config();
     app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
     app.use((request, response, next) => {
@@ -248,4 +249,4 @@ function configureServerModule(): true {
     return true;
 }
 
-export const serverModuleConfigured = configureServerModule();
+export const isServerModuleConfigured = shouldConfigureServerModule();

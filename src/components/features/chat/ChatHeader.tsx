@@ -2,7 +2,7 @@ import { Brain, type LucideIcon, Wrench } from "lucide-react";
 
 import type { Session } from "../../../types/session";
 import { formatDuration } from "../../../utils/format";
-import { formatSessionType } from "../../../utils/sessionUtils";
+import { formatSessionType } from "../../../utils/sessionUtilities";
 import { Button } from "../../ui/Button";
 import { Select } from "../../ui/Select";
 
@@ -14,7 +14,7 @@ interface Option {
 }
 
 /** Provides props for diagnostic toggle. */
-interface DiagnosticToggleProps {
+interface DiagnosticToggleProperties {
     active: boolean;
     icon: LucideIcon;
     label: string;
@@ -29,7 +29,7 @@ function DiagnosticToggle({
     label,
     title,
     onClick,
-}: DiagnosticToggleProps) {
+}: DiagnosticToggleProperties) {
     return (
         <Button
             type="button"
@@ -52,14 +52,14 @@ function DiagnosticToggle({
 }
 
 /** Provides props for chat header. */
-interface ChatHeaderProps {
+interface ChatHeaderProperties {
     selectedSession: Session | null;
     selectedAgentId: string;
     selectedSessionKey: string;
     sessionOptions: Option[];
     agentOptions: Option[];
-    showThinking: boolean;
-    showTools: boolean;
+    shouldShowThinking: boolean;
+    shouldShowTools: boolean;
     onToggleThinking: () => void;
     onToggleTools: () => void;
     onSelectAgent: (agentId: string) => void;
@@ -84,13 +84,13 @@ export function ChatHeader({
     selectedSessionKey,
     sessionOptions,
     agentOptions,
-    showThinking,
-    showTools,
+    shouldShowThinking,
+    shouldShowTools,
     onToggleThinking,
     onToggleTools,
     onSelectAgent,
     onSelectSession,
-}: ChatHeaderProps) {
+}: ChatHeaderProperties) {
     return (
         <div className="border-primary-700 border-b pb-2 sm:pb-3">
             <div className="flex flex-col gap-2 sm:gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -102,14 +102,14 @@ export function ChatHeader({
                 <div className="flex w-full flex-col gap-2 lg:ml-auto lg:w-auto lg:flex-row lg:items-center lg:justify-end">
                     <div className="flex shrink-0 flex-wrap justify-start gap-1.5 lg:justify-end">
                         <DiagnosticToggle
-                            active={showThinking}
+                            active={shouldShowThinking}
                             icon={Brain}
                             label="Thinking"
                             title="Toggle assistant thinking / working output"
                             onClick={onToggleThinking}
                         />
                         <DiagnosticToggle
-                            active={showTools}
+                            active={shouldShowTools}
                             icon={Wrench}
                             label="Tools"
                             title="Toggle tool calls and tool result output"

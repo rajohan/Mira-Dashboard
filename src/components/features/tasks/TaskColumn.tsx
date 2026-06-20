@@ -2,11 +2,11 @@ import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 
 import type { ColumnId, Task } from "../../../types/task";
-import { COLUMN_CONFIG, type ColumnConfig } from "../../../utils/taskUtils";
+import { COLUMN_CONFIG, type ColumnConfig } from "../../../utils/taskUtilities";
 import { TaskCard } from "./TaskCard";
 
 /** Provides props for task column. */
-interface TaskColumnProps {
+interface TaskColumnProperties {
     id: ColumnId;
     tasks: Task[];
     isOver: boolean;
@@ -14,7 +14,7 @@ interface TaskColumnProps {
 }
 
 /** Renders the task column UI. */
-export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnProps) {
+export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnProperties) {
     const config: ColumnConfig | undefined = COLUMN_CONFIG.find((c) => c.id === id);
     const { setNodeRef } = useDroppable({ id });
 

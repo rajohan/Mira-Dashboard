@@ -1,4 +1,4 @@
-import { getCacheEntry, parseJsonField } from "./cacheStore.js";
+import { getCacheEntry, parseJsonField } from "./cacheStore.ts";
 
 /** Represents cached OpenClaw version. */
 export interface CachedOpenClawVersion {

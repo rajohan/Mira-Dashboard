@@ -7,7 +7,7 @@ import {
     getCronJobName,
     getCronStateValue,
     getCronStatusVariant,
-} from "../../../utils/cronUtils";
+} from "../../../utils/cronUtilities";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 

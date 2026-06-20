@@ -21,10 +21,10 @@ import type {
     ChatVisibilitySettings,
 } from "./chatTypes";
 import { TOOL_ROLE_VARIANTS } from "./chatTypes";
-import { chatErrorMessage } from "./chatUtils";
+import { chatErrorMessage } from "./chatUtilities";
 
 /** Provides props for chat messages list. */
-interface ChatMessagesListProps {
+interface ChatMessagesListProperties {
     isLoadingHistory: boolean;
     isAtBottom: boolean;
     chatRows: ChatRow[];
@@ -33,7 +33,7 @@ interface ChatMessagesListProps {
     messagesVirtualizer: Virtualizer<HTMLDivElement, Element>;
     onDynamicContentLoad: () => void;
     onFollow: () => void;
-    onPreview: (preview: ChatPreviewItem) => void;
+    onPreview: (isPreview: ChatPreviewItem) => void;
     visibility: ChatVisibilitySettings;
     onScroll: () => void;
     onTtsError: (error: string) => void;
@@ -64,7 +64,7 @@ export function base64ToText(base64: string): string | undefined {
     }
 }
 
-/** Performs preview from attachment. */
+/** Builds preview data from an attachment. */
 export function previewFromAttachment(
     attachment: ChatAttachmentDisplay
 ): ChatPreviewItem | null {
@@ -263,7 +263,7 @@ export function ChatMessagesList({
     onScroll,
     onTtsError,
     onDeleteMessage,
-}: ChatMessagesListProps) {
+}: ChatMessagesListProperties) {
     const audioReference = useRef<HTMLAudioElement | null>(null);
     const audioUrlReference = useRef<string | null>(null);
     const [playingMessageKey, setPlayingMessageKey] = useState<string | null>(null);

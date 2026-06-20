@@ -1,16 +1,16 @@
-import { db } from "../db.js";
+import { database } from "../database.ts";
 import {
     fetchCachedQuotas,
     hasQuotaStatus,
     type SyntheticQuota,
-} from "../lib/quotasCache.js";
-import { pruneReadNotifications } from "./notificationMaintenance.js";
+} from "../lib/quotasCache.ts";
+import { pruneReadNotifications } from "./notificationMaintenance.ts";
 import {
     getScheduledJob,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
     upsertScheduledJob,
-} from "./scheduledJobs.js";
+} from "./scheduledJobs.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -30,7 +30,7 @@ function formatSyntheticWeeklyRemaining(
     return `${weeklyTokenLimit.percentRemaining}% left`;
 }
 
-/** Returns provIDer percent. */
+/** Returns provider percent. */
 function getProviderPercent(
     provider: ProviderKey,
     quotas: Awaited<ReturnType<typeof fetchCachedQuotas>>
@@ -109,16 +109,18 @@ function getProviderNotificationPayload(
 
 /** Performs ensure state row. */
 function ensureStateRow(provider: ProviderKey, bucket: number): void {
-    db.prepare(
-        `INSERT INTO quota_alert_state (provider, bucket, is_armed, updated_at)
+    database
+        .prepare(
+            `INSERT INTO quota_alert_state (provider, bucket, is_armed, updated_at)
          VALUES (?, ?, 1, ?)
          ON CONFLICT(provider, bucket) DO NOTHING`
-    ).run(provider, bucket, dateToISOString(new Date()));
+        )
+        .run(provider, bucket, dateToISOString(new Date()));
 }
 
 /** Returns state. */
 function getState(provider: ProviderKey, bucket: number): { is_armed: number } {
-    const state = db
+    const state = database
         .prepare(
             "SELECT is_armed FROM quota_alert_state WHERE provider = ? AND bucket = ?"
         )
@@ -131,11 +133,13 @@ function getState(provider: ProviderKey, bucket: number): { is_armed: number } {
 
 /** Performs set state. */
 function setState(provider: ProviderKey, bucket: number, isArmed: number): void {
-    db.prepare(
-        `UPDATE quota_alert_state
+    database
+        .prepare(
+            `UPDATE quota_alert_state
          SET is_armed = ?, updated_at = ?
          WHERE provider = ? AND bucket = ?`
-    ).run(isArmed, dateToISOString(new Date()), provider, bucket);
+        )
+        .run(isArmed, dateToISOString(new Date()), provider, bucket);
 }
 
 /** Performs insert notification. */
@@ -150,8 +154,9 @@ function insertNotification(
     const now = dateToISOString(new Date());
     const dedupeKey = `quota:${provider}:${bucket}`;
 
-    db.prepare(
-        `INSERT INTO notifications (
+    database
+        .prepare(
+            `INSERT INTO notifications (
             title, description, type, source, dedupe_key, metadata_json, is_read, created_at, updated_at, occurred_at
         ) VALUES (?, ?, 'warning', 'quota', ?, ?, 0, ?, ?, ?)
         ON CONFLICT(dedupe_key) DO UPDATE SET
@@ -160,15 +165,16 @@ function insertNotification(
             metadata_json = excluded.metadata_json,
             updated_at = excluded.updated_at,
             occurred_at = excluded.occurred_at`
-    ).run(
-        title,
-        description,
-        dedupeKey,
-        JSON.stringify({ provider, bucket, percent }),
-        now,
-        now,
-        occurredAt
-    );
+        )
+        .run(
+            title,
+            description,
+            dedupeKey,
+            JSON.stringify({ provider, bucket, percent }),
+            now,
+            now,
+            occurredAt
+        );
 
     pruneReadNotifications();
 }
@@ -207,15 +213,15 @@ function handleQuotaBucket(
     setState(provider, bucket, isArmed);
 }
 
-let running = false;
+const quotaNotificationState = { isRunning: false };
 
 /** Performs run quota notification check. */
 export async function runQuotaNotificationCheck(): Promise<boolean> {
-    if (running) {
+    if (quotaNotificationState.isRunning) {
         return true;
     }
 
-    running = true;
+    quotaNotificationState.isRunning = true;
 
     try {
         const quotas = await fetchCachedQuotas();
@@ -242,20 +248,20 @@ export async function runQuotaNotificationCheck(): Promise<boolean> {
         console.error("[QuotaNotifications] check failed", error);
         return false;
     } finally {
-        running = false;
+        quotaNotificationState.isRunning = false;
     }
 }
 
 /** Registers quota notification checks with the shared scheduler. */
-export function registerQuotaNotificationScheduledJobs(): boolean {
+export function shouldRegisterQuotaNotificationScheduledJobs(): boolean {
     registerScheduledJobAction("notifications.quota", async () => {
-        const ok = await runQuotaNotificationCheck();
-        if (!ok) {
+        const isOk = await runQuotaNotificationCheck();
+        if (!isOk) {
             throw new Error("Quota notification check failed");
         }
-        return { ok: true };
+        return { isOk: true };
     });
-    db.exec("BEGIN");
+    database.run("BEGIN");
     try {
         removeScheduledJobsNotInAction("notifications.quota", [
             QUOTA_NOTIFICATION_JOB_ID,
@@ -273,20 +279,10 @@ export function registerQuotaNotificationScheduledJobs(): boolean {
             actionKey: "notifications.quota",
             actionPayload: {},
         });
-        db.exec("COMMIT");
+        database.run("COMMIT");
         return existing?.enabled ?? true;
     } catch (error) {
-        db.exec("ROLLBACK");
+        database.run("ROLLBACK");
         throw error;
     }
 }
-
-export const __testing = {
-    formatSyntheticWeeklyRemaining,
-    getNotificationPayload,
-    getProviderNotificationPayload,
-    getProviderPercent,
-    getState,
-    handleQuotaBucket,
-    isRunning: () => running,
-};

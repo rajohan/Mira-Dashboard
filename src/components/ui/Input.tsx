@@ -5,15 +5,15 @@ import { forwardRef } from "react";
 import { cn } from "../../utils/cn";
 
 /** Provides props for input. */
-interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
+interface InputProperties extends InputHTMLAttributes<HTMLInputElement> {
     label?: string;
     description?: string;
     error?: string;
 }
 
 /** Renders the input UI. */
-export const Input = forwardRef<HTMLInputElement, InputProps>(
-    ({ className, label, description, error, ...props }, ref) => {
+export const Input = forwardRef<HTMLInputElement, InputProperties>(
+    ({ className, label, description, error, ...properties }, reference) => {
         return (
             <Field>
                 {label && (
@@ -27,7 +27,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
                     </Description>
                 )}
                 <HeadlessInput
-                    ref={ref}
+                    ref={reference}
                     className={cn(
                         "border-primary-600 bg-primary-900 w-full rounded-lg border px-3 py-2",
                         "text-primary-50 placeholder-primary-400",
@@ -37,7 +37,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
                         error && "border-red-500",
                         className
                     )}
-                    {...props}
+                    {...properties}
                 />
                 {error && <p className="mt-1 text-sm text-red-400">{error}</p>}
             </Field>

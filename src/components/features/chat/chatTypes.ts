@@ -83,8 +83,8 @@ export interface ChatToolResultDisplay {
 
 /** Represents chat visibility settings. */
 export interface ChatVisibilitySettings {
-    showThinking: boolean;
-    showTools: boolean;
+    shouldShowThinking: boolean;
+    shouldShowTools: boolean;
 }
 
 /** Represents chat history message. */
@@ -143,8 +143,8 @@ export interface ChatRow {
 
 /** Defines default chat visibility. */
 export const DEFAULT_CHAT_VISIBILITY: ChatVisibilitySettings = {
-    showThinking: false,
-    showTools: false,
+    shouldShowThinking: false,
+    shouldShowTools: false,
 };
 
 /** Returns whether record. */
@@ -545,7 +545,7 @@ export function isRenderableChatHistoryMessage(
     const role = message.role.toLowerCase();
     if (isToolRole(role)) {
         return Boolean(
-            visibility.showTools &&
+            visibility.shouldShowTools &&
             ((message.toolResult?.content.trim() || "").length > 0 ||
                 (message.toolResult?.images?.length || 0) > 0)
         );
@@ -560,8 +560,8 @@ export function isRenderableChatHistoryMessage(
     }
 
     return Boolean(
-        (visibility.showThinking && (message.thinking?.length || 0) > 0) ||
-        (visibility.showTools && (message.toolCalls?.length || 0) > 0)
+        (visibility.shouldShowThinking && (message.thinking?.length || 0) > 0) ||
+        (visibility.shouldShowTools && (message.toolCalls?.length || 0) > 0)
     );
 }
 
@@ -576,10 +576,12 @@ export function normalizeVisibleChatHistoryMessages(
     for (const rawMessage of messages) {
         const message = normalizeChatHistoryMessage(rawMessage);
         const isToolMessage = isToolRole(message.role);
-        const hiddenToolMedia =
-            isToolMessage && !visibility.showTools && message.attachments!.length > 0;
+        const isHiddenToolMedia =
+            isToolMessage &&
+            !visibility.shouldShowTools &&
+            message.attachments!.length > 0;
 
-        if (hiddenToolMedia) {
+        if (isHiddenToolMedia) {
             pendingHiddenToolMedia = [...pendingHiddenToolMedia, ...message.attachments!];
             continue;
         }

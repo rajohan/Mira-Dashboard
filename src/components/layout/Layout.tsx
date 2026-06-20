@@ -38,7 +38,7 @@ const navItems = [
 ];
 
 /** Provides props for layout. */
-interface LayoutProps {
+interface LayoutProperties {
     children: ReactNode;
 }
 
@@ -50,7 +50,7 @@ interface SystemHostCache {
 }
 
 /** Renders the layout UI. */
-export function Layout({ children }: LayoutProps) {
+export function Layout({ children }: LayoutProperties) {
     const location = useLocation();
     const sidebarId = useId();
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);

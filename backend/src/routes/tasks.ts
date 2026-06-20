@@ -4,10 +4,10 @@ import {
     TASK_ASSIGNEE_IDS,
     TASK_ASSIGNEES,
     type TaskAssigneeId,
-} from "../constants/taskActors.js";
-import { db } from "../db.js";
-import gateway from "../gateway.js";
-import { objectFallback } from "../lib/values.js";
+} from "../constants/taskActors.ts";
+import { database } from "../database.ts";
+import gateway from "../gateway.ts";
+import { objectFallback } from "../lib/values.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -19,8 +19,8 @@ type Status = "todo" | "in-progress" | "blocked" | "done";
 /** Defines assignee. */
 type Assignee = TaskAssigneeId;
 
-/** Represents db task update. */
-interface DbTaskUpdate {
+/** Represents database task update. */
+interface DatabaseTaskUpdate {
     id: number;
     task_id: number;
     author: Assignee;
@@ -28,8 +28,8 @@ interface DbTaskUpdate {
     created_at: string;
 }
 
-/** Represents db task. */
-interface DbTask {
+/** Represents database task. */
+interface DatabaseTask {
     id: number;
     title: string;
     body: string;
@@ -94,7 +94,7 @@ function derivePriority(labels: string[]): "low" | "medium" | "high" {
 }
 
 /** Performs labels from task. */
-function labelsFromTask(task: DbTask): string[] {
+function labelsFromTask(task: DatabaseTask): string[] {
     const base = (() => {
         try {
             const parsed = JSON.parse(task.labels_json) as unknown;
@@ -190,8 +190,7 @@ async function fetchCronJobsById(): Promise<Map<string, CronJob>> {
                 .map((job) => [getCronJobId(job), job] as const)
                 .filter(([id]) => id.length > 0)
         );
-    } catch (error) {
-        console.warn("[Tasks] Failed to load cron jobs for task automation:", error);
+    } catch {
         return new Map();
     }
 }
@@ -215,10 +214,10 @@ function formatScheduleSummary(schedule: Record<string, unknown> | undefined) {
     }
 
     if (schedule.kind === "cron") {
-        const expr = stringFromRecord(schedule, "expr");
+        const expression = stringFromRecord(schedule, "expr");
         const tz = stringFromRecord(schedule, "tz");
-        if (expr && tz) return `${expr} (${tz})`;
-        return expr;
+        if (expression && tz) return `${expression} (${tz})`;
+        return expression;
     }
 
     if (schedule.kind === "every") {
@@ -232,8 +231,7 @@ function formatScheduleSummary(schedule: Record<string, unknown> | undefined) {
             const minutes = Math.round(everyMs / 60_000);
             return `Every ${minutes}m`;
         }
-    }
-    if (schedule.kind === "at") {
+    } else if (schedule.kind === "at") {
         return stringFromRecord(schedule, "at");
     }
 
@@ -241,7 +239,7 @@ function formatScheduleSummary(schedule: Record<string, unknown> | undefined) {
 }
 
 /** Performs to frontend automation. */
-function toFrontendAutomation(task: DbTask, cronJobsById?: Map<string, CronJob>) {
+function toFrontendAutomation(task: DatabaseTask, cronJobsById?: Map<string, CronJob>) {
     const stored = parseRecordJson(task.automation_json);
     const cronJobId = stringFromRecord(stored, "cronJobId");
     if (!cronJobId) {
@@ -280,7 +278,7 @@ function toFrontendAutomation(task: DbTask, cronJobsById?: Map<string, CronJob>)
 }
 
 /** Performs to frontend task. */
-function toFrontendTask(task: DbTask, cronJobsById?: Map<string, CronJob>) {
+function toFrontendTask(task: DatabaseTask, cronJobsById?: Map<string, CronJob>) {
     const labels = labelsFromTask(task);
     const automation = toFrontendAutomation(task, cronJobsById);
     return {
@@ -316,7 +314,7 @@ async function notifyMira(eventType: string, task: { id: number; title: string }
 }
 
 /** Performs to frontend task update. */
-function toFrontendTaskUpdate(update: DbTaskUpdate) {
+function toFrontendTaskUpdate(update: DatabaseTaskUpdate) {
     return {
         id: update.id,
         taskId: update.task_id,
@@ -339,73 +337,64 @@ function serializeTaskEventPayload(payload: unknown): string {
 
 /** Performs record event. */
 function recordEvent(taskId: number, eventType: string, payload: unknown) {
-    db.prepare(
-        `INSERT INTO task_events (task_id, event_type, payload_json, created_at)
+    database
+        .prepare(
+            `INSERT INTO task_events (task_id, event_type, payload_json, created_at)
          VALUES (?, ?, ?, ?)`
-    ).run(
-        taskId,
-        eventType,
-        serializeTaskEventPayload(payload),
-        dateToISOString(new Date())
-    );
+        )
+        .run(
+            taskId,
+            eventType,
+            serializeTaskEventPayload(payload),
+            dateToISOString(new Date())
+        );
 }
 
 /** Defines testing. */
-export const __testing = {
-    derivePriority,
-    formatScheduleSummary,
-    labelsFromTask,
-    normalizeAutomationInput,
-    normalizeCronJobs,
-    normalizeStatus,
-    parseRecordJson,
-    serializeTaskEventPayload,
-    toFrontendTask,
-};
 
 /** Registers tasks API routes. */
 export default function tasksRoutes(
     app: express.Application,
     _express: typeof express
 ): void {
-    app.get("/api/tasks", (async (_req, res) => {
-        const rows = db
+    app.get("/api/tasks", (async (_request, response) => {
+        const rows = database
             .prepare(
                 `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
                  FROM tasks
                  ORDER BY datetime(updated_at) DESC, id DESC`
             )
-            .all() as unknown as DbTask[];
+            .all() as unknown as DatabaseTask[];
 
         const cronJobsById = await fetchCronJobsById();
-        res.json(rows.map((task) => toFrontendTask(task, cronJobsById)));
+        response.json(rows.map((task) => toFrontendTask(task, cronJobsById)));
     }) as RequestHandler);
 
-    app.get("/api/tasks/:id", (async (req, res) => {
-        const id = Number(req.params.id);
+    app.get("/api/tasks/:id", (async (request, response) => {
+        const id = Number(request.params.id);
         if (!Number.isSafeInteger(id)) {
-            res.status(400).json({ error: "Invalid id" });
+            response.status(400).json({ error: "Invalid id" });
             return;
         }
 
-        const row = db
+        const row = database
             .prepare(
                 `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
                  FROM tasks WHERE id = ?`
             )
-            .get(id) as unknown as DbTask | undefined;
+            .get(id) as unknown as DatabaseTask | undefined;
 
         if (!row) {
-            res.status(404).json({ error: "Task not found" });
+            response.status(404).json({ error: "Task not found" });
             return;
         }
 
         const cronJobsById = await fetchCronJobsById();
-        res.json(toFrontendTask(row, cronJobsById));
+        response.json(toFrontendTask(row, cronJobsById));
     }) as RequestHandler);
 
-    app.post("/api/tasks", express.json(), (async (req, res) => {
-        const { title, body, labels, assignee, automation } = req.body as {
+    app.post("/api/tasks", express.json(), (async (request, response) => {
+        const { title, body, labels, assignee, automation } = request.body as {
             title?: string;
             body?: string;
             labels?: string[];
@@ -414,12 +403,12 @@ export default function tasksRoutes(
         };
 
         if (!title || !title.trim()) {
-            res.status(400).json({ error: "Title is required" });
+            response.status(400).json({ error: "Title is required" });
             return;
         }
 
         if (!isValidAssignee(assignee)) {
-            res.status(400).json({ error: "Assignee must be Mira or Raymond" });
+            response.status(400).json({ error: "Assignee must be Mira or Raymond" });
             return;
         }
 
@@ -437,7 +426,7 @@ export default function tasksRoutes(
         );
         const priority = derivePriority(labelList);
 
-        const result = db
+        const result = database
             .prepare(
                 `INSERT INTO tasks (title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -465,36 +454,36 @@ export default function tasksRoutes(
             void notifyMira("created", { id, title: title.trim() });
         }
 
-        const row = db
+        const row = database
             .prepare(
                 `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
                  FROM tasks WHERE id = ?`
             )
-            .get(id) as unknown as DbTask;
+            .get(id) as unknown as DatabaseTask;
 
-        res.status(201).json(toFrontendTask(row));
+        response.status(201).json(toFrontendTask(row));
     }) as RequestHandler);
 
-    app.patch("/api/tasks/:id", express.json(), (async (req, res) => {
-        const id = Number(req.params.id);
+    app.patch("/api/tasks/:id", express.json(), (async (request, response) => {
+        const id = Number(request.params.id);
         if (!Number.isSafeInteger(id)) {
-            res.status(400).json({ error: "Invalid id" });
+            response.status(400).json({ error: "Invalid id" });
             return;
         }
 
-        const existing = db
+        const existing = database
             .prepare(
                 `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
                  FROM tasks WHERE id = ?`
             )
-            .get(id) as unknown as DbTask | undefined;
+            .get(id) as unknown as DatabaseTask | undefined;
 
         if (!existing) {
-            res.status(404).json({ error: "Task not found" });
+            response.status(404).json({ error: "Task not found" });
             return;
         }
 
-        const updates = req.body as {
+        const updates = request.body as {
             title?: string;
             body?: string;
             labels?: string[];
@@ -520,20 +509,22 @@ export default function tasksRoutes(
                 : normalizeAutomationInput(updates.automation);
         const updatedAt = dateToISOString(new Date());
 
-        db.prepare(
-            `UPDATE tasks
+        database
+            .prepare(
+                `UPDATE tasks
              SET title = ?, body = ?, status = ?, priority = ?, labels_json = ?, automation_json = ?, updated_at = ?
              WHERE id = ?`
-        ).run(
-            title,
-            body,
-            nextStatus,
-            nextPriority,
-            JSON.stringify(labels),
-            automationJson,
-            updatedAt,
-            id
-        );
+            )
+            .run(
+                title,
+                body,
+                nextStatus,
+                nextPriority,
+                JSON.stringify(labels),
+                automationJson,
+                updatedAt,
+                id
+            );
 
         recordEvent(id, "updated", {
             title,
@@ -545,147 +536,147 @@ export default function tasksRoutes(
             void notifyMira("updated", { id, title });
         }
 
-        const row = db
+        const row = database
             .prepare(
                 `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
                  FROM tasks WHERE id = ?`
             )
-            .get(id) as unknown as DbTask;
+            .get(id) as unknown as DatabaseTask;
 
-        res.json(toFrontendTask(row));
+        response.json(toFrontendTask(row));
     }) as RequestHandler);
 
-    app.post("/api/tasks/:id/assign", express.json(), (async (req, res) => {
-        const id = Number(req.params.id);
-        const { assignee } = req.body as { assignee?: string | null };
+    app.post("/api/tasks/:id/assign", express.json(), (async (request, response) => {
+        const id = Number(request.params.id);
+        const { assignee } = request.body as { assignee?: string | null };
         if (!Number.isSafeInteger(id)) {
-            res.status(400).json({ error: "Invalid id" });
+            response.status(400).json({ error: "Invalid id" });
             return;
         }
 
         if (!isValidAssignee(assignee)) {
-            res.status(400).json({ error: "Assignee must be Mira or Raymond" });
+            response.status(400).json({ error: "Assignee must be Mira or Raymond" });
             return;
         }
 
-        const existing = db
+        const existing = database
             .prepare(
                 `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
                  FROM tasks WHERE id = ?`
             )
-            .get(id) as unknown as DbTask | undefined;
+            .get(id) as unknown as DatabaseTask | undefined;
 
         if (!existing) {
-            res.status(404).json({ error: "Task not found" });
+            response.status(404).json({ error: "Task not found" });
             return;
         }
 
         const safeAssignee = assignee;
         const updatedAt = dateToISOString(new Date());
-        db.prepare(`UPDATE tasks SET assignee = ?, updated_at = ? WHERE id = ?`).run(
-            safeAssignee,
-            updatedAt,
-            id
-        );
+        database
+            .prepare(`UPDATE tasks SET assignee = ?, updated_at = ? WHERE id = ?`)
+            .run(safeAssignee, updatedAt, id);
 
         recordEvent(id, "assigned", { assignee: safeAssignee });
         if (safeAssignee === TASK_ASSIGNEES.mira.id) {
             void notifyMira("assigned", { id, title: existing.title });
         }
 
-        const row = db
+        const row = database
             .prepare(
                 `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
                  FROM tasks WHERE id = ?`
             )
-            .get(id) as unknown as DbTask;
+            .get(id) as unknown as DatabaseTask;
 
-        res.json(toFrontendTask(row));
+        response.json(toFrontendTask(row));
     }) as RequestHandler);
 
-    app.delete("/api/tasks/:id", (req, res) => {
-        const id = Number(req.params.id);
+    app.delete("/api/tasks/:id", (request, response) => {
+        const id = Number(request.params.id);
         if (!Number.isSafeInteger(id)) {
-            res.status(400).json({ error: "Invalid id" });
+            response.status(400).json({ error: "Invalid id" });
             return;
         }
 
-        const existing = db
+        const existing = database
             .prepare("SELECT id, title, assignee FROM tasks WHERE id = ?")
             .get(id) as unknown as
             | undefined
             | { id: number; title: string; assignee?: string };
 
         if (!existing) {
-            res.status(404).json({ error: "Task not found" });
+            response.status(404).json({ error: "Task not found" });
             return;
         }
 
-        db.prepare("DELETE FROM task_updates WHERE task_id = ?").run(id);
-        db.prepare("DELETE FROM task_events WHERE task_id = ?").run(id);
-        db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+        database.prepare("DELETE FROM task_updates WHERE task_id = ?").run(id);
+        database.prepare("DELETE FROM task_events WHERE task_id = ?").run(id);
+        database.prepare("DELETE FROM tasks WHERE id = ?").run(id);
         if (existing.assignee === TASK_ASSIGNEES.mira.id) {
             void notifyMira("deleted", existing);
         }
-        res.json({ ok: true });
+        response.json({ isOk: true });
     });
 
-    app.get("/api/tasks/:id/updates", (req, res) => {
-        const id = Number(req.params.id);
+    app.get("/api/tasks/:id/updates", (request, response) => {
+        const id = Number(request.params.id);
         if (!Number.isSafeInteger(id)) {
-            res.status(400).json({ error: "Invalid id" });
+            response.status(400).json({ error: "Invalid id" });
             return;
         }
 
-        const rows = db
+        const rows = database
             .prepare(
                 `SELECT id, task_id, author, message_md, created_at
                  FROM task_updates
                  WHERE task_id = ?
                  ORDER BY datetime(created_at) DESC, id DESC`
             )
-            .all(id) as unknown as DbTaskUpdate[];
+            .all(id) as unknown as DatabaseTaskUpdate[];
 
-        res.json(rows.map(toFrontendTaskUpdate));
+        response.json(rows.map(toFrontendTaskUpdate));
     });
 
-    app.post("/api/tasks/:id/updates", express.json(), (req, res) => {
-        const id = Number(req.params.id);
-        const { author, messageMd } = req.body as {
+    app.post("/api/tasks/:id/updates", express.json(), (request, response) => {
+        const id = Number(request.params.id);
+        const { author, messageMd } = request.body as {
             author?: Assignee;
             messageMd?: string;
         };
 
         if (!Number.isSafeInteger(id) || !isValidAssignee(author) || !messageMd?.trim()) {
-            res.status(400).json({ error: "Invalid update payload" });
+            response.status(400).json({ error: "Invalid update payload" });
             return;
         }
 
-        const existing = db.prepare("SELECT id FROM tasks WHERE id = ?").get(id);
+        const existing = database.prepare("SELECT id FROM tasks WHERE id = ?").get(id);
         if (!existing) {
-            res.status(404).json({ error: "Task not found" });
+            response.status(404).json({ error: "Task not found" });
             return;
         }
 
         const createdAt = dateToISOString(new Date());
-        const result = db
+        const result = database
             .prepare(
                 `INSERT INTO task_updates (task_id, author, message_md, created_at)
                  VALUES (?, ?, ?, ?)`
             )
             .run(id, author, messageMd.trim(), createdAt);
 
-        db.prepare("UPDATE tasks SET updated_at = ? WHERE id = ?").run(createdAt, id);
+        database
+            .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
+            .run(createdAt, id);
 
-        const row = db
+        const row = database
             .prepare(
                 `SELECT id, task_id, author, message_md, created_at
                  FROM task_updates
                  WHERE id = ?`
             )
-            .get(Number(result.lastInsertRowid)) as unknown as DbTaskUpdate;
+            .get(Number(result.lastInsertRowid)) as unknown as DatabaseTaskUpdate;
 
-        const taskRow = db
+        const taskRow = database
             .prepare("SELECT title, assignee FROM tasks WHERE id = ?")
             .get(id) as unknown as { title: string; assignee: Assignee | null };
 
@@ -693,13 +684,13 @@ export default function tasksRoutes(
             void notifyMira("progress", { id, title: taskRow.title });
         }
 
-        res.status(201).json(toFrontendTaskUpdate(row));
+        response.status(201).json(toFrontendTaskUpdate(row));
     });
 
-    app.patch("/api/tasks/:id/updates/:updateId", express.json(), (req, res) => {
-        const id = Number(req.params.id);
-        const updateId = Number(req.params.updateId);
-        const { author, messageMd } = req.body as {
+    app.patch("/api/tasks/:id/updates/:updateId", express.json(), (request, response) => {
+        const id = Number(request.params.id);
+        const updateId = Number(request.params.updateId);
+        const { author, messageMd } = request.body as {
             author?: Assignee;
             messageMd?: string;
         };
@@ -710,84 +701,86 @@ export default function tasksRoutes(
             !isValidAssignee(author) ||
             !messageMd?.trim()
         ) {
-            res.status(400).json({ error: "Invalid update payload" });
+            response.status(400).json({ error: "Invalid update payload" });
             return;
         }
 
-        const existing = db
+        const existing = database
             .prepare("SELECT id FROM task_updates WHERE id = ? AND task_id = ?")
             .get(updateId, id);
 
         if (!existing) {
-            res.status(404).json({ error: "Update not found" });
+            response.status(404).json({ error: "Update not found" });
             return;
         }
 
         const updatedAt = dateToISOString(new Date());
-        db.prepare(
-            `UPDATE task_updates
+        database
+            .prepare(
+                `UPDATE task_updates
              SET author = ?, message_md = ?
              WHERE id = ? AND task_id = ?`
-        ).run(author, messageMd.trim(), updateId, id);
-        db.prepare("UPDATE tasks SET updated_at = ? WHERE id = ?").run(updatedAt, id);
+            )
+            .run(author, messageMd.trim(), updateId, id);
+        database
+            .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
+            .run(updatedAt, id);
 
-        const row = db
+        const row = database
             .prepare(
                 `SELECT id, task_id, author, message_md, created_at
                  FROM task_updates
                  WHERE id = ?`
             )
-            .get(updateId) as unknown as DbTaskUpdate;
+            .get(updateId) as unknown as DatabaseTaskUpdate;
 
-        res.json(toFrontendTaskUpdate(row));
+        response.json(toFrontendTaskUpdate(row));
     });
 
-    app.delete("/api/tasks/:id/updates/:updateId", (req, res) => {
-        const id = Number(req.params.id);
-        const updateId = Number(req.params.updateId);
+    app.delete("/api/tasks/:id/updates/:updateId", (request, response) => {
+        const id = Number(request.params.id);
+        const updateId = Number(request.params.updateId);
         if (!Number.isSafeInteger(id) || !Number.isSafeInteger(updateId)) {
-            res.status(400).json({ error: "Invalid id" });
+            response.status(400).json({ error: "Invalid id" });
             return;
         }
 
-        const existing = db
+        const existing = database
             .prepare("SELECT id FROM task_updates WHERE id = ? AND task_id = ?")
             .get(updateId, id);
         if (!existing) {
-            res.status(404).json({ error: "Update not found" });
+            response.status(404).json({ error: "Update not found" });
             return;
         }
 
-        db.prepare("DELETE FROM task_updates WHERE id = ? AND task_id = ?").run(
-            updateId,
-            id
-        );
-        db.prepare("UPDATE tasks SET updated_at = ? WHERE id = ?").run(
-            dateToISOString(new Date()),
-            id
-        );
+        database
+            .prepare("DELETE FROM task_updates WHERE id = ? AND task_id = ?")
+            .run(updateId, id);
+        database
+            .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
+            .run(dateToISOString(new Date()), id);
 
-        res.json({ ok: true });
+        response.json({ isOk: true });
     });
 
-    app.post("/api/tasks/:id/move", express.json(), (async (req, res) => {
-        const id = Number(req.params.id);
-        const { columnLabel } = req.body as { columnLabel?: string };
+    app.post("/api/tasks/:id/move", express.json(), (async (request, response) => {
+        const id = Number(request.params.id);
+        const { columnLabel } = request.body as { columnLabel?: string };
 
         if (!Number.isSafeInteger(id) || !columnLabel) {
-            res.status(400).json({ error: "Invalid request" });
+            response.status(400).json({ error: "Invalid request" });
             return;
         }
 
-        const existing = db
+        const existing = database
             .prepare(
                 `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
                  FROM tasks WHERE id = ?`
             )
-            .get(id) as unknown as DbTask | undefined;
+            .get(id) as unknown as DatabaseTask | undefined;
 
         if (!existing) {
-            res.status(404).json({ error: "Task not found" });
+            response.status(404).json({ error: "Task not found" });
             return;
         }
 
@@ -801,21 +794,23 @@ export default function tasksRoutes(
 
         const updatedAt = dateToISOString(new Date());
 
-        db.prepare(
-            `UPDATE tasks
+        database
+            .prepare(
+                `UPDATE tasks
              SET status = ?, labels_json = ?, updated_at = ?
              WHERE id = ?`
-        ).run(status, JSON.stringify(labels), updatedAt, id);
+            )
+            .run(status, JSON.stringify(labels), updatedAt, id);
 
         recordEvent(id, "moved", { status });
 
-        const row = db
+        const row = database
             .prepare(
                 `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
                  FROM tasks WHERE id = ?`
             )
-            .get(id) as unknown as DbTask;
+            .get(id) as unknown as DatabaseTask;
 
-        res.json(toFrontendTask(row));
+        response.json(toFrontendTask(row));
     }) as RequestHandler);
 }

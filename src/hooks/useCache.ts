@@ -65,9 +65,10 @@ export function useRefreshCacheEntry() {
 
             const results = await Promise.all(
                 keys.map((key) =>
-                    apiPostRequired<{ ok: boolean; entry: CacheEnvelope<unknown> }>(
-                        `/cache/${encodeURIComponent(key)}/refresh`
-                    )
+                    apiPostRequired<{
+                        isOk: boolean;
+                        entry: CacheEnvelope<unknown>;
+                    }>(`/cache/${encodeURIComponent(key)}/refresh`)
                 )
             );
 

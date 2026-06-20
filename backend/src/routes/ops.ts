@@ -1,11 +1,8 @@
 import express, { type RequestHandler } from "express";
 
-import { db } from "../db.js";
-import { asyncRoute as baseAsyncRoute } from "../lib/errors.js";
-import {
-    __testing as logRotationTesting,
-    runElevatedLogRotationService,
-} from "../services/logRotation.js";
+import { database } from "../database.ts";
+import { asyncRoute as baseAsyncRoute } from "../lib/errors.ts";
+import { runElevatedLogRotationService } from "../services/logRotation.ts";
 
 const LOG_ROTATION_STATE_KEY = "log_rotation.state";
 
@@ -14,7 +11,7 @@ interface LogRotationResult {
     stderr: string;
 }
 
-type LogRotationRunner = (options: { dryRun: boolean }) => Promise<LogRotationResult>;
+type LogRotationRunner = (options: { isDryRun: boolean }) => Promise<LogRotationResult>;
 
 function normalizeLastRunErrors(run: Record<string, unknown>): unknown[] {
     if (Array.isArray(run.errors)) {
@@ -44,8 +41,8 @@ function normalizeLastRun(value: unknown) {
     }
     const run = value as Record<string, unknown>;
     return {
-        ok: run.ok === true,
-        dryRun: run.dryRun === true,
+        isOk: run.isOk === true,
+        isDryRun: run.isDryRun === true,
         startedAt: typeof run.startedAt === "string" ? run.startedAt : null,
         finishedAt: typeof run.finishedAt === "string" ? run.finishedAt : null,
         checkedGroups: Number.isFinite(Number(run.checkedGroups))
@@ -82,7 +79,7 @@ function asyncRoute(handler: RequestHandler): RequestHandler {
 
 /** Performs read log rotation status. */
 async function readLogRotationStatus() {
-    const row = db
+    const row = database
         .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
         .get(LOG_ROTATION_STATE_KEY) as undefined | { data_json?: string | null };
     const raw = row?.data_json ?? "";
@@ -95,36 +92,36 @@ async function readLogRotationStatus() {
         }
     }
     return {
-        success: true,
+        isSuccess: true,
         lastRun: normalizeLastRun(data?.lastRun),
     };
 }
 
 /** Performs run log rotation. */
 export async function runLogRotation(options: {
-    dryRun: boolean;
+    isDryRun: boolean;
 }): Promise<LogRotationResult> {
     return elevatedLogRotationRunner(options);
 }
 
-let elevatedLogRotationRunner: LogRotationRunner = runElevatedLogRotationService;
+const elevatedLogRotationRunner: LogRotationRunner = runElevatedLogRotationService;
 
 /** Registers ops API routes. */
 export default function opsRoutes(app: express.Application): void {
     app.get(
         "/api/ops/log-rotation/status",
-        asyncRoute(async (_req, res) => {
-            res.json(await readLogRotationStatus());
+        asyncRoute(async (_request, response) => {
+            response.json(await readLogRotationStatus());
         })
     );
 
     app.post(
         "/api/ops/log-rotation/dry-run",
         express.json(),
-        asyncRoute(async (_req, res) => {
-            const { result, stderr } = await runLogRotation({ dryRun: true });
-            res.json({
-                success: result?.ok === true,
+        asyncRoute(async (_request, response) => {
+            const { result, stderr } = await runLogRotation({ isDryRun: true });
+            response.json({
+                isSuccess: result?.isOk === true,
                 result,
                 stderr,
             });
@@ -134,24 +131,13 @@ export default function opsRoutes(app: express.Application): void {
     app.post(
         "/api/ops/log-rotation/run",
         express.json(),
-        asyncRoute(async (_req, res) => {
-            const { result, stderr } = await runLogRotation({ dryRun: false });
-            res.json({
-                success: result?.ok === true,
+        asyncRoute(async (_request, response) => {
+            const { result, stderr } = await runLogRotation({ isDryRun: false });
+            response.json({
+                isSuccess: result?.isOk === true,
                 result,
                 stderr,
             });
         })
     );
 }
-
-export const __testing = {
-    resetLogRotationRunner() {
-        elevatedLogRotationRunner = runElevatedLogRotationService;
-        logRotationTesting.resetElevatedLogRotationExecFileRunner();
-    },
-    setElevatedLogRotationRunner(runner: LogRotationRunner) {
-        elevatedLogRotationRunner = runner;
-    },
-    setLogRotationExecFileRunner: logRotationTesting.setElevatedLogRotationExecFileRunner,
-};

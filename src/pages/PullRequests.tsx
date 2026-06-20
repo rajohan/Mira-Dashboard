@@ -98,7 +98,7 @@ function authorLabel(pr: PullRequestSummary): string {
 /** Performs status variant. */
 function statusVariant(value: string | undefined) {
     const normalized = (value || "").toLowerCase();
-    if (["mergeable", "clean", "ok", "success"].includes(normalized)) {
+    if (["mergeable", "clean", "isOk", "success"].includes(normalized)) {
         return "success" as const;
     }
 
@@ -123,7 +123,7 @@ function statusVariant(value: string | undefined) {
 
 /** Performs review decision variant. */
 function reviewDecisionVariant(pr: PullRequestSummary) {
-    if (pullRequestReviewApproved(pr)) return "success" as const;
+    if (isPullRequestReviewApproved(pr)) return "success" as const;
     const value = pr.reviewDecision;
     const normalized = (value || "").toUpperCase();
     if (normalized === "CHANGES_REQUESTED") return "error" as const;
@@ -133,7 +133,7 @@ function reviewDecisionVariant(pr: PullRequestSummary) {
 
 /** Performs review decision label. */
 function reviewDecisionLabel(pr: PullRequestSummary) {
-    if (pullRequestReviewApproved(pr)) return "Review approved";
+    if (isPullRequestReviewApproved(pr)) return "Review approved";
     const value = pr.reviewDecision;
     const normalized = (value || "").toUpperCase();
     switch (normalized) {
@@ -147,7 +147,7 @@ function reviewDecisionLabel(pr: PullRequestSummary) {
 }
 
 /** Returns whether the pull request has a dashboard-accepted approval. */
-function pullRequestReviewApproved(pr: PullRequestSummary): boolean {
+function isPullRequestReviewApproved(pr: PullRequestSummary): boolean {
     return (
         pr.reviewDecision?.toUpperCase() === "APPROVED" || pr.reviewerApproved === true
     );
@@ -189,7 +189,7 @@ function summarizeChecks(checks: unknown[] | undefined) {
         return { label: "Checks skipped", variant: "warning" as const };
     }
 
-    if (pullRequestChecksPassed(checks)) {
+    if (hasPullRequestChecksPassed(checks)) {
         return { label: "Checks passed", variant: "success" as const };
     }
 
@@ -197,7 +197,7 @@ function summarizeChecks(checks: unknown[] | undefined) {
 }
 
 /** Returns whether pull request checks are conclusively passing. */
-function pullRequestChecksPassed(checks: unknown[] | undefined): boolean {
+function hasPullRequestChecksPassed(checks: unknown[] | undefined): boolean {
     const records = (checks || []).filter(
         (check): check is Record<string, unknown> =>
             Boolean(check) && typeof check === "object" && !Array.isArray(check)
@@ -225,13 +225,13 @@ function normalizedCheckValue(value: unknown): string {
 
 /** Performs deployment variant. */
 function deploymentVariant(status: DeploymentJob["status"]) {
-    if (status === "ok") return "success" as const;
+    if (status === "isOk") return "success" as const;
     if (status === "failed") return "error" as const;
     if (status === "restart-scheduled") return "warning" as const;
     return "info" as const;
 }
 
-/** Renders the deploy commit title and commit reference. */
+/** Renders the deployment commit title and commit reference. */
 function deploymentCommitLabel(deployment: DeploymentJob): ReactNode {
     const commit = deployment.commit || deployment.id;
     if (!deployment.commitTitle) return commit;
@@ -287,7 +287,7 @@ function checkoutMessage(
 }
 
 /** Returns whether GitHub currently reports a pull request merge blocker. */
-function githubMergeBlocked(pr: PullRequestSummary): boolean {
+function isGithubMergeBlocked(pr: PullRequestSummary): boolean {
     return (
         ["BEHIND", "BLOCKED"].includes(pr.mergeStateStatus?.toUpperCase() || "") ||
         ["CONFLICTING", "DIRTY"].includes(pr.mergeable?.toUpperCase() || "")
@@ -295,25 +295,25 @@ function githubMergeBlocked(pr: PullRequestSummary): boolean {
 }
 
 /** Returns whether GitHub reports the pull request branch is behind the base branch. */
-function pullRequestBranchBehind(pr: PullRequestSummary): boolean {
+function isPullRequestBranchBehind(pr: PullRequestSummary): boolean {
     return pr.mergeStateStatus?.toUpperCase() === "BEHIND";
 }
 
 /** Returns whether GitHub reports merge conflicts for a pull request. */
-function pullRequestHasConflicts(pr: PullRequestSummary): boolean {
+function hasPullRequestConflicts(pr: PullRequestSummary): boolean {
     const mergeable = pr.mergeable?.toUpperCase();
     return mergeable === "CONFLICTING" || mergeable === "DIRTY";
 }
 
 /** Returns whether the configured reviewer can approve the pull request review. */
 function canConfiguredReviewerApproveReview(pr: PullRequestSummary): boolean {
-    if (typeof pr.reviewerCanApprove === "boolean") {
-        return pr.reviewerCanApprove;
+    if (typeof pr.canReviewerApprove === "boolean") {
+        return pr.canReviewerApprove;
     }
     return (
         pr.author?.login !== DEFAULT_REVIEWER_AUTHOR &&
         !pr.isDraft &&
-        !pullRequestReviewApproved(pr)
+        !isPullRequestReviewApproved(pr)
     );
 }
 
@@ -323,7 +323,7 @@ function actionLabel(action: Exclude<PendingAction, null>) {
         case "merge":
             return "Merge PR";
         case "merge-deploy":
-            return "Merge + deploy";
+            return "Merge + Deploy";
         case "review-approve":
             return "Approve PR";
         case "reject":
@@ -375,9 +375,9 @@ function PullRequestDescription({ body }: { body: string }) {
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeRaw, rehypeSanitize]}
                     components={{
-                        a: ({ node, ...props }) => {
+                        a: ({ node, ...properties }) => {
                             void node;
-                            return <a {...props} target="_blank" rel="noreferrer" />;
+                            return <a {...properties} target="_blank" rel="noreferrer" />;
                         },
                     }}
                 >
@@ -447,7 +447,7 @@ function PullRequestCard({
     );
 }
 
-/** Renders recent dashboard deploy jobs. */
+/** Renders recent dashboard deployment jobs. */
 function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
     return (
         <Card variant="bordered" className="h-fit space-y-3">
@@ -542,7 +542,7 @@ export function PullRequests() {
                 case "merge": {
                     const result = await approvePullRequest.mutateAsync({
                         number: action.pr.number,
-                        deploy: false,
+                        willDeploy: false,
                     });
                     setLastResult(actionResultMessage(result.message, result.cleanup));
                     break;
@@ -551,7 +551,7 @@ export function PullRequests() {
                 case "merge-deploy": {
                     const result = await approvePullRequest.mutateAsync({
                         number: action.pr.number,
-                        deploy: true,
+                        willDeploy: true,
                     });
                     const message = result.deployError
                         ? `${result.message}: ${result.deployError}`
@@ -592,27 +592,27 @@ export function PullRequests() {
 
     /** Renders merge controls for a pull request. */
     function renderPullRequestActions(pr: PullRequestSummary) {
-        const checksPassed = pullRequestChecksPassed(pr.statusCheckRollup);
-        const reviewApproved = pullRequestReviewApproved(pr);
-        const mergeBlocked = githubMergeBlocked(pr);
+        const isChecksPassed = hasPullRequestChecksPassed(pr.statusCheckRollup);
+        const isReviewApproved = isPullRequestReviewApproved(pr);
+        const isMergeBlocked = isGithubMergeBlocked(pr);
         const canUpdateBranch =
             pr.baseRefName === DEFAULT_BASE &&
-            pullRequestBranchBehind(pr) &&
-            !pullRequestHasConflicts(pr);
+            isPullRequestBranchBehind(pr) &&
+            !hasPullRequestConflicts(pr);
         const mergeDisabled =
             isActionPending ||
             isProductionActionBlocked ||
             pr.isDraft ||
-            !checksPassed ||
-            !reviewApproved ||
-            mergeBlocked;
+            !isChecksPassed ||
+            !isReviewApproved ||
+            isMergeBlocked;
         let mergeDisabledReason: string | undefined;
         if (pr.isDraft) {
             mergeDisabledReason =
                 "Draft pull requests cannot be merged from the dashboard";
-        } else if (checksPassed) {
-            if (reviewApproved) {
-                if (mergeBlocked) {
+        } else if (isChecksPassed) {
+            if (isReviewApproved) {
+                if (isMergeBlocked) {
                     mergeDisabledReason =
                         "GitHub reports this pull request is blocked from merging";
                 } else if (isProductionActionBlocked) {
@@ -684,7 +684,7 @@ export function PullRequests() {
                     aria-describedby={mergeDisabledReasonId}
                 >
                     <Rocket className="h-4 w-4" />
-                    Merge + deploy
+                    Merge + Deploy
                 </Button>
                 <Button
                     variant="secondary"

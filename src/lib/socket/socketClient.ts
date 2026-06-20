@@ -21,7 +21,7 @@ export interface SocketClient {
     disconnect: () => void;
     request: <T = unknown>(
         method: string,
-        params?: Record<string, unknown>
+        parameters?: Record<string, unknown>
     ) => Promise<T>;
     isOpen: () => boolean;
 }
@@ -53,11 +53,11 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             try {
                 const data = JSON.parse(event.data) as SocketEnvelope;
 
-                if (data.type === "res" && data.id) {
+                if (data.type === "response" && data.id) {
                     const pending = pendingRequests.get(data.id);
                     if (pending) {
                         pendingRequests.delete(data.id);
-                        if (data.ok) {
+                        if (data.isOk) {
                             pending.resolve(data.payload);
                         } else {
                             pending.reject(data.error);
@@ -74,7 +74,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         ws.addEventListener("close", () => {
             options.onClose?.();
             if (shouldReconnect) {
-                setTimeout(() => {
+                window.setTimeout(() => {
                     if (shouldReconnect) {
                         connect();
                     }
@@ -102,7 +102,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
     /** Performs request. */
     const request = <T = unknown>(
         method: string,
-        params?: Record<string, unknown>
+        parameters?: Record<string, unknown>
     ): Promise<T> => {
         return new Promise((resolve, reject) => {
             if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -121,11 +121,11 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                     type: "req",
                     id,
                     method,
-                    params,
+                    params: parameters,
                 })
             );
 
-            setTimeout(() => {
+            window.setTimeout(() => {
                 if (!pendingRequests.has(id)) {
                     return;
                 }

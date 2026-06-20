@@ -1,6 +1,7 @@
 import express, { type RequestHandler } from "express";
 
-import gateway from "../gateway.js";
+import gateway from "../gateway.ts";
+import { httpStatusCode } from "../lib/errors.ts";
 
 /** Represents cron job. */
 interface CronJob {
@@ -38,24 +39,32 @@ function normalizeJobs(payload: unknown): CronJob[] {
     return [];
 }
 
+function handleCronError(
+    response: express.Response,
+    error: unknown,
+    fallback = "Cron request failed"
+): void {
+    response.status(httpStatusCode(error)).json({ error: fallback });
+}
+
 /** Registers cron API routes. */
 export default function cronRoutes(app: express.Application): void {
-    app.get("/api/cron/jobs", (async (_req, res) => {
+    app.get("/api/cron/jobs", (async (_request, response) => {
         try {
             const payload = await gateway.request("cron.list", { includeDisabled: true });
             const jobs = normalizeJobs(payload);
-            res.json({ jobs });
+            response.json({ jobs });
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            handleCronError(response, error, "Failed to list cron jobs");
         }
     }) as RequestHandler);
 
-    app.post("/api/cron/jobs/:id/toggle", express.json(), (async (req, res) => {
-        const jobId = req.params.id;
-        const enabled = req.body?.enabled;
+    app.post("/api/cron/jobs/:id/toggle", express.json(), (async (request, response) => {
+        const jobId = request.params.id;
+        const enabled = request.body?.enabled;
 
         if (typeof enabled !== "boolean") {
-            res.status(400).json({ error: "enabled must be a boolean" });
+            response.status(400).json({ error: "enabled must be a boolean" });
             return;
         }
 
@@ -64,48 +73,48 @@ export default function cronRoutes(app: express.Application): void {
                 jobId,
                 patch: { enabled },
             });
-            res.json({ ok: true });
+            response.json({ isOk: true });
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            handleCronError(response, error, "Failed to toggle cron job");
         }
     }) as RequestHandler);
 
-    app.post("/api/cron/jobs/:id/update", express.json(), (async (req, res) => {
-        const jobId = req.params.id;
-        const patch = req.body?.patch;
+    app.post("/api/cron/jobs/:id/update", express.json(), (async (request, response) => {
+        const jobId = request.params.id;
+        const patch = request.body?.patch;
 
         if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
-            res.status(400).json({ error: "patch must be an object" });
+            response.status(400).json({ error: "patch must be an object" });
             return;
         }
 
         try {
             await gateway.request("cron.update", { jobId, patch });
-            res.json({ ok: true });
+            response.json({ isOk: true });
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            handleCronError(response, error, "Failed to update cron job");
         }
     }) as RequestHandler);
 
-    app.post("/api/cron/jobs/:id/run", (async (req, res) => {
-        const jobId = req.params.id;
+    app.post("/api/cron/jobs/:id/run", (async (request, response) => {
+        const jobId = request.params.id;
 
         try {
             const payload = await gateway.request("cron.run", { jobId });
-            res.json({ ok: true, payload });
+            response.json({ isOk: true, payload });
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            handleCronError(response, error, "Failed to run cron job");
         }
     }) as RequestHandler);
 
-    app.post("/api/cron/jobs/:id/delete", (async (req, res) => {
-        const jobId = req.params.id;
+    app.post("/api/cron/jobs/:id/delete", (async (request, response) => {
+        const jobId = request.params.id;
 
         try {
             const payload = await gateway.request("cron.remove", { jobId });
-            res.json({ ok: true, payload });
+            response.json({ isOk: true, payload });
         } catch (error) {
-            res.status(500).json({ error: (error as Error).message });
+            handleCronError(response, error, "Failed to delete cron job");
         }
     }) as RequestHandler);
 }

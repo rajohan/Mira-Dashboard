@@ -1,14 +1,14 @@
 import { type MiraComment } from "../../../types/moltbook";
-import { formatTime, getMoltbookUrl, truncate } from "../../../utils/moltbookUtils";
+import { formatTime, getMoltbookUrl, truncate } from "../../../utils/moltbookUtilities";
 import { Card } from "../../ui/Card";
 
 /** Provides props for my comment card. */
-interface MyCommentCardProps {
+interface MyCommentCardProperties {
     comment: MiraComment;
 }
 
 /** Renders the my comment card UI. */
-export function MyCommentCard({ comment }: MyCommentCardProps) {
+export function MyCommentCard({ comment }: MyCommentCardProperties) {
     return (
         <Card className="p-3 sm:p-4">
             <div className="text-primary-500 mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">

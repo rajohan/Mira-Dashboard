@@ -28,7 +28,7 @@ function truncateMiddle(value: string, maxLength = 48): string {
 }
 
 /** Provides props for Docker volumes table. */
-interface DockerVolumesTableProps {
+interface DockerVolumesTableProperties {
     volumes: DockerVolume[];
     onDelete: (volumeName: string) => void;
     onPruneUnused: () => void;
@@ -41,7 +41,7 @@ export function DockerVolumesTable({
     onDelete,
     onPruneUnused,
     isPruning = false,
-}: DockerVolumesTableProps) {
+}: DockerVolumesTableProperties) {
     const [sorting, setSorting] = useState<SortingState>([]);
 
     const columns = [

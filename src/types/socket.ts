@@ -6,7 +6,7 @@ import type { Session } from "./session";
 export interface SocketEnvelope {
     type?: string;
     id?: string;
-    ok?: boolean;
+    isOk?: boolean;
     error?: unknown;
     payload?: unknown;
     event?: string;
