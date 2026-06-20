@@ -39,7 +39,16 @@ const dockerExecPidWaitTimeoutMs = DEFAULT_DOCKER_EXEC_PID_WAIT_TIMEOUT_MS;
 const DOCKER_EXEC_PID_WAIT_INTERVAL_MS = 50;
 const DOCKER_REQUEST_TIMEOUT_MS = 30_000;
 const SENSITIVE_ENV_KEY_PATTERN =
-    /(?:SECRET|TOKEN|KEY|PASSWORD|API[_-]?KEY|ACCESS[_-]?TOKEN)/iu;
+    /(?:SECRET|TOKEN|KEY|PASSWORD|CREDENTIAL|PRIVATE|DSN|DATABASE[_-]?URL|DB[_-]?URL|REDIS[_-]?URL|MONGO(?:DB)?[_-]?URL|CONNECTION[_-]?STRING|API[_-]?KEY|ACCESS[_-]?TOKEN|PAT|(?:^|[_-])URL$)/iu;
+
+function hasEmbeddedCredentials(value: string): boolean {
+    try {
+        const url = new URL(value);
+        return Boolean(url.username || url.password);
+    } catch {
+        return false;
+    }
+}
 
 function redactEnvironmentValue(value: unknown): string {
     const environmentValue = String(value);
@@ -51,7 +60,8 @@ function redactEnvironmentValue(value: unknown): string {
     }
 
     const key = environmentValue.slice(0, separatorIndex);
-    if (!SENSITIVE_ENV_KEY_PATTERN.test(key)) {
+    const rawValue = environmentValue.slice(separatorIndex + 1);
+    if (!SENSITIVE_ENV_KEY_PATTERN.test(key) && !hasEmbeddedCredentials(rawValue)) {
         return environmentValue;
     }
 

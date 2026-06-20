@@ -68,7 +68,11 @@ function resolveOpenclawRoot(): string | null {
     const configuredRoot =
         process.env.OPENCLAW_HOME?.trim() ||
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
-    const homeDirectory = path.resolve(process.env.HOME?.trim() || os.homedir().trim());
+    const rawHomeDirectory = process.env.HOME?.trim();
+    const homeDirectory =
+        rawHomeDirectory && path.isAbsolute(rawHomeDirectory)
+            ? path.resolve(rawHomeDirectory)
+            : os.homedir().trim();
     if (
         !configuredRoot &&
         (!homeDirectory ||

@@ -142,6 +142,20 @@ function realExistingChildDirectoryFromVerifiedParent(
     }
 }
 
+function assertOpenedDirectoryMatches(parentFd: number, realDirectory: string): void {
+    const openedStat = FS.fstatSync(parentFd);
+    const realDirectoryStat = FS.statSync(realDirectory);
+    if (
+        openedStat.dev !== realDirectoryStat.dev ||
+        openedStat.ino !== realDirectoryStat.ino ||
+        !openedStat.isDirectory()
+    ) {
+        throw Object.assign(new Error("Directory path validation failed"), {
+            code: "EACCES",
+        });
+    }
+}
+
 /** Matches agent ids that are safe to use as path segments. */
 const SAFE_AGENT_ID_RE = /^[a-zA-Z0-9._-]+$/u;
 
@@ -477,6 +491,76 @@ function nowIso(): string {
 function timestampToIso(timestamp: number): string {
     const date = new Date(timestamp);
     return date.toISOString();
+}
+
+async function updateAgentMetadataFromVerifiedDirectory({
+    realMetadataDirectory,
+    realExpectedSessionsDirectory,
+    agentId,
+    currentTask,
+}: {
+    realMetadataDirectory: string;
+    realExpectedSessionsDirectory: string;
+    agentId: string;
+    currentTask: string;
+}): Promise<{ metadata: AgentMetadata; safeTask: string; ts: string }> {
+    const metadataDirectoryFd = FS.openSync(
+        Buffer.from(realMetadataDirectory),
+        FS.constants.O_DIRECTORY | FS.constants.O_RDONLY | FS.constants.O_NOFOLLOW
+    );
+    try {
+        assertOpenedDirectoryMatches(metadataDirectoryFd, realExpectedSessionsDirectory);
+        const safeMetadataPath = Path.join(
+            "/proc/self/fd",
+            String(metadataDirectoryFd),
+            "metadata.json"
+        );
+
+        let metadata: AgentMetadata = {};
+        try {
+            const metadataText = await readTextNoFollowGuarded(
+                guardedPath(safeMetadataPath)
+            );
+            let parsedMetadata: unknown;
+            try {
+                parsedMetadata = JSON5.parse(metadataText) as unknown;
+            } catch (parseError) {
+                console.warn(
+                    `[Agents] Ignoring malformed metadata for ${agentId} at ${Path.join(realMetadataDirectory, "metadata.json")}:`,
+                    (parseError as Error).message
+                );
+                parsedMetadata = {};
+            }
+            metadata =
+                parsedMetadata &&
+                typeof parsedMetadata === "object" &&
+                !Array.isArray(parsedMetadata)
+                    ? (parsedMetadata as AgentMetadata)
+                    : {};
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                throw error;
+            }
+        }
+
+        const safeTask = currentTask.trim().slice(0, 100);
+        const ts = nowIso();
+
+        if (safeTask.length > 0) {
+            metadata.currentTask = safeTask;
+        }
+        metadata.updatedAt = ts;
+
+        assertOpenedDirectoryMatches(metadataDirectoryFd, realExpectedSessionsDirectory);
+        await writeTextNoFollowGuarded(
+            guardedPath(safeMetadataPath),
+            JSON.stringify(metadata, null, 2)
+        );
+
+        return { metadata, safeTask, ts };
+    } finally {
+        FS.closeSync(metadataDirectoryFd);
+    }
 }
 
 /** Performs close stale active tasks. */
@@ -1696,60 +1780,13 @@ export default function agentsRoutes(app: express.Application): void {
                     return;
                 }
 
-                const safeMetadataPath = Path.join(
-                    realMetadataDirectory,
-                    "metadata.json"
-                );
-
-                // Read existing metadata or create new (atomic read, no existsSync check)
-                let metadata: AgentMetadata = {};
-                try {
-                    // lgtm[js/path-injection] safeMetadataPath is re-canonicalized after mkdir and remains under AGENTS_DIR.
-                    const metadataText = await readTextNoFollowGuarded(
-                        guardedPath(safeMetadataPath)
-                    );
-                    let parsedMetadata: unknown;
-                    try {
-                        parsedMetadata = JSON5.parse(metadataText) as unknown;
-                    } catch (parseError) {
-                        console.warn(
-                            `[Agents] Ignoring malformed metadata for ${agentId} at ${safeMetadataPath}:`,
-                            (parseError as Error).message
-                        );
-                        parsedMetadata = {};
-                    }
-                    metadata =
-                        parsedMetadata &&
-                        typeof parsedMetadata === "object" &&
-                        !Array.isArray(parsedMetadata)
-                            ? (parsedMetadata as AgentMetadata)
-                            : {};
-                } catch (error) {
-                    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-                        throw error;
-                    }
-                }
-
-                const safeTask = currentTask.trim().slice(0, 100);
-                const ts = nowIso();
-
-                if (safeTask && safeTask.length > 0) {
-                    metadata.currentTask = safeTask;
-                }
-
-                metadata.updatedAt = ts;
-
-                const latestMetadataDirectory = FS.realpathSync(metadataDirectory);
-                if (latestMetadataDirectory !== realExpectedSessionsDirectory) {
-                    response.status(400).json({ error: "Invalid agent metadata path" });
-                    return;
-                }
-
-                // Write back using O_NOFOLLOW so a swapped final metadata.json symlink is rejected at open time.
-                await writeTextNoFollowGuarded(
-                    guardedPath(Path.join(latestMetadataDirectory, "metadata.json")),
-                    JSON.stringify(metadata, null, 2)
-                );
+                const { metadata, safeTask, ts } =
+                    await updateAgentMetadataFromVerifiedDirectory({
+                        realMetadataDirectory,
+                        realExpectedSessionsDirectory,
+                        agentId,
+                        currentTask,
+                    });
 
                 try {
                     // Auto history handling on task changes after metadata is durably written.
