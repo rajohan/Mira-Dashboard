@@ -19,7 +19,7 @@ interface CdRequest {
 
 /** Represents the CD API response. */
 interface CdResponse {
-    success: boolean;
+    isSuccess: boolean;
     newCwd: string;
     error?: string;
 }
@@ -182,7 +182,7 @@ export default function terminalRoutes(app: express.Application): void {
 
         if (!targetPath || typeof targetPath !== "string" || targetPath.includes("\0")) {
             response.status(400).json({
-                success: false,
+                isSuccess: false,
                 newCwd: resolvedCwd,
                 error: "Missing or invalid path",
             } satisfies CdResponse);
@@ -217,16 +217,16 @@ export default function terminalRoutes(app: express.Application): void {
             const stats = await statGuardedAsync(guardedPath(newPath));
             if (!stats.isDirectory()) {
                 response.status(400).json({
-                    success: false,
+                    isSuccess: false,
                     newCwd: resolvedCwd,
                     error: `Not a directory: ${targetPath}`,
                 } satisfies CdResponse);
                 return;
             }
-            response.json({ success: true, newCwd: newPath } satisfies CdResponse);
+            response.json({ isSuccess: true, newCwd: newPath } satisfies CdResponse);
         } catch {
             response.status(400).json({
-                success: false,
+                isSuccess: false,
                 newCwd: resolvedCwd,
                 error: `No such file or directory: ${targetPath}`,
             } satisfies CdResponse);

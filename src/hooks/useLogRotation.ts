@@ -29,14 +29,14 @@ export interface LogRotationSummary {
 
 /** Represents log rotation run result. */
 export interface LogRotationRunResult {
-    success: boolean;
+    isSuccess: boolean;
     result: LogRotationSummary;
     stderr: string;
 }
 
 /** Represents log rotation status. */
 export interface LogRotationStatus {
-    success: boolean;
+    isSuccess: boolean;
     lastRun: LogRotationSummary | null;
 }
 

@@ -93,7 +93,7 @@ export async function getCompletions(
 
 /** Represents the CD API response. */
 export interface CdResponse {
-    success: boolean;
+    isSuccess: boolean;
     newCwd: string;
     error?: string;
 }

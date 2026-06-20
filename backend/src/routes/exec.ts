@@ -540,7 +540,7 @@ export default function execRoutes(
                 if (!sent) {
                     // Process already gone – close handler will transition to done
                     response.json({
-                        success: true,
+                        isSuccess: true,
                         message: "Process already terminated",
                     });
                     return;
@@ -578,7 +578,7 @@ export default function execRoutes(
                 }
             }, 3000);
 
-            response.json({ success: true, message: "Stop signal sent" });
+            response.json({ isSuccess: true, message: "Stop signal sent" });
         } else {
             response.status(400).json({ error: "Process not available" });
         }

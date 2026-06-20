@@ -323,7 +323,7 @@ function startBackupJob(
     };
 
     const abortBackup = () => {
-        if (isFinalizing) {
+        if (isFinalized || isFinalizing || isAbortRequested) {
             return;
         }
         isAbortRequested = true;

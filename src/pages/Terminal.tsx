@@ -181,7 +181,7 @@ export function Terminal() {
             try {
                 const result = await changeDirectory(targetPath, cwd);
 
-                if (result.success) {
+                if (result.isSuccess) {
                     addCommand({
                         command: trimmedCommand,
                         cwd: shortenPath(cwd),

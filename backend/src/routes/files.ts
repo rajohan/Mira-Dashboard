@@ -99,7 +99,7 @@ interface FileResponse {
 
 /** Represents the write API response. */
 interface WriteResponse {
-    success: boolean;
+    isSuccess: boolean;
     path: string;
     size: number;
     modified: string;
@@ -745,7 +745,7 @@ export default function filesRoutes(
                 }
 
                 response.json({
-                    success: true,
+                    isSuccess: true,
                     path: filePath,
                     size: stat.size,
                     modified: stat.mtime.toISOString(),

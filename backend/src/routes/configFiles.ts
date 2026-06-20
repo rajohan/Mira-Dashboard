@@ -48,7 +48,7 @@ interface ConfigFileResponse {
 
 /** Represents the write API response. */
 interface WriteResponse {
-    success: boolean;
+    isSuccess: boolean;
     path: string;
     relativePath: string;
     size: number;
@@ -709,7 +709,7 @@ export default function configFilesRoutes(
                     return;
                 }
                 response.json({
-                    success: true,
+                    isSuccess: true,
                     path: "config:" + filePath,
                     relativePath: filePath,
                     size: stat.size,

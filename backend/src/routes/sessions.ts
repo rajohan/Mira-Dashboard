@@ -46,19 +46,19 @@ export default function sessionsRoutes(app: express.Application): void {
         try {
             if (action === "stop") {
                 await gateway.abortSessionRun(sessionKey);
-                response.json({ success: true, action });
+                response.json({ isSuccess: true, action });
                 return;
             }
 
             if (action === "compact") {
                 await gateway.sendSessionMessage(sessionKey, "/compact");
-                response.json({ success: true, action });
+                response.json({ isSuccess: true, action });
                 return;
             }
 
             if (action === "reset") {
                 await gateway.sendSessionMessage(sessionKey, "/reset");
-                response.json({ success: true, action });
+                response.json({ isSuccess: true, action });
                 return;
             }
 
@@ -78,7 +78,7 @@ export default function sessionsRoutes(app: express.Application): void {
 
         try {
             const result = await gateway.deleteSession(sessionKey);
-            response.json({ success: true, result });
+            response.json({ isSuccess: true, result });
         } catch (error) {
             response.status(500).json({ error: (error as Error).message });
         }

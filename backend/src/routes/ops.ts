@@ -92,7 +92,7 @@ async function readLogRotationStatus() {
         }
     }
     return {
-        success: true,
+        isSuccess: true,
         lastRun: normalizeLastRun(data?.lastRun),
     };
 }
@@ -121,7 +121,7 @@ export default function opsRoutes(app: express.Application): void {
         asyncRoute(async (_request, response) => {
             const { result, stderr } = await runLogRotation({ isDryRun: true });
             response.json({
-                success: result?.isOk === true,
+                isSuccess: result?.isOk === true,
                 result,
                 stderr,
             });
@@ -134,7 +134,7 @@ export default function opsRoutes(app: express.Application): void {
         asyncRoute(async (_request, response) => {
             const { result, stderr } = await runLogRotation({ isDryRun: false });
             response.json({
-                success: result?.isOk === true,
+                isSuccess: result?.isOk === true,
                 result,
                 stderr,
             });

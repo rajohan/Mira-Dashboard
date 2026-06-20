@@ -200,13 +200,13 @@ describe("Mira Dashboard backend integration", () => {
         expect(readFile.status).toBe(200);
         expect(readFile.body.content).toBe("hello workspace\n");
 
-        const writeFile = await api<{ success: boolean; path: string }>(
+        const writeFile = await api<{ isSuccess: boolean; path: string }>(
             "/api/files/notes/test.md",
             json("PUT", { content: "created in temp workspace\n" })
         );
         expect(writeFile.status).toBe(200);
         expect(writeFile.body).toMatchObject({
-            success: true,
+            isSuccess: true,
             path: "notes/test.md",
         });
 
