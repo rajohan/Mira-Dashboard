@@ -69,6 +69,8 @@ From `backend/`:
 ```bash
 bun run lint
 bun run build
+bun run test
+bun run test:coverage
 bun run format:check
 ```
 

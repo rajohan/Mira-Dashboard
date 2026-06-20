@@ -552,7 +552,7 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
         );
     }
 
-    database.exec("SAVEPOINT moltbook_cache_write");
+    database.run("SAVEPOINT moltbook_cache_write");
     try {
         for (const item of writes) {
             writeCacheSuccess({
@@ -564,10 +564,10 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
                 metadata: item.metadata,
             });
         }
-        database.exec("RELEASE SAVEPOINT moltbook_cache_write");
+        database.run("RELEASE SAVEPOINT moltbook_cache_write");
     } catch (error) {
-        database.exec("ROLLBACK TO SAVEPOINT moltbook_cache_write");
-        database.exec("RELEASE SAVEPOINT moltbook_cache_write");
+        database.run("ROLLBACK TO SAVEPOINT moltbook_cache_write");
+        database.run("RELEASE SAVEPOINT moltbook_cache_write");
         throw error;
     }
     if (firstFailure !== undefined) {
@@ -2091,7 +2091,7 @@ export function registerCacheRefreshScheduledJobs(): void {
         return { key, ...result };
     });
     const seedKeys: string[] = [];
-    database.exec("BEGIN");
+    database.run("BEGIN");
     try {
         removeScheduledJobsNotInAction(
             "cache.refresh",
@@ -2116,10 +2116,10 @@ export function registerCacheRefreshScheduledJobs(): void {
                 seedKeys.push(job.actionPayload.key);
             }
         }
-        database.exec("COMMIT");
+        database.run("COMMIT");
     } catch (error) {
         try {
-            database.exec("ROLLBACK");
+            database.run("ROLLBACK");
         } catch {
             // Preserve the original transaction failure.
         }

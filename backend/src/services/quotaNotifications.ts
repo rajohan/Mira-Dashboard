@@ -261,7 +261,7 @@ export function shouldRegisterQuotaNotificationScheduledJobs(): boolean {
         }
         return { isOk: true };
     });
-    database.exec("BEGIN");
+    database.run("BEGIN");
     try {
         removeScheduledJobsNotInAction("notifications.quota", [
             QUOTA_NOTIFICATION_JOB_ID,
@@ -279,10 +279,10 @@ export function shouldRegisterQuotaNotificationScheduledJobs(): boolean {
             actionKey: "notifications.quota",
             actionPayload: {},
         });
-        database.exec("COMMIT");
+        database.run("COMMIT");
         return existing?.enabled ?? true;
     } catch (error) {
-        database.exec("ROLLBACK");
+        database.run("ROLLBACK");
         throw error;
     }
 }

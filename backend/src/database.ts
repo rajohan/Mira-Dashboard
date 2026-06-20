@@ -237,9 +237,9 @@ function initializeDatabase(): DatabaseSync {
     fs.mkdirSync(dataDirectory, { recursive: true });
 
     const initializedDatabase = new Database(miraDatabasePath);
-    initializedDatabase.exec("PRAGMA foreign_keys = ON");
-    initializedDatabase.exec("PRAGMA busy_timeout = 5000");
-    initializedDatabase.exec(SCHEMA_SQL);
+    initializedDatabase.run("PRAGMA foreign_keys = ON");
+    initializedDatabase.run("PRAGMA busy_timeout = 5000");
+    initializedDatabase.run(SCHEMA_SQL);
 
     return initializedDatabase;
 }

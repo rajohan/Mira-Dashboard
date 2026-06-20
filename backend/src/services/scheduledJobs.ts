@@ -716,7 +716,7 @@ function claimScheduledRun(job: ScheduledJob): ScheduledJobRun | null {
     const nextRunAt = calculateNextRunAt(currentJob);
     const startedAt = nowIso();
     try {
-        database.exec("BEGIN IMMEDIATE");
+        database.run("BEGIN IMMEDIATE");
         const updateResult = database
             .prepare(
                 `UPDATE scheduled_jobs
@@ -725,7 +725,7 @@ function claimScheduledRun(job: ScheduledJob): ScheduledJobRun | null {
             )
             .run(nextRunAt, startedAt, currentJob.id, dueAt);
         if (updateResult.changes === 0) {
-            database.exec("ROLLBACK");
+            database.run("ROLLBACK");
             return null;
         }
         const insertResult = database
@@ -735,7 +735,7 @@ function claimScheduledRun(job: ScheduledJob): ScheduledJobRun | null {
                 ) VALUES (?, 'running', 'schedule', ?, '{}')`
             )
             .run(currentJob.id, startedAt);
-        database.exec("COMMIT");
+        database.run("COMMIT");
         return {
             id: Number(insertResult.lastInsertRowid),
             jobId: currentJob.id,
@@ -748,7 +748,7 @@ function claimScheduledRun(job: ScheduledJob): ScheduledJobRun | null {
         };
     } catch (error) {
         try {
-            database.exec("ROLLBACK");
+            database.run("ROLLBACK");
         } catch {
             // Ignore rollback failures after SQLite has already unwound the transaction.
         }

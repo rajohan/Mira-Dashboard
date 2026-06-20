@@ -1843,7 +1843,7 @@ export function registerLogRotationScheduledJobs(): void {
         }
         return { logRotation };
     });
-    database.exec("BEGIN");
+    database.run("BEGIN");
     try {
         removeScheduledJobsNotInAction(LOG_ROTATION_JOB_ID, [LOG_ROTATION_JOB_ID]);
         const existing = getScheduledJob(LOG_ROTATION_JOB_ID);
@@ -1860,10 +1860,10 @@ export function registerLogRotationScheduledJobs(): void {
             actionKey: LOG_ROTATION_JOB_ID,
             actionPayload: { key: STATE_CACHE_KEY },
         });
-        database.exec("COMMIT");
+        database.run("COMMIT");
     } catch (error) {
         try {
-            database.exec("ROLLBACK");
+            database.run("ROLLBACK");
         } catch {
             // Preserve the registration error.
         }

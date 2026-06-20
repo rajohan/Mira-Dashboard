@@ -66,7 +66,7 @@ function rollbackFirstUserBootstrap(
     previousGatewayToken: string | null = null,
     persistToken: typeof persistGatewayToken = persistGatewayToken
 ): void {
-    database.exec("BEGIN IMMEDIATE");
+    database.run("BEGIN IMMEDIATE");
     try {
         database.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
         database.prepare("DELETE FROM users WHERE id = ?").run(userId);
@@ -79,10 +79,10 @@ function rollbackFirstUserBootstrap(
                 )
                 .run(gatewayToken);
         }
-        database.exec("COMMIT");
+        database.run("COMMIT");
     } catch (error) {
         try {
-            database.exec("ROLLBACK");
+            database.run("ROLLBACK");
         } catch (rollbackError) {
             console.error(
                 "[Auth] First-user rollback transaction rollback failed:",
@@ -99,14 +99,14 @@ function rollbackFirstUserBootstrap(
 }
 
 function rollbackCreatedFirstUser(userId: number): void {
-    database.exec("BEGIN IMMEDIATE");
+    database.run("BEGIN IMMEDIATE");
     try {
         database.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
         database.prepare("DELETE FROM users WHERE id = ?").run(userId);
-        database.exec("COMMIT");
+        database.run("COMMIT");
     } catch (error) {
         try {
-            database.exec("ROLLBACK");
+            database.run("ROLLBACK");
         } catch (rollbackError) {
             console.error(
                 "[Auth] First-user cleanup transaction rollback failed:",

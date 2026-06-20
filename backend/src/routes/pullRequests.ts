@@ -1103,10 +1103,10 @@ function deploymentJobUpdateCommand(job: DeploymentJob): string {
 import { Database } from "bun:sqlite";
 const job = JSON.parse(process.env.MIRA_DEPLOYMENT_JOB || "{}");
 const database = new Database(process.env.MIRA_DEPLOYMENT_DB);
-database.exec("PRAGMA foreign_keys = ON");
-database.exec("PRAGMA busy_timeout = 5000");
+database.run("PRAGMA foreign_keys = ON");
+database.run("PRAGMA busy_timeout = 5000");
 try {
-    database.exec("BEGIN IMMEDIATE");
+    database.run("BEGIN IMMEDIATE");
     database.prepare(\`
     INSERT INTO deployment_jobs (
         id,
@@ -1141,10 +1141,10 @@ try {
     job.stderr ?? null
 );
     database.prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?").run(job.id);
-    database.exec("COMMIT");
+    database.run("COMMIT");
 } catch (error) {
     try {
-        database.exec("ROLLBACK");
+        database.run("ROLLBACK");
     } catch {}
     throw error;
 } finally {

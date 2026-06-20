@@ -1616,7 +1616,7 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
     );
     let isTxnStarted = false;
     try {
-        database.exec("BEGIN");
+        database.run("BEGIN");
         isTxnStarted = true;
         const discoveredAppSlugs = new Set(
             successfulOrPartialDiscoveries.map((item) => item.appSlug)
@@ -1673,12 +1673,12 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
                 timestamp
             );
         }
-        database.exec("COMMIT");
+        database.run("COMMIT");
     } catch (error) {
         let failureMessage = caughtMessage(error);
         if (isTxnStarted) {
             try {
-                database.exec("ROLLBACK");
+                database.run("ROLLBACK");
             } catch (rollbackError) {
                 failureMessage += `; rollback failed: ${caughtMessage(rollbackError)}`;
             }
@@ -2188,7 +2188,7 @@ export function registerDockerUpdaterScheduledJobs(): void {
         },
         { timeoutMs: 30 * 60 * 1000 }
     );
-    database.exec("BEGIN");
+    database.run("BEGIN");
     try {
         removeScheduledJobsNotInAction("docker.updater", [job.id]);
         const existing = getScheduledJob(job.id);
@@ -2200,9 +2200,9 @@ export function registerDockerUpdaterScheduledJobs(): void {
             timeOfDay: preservedTimeOfDay(existing, job.timeOfDay),
             cronExpression: existing?.cronExpression ?? null,
         });
-        database.exec("COMMIT");
+        database.run("COMMIT");
     } catch (error) {
-        database.exec("ROLLBACK");
+        database.run("ROLLBACK");
         throw error;
     }
 }

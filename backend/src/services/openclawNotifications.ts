@@ -128,7 +128,7 @@ export function registerOpenClawNotificationScheduledJobs(): void {
         }
         return { isOk: true };
     });
-    database.exec("BEGIN");
+    database.run("BEGIN");
     try {
         removeScheduledJobsNotInAction("notifications.openclaw", [
             OPENCLAW_NOTIFICATION_JOB_ID,
@@ -146,9 +146,9 @@ export function registerOpenClawNotificationScheduledJobs(): void {
             actionKey: "notifications.openclaw",
             actionPayload: {},
         });
-        database.exec("COMMIT");
+        database.run("COMMIT");
     } catch (error) {
-        database.exec("ROLLBACK");
+        database.run("ROLLBACK");
         throw error;
     }
 }

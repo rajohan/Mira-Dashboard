@@ -225,7 +225,7 @@ export function createFirstUser(username: string, password: string): AuthUser | 
     const passwordHash = hashPassword(password);
     const rollback = (transactionError?: unknown) => {
         try {
-            database.exec("ROLLBACK");
+            database.run("ROLLBACK");
         } catch (rollbackError) {
             if (transactionError) {
                 throw new AggregateError(
@@ -238,7 +238,7 @@ export function createFirstUser(username: string, password: string): AuthUser | 
         }
     };
 
-    database.exec("BEGIN IMMEDIATE");
+    database.run("BEGIN IMMEDIATE");
     try {
         const result = database
             .prepare(
@@ -251,7 +251,7 @@ export function createFirstUser(username: string, password: string): AuthUser | 
             rollback();
             return null;
         }
-        database.exec("COMMIT");
+        database.run("COMMIT");
         return {
             id: Number(result.lastInsertRowid),
             username: normalizedUsername,

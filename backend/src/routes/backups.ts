@@ -323,6 +323,9 @@ function startBackupJob(
     };
 
     const abortBackup = () => {
+        if (isFinalizing) {
+            return;
+        }
         isAbortRequested = true;
         job.stderr = trimOutput(`${job.stderr}\nBackup aborted by scheduler`.trim());
         if (abortConfig) {
@@ -987,7 +990,7 @@ export function registerBackupScheduledJobs(): void {
         },
         { timeoutMs: SCHEDULED_BACKUP_TIMEOUT_MS }
     );
-    database.exec("BEGIN");
+    database.run("BEGIN");
     try {
         removeScheduledJobsNotInAction(
             "backup.run",
@@ -1005,9 +1008,9 @@ export function registerBackupScheduledJobs(): void {
                 cronExpression: existing?.cronExpression ?? null,
             });
         }
-        database.exec("COMMIT");
+        database.run("COMMIT");
     } catch (error) {
-        database.exec("ROLLBACK");
+        database.run("ROLLBACK");
         throw error;
     }
 }
