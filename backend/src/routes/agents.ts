@@ -120,6 +120,17 @@ function realExistingChildDirectoryFromVerifiedParent(
             });
         }
         const realChild = FS.realpathSync(childPath);
+        const relativeChild = Path.relative(realParent, realChild);
+        if (
+            relativeChild.length === 0 ||
+            relativeChild === ".." ||
+            relativeChild.startsWith(`..${Path.sep}`) ||
+            Path.isAbsolute(relativeChild)
+        ) {
+            throw Object.assign(new Error("Child path escapes parent directory"), {
+                code: "EACCES",
+            });
+        }
         if (!FS.statSync(realChild).isDirectory()) {
             throw Object.assign(new Error("Child directory is not a directory"), {
                 code: "ENOTDIR",
