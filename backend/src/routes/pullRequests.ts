@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { accessSync, constants } from "node:fs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -41,6 +42,39 @@ const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipp
 const OPINIONATED_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
 const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "restart-scheduled"]);
 const BUN_EXECUTABLE = process.env.BUN_BINARY || "bun";
+
+function resolveExecutableFromPath(executable: string): string | null {
+    if (path.isAbsolute(executable)) {
+        return executable;
+    }
+    if (executable.includes(path.sep)) {
+        return path.resolve(executable);
+    }
+
+    const pathDirectories = (process.env.PATH || "").split(path.delimiter);
+    for (const directory of pathDirectories) {
+        if (!directory) {
+            continue;
+        }
+        const candidate = path.join(directory, executable);
+        try {
+            accessSync(candidate, constants.X_OK);
+            return candidate;
+        } catch {
+            // Keep searching PATH.
+        }
+    }
+
+    return null;
+}
+
+function resolveBunExecutable(): string {
+    const resolved = resolveExecutableFromPath(BUN_EXECUTABLE);
+    if (resolved) {
+        return resolved;
+    }
+    return BUN_EXECUTABLE === "bun" ? process.execPath : BUN_EXECUTABLE;
+}
 
 function getResolvedRoots() {
     return {
@@ -1154,7 +1188,7 @@ try {
     return [
         `MIRA_DEPLOYMENT_DB=${shellQuote(miraDatabasePath)}`,
         `MIRA_DEPLOYMENT_JOB=${shellQuote(JSON.stringify(job))}`,
-        shellQuote(BUN_EXECUTABLE),
+        shellQuote(resolveBunExecutable()),
         "-e",
         shellQuote(script),
     ].join(" ");
