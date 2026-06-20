@@ -1,12 +1,10 @@
-import express from "express";
+import { JSON5 } from "bun";
 import FS from "fs";
-import JSON5 from "json5";
 import os from "os";
 import Path from "path";
 
 import { database } from "../database.ts";
 import gateway from "../gateway.ts";
-import { asyncRoute } from "../lib/errors.ts";
 import {
     guardedPath,
     mkdirGuarded,
@@ -169,11 +167,6 @@ export function isValidAgentId(id: string): boolean {
         id !== ".." &&
         SAFE_AGENT_ID_RE.test(id)
     );
-}
-
-/** Returns the first Express route param value regardless of scalar/array shape. */
-function getRouteParameter(value: string | string[] | undefined): string {
-    return Array.isArray(value) ? value[0] || "" : value || "";
 }
 
 function getRealAgentsDirectory(): string | null {
@@ -562,7 +555,7 @@ async function updateAgentMetadataFromVerifiedDirectory({
 }
 
 /** Performs close stale active tasks. */
-function closeStaleActiveTasks(): void {
+export function closeStaleActiveTasks(): void {
     const cutoff = timestampToIso(Date.now() - TASK_IDLE_TIMEOUT_MS);
     database
         .prepare(
@@ -611,7 +604,7 @@ function getActiveHistoryTask(agentId: string): AgentTaskHistoryItem | null {
 }
 
 /** Returns recently completed task-history entries for dashboard display. */
-function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
+export function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
     const rows = database
         .prepare(
             `SELECT id, agent_id, task, status, started_at, completed_at, last_activity_at
@@ -642,7 +635,7 @@ function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
 }
 
 /** Parses agents.yml into dashboard agent records while tolerating empty or malformed input. */
-function parseAgentsConfig(): AgentsConfig | null {
+export function parseAgentsConfig(): AgentsConfig | null {
     const configPath = Path.join(getOpenclawRoot(), "openclaw.json");
 
     try {
@@ -1525,7 +1518,7 @@ async function getAgentStatus(agentId: string): Promise<AgentStatus> {
 }
 
 /** Builds all dashboard agent statuses for a parsed agent config. */
-async function buildAgentStatuses(config: AgentsConfig): Promise<AgentStatus[]> {
+export async function buildAgentStatuses(config: AgentsConfig): Promise<AgentStatus[]> {
     const defaultModel = config.defaults?.model?.primary || "unknown";
     const sessions = await getGatewaySessionsForAgents();
 
@@ -1559,7 +1552,7 @@ async function buildAgentStatuses(config: AgentsConfig): Promise<AgentStatus[]> 
 }
 
 /** Builds one dashboard agent status when the id exists in config. */
-async function buildSingleAgentStatus(
+export async function buildSingleAgentStatus(
     agentId: string,
     config: AgentsConfig
 ): Promise<AgentStatus | null> {
@@ -1599,248 +1592,143 @@ function normalizeGatewaySessionModel(model: string | undefined): string | undef
     return model;
 }
 
-/** Registers agents API routes. */
-export default function agentsRoutes(app: express.Application): void {
-    app.use("/api/agents/:id/metadata", express.json());
+export async function updateAgentCurrentTask(
+    agentId: string,
+    currentTask: unknown
+): Promise<AgentMetadata> {
+    if (!isValidAgentId(agentId)) {
+        throw Object.assign(new Error("Invalid agent ID"), { statusCode: 400 });
+    }
+    if (typeof currentTask !== "string" || currentTask.trim().length === 0) {
+        throw Object.assign(new Error("Provide currentTask"), { statusCode: 400 });
+    }
 
-    // Get agent configuration
-    app.get(
-        "/api/agents/config",
-        asyncRoute(
-            async (_request, response) => {
-                const config = parseAgentsConfig();
-                if (!config) {
-                    response.status(404).json({ error: "Agent configuration not found" });
-                    return;
-                }
-
-                response.json(config);
-            },
-            { fallback: "Agent config failed", logLabel: "[Agents] Config error:" }
-        )
+    const metadataPath = safePathWithinRoot(
+        Path.join(agentId, "sessions", "metadata.json"),
+        getAgentsDirectory()
     );
+    if (!metadataPath) {
+        throw Object.assign(new Error("Invalid agent ID"), { statusCode: 400 });
+    }
+    const metadataDirectory = Path.dirname(metadataPath as string);
+    const realAgentsDirectory = ensureRealAgentsDirectory();
+    if (!realAgentsDirectory) {
+        throw Object.assign(new Error("Invalid agent metadata path"), {
+            statusCode: 400,
+        });
+    }
 
-    // Get all agents with status
-    app.get(
-        "/api/agents/status",
-        asyncRoute(
-            async (_request, response) => {
-                closeStaleActiveTasks();
-                const config = parseAgentsConfig();
-                if (!config) {
-                    response.status(404).json({ error: "Agent configuration not found" });
-                    return;
-                }
-                const agents = await buildAgentStatuses(config);
-                response.json({ agents, timestamp: Date.now() });
-            },
-            { fallback: "Agent status failed", logLabel: "[Agents] Status error:" }
-        )
+    const agentsDirectory = getAgentsDirectory();
+    const expectedSessionsDirectory = Path.join(agentsDirectory, agentId, "sessions");
+    const canonicalExpectedSessionsDirectory = Path.join(
+        realAgentsDirectory,
+        agentId,
+        "sessions"
     );
-
-    // Get single agent status
-    app.get(
-        "/api/agents/:id/status",
-        asyncRoute(
-            async (request, response) => {
-                const agentId = getRouteParameter(request.params.id);
-                if (!isValidAgentId(agentId)) {
-                    response.status(400).json({ error: "Invalid agent ID" });
-                    return;
-                }
-                closeStaleActiveTasks();
-                const config = parseAgentsConfig();
-                if (!config) {
-                    response.status(404).json({ error: "Agent configuration not found" });
-                    return;
-                }
-
-                const status = await buildSingleAgentStatus(agentId, config);
-                if (!status) {
-                    response.status(404).json({ error: `Agent '${agentId}' not found` });
-                    return;
-                }
-
-                response.json(status);
-            },
-            { fallback: "Agent status failed", logLabel: "[Agents] Status error:" }
-        )
+    const safeSessionsDirectory = prepareAgentMetadataDirectoryForWrite(
+        expectedSessionsDirectory,
+        agentsDirectory
     );
+    if (safeSessionsDirectory !== canonicalExpectedSessionsDirectory) {
+        throw Object.assign(new Error("Invalid agent metadata path"), {
+            statusCode: 400,
+        });
+    }
 
-    // Latest completed tasks across agents
-    app.get(
-        "/api/agents/tasks/history",
-        asyncRoute(
-            async (request, response) => {
-                const limit = Math.max(1, Math.min(20, Number(request.query.limit) || 8));
-                closeStaleActiveTasks();
-                const tasks = getLatestCompletedTasks(limit);
-                response.json({ tasks, timestamp: Date.now() });
-            },
-            {
-                fallback: "Agent task history failed",
-                logLabel: "[Agents] Task history error:",
+    const expectedSessionsParent = Path.dirname(safeSessionsDirectory);
+    let realExpectedSessionsParent: string;
+    try {
+        mkdirChildFromVerifiedParent(realAgentsDirectory, agentId);
+        realExpectedSessionsParent = FS.realpathSync(expectedSessionsParent);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {
+            realExpectedSessionsParent = realExistingChildDirectoryFromVerifiedParent(
+                realAgentsDirectory,
+                agentId
+            );
+        } else {
+            throw error;
+        }
+    }
+    if (
+        realExpectedSessionsParent !== Path.dirname(canonicalExpectedSessionsDirectory) ||
+        !FS.statSync(realExpectedSessionsParent).isDirectory()
+    ) {
+        throw Object.assign(new Error("Invalid agent metadata path"), {
+            statusCode: 400,
+        });
+    }
+
+    let realExpectedSessionsDirectory: string;
+    try {
+        mkdirChildFromVerifiedParent(realExpectedSessionsParent, "sessions");
+        realExpectedSessionsDirectory = FS.realpathSync(expectedSessionsDirectory);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {
+            realExpectedSessionsDirectory = realExistingChildDirectoryFromVerifiedParent(
+                realExpectedSessionsParent,
+                "sessions"
+            );
+        } else {
+            throw error;
+        }
+    }
+
+    const realMetadataDirectory = FS.realpathSync(metadataDirectory);
+    if (
+        realMetadataDirectory !== realExpectedSessionsDirectory ||
+        realExpectedSessionsDirectory !== canonicalExpectedSessionsDirectory ||
+        !FS.statSync(realExpectedSessionsDirectory).isDirectory() ||
+        !FS.statSync(realMetadataDirectory).isDirectory()
+    ) {
+        throw Object.assign(new Error("Invalid agent metadata path"), {
+            statusCode: 400,
+        });
+    }
+
+    const { metadata, safeTask, ts } = await updateAgentMetadataFromVerifiedDirectory({
+        agentId,
+        currentTask,
+        realExpectedSessionsDirectory,
+        realMetadataDirectory,
+    });
+
+    try {
+        if (safeTask && safeTask.length > 0) {
+            const currentActive = getActiveHistoryTask(agentId);
+            if (!currentActive) {
+                database
+                    .prepare(
+                        `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
+                         VALUES (?, ?, 'active', ?, ?)`
+                    )
+                    .run(agentId, safeTask, ts, ts);
+            } else if (currentActive.task === safeTask) {
+                database
+                    .prepare(
+                        `UPDATE agent_task_history SET last_activity_at = ? WHERE id = ?`
+                    )
+                    .run(ts, currentActive.id);
+            } else {
+                database
+                    .prepare(
+                        `UPDATE agent_task_history
+                         SET status = 'completed', completed_at = ?, last_activity_at = ?
+                         WHERE id = ?`
+                    )
+                    .run(ts, ts, currentActive.id);
+
+                database
+                    .prepare(
+                        `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
+                         VALUES (?, ?, 'active', ?, ?)`
+                    )
+                    .run(agentId, safeTask, ts, ts);
             }
-        )
-    );
+        }
+    } catch (error) {
+        console.error("[Agents] Task history sync failed:", error);
+    }
 
-    // Update agent metadata (current task)
-    app.put(
-        "/api/agents/:id/metadata",
-        asyncRoute(
-            async (request, response) => {
-                const agentId = getRouteParameter(request.params.id);
-                if (!isValidAgentId(agentId)) {
-                    response.status(400).json({ error: "Invalid agent ID" });
-                    return;
-                }
-
-                const body = request.body as null | { currentTask?: unknown };
-                const currentTask =
-                    body && typeof body === "object" ? body.currentTask : undefined;
-
-                if (typeof currentTask !== "string" || currentTask.trim().length === 0) {
-                    response.status(400).json({ error: "Provide currentTask" });
-                    return;
-                }
-                const metadataPath = safePathWithinRoot(
-                    Path.join(agentId, "sessions", "metadata.json"),
-                    getAgentsDirectory()
-                );
-                if (!metadataPath) {
-                    response.status(400).json({ error: "Invalid agent ID" });
-                    return;
-                }
-                const metadataDirectory = Path.dirname(metadataPath as string);
-
-                const realAgentsDirectory = ensureRealAgentsDirectory();
-                if (!realAgentsDirectory) {
-                    response.status(400).json({ error: "Invalid agent metadata path" });
-                    return;
-                }
-                const agentsDirectory = getAgentsDirectory();
-                const expectedSessionsDirectory = Path.join(
-                    agentsDirectory,
-                    agentId,
-                    "sessions"
-                );
-                const canonicalExpectedSessionsDirectory = Path.join(
-                    realAgentsDirectory,
-                    agentId,
-                    "sessions"
-                );
-                const safeSessionsDirectory = prepareAgentMetadataDirectoryForWrite(
-                    expectedSessionsDirectory,
-                    agentsDirectory
-                );
-                if (safeSessionsDirectory !== canonicalExpectedSessionsDirectory) {
-                    response.status(400).json({ error: "Invalid agent metadata path" });
-                    return;
-                }
-                const expectedSessionsParent = Path.dirname(safeSessionsDirectory);
-                let realExpectedSessionsParent: string;
-                try {
-                    mkdirChildFromVerifiedParent(realAgentsDirectory, agentId);
-                    realExpectedSessionsParent = FS.realpathSync(expectedSessionsParent);
-                } catch (error) {
-                    if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {
-                        realExpectedSessionsParent =
-                            realExistingChildDirectoryFromVerifiedParent(
-                                realAgentsDirectory,
-                                agentId
-                            );
-                    } else {
-                        throw error;
-                    }
-                }
-                if (
-                    realExpectedSessionsParent !==
-                        Path.dirname(canonicalExpectedSessionsDirectory) ||
-                    !FS.statSync(realExpectedSessionsParent).isDirectory()
-                ) {
-                    response.status(400).json({ error: "Invalid agent metadata path" });
-                    return;
-                }
-                let realExpectedSessionsDirectory: string;
-                try {
-                    mkdirChildFromVerifiedParent(realExpectedSessionsParent, "sessions");
-                    realExpectedSessionsDirectory = FS.realpathSync(
-                        expectedSessionsDirectory
-                    );
-                } catch (error) {
-                    if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {
-                        realExpectedSessionsDirectory =
-                            realExistingChildDirectoryFromVerifiedParent(
-                                realExpectedSessionsParent,
-                                "sessions"
-                            );
-                    } else {
-                        throw error;
-                    }
-                }
-                const realMetadataDirectory = FS.realpathSync(metadataDirectory);
-                if (
-                    realMetadataDirectory !== realExpectedSessionsDirectory ||
-                    realExpectedSessionsDirectory !==
-                        canonicalExpectedSessionsDirectory ||
-                    !FS.statSync(realExpectedSessionsDirectory).isDirectory() ||
-                    !FS.statSync(realMetadataDirectory).isDirectory()
-                ) {
-                    response.status(400).json({ error: "Invalid agent metadata path" });
-                    return;
-                }
-
-                const { metadata, safeTask, ts } =
-                    await updateAgentMetadataFromVerifiedDirectory({
-                        realMetadataDirectory,
-                        realExpectedSessionsDirectory,
-                        agentId,
-                        currentTask,
-                    });
-
-                try {
-                    // Auto history handling on task changes after metadata is durably written.
-                    if (safeTask && safeTask.length > 0) {
-                        const currentActive = getActiveHistoryTask(agentId);
-                        if (!currentActive) {
-                            database
-                                .prepare(
-                                    `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
-                             VALUES (?, ?, 'active', ?, ?)`
-                                )
-                                .run(agentId, safeTask, ts, ts);
-                        } else if (currentActive.task === safeTask) {
-                            database
-                                .prepare(
-                                    `UPDATE agent_task_history SET last_activity_at = ? WHERE id = ?`
-                                )
-                                .run(ts, currentActive.id);
-                        } else {
-                            database
-                                .prepare(
-                                    `UPDATE agent_task_history
-                             SET status = 'completed', completed_at = ?, last_activity_at = ?
-                             WHERE id = ?`
-                                )
-                                .run(ts, ts, currentActive.id);
-
-                            database
-                                .prepare(
-                                    `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
-                             VALUES (?, ?, 'active', ?, ?)`
-                                )
-                                .run(agentId, safeTask, ts, ts);
-                        }
-                    }
-                } catch (error) {
-                    console.error("[Agents] Task history sync failed:", error);
-                }
-                response.json(metadata);
-            },
-            {
-                fallback: "Agent metadata update failed",
-                logLabel: "[Agents] Metadata update error:",
-            }
-        )
-    );
+    return metadata;
 }

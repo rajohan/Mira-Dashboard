@@ -1,0 +1,221 @@
+import os from "node:os";
+import path from "node:path";
+
+import { json, readJson } from "../http.ts";
+import { guardedPath, readdirGuardedAsync, statGuardedAsync } from "../lib/guardedOps.ts";
+
+interface CompletionRequest {
+    cwd?: string;
+    partial: string;
+}
+
+interface CdRequest {
+    cwd: string;
+    path: string;
+}
+
+interface CdResponse {
+    error?: string;
+    isSuccess: boolean;
+    newCwd: string;
+}
+
+interface CompletionItem {
+    completion: string;
+    display: string;
+    type: "file" | "directory" | "executable";
+}
+
+interface CompletionResponse {
+    commonPrefix: string;
+    completions: CompletionItem[];
+}
+
+const HOME_DIR = os.homedir();
+
+function expandPath(inputPath: string, cwd: string): string {
+    if (inputPath.includes("\0")) return cwd;
+    if (inputPath.startsWith("/")) return inputPath;
+    if (inputPath.startsWith("~/")) return HOME_DIR + inputPath.slice(1);
+    if (inputPath === "~") return HOME_DIR;
+    return path.join(cwd, inputPath);
+}
+
+async function getCompletions(
+    partial: string,
+    cwd: string,
+    statFile = statGuardedAsync
+): Promise<CompletionResponse> {
+    const trimmed = partial.trim();
+    const lastSpaceIndex = trimmed.lastIndexOf(" ");
+    const pathPart = lastSpaceIndex === -1 ? trimmed : trimmed.slice(lastSpaceIndex + 1);
+    const prefix = lastSpaceIndex === -1 ? "" : trimmed.slice(0, lastSpaceIndex + 1);
+
+    let searchDirectory: string;
+    let searchPrefix: string;
+    let directoryPart = "";
+
+    if (pathPart.includes("/")) {
+        const lastSlashIndex = pathPart.lastIndexOf("/");
+        directoryPart = pathPart.slice(0, lastSlashIndex + 1);
+        searchPrefix = pathPart.slice(lastSlashIndex + 1);
+        searchDirectory = expandPath(directoryPart, cwd);
+    } else {
+        searchDirectory = cwd;
+        searchPrefix = pathPart;
+    }
+
+    try {
+        const entries = await readdirGuardedAsync(guardedPath(searchDirectory), {
+            withFileTypes: true,
+        });
+        const matches: CompletionItem[] = [];
+
+        for (const entry of entries) {
+            const name = entry.name;
+            if (!name.startsWith(searchPrefix) || name.startsWith(".")) continue;
+            const fullPath = path.join(searchDirectory, name);
+            let type: CompletionItem["type"] = "file";
+            if (entry.isDirectory()) {
+                type = "directory";
+            } else if (entry.isFile()) {
+                try {
+                    const stats = await statFile(guardedPath(fullPath));
+                    if (stats.mode & 0o111) type = "executable";
+                } catch {
+                    // ignore unavailable entries
+                }
+            }
+
+            matches.push({
+                completion:
+                    prefix + (pathPart.includes("/") ? directoryPart + name : name),
+                display: name + (type === "directory" ? "/" : ""),
+                type,
+            });
+        }
+
+        matches.sort((a, b) => {
+            const typeOrder = { directory: 0, executable: 1, file: 2 };
+            if (typeOrder[a.type] !== typeOrder[b.type]) {
+                return typeOrder[a.type] - typeOrder[b.type];
+            }
+            return a.display.localeCompare(b.display);
+        });
+
+        let commonPrefix = "";
+        if (matches.length > 0) {
+            const first = matches[0].completion;
+            let index = first.length;
+            while (index > searchPrefix.length) {
+                const candidate = first.slice(0, index);
+                if (matches.every((match) => match.completion.startsWith(candidate))) {
+                    commonPrefix = candidate;
+                    break;
+                }
+                index -= 1;
+            }
+        }
+
+        return { commonPrefix, completions: matches.slice(0, 20) };
+    } catch {
+        return { commonPrefix: "", completions: [] };
+    }
+}
+
+export const terminalRoutes = {
+    "/api/terminal/complete": {
+        POST: async (request: Request) => {
+            const body = await readJson<CompletionRequest | null>(request);
+            if (!body || typeof body !== "object") {
+                return json({ error: "Missing or invalid body" }, { status: 400 });
+            }
+
+            const { cwd, partial } = body;
+            if (
+                typeof partial !== "string" ||
+                partial.length === 0 ||
+                partial.includes("\0")
+            ) {
+                return json({ error: "Missing or invalid partial" }, { status: 400 });
+            }
+            const trimmedCwd = typeof cwd === "string" ? cwd.trim() : undefined;
+            if (
+                cwd !== undefined &&
+                (typeof cwd !== "string" || !trimmedCwd || trimmedCwd.includes("\0"))
+            ) {
+                return json({ error: "Missing or invalid cwd" }, { status: 400 });
+            }
+            return json(await getCompletions(partial, trimmedCwd || HOME_DIR));
+        },
+    },
+
+    "/api/terminal/cd": {
+        POST: async (request: Request) => {
+            const body = await readJson<CdRequest>(request);
+            const resolvedCwd = body.cwd || HOME_DIR;
+            const targetPath = body.path;
+
+            if (
+                !targetPath ||
+                typeof targetPath !== "string" ||
+                targetPath.includes("\0")
+            ) {
+                return json(
+                    {
+                        error: "Missing or invalid path",
+                        isSuccess: false,
+                        newCwd: resolvedCwd,
+                    } satisfies CdResponse,
+                    { status: 400 }
+                );
+            }
+
+            let newPath: string;
+            if (targetPath === "~") {
+                newPath = HOME_DIR;
+            } else if (targetPath.startsWith("~/")) {
+                newPath = HOME_DIR + targetPath.slice(1);
+            } else if (targetPath.startsWith("/")) {
+                newPath = targetPath;
+            } else {
+                newPath = path.join(resolvedCwd, targetPath);
+            }
+
+            const resolvedParts: string[] = [];
+            const pathParts = newPath.split("/").filter(Boolean);
+            for (const part of pathParts) {
+                if (part === "..") {
+                    resolvedParts.pop();
+                } else if (part !== ".") {
+                    resolvedParts.push(part);
+                }
+            }
+            newPath = `/${resolvedParts.join("/")}`;
+
+            try {
+                const stats = await statGuardedAsync(guardedPath(newPath));
+                if (!stats.isDirectory()) {
+                    return json(
+                        {
+                            error: `Not a directory: ${targetPath}`,
+                            isSuccess: false,
+                            newCwd: resolvedCwd,
+                        } satisfies CdResponse,
+                        { status: 400 }
+                    );
+                }
+                return json({ isSuccess: true, newCwd: newPath } satisfies CdResponse);
+            } catch {
+                return json(
+                    {
+                        error: `No such file or directory: ${targetPath}`,
+                        isSuccess: false,
+                        newCwd: resolvedCwd,
+                    } satisfies CdResponse,
+                    { status: 400 }
+                );
+            }
+        },
+    },
+} as const;

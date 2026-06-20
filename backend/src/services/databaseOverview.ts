@@ -1,12 +1,8 @@
-import { execFile, type ExecFileOptionsWithStringEncoding } from "node:child_process";
 import { isIP } from "node:net";
-import { promisify } from "node:util";
 
-import express, { type RequestHandler } from "express";
-
+import { runProcess } from "../lib/processes.ts";
 import { stringFallback } from "../lib/values.ts";
 
-const execFileAsync = promisify(execFile);
 const DOCKER_EXEC_TIMEOUT_MS = 30_000;
 
 /** Represents one PostgreSQL database row from pg_stat_database with numeric values encoded as psql strings. */
@@ -109,17 +105,11 @@ function numberFrom(value: string | null | undefined): number {
 
 /** Runs a command inside a Docker container and returns raw stdout. */
 async function runDockerExec(container: string, command: string[]) {
-    const options: ExecFileOptionsWithStringEncoding = {
-        encoding: "utf8",
-        maxBuffer: 10 * 1024 * 1024,
+    const { stdout } = await runProcess("docker", ["exec", container, ...command], {
         env: process.env,
+        maxBuffer: 10 * 1024 * 1024,
         timeout: DOCKER_EXEC_TIMEOUT_MS,
-    };
-    const { stdout } = await execFileAsync(
-        "docker",
-        ["exec", container, ...command],
-        options
-    );
+    });
     return stdout;
 }
 
@@ -301,7 +291,7 @@ async function getTorrentCounts() {
 }
 
 /** Collects PostgreSQL and PgBouncer metrics used by the database overview endpoint. */
-async function getDatabaseOverview() {
+export async function getDatabaseOverview() {
     const torrentCounts = await getTorrentCounts();
 
     const databaseRows = parseTable<PostgresDatabaseRow>(
@@ -453,23 +443,4 @@ async function getDatabaseOverview() {
         pgbouncerPools: pgBouncerPools,
         pgbouncerStats: pgBouncerStats,
     };
-}
-
-/** Registers GET /API/database/overview for aggregated PostgreSQL and PgBouncer monitoring data. */
-export default function databaseRoutes(app: express.Application): void {
-    app.get("/api/database/overview", (async (_request, response) => {
-        try {
-            const data = await getDatabaseOverview();
-            response.json(data);
-        } catch (error) {
-            const safeError = {
-                code: (error as NodeJS.ErrnoException).code,
-                name: (error as Error).name,
-            };
-            console.error("[databaseRoutes] Failed to load database overview", safeError);
-            response.status(500).json({
-                error: "Failed to load database overview",
-            });
-        }
-    }) as RequestHandler);
 }

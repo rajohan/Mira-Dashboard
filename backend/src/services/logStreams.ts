@@ -1,0 +1,238 @@
+import fs from "fs";
+import path from "path";
+
+import type { DashboardSocket } from "../dashboardSocket.ts";
+import { errorMessage } from "../lib/errors.ts";
+import { guardedPath, openReadNoFollowGuarded } from "../lib/guardedOps.ts";
+
+function dateToISOString(date: Date): string {
+    return date.toISOString();
+}
+
+const logsDirectory = "/tmp/openclaw";
+const logsRouteState: {
+    logWatcher: NodeJS.Timeout | null;
+    isLogPollInFlight: boolean;
+    lastLogSize: number;
+    lastLogFile: string;
+} = { logWatcher: null, isLogPollInFlight: false, lastLogSize: 0, lastLogFile: "" };
+
+const logSubscribers = new Set<DashboardSocket>();
+const MIN_LOG_TAIL_BYTES = 64 * 1024;
+const LOG_BYTES_PER_REQUESTED_LINE = 1024;
+const LOG_TAIL_READ_CHUNK_BYTES = 64 * 1024;
+
+function resolveRealLogsDirectory(): string {
+    return fs.realpathSync(logsDirectory);
+}
+
+/** Returns today log file. */
+function getTodayLogFile(root = resolveRealLogsDirectory()): string {
+    const today = dateToISOString(new Date()).split("T", 1)[0];
+    return path.join(root, "openclaw-" + today + ".log");
+}
+
+async function readLogContent(
+    file: fs.promises.FileHandle,
+    stat: fs.Stats,
+    lines: number | null
+): Promise<string> {
+    if (!lines) {
+        return file.readFile("utf8");
+    }
+
+    const minimumWindowBytes = Math.min(
+        stat.size,
+        Math.max(MIN_LOG_TAIL_BYTES, lines * LOG_BYTES_PER_REQUESTED_LINE)
+    );
+    const chunks: Buffer[] = [];
+    let offset = stat.size;
+    let bytesReadTotal = 0;
+    let newlineCount = 0;
+
+    while (offset > 0 && (bytesReadTotal < minimumWindowBytes || newlineCount <= lines)) {
+        const chunkBytes = Math.min(LOG_TAIL_READ_CHUNK_BYTES, offset);
+        offset -= chunkBytes;
+        const buffer = Buffer.allocUnsafe(chunkBytes);
+        const { bytesRead } = await file.read(buffer, 0, chunkBytes, offset);
+        if (bytesRead <= 0) {
+            break;
+        }
+        const chunk = buffer.subarray(0, bytesRead);
+        for (const byte of chunk) {
+            if (byte === 10) newlineCount += 1;
+        }
+        chunks.unshift(chunk);
+        bytesReadTotal += bytesRead;
+    }
+
+    return Buffer.concat(chunks, bytesReadTotal).toString("utf8");
+}
+
+async function readLogTailLines(
+    file: fs.promises.FileHandle,
+    stat: fs.Stats,
+    lineCount: number
+): Promise<string[]> {
+    const content = await readLogContent(file, stat, lineCount);
+    return content
+        .split("\n")
+        .filter((line) => line.trim())
+        .slice(-lineCount);
+}
+
+/** Polls the current OpenClaw log once, serialized by startLogWatcher. */
+async function pollLogFile(): Promise<void> {
+    let logFile: string;
+    try {
+        logFile = getTodayLogFile();
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
+    }
+
+    let file: fs.promises.FileHandle | undefined;
+    try {
+        file = await openReadNoFollowGuarded(guardedPath(logFile));
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
+    }
+
+    try {
+        const stat = await file.stat();
+
+        if (logFile !== logsRouteState.lastLogFile) {
+            logsRouteState.lastLogFile = logFile;
+            logsRouteState.lastLogSize = stat.size;
+            return;
+        }
+
+        if (stat.size < logsRouteState.lastLogSize) {
+            logsRouteState.lastLogSize = 0;
+        }
+
+        if (stat.size > logsRouteState.lastLogSize) {
+            const buffer = Buffer.alloc(stat.size - logsRouteState.lastLogSize);
+            await file.read(buffer, 0, buffer.length, logsRouteState.lastLogSize);
+
+            const lines = buffer
+                .toString("utf8")
+                .split("\n")
+                .filter((l) => l.trim());
+            logsRouteState.lastLogSize = stat.size;
+
+            for (const line of lines) {
+                const message = JSON.stringify({ type: "log", line });
+                for (const ws of logSubscribers) {
+                    try {
+                        ws.send(message);
+                    } catch {
+                        // Ignore errors from closed connections
+                    }
+                }
+            }
+        }
+    } finally {
+        await file.close();
+    }
+}
+
+/** Performs a single tick of the log watcher. */
+async function pollLogFileAndLogErrors(poller = pollLogFile): Promise<void> {
+    try {
+        await poller();
+    } catch (error) {
+        console.error("[LogWatcher] Error:", errorMessage(error, "Log polling failed"));
+    }
+}
+
+/** Performs a single tick of the log watcher. */
+function runLogWatcherTick(): void {
+    if (logsRouteState.isLogPollInFlight) return;
+    logsRouteState.isLogPollInFlight = true;
+    void (async () => {
+        await pollLogFileAndLogErrors();
+        logsRouteState.isLogPollInFlight = false;
+    })();
+}
+
+/** Performs start log watcher. */
+function startLogWatcher(): void {
+    if (logsRouteState.logWatcher) return;
+
+    logsRouteState.logWatcher = setInterval(runLogWatcherTick, 1000);
+}
+
+/** Performs send log history. */
+async function sendLogHistory(ws: DashboardSocket): Promise<void> {
+    const send = (payload: unknown) => {
+        if (!logSubscribers.has(ws)) {
+            return;
+        }
+        try {
+            ws.send(JSON.stringify(payload));
+        } catch (error) {
+            console.error("[Logs] Error sending history:", (error as Error).message);
+        }
+    };
+
+    try {
+        const logFile = getTodayLogFile();
+        const fileName = path.basename(logFile);
+
+        // Send file name
+        send({ type: "log_file", file: fileName });
+
+        let file: fs.promises.FileHandle;
+        try {
+            file = await openReadNoFollowGuarded(guardedPath(logFile));
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                throw error;
+            }
+            send({ type: "log_history_complete", count: 0 });
+            return;
+        }
+
+        let lines: string[];
+        try {
+            const stat = await file.stat();
+            lines = await readLogTailLines(file, stat, 100);
+        } finally {
+            await file.close();
+        }
+
+        // Send each line
+        for (const line of lines) {
+            if (!logSubscribers.has(ws)) {
+                return;
+            }
+            send({ type: "log", line });
+        }
+
+        // Send completion
+        send({ type: "log_history_complete", count: lines.length });
+    } catch (error) {
+        console.error("[Logs] Error sending history:", (error as Error).message);
+        send({ type: "log_history_complete", count: 0 });
+    }
+}
+
+/** Performs subscribe to logs. */
+export function subscribeToLogs(ws: DashboardSocket): void {
+    logSubscribers.add(ws);
+
+    // Send log history first
+    void sendLogHistory(ws);
+
+    // Start watching for new logs
+    startLogWatcher();
+}
+
+/** Performs unsubscribe from logs. */
+export function unsubscribeFromLogs(ws: DashboardSocket): void {
+    logSubscribers.delete(ws);
+}
+
+/** Defines testing. */

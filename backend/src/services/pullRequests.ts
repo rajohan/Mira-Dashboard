@@ -1,21 +1,14 @@
-import { execFile, spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { accessSync, constants } from "node:fs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
-
-import express, { type RequestHandler } from "express";
 
 import { database, miraDatabasePath } from "../database.ts";
-import { asyncRoute as baseAsyncRoute, errorMessage } from "../lib/errors.ts";
+import { errorMessage } from "../lib/errors.ts";
+import { pipeProcessOutput, runProcess, spawnProcess } from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
 }
-
-const execFileAsync = promisify(execFile);
 
 function resolveConfiguredRoot(environmentName: string, fallback: string): string {
     const rawValue = nonEmptyEnvironmentFallback(environmentName, fallback).trim();
@@ -51,21 +44,7 @@ function resolveExecutableFromPath(executable: string): string | null {
         return path.resolve(executable);
     }
 
-    const pathDirectories = (process.env.PATH || "").split(path.delimiter);
-    for (const directory of pathDirectories) {
-        if (!directory) {
-            continue;
-        }
-        const candidate = path.join(directory, executable);
-        try {
-            accessSync(candidate, constants.X_OK);
-            return candidate;
-        } catch {
-            // Keep searching PATH.
-        }
-    }
-
-    return null;
+    return Bun.which(executable);
 }
 
 function resolveBunExecutable(): string {
@@ -76,7 +55,7 @@ function resolveBunExecutable(): string {
     return BUN_EXECUTABLE === "bun" ? process.execPath : BUN_EXECUTABLE;
 }
 
-function getResolvedRoots() {
+export function getResolvedRoots() {
     return {
         dashboardRoot: getDashboardRoot(),
         dashboardWorktreeRoot: getDashboardWorktreeRoot(),
@@ -189,14 +168,6 @@ interface WorktreeCleanupResult {
     branch: string;
     path?: string;
     message: string;
-}
-
-/** Performs async route. */
-function asyncRoute(handler: RequestHandler): RequestHandler {
-    return baseAsyncRoute(handler, {
-        fallback: "Pull request route failed",
-        logLabel: "[pullRequestsRoutes]",
-    });
 }
 
 /** Performs write deployment job. */
@@ -386,7 +357,7 @@ function refreshDeploymentHeartbeat(job: DeploymentJob): DeploymentJob {
 }
 
 /** Performs read deployment jobs. */
-function readDeploymentJobs(): DeploymentJob[] {
+export function readDeploymentJobs(): DeploymentJob[] {
     return (
         database
             .prepare(
@@ -539,7 +510,7 @@ async function runCommand(
         timeoutMs?: number;
     } = {}
 ): Promise<CommandResult> {
-    const { stdout, stderr } = await execFileAsync(command, arguments_, {
+    const { stdout, stderr } = await runProcess(command, arguments_, {
         cwd: options.cwd || getDashboardRoot(),
         env: options.environment || buildCommandEnvironment(),
         maxBuffer: MAX_BUFFER,
@@ -554,7 +525,7 @@ async function runCommand(
 
 /** Runs a GitHub CLI command and parses its JSON output. */
 async function runGhJson<T>(arguments_: string[]): Promise<T> {
-    const { stdout } = await execFileAsync("gh", arguments_, {
+    const { stdout } = await runProcess("gh", arguments_, {
         cwd: getDashboardRoot(),
         env: buildCommandEnvironment(),
         maxBuffer: MAX_BUFFER,
@@ -599,10 +570,9 @@ async function runGhJsonLines<T>(
     options: { timeoutMs?: number } = {}
 ): Promise<T[]> {
     return new Promise((resolve, reject) => {
-        const child = spawn("gh", arguments_, {
+        const child = spawnProcess("gh", arguments_, {
             cwd: getDashboardRoot(),
             env: buildCommandEnvironment(),
-            stdio: ["ignore", "pipe", "pipe"],
         });
         const rows: T[] = [];
         let stdoutBuffer = "";
@@ -651,65 +621,74 @@ async function runGhJsonLines<T>(
             callback();
         };
 
-        child.stdout.setEncoding("utf8");
-        child.stdout.on("data", (chunk: string) => {
-            stdoutBuffer += chunk;
+        void pipeProcessOutput(
+            child.stdout as ReadableStream<Uint8Array> | undefined,
+            (chunk) => {
+                stdoutBuffer += chunk;
 
-            const lines = stdoutBuffer.split("\n");
-            stdoutBuffer = lines.pop() || "";
-            if (Buffer.byteLength(stdoutBuffer, "utf8") > MAX_JSON_LINE_LENGTH) {
-                child.kill("SIGTERM");
-                armForceKillTimer();
-                settle(() => reject(new Error("GitHub CLI JSON line was too large")), {
-                    keepForceKillTimer: true,
-                });
-            } else {
-                try {
-                    for (const line of lines) {
-                        parseGhJsonLine(line, rows);
-                    }
-                } catch (error) {
+                const lines = stdoutBuffer.split("\n");
+                stdoutBuffer = lines.pop() || "";
+                if (Buffer.byteLength(stdoutBuffer, "utf8") > MAX_JSON_LINE_LENGTH) {
                     child.kill("SIGTERM");
                     armForceKillTimer();
-                    settle(() => reject(toGhJsonParseError(error)), {
-                        keepForceKillTimer: true,
-                    });
+                    settle(
+                        () => reject(new Error("GitHub CLI JSON line was too large")),
+                        {
+                            keepForceKillTimer: true,
+                        }
+                    );
+                } else {
+                    try {
+                        for (const line of lines) {
+                            parseGhJsonLine(line, rows);
+                        }
+                    } catch (error) {
+                        child.kill("SIGTERM");
+                        armForceKillTimer();
+                        settle(() => reject(toGhJsonParseError(error)), {
+                            keepForceKillTimer: true,
+                        });
+                    }
                 }
             }
-        });
+        );
 
-        child.stderr.setEncoding("utf8");
-        child.stderr.on("data", (chunk: string) => {
-            stderr = trimOutput(stderr + chunk);
-        });
+        void pipeProcessOutput(
+            child.stderr as ReadableStream<Uint8Array> | undefined,
+            (chunk) => {
+                stderr = trimOutput(stderr + chunk);
+            }
+        );
 
-        child.on("error", (error) => {
-            isPreserveForceKillTimer = false;
-            forceKillTimer = clearForceKillTimerIfAllowed(forceKillTimer, {}, false);
-            settle(() => reject(error));
-        });
-
-        child.on("close", (code) => {
-            isPreserveForceKillTimer = false;
-            forceKillTimer = clearForceKillTimerIfAllowed(forceKillTimer, {}, false);
-            settle(() => {
-                if (code !== 0) {
-                    reject(new Error(stderr || `GitHub CLI exited with code ${code}`));
-                    return;
-                }
-                try {
-                    parseGhJsonLine(stdoutBuffer, rows);
-                    resolve(rows);
-                } catch (error) {
-                    reject(toGhJsonParseError(error));
-                }
+        void child.exited
+            .then((code) => {
+                isPreserveForceKillTimer = false;
+                forceKillTimer = clearForceKillTimerIfAllowed(forceKillTimer, {}, false);
+                settle(() => {
+                    if (code !== 0) {
+                        reject(
+                            new Error(stderr || `GitHub CLI exited with code ${code}`)
+                        );
+                        return;
+                    }
+                    try {
+                        parseGhJsonLine(stdoutBuffer, rows);
+                        resolve(rows);
+                    } catch (error) {
+                        reject(toGhJsonParseError(error));
+                    }
+                });
+            })
+            .catch((error: unknown) => {
+                isPreserveForceKillTimer = false;
+                forceKillTimer = clearForceKillTimerIfAllowed(forceKillTimer, {}, false);
+                settle(() => reject(error));
             });
-        });
     });
 }
 
 /** Lists open pull requests targeting the dashboard production branch. */
-async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
+export async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
     const repo = parseRepoParts(DASHBOARD_REPO);
     const pullRequests = await runGhJsonLines<PullRequestSummary>(
         [
@@ -844,7 +823,7 @@ async function getPullRequest(number: number): Promise<PullRequestSummary> {
 }
 
 /** Validates pr number. */
-function validatePrNumber(value: unknown): number {
+export function validatePrNumber(value: unknown): number {
     if (typeof value !== "string" || !/^\d+$/u.test(value)) {
         throw new Error("Invalid pull request number");
     }
@@ -1039,7 +1018,7 @@ function normalizedCheckValue(value: unknown): string {
 }
 
 /** Returns production checkout status. */
-async function getProductionCheckoutStatus(): Promise<ProductionCheckoutStatus> {
+export async function getProductionCheckoutStatus(): Promise<ProductionCheckoutStatus> {
     const [{ stdout: root }, { stdout: branch }, { stdout: head }, { stdout: status }] =
         await Promise.all([
             runCommand("git", ["rev-parse", "--show-toplevel"], {
@@ -1090,7 +1069,7 @@ async function getProductionCheckoutStatus(): Promise<ProductionCheckoutStatus> 
 }
 
 /** Performs ensure production checkout. */
-async function ensureProductionCheckout(): Promise<void> {
+export async function ensureProductionCheckout(): Promise<void> {
     const status = await getProductionCheckoutStatus();
 
     if (!status.isProductionRoot) {
@@ -1105,7 +1084,7 @@ async function ensureProductionCheckout(): Promise<void> {
 }
 
 /** Performs ensure production ready for deploy. */
-async function ensureProductionReadyForDeploy(): Promise<void> {
+export async function ensureProductionReadyForDeploy(): Promise<void> {
     const status = await getProductionCheckoutStatus();
 
     if (!status.isSafeForDeploy) {
@@ -1327,10 +1306,10 @@ async function runDeploymentJobAndReportErrors(
 }
 
 /** Starts deploy latest in the background. */
-function startDeployLatest(lockHeldBy?: string): DeploymentJob {
+export function startDeployLatest(lockHeldBy?: string): DeploymentJob {
     const now = dateToISOString(new Date());
     const job: DeploymentJob = {
-        id: randomUUID(),
+        id: Bun.randomUUIDv7(),
         status: "building",
         startedAt: now,
         updatedAt: now,
@@ -1362,11 +1341,11 @@ function startDeployLatest(lockHeldBy?: string): DeploymentJob {
 }
 
 /** Performs approve pull request. */
-async function approvePullRequest(number: number, willDeploy: boolean) {
+export async function approvePullRequest(number: number, willDeploy: boolean) {
     await ensureProductionCheckout();
     const pr = await getPullRequest(number);
     validateDashboardPrForApproval(pr);
-    const lockId = `approve-${randomUUID()}`;
+    const lockId = `approve-${Bun.randomUUIDv7()}`;
     acquireDeploymentLock(lockId);
     let isReleaseLock = true;
 
@@ -1428,7 +1407,7 @@ async function approvePullRequest(number: number, willDeploy: boolean) {
 }
 
 /** Performs approve pull request review. */
-async function approvePullRequestReview(number: number) {
+export async function approvePullRequestReview(number: number) {
     const pr = await getPullRequest(number);
     validateDashboardPrForReviewApproval(pr);
 
@@ -1448,7 +1427,7 @@ async function approvePullRequestReview(number: number) {
 }
 
 /** Updates one pull request branch with the latest base branch. */
-async function updatePullRequestBranch(number: number) {
+export async function updatePullRequestBranch(number: number) {
     const pr = await getPullRequest(number);
     validateDashboardPrForBranchUpdate(pr);
     const repo = parseRepoParts(DASHBOARD_REPO);
@@ -1472,7 +1451,7 @@ async function updatePullRequestBranch(number: number) {
 }
 
 /** Performs reject pull request. */
-async function rejectPullRequest(number: number, comment: string) {
+export async function rejectPullRequest(number: number, comment: string) {
     const pr = await getPullRequest(number);
     validateDashboardPr(pr);
 
@@ -1488,113 +1467,4 @@ async function rejectPullRequest(number: number, comment: string) {
         message: `PR #${number} closed`,
         cleanup,
     };
-}
-
-/** Registers pull requests API routes. */
-export default function pullRequestsRoutes(app: express.Application): void {
-    getResolvedRoots();
-
-    app.get(
-        "/api/pull-requests",
-        asyncRoute(async (_request, response) => {
-            response.json({ pullRequests: await listDashboardPullRequests() });
-        })
-    );
-
-    app.get(
-        "/api/pull-requests/deployments",
-        asyncRoute(async (_request, response) => {
-            response.json({ deployments: readDeploymentJobs() });
-        })
-    );
-
-    app.get(
-        "/api/pull-requests/production-checkout",
-        asyncRoute(async (_request, response) => {
-            response.json({ checkout: await getProductionCheckoutStatus() });
-        })
-    );
-
-    app.post(
-        "/api/pull-requests/deploy",
-        express.json(),
-        asyncRoute(async (_request, response) => {
-            await ensureProductionCheckout();
-            await ensureProductionReadyForDeploy();
-            response.json({ isOk: true, deployment: startDeployLatest() });
-        })
-    );
-
-    app.post(
-        "/api/pull-requests/:number/approve",
-        express.json(),
-        asyncRoute(async (request, response) => {
-            let number: number;
-            try {
-                number = validatePrNumber(request.params.number);
-            } catch (error) {
-                response.status(400).json({
-                    error: errorMessage(error, "Invalid pull request number"),
-                });
-                return;
-            }
-            const isDeploy = request.body?.deploy === true;
-            response.json(await approvePullRequest(number, isDeploy));
-        })
-    );
-
-    app.post(
-        "/api/pull-requests/:number/review-approval",
-        express.json(),
-        asyncRoute(async (request, response) => {
-            let number: number;
-            try {
-                number = validatePrNumber(request.params.number);
-            } catch (error) {
-                response.status(400).json({
-                    error: errorMessage(error, "Invalid pull request number"),
-                });
-                return;
-            }
-            response.json(await approvePullRequestReview(number));
-        })
-    );
-
-    app.post(
-        "/api/pull-requests/:number/update-branch",
-        express.json(),
-        asyncRoute(async (request, response) => {
-            let number: number;
-            try {
-                number = validatePrNumber(request.params.number);
-            } catch (error) {
-                response.status(400).json({
-                    error: errorMessage(error, "Invalid pull request number"),
-                });
-                return;
-            }
-            response.json(await updatePullRequestBranch(number));
-        })
-    );
-
-    app.post(
-        "/api/pull-requests/:number/reject",
-        express.json(),
-        asyncRoute(async (request, response) => {
-            let number: number;
-            try {
-                number = validatePrNumber(request.params.number);
-            } catch (error) {
-                response.status(400).json({
-                    error: errorMessage(error, "Invalid pull request number"),
-                });
-                return;
-            }
-            const comment =
-                typeof request.body?.comment === "string" && request.body.comment.trim()
-                    ? request.body.comment.trim()
-                    : "Closed from Mira Dashboard after Rajohan rejected it.";
-            response.json(await rejectPullRequest(number, comment));
-        })
-    );
 }

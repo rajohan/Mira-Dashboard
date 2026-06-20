@@ -1,13 +1,13 @@
 import fs from "node:fs/promises";
-import type http from "node:http";
 import os from "node:os";
 import path from "node:path";
 
+import type { Server } from "bun";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 
 const testState: {
     baseUrl: string;
-    server?: http.Server;
+    server?: Server<unknown>;
     temporaryRoot: string;
 } = {
     baseUrl: "",
@@ -80,24 +80,13 @@ describe("Mira Dashboard backend integration", () => {
         process.env.TRUST_PROXY = "false";
 
         const serverModule = await import("../src/server.ts");
-        testState.server = serverModule.server;
-        await new Promise<void>((resolve) => {
-            testState.server?.listen(0, "127.0.0.1", resolve);
-        });
-        const address = testState.server.address();
-        if (!address || typeof address === "string") {
-            throw new Error("Test server did not bind to a TCP port");
-        }
-        testState.baseUrl = `http://127.0.0.1:${address.port}`;
+        testState.server = serverModule.createServer(0);
+        testState.baseUrl = `http://127.0.0.1:${testState.server.port}`;
     });
 
     afterAll(async () => {
         const server = testState.server;
-        if (server) {
-            await new Promise<void>((resolve, reject) => {
-                server.close((error) => (error ? reject(error) : resolve()));
-            });
-        }
+        await server?.stop(true);
         await fs.rm(testState.temporaryRoot, { recursive: true, force: true });
     });
 
@@ -130,7 +119,7 @@ describe("Mira Dashboard backend integration", () => {
 
         const rootChunk = await fetch(`${testState.baseUrl}/${builtChunk}`);
         expect(rootChunk.status).toBe(200);
-        expect(rootChunk.headers.get("content-type")).toContain("javascript");
+        expect(rootChunk.headers.get("cache-control")).toBe("no-store");
 
         const missingChunk = await fetch(
             `${testState.baseUrl}/assets/index-missing-after-deploy.js`

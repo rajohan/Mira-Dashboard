@@ -1,11 +1,12 @@
-import { type ChildProcess, spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
-
-import express, { type RequestHandler } from "express";
-
 import { database } from "../database.ts";
-import { asyncRoute, errorMessage } from "../lib/errors.ts";
-import { refreshCacheProducer } from "../services/cacheRefresh.ts";
+import { errorMessage } from "../lib/errors.ts";
+import {
+    type BunProcess,
+    pipeProcessOutput,
+    runProcess,
+    spawnProcess,
+} from "../lib/processes.ts";
+import { refreshCacheProducer } from "./cacheRefresh.ts";
 import {
     createManualScheduledJobRun,
     finishScheduledJobRun,
@@ -14,14 +15,13 @@ import {
     removeScheduledJobsNotInAction,
     type ScheduledJobRun,
     upsertScheduledJob,
-} from "../services/scheduledJobs.ts";
+} from "./scheduledJobs.ts";
 const MAX_OUTPUT_CHARS = 100_000;
 const SCHEDULED_BACKUP_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const BACKUP_ABORT_SIGKILL_GRACE_MS = 10_000;
 const KOPIA_BACKUP_SCRIPT_PATTERN = "/opt/docker/apps/kopia/backup.sh";
 const WALG_BACKUP_SCRIPT_PATTERN = "/usr/local/bin/backup-push.sh";
 const CONTAINER_PGREP_NO_MATCH_MARKER = "__MIRA_CONTAINER_PGREP_NO_MATCH__";
-const spawnBackupProcess = spawn;
 const backupAbortContainerWaitMs = 30_000;
 const backupAbortContainerPollMs = 1_000;
 const backupAbortContainerConfirmAttempts = 3;
@@ -43,23 +43,9 @@ interface BackupJob {
     startedAt: number;
     endedAt: number | null;
     completed: Promise<BackupJob>;
-    process?: ChildProcess;
+    process?: BunProcess;
     statusRefreshed?: boolean;
     manualScheduledRun?: ScheduledJobRun;
-}
-
-/** Represents the backup job API response. */
-interface BackupJobResponse {
-    job: null | {
-        id: string;
-        type: BackupJob["type"];
-        status: BackupJob["status"];
-        code: number | null;
-        stdout: string;
-        stderr: string;
-        startedAt: number;
-        endedAt: number | null;
-    };
 }
 
 const backupJobs = new Map<string, BackupJob>();
@@ -112,7 +98,7 @@ function getCurrentWalgJob() {
 }
 
 /** Performs map job. */
-function mapJob(job: BackupJob | null) {
+export function mapBackupJob(job: BackupJob | null) {
     if (!job) {
         return null;
     }
@@ -150,7 +136,7 @@ function evictCompletedBackupJobs(type: BackupJob["type"]) {
     }
 }
 
-async function clearNeedsAttentionBackupJob(type: BackupJob["type"]) {
+export async function clearNeedsAttentionBackupJob(type: BackupJob["type"]) {
     const job = getCurrentBackupJob(type);
     if (!job) {
         throw Object.assign(new Error(`${type.toUpperCase()} backup job not found`), {
@@ -175,7 +161,7 @@ async function clearNeedsAttentionBackupJob(type: BackupJob["type"]) {
 }
 
 function recordBackupNeedsAttention(type: BackupJob["type"], stderr: string): BackupJob {
-    const jobId = randomUUID();
+    const jobId = Bun.randomUUIDv7();
     const completed = Promise.withResolvers<BackupJob>();
     const now = Date.now();
     const job: BackupJob = {
@@ -221,7 +207,7 @@ function startBackupJob(
     }
     evictCompletedBackupJobs(type);
 
-    const jobId = randomUUID();
+    const jobId = Bun.randomUUIDv7();
     const completed = Promise.withResolvers<BackupJob>();
     const job: BackupJob = {
         id: jobId,
@@ -242,10 +228,9 @@ function startBackupJob(
         backupRouteState.activeWalgJobId = jobId;
     }
 
-    let child: ReturnType<typeof spawn>;
+    let child: BunProcess;
     try {
-        child = spawnBackupProcess("bash", ["-lc", command], {
-            detached: true,
+        child = spawnProcess("bash", ["-lc", command], {
             env: process.env,
         });
     } catch (error) {
@@ -336,34 +321,18 @@ function startBackupJob(
             containerAbortKillTimer.unref();
         }
         try {
-            if (typeof child.pid === "number") {
-                const childPid = child.pid;
-                const processGroupId = -childPid;
-                process.kill(processGroupId, "SIGTERM");
-                hostAbortKillTimer = setTimeout(() => {
-                    try {
-                        process.kill(processGroupId, "SIGKILL");
-                    } catch (error) {
-                        job.stderr = trimOutput(
-                            `${job.stderr}\nFailed to force terminate backup process group: ${String(error)}`.trim()
-                        );
-                        try {
-                            process.kill(childPid, "SIGKILL");
-                        } catch (childKillError) {
-                            job.stderr = trimOutput(
-                                `${job.stderr}\nFailed to force terminate backup process: ${String(childKillError)}`.trim()
-                            );
-                            void markNeedsAttention();
-                        }
-                    }
-                }, BACKUP_ABORT_SIGKILL_GRACE_MS);
-                hostAbortKillTimer.unref();
-            } else if (!child.kill("SIGTERM")) {
-                job.stderr = trimOutput(
-                    `${job.stderr}\nFailed to terminate backup process`.trim()
-                );
-                void finalizeJob(130, "SIGTERM");
-            }
+            child.kill("SIGTERM");
+            hostAbortKillTimer = setTimeout(() => {
+                try {
+                    child.kill("SIGKILL");
+                } catch (error) {
+                    job.stderr = trimOutput(
+                        `${job.stderr}\nFailed to force terminate backup process: ${String(error)}`.trim()
+                    );
+                    void markNeedsAttention();
+                }
+            }, BACKUP_ABORT_SIGKILL_GRACE_MS);
+            hostAbortKillTimer.unref();
         } catch (error) {
             job.stderr = trimOutput(
                 `${job.stderr}\nFailed to terminate backup process: ${String(error)}`.trim()
@@ -374,42 +343,50 @@ function startBackupJob(
 
     signal?.addEventListener("abort", abortBackup, { once: true });
 
-    child.stdout?.on("data", (data) => {
-        job.stdout = trimOutput(job.stdout + String(data));
-    });
+    void pipeProcessOutput(
+        child.stdout as ReadableStream<Uint8Array> | undefined,
+        (data) => {
+            job.stdout = trimOutput(job.stdout + String(data));
+        }
+    );
 
-    child.stderr?.on("data", (data) => {
-        job.stderr = trimOutput(job.stderr + String(data));
-    });
+    void pipeProcessOutput(
+        child.stderr as ReadableStream<Uint8Array> | undefined,
+        (data) => {
+            job.stderr = trimOutput(job.stderr + String(data));
+        }
+    );
 
-    child.on("close", async (code, signal) => {
-        await finalizeJob(signal ? 130 : (code ?? 1), signal);
-    });
-
-    child.on("error", async (error) => {
-        if (isFinalized || isFinalizing) {
-            return;
-        }
-        isFinalizing = true;
-        if (hostAbortKillTimer) {
-            clearTimeout(hostAbortKillTimer);
-            hostAbortKillTimer = null;
-        }
-        if (containerAbortKillTimer) {
-            clearTimeout(containerAbortKillTimer);
-            containerAbortKillTimer = null;
-        }
-        isFinalized = true;
-        job.status = "done";
-        job.code = 1;
-        job.stderr = trimOutput(`${job.stderr}\n${error.message}`.trim());
-        job.endedAt = Date.now();
-        if (signal) {
-            signal.removeEventListener("abort", abortBackup);
-        }
-        completed.resolve(job);
-        await refreshBackupStatus(type, job);
-    });
+    void child.exited
+        .then(async (code) => {
+            await finalizeJob(code, isAbortRequested ? "SIGTERM" : null);
+        })
+        .catch(async (error: unknown) => {
+            if (isFinalized || isFinalizing) {
+                return;
+            }
+            isFinalizing = true;
+            if (hostAbortKillTimer) {
+                clearTimeout(hostAbortKillTimer);
+                hostAbortKillTimer = null;
+            }
+            if (containerAbortKillTimer) {
+                clearTimeout(containerAbortKillTimer);
+                containerAbortKillTimer = null;
+            }
+            isFinalized = true;
+            job.status = "done";
+            job.code = 1;
+            job.stderr = trimOutput(
+                `${job.stderr}\n${error instanceof Error ? error.message : String(error)}`.trim()
+            );
+            job.endedAt = Date.now();
+            if (signal) {
+                signal.removeEventListener("abort", abortBackup);
+            }
+            completed.resolve(job);
+            await refreshBackupStatus(type, job);
+        });
 
     return job;
 }
@@ -418,47 +395,9 @@ function runDockerExec(
     container: string,
     arguments_: readonly string[]
 ): Promise<{ code: number; stdout: string; stderr: string }> {
-    return new Promise((resolve, reject) => {
-        const child = spawnBackupProcess("docker", ["exec", container, ...arguments_], {
-            detached: true,
-            env: process.env,
-        });
-        const timeout = setTimeout(() => {
-            try {
-                if (typeof child.pid === "number") {
-                    process.kill(-child.pid, "SIGKILL");
-                    reject(
-                        new Error(`Timed out waiting for docker exec ${arguments_[0]}`)
-                    );
-                    return;
-                }
-            } catch {
-                // Fall back to the direct child handle when process-group kill fails.
-            }
-            try {
-                child.kill("SIGKILL");
-            } catch {
-                // The timeout error below is still the actionable failure.
-            }
-            reject(new Error(`Timed out waiting for docker exec ${arguments_[0]}`));
-        }, backupAbortDockerExecTimeoutMs);
-        timeout.unref();
-        let stdout = "";
-        let stderr = "";
-        child.stdout?.on("data", (data) => {
-            stdout = trimOutput(stdout + String(data));
-        });
-        child.stderr?.on("data", (data) => {
-            stderr = trimOutput(stderr + String(data));
-        });
-        child.on("error", (error) => {
-            clearTimeout(timeout);
-            reject(error);
-        });
-        child.on("close", (code) => {
-            clearTimeout(timeout);
-            resolve({ code: code ?? 1, stdout, stderr });
-        });
+    return runProcess("docker", ["exec", container, ...arguments_], {
+        env: process.env,
+        timeout: backupAbortDockerExecTimeoutMs,
     });
 }
 
@@ -535,40 +474,9 @@ async function assertNoContainerBackupInProgress(
 }
 
 function runHostPgrep(pattern: string): Promise<{ code: number; stderr: string }> {
-    return new Promise((resolve, reject) => {
-        const child = spawnBackupProcess("pgrep", ["-f", pattern], {
-            detached: true,
-            env: process.env,
-        });
-        const timeout = setTimeout(() => {
-            try {
-                if (typeof child.pid === "number") {
-                    process.kill(-child.pid, "SIGKILL");
-                } else {
-                    child.kill("SIGKILL");
-                }
-            } catch {
-                try {
-                    child.kill("SIGKILL");
-                } catch {
-                    // The timeout error below is still the actionable failure.
-                }
-            }
-            reject(new Error(`Timed out waiting for pgrep ${pattern}`));
-        }, backupAbortDockerExecTimeoutMs);
-        timeout.unref();
-        let stderr = "";
-        child.stderr?.on("data", (data) => {
-            stderr = trimOutput(stderr + String(data));
-        });
-        child.on("error", (error) => {
-            clearTimeout(timeout);
-            reject(error);
-        });
-        child.on("close", (code) => {
-            clearTimeout(timeout);
-            resolve({ code: code ?? 1, stderr });
-        });
+    return runProcess("pgrep", ["-f", pattern], {
+        env: process.env,
+        timeout: backupAbortDockerExecTimeoutMs,
     });
 }
 
@@ -836,7 +744,7 @@ async function startScheduledBackup(type: BackupJob["type"], signal?: AbortSigna
             }`
         );
     }
-    return { backup: mapJob(completedJob) };
+    return { backup: mapBackupJob(completedJob) };
 }
 
 function scheduledBackupJobId(type: BackupJob["type"]) {
@@ -894,14 +802,14 @@ async function finishManualScheduledRunWhenComplete(
             run,
             isSuccess ? "success" : "failed",
             isSuccess ? null : backupFailureMessage(completedJob),
-            { backup: mapJob(completedJob) }
+            { backup: mapBackupJob(completedJob) }
         );
     } catch (error) {
         console.warn("[Backups] Failed to finish manual backup run:", error);
     }
 }
 
-function getCurrentBackupJob(type: BackupJob["type"]): BackupJob | null {
+export function getCurrentBackupJob(type: BackupJob["type"]): BackupJob | null {
     return (type === "kopia" ? getCurrentKopiaJob : getCurrentWalgJob)();
 }
 
@@ -921,7 +829,7 @@ async function terminateContainerProcessSafely(
     }
 }
 
-async function startManualBackup(type: BackupJob["type"]) {
+export async function startManualBackup(type: BackupJob["type"]) {
     const existingJob = getCurrentBackupJob(type);
     if (existingJob?.status === "running") {
         return existingJob;
@@ -1013,62 +921,4 @@ export function registerBackupScheduledJobs(): void {
         database.run("ROLLBACK");
         throw error;
     }
-}
-
-/** Registers backup API routes. */
-export default function backupRoutes(
-    app: express.Application,
-    _express: typeof express
-): void {
-    app.get("/api/backups/kopia", ((_request, response) => {
-        response.json({ job: mapJob(getCurrentKopiaJob()) } satisfies BackupJobResponse);
-    }) as RequestHandler);
-
-    app.post(
-        "/api/backups/kopia/run",
-        asyncRoute(
-            async (_request, response) => {
-                const job = await startManualBackup("kopia");
-                response.json({ isOk: true, job: mapJob(job) });
-            },
-            { fallback: "Failed to start Kopia backup" }
-        )
-    );
-
-    app.post(
-        "/api/backups/kopia/clear-needs-attention",
-        asyncRoute(
-            async (_request, response) => {
-                const job = await clearNeedsAttentionBackupJob("kopia");
-                response.json({ isOk: true, cleared: mapJob(job) });
-            },
-            { fallback: "Failed to clear Kopia backup attention" }
-        )
-    );
-
-    app.get("/api/backups/walg", ((_request, response) => {
-        response.json({ job: mapJob(getCurrentWalgJob()) } satisfies BackupJobResponse);
-    }) as RequestHandler);
-
-    app.post(
-        "/api/backups/walg/run",
-        asyncRoute(
-            async (_request, response) => {
-                const job = await startManualBackup("walg");
-                response.json({ isOk: true, job: mapJob(job) });
-            },
-            { fallback: "Failed to start WAL-G backup" }
-        )
-    );
-
-    app.post(
-        "/api/backups/walg/clear-needs-attention",
-        asyncRoute(
-            async (_request, response) => {
-                const job = await clearNeedsAttentionBackupJob("walg");
-                response.json({ isOk: true, cleared: mapJob(job) });
-            },
-            { fallback: "Failed to clear WAL-G backup attention" }
-        )
-    );
 }

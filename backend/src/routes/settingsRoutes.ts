@@ -1,8 +1,9 @@
-import express, { type RequestHandler } from "express";
-import fs from "fs";
-import os from "os";
-import path from "path";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
+import gateway from "../gateway.ts";
+import { json, readJson } from "../http.ts";
 import {
     guardedPath,
     mkdirGuarded,
@@ -10,15 +11,20 @@ import {
     writeTextNoFollowGuarded,
 } from "../lib/guardedOps.ts";
 
-/** Represents settings. */
 interface Settings {
-    theme: "light" | "dark" | "system";
-    sidebarCollapsed: boolean;
     defaultModel: string;
     refreshInterval: number;
+    sidebarCollapsed: boolean;
+    theme: "light" | "dark" | "system";
 }
 
-/** Resolves dashboard settings directory from a home directory value. */
+const DEFAULT_SETTINGS: Settings = {
+    defaultModel: "ollama/glm-5",
+    refreshInterval: 5000,
+    sidebarCollapsed: false,
+    theme: "dark",
+};
+
 function resolveSettingsDirectory(home = process.env.HOME): string {
     const normalizedHome = home?.trim() || os.homedir().trim();
     if (
@@ -66,38 +72,6 @@ async function withPinnedSettingsFile<T>(
     }
 }
 
-const DEFAULT_SETTINGS: Settings = {
-    theme: "dark",
-    sidebarCollapsed: false,
-    defaultModel: "ollama/glm-5",
-    refreshInterval: 5000,
-};
-
-/** Performs load settings. */
-async function loadSettings(): Promise<Settings> {
-    const settingsDirectory = resolveSettingsDirectory();
-    let content: string;
-
-    try {
-        content = await withPinnedSettingsFile(settingsDirectory, (settingsFile) =>
-            readTextNoFollowGuarded(guardedPath(settingsFile))
-        );
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-            return DEFAULT_SETTINGS;
-        }
-        throw error;
-    }
-
-    try {
-        const persisted = JSON.parse(content) as unknown;
-        return { ...DEFAULT_SETTINGS, ...parseSettingsPatch(persisted) };
-    } catch {
-        return DEFAULT_SETTINGS;
-    }
-}
-
-/** Returns a validated settings patch and rejects malformed input before persistence. */
 function parseSettingsPatch(input: unknown): Partial<Settings> {
     if (!input || typeof input !== "object" || Array.isArray(input)) {
         throw new Error("Settings payload must be an object");
@@ -148,7 +122,29 @@ function parseSettingsPatch(input: unknown): Partial<Settings> {
     return patch;
 }
 
-/** Performs save settings. */
+async function loadSettings(): Promise<Settings> {
+    const settingsDirectory = resolveSettingsDirectory();
+    let content: string;
+
+    try {
+        content = await withPinnedSettingsFile(settingsDirectory, (settingsFile) =>
+            readTextNoFollowGuarded(guardedPath(settingsFile))
+        );
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return DEFAULT_SETTINGS;
+        }
+        throw error;
+    }
+
+    try {
+        const persisted = JSON.parse(content) as unknown;
+        return { ...DEFAULT_SETTINGS, ...parseSettingsPatch(persisted) };
+    } catch {
+        return DEFAULT_SETTINGS;
+    }
+}
+
 async function saveSettings(settings: Settings): Promise<void> {
     const settingsDirectory = resolveSettingsDirectory();
     mkdirGuarded(guardedPath(settingsDirectory), { recursive: true });
@@ -160,48 +156,39 @@ async function saveSettings(settings: Settings): Promise<void> {
     );
 }
 
-/** Registers settings API routes. */
-export default function settingsRoutes(
-    app: express.Application,
-    _express: typeof express,
-    getGatewayStatus: () => { gateway: string; sessions: number }
-): void {
-    // Get settings
-    app.get("/api/settings", (async (_request, response) => {
-        try {
-            const settings = await loadSettings();
-            const gatewayStatus = getGatewayStatus();
-            response.json({ ...settings, gateway: gatewayStatus });
-        } catch (error) {
-            response.status(500).json({ error: (error as Error).message });
-        }
-    }) as RequestHandler);
+export const settingsRoutes = {
+    "/api/settings": {
+        GET: async () => {
+            try {
+                const settings = await loadSettings();
+                return json({ ...settings, gateway: gateway.getStatus() });
+            } catch (error) {
+                return json({ error: (error as Error).message }, { status: 500 });
+            }
+        },
+        PUT: async (request: Request) => {
+            let current: Settings;
+            let updated: Settings;
 
-    // Update settings
-    app.put("/api/settings", express.json(), (async (request, response) => {
-        let current: Settings;
-        let updated: Settings;
+            try {
+                current = await loadSettings();
+            } catch (error) {
+                return json({ error: (error as Error).message }, { status: 500 });
+            }
 
-        try {
-            current = await loadSettings();
-        } catch (error) {
-            response.status(500).json({ error: (error as Error).message });
-            return;
-        }
+            try {
+                updated = { ...current, ...parseSettingsPatch(await readJson(request)) };
+            } catch (error) {
+                return json({ error: (error as Error).message }, { status: 400 });
+            }
 
-        try {
-            updated = { ...current, ...parseSettingsPatch(request.body) };
-        } catch (error) {
-            response.status(400).json({ error: (error as Error).message });
-            return;
-        }
-
-        try {
-            await saveSettings(updated);
-            response.json(updated);
-        } catch (error) {
-            console.error("[Settings] Save error:", (error as Error).message);
-            response.status(500).json({ error: "Failed to save settings" });
-        }
-    }) as RequestHandler);
-}
+            try {
+                await saveSettings(updated);
+                return json(updated);
+            } catch (error) {
+                console.error("[Settings] Save error:", (error as Error).message);
+                return json({ error: "Failed to save settings" }, { status: 500 });
+            }
+        },
+    },
+} as const;

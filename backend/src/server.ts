@@ -1,252 +1,160 @@
-import { execSync } from "node:child_process";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import path from "node:path";
 
-import dotenv from "dotenv";
-import express from "express";
-import rateLimit from "express-rate-limit";
-import http from "http";
-import path from "path";
-import { fileURLToPath } from "url";
-import { WebSocket, WebSocketServer } from "ws";
+import type { Server, ServerWebSocket } from "bun";
 
-import { getAuthUserFromRequest, requireAuth } from "./auth.ts";
+import type { DashboardSocket } from "./dashboardSocket.ts";
 import gateway from "./gateway.ts";
-import agentsRoutes from "./routes/agents.ts";
-import authRoutes from "./routes/auth.ts";
-import backupRoutes from "./routes/backups.ts";
-import cacheRoutes from "./routes/cache.ts";
-import configFilesRoutes from "./routes/configFiles.ts";
-import cronRoutes from "./routes/cron.ts";
-import databaseRoutes from "./routes/database.ts";
-import dockerRoutes from "./routes/docker.ts";
-import execRoutes from "./routes/exec.ts";
-import filesRoutes from "./routes/files.ts";
-import jobsRoutes from "./routes/jobs.ts";
-import logsRoutes from "./routes/logs.ts";
-import mediaRoutes from "./routes/media.ts";
-import metricsRoutes from "./routes/metrics.ts";
-import moltbookRoutes from "./routes/moltbook.ts";
-import notificationsRoutes from "./routes/notifications.ts";
-import openClawConfigRoutes from "./routes/openclawConfig.ts";
-import opsRoutes from "./routes/ops.ts";
-import pullRequestsRoutes from "./routes/pullRequests.ts";
-import sessionsRoutes from "./routes/sessions.ts";
-import settingsRoutes from "./routes/settings.ts";
-import staticRoutes from "./routes/static.ts";
-import sttRoutes from "./routes/stt.ts";
-import tasksRoutes from "./routes/tasks.ts";
-import terminalRoutes from "./routes/terminal.ts";
-import ttsRoutes from "./routes/tts.ts";
+import { authUser } from "./http.ts";
+import { routes } from "./routes.ts";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-export const app = express();
-const GLOBAL_JSON_LIMIT = "2097152b";
-const globalJsonParser = express.json({ limit: GLOBAL_JSON_LIMIT });
-
-export function shouldSkipGlobalJsonParser(
-    request: Pick<express.Request, "method" | "path">
-): boolean {
-    return (
-        (request.method === "PATCH" && /^\/api\/jobs\/[^/]+\/?$/u.test(request.path)) ||
-        (request.method === "PUT" && request.path.startsWith("/api/config-files/")) ||
-        (request.method === "PUT" && request.path.startsWith("/api/files/"))
-    );
+interface DashboardSocketData {
+    closeHandlers: Array<() => void>;
+    errorHandlers: Array<(error: unknown) => void>;
+    messageHandlers: Array<(data: string | Buffer) => void>;
+    socket?: DashboardSocket;
+    userId: number;
 }
-
-/** Parses Express trust-proxy config from environment strings. */
-export function parseTrustProxy(value?: string): boolean | number | string {
-    if (value === undefined || value.trim() === "") {
-        return "loopback";
-    }
-
-    const normalized = value.trim().toLowerCase();
-    if (normalized === "true") return true;
-    if (normalized === "false") return false;
-
-    if (/^\d+$/u.test(normalized)) {
-        const parsed = Number(normalized);
-        if (Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= 255) {
-            return parsed;
-        }
-        return "loopback";
-    }
-
-    return normalized;
-}
-
-export const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
 
 const frontendPath =
-    process.env.MIRA_DASHBOARD_FRONTEND_PATH || path.join(__dirname, "..", "..", "dist");
+    process.env.MIRA_DASHBOARD_FRONTEND_PATH ||
+    path.join(import.meta.dirname, "..", "..", "dist");
 
-type ExecSyncCommand = (
-    command: string,
-    options: Parameters<typeof execSync>[1]
-) => Buffer | string;
-
-/** Resolves the current backend Git commit for health responses. */
-export function resolveBackendCommit(
-    repoRoot = path.join(__dirname, "..", ".."),
-    execCommand: ExecSyncCommand = execSync
-): string {
-    try {
-        return execCommand("git rev-parse --short HEAD", {
-            cwd: repoRoot,
-            stdio: ["ignore", "pipe", "ignore"],
-        })
-            .toString()
-            .trim();
-    } catch {
-        return "unknown";
-    }
-}
-
-const backendCommit = resolveBackendCommit();
-
-/** Resolves the port the backend should listen on. */
 export function resolveListenPort(value = process.env.PORT): number {
     const trimmed = value?.trim() ?? "";
     if (!/^\d+$/u.test(trimmed)) {
         return 3100;
     }
-
     const port = Number(trimmed);
     return port <= 65_535 ? port : 3100;
 }
 
-// =====================
-// API Routes
-// =====================
+function dashboardSocketFromBun(
+    ws: ServerWebSocket<DashboardSocketData>
+): DashboardSocket {
+    return {
+        close: (code?: number, reason?: string) => ws.close(code, reason),
+        isOpen: () => ws.readyState === WebSocket.OPEN,
+        onClose: (handler) => {
+            ws.data.closeHandlers.push(handler);
+        },
+        onError: (handler) => {
+            ws.data.errorHandlers.push(handler);
+        },
+        onMessage: (handler) => {
+            ws.data.messageHandlers.push(handler);
+        },
+        send: (data) => {
+            ws.send(data);
+        },
+    };
+}
 
-/** Performs health handler. */
-const healthHandler: express.RequestHandler = (_request, response) => {
-    response.json({
-        status: "isOk",
-        gatewayConnected: gateway.isConnected(),
-        sessionCount: gateway.getSessions().length,
-        backendCommit,
+export function createServer(port = resolveListenPort()): Server<DashboardSocketData> {
+    return Bun.serve<DashboardSocketData>({
+        port,
+        routes,
+        fetch(request, server) {
+            const url = new URL(request.url);
+            if (url.pathname === "/ws") {
+                const user = authUser(request, server);
+                if (!user) {
+                    return new Response("Unauthorized", { status: 401 });
+                }
+                const isUpgraded = server.upgrade(request, {
+                    data: {
+                        closeHandlers: [],
+                        errorHandlers: [],
+                        messageHandlers: [],
+                        userId: user.id,
+                    },
+                });
+                return isUpgraded
+                    ? undefined
+                    : new Response("WebSocket upgrade failed", { status: 400 });
+            }
+            return staticResponse(url.pathname);
+        },
+        websocket: {
+            close(ws) {
+                for (const handler of ws.data.closeHandlers) {
+                    handler();
+                }
+            },
+            message(ws, message) {
+                const data = typeof message === "string" ? message : Buffer.from(message);
+                for (const handler of ws.data.messageHandlers) {
+                    handler(data);
+                }
+            },
+            open(ws) {
+                const socket = dashboardSocketFromBun(ws);
+                ws.data.socket = socket;
+                gateway.handleDashboardClient(socket);
+            },
+        },
     });
-};
-
-/** Returns whether an API-relative path belongs to the auth route tree. */
-export function isAuthRoute(pathname: string): boolean {
-    return pathname === "/auth" || pathname.startsWith("/auth/");
 }
 
-// Rate limiting: general API (600 req/min per IP). This intentionally stays
-// above normal dashboard polling (terminal jobs poll every 500ms) while still
-// bounding abusive request bursts.
-const apiLimiter = rateLimit({
-    windowMs: 60_000,
-    max: 600,
-    standardHeaders: true,
-    legacyHeaders: false,
-    skip: (request) => isAuthRoute(request.path),
-    message: { error: "Too many requests, please try again later" },
-});
-
-// Stricter limit for auth endpoints (20 req/min per IP)
-const authLimiter = rateLimit({
-    windowMs: 60_000,
-    max: 20,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many authentication attempts, please try again later" },
-});
-
-/** Returns dashboard sessions for authenticated requests. */
-export const sessionsHandler: express.RequestHandler = (request, response) => {
-    const user = getAuthUserFromRequest(request);
-    if (!user) {
-        response.status(401).json({ error: "Unauthorized" });
-        return;
-    }
-
-    response.json(gateway.getSessions());
-};
-
-/** Applies API auth while leaving auth bootstrap/login routes public. */
-export const apiAuthMiddleware: express.RequestHandler = (request, response, next) => {
-    if (isAuthRoute(request.path)) {
-        next();
-        return;
-    }
-    requireAuth(request, response, next);
-};
-
-// =====================
-// WebSocket
-// =====================
-/** Handles one dashboard WebSocket connection after authenticating the request. */
-export function handleWebSocketConnection(
-    ws: WebSocket,
-    request: http.IncomingMessage
-): void {
-    const user = getAuthUserFromRequest(request);
-    if (!user) {
-        ws.close(4401, "Unauthorized");
-        return;
-    }
-
-    gateway.handleClient(ws);
+async function fileResponse(filePath: string, contentType?: string): Promise<Response> {
+    const headers: Record<string, string> = { "Cache-Control": "no-store" };
+    if (contentType) headers["Content-Type"] = contentType;
+    return new Response(Bun.file(filePath), { headers });
 }
 
-function shouldConfigureServerModule(): true {
-    dotenv.config();
-    app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
-    app.use((request, response, next) => {
-        if (shouldSkipGlobalJsonParser(request)) {
-            next();
-            return;
+async function staticResponse(pathname: string): Promise<Response> {
+    if (pathname === "/api" || pathname.startsWith("/api/")) {
+        return Response.json({ error: "Not found" }, { status: 404 });
+    }
+    const indexPath = path.join(frontendPath, "index.html");
+    if (!fs.existsSync(indexPath)) {
+        return new Response(
+            `
+                <html>
+                <head><title>Mira Dashboard - Not Built</title></head>
+                <body style="font-family: system-ui; padding: 2rem; background: #1a1a2e; color: #eee;">
+                    <h1>Frontend Not Built</h1>
+                    <p>Run <code style="background: #333; padding: 2px 6px; border-radius: 4px;">bun run build</code> in the frontend directory.</p>
+                    <p style="color: #888; margin-top: 2rem;">
+                        Backend API is available at <code style="background: #333; padding: 2px 6px;">/api/*</code>
+                    </p>
+                </body>
+                </html>
+            `,
+            { headers: { "Content-Type": "text/html" }, status: 503 }
+        );
+    }
+
+    const root = path.resolve(frontendPath);
+    const directPath = path.resolve(
+        root,
+        decodeURIComponent(pathname.replace(/^\/+/u, ""))
+    );
+    if (directPath.startsWith(`${root}${path.sep}`)) {
+        try {
+            const stat = await fsp.stat(directPath);
+            if (stat.isFile()) return fileResponse(directPath);
+        } catch {
+            // Continue with hashed asset lookup or SPA routing below.
         }
+    }
 
-        globalJsonParser(request, response, next);
-    });
+    if (/\.[\da-z]+$/iu.test(pathname)) {
+        if (pathname.includes("/") && pathname !== `/${path.basename(pathname)}`) {
+            return new Response("Not found", { status: 404 });
+        }
+        const assetPath = path.join(root, "assets", path.basename(pathname));
+        try {
+            const stat = await fsp.stat(assetPath);
+            if (stat.isFile()) return fileResponse(assetPath);
+        } catch {
+            return new Response("Not found", { status: 404 });
+        }
+    }
 
-    app.get("/health", healthHandler);
-    app.get("/api/health", healthHandler);
-
-    // Apply rate limiting before auth middleware
-    app.use("/api/auth", authLimiter);
-    app.use("/api", apiLimiter);
-    app.get("/api/sessions", sessionsHandler);
-
-    authRoutes(app);
-    app.use("/api", apiAuthMiddleware);
-
-    // Route modules
-    filesRoutes(app, express);
-    configFilesRoutes(app, express);
-    cacheRoutes(app);
-    backupRoutes(app, express);
-    agentsRoutes(app);
-    logsRoutes(app);
-    cronRoutes(app);
-    databaseRoutes(app);
-    dockerRoutes(app);
-    execRoutes(app, express);
-    jobsRoutes(app);
-    openClawConfigRoutes(app);
-    mediaRoutes(app);
-    metricsRoutes(app);
-    moltbookRoutes(app);
-    settingsRoutes(app, express, gateway.getStatus);
-    sessionsRoutes(app);
-    sttRoutes(app, express);
-    tasksRoutes(app, express);
-    ttsRoutes(app, express);
-    notificationsRoutes(app);
-    opsRoutes(app);
-    pullRequestsRoutes(app);
-    terminalRoutes(app);
-
-    // Static files & SPA (must be last)
-    staticRoutes(app, frontendPath);
-
-    wss.on("connection", handleWebSocketConnection);
-    return true;
+    if (pathname.startsWith("/assets/") || path.extname(pathname)) {
+        return new Response("Not found", { status: 404 });
+    }
+    return fileResponse(indexPath, "text/html");
 }
-
-export const isServerModuleConfigured = shouldConfigureServerModule();

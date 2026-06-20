@@ -1,8 +1,11 @@
-import crypto from "node:crypto";
+import {
+    createPrivateKey,
+    createPublicKey,
+    generateKeyPairSync,
+    sign,
+} from "node:crypto";
 import fs from "node:fs";
 import Path from "node:path";
-
-import WebSocket from "ws";
 
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
@@ -107,7 +110,7 @@ function sanitizeTimerDurationMs(value: unknown, fallback: number): number {
 
 /** Performs derive public key raw. */
 function derivePublicKeyRaw(publicKeyPem: string): Buffer {
-    const spki = crypto.createPublicKey(publicKeyPem).export({
+    const spki = createPublicKey(publicKeyPem).export({
         type: "spki",
         format: "der",
     });
@@ -123,10 +126,9 @@ function derivePublicKeyRaw(publicKeyPem: string): Buffer {
 
 /** Performs fingerprint public key. */
 function fingerprintPublicKey(publicKeyPem: string): string {
-    return crypto
-        .createHash("sha256")
+    return new Bun.CryptoHasher("sha256")
         .update(derivePublicKeyRaw(publicKeyPem))
-        .digest("hex");
+        .digest("hex") as string;
 }
 
 /** Performs public key raw base64 URL from pem. */
@@ -141,13 +143,13 @@ function asError(error: unknown): Error {
 
 /** Performs sign device payload. */
 function signDevicePayload(privateKeyPem: string, payload: string): string {
-    const key = crypto.createPrivateKey(privateKeyPem);
-    return base64UrlEncode(crypto.sign(null, Buffer.from(payload, "utf8"), key));
+    const key = createPrivateKey(privateKeyPem);
+    return base64UrlEncode(sign(null, Buffer.from(payload, "utf8"), key));
 }
 
 /** Performs generate IDentity. */
 function generateIdentity(): DeviceIdentity {
-    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
     const publicKeyPem = publicKey.export({ type: "spki", format: "pem" }).toString();
     const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 
@@ -556,30 +558,30 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         const ws = new WebSocket(trimmedUrl);
         this.ws = ws;
 
-        ws.on("open", () => {
+        ws.addEventListener("open", () => {
             this.armConnectChallengeTimeout();
         });
 
-        ws.on("message", (raw) => {
-            this.handleMessage(raw.toString());
+        ws.addEventListener("message", (event) => {
+            this.handleMessage(String(event.data));
         });
 
-        ws.on("close", (code, reasonBuffer) => {
-            const reason = reasonBuffer.toString();
+        ws.addEventListener("close", (event) => {
+            const reason = event.reason;
             if (this.ws === ws) {
                 this.ws = null;
             }
             this.clearConnectChallengeTimeout();
             this.stopTickWatch();
-            this.rejectAllPending(new Error(`gateway closed (${code}): ${reason}`));
-            this.opts.onClose?.(code, reason);
+            this.rejectAllPending(new Error(`gateway closed (${event.code}): ${reason}`));
+            this.opts.onClose?.(event.code, reason);
             if (!this.closed) {
                 this.scheduleReconnect();
             }
         });
 
-        ws.on("error", (error) => {
-            this.opts.onConnectError?.(asError(error));
+        ws.addEventListener("error", (event) => {
+            this.opts.onConnectError?.(asError(event));
         });
     }
 
@@ -623,14 +625,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
 
             this.pending.set(id, { resolve, reject, timeout });
             try {
-                ws.send(JSON.stringify(frame), (error) => {
-                    if (!error) {
-                        return;
-                    }
-                    this.pending.delete(id);
-                    clearTimeout(timeout);
-                    reject(error);
-                });
+                ws.send(JSON.stringify(frame));
             } catch (error) {
                 this.pending.delete(id);
                 clearTimeout(timeout);

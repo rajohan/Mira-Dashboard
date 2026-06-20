@@ -1,11 +1,7 @@
-import crypto from "node:crypto";
-import type { IncomingMessage } from "node:http";
-
-import type express from "express";
+import { scryptSync, timingSafeEqual } from "node:crypto";
 
 import { database } from "./database.ts";
 
-const SESSION_COOKIE = "mira_dashboard_session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 
 /** Represents one user row. */
@@ -23,39 +19,6 @@ export interface AuthUser {
     username: string;
 }
 
-const LOOPBACK_USER: AuthUser = {
-    id: 0,
-    username: "mira-local",
-};
-
-/** Parses cookies. */
-function parseCookies(cookieHeader?: string): Record<string, string> {
-    if (!cookieHeader) {
-        return {};
-    }
-
-    return Object.fromEntries(
-        cookieHeader
-            .split(";")
-            .map((part) => part.trim())
-            .filter(Boolean)
-            .map((part) => {
-                const index = part.indexOf("=");
-                if (index === -1) {
-                    return [part, ""];
-                }
-                return [part.slice(0, index), decodeURIComponent(part.slice(index + 1))];
-            })
-    );
-}
-
-/** Returns session ID from cookie header. */
-function getSessionIdFromCookieHeader(cookieHeader?: string): string | null {
-    const cookies = parseCookies(cookieHeader);
-    const sessionId = cookies[SESSION_COOKIE];
-    return sessionId || null;
-}
-
 /** Performs now iso. */
 function nowIso(): string {
     const now = new Date();
@@ -67,94 +30,18 @@ function normalizeUsername(username: string): string {
     return username.trim().toLowerCase();
 }
 
-/** Returns whether production. */
-function isProduction(request?: IncomingMessage): boolean {
-    if (process.env.NODE_ENV === "production") {
-        return true;
-    }
-
-    const forwardedProtocol = request?.headers["x-forwarded-proto"];
-    const trustedProxyIps = new Set(
-        (process.env.MIRA_DASHBOARD_TRUSTED_PROXY_IPS || "")
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean)
-    );
-    const peerAddress = request?.socket.remoteAddress;
-    const isTrustedProxy =
-        isLoopbackAddress(peerAddress) ||
-        (peerAddress ? trustedProxyIps.has(peerAddress) : false);
-
-    if (isTrustedProxy && typeof forwardedProtocol === "string") {
-        return forwardedProtocol.split(",", 1)[0]?.trim() === "https";
-    }
-    return false;
-}
-
-/** Returns whether loopback address. */
-function isLoopbackAddress(address?: string | null): boolean {
-    if (!address) {
-        return false;
-    }
-
-    return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address);
-}
-
-function headerValue(value: string | string[] | undefined): string | undefined {
-    return Array.isArray(value) ? value[0] : value;
-}
-
-function forwardedAddresses(forwardedFor: string): string[] {
-    return forwardedFor
-        .split(",")
-        .map((address) => address.trim())
-        .filter(Boolean);
-}
-
-function clientAddressFromTrustedChain(
-    peerAddress: string | undefined,
-    forwardedFor: string
-): string | undefined {
-    let clientAddress = peerAddress;
-    const forwardedChain = forwardedAddresses(forwardedFor);
-    for (let index = forwardedChain.length - 1; index >= 0; index -= 1) {
-        const address = forwardedChain[index];
-        clientAddress = address;
-        if (!isLoopbackAddress(address)) {
-            break;
-        }
-    }
-
-    return clientAddress;
-}
-
-function remoteAddress(request: express.Request | IncomingMessage): string | undefined {
-    return request.socket?.remoteAddress ?? request.connection?.remoteAddress;
-}
-
-/** Returns whether loopback request. */
-export function isLoopbackRequest(request: express.Request | IncomingMessage): boolean {
-    const peerAddress = remoteAddress(request);
-    const isTrustForwardedHeaders = isLoopbackAddress(peerAddress);
-    const headers = request.headers ?? {};
-    const realIp = headerValue(headers["x-real-ip"]);
-    if (isTrustForwardedHeaders && realIp) {
-        return isLoopbackAddress(realIp.trim());
-    }
-    const forwardedFor = headerValue(headers["x-forwarded-for"]);
-    if (isTrustForwardedHeaders && forwardedFor) {
-        return isLoopbackAddress(
-            clientAddressFromTrustedChain(peerAddress, forwardedFor)
-        );
-    }
-    return isLoopbackAddress(peerAddress);
-}
-
 /** Performs hash password. */
 export function hashPassword(password: string): string {
-    const salt = crypto.randomBytes(16).toString("hex");
-    const derivedKey = crypto.scryptSync(password, salt, 64);
+    const salt = randomHex(16);
+    const derivedKey = scryptSync(password, salt, 64);
     return `scrypt:${salt}:${derivedKey.toString("hex")}`;
+}
+
+/** Returns cryptographically secure random bytes as hex using Bun's Web Crypto runtime. */
+function randomHex(byteLength: number): string {
+    const bytes = new Uint8Array(byteLength);
+    crypto.getRandomValues(bytes);
+    return Buffer.from(bytes).toString("hex");
 }
 
 /** Performs verify password. */
@@ -164,14 +51,14 @@ export function isPasswordVerified(password: string, storedHash: string): boolea
         return false;
     }
 
-    const derivedKey = crypto.scryptSync(password, salt, 64);
+    const derivedKey = scryptSync(password, salt, 64);
     const storedBuffer = Buffer.from(hash, "hex");
 
     if (storedBuffer.length !== derivedKey.length) {
         return false;
     }
 
-    return crypto.timingSafeEqual(storedBuffer, derivedKey);
+    return timingSafeEqual(storedBuffer, derivedKey);
 }
 
 /** Returns user count. */
@@ -284,7 +171,7 @@ export function getPersistedGatewayToken(): string | null {
 
 /** Creates session. */
 export function createSession(userId: number): string {
-    const sessionId = crypto.randomBytes(32).toString("hex");
+    const sessionId = randomHex(32);
     const expiresAtDate = new Date(Date.now() + SESSION_TTL_MS);
     const expiresAt = expiresAtDate.toISOString();
     const createdAt = nowIso();
@@ -323,86 +210,4 @@ export function getAuthUserFromSessionId(sessionId: string): AuthUser | null {
         .get(sessionId, nowIso()) as AuthUser | undefined;
 
     return row || null;
-}
-
-/** Returns auth user from request. */
-export function getAuthUserFromRequest(
-    request: express.Request | IncomingMessage
-): AuthUser | null {
-    if (isLoopbackRequest(request)) {
-        return LOOPBACK_USER;
-    }
-
-    const sessionId = getSessionIdFromCookieHeader(request.headers.cookie);
-    if (!sessionId) {
-        return null;
-    }
-    return getAuthUserFromSessionId(sessionId);
-}
-
-/** Performs set session cookie. */
-export function setSessionCookie(
-    response: express.Response,
-    sessionId: string,
-    request: express.Request
-): void {
-    const maxAge = Math.floor(SESSION_TTL_MS / 1000);
-    const isSecure = isProduction(request);
-    const cookieParts = [
-        `${SESSION_COOKIE}=${encodeURIComponent(sessionId)}`,
-        "Path=/",
-        "HttpOnly",
-        "SameSite=Strict",
-        `Max-Age=${maxAge}`,
-    ];
-
-    if (isSecure) {
-        cookieParts.push("Secure");
-    }
-
-    response.setHeader("Set-Cookie", cookieParts.join("; "));
-}
-
-/** Performs clear session cookie. */
-export function clearSessionCookie(
-    response: express.Response,
-    request: express.Request
-): void {
-    const isSecure = isProduction(request);
-    const cookieParts = [
-        `${SESSION_COOKIE}=`,
-        "Path=/",
-        "HttpOnly",
-        "SameSite=Strict",
-        "Max-Age=0",
-    ];
-
-    if (isSecure) {
-        cookieParts.push("Secure");
-    }
-
-    response.setHeader("Set-Cookie", cookieParts.join("; "));
-}
-
-/** Performs reqUIre auth. */
-export function requireAuth(
-    request: express.Request,
-    response: express.Response,
-    next: express.NextFunction
-): void {
-    const user = getAuthUserFromRequest(request);
-    if (!user) {
-        response.status(401).json({ error: "Unauthorized" });
-        return;
-    }
-
-    request.user = user;
-    next();
-}
-
-declare module "express-serve-static-core" {
-    /** Represents request. */
-    interface Request {
-        user?: AuthUser;
-    }
 }

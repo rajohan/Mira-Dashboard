@@ -1,9 +1,7 @@
-import * as ChildProcess from "node:child_process";
-import * as Crypto from "node:crypto";
 import * as Fs from "node:fs";
 import Path from "node:path";
 
-import JSON5 from "json5";
+import { JSON5 } from "bun";
 
 export type GuardedPath = string & { readonly __guardedPath: unique symbol };
 
@@ -38,10 +36,6 @@ const fsPromiseOps = Fs.promises as unknown as {
     open: typeof Fs.promises.open;
     readdir: typeof Fs.promises.readdir;
     stat: typeof Fs.promises.stat;
-};
-
-const childProcessOps = ChildProcess as unknown as {
-    spawn: typeof ChildProcess.spawn;
 };
 
 /** Converts a guarded path to a Buffer to avoid direct string path sinks in wrappers. */
@@ -136,7 +130,7 @@ export async function copyNoFollowGuarded(
         const destinationDirectory = Path.dirname(destinationPath);
         const temporaryPath = Path.join(
             destinationDirectory,
-            `.${Path.basename(destinationPath)}.${Crypto.randomUUID()}.tmp`
+            `.${Path.basename(destinationPath)}.${Bun.randomUUIDv7()}.tmp`
         );
         let destinationFile: Fs.promises.FileHandle | undefined;
         try {
@@ -285,7 +279,7 @@ export async function writeTextNoFollowGuarded(
     const destinationDirectory = Path.dirname(destinationPath);
     const temporaryPath = Path.join(
         destinationDirectory,
-        `.${Path.basename(destinationPath)}.${Crypto.randomUUID()}.tmp`
+        `.${Path.basename(destinationPath)}.${Bun.randomUUIDv7()}.tmp`
     );
     let file: Fs.promises.FileHandle | undefined;
     try {
@@ -379,17 +373,4 @@ export function statGuarded(path: GuardedPath): Fs.Stats {
 /** Stats a validated path without following the final component. */
 export function lstatGuarded(path: GuardedPath): Fs.Stats {
     return lstatSync(guardedPathBuffer(path));
-}
-
-/** Spawns a validated executable with explicit argument vector semantics. */
-export function spawnGuarded(
-    executable: string,
-    arguments_: string[],
-    options: ChildProcess.SpawnOptions
-): ChildProcess.ChildProcess {
-    return Reflect.apply(childProcessOps.spawn, childProcessOps, [
-        executable,
-        arguments_,
-        options,
-    ]) as ChildProcess.ChildProcess;
 }
