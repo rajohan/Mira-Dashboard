@@ -1736,13 +1736,12 @@ export async function runElevatedLogRotationService(options: {
         stdout = typeof failedOutput.stdout === "string" ? failedOutput.stdout : "";
         const trimmedFailure = stdout.trim();
         if (trimmedFailure) {
-            try {
+            const parsedFailure = parseJsonObjectFromOutput(trimmedFailure);
+            if (parsedFailure) {
                 return {
-                    result: JSON.parse(trimmedFailure) as Record<string, unknown>,
+                    result: parsedFailure,
                     stderr,
                 };
-            } catch {
-                // Fall through to a structured failure with the captured output.
             }
         }
         const failureMessage = caughtMessage(error);
@@ -1760,10 +1759,14 @@ export async function runElevatedLogRotationService(options: {
         };
     }
     try {
-        return {
-            result: JSON.parse(trimmed) as Record<string, unknown>,
-            stderr,
-        };
+        const parsed = parseJsonObjectFromOutput(trimmed);
+        if (parsed) {
+            return {
+                result: parsed,
+                stderr,
+            };
+        }
+        throw new Error("No JSON object found in stdout");
     } catch (error) {
         const parseError = caughtMessage(error);
         const parseContext = `Failed to parse elevated log rotation JSON: ${parseError}; stdout: ${trimmed}`;
@@ -1777,6 +1780,27 @@ export async function runElevatedLogRotationService(options: {
             stderr: stderr ? `${stderr}\n${parseContext}` : parseContext,
         };
     }
+}
+
+function parseJsonObjectFromOutput(output: string): Record<string, unknown> | null {
+    const trimmed = output.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    for (let startIndex = 0; startIndex < trimmed.length; startIndex += 1) {
+        if (trimmed[startIndex] !== "{") {
+            continue;
+        }
+        try {
+            const parsed = JSON.parse(trimmed.slice(startIndex)) as unknown;
+            return asRecord(parsed);
+        } catch {
+            // Doppler can print a non-JSON banner before the real JSON payload.
+        }
+    }
+
+    return null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

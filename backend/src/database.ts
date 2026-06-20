@@ -232,6 +232,15 @@ CREATE INDEX IF NOT EXISTS idx_docker_update_events_created_at
     ON docker_update_events(created_at DESC);
 `;
 
+function runSchemaSql(databaseConnection: DatabaseSync, schemaSql: string): void {
+    for (const statement of schemaSql.split(";")) {
+        const trimmedStatement = statement.trim();
+        if (trimmedStatement) {
+            databaseConnection.run(trimmedStatement);
+        }
+    }
+}
+
 function initializeDatabase(): DatabaseSync {
     const dataDirectory = path.dirname(miraDatabasePath);
     fs.mkdirSync(dataDirectory, { recursive: true });
@@ -239,7 +248,7 @@ function initializeDatabase(): DatabaseSync {
     const initializedDatabase = new Database(miraDatabasePath);
     initializedDatabase.run("PRAGMA foreign_keys = ON");
     initializedDatabase.run("PRAGMA busy_timeout = 5000");
-    initializedDatabase.run(SCHEMA_SQL);
+    runSchemaSql(initializedDatabase, SCHEMA_SQL);
 
     return initializedDatabase;
 }
