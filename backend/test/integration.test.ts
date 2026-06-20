@@ -92,9 +92,12 @@ describe("Mira Dashboard backend integration", () => {
     });
 
     afterAll(async () => {
-        await new Promise<void>((resolve, reject) => {
-            testState.server?.close((error) => (error ? reject(error) : resolve()));
-        });
+        const server = testState.server;
+        if (server) {
+            await new Promise<void>((resolve, reject) => {
+                server.close((error) => (error ? reject(error) : resolve()));
+            });
+        }
         await fs.rm(testState.temporaryRoot, { recursive: true, force: true });
     });
 
