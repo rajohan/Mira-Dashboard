@@ -105,11 +105,20 @@ function numberFrom(value: string | null | undefined): number {
 
 /** Runs a command inside a Docker container and returns raw stdout. */
 async function runDockerExec(container: string, command: string[]) {
-    const { stdout } = await runProcess("docker", ["exec", container, ...command], {
-        env: process.env,
-        maxBuffer: 10 * 1024 * 1024,
-        timeout: DOCKER_EXEC_TIMEOUT_MS,
-    });
+    const { code, stderr, stdout } = await runProcess(
+        "docker",
+        ["exec", container, ...command],
+        {
+            env: process.env,
+            maxBuffer: 10 * 1024 * 1024,
+            timeoutMs: DOCKER_EXEC_TIMEOUT_MS,
+        }
+    );
+    if (code !== 0) {
+        throw new Error(
+            `docker exec failed with exit code ${code}: ${stderr.trim() || stdout.trim()}`
+        );
+    }
     return stdout;
 }
 

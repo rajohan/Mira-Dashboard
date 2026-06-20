@@ -697,11 +697,18 @@ async function runCommand(
     arguments_: string[],
     cwd?: string
 ): Promise<string> {
-    const { stdout } = await runProcess(file, arguments_, {
+    const { code, stderr, stdout } = await runProcess(file, arguments_, {
         cwd,
         maxBuffer: 10 * 1024 * 1024,
-        timeout: 90_000,
+        timeoutMs: 90_000,
     });
+    if (code !== 0) {
+        throw new Error(
+            `${file} ${arguments_.join(" ")} failed with exit code ${code}: ${
+                stderr.trim() || stdout.trim()
+            }`
+        );
+    }
     return stdout.trimEnd();
 }
 
@@ -1591,16 +1598,19 @@ tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw env CODEX_HOME="$MIR
 	for i in $(seq 1 20); do OUT=$(tmux capture-pane -pt "$SESSION" -S -320 || true); has_limits && break; sleep 1; done
 	printf "%s\n" "$OUT"
 	`;
-        const { stdout } = await runProcess("bash", ["-c", command], {
+        const { code, stdout } = await runProcess("bash", ["-c", command], {
             env: {
                 PATH: process.env.PATH,
                 NODE_ENV: process.env.NODE_ENV,
                 MIRA_QUOTA_CODEX_BIN: codexPath,
                 MIRA_QUOTA_CODEX_HOME: codexHome,
             },
-            timeout: 120_000,
+            timeoutMs: 120_000,
             maxBuffer: 1024 * 1024,
         });
+        if (code !== 0) {
+            return { status: "error", note: `codex quota exited ${code}` };
+        }
         const output = stripAnsi(stdout).replaceAll("\r", "");
         return parseOpenAiQuotaOutput(output);
     } catch (error) {

@@ -111,6 +111,7 @@ interface DockerVolumeRow {
 interface DockerExecJob {
     code: number | null;
     containerId: string;
+    containerPid?: number;
     endedAt: number | null;
     id: string;
     process?: BunProcess;
@@ -187,7 +188,7 @@ function trimOutput(text: string): string {
 
 function dockerIdentifier(value: unknown): string | null {
     const identifier = stringFallback(value).trim();
-    if (!identifier || identifier.startsWith("-")) return null;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(identifier)) return null;
     return identifier;
 }
 
@@ -278,24 +279,39 @@ function parseDockerSizeToBytes(sizeRaw: string | undefined): number {
 }
 
 async function runDocker(arguments_: string[]): Promise<string> {
-    const { stdout } = await runProcess(dockerBin, arguments_, {
+    const { code, stderr, stdout } = await runProcess(dockerBin, arguments_, {
         cwd: getDockerRoot(),
         env: process.env,
         maxBuffer: 10 * 1024 * 1024,
-        timeout: DOCKER_REQUEST_TIMEOUT_MS,
+        timeoutMs: DOCKER_REQUEST_TIMEOUT_MS,
     });
+    if (code !== 0) {
+        throw new Error(
+            `docker ${arguments_.join(" ")} failed with exit code ${code}: ${
+                stderr.trim() || stdout.trim()
+            }`
+        );
+    }
     return String(stdout);
 }
 
 async function runCompose(
     arguments_: string[]
 ): Promise<{ stderr: string; stdout: string }> {
-    return runProcess(getDockerComposeWrapper(), arguments_, {
+    const result = await runProcess(getDockerComposeWrapper(), arguments_, {
         cwd: getDockerRoot(),
         env: process.env,
         maxBuffer: 20 * 1024 * 1024,
-        timeout: DOCKER_REQUEST_TIMEOUT_MS,
+        timeoutMs: DOCKER_REQUEST_TIMEOUT_MS,
     });
+    if (result.code !== 0) {
+        throw new Error(
+            `docker compose ${arguments_.join(" ")} failed with exit code ${
+                result.code
+            }: ${result.stderr.trim() || result.stdout.trim()}`
+        );
+    }
+    return result;
 }
 
 async function getContainerInspectMap(containerIds: string[]) {
@@ -615,28 +631,65 @@ function activeDockerExecJobCount(): number {
 }
 
 function settleDockerExecJob(containerId: string, command: string, jobId: string): void {
-    const child = spawnProcess(dockerBin, ["exec", containerId, "sh", "-lc", command], {
-        cwd: getDockerRoot(),
-        env: process.env,
-    });
+    const pidMarker = `__MIRA_DOCKER_EXEC_PID_${jobId}:`;
+    const child = spawnProcess(
+        dockerBin,
+        [
+            "exec",
+            "-e",
+            `MIRA_DASHBOARD_EXEC_COMMAND=${command}`,
+            containerId,
+            "sh",
+            "-lc",
+            String.raw`printf '${pidMarker}%s\n' "$$"; exec sh -lc "$MIRA_DASHBOARD_EXEC_COMMAND"`,
+        ],
+        {
+            cwd: getDockerRoot(),
+            env: process.env,
+        }
+    );
     const job = dockerExecJobs.get(jobId);
     if (job) job.process = child;
 
-    void pipeProcessOutput(
+    let stdoutPrefix = "";
+    const stdoutDone = pipeProcessOutput(
         child.stdout as ReadableStream<Uint8Array> | undefined,
         (data) => {
             const current = dockerExecJobs.get(jobId);
-            if (current) current.stdout = trimOutput(current.stdout + String(data));
+            if (!current) return;
+            const output = stdoutPrefix + String(data);
+            const newlineIndex = output.indexOf("\n");
+            if (current.containerPid === undefined && newlineIndex === -1) {
+                stdoutPrefix = output;
+                return;
+            }
+            let userOutput = output;
+            if (current.containerPid === undefined) {
+                const firstLine = output.slice(0, newlineIndex).trim();
+                if (firstLine.startsWith(pidMarker)) {
+                    const pid = Number(firstLine.slice(pidMarker.length));
+                    if (Number.isSafeInteger(pid) && pid > 0) {
+                        current.containerPid = pid;
+                    }
+                    userOutput = output.slice(newlineIndex + 1);
+                }
+                stdoutPrefix = "";
+            }
+            current.stdout = trimOutput(current.stdout + userOutput);
         }
     );
-    void pipeProcessOutput(
+    const stderrDone = pipeProcessOutput(
         child.stderr as ReadableStream<Uint8Array> | undefined,
         (data) => {
             const current = dockerExecJobs.get(jobId);
             if (current) current.stderr = trimOutput(current.stderr + String(data));
         }
     );
-    void child.exited
+    void (async () => {
+        const code = await child.exited;
+        await Promise.all([stdoutDone, stderrDone]);
+        return code;
+    })()
         .then((code) => {
             const current = dockerExecJobs.get(jobId);
             if (!current) return;
@@ -699,16 +752,23 @@ export const dockerRoutes = {
             if (!containerId) return invalidDockerIdentifier("containerId");
             const requestedTail = Math.trunc(queryNumber(request, "tail", 200)) || 200;
             const tail = Math.min(MAX_LOG_TAIL, Math.max(MIN_LOG_TAIL, requestedTail));
-            const { stdout, stderr } = await runProcess(
+            const { code, stderr, stdout } = await runProcess(
                 dockerBin,
                 ["logs", "--tail", String(tail), containerId],
                 {
                     cwd: getDockerRoot(),
                     env: process.env,
                     maxBuffer: 10 * 1024 * 1024,
-                    timeout: DOCKER_REQUEST_TIMEOUT_MS,
+                    timeoutMs: DOCKER_REQUEST_TIMEOUT_MS,
                 }
             );
+            if (code !== 0) {
+                throw new Error(
+                    `docker logs failed with exit code ${code}: ${
+                        stderr.trim() || stdout.trim()
+                    }`
+                );
+            }
             return json({
                 content: [String(stdout), String(stderr)]
                     .filter(Boolean)
@@ -744,6 +804,19 @@ export const dockerRoutes = {
             }
             if (!job.process) {
                 return json({ error: "Process not available" }, { status: 400 });
+            }
+            if (job.containerPid) {
+                void runDocker([
+                    "exec",
+                    job.containerId,
+                    "kill",
+                    "-TERM",
+                    String(job.containerPid),
+                ]).catch((error: unknown) => {
+                    job.stderr = trimOutput(
+                        `${job.stderr}\n${errorMessage(error, "Failed to stop in-container process")}`.trim()
+                    );
+                });
             }
             job.process.kill("SIGTERM");
             return json({ isSuccess: true });

@@ -6,7 +6,9 @@ import { json, readJson } from "../http.ts";
 import {
     guardedPath,
     lstatGuarded,
+    openReadNoFollowGuarded,
     readdirGuarded,
+    readFromOpenFile,
     statGuarded,
     writeTextNoFollowExclusiveGuarded,
 } from "../lib/guardedOps.ts";
@@ -90,7 +92,19 @@ function imageMime(filename: string): string | null {
 }
 
 function listFiles(directoryPath: string) {
-    const root = fs.realpathSync(workspaceRoot());
+    let root: string;
+    try {
+        root = fs.realpathSync(workspaceRoot());
+    } catch (error) {
+        if (
+            !directoryPath &&
+            ((error as NodeJS.ErrnoException).code === "ENOENT" ||
+                (error as NodeJS.ErrnoException).code === "ENOTDIR")
+        ) {
+            return [];
+        }
+        throw error;
+    }
     const fullPath = safePathWithinRoot(directoryPath || ".", root);
     if (!fullPath) return null;
     const resolved = safePathWithinRoot(fs.realpathSync(fullPath), root);
@@ -195,7 +209,13 @@ export const fileRoutes = {
                         { status: 413 }
                     );
                 }
-                const buffer = Buffer.from(await Bun.file(fullPath).arrayBuffer());
+                const file = await openReadNoFollowGuarded(guardedPath(fullPath));
+                let buffer: Buffer;
+                try {
+                    buffer = readFromOpenFile(file.fd, stat.size);
+                } finally {
+                    await file.close();
+                }
                 return json({
                     content: buffer.toBase64(),
                     isBinary: true,
@@ -206,12 +226,13 @@ export const fileRoutes = {
                     size: stat.size,
                 });
             }
-            const buffer =
-                stat.size > MAX_FILE_SIZE
-                    ? Buffer.from(
-                          await Bun.file(fullPath).slice(0, MAX_FILE_SIZE).arrayBuffer()
-                      )
-                    : Buffer.from(await Bun.file(fullPath).arrayBuffer());
+            const file = await openReadNoFollowGuarded(guardedPath(fullPath));
+            let buffer: Buffer;
+            try {
+                buffer = readFromOpenFile(file.fd, Math.min(stat.size, MAX_FILE_SIZE));
+            } finally {
+                await file.close();
+            }
             const content = buffer.toString("utf8");
             const isBinary = isBinaryContent(content);
             return json({
@@ -226,7 +247,9 @@ export const fileRoutes = {
 
         PUT: async (request: Request) => {
             const relativePath = filePathFromRequest(request);
-            const body = await readJson<{ content?: unknown }>(request);
+            const body = await readJson<{ content?: unknown }>(request, {
+                maxBytes: JSON_WRITE_BODY_LIMIT,
+            });
             if (typeof body.content !== "string") {
                 return json({ error: "Content required" }, { status: 400 });
             }
@@ -253,7 +276,11 @@ export const fileRoutes = {
                 guardedPath(temporaryPath),
                 body.content
             );
-            await fs.promises.rename(temporaryPath, safeFullPath);
+            try {
+                await fs.promises.rename(temporaryPath, safeFullPath);
+            } finally {
+                await fs.promises.rm(temporaryPath, { force: true });
+            }
             const stat = statGuarded(guardedPath(safeFullPath));
             return json({
                 isSuccess: true,

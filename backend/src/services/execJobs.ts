@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { type BunProcess, pipeProcessOutput, spawnProcess } from "../lib/processes.ts";
+import {
+    type BunProcess,
+    killProcessGroup,
+    pipeProcessOutput,
+    spawnProcess,
+} from "../lib/processes.ts";
 
 const OPS_SHELL_COMMANDS = new Set([
     "__mira_dashboard_shell_smoke_test__",
@@ -216,7 +221,7 @@ function runExecCommand(
     options: { allowTerminalShell?: boolean } = {}
 ): Promise<ExecResponse> {
     const { args, command, cwd, shell } = request;
-    const cwdOption = { cwd: resolveCwd(cwd), env: process.env };
+    const cwdOption = { cwd: resolveCwd(cwd), detached: true, env: process.env };
     let childFactory: () => BunProcess;
     if (shell) {
         childFactory = () =>
@@ -238,7 +243,7 @@ function runExecCommand(
 
         let stdout = "";
         let stderr = "";
-        void pipeProcessOutput(
+        const stdoutDone = pipeProcessOutput(
             child.stdout as ReadableStream<Uint8Array> | undefined,
             (data) => {
                 stdout = trimOutput(stdout + String(data));
@@ -253,7 +258,7 @@ function runExecCommand(
                 });
             }
         );
-        void pipeProcessOutput(
+        const stderrDone = pipeProcessOutput(
             child.stderr as ReadableStream<Uint8Array> | undefined,
             (data) => {
                 stderr = trimOutput(stderr + String(data));
@@ -268,7 +273,11 @@ function runExecCommand(
                 });
             }
         );
-        void child.exited
+        void (async () => {
+            const code = await child.exited;
+            await Promise.all([stdoutDone, stderrDone]);
+            return code;
+        })()
             .then((code) => {
                 resolve({ code, stderr, stdout });
             })
@@ -406,12 +415,12 @@ export function stopExecJob(jobId: string): { isSuccess: boolean; message: strin
         throw Object.assign(new Error("Process not available"), { statusCode: 400 });
     }
 
-    job.process.kill("SIGTERM");
+    killProcessGroup(job.process, "SIGTERM");
     job.status = "signaled";
 
     setTimeout(() => {
         if (!job.process || job.status !== "signaled") return;
-        job.process.kill("SIGKILL");
+        killProcessGroup(job.process, "SIGKILL");
         markExecJobForcedKilled(job);
     }, 3000);
 

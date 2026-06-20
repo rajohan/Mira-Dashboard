@@ -1,6 +1,6 @@
 import type { Server } from "bun";
 
-import { authUser, json, requestIp } from "./http.ts";
+import { authUser, HttpError, isTrustedProxyAddress, json, requestIp } from "./http.ts";
 
 type BunHandler = (
     request: Request,
@@ -58,8 +58,11 @@ function rateLimitKey(
     request: Request,
     server: Server<unknown>
 ): string {
-    const forwardedFor = request.headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim();
-    return `${rule.keyPrefix}:${forwardedFor || requestIp(request, server) || "unknown"}`;
+    const peerAddress = requestIp(request, server);
+    const forwardedFor = isTrustedProxyAddress(peerAddress)
+        ? request.headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim()
+        : undefined;
+    return `${rule.keyPrefix}:${forwardedFor || peerAddress || "unknown"}`;
 }
 
 function withRateLimitHeaders(
@@ -156,6 +159,9 @@ function secureHandler(routePath: string, handler: BunHandler | Response): BunHa
                 bucket.resetAt
             );
         } catch (error) {
+            if (error instanceof HttpError) {
+                return json({ error: error.message }, { status: error.statusCode });
+            }
             if (error instanceof SyntaxError) {
                 return json({ error: "Invalid JSON" }, { status: 400 });
             }

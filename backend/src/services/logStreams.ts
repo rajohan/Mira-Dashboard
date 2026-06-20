@@ -233,6 +233,10 @@ export function subscribeToLogs(ws: DashboardSocket): void {
 /** Performs unsubscribe from logs. */
 export function unsubscribeFromLogs(ws: DashboardSocket): void {
     logSubscribers.delete(ws);
+    if (logSubscribers.size === 0 && logsRouteState.logWatcher) {
+        clearInterval(logsRouteState.logWatcher);
+        logsRouteState.logWatcher = null;
+    }
 }
 
 /** Defines testing. */

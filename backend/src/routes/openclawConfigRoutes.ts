@@ -304,9 +304,18 @@ export const openclawConfigRoutes = {
     "/api/restart": {
         POST: async () => {
             try {
-                await runProcess(getOpenClawBin(), ["gateway", "restart"], {
-                    timeout: 30_000,
-                });
+                const { code, stderr, stdout } = await runProcess(
+                    getOpenClawBin(),
+                    ["gateway", "restart"],
+                    {
+                        timeoutMs: 30_000,
+                    }
+                );
+                if (code !== 0) {
+                    throw new Error(
+                        stderr.trim() || stdout.trim() || `openclaw exited ${code}`
+                    );
+                }
                 return json({ isOk: true });
             } catch (error) {
                 return json(
@@ -332,7 +341,9 @@ export const openclawConfigRoutes = {
                 }
 
                 await patchConfigRaw(
-                    `{"skills":{"entries":{${JSON.stringify(name)}:{"enabled":${JSON.stringify(enabled)}}}}}`
+                    JSON.stringify({
+                        skills: { entries: { [name]: { enabled } } },
+                    })
                 );
                 return json({ isOk: true });
             } catch (error) {

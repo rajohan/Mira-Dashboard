@@ -16,7 +16,7 @@ function parseJsonFieldOrValue(value: string) {
 
 function mapCacheRowForResponse(row: CacheEntryRow) {
     return {
-        consecutiveFailures: Number(row.consecutive_failures || 0),
+        consecutiveFailures: Number(row.consecutive_failures) || 0,
         data: parseJsonFieldOrValue(row.data),
         errorCode: row.error_code || null,
         errorMessage: row.error_message || null,

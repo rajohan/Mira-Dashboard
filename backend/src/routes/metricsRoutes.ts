@@ -151,11 +151,12 @@ async function getSystemMetrics(): Promise<SystemMetricsResponse> {
     let diskPercent = 0;
 
     try {
-        const { stdout } = await runProcess("df", [
+        const { code, stderr, stdout } = await runProcess("df", [
             "-B1",
             "--output=size,used,pcent",
             "/",
         ]);
+        if (code !== 0) throw new Error(stderr || `df exited ${code}`);
         const parts = (stdout.trim().split("\n").at(-1) ?? "").trim().split(/\s+/u);
         if (parts.length >= 3) {
             diskTotal = Number(parts[0]);

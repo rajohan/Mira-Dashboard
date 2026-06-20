@@ -61,8 +61,8 @@ function sessions(request: Request, server: Server<unknown>) {
 }
 
 const routeTable = {
-    "/health": health(),
-    "/api/health": health(),
+    "/health": health,
+    "/api/health": health,
     "/api/sessions": {
         GET: sessions,
     },
@@ -91,7 +91,7 @@ const routeTable = {
     ...taskRoutes,
     ...terminalRoutes,
     ...ttsRoutes,
-    "/api/*": json({ error: "Not found" }, { status: 404 }),
+    "/api/*": () => json({ error: "Not found" }, { status: 404 }),
 } as const;
 
 export const routes = withRequestPolicy(routeTable);

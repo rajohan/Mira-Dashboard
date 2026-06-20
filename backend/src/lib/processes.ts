@@ -1,9 +1,9 @@
 export interface RunProcessOptions {
     cwd?: string;
+    detached?: boolean;
     env?: Record<string, string | undefined>;
     killSignal?: NodeJS.Signals;
     maxBuffer?: number;
-    timeout?: number;
     timeoutMs?: number;
 }
 
@@ -53,11 +53,24 @@ export function spawnProcess(
     return Bun.spawn({
         cmd: [executable, ...arguments_],
         cwd: options.cwd,
+        detached: options.detached,
         env: options.env,
         stderr: "pipe",
         stdin: "ignore",
         stdout: "pipe",
     });
+}
+
+export function killProcessGroup(process_: BunProcess, signal: NodeJS.Signals): void {
+    try {
+        if (typeof process_.pid === "number") {
+            process.kill(-process_.pid, signal);
+            return;
+        }
+    } catch {
+        // Fall back to Bun's process handle when process groups are unavailable.
+    }
+    process_.kill(signal);
 }
 
 export async function runProcess(
@@ -68,7 +81,7 @@ export async function runProcess(
     const maxBuffer = options.maxBuffer ?? DEFAULT_MAX_BUFFER;
     const process = spawnProcess(executable, arguments_, options);
     let timeout: Timer | undefined;
-    const timeoutMs = options.timeoutMs ?? options.timeout;
+    const timeoutMs = options.timeoutMs;
     if (timeoutMs !== undefined) {
         timeout = setTimeout(() => {
             process.kill(options.killSignal ?? "SIGTERM");

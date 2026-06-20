@@ -1695,6 +1695,7 @@ export async function updateAgentCurrentTask(
 
     try {
         if (safeTask && safeTask.length > 0) {
+            database.run("BEGIN IMMEDIATE");
             const currentActive = getActiveHistoryTask(agentId);
             if (!currentActive) {
                 database
@@ -1725,8 +1726,14 @@ export async function updateAgentCurrentTask(
                     )
                     .run(agentId, safeTask, ts, ts);
             }
+            database.run("COMMIT");
         }
     } catch (error) {
+        try {
+            database.run("ROLLBACK");
+        } catch (rollbackError) {
+            console.error("[Agents] Task history sync rollback failed:", rollbackError);
+        }
         console.error("[Agents] Task history sync failed:", error);
     }
 

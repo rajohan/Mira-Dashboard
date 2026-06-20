@@ -2,7 +2,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import type { Server, ServerWebSocket } from "bun";
+import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 
 import type { DashboardSocket } from "./dashboardSocket.ts";
 import gateway from "./gateway.ts";
@@ -77,23 +77,28 @@ export function createServer(port = resolveListenPort()): Server<DashboardSocket
             return staticResponse(url.pathname);
         },
         websocket: {
-            close(ws) {
+            close(ws: ServerWebSocket<DashboardSocketData>) {
                 for (const handler of ws.data.closeHandlers) {
                     handler();
                 }
             },
-            message(ws, message) {
+            error(ws: ServerWebSocket<DashboardSocketData>, error: unknown) {
+                for (const handler of ws.data.errorHandlers) {
+                    handler(error);
+                }
+            },
+            message(ws: ServerWebSocket<DashboardSocketData>, message: string | Buffer) {
                 const data = typeof message === "string" ? message : Buffer.from(message);
                 for (const handler of ws.data.messageHandlers) {
                     handler(data);
                 }
             },
-            open(ws) {
+            open(ws: ServerWebSocket<DashboardSocketData>) {
                 const socket = dashboardSocketFromBun(ws);
                 ws.data.socket = socket;
                 gateway.handleDashboardClient(socket);
             },
-        },
+        } as unknown as WebSocketHandler<DashboardSocketData>,
     });
 }
 

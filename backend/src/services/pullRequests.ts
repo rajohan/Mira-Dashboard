@@ -510,12 +510,19 @@ async function runCommand(
         timeoutMs?: number;
     } = {}
 ): Promise<CommandResult> {
-    const { stdout, stderr } = await runProcess(command, arguments_, {
+    const { code, stderr, stdout } = await runProcess(command, arguments_, {
         cwd: options.cwd || getDashboardRoot(),
         env: options.environment || buildCommandEnvironment(),
         maxBuffer: MAX_BUFFER,
-        timeout: options.timeoutMs || 120_000,
+        timeoutMs: options.timeoutMs || 120_000,
     });
+    if (code !== 0) {
+        throw new Error(
+            `${command} ${arguments_.join(" ")} failed with exit code ${code}: ${
+                stderr.trim() || stdout.trim()
+            }`
+        );
+    }
 
     return {
         stdout: trimOutput(String(stdout || "")),
@@ -525,12 +532,19 @@ async function runCommand(
 
 /** Runs a GitHub CLI command and parses its JSON output. */
 async function runGhJson<T>(arguments_: string[]): Promise<T> {
-    const { stdout } = await runProcess("gh", arguments_, {
+    const { code, stderr, stdout } = await runProcess("gh", arguments_, {
         cwd: getDashboardRoot(),
         env: buildCommandEnvironment(),
         maxBuffer: MAX_BUFFER,
-        timeout: 60_000,
+        timeoutMs: 60_000,
     });
+    if (code !== 0) {
+        throw new Error(
+            `gh ${arguments_.join(" ")} failed with exit code ${code}: ${
+                stderr.trim() || stdout.trim()
+            }`
+        );
+    }
     return JSON.parse(String(stdout || "null")) as T;
 }
 
@@ -621,7 +635,7 @@ async function runGhJsonLines<T>(
             callback();
         };
 
-        void pipeProcessOutput(
+        const stdoutDone = pipeProcessOutput(
             child.stdout as ReadableStream<Uint8Array> | undefined,
             (chunk) => {
                 stdoutBuffer += chunk;
@@ -653,14 +667,18 @@ async function runGhJsonLines<T>(
             }
         );
 
-        void pipeProcessOutput(
+        const stderrDone = pipeProcessOutput(
             child.stderr as ReadableStream<Uint8Array> | undefined,
             (chunk) => {
                 stderr = trimOutput(stderr + chunk);
             }
         );
 
-        void child.exited
+        void (async () => {
+            const code = await child.exited;
+            await Promise.all([stdoutDone, stderrDone]);
+            return code;
+        })()
             .then((code) => {
                 isPreserveForceKillTimer = false;
                 forceKillTimer = clearForceKillTimerIfAllowed(forceKillTimer, {}, false);

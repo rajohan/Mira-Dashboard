@@ -343,21 +343,25 @@ function startBackupJob(
 
     signal?.addEventListener("abort", abortBackup, { once: true });
 
-    void pipeProcessOutput(
+    const stdoutDone = pipeProcessOutput(
         child.stdout as ReadableStream<Uint8Array> | undefined,
         (data) => {
             job.stdout = trimOutput(job.stdout + String(data));
         }
     );
 
-    void pipeProcessOutput(
+    const stderrDone = pipeProcessOutput(
         child.stderr as ReadableStream<Uint8Array> | undefined,
         (data) => {
             job.stderr = trimOutput(job.stderr + String(data));
         }
     );
 
-    void child.exited
+    void (async () => {
+        const code = await child.exited;
+        await Promise.all([stdoutDone, stderrDone]);
+        return code;
+    })()
         .then(async (code) => {
             await finalizeJob(code, isAbortRequested ? "SIGTERM" : null);
         })
@@ -397,7 +401,7 @@ function runDockerExec(
 ): Promise<{ code: number; stdout: string; stderr: string }> {
     return runProcess("docker", ["exec", container, ...arguments_], {
         env: process.env,
-        timeout: backupAbortDockerExecTimeoutMs,
+        timeoutMs: backupAbortDockerExecTimeoutMs,
     });
 }
 
@@ -476,7 +480,7 @@ async function assertNoContainerBackupInProgress(
 function runHostPgrep(pattern: string): Promise<{ code: number; stderr: string }> {
     return runProcess("pgrep", ["-f", pattern], {
         env: process.env,
-        timeout: backupAbortDockerExecTimeoutMs,
+        timeoutMs: backupAbortDockerExecTimeoutMs,
     });
 }
 

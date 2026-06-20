@@ -4,10 +4,17 @@ import os from "node:os";
 import path from "node:path";
 
 import { json, readJson } from "../http.ts";
+import {
+    guardedPath,
+    openReadNoFollowGuarded,
+    readFromOpenFile,
+    writeTextNoFollowGuarded,
+} from "../lib/guardedOps.ts";
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.ts";
 
 const MAX_FILE_SIZE = 1024 * 1024;
 const MAX_CONFIG_WRITE_SIZE = 2 * 1024 * 1024;
+const CONFIG_WRITE_BODY_LIMIT = MAX_CONFIG_WRITE_SIZE + 4096;
 const ALLOWED_CONFIG_FILES = new Set(["openclaw.json", "hooks/transforms/agentmail.ts"]);
 
 function openclawRoot(): string | null {
@@ -150,12 +157,13 @@ export const configFileRoutes = {
                     { status: 403 }
                 );
             }
-            const buffer =
-                stat.size > MAX_FILE_SIZE
-                    ? Buffer.from(
-                          await Bun.file(fullPath).slice(0, MAX_FILE_SIZE).arrayBuffer()
-                      )
-                    : Buffer.from(await Bun.file(fullPath).arrayBuffer());
+            const file = await openReadNoFollowGuarded(guardedPath(fullPath));
+            let buffer: Buffer;
+            try {
+                buffer = readFromOpenFile(file.fd, Math.min(stat.size, MAX_FILE_SIZE));
+            } finally {
+                await file.close();
+            }
             const content = buffer.toString("utf8");
             const isBinary = isBinaryContent(content);
             return json({
@@ -180,7 +188,9 @@ export const configFileRoutes = {
                     { status: 403 }
                 );
             }
-            const body = await readJson<{ content?: unknown }>(request);
+            const body = await readJson<{ content?: unknown }>(request, {
+                maxBytes: CONFIG_WRITE_BODY_LIMIT,
+            });
             if (body.content === undefined)
                 return json({ error: "Content required" }, { status: 400 });
             if (
@@ -226,7 +236,7 @@ export const configFileRoutes = {
                         await fsp.copyFile(target, `${target}.bak`);
                     }
                 }
-                await Bun.write(target, body.content);
+                await writeTextNoFollowGuarded(guardedPath(target), body.content);
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code === "EACCES") {
                     return json({ error: "Access denied" }, { status: 403 });

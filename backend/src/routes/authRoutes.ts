@@ -19,6 +19,7 @@ import {
     json,
     readJson,
     sessionCookie,
+    sessionIdFromCookie,
     withCookie,
 } from "../http.ts";
 
@@ -40,20 +41,6 @@ function validatePassword(password: unknown): string | null {
     return typeof password === "string" && password.length >= 8 && password.length <= 256
         ? password
         : null;
-}
-
-function sessionIdFromCookie(request: Request): string | null {
-    const cookieHeader = request.headers.get("cookie");
-    if (!cookieHeader) {
-        return null;
-    }
-    for (const part of cookieHeader.split(";")) {
-        const trimmed = part.trim();
-        if (trimmed.startsWith("mira_dashboard_session=")) {
-            return decodeURIComponent(trimmed.slice("mira_dashboard_session=".length));
-        }
-    }
-    return null;
 }
 
 function rollbackFirstUserBootstrap(
@@ -86,7 +73,8 @@ function rollbackFirstUserBootstrap(
             throw new AggregateError(
                 [error, rollbackError],
                 "First-user rollback transaction and rollback failed",
-                { cause: rollbackError }
+                // eslint-disable-next-line preserve-caught-error -- the root transaction error should remain the cause; rollbackError is included in errors.
+                { cause: error }
             );
         }
         throw error;
@@ -110,7 +98,8 @@ function rollbackCreatedFirstUser(userId: number): void {
             throw new AggregateError(
                 [error, rollbackError],
                 "First-user cleanup transaction and rollback failed",
-                { cause: rollbackError }
+                // eslint-disable-next-line preserve-caught-error -- the root transaction error should remain the cause; rollbackError is included in errors.
+                { cause: error }
             );
         }
         throw error;

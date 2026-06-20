@@ -93,7 +93,16 @@ function stripEnvironmentComment(line: string): string {
     let quote: string | null = null;
     for (let index = 0; index < line.length; index += 1) {
         const character = line[index];
-        if ((character === '"' || character === "'") && line[index - 1] !== "\\") {
+        if (character === '"' || character === "'") {
+            let backslashCount = 0;
+            for (
+                let slashIndex = index - 1;
+                slashIndex >= 0 && line[slashIndex] === "\\";
+                slashIndex -= 1
+            ) {
+                backslashCount += 1;
+            }
+            if (backslashCount % 2 === 1) continue;
             quote = quote === character ? null : (quote ?? character);
             continue;
         }
@@ -1392,12 +1401,19 @@ async function applyComposeUpdateUnlocked(
         }
         const command = getComposeCommand(configuredComposePath, service.service_name);
         isComposeStarted = true;
-        const { stdout, stderr } = await runProcess(command.file, command.args, {
+        const { code, stderr, stdout } = await runProcess(command.file, command.args, {
             cwd: command.cwd,
             env: process.env,
             maxBuffer: 10 * 1024 * 1024,
-            timeout: 180_000,
+            timeoutMs: 180_000,
         });
+        if (code !== 0) {
+            throw new Error(
+                `${command.file} ${command.args.join(" ")} failed with exit code ${code}: ${
+                    stderr.trim() || stdout.trim()
+                }`
+            );
+        }
         try {
             fs.unlinkSync(rollbackTemporaryPath);
         } catch {
@@ -1452,12 +1468,23 @@ async function applyComposeUpdateUnlocked(
                     configuredComposePath,
                     service.service_name
                 );
-                await runProcess(command.file, command.args, {
+                const rollbackResult = await runProcess(command.file, command.args, {
                     cwd: command.cwd,
                     env: process.env,
                     maxBuffer: 10 * 1024 * 1024,
-                    timeout: 180_000,
+                    timeoutMs: 180_000,
                 });
+                if (rollbackResult.code !== 0) {
+                    console.error(
+                        "[DockerUpdater] Re-applying restored compose file failed",
+                        {
+                            code: rollbackResult.code,
+                            output:
+                                rollbackResult.stderr.trim() ||
+                                rollbackResult.stdout.trim(),
+                        }
+                    );
+                }
             } catch (rollbackError) {
                 console.error(
                     "[DockerUpdater] Failed to re-apply restored compose file",
@@ -2060,11 +2087,16 @@ async function applyServiceUpdate(
 
 async function pruneDanglingImagesBestEffort(): Promise<void> {
     try {
-        await runProcess(getDockerBin(), ["image", "prune", "-f"], {
+        const result = await runProcess(getDockerBin(), ["image", "prune", "-f"], {
             env: process.env,
             maxBuffer: 10 * 1024 * 1024,
-            timeout: 120_000,
+            timeoutMs: 120_000,
         });
+        if (result.code !== 0) {
+            throw new Error(
+                result.stderr.trim() || `docker image prune exited ${result.code}`
+            );
+        }
     } catch (error) {
         console.error("[DockerUpdater] Failed to prune dangling images", {
             error: caughtMessage(error),

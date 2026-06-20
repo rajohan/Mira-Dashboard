@@ -4,6 +4,7 @@ import { type AuthUser, getAuthUserFromSessionId } from "./auth.ts";
 
 const SESSION_COOKIE = "mira_dashboard_session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+const DEFAULT_JSON_BODY_LIMIT = 2 * 1024 * 1024;
 
 type HeaderInput = Record<string, string> | Array<[string, string]>;
 
@@ -39,16 +40,76 @@ export function methodNotAllowed(): Response {
     return json({ error: "Method not allowed" }, { status: 405 });
 }
 
-export async function readJson<T>(request: Request): Promise<T> {
-    return (await request.json()) as T;
+export class HttpError extends Error {
+    constructor(
+        message: string,
+        readonly statusCode: number
+    ) {
+        super(message);
+    }
+}
+
+export async function readRequestBytes(
+    request: Request,
+    maxBytes: number
+): Promise<Buffer> {
+    const contentLength = request.headers.get("content-length");
+    if (contentLength) {
+        const size = Number(contentLength);
+        if (Number.isFinite(size) && size > maxBytes) {
+            throw new HttpError("Request body too large", 413);
+        }
+    }
+
+    const reader = request.body?.getReader();
+    if (!reader) return Buffer.alloc(0);
+
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            total += value.byteLength;
+            if (total > maxBytes) {
+                throw new HttpError("Request body too large", 413);
+            }
+            chunks.push(value);
+        }
+    } finally {
+        reader.releaseLock();
+    }
+
+    return Buffer.concat(chunks, total);
+}
+
+export async function readJson<T>(
+    request: Request,
+    options: { maxBytes?: number } = {}
+): Promise<T> {
+    const body = await readRequestBytes(
+        request,
+        options.maxBytes ?? DEFAULT_JSON_BODY_LIMIT
+    );
+    return JSON.parse(body.toString("utf8")) as T;
 }
 
 export function requestIp(request: Request, server: Server<unknown>): string | undefined {
     return server.requestIP(request)?.address;
 }
 
-function isLoopbackAddress(address?: string | null): boolean {
+export function isLoopbackAddress(address?: string | null): boolean {
     return Boolean(address && ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address));
+}
+
+export function isTrustedProxyAddress(address?: string | null): boolean {
+    const trustedProxyIps = new Set(
+        (process.env.MIRA_DASHBOARD_TRUSTED_PROXY_IPS || "")
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean)
+    );
+    return isLoopbackAddress(address) || Boolean(address && trustedProxyIps.has(address));
 }
 
 function forwardedAddresses(forwardedFor: string): string[] {
@@ -76,7 +137,7 @@ function clientAddressFromTrustedChain(
 
 export function isLoopbackRequest(request: Request, server: Server<unknown>): boolean {
     const peerAddress = requestIp(request, server);
-    const isTrustForwardedHeaders = isLoopbackAddress(peerAddress);
+    const isTrustForwardedHeaders = isTrustedProxyAddress(peerAddress);
     const realIp = request.headers.get("x-real-ip");
     if (isTrustForwardedHeaders && realIp) {
         return isLoopbackAddress(realIp.trim());
@@ -90,7 +151,7 @@ export function isLoopbackRequest(request: Request, server: Server<unknown>): bo
     return isLoopbackAddress(peerAddress);
 }
 
-function sessionIdFromCookie(request: Request): string | null {
+export function sessionIdFromCookie(request: Request): string | null {
     const cookieHeader = request.headers.get("cookie");
     if (!cookieHeader) {
         return null;
@@ -118,17 +179,8 @@ function isProductionRequest(request: Request, server: Server<unknown>): boolean
     }
     const forwardedProtocol = request.headers.get("x-forwarded-proto");
     const peerAddress = requestIp(request, server);
-    const trustedProxyIps = new Set(
-        (process.env.MIRA_DASHBOARD_TRUSTED_PROXY_IPS || "")
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean)
-    );
-    const isTrustedProxy =
-        isLoopbackAddress(peerAddress) ||
-        (peerAddress ? trustedProxyIps.has(peerAddress) : false);
     return Boolean(
-        isTrustedProxy &&
+        isTrustedProxyAddress(peerAddress) &&
         forwardedProtocol &&
         forwardedProtocol.split(",", 1)[0]?.trim() === "https"
     );

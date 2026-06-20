@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -34,7 +35,9 @@ function json(method: string, body: unknown): RequestInit {
 
 describe("Bun-native dashboard backend", () => {
     beforeAll(async () => {
-        state.temporaryRoot = await fs.mkdtemp("/tmp/mira-dashboard-bun-test-");
+        state.temporaryRoot = await fs.mkdtemp(
+            path.join(os.tmpdir(), "mira-dashboard-bun-test-")
+        );
         const workspaceRoot = path.join(state.temporaryRoot, "workspace");
         const openclawRoot = path.join(state.temporaryRoot, "openclaw");
         const frontendRoot = path.join(state.temporaryRoot, "frontend");

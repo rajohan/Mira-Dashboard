@@ -1,4 +1,4 @@
-import { json } from "../http.ts";
+import { json, readRequestBytes } from "../http.ts";
 import { stringFallback } from "../lib/values.ts";
 
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
@@ -65,7 +65,7 @@ async function transcribeWithElevenLabs(
     const formData = new FormData();
     const safeContentType = contentType?.trim() || undefined;
     const fileName = `recording${audioExtension(safeContentType)}`;
-    const audioBlob = new Blob([Uint8Array.from(audioBuffer)], {
+    const audioBlob = new Blob([audioBuffer], {
         type: stringFallback(safeContentType, "application/octet-stream"),
     });
 
@@ -106,17 +106,9 @@ export const sttRoutes = {
                 );
             }
 
-            const contentLength = Number(request.headers.get("content-length") || 0);
-            if (contentLength > MAX_AUDIO_BYTES) {
-                return json({ error: "request entity too large" }, { status: 413 });
-            }
-
-            const audioBuffer = Buffer.from(await request.arrayBuffer());
+            const audioBuffer = await readRequestBytes(request, MAX_AUDIO_BYTES);
             if (audioBuffer.length === 0) {
                 return json({ error: "Missing audio payload" }, { status: 400 });
-            }
-            if (audioBuffer.length > MAX_AUDIO_BYTES) {
-                return json({ error: "request entity too large" }, { status: 413 });
             }
 
             sttRouteState.isActiveTranscription = true;

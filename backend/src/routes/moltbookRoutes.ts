@@ -11,7 +11,8 @@ export const moltbookRoutes = {
     "/api/moltbook/home": {
         GET: async () => {
             try {
-                return json(await fetchCachedMoltbookHome());
+                const home = await fetchCachedMoltbookHome();
+                return json(home.data);
             } catch (error) {
                 return json(
                     { error: errorMessage(error, "Moltbook cache unavailable") },
