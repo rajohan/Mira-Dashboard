@@ -304,13 +304,24 @@ function safeId(value: string | undefined): number | null {
 
 async function readTaskJson<T>(request: Request): Promise<T | Response> {
     try {
-        return await readJson<T>(request);
+        const body = await readJson<T>(request);
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+            return json({ error: "Request body must be an object" }, { status: 400 });
+        }
+        return body;
     } catch (error) {
         return json(
             { error: errorMessage(error, "Invalid JSON") },
             { status: httpStatusCode(error) }
         );
     }
+}
+
+function taskRouteError(error: unknown, fallback = "Invalid task payload"): Response {
+    return json(
+        { error: errorMessage(error, fallback) },
+        { status: httpStatusCode(error) }
+    );
 }
 
 export const taskRoutes = {
@@ -341,55 +352,62 @@ export const taskRoutes = {
                 title?: string;
             }>(request);
             if (body instanceof Response) return body;
-            const title = optionalString(body.title, "Title")?.trim();
-            if (!title) return json({ error: "Title is required" }, { status: 400 });
-            if (!isValidAssignee(body.assignee)) {
-                return json({ error: INVALID_ASSIGNEE_MESSAGE }, { status: 400 });
-            }
-            const assignee = body.assignee;
-            const now = nowIso();
-            const labels = optionalLabels(body.labels) ?? [];
-            const taskBody = optionalString(body.body, "Body") ?? "";
-            const status = normalizeStatus(
-                labels.includes("done")
-                    ? "done"
-                    : labels.includes("blocked")
-                      ? "blocked"
-                      : labels.includes("in-progress")
-                        ? "in-progress"
-                        : "todo"
-            );
-            const priority = derivePriority(labels);
-            const id = database.transaction(() => {
-                const result = database
-                    .prepare(
-                        `INSERT INTO tasks (title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at)
+            try {
+                const title = optionalString(body.title, "Title")?.trim();
+                if (!title) return json({ error: "Title is required" }, { status: 400 });
+                if (!isValidAssignee(body.assignee)) {
+                    return json({ error: INVALID_ASSIGNEE_MESSAGE }, { status: 400 });
+                }
+                const assignee = body.assignee;
+                const now = nowIso();
+                const labels = optionalLabels(body.labels) ?? [];
+                const taskBody = optionalString(body.body, "Body") ?? "";
+                const status =
+                    normalizeStatus(
+                        labels.includes("done")
+                            ? "done"
+                            : labels.includes("blocked")
+                              ? "blocked"
+                              : labels.includes("in-progress")
+                                ? "in-progress"
+                                : "todo"
+                    ) ?? "todo";
+                const priority = derivePriority(labels);
+                const id = database.transaction(() => {
+                    const result = database
+                        .prepare(
+                            `INSERT INTO tasks (title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at)
                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-                    )
-                    .run(
+                        )
+                        .run(
+                            title,
+                            taskBody,
+                            status,
+                            priority,
+                            JSON.stringify(labels),
+                            normalizeAutomationInput(body.automation),
+                            assignee,
+                            now,
+                            now
+                        );
+                    const taskId = Number(result.lastInsertRowid);
+                    recordEvent(taskId, "created", {
                         title,
-                        taskBody,
                         status,
                         priority,
-                        JSON.stringify(labels),
-                        normalizeAutomationInput(body.automation),
                         assignee,
-                        now,
-                        now
-                    );
-                const taskId = Number(result.lastInsertRowid);
-                recordEvent(taskId, "created", {
-                    title,
-                    status,
-                    priority,
-                    assignee,
+                    });
+                    return taskId;
+                })();
+                if (assignee === TASK_ASSIGNEES.mira.id) {
+                    void notifyMira("created", { id, title });
+                }
+                return json(toFrontendTask(taskById(id) as DatabaseTask), {
+                    status: 201,
                 });
-                return taskId;
-            })();
-            if (assignee === TASK_ASSIGNEES.mira.id) {
-                void notifyMira("created", { id, title });
+            } catch (error) {
+                return taskRouteError(error);
             }
-            return json(toFrontendTask(taskById(id) as DatabaseTask), { status: 201 });
         },
     },
 
@@ -414,51 +432,57 @@ export const taskRoutes = {
                 title?: string;
             }>(request);
             if (body instanceof Response) return body;
-            const labels = optionalLabels(body.labels) ?? labelsFromTask(existing);
-            const status = normalizeStatus(
-                labels.includes("done")
-                    ? "done"
-                    : labels.includes("blocked")
-                      ? "blocked"
-                      : labels.includes("in-progress")
-                        ? "in-progress"
-                        : "todo"
-            );
-            const priority = derivePriority(labels);
-            const title = optionalString(body.title, "Title")?.trim() || existing.title;
-            const taskBody = optionalString(body.body, "Body") ?? existing.body;
-            const automationJson =
-                body.automation === undefined
-                    ? existing.automation_json
-                    : normalizeAutomationInput(body.automation);
-            database.transaction(() => {
-                database
-                    .prepare(
-                        `UPDATE tasks
+            try {
+                const labels = optionalLabels(body.labels) ?? labelsFromTask(existing);
+                const status =
+                    normalizeStatus(
+                        labels.includes("done")
+                            ? "done"
+                            : labels.includes("blocked")
+                              ? "blocked"
+                              : labels.includes("in-progress")
+                                ? "in-progress"
+                                : "todo"
+                    ) ?? "todo";
+                const priority = derivePriority(labels);
+                const title =
+                    optionalString(body.title, "Title")?.trim() || existing.title;
+                const taskBody = optionalString(body.body, "Body") ?? existing.body;
+                const automationJson =
+                    body.automation === undefined
+                        ? existing.automation_json
+                        : normalizeAutomationInput(body.automation);
+                database.transaction(() => {
+                    database
+                        .prepare(
+                            `UPDATE tasks
                          SET title = ?, body = ?, status = ?, priority = ?, labels_json = ?, automation_json = ?, updated_at = ?
                          WHERE id = ?`
-                    )
-                    .run(
+                        )
+                        .run(
+                            title,
+                            taskBody,
+                            status,
+                            priority,
+                            JSON.stringify(labels),
+                            automationJson,
+                            nowIso(),
+                            id
+                        );
+                    recordEvent(id, "updated", {
                         title,
-                        taskBody,
                         status,
                         priority,
-                        JSON.stringify(labels),
-                        automationJson,
-                        nowIso(),
-                        id
-                    );
-                recordEvent(id, "updated", {
-                    title,
-                    status,
-                    priority,
-                    assignee: existing.assignee,
-                });
-            })();
-            if (existing.assignee === TASK_ASSIGNEES.mira.id) {
-                void notifyMira("updated", { id, title });
+                        assignee: existing.assignee,
+                    });
+                })();
+                if (existing.assignee === TASK_ASSIGNEES.mira.id) {
+                    void notifyMira("updated", { id, title });
+                }
+                return json(toFrontendTask(taskById(id) as DatabaseTask));
+            } catch (error) {
+                return taskRouteError(error);
             }
-            return json(toFrontendTask(taskById(id) as DatabaseTask));
         },
 
         DELETE: (request: ParametersRequest<"id">) => {
@@ -510,31 +534,36 @@ export const taskRoutes = {
             const id = safeId(request.params.id);
             const body = await readTaskJson<{ columnLabel?: string }>(request);
             if (body instanceof Response) return body;
-            const columnLabel = optionalString(body.columnLabel, "Column label");
-            if (id === null || !columnLabel) {
-                return json({ error: "Invalid request" }, { status: 400 });
+            try {
+                const columnLabel = optionalString(body.columnLabel, "Column label");
+                if (id === null || !columnLabel) {
+                    return json({ error: "Invalid request" }, { status: 400 });
+                }
+                const existing = taskById(id);
+                if (!existing) return json({ error: "Task not found" }, { status: 404 });
+                const status = normalizeStatus(columnLabel);
+                if (!status) {
+                    return json({ error: "Invalid task status" }, { status: 400 });
+                }
+                const labels = [
+                    ...labelsFromTask(existing).filter(
+                        (label) =>
+                            !["todo", "in-progress", "blocked", "done"].includes(label)
+                    ),
+                    status,
+                ];
+                database.transaction(() => {
+                    database
+                        .prepare(
+                            "UPDATE tasks SET status = ?, labels_json = ?, updated_at = ? WHERE id = ?"
+                        )
+                        .run(status, JSON.stringify(labels), nowIso(), id);
+                    recordEvent(id, "moved", { status });
+                })();
+                return json(toFrontendTask(taskById(id) as DatabaseTask));
+            } catch (error) {
+                return taskRouteError(error);
             }
-            const existing = taskById(id);
-            if (!existing) return json({ error: "Task not found" }, { status: 404 });
-            const status = normalizeStatus(columnLabel);
-            if (!status) {
-                return json({ error: "Invalid task status" }, { status: 400 });
-            }
-            const labels = [
-                ...labelsFromTask(existing).filter(
-                    (label) => !["todo", "in-progress", "blocked", "done"].includes(label)
-                ),
-                status,
-            ];
-            database.transaction(() => {
-                database
-                    .prepare(
-                        "UPDATE tasks SET status = ?, labels_json = ?, updated_at = ? WHERE id = ?"
-                    )
-                    .run(status, JSON.stringify(labels), nowIso(), id);
-                recordEvent(id, "moved", { status });
-            })();
-            return json(toFrontendTask(taskById(id) as DatabaseTask));
         },
     },
 
@@ -559,39 +588,43 @@ export const taskRoutes = {
                 request
             );
             if (body instanceof Response) return body;
-            const messageMd = optionalString(body.messageMd, "Message")?.trim();
-            if (id === null || !isValidAssignee(body.author) || !messageMd) {
-                return json({ error: "Invalid update payload" }, { status: 400 });
-            }
-            if (!database.prepare("SELECT id FROM tasks WHERE id = ?").get(id)) {
-                return json({ error: "Task not found" }, { status: 404 });
-            }
-            const author = body.author;
-            const createdAt = nowIso();
-            const result = database.transaction(() => {
-                const insertResult = database
-                    .prepare(
-                        `INSERT INTO task_updates (task_id, author, message_md, created_at)
+            try {
+                const messageMd = optionalString(body.messageMd, "Message")?.trim();
+                if (id === null || !isValidAssignee(body.author) || !messageMd) {
+                    return json({ error: "Invalid update payload" }, { status: 400 });
+                }
+                if (!database.prepare("SELECT id FROM tasks WHERE id = ?").get(id)) {
+                    return json({ error: "Task not found" }, { status: 404 });
+                }
+                const author = body.author;
+                const createdAt = nowIso();
+                const result = database.transaction(() => {
+                    const insertResult = database
+                        .prepare(
+                            `INSERT INTO task_updates (task_id, author, message_md, created_at)
                          VALUES (?, ?, ?, ?)`
+                        )
+                        .run(id, author, messageMd, createdAt);
+                    database
+                        .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
+                        .run(createdAt, id);
+                    return insertResult;
+                })();
+                const row = database
+                    .prepare(
+                        "SELECT id, task_id, author, message_md, created_at FROM task_updates WHERE id = ?"
                     )
-                    .run(id, author, messageMd, createdAt);
-                database
-                    .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
-                    .run(createdAt, id);
-                return insertResult;
-            })();
-            const row = database
-                .prepare(
-                    "SELECT id, task_id, author, message_md, created_at FROM task_updates WHERE id = ?"
-                )
-                .get(Number(result.lastInsertRowid)) as DatabaseTaskUpdate;
-            const task = database
-                .prepare("SELECT title, assignee FROM tasks WHERE id = ?")
-                .get(id) as { assignee: Assignee | null; title: string };
-            if (task.assignee === TASK_ASSIGNEES.mira.id) {
-                void notifyMira("progress", { id, title: task.title });
+                    .get(Number(result.lastInsertRowid)) as DatabaseTaskUpdate;
+                const task = database
+                    .prepare("SELECT title, assignee FROM tasks WHERE id = ?")
+                    .get(id) as { assignee: Assignee | null; title: string };
+                if (task.assignee === TASK_ASSIGNEES.mira.id) {
+                    void notifyMira("progress", { id, title: task.title });
+                }
+                return json(toFrontendTaskUpdate(row), { status: 201 });
+            } catch (error) {
+                return taskRouteError(error);
             }
-            return json(toFrontendTaskUpdate(row), { status: 201 });
         },
     },
 
@@ -603,36 +636,41 @@ export const taskRoutes = {
                 request
             );
             if (body instanceof Response) return body;
-            const messageMd = optionalString(body.messageMd, "Message")?.trim();
-            if (
-                id === null ||
-                updateId === null ||
-                !isValidAssignee(body.author) ||
-                !messageMd
-            ) {
-                return json({ error: "Invalid update payload" }, { status: 400 });
-            }
-            const author = body.author;
-            const existing = database
-                .prepare("SELECT id FROM task_updates WHERE id = ? AND task_id = ?")
-                .get(updateId, id);
-            if (!existing) return json({ error: "Update not found" }, { status: 404 });
-            database.transaction(() => {
-                database
+            try {
+                const messageMd = optionalString(body.messageMd, "Message")?.trim();
+                if (
+                    id === null ||
+                    updateId === null ||
+                    !isValidAssignee(body.author) ||
+                    !messageMd
+                ) {
+                    return json({ error: "Invalid update payload" }, { status: 400 });
+                }
+                const author = body.author;
+                const existing = database
+                    .prepare("SELECT id FROM task_updates WHERE id = ? AND task_id = ?")
+                    .get(updateId, id);
+                if (!existing)
+                    return json({ error: "Update not found" }, { status: 404 });
+                database.transaction(() => {
+                    database
+                        .prepare(
+                            "UPDATE task_updates SET author = ?, message_md = ? WHERE id = ? AND task_id = ?"
+                        )
+                        .run(author, messageMd, updateId, id);
+                    database
+                        .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
+                        .run(nowIso(), id);
+                })();
+                const row = database
                     .prepare(
-                        "UPDATE task_updates SET author = ?, message_md = ? WHERE id = ? AND task_id = ?"
+                        "SELECT id, task_id, author, message_md, created_at FROM task_updates WHERE id = ?"
                     )
-                    .run(author, messageMd, updateId, id);
-                database
-                    .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
-                    .run(nowIso(), id);
-            })();
-            const row = database
-                .prepare(
-                    "SELECT id, task_id, author, message_md, created_at FROM task_updates WHERE id = ?"
-                )
-                .get(updateId) as DatabaseTaskUpdate;
-            return json(toFrontendTaskUpdate(row));
+                    .get(updateId) as DatabaseTaskUpdate;
+                return json(toFrontendTaskUpdate(row));
+            } catch (error) {
+                return taskRouteError(error);
+            }
         },
 
         DELETE: (request: ParametersRequest<"id" | "updateId">) => {

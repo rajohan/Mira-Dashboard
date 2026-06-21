@@ -106,6 +106,7 @@ describe("Mira Dashboard backend integration", () => {
             testState.temporaryRoot,
             "dashboard.database"
         );
+        process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH = "1";
         process.env.MIRA_DASHBOARD_FRONTEND_PATH = frontendRoot;
         process.env.WORKSPACE_ROOT = workspaceRoot;
         process.env.OPENCLAW_HOME = openclawRoot;

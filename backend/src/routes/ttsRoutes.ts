@@ -92,6 +92,9 @@ export const ttsRoutes = {
                     },
                 });
             } catch (error) {
+                if (controller.signal.aborted) {
+                    return json({ error: "TTS request timed out" }, { status: 504 });
+                }
                 return json(
                     {
                         error:

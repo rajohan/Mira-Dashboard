@@ -33,6 +33,7 @@ interface CompletionResponse {
 }
 
 const HOME_DIR = os.homedir();
+const SHELL_ESCAPE_RE = /([\s\\'"$`!&|;<>()*?[\]{}])/gu;
 
 async function readTerminalJson<T>(request: Request): Promise<T | Response> {
     try {
@@ -53,14 +54,75 @@ function expandPath(inputPath: string, cwd: string): string {
     return path.join(cwd, inputPath);
 }
 
+function unescapeShellToken(token: string): string {
+    let output = "";
+    let quote: "'" | '"' | null = null;
+    let isEscaped = false;
+    for (const character of token) {
+        if (isEscaped) {
+            output += character;
+            isEscaped = false;
+            continue;
+        }
+        if (character === "\\") {
+            isEscaped = true;
+            continue;
+        }
+        if ((character === "'" || character === '"') && quote === null) {
+            quote = character;
+            continue;
+        }
+        if (character === quote) {
+            quote = null;
+            continue;
+        }
+        output += character;
+    }
+    if (isEscaped) output += "\\";
+    return output;
+}
+
+function completionInput(input: string): { pathPart: string; prefix: string } {
+    let quote: "'" | '"' | null = null;
+    let isEscaped = false;
+    let tokenStart = 0;
+    for (const [index, character] of [...input].entries()) {
+        if (isEscaped) {
+            isEscaped = false;
+            continue;
+        }
+        if (character === "\\") {
+            isEscaped = true;
+            continue;
+        }
+        if ((character === "'" || character === '"') && quote === null) {
+            quote = character;
+            continue;
+        }
+        if (character === quote) {
+            quote = null;
+            continue;
+        }
+        if (quote === null && /\s/u.test(character)) {
+            tokenStart = index + 1;
+        }
+    }
+    return {
+        pathPart: unescapeShellToken(input.slice(tokenStart)),
+        prefix: input.slice(0, tokenStart),
+    };
+}
+
+function escapeShellPath(value: string): string {
+    return value.replaceAll(SHELL_ESCAPE_RE, String.raw`\$1`);
+}
+
 async function getCompletions(
     partial: string,
     cwd: string,
     statFile = statGuardedAsync
 ): Promise<CompletionResponse> {
-    const lastSpaceIndex = partial.lastIndexOf(" ");
-    const pathPart = lastSpaceIndex === -1 ? partial : partial.slice(lastSpaceIndex + 1);
-    const prefix = lastSpaceIndex === -1 ? "" : partial.slice(0, lastSpaceIndex + 1);
+    const { pathPart, prefix } = completionInput(partial);
 
     let searchDirectory: string;
     let searchPrefix: string;
@@ -84,7 +146,12 @@ async function getCompletions(
 
         for (const entry of entries) {
             const name = entry.name;
-            if (!name.startsWith(searchPrefix) || name.startsWith(".")) continue;
+            if (
+                !name.startsWith(searchPrefix) ||
+                (searchPrefix === "" && name.startsWith("."))
+            ) {
+                continue;
+            }
             const fullPath = path.join(searchDirectory, name);
             let type: CompletionItem["type"] = "file";
             if (entry.isDirectory()) {
@@ -100,7 +167,8 @@ async function getCompletions(
 
             matches.push({
                 completion:
-                    prefix + (pathPart.includes("/") ? directoryPart + name : name),
+                    prefix +
+                    escapeShellPath(pathPart.includes("/") ? directoryPart + name : name),
                 display: name + (type === "directory" ? "/" : ""),
                 type,
             });

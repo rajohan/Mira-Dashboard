@@ -3,7 +3,7 @@ import path from "path";
 
 import type { DashboardSocket } from "../dashboardSocket.ts";
 import { errorMessage } from "../lib/errors.ts";
-import { guardedPath, openReadNoFollowGuarded } from "../lib/guardedOps.ts";
+import { guardedPath, openReadNoFollowNonblockingGuarded } from "../lib/guardedOps.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -100,7 +100,7 @@ async function pollLogFile(): Promise<void> {
 
     let file: fs.promises.FileHandle | undefined;
     try {
-        file = await openReadNoFollowGuarded(guardedPath(logFile));
+        file = await openReadNoFollowNonblockingGuarded(guardedPath(logFile));
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
         throw error;
@@ -108,6 +108,7 @@ async function pollLogFile(): Promise<void> {
 
     try {
         const stat = await file.stat();
+        if (!stat.isFile()) return;
 
         if (logFile !== logsRouteState.lastLogFile) {
             const isInitialStartup = !logsRouteState.lastLogFile;
@@ -215,7 +216,7 @@ async function sendLogHistory(ws: DashboardSocket): Promise<void> {
 
         let file: fs.promises.FileHandle;
         try {
-            file = await openReadNoFollowGuarded(guardedPath(logFile));
+            file = await openReadNoFollowNonblockingGuarded(guardedPath(logFile));
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                 throw error;
@@ -230,6 +231,10 @@ async function sendLogHistory(ws: DashboardSocket): Promise<void> {
         let lines: string[];
         try {
             const stat = await file.stat();
+            if (!stat.isFile()) {
+                send({ type: "log_history_complete", count: 0 });
+                return;
+            }
             if (subscriberCountAtStart <= 1 || !logsRouteState.lastLogFile) {
                 logsRouteState.lastLogFile = logFile;
                 logsRouteState.lastLogSize = stat.size;

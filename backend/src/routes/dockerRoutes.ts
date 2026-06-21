@@ -1063,7 +1063,7 @@ export const dockerRoutes = {
                     { status: statusCodeFromError(error) }
                 );
             }
-            const failed = steps.filter((step) => !step.isOk);
+            const failed = blockingDockerUpdaterFailures(steps);
             const code = updaterResultCode(steps);
             if (failed.length > 0 && code === "NOT_FOUND") {
                 return json(

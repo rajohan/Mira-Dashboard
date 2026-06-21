@@ -123,7 +123,19 @@ export const mediaRoutes = {
             if (relativeRealPath.startsWith("..") || path.isAbsolute(relativeRealPath)) {
                 return json({ error: "Access denied" }, { status: 403 });
             }
-            const preOpenStat = await fsp.stat(realPath);
+            let preOpenStat: fs.Stats;
+            try {
+                preOpenStat = await fsp.stat(realPath);
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === "ENOENT" || code === "ENOTDIR") {
+                    return json({ error: "Media not found" }, { status: 404 });
+                }
+                if (code === "EACCES") {
+                    return json({ error: "Access denied" }, { status: 403 });
+                }
+                throw error;
+            }
             if (!preOpenStat.isFile()) {
                 return json({ error: "Media path is not a file" }, { status: 400 });
             }

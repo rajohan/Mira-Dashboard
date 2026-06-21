@@ -87,9 +87,17 @@ export async function runProcess(
     if (timeoutMs !== undefined) {
         timeout = setTimeout(() => {
             didTimeout = true;
-            killProcessGroup(process, options.killSignal ?? "SIGTERM");
+            try {
+                killProcessGroup(process, options.killSignal ?? "SIGTERM");
+            } catch {
+                // The process may already have exited between scheduling and timeout.
+            }
             forceKillTimeout = setTimeout(() => {
-                killProcessGroup(process, "SIGKILL");
+                try {
+                    killProcessGroup(process, "SIGKILL");
+                } catch {
+                    // The process may already have exited during the grace period.
+                }
             }, DEFAULT_FORCE_KILL_GRACE_MS);
             forceKillTimeout.unref();
         }, timeoutMs);

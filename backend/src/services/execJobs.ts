@@ -71,7 +71,7 @@ const EXECUTABLE_RE = /^(?:[\w./-]+)$/u;
 const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
 const EXEC_ONCE_TIMEOUT_MS = 60_000;
-const ALLOWED_DIRECT_EXECUTABLES = new Set(["docker", "git", "openclaw"]);
+const ALLOWED_DIRECT_EXECUTABLES = new Set<string>();
 const jobs = new Map<string, ExecJob>();
 
 function trimOutput(text: string): string {
@@ -220,8 +220,10 @@ function runExecCommand(
         };
         let timeout: Timer | undefined;
         let forceKillTimeout: Timer | undefined;
+        let didTimeout = false;
         if (timeoutMs !== undefined) {
             timeout = setTimeout(() => {
+                didTimeout = true;
                 try {
                     killProcessGroup(child, "SIGTERM");
                 } catch (error) {
@@ -279,7 +281,11 @@ function runExecCommand(
             .then((code) => {
                 if (timeout) clearTimeout(timeout);
                 if (forceKillTimeout) clearTimeout(forceKillTimeout);
-                resolve({ code, stderr, stdout });
+                resolve({
+                    code: didTimeout && code === 0 ? 1 : code,
+                    stderr,
+                    stdout,
+                });
             })
             .catch((error: unknown) => {
                 if (timeout) clearTimeout(timeout);

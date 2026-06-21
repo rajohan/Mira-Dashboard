@@ -11,6 +11,7 @@ const TRUSTED_PROXY_IPS = new Set(
         .map((value) => value.trim())
         .filter(Boolean)
 );
+const isLoopbackAuthEnabled = process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH === "1";
 
 type HeaderInput = Record<string, string> | Array<[string, string]>;
 
@@ -152,7 +153,11 @@ export function authUser(request: Request, server: Server<unknown>): AuthUser | 
     const hasForwardedClient =
         Boolean(request.headers.get("x-forwarded-for")) ||
         Boolean(request.headers.get("x-real-ip"));
-    if (!hasForwardedClient && isLoopbackRequest(request, server)) {
+    if (
+        isLoopbackAuthEnabled &&
+        !hasForwardedClient &&
+        isLoopbackRequest(request, server)
+    ) {
         return { id: 0, username: "mira-local" };
     }
     const sessionId = sessionIdFromCookie(request);

@@ -339,6 +339,9 @@ export const fileRoutes = {
                     { status: httpStatusCode(error) }
                 );
             }
+            if (!body || typeof body !== "object" || Array.isArray(body)) {
+                return json({ error: "Request body must be an object" }, { status: 400 });
+            }
             if (typeof body.content !== "string") {
                 return json({ error: "Content required" }, { status: 400 });
             }

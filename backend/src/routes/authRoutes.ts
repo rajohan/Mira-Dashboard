@@ -198,7 +198,13 @@ export const authRoutes = {
                 gateway.init(gatewayToken);
                 const sessionId = createSession(user.id);
                 return withCookie(
-                    json({ authenticated: true, user }, { status: 201 }),
+                    json(
+                        {
+                            authenticated: true,
+                            user: { id: user.id, username: user.username },
+                        },
+                        { status: 201 }
+                    ),
                     sessionCookie(request, server, sessionId)
                 );
             } catch (bootstrapError) {

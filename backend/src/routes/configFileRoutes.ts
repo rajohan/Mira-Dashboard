@@ -227,6 +227,9 @@ export const configFileRoutes = {
                     { status: httpStatusCode(error) }
                 );
             }
+            if (!body || typeof body !== "object" || Array.isArray(body)) {
+                return json({ error: "Request body must be an object" }, { status: 400 });
+            }
             if (body.content === undefined)
                 return json({ error: "Content required" }, { status: 400 });
             if (

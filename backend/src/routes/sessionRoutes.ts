@@ -45,6 +45,12 @@ export const sessionRoutes = {
             }
             try {
                 const body = await readJson<{ action?: unknown }>(request);
+                if (!body || typeof body !== "object" || Array.isArray(body)) {
+                    return json(
+                        { error: "Request body must be an object" },
+                        { status: 400 }
+                    );
+                }
                 const action = stringFallback(body.action).trim().toLowerCase();
                 if (action === "stop") {
                     await gateway.abortSessionRun(sessionKey);

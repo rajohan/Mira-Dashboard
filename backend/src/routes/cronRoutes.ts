@@ -76,6 +76,12 @@ export const cronRoutes = {
         POST: async (request: ParametersRequest<"id">) => {
             try {
                 const body = await readJson<{ enabled?: unknown }>(request);
+                if (!body || typeof body !== "object" || Array.isArray(body)) {
+                    return json(
+                        { error: "Request body must be an object" },
+                        { status: 400 }
+                    );
+                }
                 if (typeof body.enabled !== "boolean") {
                     return json({ error: "enabled must be a boolean" }, { status: 400 });
                 }
@@ -94,6 +100,12 @@ export const cronRoutes = {
         POST: async (request: ParametersRequest<"id">) => {
             try {
                 const body = await readJson<{ patch?: unknown }>(request);
+                if (!body || typeof body !== "object" || Array.isArray(body)) {
+                    return json(
+                        { error: "Request body must be an object" },
+                        { status: 400 }
+                    );
+                }
                 const patch = body.patch;
                 if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
                     return json({ error: "patch must be an object" }, { status: 400 });

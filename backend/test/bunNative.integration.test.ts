@@ -108,6 +108,7 @@ describe("Bun-native dashboard backend", () => {
                     state.temporaryRoot,
                     "dashboard.database"
                 ),
+                MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH: "1",
                 MIRA_DASHBOARD_FRONTEND_PATH: frontendRoot,
                 MIRA_DOCKER_COMPOSE_WRAPPER: composeWrapper,
                 MIRA_DOCKER_ROOT: dockerRoot,

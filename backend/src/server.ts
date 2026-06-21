@@ -21,6 +21,16 @@ const frontendPath =
     process.env.MIRA_DASHBOARD_FRONTEND_PATH ||
     path.join(import.meta.dirname, "..", "..", "dist");
 
+function isAllowedWebSocketOrigin(request: Request): boolean {
+    const origin = request.headers.get("origin");
+    if (!origin) return true;
+    try {
+        return new URL(origin).host === new URL(request.url).host;
+    } catch {
+        return false;
+    }
+}
+
 export function resolveListenPort(value = process.env.PORT): number {
     const trimmed = value?.trim() ?? "";
     if (!/^\d+$/u.test(trimmed)) {
@@ -58,6 +68,9 @@ export function createServer(port = resolveListenPort()): Server<DashboardSocket
         fetch(request, server) {
             const url = new URL(request.url);
             if (url.pathname === "/ws") {
+                if (!isAllowedWebSocketOrigin(request)) {
+                    return new Response("Forbidden", { status: 403 });
+                }
                 const user = authUser(request, server);
                 if (!user) {
                     return new Response("Unauthorized", { status: 401 });
