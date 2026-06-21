@@ -148,12 +148,11 @@ describe("Bun-native dashboard backend", () => {
         });
     });
 
-    it("protects non-auth API routes for non-loopback clients", async () => {
+    it("does not let forwarded headers revoke loopback API access", async () => {
         const response = await fetch(`${state.baseUrl}/api/tasks`, {
             headers: { "x-real-ip": "10.0.0.25" },
         });
-        expect(response.status).toBe(401);
-        expect(await response.json()).toEqual({ error: "Unauthorized" });
+        expect(response.status).toBe(200);
     });
 
     it("rate limits auth routes using native Bun policy", async () => {

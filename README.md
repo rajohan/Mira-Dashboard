@@ -86,7 +86,7 @@ Frontend and backend tests run directly with Bun. Coverage LCOV files are upload
 - Frontend builds and the local frontend dev server use Bun's HTML bundler with Babel React Compiler and Bun Tailwind plugins.
 - Dev server listens on all addresses so the dashboard can be reached over Tailscale when needed.
 - Auth is enforced by the backend request policy for API routes except `/api/auth/*` and `/api/health`; route modules should assume authenticated access unless explicitly public.
-- If `MIRA_DASHBOARD_TRUSTED_PROXY_IPS` is configured, the trusted proxy must overwrite or strip inbound `X-Real-IP` and `X-Forwarded-For` headers from untrusted clients before forwarding to the backend. Dashboard localhost bypass depends on trusted request identity, so forwarding spoofed client headers can turn into an authentication bypass.
+- If `MIRA_DASHBOARD_TRUSTED_PROXY_IPS` is configured, the trusted proxy must overwrite or strip inbound `X-Real-IP` and `X-Forwarded-For` headers from untrusted clients before forwarding to the backend. These headers are used only for proxied client identity such as rate-limit buckets; localhost auth bypass is granted only to immediate loopback peers.
 
 ## Production checkout and PR worktrees
 

@@ -10,7 +10,7 @@ import {
     readdirGuarded,
     readFromOpenFile,
     statGuarded,
-    writeTextNoFollowExclusiveGuarded,
+    writeTextNoFollowAnchoredGuarded,
 } from "../lib/guardedOps.ts";
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.ts";
 
@@ -259,7 +259,7 @@ export const fileRoutes = {
             if (typeof body.content !== "string") {
                 return json({ error: "Content required" }, { status: 400 });
             }
-            if (Buffer.byteLength(body.content, "utf8") > JSON_WRITE_BODY_LIMIT) {
+            if (Buffer.byteLength(body.content, "utf8") > MAX_FILE_SIZE) {
                 return json({ error: "File is too large to write" }, { status: 413 });
             }
             const root = fs.realpathSync(workspaceRoot());
@@ -288,17 +288,13 @@ export const fileRoutes = {
                     throw error;
                 }
             }
-            const temporaryPath = `${safeFullPath}.${process.pid}.${Date.now()}.${Bun.randomUUIDv7()}.tmp`;
-            await writeTextNoFollowExclusiveGuarded(
-                guardedPath(temporaryPath),
+            const anchoredPath = path.relative(root, safeFullPath);
+            await writeTextNoFollowAnchoredGuarded(
+                guardedPath(root),
+                anchoredPath,
                 body.content,
-                existingMode
+                { mode: existingMode }
             );
-            try {
-                await fs.promises.rename(temporaryPath, safeFullPath);
-            } finally {
-                await fs.promises.rm(temporaryPath, { force: true });
-            }
             const stat = statGuarded(guardedPath(safeFullPath));
             return json({
                 isSuccess: true,

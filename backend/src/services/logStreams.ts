@@ -15,7 +15,14 @@ const logsRouteState: {
     isLogPollInFlight: boolean;
     lastLogSize: number;
     lastLogFile: string;
-} = { logWatcher: null, isLogPollInFlight: false, lastLogSize: 0, lastLogFile: "" };
+    pendingFragment: string;
+} = {
+    logWatcher: null,
+    isLogPollInFlight: false,
+    lastLogSize: 0,
+    lastLogFile: "",
+    pendingFragment: "",
+};
 
 const logSubscribers = new Set<DashboardSocket>();
 const MIN_LOG_TAIL_BYTES = 64 * 1024;
@@ -104,12 +111,13 @@ async function pollLogFile(): Promise<void> {
 
         if (logFile !== logsRouteState.lastLogFile) {
             logsRouteState.lastLogFile = logFile;
-            logsRouteState.lastLogSize = stat.size;
-            return;
+            logsRouteState.lastLogSize = 0;
+            logsRouteState.pendingFragment = "";
         }
 
         if (stat.size < logsRouteState.lastLogSize) {
             logsRouteState.lastLogSize = 0;
+            logsRouteState.pendingFragment = "";
         }
 
         if (stat.size > logsRouteState.lastLogSize) {
@@ -117,13 +125,20 @@ async function pollLogFile(): Promise<void> {
             const readBytes = Math.min(deltaBytes, LOG_TAIL_READ_CHUNK_BYTES);
             const readOffset = logsRouteState.lastLogSize;
             const buffer = Buffer.alloc(readBytes);
-            await file.read(buffer, 0, buffer.length, readOffset);
+            const { bytesRead } = await file.read(buffer, 0, buffer.length, readOffset);
+            if (bytesRead <= 0) return;
 
-            const lines = buffer
-                .toString("utf8")
-                .split("\n")
-                .filter((l) => l.trim());
-            logsRouteState.lastLogSize = readOffset + readBytes;
+            const text =
+                logsRouteState.pendingFragment +
+                buffer.subarray(0, bytesRead).toString("utf8");
+            const parts = text.split("\n");
+            logsRouteState.pendingFragment = parts.pop() ?? "";
+            const lines = parts.filter((line) => line.trim());
+            if (logsRouteState.pendingFragment.length > LOG_TAIL_READ_CHUNK_BYTES) {
+                lines.push(logsRouteState.pendingFragment);
+                logsRouteState.pendingFragment = "";
+            }
+            logsRouteState.lastLogSize = readOffset + bytesRead;
 
             for (const line of lines) {
                 const message = JSON.stringify({ type: "log", line });

@@ -46,10 +46,9 @@ async function getCompletions(
     cwd: string,
     statFile = statGuardedAsync
 ): Promise<CompletionResponse> {
-    const trimmed = partial.trim();
-    const lastSpaceIndex = trimmed.lastIndexOf(" ");
-    const pathPart = lastSpaceIndex === -1 ? trimmed : trimmed.slice(lastSpaceIndex + 1);
-    const prefix = lastSpaceIndex === -1 ? "" : trimmed.slice(0, lastSpaceIndex + 1);
+    const lastSpaceIndex = partial.lastIndexOf(" ");
+    const pathPart = lastSpaceIndex === -1 ? partial : partial.slice(lastSpaceIndex + 1);
+    const prefix = lastSpaceIndex === -1 ? "" : partial.slice(0, lastSpaceIndex + 1);
 
     let searchDirectory: string;
     let searchPrefix: string;

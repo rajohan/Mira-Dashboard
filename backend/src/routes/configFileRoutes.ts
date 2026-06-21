@@ -1,15 +1,13 @@
 import fs from "node:fs";
-import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { json, readJson } from "../http.ts";
 import {
-    copyNoFollowGuarded,
     guardedPath,
     openReadNoFollowGuarded,
     readFromOpenFile,
-    writeTextNoFollowGuarded,
+    writeTextNoFollowAnchoredGuarded,
 } from "../lib/guardedOps.ts";
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.ts";
 
@@ -130,6 +128,14 @@ export const configFileRoutes = {
                     { status: 500 }
                 );
             }
+            const lexicalPath = path.resolve(root, relativePath);
+            try {
+                if (fs.lstatSync(lexicalPath).isSymbolicLink()) {
+                    return json({ error: "File not found" }, { status: 404 });
+                }
+            } catch {
+                return json({ error: "File not found" }, { status: 404 });
+            }
             const fullPath = configTarget(relativePath, root);
             if (!fullPath) {
                 return json(
@@ -139,10 +145,6 @@ export const configFileRoutes = {
             }
             let stat: fs.Stats;
             try {
-                const linkStat = fs.lstatSync(fullPath);
-                if (linkStat.isSymbolicLink()) {
-                    return json({ error: "File not found" }, { status: 404 });
-                }
                 stat = fs.statSync(fullPath);
             } catch {
                 return json({ error: "File not found" }, { status: 404 });
@@ -208,17 +210,24 @@ export const configFileRoutes = {
                     { status: 500 }
                 );
             }
-            const target = prepareSafeWriteTargetWithinRoot(
-                path.resolve(root, relativePath),
-                root
-            );
+            const lexicalTarget = path.resolve(root, relativePath);
+            try {
+                if (fs.lstatSync(lexicalTarget).isSymbolicLink()) {
+                    return json({ error: "Access denied" }, { status: 403 });
+                }
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                    throw error;
+                }
+            }
+            const target = prepareSafeWriteTargetWithinRoot(lexicalTarget, root);
             if (!target) {
                 return json(
                     { error: "Access denied: path outside allowed root" },
                     { status: 403 }
                 );
             }
-            await fsp.mkdir(path.dirname(target), { recursive: true });
+            let existingMode: number | undefined;
             try {
                 if (fs.existsSync(target)) {
                     const stat = fs.lstatSync(target);
@@ -237,14 +246,31 @@ export const configFileRoutes = {
                             { status: 403 }
                         );
                     }
+                    existingMode = stat.mode & 0o777;
                     if (stat.size <= MAX_CONFIG_WRITE_SIZE) {
-                        await copyNoFollowGuarded(
-                            guardedPath(target),
-                            guardedPath(`${target}.bak`)
+                        const file = await openReadNoFollowGuarded(guardedPath(target));
+                        let backupContent: string;
+                        try {
+                            backupContent = readFromOpenFile(file.fd, stat.size).toString(
+                                "utf8"
+                            );
+                        } finally {
+                            await file.close();
+                        }
+                        await writeTextNoFollowAnchoredGuarded(
+                            guardedPath(root),
+                            `${relativePath}.bak`,
+                            backupContent,
+                            { createParents: true, mode: stat.mode & 0o777 }
                         );
                     }
                 }
-                await writeTextNoFollowGuarded(guardedPath(target), body.content);
+                await writeTextNoFollowAnchoredGuarded(
+                    guardedPath(root),
+                    relativePath,
+                    body.content,
+                    { createParents: true, mode: existingMode }
+                );
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code === "EACCES") {
                     return json({ error: "Access denied" }, { status: 403 });

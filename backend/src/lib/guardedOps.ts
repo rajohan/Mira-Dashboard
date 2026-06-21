@@ -33,14 +33,77 @@ const lstatSync = (path: Fs.PathLike) => fsOps.lstatSync(path);
 const statSync = (path: Fs.PathLike) => fsOps.statSync(path);
 
 const fsPromiseOps = Fs.promises as unknown as {
+    mkdir: typeof Fs.promises.mkdir;
     open: typeof Fs.promises.open;
     readdir: typeof Fs.promises.readdir;
+    rename: typeof Fs.promises.rename;
+    rm: typeof Fs.promises.rm;
     stat: typeof Fs.promises.stat;
 };
 
 /** Converts a guarded path to a Buffer to avoid direct string path sinks in wrappers. */
 function guardedPathBuffer(path: GuardedPath): Buffer {
     return Buffer.from(path);
+}
+
+function validateRelativePath(relativePath: string): string[] {
+    if (!relativePath || Path.isAbsolute(relativePath) || relativePath.includes("\0")) {
+        throw Object.assign(new Error("Invalid relative path"), { code: "EINVAL" });
+    }
+    const parts = relativePath.split(/[\\/]+/u).filter(Boolean);
+    if (parts.length === 0 || parts.some((part) => part === "." || part === "..")) {
+        throw Object.assign(new Error("Invalid relative path"), { code: "EINVAL" });
+    }
+    return parts;
+}
+
+function procFdPath(fd: number, child?: string): Buffer {
+    return Buffer.from(
+        child === undefined
+            ? Path.join("/proc/self/fd", String(fd))
+            : Path.join("/proc/self/fd", String(fd), child)
+    );
+}
+
+async function openDirectoryNoFollow(path: Buffer): Promise<Fs.promises.FileHandle> {
+    return Reflect.apply(fsPromiseOps.open, Fs.promises, [
+        path,
+        Fs.constants.O_RDONLY | Fs.constants.O_DIRECTORY | Fs.constants.O_NOFOLLOW,
+    ]) as Promise<Fs.promises.FileHandle>;
+}
+
+async function openAnchoredParentDirectory(
+    root: GuardedPath,
+    relativePath: string,
+    options: { createParents?: boolean } = {}
+): Promise<{ basename: string; handles: Fs.promises.FileHandle[]; parentPath: Buffer }> {
+    const parts = validateRelativePath(relativePath);
+    const basename = parts.at(-1) as string;
+    const parentParts = parts.slice(0, -1);
+    const handles: Fs.promises.FileHandle[] = [];
+    let current = await openDirectoryNoFollow(guardedPathBuffer(root));
+    handles.push(current);
+
+    try {
+        for (const part of parentParts) {
+            const childPath = procFdPath(current.fd, part);
+            if (options.createParents) {
+                try {
+                    await Reflect.apply(fsPromiseOps.mkdir, Fs.promises, [childPath]);
+                } catch (error) {
+                    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+                        throw error;
+                    }
+                }
+            }
+            current = await openDirectoryNoFollow(childPath);
+            handles.push(current);
+        }
+        return { basename, handles, parentPath: procFdPath(current.fd) };
+    } catch (error) {
+        await Promise.allSettled(handles.map((handle) => handle.close()));
+        throw error;
+    }
 }
 
 /** Creates a validated directory tree. */
@@ -337,6 +400,70 @@ export async function writeTextNoFollowGuarded(
         if (isTemporaryCreated) {
             await Fs.promises.rm(temporaryPath, { force: true });
         }
+    }
+}
+
+/** Writes UTF-8 text through a pinned parent directory descriptor. */
+export async function writeTextNoFollowAnchoredGuarded(
+    root: GuardedPath,
+    relativePath: string,
+    content: string,
+    options: { createParents?: boolean; mode?: number } = {}
+): Promise<void> {
+    if (process.platform !== "linux") {
+        await writeTextNoFollowGuarded(
+            guardedPath(Path.join(root as string, relativePath)),
+            content,
+            options.mode
+        );
+        return;
+    }
+
+    const { basename, handles, parentPath } = await openAnchoredParentDirectory(
+        root,
+        relativePath,
+        { createParents: options.createParents }
+    );
+    const destinationPath = Buffer.from(Path.join(parentPath.toString(), basename));
+    const temporaryPath = Buffer.from(
+        Path.join(parentPath.toString(), `.${basename}.${Bun.randomUUIDv7()}.tmp`)
+    );
+    const fileMode = (options.mode ?? 0o666) & 0o777;
+    let isTemporaryCreated = false;
+
+    try {
+        const file = await Fs.promises.open(
+            temporaryPath,
+            Fs.constants.O_WRONLY |
+                Fs.constants.O_CREAT |
+                Fs.constants.O_EXCL |
+                Fs.constants.O_NOFOLLOW,
+            fileMode
+        );
+        isTemporaryCreated = true;
+        try {
+            if (options.mode !== undefined) {
+                await file.chmod(fileMode);
+            }
+            await file.writeFile(content, "utf8");
+            await file.sync();
+        } finally {
+            await file.close();
+        }
+        await Reflect.apply(fsPromiseOps.rename, Fs.promises, [
+            temporaryPath,
+            destinationPath,
+        ]);
+        isTemporaryCreated = false;
+        await handles.at(-1)?.sync();
+    } finally {
+        if (isTemporaryCreated) {
+            await Reflect.apply(fsPromiseOps.rm, Fs.promises, [
+                temporaryPath,
+                { force: true },
+            ]);
+        }
+        await Promise.allSettled(handles.reverse().map((handle) => handle.close()));
     }
 }
 

@@ -1598,7 +1598,7 @@ tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw env CODEX_HOME="$MIR
 	for i in $(seq 1 20); do OUT=$(tmux capture-pane -pt "$SESSION" -S -320 || true); has_limits && break; sleep 1; done
 	printf "%s\n" "$OUT"
 	`;
-        const { code, stdout } = await runProcess("bash", ["-c", command], {
+        const { code, stderr, stdout } = await runProcess("bash", ["-c", command], {
             env: {
                 PATH: process.env.PATH,
                 NODE_ENV: process.env.NODE_ENV,
@@ -1609,7 +1609,14 @@ tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw env CODEX_HOME="$MIR
             maxBuffer: 1024 * 1024,
         });
         if (code !== 0) {
-            return { status: "error", note: `codex quota exited ${code}` };
+            const output = stripAnsi(`${stderr}\n${stdout}`)
+                .replaceAll("\r", "")
+                .trim()
+                .slice(-1000);
+            return {
+                status: "error",
+                note: `codex quota exited ${code}${output ? `: ${output}` : ""}`,
+            };
         }
         const output = stripAnsi(stdout).replaceAll("\r", "");
         return parseOpenAiQuotaOutput(output);

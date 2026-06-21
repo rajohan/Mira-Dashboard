@@ -5,7 +5,7 @@ import {
 } from "../constants/taskActors.ts";
 import { database } from "../database.ts";
 import gateway from "../gateway.ts";
-import { json, readJson } from "../http.ts";
+import { HttpError, json, readJson } from "../http.ts";
 import { objectFallback } from "../lib/values.ts";
 
 type Status = "todo" | "in-progress" | "blocked" | "done";
@@ -74,6 +74,22 @@ function derivePriority(labels: string[]): "low" | "medium" | "high" {
     if (labels.includes("priority-high") || labels.includes("high")) return "high";
     if (labels.includes("priority-low") || labels.includes("low")) return "low";
     return "medium";
+}
+
+function optionalString(value: unknown, field: string): string | undefined {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== "string") {
+        throw new HttpError(`${field} must be a string`, 400);
+    }
+    return value;
+}
+
+function optionalLabels(value: unknown): string[] | undefined {
+    if (value === undefined || value === null) return undefined;
+    if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+        throw new HttpError("Labels must be an array of strings", 400);
+    }
+    return value;
 }
 
 function labelsFromTask(task: DatabaseTask): string[] {
@@ -305,8 +321,8 @@ export const taskRoutes = {
                 labels?: string[];
                 title?: string;
             }>(request);
-            if (!body.title?.trim())
-                return json({ error: "Title is required" }, { status: 400 });
+            const title = optionalString(body.title, "Title")?.trim();
+            if (!title) return json({ error: "Title is required" }, { status: 400 });
             if (!isValidAssignee(body.assignee)) {
                 return json(
                     { error: "Assignee must be Mira or Raymond" },
@@ -314,7 +330,8 @@ export const taskRoutes = {
                 );
             }
             const now = nowIso();
-            const labels = Array.isArray(body.labels) ? body.labels : [];
+            const labels = optionalLabels(body.labels) ?? [];
+            const taskBody = optionalString(body.body, "Body") ?? "";
             const status = normalizeStatus(
                 labels.includes("done")
                     ? "done"
@@ -331,8 +348,8 @@ export const taskRoutes = {
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
                 )
                 .run(
-                    body.title.trim(),
-                    body.body || "",
+                    title,
+                    taskBody,
                     status,
                     priority,
                     JSON.stringify(labels),
@@ -343,13 +360,13 @@ export const taskRoutes = {
                 );
             const id = Number(result.lastInsertRowid);
             recordEvent(id, "created", {
-                title: body.title.trim(),
+                title,
                 status,
                 priority,
                 assignee: body.assignee,
             });
             if (body.assignee === TASK_ASSIGNEES.mira.id) {
-                void notifyMira("created", { id, title: body.title.trim() });
+                void notifyMira("created", { id, title });
             }
             return json(toFrontendTask(taskById(id) as DatabaseTask), { status: 201 });
         },
@@ -375,7 +392,7 @@ export const taskRoutes = {
                 labels?: string[];
                 title?: string;
             }>(request);
-            const labels = body.labels ?? labelsFromTask(existing);
+            const labels = optionalLabels(body.labels) ?? labelsFromTask(existing);
             const status = normalizeStatus(
                 labels.includes("done")
                     ? "done"
@@ -386,7 +403,8 @@ export const taskRoutes = {
                         : "todo"
             );
             const priority = derivePriority(labels);
-            const title = body.title?.trim() || existing.title;
+            const title = optionalString(body.title, "Title")?.trim() || existing.title;
+            const taskBody = optionalString(body.body, "Body") ?? existing.body;
             const automationJson =
                 body.automation === undefined
                     ? existing.automation_json
@@ -399,7 +417,7 @@ export const taskRoutes = {
                 )
                 .run(
                     title,
-                    body.body ?? existing.body,
+                    taskBody,
                     status,
                     priority,
                     JSON.stringify(labels),
@@ -466,12 +484,13 @@ export const taskRoutes = {
         POST: async (request: ParametersRequest<"id">) => {
             const id = safeId(request.params.id);
             const body = await readJson<{ columnLabel?: string }>(request);
-            if (id === null || !body.columnLabel) {
+            const columnLabel = optionalString(body.columnLabel, "Column label");
+            if (id === null || !columnLabel) {
                 return json({ error: "Invalid request" }, { status: 400 });
             }
             const existing = taskById(id);
             if (!existing) return json({ error: "Task not found" }, { status: 404 });
-            const status = normalizeStatus(body.columnLabel);
+            const status = normalizeStatus(columnLabel);
             const labels = [
                 ...labelsFromTask(existing).filter(
                     (label) => !["todo", "in-progress", "blocked", "done"].includes(label)
@@ -508,7 +527,8 @@ export const taskRoutes = {
             const body = await readJson<{ author?: Assignee; messageMd?: string }>(
                 request
             );
-            if (id === null || !isValidAssignee(body.author) || !body.messageMd?.trim()) {
+            const messageMd = optionalString(body.messageMd, "Message")?.trim();
+            if (id === null || !isValidAssignee(body.author) || !messageMd) {
                 return json({ error: "Invalid update payload" }, { status: 400 });
             }
             if (!database.prepare("SELECT id FROM tasks WHERE id = ?").get(id)) {
@@ -520,7 +540,7 @@ export const taskRoutes = {
                     `INSERT INTO task_updates (task_id, author, message_md, created_at)
                      VALUES (?, ?, ?, ?)`
                 )
-                .run(id, body.author, body.messageMd.trim(), createdAt);
+                .run(id, body.author, messageMd, createdAt);
             database
                 .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
                 .run(createdAt, id);
@@ -546,11 +566,12 @@ export const taskRoutes = {
             const body = await readJson<{ author?: Assignee; messageMd?: string }>(
                 request
             );
+            const messageMd = optionalString(body.messageMd, "Message")?.trim();
             if (
                 id === null ||
                 updateId === null ||
                 !isValidAssignee(body.author) ||
-                !body.messageMd?.trim()
+                !messageMd
             ) {
                 return json({ error: "Invalid update payload" }, { status: 400 });
             }
@@ -562,7 +583,7 @@ export const taskRoutes = {
                 .prepare(
                     "UPDATE task_updates SET author = ?, message_md = ? WHERE id = ? AND task_id = ?"
                 )
-                .run(body.author, body.messageMd.trim(), updateId, id);
+                .run(body.author, messageMd, updateId, id);
             database
                 .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
                 .run(nowIso(), id);

@@ -51,7 +51,13 @@ async function readLogContent(
     stat: fs.Stats,
     lines: number | null
 ): Promise<string> {
-    if (!lines) return file.readFile("utf8");
+    if (!lines) {
+        const byteLength = Math.min(stat.size, MIN_LOG_TAIL_BYTES);
+        const buffer = Buffer.allocUnsafe(byteLength);
+        const offset = Math.max(0, stat.size - byteLength);
+        const { bytesRead } = await file.read(buffer, 0, byteLength, offset);
+        return buffer.subarray(0, bytesRead).toString("utf8");
+    }
 
     const minimumWindowBytes = Math.min(
         stat.size,
@@ -123,7 +129,8 @@ function logInfoResponse(): Response {
 
         return json({ logs: files });
     } catch (error) {
-        return json({ error: (error as Error).message }, { status: 500 });
+        console.error("[Logs] Failed to list log files:", error);
+        return json({ error: "Failed to list log files" }, { status: 500 });
     }
 }
 
@@ -210,7 +217,8 @@ async function logContentResponse(request: Request): Promise<Response> {
 
         return json({ content, file: logFile });
     } catch (error) {
-        return json({ error: (error as Error).message }, { status: 500 });
+        console.error("[Logs] Failed to read log file:", error);
+        return json({ error: "Failed to read log file" }, { status: 500 });
     }
 }
 

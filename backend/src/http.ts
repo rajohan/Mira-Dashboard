@@ -118,43 +118,8 @@ export function isTrustedProxyAddress(address?: string | null): boolean {
     );
 }
 
-function forwardedAddresses(forwardedFor: string): string[] {
-    return forwardedFor
-        .split(",")
-        .map((address) => address.trim())
-        .filter(Boolean);
-}
-
-function clientAddressFromTrustedChain(
-    peerAddress: string | undefined,
-    forwardedFor: string
-): string | undefined {
-    let clientAddress = peerAddress;
-    const forwardedChain = forwardedAddresses(forwardedFor);
-    for (let index = forwardedChain.length - 1; index >= 0; index -= 1) {
-        const address = forwardedChain[index];
-        clientAddress = address;
-        if (!isLoopbackAddress(address)) {
-            break;
-        }
-    }
-    return clientAddress;
-}
-
 export function isLoopbackRequest(request: Request, server: Server<unknown>): boolean {
-    const peerAddress = requestIp(request, server);
-    const isTrustForwardedHeaders = isTrustedProxyAddress(peerAddress);
-    const realIp = request.headers.get("x-real-ip");
-    if (isTrustForwardedHeaders && realIp) {
-        return isLoopbackAddress(realIp.trim());
-    }
-    const forwardedFor = request.headers.get("x-forwarded-for");
-    if (isTrustForwardedHeaders && forwardedFor) {
-        return isLoopbackAddress(
-            clientAddressFromTrustedChain(peerAddress, forwardedFor)
-        );
-    }
-    return isLoopbackAddress(peerAddress);
+    return isLoopbackAddress(requestIp(request, server));
 }
 
 export function sessionIdFromCookie(request: Request): string | null {

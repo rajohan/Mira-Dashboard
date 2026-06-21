@@ -217,8 +217,7 @@ export function execErrorResponse(error: unknown): { error: string; status: numb
 function runExecCommand(
     request: ExecRequest,
     jobId: string,
-    onUpdate?: (job: ExecJob) => void,
-    options: { allowTerminalShell?: boolean } = {}
+    onUpdate?: (job: ExecJob) => void
 ): Promise<ExecResponse> {
     const { args, command, cwd, shell } = request;
     const cwdOption = { cwd: resolveCwd(cwd), detached: true, env: process.env };
@@ -226,8 +225,6 @@ function runExecCommand(
     if (shell) {
         childFactory = () =>
             spawnProcess("/bin/sh", ["-c", getApprovedShellCommand(command)], cwdOption);
-    } else if (options.allowTerminalShell && args === undefined) {
-        childFactory = () => spawnProcess("/bin/sh", ["-c", command], cwdOption);
     } else {
         const commandParts = Array.isArray(args)
             ? { args, executable: command }
@@ -380,11 +377,8 @@ export function startExecJob(payload: unknown): ExecStartResponse {
 
     let runPromise: Promise<ExecResponse>;
     try {
-        runPromise = runExecCommand(
-            request,
-            jobId,
-            (update) => updateExecJobOutput(jobId, update),
-            { allowTerminalShell: true }
+        runPromise = runExecCommand(request, jobId, (update) =>
+            updateExecJobOutput(jobId, update)
         );
     } catch (error) {
         jobs.delete(jobId);

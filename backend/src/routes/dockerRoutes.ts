@@ -19,6 +19,11 @@ import {
     isNonblockingRegistrationFailure,
     runDockerUpdaterService,
 } from "../services/dockerUpdater.ts";
+import {
+    createManualScheduledJobRun,
+    finishScheduledJobRun,
+    runScheduledJob,
+} from "../services/scheduledJobs.ts";
 
 const dockerBin = nonEmptyEnvironmentFallback("MIRA_DOCKER_BIN", "docker");
 const MAX_OUTPUT_CHARS = 100_000;
@@ -593,6 +598,19 @@ function updaterResultCode(steps: DockerUpdaterStepResult[]): string {
     return steps.find((step) => !step.isOk)?.code ?? "OK";
 }
 
+function updaterStepsFromOutput(
+    output: Record<string, unknown>
+): DockerUpdaterStepResult[] {
+    return Array.isArray(output.steps) ? (output.steps as DockerUpdaterStepResult[]) : [];
+}
+
+function statusCodeFromError(error: unknown): number {
+    const statusCode = Number((error as { statusCode?: unknown }).statusCode);
+    return Number.isSafeInteger(statusCode) && statusCode >= 400 && statusCode < 600
+        ? statusCode
+        : 500;
+}
+
 async function runStackAction(request: Request): Promise<Response> {
     const body = await readJson<{ action?: unknown; service?: unknown }>(request);
     if (!body || typeof body !== "object") {
@@ -904,11 +922,21 @@ export const dockerRoutes = {
     },
     "/api/docker/updater/run": {
         POST: async () => {
-            const steps = await runDockerUpdaterService();
-            return json({
-                isSuccess: blockingDockerUpdaterFailures(steps).length === 0,
-                steps,
-            });
+            try {
+                const run = await runScheduledJob("docker.updater");
+                const steps = updaterStepsFromOutput(run.output);
+                return json({
+                    isSuccess:
+                        run.status === "success" &&
+                        blockingDockerUpdaterFailures(steps).length === 0,
+                    steps,
+                });
+            } catch (error) {
+                return json(
+                    { error: errorMessage(error, "Docker updater failed") },
+                    { status: statusCodeFromError(error) }
+                );
+            }
         },
     },
     "/api/docker/updater/services": {
@@ -946,7 +974,38 @@ export const dockerRoutes = {
             if (!service.enabled) {
                 return json({ error: "Updater service is disabled" }, { status: 400 });
             }
-            const steps = await runDockerUpdaterService(serviceId);
+            let scheduledRun;
+            try {
+                scheduledRun = createManualScheduledJobRun("docker.updater");
+            } catch (error) {
+                return json(
+                    { error: errorMessage(error, "Docker updater failed") },
+                    { status: statusCodeFromError(error) }
+                );
+            }
+            let steps: DockerUpdaterStepResult[];
+            try {
+                steps = await runDockerUpdaterService(serviceId);
+                finishScheduledJobRun(
+                    scheduledRun,
+                    blockingDockerUpdaterFailures(steps).length === 0
+                        ? "success"
+                        : "failed",
+                    null,
+                    { serviceId, steps }
+                );
+            } catch (error) {
+                finishScheduledJobRun(
+                    scheduledRun,
+                    "failed",
+                    errorMessage(error, "Docker updater failed"),
+                    { serviceId }
+                );
+                return json(
+                    { error: errorMessage(error, "Docker updater failed") },
+                    { status: statusCodeFromError(error) }
+                );
+            }
             const failed = steps.filter((step) => !step.isOk);
             const code = updaterResultCode(steps);
             if (failed.length > 0 && code === "NOT_FOUND") {

@@ -26,11 +26,13 @@ function missingConfig(): Response {
 export const agentRoutes = {
     "/api/agents/:id/metadata": {
         PUT: async (request: ParametersRequest<"id">) => {
+            const agentId = request.params.id;
+            if (!isValidAgentId(agentId)) {
+                return json({ error: "Invalid agent ID" }, { status: 400 });
+            }
             try {
                 const body = await readJson<{ currentTask?: unknown } | null>(request);
-                return json(
-                    await updateAgentCurrentTask(request.params.id, body?.currentTask)
-                );
+                return json(await updateAgentCurrentTask(agentId, body?.currentTask));
             } catch (error) {
                 return agentError(error, "Agent metadata update failed");
             }
