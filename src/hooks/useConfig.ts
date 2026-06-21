@@ -143,13 +143,17 @@ async function fetchSkills(): Promise<Skill[]> {
 }
 
 /** Performs update config. */
-async function updateConfig(config: OpenClawConfig): Promise<void> {
-    await apiPut("/config", config);
+async function updateConfig(config: OpenClawConfig, baseHash?: string): Promise<void> {
+    await apiPut("/config", { ...config, __hash: baseHash ?? config.__hash });
 }
 
 /** Performs toggle skill. */
-async function toggleSkill(name: string, isEnabled: boolean): Promise<void> {
-    await apiPost(`/skills/${name}`, { enabled: isEnabled });
+async function toggleSkill(
+    name: string,
+    isEnabled: boolean,
+    baseHash?: string
+): Promise<void> {
+    await apiPost(`/skills/${name}`, { __hash: baseHash, enabled: isEnabled });
 }
 
 /** Performs restart gateway. */
@@ -192,7 +196,10 @@ export function useUpdateConfig() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: updateConfig,
+        mutationFn: (config: OpenClawConfig) => {
+            const current = queryClient.getQueryData<OpenClawConfig>(configKeys.config());
+            return updateConfig(config, current?.__hash);
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: configKeys.config() });
         },
@@ -204,9 +211,12 @@ export function useToggleSkill() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ name, enabled }: { name: string; enabled: boolean }) =>
-            toggleSkill(name, enabled),
+        mutationFn: ({ name, enabled }: { name: string; enabled: boolean }) => {
+            const current = queryClient.getQueryData<OpenClawConfig>(configKeys.config());
+            return toggleSkill(name, enabled, current?.__hash);
+        },
         onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: configKeys.config() });
             queryClient.invalidateQueries({ queryKey: configKeys.skills() });
         },
     });

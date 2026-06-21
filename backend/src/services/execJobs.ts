@@ -111,8 +111,11 @@ function validateExecRequest(payload: unknown): ExecRequest {
     }
     if (args !== undefined && !EXECUTABLE_RE.test(command)) {
         throw new ExecValidationError(
-            "command must be an executable path when args are provided"
+            "command must be an executable name when args are provided"
         );
+    }
+    if (args !== undefined && path.basename(command) !== command) {
+        throw new ExecValidationError("command must be an approved executable name");
     }
     if (args !== undefined && !ALLOWED_DIRECT_EXECUTABLES.has(path.basename(command))) {
         throw new ExecValidationError("command executable is not approved");

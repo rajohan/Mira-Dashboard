@@ -150,7 +150,7 @@ async function callHandler(
     server: Server<unknown>
 ): Promise<Response> {
     if (handler instanceof Response) {
-        return handler;
+        return handler.clone() as Response;
     }
     return handler(request, server);
 }

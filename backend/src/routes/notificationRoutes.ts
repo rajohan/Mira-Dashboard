@@ -1,5 +1,6 @@
 import { database } from "../database.ts";
 import { json, readJson, readRequestBytes } from "../http.ts";
+import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import { nullableString, objectFallback, stringFallback } from "../lib/values.ts";
 import { pruneReadNotifications } from "../services/notificationMaintenance.ts";
 
@@ -111,7 +112,15 @@ export const notificationRoutes = {
         },
 
         POST: async (request: Request) => {
-            const body = await readJson<Record<string, unknown>>(request);
+            let body: Record<string, unknown>;
+            try {
+                body = await readJson<Record<string, unknown>>(request);
+            } catch (error) {
+                return json(
+                    { error: errorMessage(error, "Invalid JSON") },
+                    { status: httpStatusCode(error) }
+                );
+            }
             const titleField = optionalStringField("title", body.title);
             if (titleField.error) return titleField.error;
             const descriptionField = optionalStringField("description", body.description);
@@ -203,7 +212,15 @@ export const notificationRoutes = {
         POST: async (request: Request) => {
             const querySource = new URL(request.url).searchParams.get("source");
             let body: { source?: unknown };
-            const rawBody = await readRequestBytes(request, 1024);
+            let rawBody: Buffer;
+            try {
+                rawBody = await readRequestBytes(request, 1024);
+            } catch (error) {
+                return json(
+                    { error: errorMessage(error, "Invalid JSON") },
+                    { status: httpStatusCode(error) }
+                );
+            }
             if (rawBody.length === 0) {
                 body = {};
             } else {

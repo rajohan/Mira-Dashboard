@@ -336,22 +336,26 @@ export const openclawConfigRoutes = {
                 if (!isValidSkillName(name)) {
                     return json({ error: "Invalid skill name" }, { status: 400 });
                 }
-                const body = await readJson<{ enabled?: unknown } | null>(request);
+                const body = await readJson<{
+                    __hash?: unknown;
+                    enabled?: unknown;
+                } | null>(request);
                 const enabled =
                     body && typeof body === "object" ? body.enabled : undefined;
                 if (typeof enabled !== "boolean") {
                     return json({ error: "Invalid enabled value" }, { status: 400 });
                 }
-
-                const snapshot = await getConfigSnapshot();
-                if (!snapshot.hash) {
-                    throw new Error("OpenClaw config hash unavailable");
+                const baseHash =
+                    body && typeof body === "object" ? body.__hash : undefined;
+                if (typeof baseHash !== "string" || !baseHash.trim()) {
+                    return json({ error: "Config hash is required" }, { status: 400 });
                 }
+
                 await patchConfigRaw(
                     JSON.stringify({
                         skills: { entries: { [name]: { enabled } } },
                     }),
-                    snapshot.hash
+                    baseHash.trim()
                 );
                 return json({ isOk: true });
             } catch (error) {

@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 
 import { json } from "../http.ts";
-import { guardedPath, openReadNoFollowGuarded } from "../lib/guardedOps.ts";
+import {
+    guardedPath,
+    openReadNoFollowGuarded,
+    readFromOpenFile,
+} from "../lib/guardedOps.ts";
 import { stringFallback } from "../lib/values.ts";
 
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
@@ -154,7 +158,7 @@ export const mediaRoutes = {
                 if (stat.size > MAX_MEDIA_SIZE) {
                     return json({ error: "Media file too large" }, { status: 413 });
                 }
-                buffer = await file.readFile();
+                buffer = readFromOpenFile(file.fd, stat.size);
             } finally {
                 await file.close();
             }

@@ -102,6 +102,29 @@ function configTarget(relativePath: string, root: string): string | null {
     return safePathWithinRoot(relativePath, root);
 }
 
+async function realPathFromOpenFile(file: fs.promises.FileHandle, fallback: string) {
+    return process.platform === "linux"
+        ? fs.realpathSync(`/proc/self/fd/${file.fd}`)
+        : fallback;
+}
+
+async function validateOpenFileWithinRoot(
+    file: fs.promises.FileHandle,
+    root: string,
+    fallbackPath: string
+): Promise<fs.Stats | null> {
+    const stat = await file.stat();
+    if (!stat.isFile() || stat.nlink > 1) {
+        return null;
+    }
+    const realPath = await realPathFromOpenFile(file, fallbackPath);
+    const relativeRealPath = path.relative(root, realPath);
+    if (relativeRealPath.startsWith("..") || path.isAbsolute(relativeRealPath)) {
+        return null;
+    }
+    return stat;
+}
+
 export const configFileRoutes = {
     "/api/config-files": {
         GET: () => {
@@ -144,24 +167,6 @@ export const configFileRoutes = {
             } catch {
                 return json({ error: "File not found" }, { status: 404 });
             }
-            let stat: fs.Stats;
-            try {
-                stat = fs.statSync(fullPath);
-            } catch {
-                return json({ error: "File not found" }, { status: 404 });
-            }
-            if (stat.isDirectory()) {
-                return json(
-                    { error: "Path is a directory, not a file" },
-                    { status: 400 }
-                );
-            }
-            if (stat.nlink > 1) {
-                return json(
-                    { error: "Hard-linked files are not allowed" },
-                    { status: 403 }
-                );
-            }
             const realFullPath = fs.realpathSync(fullPath);
             const relativeRealPath = path.relative(root, realFullPath);
             if (relativeRealPath.startsWith("..") || path.isAbsolute(relativeRealPath)) {
@@ -169,7 +174,17 @@ export const configFileRoutes = {
             }
             const file = await openReadNoFollowGuarded(guardedPath(realFullPath));
             let buffer: Buffer;
+            let stat: fs.Stats;
             try {
+                const openedStat = await validateOpenFileWithinRoot(
+                    file,
+                    root,
+                    realFullPath
+                );
+                if (!openedStat) {
+                    return json({ error: "Access denied" }, { status: 403 });
+                }
+                stat = openedStat;
                 buffer = readFromOpenFile(file.fd, Math.min(stat.size, MAX_FILE_SIZE));
             } finally {
                 await file.close();
@@ -265,9 +280,24 @@ export const configFileRoutes = {
                         const file = await openReadNoFollowGuarded(guardedPath(target));
                         let backupContent: string;
                         try {
-                            backupContent = readFromOpenFile(file.fd, stat.size).toString(
-                                "utf8"
+                            const openedStat = await validateOpenFileWithinRoot(
+                                file,
+                                root,
+                                target
                             );
+                            if (!openedStat) {
+                                return json({ error: "Access denied" }, { status: 403 });
+                            }
+                            if (openedStat.size > MAX_CONFIG_WRITE_SIZE) {
+                                return json(
+                                    { error: "Existing file is too large to back up" },
+                                    { status: 413 }
+                                );
+                            }
+                            backupContent = readFromOpenFile(
+                                file.fd,
+                                openedStat.size
+                            ).toString("utf8");
                         } finally {
                             await file.close();
                         }
