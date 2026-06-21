@@ -34,13 +34,16 @@ const allowedLoopbackHostnames = new Set([
     "::ffff:127.0.0.1",
     "[::ffff:127.0.0.1]",
 ]);
+const SERVER_IDLE_TIMEOUT_SECONDS = 240;
 
 function isAllowedWebSocketOrigin(request: Request): boolean {
     const origin = request.headers.get("origin");
     if (!origin) return true;
     try {
         const parsedOrigin = new URL(origin);
+        const requestUrl = new URL(request.url);
         return (
+            parsedOrigin.origin === requestUrl.origin ||
             configuredDashboardOrigins.has(parsedOrigin.origin) ||
             allowedLoopbackHostnames.has(parsedOrigin.hostname)
         );
@@ -81,6 +84,7 @@ function dashboardSocketFromBun(
 
 export function createServer(port = resolveListenPort()): Server<DashboardSocketData> {
     return Bun.serve<DashboardSocketData>({
+        idleTimeout: SERVER_IDLE_TIMEOUT_SECONDS,
         port,
         routes,
         fetch(request, server) {

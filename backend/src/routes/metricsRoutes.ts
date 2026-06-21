@@ -217,8 +217,11 @@ async function getSystemMetrics(): Promise<SystemMetricsResponse> {
 function getTokenMetrics(): TokenMetrics {
     const sessions = gateway.getSessions();
     let totalTokens = 0;
-    const byModel: Record<string, number> = {};
-    const sessionsByModel: Record<string, number> = {};
+    const byModel: Record<string, number> = Object.create(null) as Record<string, number>;
+    const sessionsByModel: Record<string, number> = Object.create(null) as Record<
+        string,
+        number
+    >;
     const byAgent: Array<{ label: string; model: string; tokens: number; type: string }> =
         [];
 

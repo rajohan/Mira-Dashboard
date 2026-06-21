@@ -7,10 +7,16 @@ export const databaseRoutes = {
             try {
                 return json(await getDatabaseOverview());
             } catch (error) {
-                const safeError = {
-                    code: (error as NodeJS.ErrnoException).code,
-                    name: (error as Error).name,
-                };
+                const safeError =
+                    error instanceof Error
+                        ? {
+                              code:
+                                  "code" in error && typeof error.code === "string"
+                                      ? error.code
+                                      : "UNKNOWN",
+                              name: error.name || "Error",
+                          }
+                        : { code: "UNKNOWN", name: "NonErrorThrown" };
                 console.error(
                     "[databaseRoutes] Failed to load database overview",
                     safeError

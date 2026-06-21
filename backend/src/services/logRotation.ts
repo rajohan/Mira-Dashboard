@@ -765,6 +765,10 @@ async function gzipFile(filePath: string, approvedRoots: string[]): Promise<stri
         });
         await gzipFileHandleBytes(source.handle, destination, source.stat.size);
         await assertFileIdentity(filePath, source.stat, approvedRoots);
+        const currentSourceStat = await source.handle.stat();
+        if (currentSourceStat.size !== source.stat.size) {
+            throw new Error("Source file changed during compression");
+        }
         await fs.utimes(gzPath, source.stat.atime, source.stat.mtime);
         await destination.close();
         destination = null;

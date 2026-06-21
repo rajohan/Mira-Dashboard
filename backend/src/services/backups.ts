@@ -356,7 +356,7 @@ function startBackupJob(
             job.stderr = trimOutput(
                 `${job.stderr}\nFailed to terminate backup process: ${String(error)}`.trim()
             );
-            void finalizeJob(130, "SIGTERM");
+            void markNeedsAttention();
         }
     };
 

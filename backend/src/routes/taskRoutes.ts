@@ -535,11 +535,11 @@ export const taskRoutes = {
                 if (assignee === TASK_ASSIGNEES.mira.id) {
                     void notifyMira("assigned", { id, title: existing.title });
                 }
+                return json(toFrontendTask(taskById(id) as DatabaseTask));
             } catch (error) {
                 console.error("[Tasks] Failed to assign task:", error);
                 return json({ error: "Failed to assign task" }, { status: 500 });
             }
-            return json(toFrontendTask(taskById(id) as DatabaseTask));
         },
     },
 

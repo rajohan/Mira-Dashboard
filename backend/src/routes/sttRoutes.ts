@@ -116,16 +116,11 @@ export const sttRoutes = {
                 if (error instanceof HttpError) {
                     return json({ error: error.message }, { status: error.statusCode });
                 }
-                const message =
-                    error instanceof Error
-                        ? error.message
-                        : typeof error === "string"
-                          ? error
-                          : undefined;
-                return json(
-                    { error: stringFallback(message, "Failed to transcribe audio") },
-                    { status: 500 }
+                console.error(
+                    "[STT] Transcription failed:",
+                    error instanceof Error ? error.message : String(error)
                 );
+                return json({ error: "Failed to transcribe audio" }, { status: 500 });
             } finally {
                 if (hasTranscriptionLock) {
                     sttRouteState.isActiveTranscription = false;

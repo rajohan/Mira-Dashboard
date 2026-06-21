@@ -17,6 +17,7 @@ import {
 import {
     type DockerUpdaterStepResult,
     isNonblockingRegistrationFailure,
+    registerDockerUpdaterScheduledJobs,
     runDockerUpdaterService,
 } from "../services/dockerUpdater.ts";
 import {
@@ -961,6 +962,7 @@ export const dockerRoutes = {
         POST: async () => {
             let scheduledRun;
             try {
+                registerDockerUpdaterScheduledJobs();
                 scheduledRun = createManualScheduledJobRun("docker.updater");
             } catch (error) {
                 return json(
@@ -1033,6 +1035,7 @@ export const dockerRoutes = {
             }
             let scheduledRun;
             try {
+                registerDockerUpdaterScheduledJobs();
                 scheduledRun = createManualScheduledJobRun("docker.updater");
             } catch (error) {
                 return json(

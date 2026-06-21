@@ -472,7 +472,23 @@ export async function writeTextNoFollowAnchoredGuarded(
     const temporaryPath = Buffer.from(
         Path.join(parentPath.toString(), `.${basename}.${Bun.randomUUIDv7()}.tmp`)
     );
-    const fileMode = (options.mode ?? 0o666) & 0o777;
+    let existingMode: number | undefined;
+    if (options.mode === undefined) {
+        try {
+            const existingStat = await Fs.promises.stat(destinationPath);
+            if (existingStat.nlink > 1) {
+                throw Object.assign(new Error("Hard-linked files are not supported"), {
+                    code: "EMLINK",
+                });
+            }
+            existingMode = existingStat.mode;
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                throw error;
+            }
+        }
+    }
+    const fileMode = (options.mode ?? existingMode ?? 0o666) & 0o777;
     let isTemporaryCreated = false;
 
     try {

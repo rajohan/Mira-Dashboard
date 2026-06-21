@@ -71,6 +71,7 @@ const EXECUTABLE_RE = /^(?:[\w./-]+)$/u;
 const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
 const EXEC_ONCE_TIMEOUT_MS = 60_000;
+// Direct argv execution is intentionally disabled; approved ops use shell mode.
 const ALLOWED_DIRECT_EXECUTABLES = new Set<string>();
 const jobs = new Map<string, ExecJob>();
 
@@ -187,7 +188,7 @@ export function execErrorResponse(error: unknown): { error: string; status: numb
 function runExecCommand(
     request: ExecRequest,
     jobId: string,
-    onUpdate?: (job: ExecJob) => void,
+    onUpdate?: (update: Pick<ExecJob, "stderr" | "stdout">) => void,
     timeoutMs?: number
 ): Promise<ExecResponse> {
     const { args, command, cwd, shell } = request;
@@ -243,34 +244,19 @@ function runExecCommand(
 
         let stdout = "";
         let stderr = "";
+        const outputUpdate = () => onUpdate?.({ stderr, stdout });
         const stdoutDone = pipeProcessOutput(
             child.stdout as ReadableStream<Uint8Array> | undefined,
             (data) => {
                 stdout = trimOutput(stdout + String(data));
-                onUpdate?.({
-                    code: null,
-                    endedAt: null,
-                    id: "",
-                    startedAt: 0,
-                    status: "running",
-                    stderr,
-                    stdout,
-                });
+                outputUpdate();
             }
         );
         const stderrDone = pipeProcessOutput(
             child.stderr as ReadableStream<Uint8Array> | undefined,
             (data) => {
                 stderr = trimOutput(stderr + String(data));
-                onUpdate?.({
-                    code: null,
-                    endedAt: null,
-                    id: "",
-                    startedAt: 0,
-                    status: "running",
-                    stderr,
-                    stdout,
-                });
+                outputUpdate();
             }
         );
         void (async () => {
@@ -318,7 +304,10 @@ function cleanupJobs(): void {
     }
 }
 
-function updateExecJobOutput(jobId: string, update: ExecJob): void {
+function updateExecJobOutput(
+    jobId: string,
+    update: Pick<ExecJob, "stderr" | "stdout">
+): void {
     const current = jobs.get(jobId);
     if (!current) return;
     current.stdout = update.stdout;
