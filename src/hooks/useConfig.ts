@@ -153,8 +153,11 @@ async function toggleSkill(
     isEnabled: boolean,
     baseHash?: string
 ): Promise<void> {
+    if (!baseHash?.trim()) {
+        throw new Error("Config hash is required");
+    }
     await apiPost(`/skills/${encodeURIComponent(name)}`, {
-        __hash: baseHash,
+        __hash: baseHash.trim(),
         enabled: isEnabled,
     });
 }

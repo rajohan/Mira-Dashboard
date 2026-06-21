@@ -276,38 +276,42 @@ export const configFileRoutes = {
                         );
                     }
                     existingMode = stat.mode & 0o777;
-                    if (stat.size <= MAX_CONFIG_WRITE_SIZE) {
-                        const file = await openReadNoFollowGuarded(guardedPath(target));
-                        let backupContent: string;
-                        try {
-                            const openedStat = await validateOpenFileWithinRoot(
-                                file,
-                                root,
-                                target
-                            );
-                            if (!openedStat) {
-                                return json({ error: "Access denied" }, { status: 403 });
-                            }
-                            if (openedStat.size > MAX_CONFIG_WRITE_SIZE) {
-                                return json(
-                                    { error: "Existing file is too large to back up" },
-                                    { status: 413 }
-                                );
-                            }
-                            backupContent = readFromOpenFile(
-                                file.fd,
-                                openedStat.size
-                            ).toString("utf8");
-                        } finally {
-                            await file.close();
-                        }
-                        await writeTextNoFollowAnchoredGuarded(
-                            guardedPath(root),
-                            `${relativePath}.bak`,
-                            backupContent,
-                            { createParents: true, mode: stat.mode & 0o777 }
+                    if (stat.size > MAX_CONFIG_WRITE_SIZE) {
+                        return json(
+                            { error: "Existing file is too large to back up" },
+                            { status: 413 }
                         );
                     }
+                    const file = await openReadNoFollowGuarded(guardedPath(target));
+                    let backupContent: string;
+                    try {
+                        const openedStat = await validateOpenFileWithinRoot(
+                            file,
+                            root,
+                            target
+                        );
+                        if (!openedStat) {
+                            return json({ error: "Access denied" }, { status: 403 });
+                        }
+                        if (openedStat.size > MAX_CONFIG_WRITE_SIZE) {
+                            return json(
+                                { error: "Existing file is too large to back up" },
+                                { status: 413 }
+                            );
+                        }
+                        backupContent = readFromOpenFile(
+                            file.fd,
+                            openedStat.size
+                        ).toString("utf8");
+                    } finally {
+                        await file.close();
+                    }
+                    await writeTextNoFollowAnchoredGuarded(
+                        guardedPath(root),
+                        `${relativePath}.bak`,
+                        backupContent,
+                        { createParents: true, mode: stat.mode & 0o777 }
+                    );
                 }
                 await writeTextNoFollowAnchoredGuarded(
                     guardedPath(root),

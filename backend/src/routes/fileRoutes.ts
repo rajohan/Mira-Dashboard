@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { json, readJson } from "../http.ts";
+import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
     guardedPath,
     lstatGuarded,
@@ -217,6 +218,12 @@ export const fileRoutes = {
                     { status: 403 }
                 );
             }
+            if (hasHiddenSegment(path.relative(root, fullPath))) {
+                return json(
+                    { error: "Access denied: hidden paths are not allowed" },
+                    { status: 403 }
+                );
+            }
             let stat: fs.Stats;
             try {
                 stat = statGuarded(guardedPath(fullPath));
@@ -319,9 +326,17 @@ export const fileRoutes = {
                     { status: 403 }
                 );
             }
-            const body = await readJson<{ content?: unknown }>(request, {
-                maxBytes: JSON_WRITE_BODY_LIMIT,
-            });
+            let body: { content?: unknown };
+            try {
+                body = await readJson<{ content?: unknown }>(request, {
+                    maxBytes: JSON_WRITE_BODY_LIMIT,
+                });
+            } catch (error) {
+                return json(
+                    { error: errorMessage(error, "Invalid JSON") },
+                    { status: httpStatusCode(error) }
+                );
+            }
             if (typeof body.content !== "string") {
                 return json({ error: "Content required" }, { status: 400 });
             }

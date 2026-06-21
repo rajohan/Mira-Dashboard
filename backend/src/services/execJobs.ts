@@ -210,13 +210,29 @@ function runExecCommand(
         const child = childFactory();
         const job = jobs.get(jobId);
         if (job) job.process = child;
+        const recordKillError = (signal: NodeJS.Signals, error: unknown) => {
+            const message = errorMessage(error, `Failed to send ${signal}`);
+            console.error("[Exec] Process group kill failed:", message);
+            const current = jobs.get(jobId);
+            if (current) {
+                current.stderr = trimOutput(`${current.stderr}\n${message}`.trim());
+            }
+        };
         let timeout: Timer | undefined;
         let forceKillTimeout: Timer | undefined;
         if (timeoutMs !== undefined) {
             timeout = setTimeout(() => {
-                killProcessGroup(child, "SIGTERM");
+                try {
+                    killProcessGroup(child, "SIGTERM");
+                } catch (error) {
+                    recordKillError("SIGTERM", error);
+                }
                 forceKillTimeout = setTimeout(() => {
-                    killProcessGroup(child, "SIGKILL");
+                    try {
+                        killProcessGroup(child, "SIGKILL");
+                    } catch (error) {
+                        recordKillError("SIGKILL", error);
+                    }
                 }, 3000);
                 forceKillTimeout.unref();
             }, timeoutMs);

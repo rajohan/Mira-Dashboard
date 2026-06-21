@@ -263,15 +263,32 @@ function startBackupJob(
             hostAbortKillTimer = null;
         }
         const interrupted = isAbortRequested || signalName !== null;
-        let isNeedsAttention =
-            interrupted && abortConfig
-                ? !(await waitForContainerProcessExitWithRetries(abortConfig, job))
-                : false;
+        let isNeedsAttention = false;
+        if (interrupted && abortConfig) {
+            try {
+                isNeedsAttention = !(await waitForContainerProcessExitWithRetries(
+                    abortConfig,
+                    job
+                ));
+            } catch (error) {
+                isNeedsAttention = true;
+                job.stderr = trimOutput(
+                    `${job.stderr}\n${errorMessage(error, "Failed to verify container backup process exit")}`.trim()
+                );
+            }
+        }
         if (interrupted && hostAbortPattern) {
-            isNeedsAttention = !(await waitForHostProcessExitWithRetries(
-                hostAbortPattern,
-                job
-            ));
+            try {
+                isNeedsAttention = !(await waitForHostProcessExitWithRetries(
+                    hostAbortPattern,
+                    job
+                ));
+            } catch (error) {
+                isNeedsAttention = true;
+                job.stderr = trimOutput(
+                    `${job.stderr}\n${errorMessage(error, "Failed to verify host backup process exit")}`.trim()
+                );
+            }
         }
         if (containerAbortKillTimer) {
             clearTimeout(containerAbortKillTimer);
