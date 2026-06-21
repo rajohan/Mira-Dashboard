@@ -6,7 +6,7 @@ import { json, readJson } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
     guardedPath,
-    openReadNoFollowGuarded,
+    openReadNoFollowNonblockingGuarded,
     readFromOpenFile,
     writeTextNoFollowAnchoredGuarded,
 } from "../lib/guardedOps.ts";
@@ -175,7 +175,9 @@ export const configFileRoutes = {
             if (!fs.statSync(realFullPath).isFile()) {
                 return json({ error: "Access denied" }, { status: 403 });
             }
-            const file = await openReadNoFollowGuarded(guardedPath(realFullPath));
+            const file = await openReadNoFollowNonblockingGuarded(
+                guardedPath(realFullPath)
+            );
             let buffer: Buffer;
             let stat: fs.Stats;
             try {
@@ -291,7 +293,9 @@ export const configFileRoutes = {
                     if (!fs.statSync(target).isFile()) {
                         return json({ error: "Access denied" }, { status: 403 });
                     }
-                    const file = await openReadNoFollowGuarded(guardedPath(target));
+                    const file = await openReadNoFollowNonblockingGuarded(
+                        guardedPath(target)
+                    );
                     let backupContent: string;
                     try {
                         const openedStat = await validateOpenFileWithinRoot(

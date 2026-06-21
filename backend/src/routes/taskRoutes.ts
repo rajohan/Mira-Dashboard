@@ -585,15 +585,19 @@ export const taskRoutes = {
         GET: (request: ParametersRequest<"id">) => {
             const id = safeId(request.params.id);
             if (id === null) return json({ error: "Invalid id" }, { status: 400 });
-            const rows = database
-                .prepare(
-                    `SELECT id, task_id, author, message_md, created_at
-                     FROM task_updates
-                     WHERE task_id = ?
-                     ORDER BY datetime(created_at) DESC, id DESC`
-                )
-                .all(id) as DatabaseTaskUpdate[];
-            return json(rows.map(toFrontendTaskUpdate));
+            try {
+                const rows = database
+                    .prepare(
+                        `SELECT id, task_id, author, message_md, created_at
+                         FROM task_updates
+                         WHERE task_id = ?
+                         ORDER BY datetime(created_at) DESC, id DESC`
+                    )
+                    .all(id) as DatabaseTaskUpdate[];
+                return json(rows.map(toFrontendTaskUpdate));
+            } catch (error) {
+                return taskRouteError(error);
+            }
         },
 
         POST: async (request: ParametersRequest<"id">) => {

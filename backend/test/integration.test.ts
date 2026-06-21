@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 
 const testState: {
     baseUrl: string;
+    originalLoopbackAuth?: string;
     server?: Server<unknown>;
     temporaryRoot: string;
 } = {
@@ -86,6 +87,7 @@ describe("Mira Dashboard backend integration", () => {
             "export const isOk = true;\n"
         );
 
+        testState.originalLoopbackAuth = process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH;
         process.env.MIRA_DASHBOARD_DB_PATH = path.join(
             testState.temporaryRoot,
             "dashboard.database"
@@ -106,6 +108,12 @@ describe("Mira Dashboard backend integration", () => {
     afterAll(async () => {
         const server = testState.server;
         await server?.stop(true);
+        if (testState.originalLoopbackAuth === undefined) {
+            delete process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH;
+        } else {
+            process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH =
+                testState.originalLoopbackAuth;
+        }
         await fs.rm(testState.temporaryRoot, { recursive: true, force: true });
     });
 

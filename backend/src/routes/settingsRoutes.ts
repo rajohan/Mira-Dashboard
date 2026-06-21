@@ -4,7 +4,7 @@ import path from "node:path";
 
 import gateway from "../gateway.ts";
 import { json, readJson } from "../http.ts";
-import { httpStatusCode } from "../lib/errors.ts";
+import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
     guardedPath,
     mkdirGuarded,
@@ -180,12 +180,19 @@ export const settingsRoutes = {
             }
 
             try {
-                updated = { ...current, ...parseSettingsPatch(await readJson(request)) };
+                const body = await readJson(request);
+                try {
+                    updated = { ...current, ...parseSettingsPatch(body) };
+                } catch (error) {
+                    return json(
+                        { error: errorMessage(error, "Invalid settings payload") },
+                        { status: 400 }
+                    );
+                }
             } catch (error) {
-                const status = httpStatusCode(error);
                 return json(
-                    { error: (error as Error).message },
-                    { status: status === 500 ? 400 : status }
+                    { error: errorMessage(error, "Invalid JSON") },
+                    { status: httpStatusCode(error) }
                 );
             }
 

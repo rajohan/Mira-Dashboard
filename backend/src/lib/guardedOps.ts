@@ -382,7 +382,7 @@ export async function writeTextNoFollowGuarded(
     try {
         file = await Fs.promises.open(
             guardedPathBuffer(path),
-            Fs.constants.O_RDONLY | Fs.constants.O_NOFOLLOW
+            Fs.constants.O_RDONLY | Fs.constants.O_NOFOLLOW | Fs.constants.O_NONBLOCK
         );
         const destinationStat = await file.stat();
         if (!destinationStat.isFile()) {
@@ -473,11 +473,24 @@ export async function writeTextNoFollowAnchoredGuarded(
         Path.join(parentPath.toString(), `.${basename}.${Bun.randomUUIDv7()}.tmp`)
     );
     let existingMode: number | undefined;
+    let shouldApplyMode = options.mode !== undefined;
 
     try {
         if (options.mode === undefined) {
+            let file: Fs.promises.FileHandle | undefined;
             try {
-                const existingStat = await Fs.promises.stat(destinationPath);
+                file = await Fs.promises.open(
+                    destinationPath,
+                    Fs.constants.O_RDONLY |
+                        Fs.constants.O_NOFOLLOW |
+                        Fs.constants.O_NONBLOCK
+                );
+                const existingStat = await file.stat();
+                if (!existingStat.isFile()) {
+                    throw Object.assign(new Error("Destination must be a regular file"), {
+                        code: "EINVAL",
+                    });
+                }
                 if (existingStat.nlink > 1) {
                     throw Object.assign(
                         new Error("Hard-linked files are not supported"),
@@ -487,10 +500,13 @@ export async function writeTextNoFollowAnchoredGuarded(
                     );
                 }
                 existingMode = existingStat.mode;
+                shouldApplyMode = true;
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                     throw error;
                 }
+            } finally {
+                await file?.close();
             }
         }
     } catch (error) {
@@ -511,7 +527,7 @@ export async function writeTextNoFollowAnchoredGuarded(
         );
         isTemporaryCreated = true;
         try {
-            if (options.mode !== undefined) {
+            if (shouldApplyMode) {
                 await file.chmod(fileMode);
             }
             await file.writeFile(content, "utf8");

@@ -8,7 +8,7 @@ import {
     guardedPath,
     lstatGuarded,
     mkdirGuarded,
-    openReadNoFollowGuarded,
+    openReadNoFollowNonblockingGuarded,
     readdirGuarded,
     readFromOpenFile,
     statGuarded,
@@ -256,7 +256,9 @@ export const fileRoutes = {
                         { status: 413 }
                     );
                 }
-                const file = await openReadNoFollowGuarded(guardedPath(fullPath));
+                const file = await openReadNoFollowNonblockingGuarded(
+                    guardedPath(fullPath)
+                );
                 let buffer: Buffer;
                 let openedStat: fs.Stats;
                 try {
@@ -287,7 +289,7 @@ export const fileRoutes = {
                     size: openedStat.size,
                 });
             }
-            const file = await openReadNoFollowGuarded(guardedPath(fullPath));
+            const file = await openReadNoFollowNonblockingGuarded(guardedPath(fullPath));
             let buffer: Buffer;
             let openedStat: fs.Stats;
             try {
@@ -400,7 +402,9 @@ export const fileRoutes = {
                     );
                 }
                 existingMode = existingStat.mode & 0o777;
-                const file = await openReadNoFollowGuarded(guardedPath(safeFullPath));
+                const file = await openReadNoFollowNonblockingGuarded(
+                    guardedPath(safeFullPath)
+                );
                 try {
                     const openedStat = await file.stat();
                     if (!openedStat.isFile() || openedStat.nlink > 1) {

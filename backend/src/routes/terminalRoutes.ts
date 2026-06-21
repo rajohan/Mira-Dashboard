@@ -249,6 +249,8 @@ export const terminalRoutes = {
 
             if (
                 resolvedCwd.includes("\0") ||
+                (typeof body.cwd === "string" &&
+                    (!body.cwd.trim() || !body.cwd.startsWith("/"))) ||
                 !targetPath ||
                 typeof targetPath !== "string" ||
                 targetPath.includes("\0")
