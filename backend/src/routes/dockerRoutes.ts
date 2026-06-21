@@ -3,6 +3,7 @@ import { json, readJson } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
     type BunProcess,
+    killProcessGroup,
     pipeProcessOutput,
     runProcess,
     spawnProcess,
@@ -878,7 +879,7 @@ export const dockerRoutes = {
                     );
                 });
             }
-            job.process.kill("SIGTERM");
+            killProcessGroup(job.process, "SIGTERM");
             return json({ isSuccess: true });
         },
     },

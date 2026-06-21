@@ -14,7 +14,7 @@ import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/saf
 
 const MAX_FILE_SIZE = 1024 * 1024;
 const MAX_CONFIG_WRITE_SIZE = 2 * 1024 * 1024;
-const CONFIG_WRITE_BODY_LIMIT = MAX_CONFIG_WRITE_SIZE + 4096;
+const CONFIG_WRITE_BODY_LIMIT = MAX_CONFIG_WRITE_SIZE * 2;
 const ALLOWED_CONFIG_FILES = new Set(["openclaw.json", "hooks/transforms/agentmail.ts"]);
 
 function openclawRoot(): string | null {

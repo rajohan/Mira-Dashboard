@@ -43,7 +43,6 @@ function isAllowedWebSocketOrigin(request: Request): boolean {
         const parsedOrigin = new URL(origin);
         const requestUrl = new URL(request.url);
         return (
-            parsedOrigin.origin === requestUrl.origin ||
             configuredDashboardOrigins.has(parsedOrigin.origin) ||
             (allowedLoopbackHostnames.has(parsedOrigin.hostname) &&
                 allowedLoopbackHostnames.has(requestUrl.hostname))

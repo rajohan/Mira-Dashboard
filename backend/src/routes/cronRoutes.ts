@@ -1,6 +1,6 @@
 import gateway from "../gateway.ts";
 import { json, readJson } from "../http.ts";
-import { httpStatusCode } from "../lib/errors.ts";
+import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 
 type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
 
@@ -29,7 +29,10 @@ function normalizeJobs(payload: unknown): CronJob[] {
 }
 
 function cronError(error: unknown, fallback: string): Response {
-    return json({ error: fallback }, { status: httpStatusCode(error) });
+    return json(
+        { error: errorMessage(error, fallback) },
+        { status: httpStatusCode(error) }
+    );
 }
 
 export const cronRoutes = {

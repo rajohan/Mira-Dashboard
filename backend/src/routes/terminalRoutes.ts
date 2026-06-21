@@ -186,7 +186,7 @@ async function getCompletions(
         if (matches.length > 0) {
             const first = matches[0].completion;
             let index = first.length;
-            while (index > searchPrefix.length) {
+            while (index >= searchPrefix.length) {
                 const candidate = first.slice(0, index);
                 if (matches.every((match) => match.completion.startsWith(candidate))) {
                     commonPrefix = candidate;

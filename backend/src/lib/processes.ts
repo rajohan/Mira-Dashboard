@@ -26,17 +26,19 @@ async function readProcessText(
     const reader = stream.getReader();
     const decoder = new TextDecoder();
     let text = "";
+    let totalBytes = 0;
     try {
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            text += decoder.decode(value, { stream: true });
-            if (text.length > maxBuffer) {
+            totalBytes += value.length;
+            if (totalBytes > maxBuffer) {
                 throw new Error(`Process output exceeded maxBuffer (${maxBuffer})`);
             }
+            text += decoder.decode(value, { stream: true });
         }
         text += decoder.decode();
-        if (text.length > maxBuffer) {
+        if (totalBytes > maxBuffer) {
             throw new Error(`Process output exceeded maxBuffer (${maxBuffer})`);
         }
         return text;

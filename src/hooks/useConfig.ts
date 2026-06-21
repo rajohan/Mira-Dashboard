@@ -144,7 +144,11 @@ async function fetchSkills(): Promise<Skill[]> {
 
 /** Performs update config. */
 async function updateConfig(config: OpenClawConfig, baseHash?: string): Promise<void> {
-    await apiPut("/config", { ...config, __hash: baseHash ?? config.__hash });
+    const configHash = baseHash ?? config.__hash;
+    if (!configHash?.trim()) {
+        throw new Error("Config hash is required");
+    }
+    await apiPut("/config", { ...config, __hash: configHash.trim() });
 }
 
 /** Performs toggle skill. */
