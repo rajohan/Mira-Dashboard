@@ -27,18 +27,18 @@ const productionDevtoolsPlugin: Bun.BunPlugin = {
 };
 
 function getAppCommit(): string {
-    const result = Bun.spawnSync({
-        cmd: ["git", "rev-parse", "--short", "HEAD"],
-        stderr: "ignore",
-        stdin: "ignore",
-        stdout: "pipe",
-    });
-
-    if (result.exitCode !== 0) {
-        return "unknown";
-    }
-
     try {
+        const result = Bun.spawnSync({
+            cmd: ["git", "rev-parse", "--short", "HEAD"],
+            stderr: "ignore",
+            stdin: "ignore",
+            stdout: "pipe",
+        });
+
+        if (result.exitCode !== 0) {
+            return "unknown";
+        }
+
         return new TextDecoder().decode(result.stdout).trim() || "unknown";
     } catch {
         return "unknown";

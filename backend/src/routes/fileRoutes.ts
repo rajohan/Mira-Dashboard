@@ -339,6 +339,13 @@ export const fileRoutes = {
                     { status: 403 }
                 );
             }
+            const safeRelativePath = path.relative(root, safeFullPath);
+            if (hasHiddenSegment(safeRelativePath)) {
+                return json(
+                    { error: "Access denied: hidden paths are not allowed" },
+                    { status: 403 }
+                );
+            }
             const parent = path.dirname(safeFullPath);
             if (!fs.existsSync(parent)) {
                 return json({ error: "Path not found" }, { status: 404 });

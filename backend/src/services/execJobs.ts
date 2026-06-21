@@ -200,6 +200,10 @@ function runExecCommand(
         const commandParts = { args, executable: command };
         childFactory = () =>
             spawnProcess(commandParts.executable, commandParts.args, cwdOption);
+    } else {
+        childFactory = () => {
+            throw new ExecValidationError("invalid exec request state");
+        };
     }
 
     return new Promise((resolve, reject) => {

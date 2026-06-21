@@ -41,6 +41,22 @@ function canRemoveTemporaryRoot(temporaryRoot: string): boolean {
     );
 }
 
+async function drainReader(
+    reader: { read: () => Promise<{ done: boolean; value?: Uint8Array }> },
+    decoder: TextDecoder
+): Promise<void> {
+    try {
+        while (true) {
+            const next = await reader.read();
+            if (next.done) break;
+            decoder.decode(next.value, { stream: true });
+        }
+        decoder.decode();
+    } catch {
+        // Test cleanup should not fail because the child stdout stream closed.
+    }
+}
+
 describe("Bun-native dashboard backend", () => {
     beforeAll(async () => {
         state.temporaryRoot = await fs.mkdtemp(
@@ -124,6 +140,7 @@ describe("Bun-native dashboard backend", () => {
         if (!firstLine) {
             throw new Error("Native server did not print port");
         }
+        void drainReader(reader, decoder);
         const { port } = JSON.parse(firstLine) as { port: number };
         state.baseUrl = `http://127.0.0.1:${port}`;
     });

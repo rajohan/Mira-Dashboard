@@ -6,6 +6,7 @@ import {
 import { database } from "../database.ts";
 import gateway from "../gateway.ts";
 import { HttpError, json, readJson } from "../http.ts";
+import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import { objectFallback } from "../lib/values.ts";
 
 type Status = "todo" | "in-progress" | "blocked" | "done";
@@ -300,6 +301,17 @@ function safeId(value: string | undefined): number | null {
     return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
+async function readTaskJson<T>(request: Request): Promise<T | Response> {
+    try {
+        return await readJson<T>(request);
+    } catch (error) {
+        return json(
+            { error: errorMessage(error, "Invalid JSON") },
+            { status: httpStatusCode(error) }
+        );
+    }
+}
+
 export const taskRoutes = {
     "/api/tasks": {
         GET: async () => {
@@ -315,13 +327,14 @@ export const taskRoutes = {
         },
 
         POST: async (request: Request) => {
-            const body = await readJson<{
+            const body = await readTaskJson<{
                 assignee?: Assignee;
                 automation?: TaskAutomationInput;
                 body?: string;
                 labels?: string[];
                 title?: string;
             }>(request);
+            if (body instanceof Response) return body;
             const title = optionalString(body.title, "Title")?.trim();
             if (!title) return json({ error: "Title is required" }, { status: 400 });
             if (!isValidAssignee(body.assignee)) {
@@ -388,12 +401,13 @@ export const taskRoutes = {
             if (id === null) return json({ error: "Invalid id" }, { status: 400 });
             const existing = taskById(id);
             if (!existing) return json({ error: "Task not found" }, { status: 404 });
-            const body = await readJson<{
+            const body = await readTaskJson<{
                 automation?: TaskAutomationInput | null;
                 body?: string;
                 labels?: string[];
                 title?: string;
             }>(request);
+            if (body instanceof Response) return body;
             const labels = optionalLabels(body.labels) ?? labelsFromTask(existing);
             const status = normalizeStatus(
                 labels.includes("done")
@@ -463,7 +477,8 @@ export const taskRoutes = {
     "/api/tasks/:id/assign": {
         POST: async (request: ParametersRequest<"id">) => {
             const id = safeId(request.params.id);
-            const body = await readJson<{ assignee?: string | null }>(request);
+            const body = await readTaskJson<{ assignee?: string | null }>(request);
+            if (body instanceof Response) return body;
             if (id === null) return json({ error: "Invalid id" }, { status: 400 });
             if (!isValidAssignee(body.assignee)) {
                 return json({ error: INVALID_ASSIGNEE_MESSAGE }, { status: 400 });
@@ -487,7 +502,8 @@ export const taskRoutes = {
     "/api/tasks/:id/move": {
         POST: async (request: ParametersRequest<"id">) => {
             const id = safeId(request.params.id);
-            const body = await readJson<{ columnLabel?: string }>(request);
+            const body = await readTaskJson<{ columnLabel?: string }>(request);
+            if (body instanceof Response) return body;
             const columnLabel = optionalString(body.columnLabel, "Column label");
             if (id === null || !columnLabel) {
                 return json({ error: "Invalid request" }, { status: 400 });
@@ -530,9 +546,10 @@ export const taskRoutes = {
 
         POST: async (request: ParametersRequest<"id">) => {
             const id = safeId(request.params.id);
-            const body = await readJson<{ author?: Assignee; messageMd?: string }>(
+            const body = await readTaskJson<{ author?: Assignee; messageMd?: string }>(
                 request
             );
+            if (body instanceof Response) return body;
             const messageMd = optionalString(body.messageMd, "Message")?.trim();
             if (id === null || !isValidAssignee(body.author) || !messageMd) {
                 return json({ error: "Invalid update payload" }, { status: 400 });
@@ -573,9 +590,10 @@ export const taskRoutes = {
         PATCH: async (request: ParametersRequest<"id" | "updateId">) => {
             const id = safeId(request.params.id);
             const updateId = safeId(request.params.updateId);
-            const body = await readJson<{ author?: Assignee; messageMd?: string }>(
+            const body = await readTaskJson<{ author?: Assignee; messageMd?: string }>(
                 request
             );
+            if (body instanceof Response) return body;
             const messageMd = optionalString(body.messageMd, "Message")?.trim();
             if (
                 id === null ||

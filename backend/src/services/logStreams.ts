@@ -139,6 +139,9 @@ async function pollLogFile(): Promise<void> {
                 logsRouteState.pendingFragment +
                 buffer.subarray(0, bytesRead).toString("utf8");
             const parts = text.split("\n");
+            if (deltaBytes > LOG_TAIL_READ_CHUNK_BYTES) {
+                parts.shift();
+            }
             logsRouteState.pendingFragment = parts.pop() ?? "";
             const lines = parts.filter((line) => line.trim());
             if (logsRouteState.pendingFragment.length > LOG_TAIL_READ_CHUNK_BYTES) {
