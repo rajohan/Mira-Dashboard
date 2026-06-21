@@ -1,4 +1,4 @@
-import { HttpError, json, readRequestBytes } from "../http.ts";
+import { HttpError, json, readRequestBytes, readResponseTextFallback } from "../http.ts";
 import { stringFallback } from "../lib/values.ts";
 
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
@@ -41,14 +41,6 @@ function transcriptTextFromElevenLabs(result?: unknown): string {
         .filter(Boolean)
         .join(" ")
         .trim();
-}
-
-async function readResponseTextFallback(response: Response): Promise<string> {
-    try {
-        return await response.text();
-    } catch {
-        return "";
-    }
 }
 
 async function transcribeWithElevenLabs(

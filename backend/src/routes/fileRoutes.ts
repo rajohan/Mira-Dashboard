@@ -129,6 +129,7 @@ function listFiles(directoryPath: string) {
     if (!fullPath) return null;
     const resolved = safePathWithinRoot(fs.realpathSync(fullPath), root);
     if (!resolved) return null;
+    if (hasHiddenSegment(path.relative(root, resolved))) return null;
     const items: FileItem[] = [];
     const entries = readdirGuarded(guardedPath(resolved), { withFileTypes: true });
     for (const entry of entries) {
@@ -234,7 +235,7 @@ export const fileRoutes = {
                 }
                 throw error;
             }
-            if (stat.isDirectory()) {
+            if (!stat.isFile()) {
                 return json(
                     { error: "Path is a directory, not a file" },
                     { status: 400 }
@@ -369,29 +370,39 @@ export const fileRoutes = {
             let backupContent: string | undefined;
             try {
                 const existingStat = lstatGuarded(guardedPath(safeFullPath));
-                if (existingStat.isFile()) {
-                    if (existingStat.size > MAX_FILE_SIZE) {
-                        return json(
-                            { error: "Existing file is too large to back up" },
-                            { status: 413 }
-                        );
-                    }
-                    existingMode = existingStat.mode & 0o777;
-                    const file = await openReadNoFollowGuarded(guardedPath(safeFullPath));
-                    try {
-                        backupContent = readFromOpenFile(
-                            file.fd,
-                            existingStat.size
-                        ).toString("utf8");
-                    } finally {
-                        await file.close();
-                    }
-                }
                 if (existingStat.isDirectory()) {
                     return json(
                         { error: "Path is a directory, not a file" },
                         { status: 400 }
                     );
+                }
+                if (!existingStat.isFile()) {
+                    return json({ error: "Path is not a regular file" }, { status: 400 });
+                }
+                if (existingStat.nlink > 1) {
+                    return json(
+                        { error: "Access denied: hard links are not supported" },
+                        { status: 403 }
+                    );
+                }
+                existingMode = existingStat.mode & 0o777;
+                const file = await openReadNoFollowGuarded(guardedPath(safeFullPath));
+                try {
+                    const openedStat = await file.stat();
+                    if (!openedStat.isFile() || openedStat.nlink > 1) {
+                        return json({ error: "Access denied" }, { status: 403 });
+                    }
+                    if (openedStat.size > MAX_FILE_SIZE) {
+                        return json(
+                            { error: "Existing file is too large to back up" },
+                            { status: 413 }
+                        );
+                    }
+                    backupContent = readFromOpenFile(file.fd, openedStat.size).toString(
+                        "utf8"
+                    );
+                } finally {
+                    await file.close();
                 }
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code !== "ENOENT") {

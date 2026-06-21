@@ -1,4 +1,4 @@
-import { json, readJson } from "../http.ts";
+import { json, readJson, readResponseTextFallback } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 
 const ELEVENLABS_TTS_TIMEOUT_MS = 60_000;
@@ -11,14 +11,6 @@ const MAX_TTS_TEXT_LENGTH = 4_000;
 
 interface TtsRequestBody {
     text?: unknown;
-}
-
-async function readResponseTextFallback(response: Response): Promise<string> {
-    try {
-        return await response.text();
-    } catch {
-        return "";
-    }
 }
 
 function normalizeTtsText(value: unknown): string {

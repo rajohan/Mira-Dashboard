@@ -159,6 +159,9 @@ export const mediaRoutes = {
                 if (!stat.isFile()) {
                     return json({ error: "Media path is not a file" }, { status: 400 });
                 }
+                if (stat.nlink > 1) {
+                    return json({ error: "Access denied" }, { status: 403 });
+                }
                 if (stat.size > MAX_MEDIA_SIZE) {
                     return json({ error: "Media file too large" }, { status: 413 });
                 }

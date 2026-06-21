@@ -104,6 +104,14 @@ export async function readJson<T>(
     }
 }
 
+export async function readResponseTextFallback(response: Response): Promise<string> {
+    try {
+        return await response.text();
+    } catch {
+        return "";
+    }
+}
+
 export function requestIp(request: Request, server: Server<unknown>): string | undefined {
     return server.requestIP(request)?.address;
 }

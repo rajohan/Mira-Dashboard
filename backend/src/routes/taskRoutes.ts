@@ -315,15 +315,20 @@ async function readTaskJson<T>(request: Request): Promise<T | Response> {
 export const taskRoutes = {
     "/api/tasks": {
         GET: async () => {
-            const rows = database
-                .prepare(
-                    `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
-                     FROM tasks
-                     ORDER BY datetime(updated_at) DESC, id DESC`
-                )
-                .all() as DatabaseTask[];
-            const cronJobsById = await fetchCronJobsById();
-            return json(rows.map((task) => toFrontendTask(task, cronJobsById)));
+            try {
+                const rows = database
+                    .prepare(
+                        `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
+                         FROM tasks
+                         ORDER BY datetime(updated_at) DESC, id DESC`
+                    )
+                    .all() as DatabaseTask[];
+                const cronJobsById = await fetchCronJobsById();
+                return json(rows.map((task) => toFrontendTask(task, cronJobsById)));
+            } catch (error) {
+                console.error("[Tasks] Failed to list tasks:", error);
+                return json({ error: "Failed to list tasks" }, { status: 500 });
+            }
         },
 
         POST: async (request: Request) => {
