@@ -1,6 +1,6 @@
 import { database } from "../database.ts";
 import { json, readJson } from "../http.ts";
-import { errorMessage } from "../lib/errors.ts";
+import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
     type BunProcess,
     pipeProcessOutput,
@@ -407,7 +407,7 @@ async function getContainers() {
 
 async function getContainerDetails(containerId: string) {
     const containers = await getContainers();
-    const summary = containers.find((container) => container.id.startsWith(containerId));
+    const summary = findContainerSummary(containers, containerId);
     if (!summary) return null;
     const inspectMap = await getContainerInspectMap([summary.id]);
     const inspect = inspectMap.get(summary.id);
@@ -428,6 +428,31 @@ async function getContainerDetails(containerId: string) {
             }
         ),
     };
+}
+
+function findContainerSummary(
+    containers: Awaited<ReturnType<typeof getContainers>>,
+    identifier: string
+) {
+    const exact = containers.find(
+        (container) => container.id === identifier || container.name === identifier
+    );
+    if (exact) return exact;
+    const prefixMatches = containers.filter((container) =>
+        container.id.startsWith(identifier)
+    );
+    return prefixMatches.length === 1 ? prefixMatches[0] : null;
+}
+
+async function readDockerJson<T>(request: Request): Promise<T | Response> {
+    try {
+        return await readJson<T>(request);
+    } catch (error) {
+        return json(
+            { error: errorMessage(error, "Invalid JSON") },
+            { status: httpStatusCode(error) }
+        );
+    }
 }
 
 async function getImages() {
@@ -606,7 +631,8 @@ function statusCodeFromError(error: unknown): number {
 }
 
 async function runStackAction(request: Request): Promise<Response> {
-    const body = await readJson<{ action?: unknown; service?: unknown }>(request);
+    const body = await readDockerJson<{ action?: unknown; service?: unknown }>(request);
+    if (body instanceof Response) return body;
     if (!body || typeof body !== "object") {
         return json({ error: "Invalid stack action" }, { status: 400 });
     }
@@ -661,7 +687,7 @@ function settleDockerExecJob(containerId: string, command: string, jobId: string
                 containerId,
                 "sh",
                 "-lc",
-                String.raw`setsid sh -lc 'printf '\''${pidMarker}%s\n'\'' "$$"; exec sh -lc "$MIRA_DASHBOARD_EXEC_COMMAND"'`,
+                String.raw`if command -v setsid >/dev/null 2>&1; then exec setsid sh -lc 'printf '\''${pidMarker}%s\n'\'' "$$"; exec sh -lc "$MIRA_DASHBOARD_EXEC_COMMAND"'; fi; printf '${pidMarker}%s\n' "$$"; exec sh -lc "$MIRA_DASHBOARD_EXEC_COMMAND"`,
             ],
             {
                 cwd: getDockerRoot(),
@@ -762,7 +788,8 @@ export const dockerRoutes = {
         POST: async (request: Request) => {
             const containerId = dockerIdentifier(parameters(request).containerId);
             if (!containerId) return invalidDockerIdentifier("containerId");
-            const body = await readJson<{ action?: unknown }>(request);
+            const body = await readDockerJson<{ action?: unknown }>(request);
+            if (body instanceof Response) return body;
             if (
                 !body ||
                 (body.action !== "start" &&
@@ -855,9 +882,11 @@ export const dockerRoutes = {
     },
     "/api/docker/exec/start": {
         POST: async (request: Request) => {
-            const body = await readJson<{ command?: unknown; containerId?: unknown }>(
-                request
-            );
+            const body = await readDockerJson<{
+                command?: unknown;
+                containerId?: unknown;
+            }>(request);
+            if (body instanceof Response) return body;
             const containerId = dockerIdentifier(body?.containerId);
             if (
                 !body ||
@@ -902,7 +931,8 @@ export const dockerRoutes = {
     },
     "/api/docker/prune": {
         POST: async (request: Request) => {
-            const body = await readJson<{ target?: unknown }>(request);
+            const body = await readDockerJson<{ target?: unknown }>(request);
+            if (body instanceof Response) return body;
             if (body?.target === "images") {
                 return json({
                     isSuccess: true,

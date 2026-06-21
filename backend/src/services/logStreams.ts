@@ -206,6 +206,7 @@ async function sendLogHistory(ws: DashboardSocket): Promise<void> {
     };
 
     try {
+        const subscriberCountAtStart = logSubscribers.size;
         const logFile = getTodayLogFile();
         const fileName = path.basename(logFile);
 
@@ -226,7 +227,7 @@ async function sendLogHistory(ws: DashboardSocket): Promise<void> {
         let lines: string[];
         try {
             const stat = await file.stat();
-            if (logSubscribers.size <= 1 || !logsRouteState.lastLogFile) {
+            if (subscriberCountAtStart <= 1 || !logsRouteState.lastLogFile) {
                 logsRouteState.lastLogFile = logFile;
                 logsRouteState.lastLogSize = stat.size;
                 logsRouteState.pendingFragment = "";

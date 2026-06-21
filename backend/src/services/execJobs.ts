@@ -426,8 +426,14 @@ export function stopExecJob(jobId: string): { isSuccess: boolean; message: strin
 
     const forceKillTimer = setTimeout(() => {
         if (!job.process || job.status !== "signaled") return;
-        killProcessGroup(job.process, "SIGKILL");
-        markExecJobForcedKilled(job);
+        try {
+            killProcessGroup(job.process, "SIGKILL");
+            markExecJobForcedKilled(job);
+        } catch (error) {
+            const message = errorMessage(error, "Failed to force kill exec job");
+            console.error("[Exec] Force kill failed:", message);
+            job.stderr = trimOutput(`${job.stderr}\n${message}`.trim());
+        }
     }, 3000);
     forceKillTimer.unref();
 

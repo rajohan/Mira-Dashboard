@@ -366,10 +366,26 @@ export const fileRoutes = {
                 return json({ error: "Path not found" }, { status: 404 });
             }
             let existingMode: number | undefined;
+            let backupContent: string | undefined;
             try {
                 const existingStat = lstatGuarded(guardedPath(safeFullPath));
                 if (existingStat.isFile()) {
+                    if (existingStat.size > MAX_FILE_SIZE) {
+                        return json(
+                            { error: "Existing file is too large to back up" },
+                            { status: 413 }
+                        );
+                    }
                     existingMode = existingStat.mode & 0o777;
+                    const file = await openReadNoFollowGuarded(guardedPath(safeFullPath));
+                    try {
+                        backupContent = readFromOpenFile(
+                            file.fd,
+                            existingStat.size
+                        ).toString("utf8");
+                    } finally {
+                        await file.close();
+                    }
                 }
                 if (existingStat.isDirectory()) {
                     return json(
@@ -383,6 +399,14 @@ export const fileRoutes = {
                 }
             }
             const anchoredPath = path.relative(root, safeFullPath);
+            if (backupContent !== undefined) {
+                await writeTextNoFollowAnchoredGuarded(
+                    guardedPath(root),
+                    `${anchoredPath}.bak`,
+                    backupContent,
+                    { mode: existingMode }
+                );
+            }
             await writeTextNoFollowAnchoredGuarded(
                 guardedPath(root),
                 anchoredPath,

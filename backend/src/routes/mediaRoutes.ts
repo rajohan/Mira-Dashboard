@@ -123,6 +123,10 @@ export const mediaRoutes = {
             if (relativeRealPath.startsWith("..") || path.isAbsolute(relativeRealPath)) {
                 return json({ error: "Access denied" }, { status: 403 });
             }
+            const preOpenStat = await fsp.stat(realPath);
+            if (!preOpenStat.isFile()) {
+                return json({ error: "Media path is not a file" }, { status: 400 });
+            }
 
             let file: fs.promises.FileHandle;
             try {

@@ -1,4 +1,3 @@
-import { JSON5 } from "bun";
 import FS from "fs";
 import os from "os";
 import Path from "path";
@@ -518,7 +517,7 @@ async function updateAgentMetadataFromVerifiedDirectory({
             );
             let parsedMetadata: unknown;
             try {
-                parsedMetadata = JSON5.parse(metadataText) as unknown;
+                parsedMetadata = Bun.JSON5.parse(metadataText) as unknown;
             } catch (parseError) {
                 console.warn(
                     `[Agents] Ignoring malformed metadata for ${agentId} at ${Path.join(realMetadataDirectory, "metadata.json")}:`,
@@ -667,7 +666,7 @@ export function parseAgentsConfig(): AgentsConfig | null {
         } finally {
             FS.closeSync(fd);
         }
-        const parsed = JSON5.parse(content) as { agents?: AgentsConfig };
+        const parsed = Bun.JSON5.parse(content) as { agents?: AgentsConfig };
 
         if (parsed.agents && Array.isArray(parsed.agents.list)) {
             return parsed.agents;
@@ -694,7 +693,7 @@ async function getAgentMetadata(agentId: string): Promise<AgentMetadata | null> 
         const content = await readTextNoFollowGuarded(
             guardedPath(Path.join(sessionsDirectory, "metadata.json"))
         );
-        return JSON5.parse(content) as AgentMetadata;
+        return Bun.JSON5.parse(content) as AgentMetadata;
     } catch {
         return null;
     }
@@ -712,7 +711,7 @@ async function getAgentSessionsFromFiles(agentId: string): Promise<SessionInfo[]
         const content = await readTextNoFollowGuarded(
             guardedPath(Path.join(sessionsDirectory, "sessions.json"))
         );
-        const sessions = JSON5.parse(content);
+        const sessions = Bun.JSON5.parse(content);
         return Array.isArray(sessions) ? sessions : [];
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") {

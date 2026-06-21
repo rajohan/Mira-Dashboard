@@ -114,6 +114,15 @@ function stripEnvironmentComment(line: string): string {
     return line;
 }
 
+function unescapeDoubleQuotedEnvironmentValue(value: string): string {
+    return value.replaceAll(/\\([\\"nrt])/gu, (_match, escaped: string) => {
+        if (escaped === "n") return "\n";
+        if (escaped === "r") return "\r";
+        if (escaped === "t") return "\t";
+        return escaped;
+    });
+}
+
 function parseComposeEnvironmentFile(content: string): ComposeEnvironment {
     const environment: ComposeEnvironment = {};
     for (const rawLine of content.split(/\r?\n/u)) {
@@ -127,12 +136,15 @@ function parseComposeEnvironmentFile(content: string): ComposeEnvironment {
         const key = withoutExport.slice(0, separatorIndex).trim();
         if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key)) continue;
         let value = withoutExport.slice(separatorIndex + 1).trim();
-        if (
-            value.length >= 2 &&
-            ((value.startsWith('"') && value.endsWith('"')) ||
-                (value.startsWith("'") && value.endsWith("'")))
-        ) {
+        const isDoubleQuoted =
+            value.length >= 2 && value.startsWith('"') && value.endsWith('"');
+        const isSingleQuoted =
+            value.length >= 2 && value.startsWith("'") && value.endsWith("'");
+        if (isDoubleQuoted || isSingleQuoted) {
             value = value.slice(1, -1);
+            if (isDoubleQuoted) {
+                value = unescapeDoubleQuotedEnvironmentValue(value);
+            }
         }
         environment[key] = value;
     }

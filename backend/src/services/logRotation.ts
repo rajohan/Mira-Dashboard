@@ -149,7 +149,13 @@ function fileHandleReadableStream(
                 return;
             }
             const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, size - position));
-            const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+            let bytesRead: number;
+            try {
+                ({ bytesRead } = await handle.read(buffer, 0, buffer.length, position));
+            } catch (error) {
+                controller.error(error);
+                return;
+            }
             if (bytesRead === 0) {
                 controller.close();
                 return;

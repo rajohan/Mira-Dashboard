@@ -172,6 +172,9 @@ export const configFileRoutes = {
             if (relativeRealPath.startsWith("..") || path.isAbsolute(relativeRealPath)) {
                 return json({ error: "Access denied" }, { status: 403 });
             }
+            if (!fs.statSync(realFullPath).isFile()) {
+                return json({ error: "Access denied" }, { status: 403 });
+            }
             const file = await openReadNoFollowGuarded(guardedPath(realFullPath));
             let buffer: Buffer;
             let stat: fs.Stats;
@@ -281,6 +284,9 @@ export const configFileRoutes = {
                             { error: "Existing file is too large to back up" },
                             { status: 413 }
                         );
+                    }
+                    if (!fs.statSync(target).isFile()) {
+                        return json({ error: "Access denied" }, { status: 403 });
                     }
                     const file = await openReadNoFollowGuarded(guardedPath(target));
                     let backupContent: string;
