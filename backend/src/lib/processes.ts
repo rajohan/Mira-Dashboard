@@ -18,10 +18,6 @@ export type BunProcess = ReturnType<typeof Bun.spawn>;
 const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
 const DEFAULT_FORCE_KILL_GRACE_MS = 3_000;
 
-function trimToMaxBuffer(text: string, maxBuffer: number): string {
-    return text.length <= maxBuffer ? text : text.slice(-maxBuffer);
-}
-
 async function readProcessText(
     stream: ReadableStream<Uint8Array> | null | undefined,
     maxBuffer: number
@@ -34,12 +30,15 @@ async function readProcessText(
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            text = trimToMaxBuffer(
-                text + decoder.decode(value, { stream: true }),
-                maxBuffer
-            );
+            text += decoder.decode(value, { stream: true });
+            if (text.length > maxBuffer) {
+                throw new Error(`Process output exceeded maxBuffer (${maxBuffer})`);
+            }
         }
-        text = trimToMaxBuffer(text + decoder.decode(), maxBuffer);
+        text += decoder.decode();
+        if (text.length > maxBuffer) {
+            throw new Error(`Process output exceeded maxBuffer (${maxBuffer})`);
+        }
         return text;
     } finally {
         reader.releaseLock();
@@ -108,6 +107,9 @@ export async function runProcess(
             process.exited,
         ]);
         return { code, stderr, stdout };
+    } catch (error) {
+        killProcessGroup(process, "SIGKILL");
+        throw error;
     } finally {
         if (timeout) clearTimeout(timeout);
         if (forceKillTimeout) clearTimeout(forceKillTimeout);

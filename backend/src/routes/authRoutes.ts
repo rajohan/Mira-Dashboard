@@ -22,11 +22,27 @@ import {
     sessionIdFromCookie,
     withCookie,
 } from "../http.ts";
+import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 
 interface AuthBody {
     gatewayToken?: unknown;
     password?: unknown;
     username?: unknown;
+}
+
+async function readAuthBody(request: Request): Promise<AuthBody | Response> {
+    try {
+        const body = await readJson<unknown>(request);
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+            return json({ error: "Invalid request body" }, { status: 400 });
+        }
+        return body as AuthBody;
+    } catch (error) {
+        return json(
+            { error: errorMessage(error, "Invalid request body") },
+            { status: httpStatusCode(error) }
+        );
+    }
 }
 
 function validateUsername(username: unknown): string | null {
@@ -129,7 +145,8 @@ export const authRoutes = {
 
     "/api/auth/register-first-user": {
         POST: async (request: Request, server: Server<unknown>) => {
-            const body = await readJson<AuthBody>(request);
+            const body = await readAuthBody(request);
+            if (body instanceof Response) return body;
             const username = validateUsername(body.username);
             if (!username) {
                 return json(
@@ -243,7 +260,8 @@ export const authRoutes = {
                     { status: 409 }
                 );
             }
-            const body = await readJson<AuthBody>(request);
+            const body = await readAuthBody(request);
+            if (body instanceof Response) return body;
             const username = validateUsername(body.username);
             const password = validatePassword(body.password);
             if (!username || !password) {

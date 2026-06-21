@@ -11,6 +11,7 @@ import { objectFallback } from "../lib/values.ts";
 type Status = "todo" | "in-progress" | "blocked" | "done";
 type Assignee = TaskAssigneeId;
 type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
+const INVALID_ASSIGNEE_MESSAGE = "Assignee not found in allowed list";
 
 interface DatabaseTaskUpdate {
     id: number;
@@ -324,10 +325,7 @@ export const taskRoutes = {
             const title = optionalString(body.title, "Title")?.trim();
             if (!title) return json({ error: "Title is required" }, { status: 400 });
             if (!isValidAssignee(body.assignee)) {
-                return json(
-                    { error: "Assignee must be Mira or Raymond" },
-                    { status: 400 }
-                );
+                return json({ error: INVALID_ASSIGNEE_MESSAGE }, { status: 400 });
             }
             const assignee = body.assignee;
             const now = nowIso();
@@ -466,10 +464,7 @@ export const taskRoutes = {
             const body = await readJson<{ assignee?: string | null }>(request);
             if (id === null) return json({ error: "Invalid id" }, { status: 400 });
             if (!isValidAssignee(body.assignee)) {
-                return json(
-                    { error: "Assignee must be Mira or Raymond" },
-                    { status: 400 }
-                );
+                return json({ error: INVALID_ASSIGNEE_MESSAGE }, { status: 400 });
             }
             const existing = taskById(id);
             if (!existing) return json({ error: "Task not found" }, { status: 404 });

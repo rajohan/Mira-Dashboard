@@ -33,14 +33,9 @@ async function getConfigSnapshot(): Promise<ConfigGetResponse> {
     return (await gateway.request("config.get", {})) as ConfigGetResponse;
 }
 
-async function patchConfigRaw(raw: string): Promise<unknown> {
-    const snapshot = await getConfigSnapshot();
-    if (!snapshot.hash) {
-        throw new Error("OpenClaw config hash unavailable");
-    }
-
+async function patchConfigRaw(raw: string, baseHash: string): Promise<unknown> {
     return gateway.request("config.patch", {
-        baseHash: snapshot.hash,
+        baseHash,
         note: "Updated from Mira Dashboard settings",
         raw,
     });
@@ -257,9 +252,16 @@ export const openclawConfigRoutes = {
                         { status: 400 }
                     );
                 }
+                const baseHash = (body as Record<string, unknown>).__hash;
+                if (typeof baseHash !== "string" || !baseHash.trim()) {
+                    return json({ error: "Config hash is required" }, { status: 400 });
+                }
                 const configBody = { ...(body as Record<string, unknown>) };
                 delete configBody.__hash;
-                const result = await patchConfigRaw(JSON.stringify(configBody));
+                const result = await patchConfigRaw(
+                    JSON.stringify(configBody),
+                    baseHash.trim()
+                );
                 return json({ isOk: true, result });
             } catch (error) {
                 return json(
@@ -341,10 +343,15 @@ export const openclawConfigRoutes = {
                     return json({ error: "Invalid enabled value" }, { status: 400 });
                 }
 
+                const snapshot = await getConfigSnapshot();
+                if (!snapshot.hash) {
+                    throw new Error("OpenClaw config hash unavailable");
+                }
                 await patchConfigRaw(
                     JSON.stringify({
                         skills: { entries: { [name]: { enabled } } },
-                    })
+                    }),
+                    snapshot.hash
                 );
                 return json({ isOk: true });
             } catch (error) {

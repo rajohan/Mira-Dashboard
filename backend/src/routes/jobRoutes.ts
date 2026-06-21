@@ -72,7 +72,15 @@ export const jobRoutes = {
             return json({ job });
         },
         PATCH: async (request: ParametersRequest<"id">) => {
-            const body = await readJson<{ patch?: unknown }>(request);
+            let body: { patch?: unknown };
+            try {
+                body = await readJson<{ patch?: unknown }>(request);
+            } catch (error) {
+                return json(
+                    { error: errorMessage(error, "Invalid JSON") },
+                    { status: httpStatusCode(error) }
+                );
+            }
             const patch = body?.patch;
             if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
                 return json({ error: "patch must be an object" }, { status: 400 });

@@ -581,7 +581,13 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         });
 
         ws.addEventListener("error", (event) => {
-            this.opts.onConnectError?.(asError(event));
+            const details =
+                "message" in event && typeof event.message === "string"
+                    ? `: ${event.message}`
+                    : "";
+            this.opts.onConnectError?.(
+                new Error(`gateway websocket error (${event.type})${details}`)
+            );
         });
     }
 

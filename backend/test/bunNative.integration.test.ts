@@ -90,7 +90,7 @@ describe("Bun-native dashboard backend", () => {
                 MIRA_DASHBOARD_TRUSTED_PROXY_IPS: "",
                 WORKSPACE_ROOT: workspaceRoot,
             },
-            stderr: "pipe",
+            stderr: "inherit",
             stdin: "ignore",
             stdout: "pipe",
         });

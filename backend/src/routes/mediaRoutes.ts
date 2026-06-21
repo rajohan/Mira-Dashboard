@@ -134,11 +134,12 @@ export const mediaRoutes = {
                 throw error;
             }
             let buffer: Buffer;
+            let openedRealPath: string;
             try {
                 const stat = await file.stat();
-                const openedRealPath =
+                openedRealPath =
                     process.platform === "linux"
-                        ? fs.realpathSync(`/proc/self/fd/${file.fd}`)
+                        ? await fsp.realpath(`/proc/self/fd/${file.fd}`)
                         : realPath;
                 const relativeOpenedPath = path.relative(realMediaRoot, openedRealPath);
                 if (
@@ -161,7 +162,7 @@ export const mediaRoutes = {
             return new Response(buffer, {
                 headers: {
                     "Cache-Control": "private, max-age=3600",
-                    "Content-Type": mimeTypeFromPath(realPath),
+                    "Content-Type": mimeTypeFromPath(openedRealPath),
                 },
             });
         },

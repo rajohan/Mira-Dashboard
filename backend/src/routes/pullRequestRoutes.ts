@@ -48,10 +48,10 @@ export const pullRequestRoutes = {
         POST: async (request: ParametersRequest<"number">) => {
             const number = parsePullRequestNumber(request.params.number);
             if (number instanceof Response) return number;
-            const body = request.body
-                ? await readJson<{ deploy?: unknown } | null>(request)
-                : null;
             try {
+                const body = request.body
+                    ? await readJson<{ deploy?: unknown } | null>(request)
+                    : null;
                 return json(await approvePullRequest(number, body?.deploy === true));
             } catch (error) {
                 return routeError(error);
@@ -62,14 +62,14 @@ export const pullRequestRoutes = {
         POST: async (request: ParametersRequest<"number">) => {
             const number = parsePullRequestNumber(request.params.number);
             if (number instanceof Response) return number;
-            const body = request.body
-                ? await readJson<{ comment?: unknown } | null>(request)
-                : null;
-            const comment =
-                typeof body?.comment === "string" && body.comment.trim()
-                    ? body.comment.trim()
-                    : "Closed from Mira Dashboard after Rajohan rejected it.";
             try {
+                const body = request.body
+                    ? await readJson<{ comment?: unknown } | null>(request)
+                    : null;
+                const comment =
+                    typeof body?.comment === "string" && body.comment.trim()
+                        ? body.comment.trim()
+                        : "Closed from Mira Dashboard after Rajohan rejected it.";
                 return json(await rejectPullRequest(number, comment));
             } catch (error) {
                 return routeError(error);
