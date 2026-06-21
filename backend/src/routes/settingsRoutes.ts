@@ -4,6 +4,7 @@ import path from "node:path";
 
 import gateway from "../gateway.ts";
 import { json, readJson } from "../http.ts";
+import { httpStatusCode } from "../lib/errors.ts";
 import {
     guardedPath,
     mkdirGuarded,
@@ -181,7 +182,11 @@ export const settingsRoutes = {
             try {
                 updated = { ...current, ...parseSettingsPatch(await readJson(request)) };
             } catch (error) {
-                return json({ error: (error as Error).message }, { status: 400 });
+                const status = httpStatusCode(error);
+                return json(
+                    { error: (error as Error).message },
+                    { status: status === 500 ? 400 : status }
+                );
             }
 
             try {

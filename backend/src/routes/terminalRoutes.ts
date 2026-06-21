@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { json, readJson } from "../http.ts";
+import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import { guardedPath, readdirGuardedAsync, statGuardedAsync } from "../lib/guardedOps.ts";
 
 interface CompletionRequest {
@@ -32,6 +33,17 @@ interface CompletionResponse {
 }
 
 const HOME_DIR = os.homedir();
+
+async function readTerminalJson<T>(request: Request): Promise<T | Response> {
+    try {
+        return await readJson<T>(request);
+    } catch (error) {
+        return json(
+            { error: errorMessage(error, "Invalid request body") },
+            { status: httpStatusCode(error) }
+        );
+    }
+}
 
 function expandPath(inputPath: string, cwd: string): string {
     if (inputPath.includes("\0")) return cwd;
@@ -125,7 +137,8 @@ async function getCompletions(
 export const terminalRoutes = {
     "/api/terminal/complete": {
         POST: async (request: Request) => {
-            const body = await readJson<CompletionRequest | null>(request);
+            const body = await readTerminalJson<CompletionRequest | null>(request);
+            if (body instanceof Response) return body;
             if (!body || typeof body !== "object") {
                 return json({ error: "Missing or invalid body" }, { status: 400 });
             }
@@ -151,11 +164,23 @@ export const terminalRoutes = {
 
     "/api/terminal/cd": {
         POST: async (request: Request) => {
-            const body = await readJson<CdRequest>(request);
-            const resolvedCwd = body.cwd || HOME_DIR;
+            const body = await readTerminalJson<CdRequest | null>(request);
+            if (body instanceof Response) return body;
+            if (!body || typeof body !== "object") {
+                return json(
+                    {
+                        error: "Missing or invalid body",
+                        isSuccess: false,
+                        newCwd: HOME_DIR,
+                    } satisfies CdResponse,
+                    { status: 400 }
+                );
+            }
+            const resolvedCwd = typeof body.cwd === "string" ? body.cwd : HOME_DIR;
             const targetPath = body.path;
 
             if (
+                resolvedCwd.includes("\0") ||
                 !targetPath ||
                 typeof targetPath !== "string" ||
                 targetPath.includes("\0")

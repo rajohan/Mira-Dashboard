@@ -262,7 +262,7 @@ export const openclawConfigRoutes = {
             } catch (error) {
                 return json(
                     { error: errorMessage(error, "Failed to update config") },
-                    { status: 500 }
+                    { status: httpStatusCode(error) }
                 );
             }
         },

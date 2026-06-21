@@ -296,7 +296,7 @@ function taskById(id: number): DatabaseTask | undefined {
 
 function safeId(value: string | undefined): number | null {
     const id = Number(value);
-    return Number.isSafeInteger(id) ? id : null;
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
 export const taskRoutes = {

@@ -17,7 +17,7 @@ const MIME_TYPES: Record<string, string> = {
     ".mp3": "audio/mpeg",
     ".mp4": "video/mp4",
     ".png": "image/png",
-    ".svg": "image/svg+xml",
+    ".svg": "application/octet-stream",
     ".txt": "text/plain; charset=utf-8",
     ".wav": "audio/wav",
     ".webm": "video/webm",

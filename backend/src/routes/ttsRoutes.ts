@@ -1,4 +1,5 @@
 import { json, readJson } from "../http.ts";
+import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 
 const ELEVENLABS_TTS_TIMEOUT_MS = 60_000;
 const ELEVENLABS_TTS_MODEL = process.env.ELEVENLABS_TTS_MODEL || "eleven_turbo_v2_5";
@@ -35,7 +36,15 @@ export const ttsRoutes = {
                 );
             }
 
-            const body = await readJson<TtsRequestBody | undefined>(request);
+            let body: TtsRequestBody | undefined;
+            try {
+                body = await readJson<TtsRequestBody | undefined>(request);
+            } catch (error) {
+                return json(
+                    { error: errorMessage(error, "Invalid JSON") },
+                    { status: httpStatusCode(error) }
+                );
+            }
             const text = normalizeTtsText(body?.text);
             if (!text) {
                 return json({ error: "Missing text" }, { status: 400 });

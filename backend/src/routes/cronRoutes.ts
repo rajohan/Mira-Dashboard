@@ -74,12 +74,11 @@ export const cronRoutes = {
 
     "/api/cron/jobs/:id/toggle": {
         POST: async (request: ParametersRequest<"id">) => {
-            const body = await readJson<{ enabled?: unknown }>(request);
-            if (typeof body.enabled !== "boolean") {
-                return json({ error: "enabled must be a boolean" }, { status: 400 });
-            }
-
             try {
+                const body = await readJson<{ enabled?: unknown }>(request);
+                if (typeof body.enabled !== "boolean") {
+                    return json({ error: "enabled must be a boolean" }, { status: 400 });
+                }
                 await gateway.request("cron.update", {
                     jobId: request.params.id,
                     patch: { enabled: body.enabled },
@@ -93,13 +92,12 @@ export const cronRoutes = {
 
     "/api/cron/jobs/:id/update": {
         POST: async (request: ParametersRequest<"id">) => {
-            const body = await readJson<{ patch?: unknown }>(request);
-            const patch = body.patch;
-            if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
-                return json({ error: "patch must be an object" }, { status: 400 });
-            }
-
             try {
+                const body = await readJson<{ patch?: unknown }>(request);
+                const patch = body.patch;
+                if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+                    return json({ error: "patch must be an object" }, { status: 400 });
+                }
                 await gateway.request("cron.update", { jobId: request.params.id, patch });
                 return json({ isOk: true });
             } catch (error) {

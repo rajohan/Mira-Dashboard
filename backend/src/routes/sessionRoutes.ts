@@ -42,9 +42,9 @@ export const sessionRoutes = {
             if (!isValidSessionKey(sessionKey)) {
                 return json({ error: "Invalid session id" }, { status: 400 });
             }
-            const body = await readJson<{ action?: unknown }>(request);
-            const action = stringFallback(body.action).trim().toLowerCase();
             try {
+                const body = await readJson<{ action?: unknown }>(request);
+                const action = stringFallback(body.action).trim().toLowerCase();
                 if (action === "stop") {
                     await gateway.abortSessionRun(sessionKey);
                     return json({ action, isSuccess: true });

@@ -132,6 +132,12 @@ async function staticResponse(pathname: string): Promise<Response> {
     }
 
     const root = path.resolve(frontendPath);
+    let realRoot: string;
+    try {
+        realRoot = await fsp.realpath(root);
+    } catch {
+        return new Response("Not found", { status: 404 });
+    }
     let decodedPath: string;
     try {
         decodedPath = decodeURIComponent(pathname.replace(/^\/+/u, ""));
@@ -141,8 +147,15 @@ async function staticResponse(pathname: string): Promise<Response> {
     const directPath = path.resolve(root, decodedPath);
     if (directPath.startsWith(`${root}${path.sep}`)) {
         try {
-            const stat = await fsp.stat(directPath);
-            if (stat.isFile()) return fileResponse(directPath);
+            const realDirectPath = await fsp.realpath(directPath);
+            const relativeRealPath = path.relative(realRoot, realDirectPath);
+            if (
+                !relativeRealPath.startsWith("..") &&
+                !path.isAbsolute(relativeRealPath)
+            ) {
+                const stat = await fsp.stat(realDirectPath);
+                if (stat.isFile()) return fileResponse(realDirectPath);
+            }
         } catch {
             // Continue with hashed asset lookup or SPA routing below.
         }
@@ -154,8 +167,13 @@ async function staticResponse(pathname: string): Promise<Response> {
         }
         const assetPath = path.join(root, "assets", path.basename(pathname));
         try {
-            const stat = await fsp.stat(assetPath);
-            if (stat.isFile()) return fileResponse(assetPath);
+            const realAssetPath = await fsp.realpath(assetPath);
+            const relativeRealPath = path.relative(realRoot, realAssetPath);
+            if (relativeRealPath.startsWith("..") || path.isAbsolute(relativeRealPath)) {
+                return new Response("Not found", { status: 404 });
+            }
+            const stat = await fsp.stat(realAssetPath);
+            if (stat.isFile()) return fileResponse(realAssetPath);
         } catch {
             return new Response("Not found", { status: 404 });
         }

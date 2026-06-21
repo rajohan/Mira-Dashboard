@@ -106,6 +106,7 @@ function stripEnvironmentComment(line: string): string {
             quote = quote === character ? null : (quote ?? character);
             continue;
         }
+        // Compose treats inline comments as comments only when the # follows whitespace.
         if (character === "#" && quote === null && /\s/u.test(line[index - 1] ?? "")) {
             return line.slice(0, index).trimEnd();
         }

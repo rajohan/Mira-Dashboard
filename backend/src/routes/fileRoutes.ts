@@ -91,6 +91,20 @@ function imageMime(filename: string): string | null {
     return extension ? (map[extension] ?? null) : null;
 }
 
+function isPathWithinRoot(candidatePath: string, root: string): boolean {
+    const relativePath = path.relative(root, candidatePath);
+    return !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
+}
+
+function isOpenFileWithinRoot(file: fs.promises.FileHandle, root: string): boolean {
+    if (process.platform !== "linux") return true;
+    try {
+        return isPathWithinRoot(fs.realpathSync(`/proc/self/fd/${file.fd}`), root);
+    } catch {
+        return false;
+    }
+}
+
 function listFiles(directoryPath: string) {
     let root: string;
     try {
@@ -218,6 +232,9 @@ export const fileRoutes = {
                 const file = await openReadNoFollowGuarded(guardedPath(fullPath));
                 let buffer: Buffer;
                 try {
+                    if (!isOpenFileWithinRoot(file, root)) {
+                        return json({ error: "Access denied" }, { status: 403 });
+                    }
                     buffer = readFromOpenFile(file.fd, stat.size);
                 } finally {
                     await file.close();
@@ -235,6 +252,9 @@ export const fileRoutes = {
             const file = await openReadNoFollowGuarded(guardedPath(fullPath));
             let buffer: Buffer;
             try {
+                if (!isOpenFileWithinRoot(file, root)) {
+                    return json({ error: "Access denied" }, { status: 403 });
+                }
                 buffer = readFromOpenFile(file.fd, Math.min(stat.size, MAX_FILE_SIZE));
             } finally {
                 await file.close();
@@ -282,6 +302,12 @@ export const fileRoutes = {
                 const existingStat = lstatGuarded(guardedPath(safeFullPath));
                 if (existingStat.isFile()) {
                     existingMode = existingStat.mode & 0o777;
+                }
+                if (existingStat.isDirectory()) {
+                    return json(
+                        { error: "Path is a directory, not a file" },
+                        { status: 400 }
+                    );
                 }
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code !== "ENOENT") {

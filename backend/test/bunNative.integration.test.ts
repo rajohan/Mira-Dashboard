@@ -87,7 +87,7 @@ describe("Bun-native dashboard backend", () => {
                 MIRA_DOCKER_COMPOSE_WRAPPER: composeWrapper,
                 MIRA_DOCKER_ROOT: dockerRoot,
                 OPENCLAW_HOME: openclawRoot,
-                TRUST_PROXY: "false",
+                MIRA_DASHBOARD_TRUSTED_PROXY_IPS: "",
                 WORKSPACE_ROOT: workspaceRoot,
             },
             stderr: "pipe",

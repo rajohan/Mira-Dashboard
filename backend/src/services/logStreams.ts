@@ -111,7 +111,7 @@ async function pollLogFile(): Promise<void> {
 
         if (logFile !== logsRouteState.lastLogFile) {
             logsRouteState.lastLogFile = logFile;
-            logsRouteState.lastLogSize = 0;
+            logsRouteState.lastLogSize = stat.size;
             logsRouteState.pendingFragment = "";
         }
 
@@ -123,7 +123,10 @@ async function pollLogFile(): Promise<void> {
         if (stat.size > logsRouteState.lastLogSize) {
             const deltaBytes = stat.size - logsRouteState.lastLogSize;
             const readBytes = Math.min(deltaBytes, LOG_TAIL_READ_CHUNK_BYTES);
-            const readOffset = logsRouteState.lastLogSize;
+            const readOffset =
+                deltaBytes > LOG_TAIL_READ_CHUNK_BYTES
+                    ? stat.size - readBytes
+                    : logsRouteState.lastLogSize;
             const buffer = Buffer.alloc(readBytes);
             const { bytesRead } = await file.read(buffer, 0, buffer.length, readOffset);
             if (bytesRead <= 0) return;
@@ -216,6 +219,9 @@ async function sendLogHistory(ws: DashboardSocket): Promise<void> {
         let lines: string[];
         try {
             const stat = await file.stat();
+            logsRouteState.lastLogFile = logFile;
+            logsRouteState.lastLogSize = stat.size;
+            logsRouteState.pendingFragment = "";
             lines = await readLogTailLines(file, stat, 100);
         } finally {
             await file.close();

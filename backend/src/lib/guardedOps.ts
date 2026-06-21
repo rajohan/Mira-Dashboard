@@ -411,6 +411,12 @@ export async function writeTextNoFollowAnchoredGuarded(
     options: { createParents?: boolean; mode?: number } = {}
 ): Promise<void> {
     if (process.platform !== "linux") {
+        validateRelativePath(relativePath);
+        if (options.createParents) {
+            const destinationPath = Path.join(root as string, relativePath);
+            const destinationDirectory = Path.dirname(destinationPath);
+            mkdirGuarded(guardedPath(destinationDirectory), { recursive: true });
+        }
         await writeTextNoFollowGuarded(
             guardedPath(Path.join(root as string, relativePath)),
             content,

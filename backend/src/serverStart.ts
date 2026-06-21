@@ -158,12 +158,15 @@ export function startBackendServer(port = resolveListenPort()): void {
 }
 
 export async function stopBackendServer(): Promise<void> {
-    removeSchedulerCloseCleanup();
-    stopScheduledJobScheduler();
-    gateway.shutdown();
     const server = serverStartState.activeServer;
     serverStartState.activeServer = null;
-    await server?.stop(true);
+    try {
+        removeSchedulerCloseCleanup();
+        stopScheduledJobScheduler();
+        gateway.shutdown();
+    } finally {
+        await server?.stop(true);
+    }
 }
 
 export function isDirectEntrypoint(

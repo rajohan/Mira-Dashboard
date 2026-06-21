@@ -16,6 +16,7 @@ export interface RunProcessResult {
 export type BunProcess = ReturnType<typeof Bun.spawn>;
 
 const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
+const DEFAULT_FORCE_KILL_GRACE_MS = 3_000;
 
 function trimToMaxBuffer(text: string, maxBuffer: number): string {
     return text.length <= maxBuffer ? text : text.slice(-maxBuffer);
@@ -81,10 +82,15 @@ export async function runProcess(
     const maxBuffer = options.maxBuffer ?? DEFAULT_MAX_BUFFER;
     const process = spawnProcess(executable, arguments_, options);
     let timeout: Timer | undefined;
+    let forceKillTimeout: Timer | undefined;
     const timeoutMs = options.timeoutMs;
     if (timeoutMs !== undefined) {
         timeout = setTimeout(() => {
             killProcessGroup(process, options.killSignal ?? "SIGTERM");
+            forceKillTimeout = setTimeout(() => {
+                killProcessGroup(process, "SIGKILL");
+            }, DEFAULT_FORCE_KILL_GRACE_MS);
+            forceKillTimeout.unref();
         }, timeoutMs);
         timeout.unref();
     }
@@ -104,6 +110,7 @@ export async function runProcess(
         return { code, stderr, stdout };
     } finally {
         if (timeout) clearTimeout(timeout);
+        if (forceKillTimeout) clearTimeout(forceKillTimeout);
     }
 }
 

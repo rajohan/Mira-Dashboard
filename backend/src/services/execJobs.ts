@@ -69,6 +69,8 @@ const SHELL_METACHARACTERS_RE = /[\n\r\0]/u;
 const EXECUTABLE_RE = /^(?:[\w./-]+)$/u;
 const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
+const EXEC_ONCE_TIMEOUT_MS = 60_000;
+const SHELL_EXECUTABLES = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh"]);
 const jobs = new Map<string, ExecJob>();
 
 function trimOutput(text: string): string {
@@ -108,6 +110,9 @@ function validateExecRequest(payload: unknown): ExecRequest {
             "command must be an executable path when args are provided"
         );
     }
+    if (args !== undefined && SHELL_EXECUTABLES.has(path.basename(command))) {
+        throw new ExecValidationError("shell interpreters are not allowed with args");
+    }
     if (args !== undefined && !Array.isArray(args)) {
         throw new ExecValidationError("args must be an array");
     }
@@ -125,54 +130,6 @@ function validateExecRequest(payload: unknown): ExecRequest {
         throw new ExecValidationError("cwd must be a string");
     }
     return { args, command, cwd, shell };
-}
-
-function parseDirectCommand(command: string): {
-    args: string[];
-    executable: string;
-} {
-    const parts: string[] = [];
-    let current = "";
-    let quote: '"' | "'" | null = null;
-    for (const character of command) {
-        if (quote) {
-            if (character === quote) {
-                quote = null;
-                continue;
-            }
-            current += character;
-            continue;
-        }
-        if (character === '"' || character === "'") {
-            quote = character;
-            continue;
-        }
-        if (/\s/u.test(character)) {
-            if (current) {
-                parts.push(current);
-                current = "";
-            }
-            continue;
-        }
-        if ("|&;<>()`$\\*?[]{}!".includes(character)) {
-            throw new ExecValidationError(
-                "shell operators and expansions are not supported"
-            );
-        }
-        current += character;
-    }
-    if (quote) {
-        throw new ExecValidationError("command contains an unterminated quote");
-    }
-    if (current) {
-        parts.push(current);
-    }
-
-    const [executable, ...parsedArguments] = parts;
-    if (!executable || !EXECUTABLE_RE.test(executable)) {
-        throw new ExecValidationError("command must start with an executable path");
-    }
-    return { args: parsedArguments, executable };
 }
 
 function resolveCwd(cwd: string | undefined): string {
@@ -217,7 +174,8 @@ export function execErrorResponse(error: unknown): { error: string; status: numb
 function runExecCommand(
     request: ExecRequest,
     jobId: string,
-    onUpdate?: (job: ExecJob) => void
+    onUpdate?: (job: ExecJob) => void,
+    timeoutMs?: number
 ): Promise<ExecResponse> {
     const { args, command, cwd, shell } = request;
     const cwdOption = { cwd: resolveCwd(cwd), detached: true, env: process.env };
@@ -225,18 +183,30 @@ function runExecCommand(
     if (shell) {
         childFactory = () =>
             spawnProcess("/bin/sh", ["-c", getApprovedShellCommand(command)], cwdOption);
-    } else {
-        const commandParts = Array.isArray(args)
-            ? { args, executable: command }
-            : parseDirectCommand(command);
+    } else if (Array.isArray(args)) {
+        const commandParts = { args, executable: command };
         childFactory = () =>
             spawnProcess(commandParts.executable, commandParts.args, cwdOption);
+    } else {
+        childFactory = () => spawnProcess("/bin/sh", ["-c", command], cwdOption);
     }
 
     return new Promise((resolve, reject) => {
         const child = childFactory();
         const job = jobs.get(jobId);
         if (job) job.process = child;
+        let timeout: Timer | undefined;
+        let forceKillTimeout: Timer | undefined;
+        if (timeoutMs !== undefined) {
+            timeout = setTimeout(() => {
+                killProcessGroup(child, "SIGTERM");
+                forceKillTimeout = setTimeout(() => {
+                    killProcessGroup(child, "SIGKILL");
+                }, 3000);
+                forceKillTimeout.unref();
+            }, timeoutMs);
+            timeout.unref();
+        }
 
         let stdout = "";
         let stderr = "";
@@ -276,9 +246,15 @@ function runExecCommand(
             return code;
         })()
             .then((code) => {
+                if (timeout) clearTimeout(timeout);
+                if (forceKillTimeout) clearTimeout(forceKillTimeout);
                 resolve({ code, stderr, stdout });
             })
-            .catch(reject);
+            .catch((error: unknown) => {
+                if (timeout) clearTimeout(timeout);
+                if (forceKillTimeout) clearTimeout(forceKillTimeout);
+                reject(error);
+            });
     });
 }
 
@@ -348,7 +324,12 @@ function failExecJob(jobId: string, error: unknown): void {
 
 export async function runExecOnce(payload: unknown): Promise<ExecResponse> {
     const request = validateExecRequest(payload);
-    const result = await runExecCommand(request, Bun.randomUUIDv7());
+    const result = await runExecCommand(
+        request,
+        Bun.randomUUIDv7(),
+        undefined,
+        EXEC_ONCE_TIMEOUT_MS
+    );
     return {
         code: result.code,
         stderr: result.stderr.slice(-10_000),

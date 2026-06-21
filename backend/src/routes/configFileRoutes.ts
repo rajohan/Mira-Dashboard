@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { json, readJson } from "../http.ts";
+import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
     guardedPath,
     openReadNoFollowGuarded,
@@ -128,6 +129,13 @@ export const configFileRoutes = {
                     { status: 500 }
                 );
             }
+            const fullPath = configTarget(relativePath, root);
+            if (!fullPath) {
+                return json(
+                    { error: "Access denied: file not in allowed list" },
+                    { status: 403 }
+                );
+            }
             const lexicalPath = path.resolve(root, relativePath);
             try {
                 if (fs.lstatSync(lexicalPath).isSymbolicLink()) {
@@ -135,13 +143,6 @@ export const configFileRoutes = {
                 }
             } catch {
                 return json({ error: "File not found" }, { status: 404 });
-            }
-            const fullPath = configTarget(relativePath, root);
-            if (!fullPath) {
-                return json(
-                    { error: "Access denied: file not in allowed list" },
-                    { status: 403 }
-                );
             }
             let stat: fs.Stats;
             try {
@@ -192,9 +193,17 @@ export const configFileRoutes = {
                     { status: 403 }
                 );
             }
-            const body = await readJson<{ content?: unknown }>(request, {
-                maxBytes: CONFIG_WRITE_BODY_LIMIT,
-            });
+            let body: { content?: unknown };
+            try {
+                body = await readJson<{ content?: unknown }>(request, {
+                    maxBytes: CONFIG_WRITE_BODY_LIMIT,
+                });
+            } catch (error) {
+                return json(
+                    { error: errorMessage(error, "Invalid JSON") },
+                    { status: httpStatusCode(error) }
+                );
+            }
             if (body.content === undefined)
                 return json({ error: "Content required" }, { status: 400 });
             if (
