@@ -12,7 +12,7 @@ import {
 
 const testState = { temporaryRoot: "" };
 
-async function makeFifo(filePath: string): Promise<void> {
+function makeFifo(filePath: string): void {
     const result = Bun.spawnSync(["mkfifo", filePath], {
         stderr: "pipe",
         stdout: "pipe",
@@ -57,23 +57,26 @@ describe("guarded writes", () => {
         await expect(fs.readFile(target, "utf8")).resolves.toBe("old");
     });
 
-    it("rejects special-file destinations", async () => {
-        const directFifo = path.join(testState.temporaryRoot, "direct.fifo");
-        const anchoredFifo = path.join(testState.temporaryRoot, "anchored.fifo");
-        await makeFifo(directFifo);
-        await makeFifo(anchoredFifo);
+    it.skipIf(process.platform === "win32")(
+        "rejects special-file destinations",
+        async () => {
+            const directFifo = path.join(testState.temporaryRoot, "direct.fifo");
+            const anchoredFifo = path.join(testState.temporaryRoot, "anchored.fifo");
+            makeFifo(directFifo);
+            makeFifo(anchoredFifo);
 
-        await expect(
-            writeTextNoFollowGuarded(guardedPath(directFifo), "new")
-        ).rejects.toThrow();
-        await expect(
-            writeTextNoFollowAnchoredGuarded(
-                guardedPath(testState.temporaryRoot),
-                "anchored.fifo",
-                "new"
-            )
-        ).rejects.toThrow();
-    });
+            await expect(
+                writeTextNoFollowGuarded(guardedPath(directFifo), "new")
+            ).rejects.toThrow();
+            await expect(
+                writeTextNoFollowAnchoredGuarded(
+                    guardedPath(testState.temporaryRoot),
+                    "anchored.fifo",
+                    "new"
+                )
+            ).rejects.toThrow();
+        }
+    );
 
     it("preserves existing destination modes", async () => {
         const directFile = path.join(testState.temporaryRoot, "direct.txt");

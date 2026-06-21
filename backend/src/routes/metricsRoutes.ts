@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import os from "node:os";
 
 import gateway from "../gateway.ts";
@@ -82,7 +82,7 @@ async function getNetworkMetrics(): Promise<NetworkMetrics> {
     if (os.platform() === "linux") {
         try {
             const preferredInterface = "enp0s6";
-            const availableInterfaces = readdirSync("/sys/class/net");
+            const availableInterfaces = await readdir("/sys/class/net");
             const interfaces = availableInterfaces.includes(preferredInterface)
                 ? [preferredInterface]
                 : availableInterfaces.filter((name) => name !== "lo");

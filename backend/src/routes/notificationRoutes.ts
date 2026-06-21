@@ -80,7 +80,7 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 
 function validId(value: string | undefined): number | null {
     const id = Number(value);
-    return Number.isSafeInteger(id) && Number.isFinite(id) && id > 0 ? id : null;
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
 export const notificationRoutes = {

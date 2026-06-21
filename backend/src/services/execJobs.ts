@@ -146,8 +146,15 @@ function resolveCwd(cwd: string | undefined): string {
         throw new ExecValidationError("cwd must be an absolute path");
     }
     try {
-        return fs.realpathSync(cwd);
+        const resolvedCwd = fs.realpathSync(cwd);
+        if (!fs.statSync(resolvedCwd).isDirectory()) {
+            throw new ExecValidationError("cwd must be a directory");
+        }
+        return resolvedCwd;
     } catch (error) {
+        if (error instanceof ExecValidationError) {
+            throw error;
+        }
         const code = (error as NodeJS.ErrnoException).code;
         if (code === "ENOENT" || code === "ENOTDIR") {
             throw new ExecValidationError("cwd does not exist");

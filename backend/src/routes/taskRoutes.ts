@@ -701,15 +701,19 @@ export const taskRoutes = {
                 .prepare("SELECT id FROM task_updates WHERE id = ? AND task_id = ?")
                 .get(updateId, id);
             if (!existing) return json({ error: "Update not found" }, { status: 404 });
-            database.transaction(() => {
-                database
-                    .prepare("DELETE FROM task_updates WHERE id = ? AND task_id = ?")
-                    .run(updateId, id);
-                database
-                    .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
-                    .run(nowIso(), id);
-            })();
-            return json({ isOk: true });
+            try {
+                database.transaction(() => {
+                    database
+                        .prepare("DELETE FROM task_updates WHERE id = ? AND task_id = ?")
+                        .run(updateId, id);
+                    database
+                        .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
+                        .run(nowIso(), id);
+                })();
+                return json({ isOk: true });
+            } catch (error) {
+                return taskRouteError(error);
+            }
         },
     },
 } as const;

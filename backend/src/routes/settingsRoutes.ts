@@ -190,9 +190,15 @@ export const settingsRoutes = {
                     );
                 }
             } catch (error) {
+                const status = httpStatusCode(error);
                 return json(
-                    { error: errorMessage(error, "Invalid JSON") },
-                    { status: httpStatusCode(error) }
+                    {
+                        error:
+                            status >= 500
+                                ? "Internal server error"
+                                : errorMessage(error, "Invalid JSON"),
+                    },
+                    { status }
                 );
             }
 

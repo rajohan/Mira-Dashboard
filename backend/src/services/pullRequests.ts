@@ -599,22 +599,25 @@ async function runGhJsonLines<T>(
         let isSettled = false;
         let forceKillTimer: NodeJS.Timeout | null = null;
         let isPreserveForceKillTimer = false;
+        const terminateGhProcess = (signal: NodeJS.Signals) => {
+            try {
+                killProcessGroup(child, signal);
+            } catch {
+                // The process may already have exited or the process group may be gone.
+            }
+        };
         const armForceKillTimer = () => {
             if (forceKillTimer) {
                 return;
             }
 
             forceKillTimer = setTimeout(() => {
-                try {
-                    killProcessGroup(child, "SIGKILL");
-                } catch {
-                    // Process may already have exited after the initial termination signal.
-                }
+                terminateGhProcess("SIGKILL");
             }, 5_000);
             forceKillTimer.unref();
         };
         const timeout = setTimeout(() => {
-            killProcessGroup(child, "SIGTERM");
+            terminateGhProcess("SIGTERM");
             armForceKillTimer();
             isPreserveForceKillTimer = true;
             settle(() => reject(new Error("GitHub CLI command timed out")), {
@@ -654,7 +657,7 @@ async function runGhJsonLines<T>(
                 const lines = stdoutBuffer.split("\n");
                 stdoutBuffer = lines.pop() || "";
                 if (Buffer.byteLength(stdoutBuffer, "utf8") > MAX_JSON_LINE_LENGTH) {
-                    killProcessGroup(child, "SIGTERM");
+                    terminateGhProcess("SIGTERM");
                     armForceKillTimer();
                     settle(
                         () => reject(new Error("GitHub CLI JSON line was too large")),
@@ -662,34 +665,32 @@ async function runGhJsonLines<T>(
                             keepForceKillTimer: true,
                         }
                     );
-                } else {
-                    try {
-                        for (const line of lines) {
-                            if (Buffer.byteLength(line, "utf8") > MAX_JSON_LINE_LENGTH) {
-                                killProcessGroup(child, "SIGTERM");
-                                armForceKillTimer();
-                                settle(
-                                    () =>
-                                        reject(
-                                            new Error(
-                                                "GitHub CLI JSON line was too large"
-                                            )
-                                        ),
-                                    {
-                                        keepForceKillTimer: true,
-                                    }
-                                );
-                                return;
-                            }
-                            parseGhJsonLine(line, rows);
+                    return;
+                }
+                try {
+                    for (const line of lines) {
+                        if (Buffer.byteLength(line, "utf8") > MAX_JSON_LINE_LENGTH) {
+                            terminateGhProcess("SIGTERM");
+                            armForceKillTimer();
+                            settle(
+                                () =>
+                                    reject(
+                                        new Error("GitHub CLI JSON line was too large")
+                                    ),
+                                {
+                                    keepForceKillTimer: true,
+                                }
+                            );
+                            return;
                         }
-                    } catch (error) {
-                        killProcessGroup(child, "SIGTERM");
-                        armForceKillTimer();
-                        settle(() => reject(toGhJsonParseError(error)), {
-                            keepForceKillTimer: true,
-                        });
+                        parseGhJsonLine(line, rows);
                     }
+                } catch (error) {
+                    terminateGhProcess("SIGTERM");
+                    armForceKillTimer();
+                    settle(() => reject(toGhJsonParseError(error)), {
+                        keepForceKillTimer: true,
+                    });
                 }
             }
         );
