@@ -41,20 +41,11 @@ async function refreshCacheKey(key: string) {
     const refreshedKeys = refreshed
         .map((refreshedKey) => stringFallback(refreshedKey).trim())
         .filter((refreshedKey) => refreshedKey !== "");
-    const refreshedKey =
-        refreshedKeys.find((candidate) => candidate === key) ?? refreshedKeys[0] ?? "";
+    const refreshedKey = refreshedKeys.find((candidate) => candidate === key);
     if (!refreshedKey) {
         throw Object.assign(new Error(`No cache keys refreshed for: ${key}`), {
-            statusCode: 404,
+            statusCode: refreshedKeys.length > 0 ? 400 : 404,
         });
-    }
-    if (refreshedKeys.length > 1 && !refreshedKeys.includes(key)) {
-        throw Object.assign(
-            new Error(`Cache refresh returned multiple keys for: ${key}`),
-            {
-                statusCode: 400,
-            }
-        );
     }
     const row = await getCacheEntry(refreshedKey);
     if (!row) {

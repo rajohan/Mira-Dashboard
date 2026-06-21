@@ -411,28 +411,30 @@ export const taskRoutes = {
                 body.automation === undefined
                     ? existing.automation_json
                     : normalizeAutomationInput(body.automation);
-            database
-                .prepare(
-                    `UPDATE tasks
-                     SET title = ?, body = ?, status = ?, priority = ?, labels_json = ?, automation_json = ?, updated_at = ?
-                     WHERE id = ?`
-                )
-                .run(
+            database.transaction(() => {
+                database
+                    .prepare(
+                        `UPDATE tasks
+                         SET title = ?, body = ?, status = ?, priority = ?, labels_json = ?, automation_json = ?, updated_at = ?
+                         WHERE id = ?`
+                    )
+                    .run(
+                        title,
+                        taskBody,
+                        status,
+                        priority,
+                        JSON.stringify(labels),
+                        automationJson,
+                        nowIso(),
+                        id
+                    );
+                recordEvent(id, "updated", {
                     title,
-                    taskBody,
                     status,
                     priority,
-                    JSON.stringify(labels),
-                    automationJson,
-                    nowIso(),
-                    id
-                );
-            recordEvent(id, "updated", {
-                title,
-                status,
-                priority,
-                assignee: existing.assignee,
-            });
+                    assignee: existing.assignee,
+                });
+            })();
             if (existing.assignee === TASK_ASSIGNEES.mira.id) {
                 void notifyMira("updated", { id, title });
             }
@@ -466,13 +468,16 @@ export const taskRoutes = {
             if (!isValidAssignee(body.assignee)) {
                 return json({ error: INVALID_ASSIGNEE_MESSAGE }, { status: 400 });
             }
+            const assignee = body.assignee;
             const existing = taskById(id);
             if (!existing) return json({ error: "Task not found" }, { status: 404 });
-            database
-                .prepare("UPDATE tasks SET assignee = ?, updated_at = ? WHERE id = ?")
-                .run(body.assignee, nowIso(), id);
-            recordEvent(id, "assigned", { assignee: body.assignee });
-            if (body.assignee === TASK_ASSIGNEES.mira.id) {
+            database.transaction(() => {
+                database
+                    .prepare("UPDATE tasks SET assignee = ?, updated_at = ? WHERE id = ?")
+                    .run(assignee, nowIso(), id);
+                recordEvent(id, "assigned", { assignee });
+            })();
+            if (assignee === TASK_ASSIGNEES.mira.id) {
                 void notifyMira("assigned", { id, title: existing.title });
             }
             return json(toFrontendTask(taskById(id) as DatabaseTask));
@@ -496,12 +501,14 @@ export const taskRoutes = {
                 ),
                 status,
             ];
-            database
-                .prepare(
-                    "UPDATE tasks SET status = ?, labels_json = ?, updated_at = ? WHERE id = ?"
-                )
-                .run(status, JSON.stringify(labels), nowIso(), id);
-            recordEvent(id, "moved", { status });
+            database.transaction(() => {
+                database
+                    .prepare(
+                        "UPDATE tasks SET status = ?, labels_json = ?, updated_at = ? WHERE id = ?"
+                    )
+                    .run(status, JSON.stringify(labels), nowIso(), id);
+                recordEvent(id, "moved", { status });
+            })();
             return json(toFrontendTask(taskById(id) as DatabaseTask));
         },
     },
@@ -533,16 +540,20 @@ export const taskRoutes = {
             if (!database.prepare("SELECT id FROM tasks WHERE id = ?").get(id)) {
                 return json({ error: "Task not found" }, { status: 404 });
             }
+            const author = body.author;
             const createdAt = nowIso();
-            const result = database
-                .prepare(
-                    `INSERT INTO task_updates (task_id, author, message_md, created_at)
-                     VALUES (?, ?, ?, ?)`
-                )
-                .run(id, body.author, messageMd, createdAt);
-            database
-                .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
-                .run(createdAt, id);
+            const result = database.transaction(() => {
+                const insertResult = database
+                    .prepare(
+                        `INSERT INTO task_updates (task_id, author, message_md, created_at)
+                         VALUES (?, ?, ?, ?)`
+                    )
+                    .run(id, author, messageMd, createdAt);
+                database
+                    .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
+                    .run(createdAt, id);
+                return insertResult;
+            })();
             const row = database
                 .prepare(
                     "SELECT id, task_id, author, message_md, created_at FROM task_updates WHERE id = ?"
@@ -574,18 +585,21 @@ export const taskRoutes = {
             ) {
                 return json({ error: "Invalid update payload" }, { status: 400 });
             }
+            const author = body.author;
             const existing = database
                 .prepare("SELECT id FROM task_updates WHERE id = ? AND task_id = ?")
                 .get(updateId, id);
             if (!existing) return json({ error: "Update not found" }, { status: 404 });
-            database
-                .prepare(
-                    "UPDATE task_updates SET author = ?, message_md = ? WHERE id = ? AND task_id = ?"
-                )
-                .run(body.author, messageMd, updateId, id);
-            database
-                .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
-                .run(nowIso(), id);
+            database.transaction(() => {
+                database
+                    .prepare(
+                        "UPDATE task_updates SET author = ?, message_md = ? WHERE id = ? AND task_id = ?"
+                    )
+                    .run(author, messageMd, updateId, id);
+                database
+                    .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
+                    .run(nowIso(), id);
+            })();
             const row = database
                 .prepare(
                     "SELECT id, task_id, author, message_md, created_at FROM task_updates WHERE id = ?"
@@ -604,12 +618,14 @@ export const taskRoutes = {
                 .prepare("SELECT id FROM task_updates WHERE id = ? AND task_id = ?")
                 .get(updateId, id);
             if (!existing) return json({ error: "Update not found" }, { status: 404 });
-            database
-                .prepare("DELETE FROM task_updates WHERE id = ? AND task_id = ?")
-                .run(updateId, id);
-            database
-                .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
-                .run(nowIso(), id);
+            database.transaction(() => {
+                database
+                    .prepare("DELETE FROM task_updates WHERE id = ? AND task_id = ?")
+                    .run(updateId, id);
+                database
+                    .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
+                    .run(nowIso(), id);
+            })();
             return json({ isOk: true });
         },
     },

@@ -182,6 +182,7 @@ function parameters(request: Request): Record<string, string | undefined> {
 
 function queryNumber(request: Request, key: string, fallback: number): number {
     const rawValue = new URL(request.url).searchParams.get(key);
+    if (rawValue === null) return fallback;
     const parsed = Number(rawValue);
     return Number.isFinite(parsed) ? parsed : fallback;
 }
@@ -660,7 +661,7 @@ function settleDockerExecJob(containerId: string, command: string, jobId: string
                 containerId,
                 "sh",
                 "-lc",
-                String.raw`printf '${pidMarker}%s\n' "$$"; exec sh -lc "$MIRA_DASHBOARD_EXEC_COMMAND"`,
+                String.raw`setsid sh -lc 'printf '\''${pidMarker}%s\n'\'' "$$"; exec sh -lc "$MIRA_DASHBOARD_EXEC_COMMAND"'`,
             ],
             {
                 cwd: getDockerRoot(),
@@ -841,7 +842,7 @@ export const dockerRoutes = {
                     job.containerId,
                     "kill",
                     "-TERM",
-                    String(job.containerPid),
+                    `-${job.containerPid}`,
                 ]).catch((error: unknown) => {
                     job.stderr = trimOutput(
                         `${job.stderr}\n${errorMessage(error, "Failed to stop in-container process")}`.trim()

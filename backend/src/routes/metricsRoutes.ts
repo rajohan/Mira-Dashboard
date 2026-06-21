@@ -77,6 +77,7 @@ const metricsRouteState: {
 async function getNetworkMetrics(): Promise<NetworkMetrics> {
     let downloadBytes = 0;
     let uploadBytes = 0;
+    let didReadNetwork = os.platform() !== "linux";
 
     if (os.platform() === "linux") {
         try {
@@ -96,6 +97,7 @@ async function getNetworkMetrics(): Promise<NetworkMetrics> {
                 if (!Number.isNaN(rxBytes)) downloadBytes += rxBytes;
                 if (!Number.isNaN(txBytes)) uploadBytes += txBytes;
             }
+            didReadNetwork = true;
         } catch (error) {
             console.error("[Metrics] network error:", (error as Error).message);
         }
@@ -103,6 +105,9 @@ async function getNetworkMetrics(): Promise<NetworkMetrics> {
         // Network byte counters are currently supported through Linux /sys only.
     }
 
+    if (!didReadNetwork) {
+        return { downloadMbps: 0, uploadMbps: 0 };
+    }
     const timestamp = Date.now();
     if (!metricsRouteState.previousNetworkSample) {
         metricsRouteState.previousNetworkSample = {

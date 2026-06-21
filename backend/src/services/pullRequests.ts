@@ -654,6 +654,22 @@ async function runGhJsonLines<T>(
                 } else {
                     try {
                         for (const line of lines) {
+                            if (Buffer.byteLength(line, "utf8") > MAX_JSON_LINE_LENGTH) {
+                                child.kill("SIGTERM");
+                                armForceKillTimer();
+                                settle(
+                                    () =>
+                                        reject(
+                                            new Error(
+                                                "GitHub CLI JSON line was too large"
+                                            )
+                                        ),
+                                    {
+                                        keepForceKillTimer: true,
+                                    }
+                                );
+                                return;
+                            }
                             parseGhJsonLine(line, rows);
                         }
                     } catch (error) {

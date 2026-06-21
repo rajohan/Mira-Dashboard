@@ -69,6 +69,10 @@ function isHidden(name: string): boolean {
     );
 }
 
+function hasHiddenSegment(relativePath: string): boolean {
+    return relativePath.split(/[\\/]+/u).some((segment) => isHidden(segment));
+}
+
 function isBinaryContent(content: string): boolean {
     for (let index = 0; index < Math.min(content.length, 8000); index += 1) {
         if (content.codePointAt(index) === 0) return true;
@@ -119,6 +123,7 @@ function listFiles(directoryPath: string) {
         }
         throw error;
     }
+    if (hasHiddenSegment(directoryPath)) return null;
     const fullPath = safePathWithinRoot(directoryPath || ".", root);
     if (!fullPath) return null;
     const resolved = safePathWithinRoot(fs.realpathSync(fullPath), root);
@@ -192,6 +197,12 @@ export const fileRoutes = {
             if (relativePath === null) {
                 return json({ error: "Malformed file path" }, { status: 400 });
             }
+            if (hasHiddenSegment(relativePath)) {
+                return json(
+                    { error: "Access denied: hidden paths are not allowed" },
+                    { status: 403 }
+                );
+            }
             let root: string;
             try {
                 root = fs.realpathSync(workspaceRoot());
@@ -238,11 +249,22 @@ export const fileRoutes = {
                 }
                 const file = await openReadNoFollowGuarded(guardedPath(fullPath));
                 let buffer: Buffer;
+                let openedStat: fs.Stats;
                 try {
                     if (!isOpenFileWithinRoot(file, root)) {
                         return json({ error: "Access denied" }, { status: 403 });
                     }
-                    buffer = readFromOpenFile(file.fd, stat.size);
+                    openedStat = await file.stat();
+                    if (!openedStat.isFile() || openedStat.nlink > 1) {
+                        return json({ error: "Access denied" }, { status: 403 });
+                    }
+                    if (openedStat.size > MAX_FILE_SIZE) {
+                        return json(
+                            { error: "Image file is too large to preview" },
+                            { status: 413 }
+                        );
+                    }
+                    buffer = readFromOpenFile(file.fd, openedStat.size);
                 } finally {
                     await file.close();
                 }
@@ -251,18 +273,26 @@ export const fileRoutes = {
                     isBinary: true,
                     isImage: true,
                     mimeType,
-                    modified: stat.mtime.toISOString(),
+                    modified: openedStat.mtime.toISOString(),
                     path: relativePath,
-                    size: stat.size,
+                    size: openedStat.size,
                 });
             }
             const file = await openReadNoFollowGuarded(guardedPath(fullPath));
             let buffer: Buffer;
+            let openedStat: fs.Stats;
             try {
                 if (!isOpenFileWithinRoot(file, root)) {
                     return json({ error: "Access denied" }, { status: 403 });
                 }
-                buffer = readFromOpenFile(file.fd, Math.min(stat.size, MAX_FILE_SIZE));
+                openedStat = await file.stat();
+                if (!openedStat.isFile() || openedStat.nlink > 1) {
+                    return json({ error: "Access denied" }, { status: 403 });
+                }
+                buffer = readFromOpenFile(
+                    file.fd,
+                    Math.min(openedStat.size, MAX_FILE_SIZE)
+                );
             } finally {
                 await file.close();
             }
@@ -271,10 +301,10 @@ export const fileRoutes = {
             return json({
                 content: isBinary ? "[Binary file]" : content,
                 isBinary,
-                modified: stat.mtime.toISOString(),
+                modified: openedStat.mtime.toISOString(),
                 path: relativePath,
-                size: stat.size,
-                truncated: stat.size > MAX_FILE_SIZE || undefined,
+                size: openedStat.size,
+                truncated: openedStat.size > MAX_FILE_SIZE || undefined,
             });
         },
 
@@ -282,6 +312,12 @@ export const fileRoutes = {
             const relativePath = filePathFromRequest(request);
             if (relativePath === null) {
                 return json({ error: "Malformed file path" }, { status: 400 });
+            }
+            if (hasHiddenSegment(relativePath)) {
+                return json(
+                    { error: "Access denied: hidden paths are not allowed" },
+                    { status: 403 }
+                );
             }
             const body = await readJson<{ content?: unknown }>(request, {
                 maxBytes: JSON_WRITE_BODY_LIMIT,

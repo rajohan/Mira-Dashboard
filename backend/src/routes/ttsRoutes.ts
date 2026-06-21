@@ -101,7 +101,12 @@ export const ttsRoutes = {
                 });
             } catch (error) {
                 return json(
-                    { error: (error as Error).message || "Failed to generate speech" },
+                    {
+                        error:
+                            error instanceof Error && error.message
+                                ? error.message
+                                : "Failed to generate speech",
+                    },
                     { status: 500 }
                 );
             } finally {

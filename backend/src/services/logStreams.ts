@@ -110,8 +110,9 @@ async function pollLogFile(): Promise<void> {
         const stat = await file.stat();
 
         if (logFile !== logsRouteState.lastLogFile) {
+            const isInitialStartup = !logsRouteState.lastLogFile;
             logsRouteState.lastLogFile = logFile;
-            logsRouteState.lastLogSize = stat.size;
+            logsRouteState.lastLogSize = isInitialStartup ? stat.size : 0;
             logsRouteState.pendingFragment = "";
         }
 

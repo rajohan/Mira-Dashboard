@@ -53,7 +53,7 @@ export function spawnProcess(
     return Bun.spawn({
         cmd: [executable, ...arguments_],
         cwd: options.cwd,
-        detached: options.detached,
+        detached: options.detached ?? true,
         env: options.env,
         stderr: "pipe",
         stdin: "ignore",

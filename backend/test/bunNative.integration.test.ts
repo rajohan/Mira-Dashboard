@@ -33,6 +33,14 @@ function json(method: string, body: unknown): RequestInit {
     return { body: JSON.stringify(body), method };
 }
 
+function canRemoveTemporaryRoot(temporaryRoot: string): boolean {
+    return (
+        temporaryRoot !== "" &&
+        path.isAbsolute(temporaryRoot) &&
+        path.basename(temporaryRoot).startsWith("mira-dashboard-bun-test-")
+    );
+}
+
 describe("Bun-native dashboard backend", () => {
     beforeAll(async () => {
         state.temporaryRoot = await fs.mkdtemp(
@@ -139,7 +147,9 @@ describe("Bun-native dashboard backend", () => {
                 }
             }
         }
-        await fs.rm(state.temporaryRoot, { recursive: true, force: true });
+        if (canRemoveTemporaryRoot(state.temporaryRoot)) {
+            await fs.rm(state.temporaryRoot, { recursive: true, force: true });
+        }
     });
 
     it("reports health and auth bootstrap state", async () => {

@@ -168,9 +168,11 @@ export function execErrorResponse(error: unknown): { error: string; status: numb
     if (error instanceof ExecValidationError) {
         return { error: error.message, status: 400 };
     }
-    const statusCode = Number((error as { statusCode?: unknown }).statusCode);
-    if (Number.isSafeInteger(statusCode) && statusCode >= 400 && statusCode < 600) {
-        return { error: errorMessage(error, "request failed"), status: statusCode };
+    if (error != null) {
+        const statusCode = Number((error as { statusCode?: unknown }).statusCode);
+        if (Number.isSafeInteger(statusCode) && statusCode >= 400 && statusCode < 600) {
+            return { error: errorMessage(error, "request failed"), status: statusCode };
+        }
     }
     const message =
         error instanceof Error

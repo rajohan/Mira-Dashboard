@@ -153,7 +153,10 @@ async function toggleSkill(
     isEnabled: boolean,
     baseHash?: string
 ): Promise<void> {
-    await apiPost(`/skills/${name}`, { __hash: baseHash, enabled: isEnabled });
+    await apiPost(`/skills/${encodeURIComponent(name)}`, {
+        __hash: baseHash,
+        enabled: isEnabled,
+    });
 }
 
 /** Performs restart gateway. */
@@ -196,10 +199,7 @@ export function useUpdateConfig() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (config: OpenClawConfig) => {
-            const current = queryClient.getQueryData<OpenClawConfig>(configKeys.config());
-            return updateConfig(config, current?.__hash);
-        },
+        mutationFn: (config: OpenClawConfig) => updateConfig(config, config.__hash),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: configKeys.config() });
         },
