@@ -3,7 +3,12 @@ import path from "node:path";
 
 import { database, miraDatabasePath } from "../database.ts";
 import { errorMessage } from "../lib/errors.ts";
-import { pipeProcessOutput, runProcess, spawnProcess } from "../lib/processes.ts";
+import {
+    killProcessGroup,
+    pipeProcessOutput,
+    runProcess,
+    spawnProcess,
+} from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 
 function dateToISOString(date: Date): string {
@@ -599,11 +604,17 @@ async function runGhJsonLines<T>(
                 return;
             }
 
-            forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+            forceKillTimer = setTimeout(() => {
+                try {
+                    killProcessGroup(child, "SIGKILL");
+                } catch {
+                    // Process may already have exited after the initial termination signal.
+                }
+            }, 5_000);
             forceKillTimer.unref();
         };
         const timeout = setTimeout(() => {
-            child.kill("SIGTERM");
+            killProcessGroup(child, "SIGTERM");
             armForceKillTimer();
             isPreserveForceKillTimer = true;
             settle(() => reject(new Error("GitHub CLI command timed out")), {
@@ -643,7 +654,7 @@ async function runGhJsonLines<T>(
                 const lines = stdoutBuffer.split("\n");
                 stdoutBuffer = lines.pop() || "";
                 if (Buffer.byteLength(stdoutBuffer, "utf8") > MAX_JSON_LINE_LENGTH) {
-                    child.kill("SIGTERM");
+                    killProcessGroup(child, "SIGTERM");
                     armForceKillTimer();
                     settle(
                         () => reject(new Error("GitHub CLI JSON line was too large")),
@@ -655,7 +666,7 @@ async function runGhJsonLines<T>(
                     try {
                         for (const line of lines) {
                             if (Buffer.byteLength(line, "utf8") > MAX_JSON_LINE_LENGTH) {
-                                child.kill("SIGTERM");
+                                killProcessGroup(child, "SIGTERM");
                                 armForceKillTimer();
                                 settle(
                                     () =>
@@ -673,7 +684,7 @@ async function runGhJsonLines<T>(
                             parseGhJsonLine(line, rows);
                         }
                     } catch (error) {
-                        child.kill("SIGTERM");
+                        killProcessGroup(child, "SIGTERM");
                         armForceKillTimer();
                         settle(() => reject(toGhJsonParseError(error)), {
                             keepForceKillTimer: true,

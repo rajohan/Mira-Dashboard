@@ -473,24 +473,33 @@ export async function writeTextNoFollowAnchoredGuarded(
         Path.join(parentPath.toString(), `.${basename}.${Bun.randomUUIDv7()}.tmp`)
     );
     let existingMode: number | undefined;
-    if (options.mode === undefined) {
-        try {
-            const existingStat = await Fs.promises.stat(destinationPath);
-            if (existingStat.nlink > 1) {
-                throw Object.assign(new Error("Hard-linked files are not supported"), {
-                    code: "EMLINK",
-                });
-            }
-            existingMode = existingStat.mode;
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-                throw error;
+
+    try {
+        if (options.mode === undefined) {
+            try {
+                const existingStat = await Fs.promises.stat(destinationPath);
+                if (existingStat.nlink > 1) {
+                    throw Object.assign(
+                        new Error("Hard-linked files are not supported"),
+                        {
+                            code: "EMLINK",
+                        }
+                    );
+                }
+                existingMode = existingStat.mode;
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                    throw error;
+                }
             }
         }
+    } catch (error) {
+        await Promise.allSettled(handles.reverse().map((handle) => handle.close()));
+        throw error;
     }
+
     const fileMode = (options.mode ?? existingMode ?? 0o666) & 0o777;
     let isTemporaryCreated = false;
-
     try {
         const file = await Fs.promises.open(
             temporaryPath,

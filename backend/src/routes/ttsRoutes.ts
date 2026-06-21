@@ -75,12 +75,12 @@ export const ttsRoutes = {
 
                 if (!elevenLabsResponse.ok) {
                     const errorText = await readResponseTextFallback(elevenLabsResponse);
+                    console.error("[TTS] ElevenLabs request failed:", {
+                        body: errorText,
+                        status: elevenLabsResponse.status,
+                    });
                     return json(
-                        {
-                            error:
-                                errorText ||
-                                `ElevenLabs TTS failed (${elevenLabsResponse.status})`,
-                        },
+                        { error: "TTS service temporarily unavailable" },
                         { status: elevenLabsResponse.status }
                     );
                 }
@@ -95,15 +95,11 @@ export const ttsRoutes = {
                 if (controller.signal.aborted) {
                     return json({ error: "TTS request timed out" }, { status: 504 });
                 }
-                return json(
-                    {
-                        error:
-                            error instanceof Error && error.message
-                                ? error.message
-                                : "Failed to generate speech",
-                    },
-                    { status: 500 }
+                console.error(
+                    "[TTS] Speech generation failed:",
+                    error instanceof Error ? error.message : String(error)
                 );
+                return json({ error: "Failed to generate speech" }, { status: 500 });
             } finally {
                 clearTimeout(timer);
             }

@@ -70,12 +70,20 @@ async function transcribeWithElevenLabs(
     }
 
     try {
-        const response = await fetch(ELEVENLABS_API_URL, {
-            body: formData,
-            headers: { "xi-api-key": apiKey },
-            method: "POST",
-            signal: controller.signal,
-        });
+        let response: Response;
+        try {
+            response = await fetch(ELEVENLABS_API_URL, {
+                body: formData,
+                headers: { "xi-api-key": apiKey },
+                method: "POST",
+                signal: controller.signal,
+            });
+        } catch (error) {
+            if (error instanceof Error && error.name === "AbortError") {
+                throw new HttpError("STT request timed out", 504);
+            }
+            throw error;
+        }
         if (!response.ok) {
             const errorText = await readResponseTextFallback(response);
             throw new Error(
@@ -98,15 +106,13 @@ export const sttRoutes = {
                 );
             }
 
-            let hasTranscriptionLock = false;
             try {
-                sttRouteState.isActiveTranscription = true;
-                hasTranscriptionLock = true;
                 const audioBuffer = await readRequestBytes(request, MAX_AUDIO_BYTES);
                 if (audioBuffer.length === 0) {
                     return json({ error: "Missing audio payload" }, { status: 400 });
                 }
 
+                sttRouteState.isActiveTranscription = true;
                 const text = await transcribeWithElevenLabs(
                     audioBuffer,
                     request.headers.get("content-type") || undefined
@@ -122,7 +128,7 @@ export const sttRoutes = {
                 );
                 return json({ error: "Failed to transcribe audio" }, { status: 500 });
             } finally {
-                if (hasTranscriptionLock) {
+                if (sttRouteState.isActiveTranscription) {
                     sttRouteState.isActiveTranscription = false;
                 }
             }

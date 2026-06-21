@@ -625,6 +625,7 @@ function updaterResultCode(steps: DockerUpdaterStepResult[]): string {
 }
 
 function statusCodeFromError(error: unknown): number {
+    if (!error || typeof error !== "object") return 500;
     const statusCode = Number((error as { statusCode?: unknown }).statusCode);
     return Number.isSafeInteger(statusCode) && statusCode >= 400 && statusCode < 600
         ? statusCode
