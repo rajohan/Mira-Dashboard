@@ -141,7 +141,10 @@ export function sessionIdFromCookie(request: Request): string | null {
 }
 
 export function authUser(request: Request, server: Server<unknown>): AuthUser | null {
-    if (isLoopbackRequest(request, server)) {
+    const hasForwardedClient =
+        Boolean(request.headers.get("x-forwarded-for")) ||
+        Boolean(request.headers.get("x-real-ip"));
+    if (!hasForwardedClient && isLoopbackRequest(request, server)) {
         return { id: 0, username: "mira-local" };
     }
     const sessionId = sessionIdFromCookie(request);

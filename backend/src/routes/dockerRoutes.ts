@@ -22,7 +22,6 @@ import {
 import {
     createManualScheduledJobRun,
     finishScheduledJobRun,
-    runScheduledJob,
 } from "../services/scheduledJobs.ts";
 
 const dockerBin = nonEmptyEnvironmentFallback("MIRA_DOCKER_BIN", "docker");
@@ -598,12 +597,6 @@ function updaterResultCode(steps: DockerUpdaterStepResult[]): string {
     return steps.find((step) => !step.isOk)?.code ?? "OK";
 }
 
-function updaterStepsFromOutput(
-    output: Record<string, unknown>
-): DockerUpdaterStepResult[] {
-    return Array.isArray(output.steps) ? (output.steps as DockerUpdaterStepResult[]) : [];
-}
-
 function statusCodeFromError(error: unknown): number {
     const statusCode = Number((error as { statusCode?: unknown }).statusCode);
     return Number.isSafeInteger(statusCode) && statusCode >= 400 && statusCode < 600
@@ -656,22 +649,35 @@ function activeDockerExecJobCount(): number {
 
 function settleDockerExecJob(containerId: string, command: string, jobId: string): void {
     const pidMarker = `__MIRA_DOCKER_EXEC_PID_${jobId}:`;
-    const child = spawnProcess(
-        dockerBin,
-        [
-            "exec",
-            "-e",
-            `MIRA_DASHBOARD_EXEC_COMMAND=${command}`,
-            containerId,
-            "sh",
-            "-lc",
-            String.raw`printf '${pidMarker}%s\n' "$$"; exec sh -lc "$MIRA_DASHBOARD_EXEC_COMMAND"`,
-        ],
-        {
-            cwd: getDockerRoot(),
-            env: process.env,
+    let child: BunProcess;
+    try {
+        child = spawnProcess(
+            dockerBin,
+            [
+                "exec",
+                "-e",
+                `MIRA_DASHBOARD_EXEC_COMMAND=${command}`,
+                containerId,
+                "sh",
+                "-lc",
+                String.raw`printf '${pidMarker}%s\n' "$$"; exec sh -lc "$MIRA_DASHBOARD_EXEC_COMMAND"`,
+            ],
+            {
+                cwd: getDockerRoot(),
+                env: process.env,
+            }
+        );
+    } catch (error) {
+        const job = dockerExecJobs.get(jobId);
+        if (job) {
+            job.status = "done";
+            job.code = 1;
+            job.stderr = errorMessage(error, "Docker exec failed");
+            job.endedAt = Date.now();
+            cleanupDockerExecJobs();
         }
-    );
+        return;
+    }
     const job = dockerExecJobs.get(jobId);
     if (job) job.process = child;
 
@@ -922,16 +928,36 @@ export const dockerRoutes = {
     },
     "/api/docker/updater/run": {
         POST: async () => {
+            let scheduledRun;
             try {
-                const run = await runScheduledJob("docker.updater");
-                const steps = updaterStepsFromOutput(run.output);
+                scheduledRun = createManualScheduledJobRun("docker.updater");
+            } catch (error) {
+                return json(
+                    { error: errorMessage(error, "Docker updater failed") },
+                    { status: statusCodeFromError(error) }
+                );
+            }
+            try {
+                const steps = await runDockerUpdaterService();
+                finishScheduledJobRun(
+                    scheduledRun,
+                    blockingDockerUpdaterFailures(steps).length === 0
+                        ? "success"
+                        : "failed",
+                    null,
+                    { steps }
+                );
                 return json({
-                    isSuccess:
-                        run.status === "success" &&
-                        blockingDockerUpdaterFailures(steps).length === 0,
+                    isSuccess: blockingDockerUpdaterFailures(steps).length === 0,
                     steps,
                 });
             } catch (error) {
+                finishScheduledJobRun(
+                    scheduledRun,
+                    "failed",
+                    errorMessage(error, "Docker updater failed"),
+                    { steps: [] }
+                );
                 return json(
                     { error: errorMessage(error, "Docker updater failed") },
                     { status: statusCodeFromError(error) }

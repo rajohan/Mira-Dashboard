@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { errorMessage } from "../lib/errors.ts";
 import {
     type BunProcess,
     killProcessGroup,
@@ -70,7 +71,7 @@ const EXECUTABLE_RE = /^(?:[\w./-]+)$/u;
 const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
 const EXEC_ONCE_TIMEOUT_MS = 60_000;
-const SHELL_EXECUTABLES = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh"]);
+const ALLOWED_DIRECT_EXECUTABLES = new Set(["docker", "git", "openclaw"]);
 const jobs = new Map<string, ExecJob>();
 
 function trimOutput(text: string): string {
@@ -105,13 +106,16 @@ function validateExecRequest(payload: unknown): ExecRequest {
             "shell mode is only available for approved ops commands"
         );
     }
+    if (!shell && args === undefined) {
+        throw new ExecValidationError("args are required unless shell mode is enabled");
+    }
     if (args !== undefined && !EXECUTABLE_RE.test(command)) {
         throw new ExecValidationError(
             "command must be an executable path when args are provided"
         );
     }
-    if (args !== undefined && SHELL_EXECUTABLES.has(path.basename(command))) {
-        throw new ExecValidationError("shell interpreters are not allowed with args");
+    if (args !== undefined && !ALLOWED_DIRECT_EXECUTABLES.has(path.basename(command))) {
+        throw new ExecValidationError("command executable is not approved");
     }
     if (args !== undefined && !Array.isArray(args)) {
         throw new ExecValidationError("args must be an array");
@@ -161,6 +165,10 @@ export function execErrorResponse(error: unknown): { error: string; status: numb
     if (error instanceof ExecValidationError) {
         return { error: error.message, status: 400 };
     }
+    const statusCode = Number((error as { statusCode?: unknown }).statusCode);
+    if (Number.isSafeInteger(statusCode) && statusCode >= 400 && statusCode < 600) {
+        return { error: errorMessage(error, "request failed"), status: statusCode };
+    }
     const message =
         error instanceof Error
             ? error.message
@@ -187,8 +195,6 @@ function runExecCommand(
         const commandParts = { args, executable: command };
         childFactory = () =>
             spawnProcess(commandParts.executable, commandParts.args, cwdOption);
-    } else {
-        childFactory = () => spawnProcess("/bin/sh", ["-c", command], cwdOption);
     }
 
     return new Promise((resolve, reject) => {

@@ -154,9 +154,13 @@ function listFiles(directoryPath: string) {
     );
 }
 
-function filePathFromRequest(request: Request): string {
+function filePathFromRequest(request: Request): string | null {
     const url = new URL(request.url);
-    return decodeURIComponent(url.pathname.slice("/api/files/".length));
+    try {
+        return decodeURIComponent(url.pathname.slice("/api/files/".length));
+    } catch {
+        return null;
+    }
 }
 
 export const fileRoutes = {
@@ -185,6 +189,9 @@ export const fileRoutes = {
     "/api/files/*": {
         GET: async (request: Request) => {
             const relativePath = filePathFromRequest(request);
+            if (relativePath === null) {
+                return json({ error: "Malformed file path" }, { status: 400 });
+            }
             let root: string;
             try {
                 root = fs.realpathSync(workspaceRoot());
@@ -273,6 +280,9 @@ export const fileRoutes = {
 
         PUT: async (request: Request) => {
             const relativePath = filePathFromRequest(request);
+            if (relativePath === null) {
+                return json({ error: "Malformed file path" }, { status: 400 });
+            }
             const body = await readJson<{ content?: unknown }>(request, {
                 maxBytes: JSON_WRITE_BODY_LIMIT,
             });

@@ -182,5 +182,16 @@ async function staticResponse(pathname: string): Promise<Response> {
     if (pathname.startsWith("/assets/") || path.extname(pathname)) {
         return new Response("Not found", { status: 404 });
     }
-    return fileResponse(indexPath, "text/html");
+    try {
+        const realIndexPath = await fsp.realpath(indexPath);
+        const relativeRealPath = path.relative(realRoot, realIndexPath);
+        if (relativeRealPath.startsWith("..") || path.isAbsolute(relativeRealPath)) {
+            return new Response("Not found", { status: 404 });
+        }
+        const stat = await fsp.stat(realIndexPath);
+        if (stat.isFile()) return fileResponse(realIndexPath, "text/html");
+    } catch {
+        // Fall through to a generic not-found response.
+    }
+    return new Response("Not found", { status: 404 });
 }

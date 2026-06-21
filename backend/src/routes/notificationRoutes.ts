@@ -81,10 +81,12 @@ function validId(value: string | undefined): number | null {
 export const notificationRoutes = {
     "/api/notifications": {
         GET: (request: Request) => {
-            const limitValue = Number(new URL(request.url).searchParams.get("limit"));
-            const limit = Number.isFinite(limitValue)
-                ? Math.max(1, Math.min(200, Math.floor(limitValue)))
-                : 100;
+            const rawLimit = new URL(request.url).searchParams.get("limit");
+            const limitValue = rawLimit === null ? null : Number(rawLimit);
+            const limit =
+                limitValue !== null && Number.isFinite(limitValue)
+                    ? Math.max(1, Math.min(200, Math.floor(limitValue)))
+                    : 100;
             const unreadCount =
                 (
                     database

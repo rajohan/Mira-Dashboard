@@ -123,10 +123,21 @@ describe("Bun-native dashboard backend", () => {
     afterAll(async () => {
         state.child?.kill("SIGTERM");
         if (state.child) {
-            await Promise.race([
-                state.child.exited,
-                new Promise((resolve) => setTimeout(resolve, 1000)),
+            const gracefulExit = await Promise.race([
+                (async () => {
+                    await state.child!.exited;
+                    return true;
+                })(),
+                new Promise<false>((resolve) => setTimeout(() => resolve(false), 1000)),
             ]);
+            if (!gracefulExit) {
+                state.child.kill("SIGKILL");
+                try {
+                    await state.child.exited;
+                } catch {
+                    // Process termination during cleanup should not fail the suite.
+                }
+            }
         }
         await fs.rm(state.temporaryRoot, { recursive: true, force: true });
     });
@@ -148,11 +159,11 @@ describe("Bun-native dashboard backend", () => {
         });
     });
 
-    it("does not let forwarded headers revoke loopback API access", async () => {
+    it("does not grant loopback API access when forwarded client headers are present", async () => {
         const response = await fetch(`${state.baseUrl}/api/tasks`, {
             headers: { "x-real-ip": "10.0.0.25" },
         });
-        expect(response.status).toBe(200);
+        expect(response.status).toBe(401);
     });
 
     it("rate limits auth routes using native Bun policy", async () => {

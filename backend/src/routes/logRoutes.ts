@@ -10,6 +10,8 @@ function dateToISOString(date: Date): string {
 
 const logsDirectory = "/tmp/openclaw";
 const MIN_LOG_TAIL_BYTES = 64 * 1024;
+const MAX_LOG_LINE_COUNT = 5_000;
+const MAX_LOG_TAIL_BYTES = 2 * 1024 * 1024;
 const LOG_BYTES_PER_REQUESTED_LINE = 1024;
 const LOG_TAIL_READ_CHUNK_BYTES = 64 * 1024;
 const LOG_NOT_FOUND_ERROR_CODES = new Set(["ENOENT", "ENOTDIR"]);
@@ -43,7 +45,9 @@ function parsePositiveLineCount(value: unknown): number | null {
     const trimmed = value.trim();
     if (!/^\d+$/u.test(trimmed)) return null;
     const parsed = Number(trimmed);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    return Number.isFinite(parsed) && parsed > 0
+        ? Math.min(parsed, MAX_LOG_LINE_COUNT)
+        : null;
 }
 
 async function readLogContent(
@@ -61,6 +65,7 @@ async function readLogContent(
 
     const minimumWindowBytes = Math.min(
         stat.size,
+        MAX_LOG_TAIL_BYTES,
         Math.max(MIN_LOG_TAIL_BYTES, lines * LOG_BYTES_PER_REQUESTED_LINE)
     );
     const chunks: Buffer[] = [];
@@ -68,7 +73,11 @@ async function readLogContent(
     let bytesReadTotal = 0;
     let newlineCount = 0;
 
-    while (offset > 0 && (bytesReadTotal < minimumWindowBytes || newlineCount <= lines)) {
+    while (
+        offset > 0 &&
+        bytesReadTotal < MAX_LOG_TAIL_BYTES &&
+        (bytesReadTotal < minimumWindowBytes || newlineCount <= lines)
+    ) {
         const chunkBytes = Math.min(LOG_TAIL_READ_CHUNK_BYTES, offset);
         offset -= chunkBytes;
         const buffer = Buffer.allocUnsafe(chunkBytes);
@@ -145,6 +154,14 @@ async function logContentResponse(request: Request): Promise<Response> {
     if (!logFile) {
         const today = dateToISOString(new Date()).split("T", 1)[0];
         logFile = `openclaw-${today}.log`;
+    }
+    const logFileName = path.basename(logFile);
+    if (
+        logFile !== logFileName ||
+        !logFileName.startsWith("openclaw-") ||
+        !logFileName.endsWith(".log")
+    ) {
+        return json({ error: "Log file not found" }, { status: 404 });
     }
 
     try {

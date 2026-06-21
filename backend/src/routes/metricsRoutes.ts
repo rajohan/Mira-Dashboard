@@ -159,7 +159,9 @@ async function getSystemMetrics(): Promise<SystemMetricsResponse> {
         const dfArguments = isDarwin
             ? ["-k", "/"]
             : ["-B1", "--output=size,used,pcent", "/"];
-        const { code, stderr, stdout } = await runProcess("df", dfArguments);
+        const { code, stderr, stdout } = await runProcess("df", dfArguments, {
+            timeoutMs: 5_000,
+        });
         if (code !== 0) throw new Error(stderr || `df exited ${code}`);
         const parts = (stdout.trim().split("\n").at(-1) ?? "").trim().split(/\s+/u);
         if (isDarwin && parts.length >= 5) {
@@ -253,7 +255,8 @@ export const metricsRoutes = {
                     tokens: getTokenMetrics(),
                 } satisfies MetricsResponse);
             } catch (error) {
-                return json({ error: (error as Error).message }, { status: 500 });
+                console.error("[Metrics] Failed to fetch metrics:", error);
+                return json({ error: "Failed to fetch metrics" }, { status: 500 });
             }
         },
     },

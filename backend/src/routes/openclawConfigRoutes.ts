@@ -257,7 +257,9 @@ export const openclawConfigRoutes = {
                         { status: 400 }
                     );
                 }
-                const result = await patchConfigRaw(JSON.stringify(body));
+                const configBody = { ...(body as Record<string, unknown>) };
+                delete configBody.__hash;
+                const result = await patchConfigRaw(JSON.stringify(configBody));
                 return json({ isOk: true, result });
             } catch (error) {
                 return json(

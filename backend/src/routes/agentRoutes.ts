@@ -90,7 +90,9 @@ export const agentRoutes = {
         GET: (request: Request) => {
             try {
                 const query = new URL(request.url).searchParams;
-                const requestedLimit = Number(query.get("limit")) || 8;
+                const rawLimit = query.get("limit");
+                const parsedLimit = rawLimit === null ? NaN : Number(rawLimit);
+                const requestedLimit = Number.isNaN(parsedLimit) ? 8 : parsedLimit;
                 const limit = Math.max(1, Math.min(20, requestedLimit));
                 closeStaleActiveTasks();
                 return json({

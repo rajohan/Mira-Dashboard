@@ -57,6 +57,30 @@ function validateRelativePath(relativePath: string): string[] {
     return parts;
 }
 
+function assertNoSymlinkAncestors(root: string, destinationPath: string): void {
+    let currentPath = Path.resolve(root);
+    const destinationDirectory = Path.dirname(destinationPath);
+    const relativeDirectory = Path.relative(currentPath, destinationDirectory);
+    if (relativeDirectory.startsWith("..") || Path.isAbsolute(relativeDirectory)) {
+        throw Object.assign(new Error("Invalid relative path"), { code: "EINVAL" });
+    }
+    for (const part of relativeDirectory.split(Path.sep)) {
+        if (!part) continue;
+        currentPath = Path.join(currentPath, part);
+        try {
+            if (Fs.lstatSync(currentPath).isSymbolicLink()) {
+                throw Object.assign(new Error("Symlinked parent is not allowed"), {
+                    code: "ELOOP",
+                });
+            }
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                throw error;
+            }
+        }
+    }
+}
+
 function procFdPath(fd: number, child?: string): Buffer {
     return Buffer.from(
         child === undefined
@@ -412,13 +436,14 @@ export async function writeTextNoFollowAnchoredGuarded(
 ): Promise<void> {
     if (process.platform !== "linux") {
         validateRelativePath(relativePath);
+        const destinationPath = Path.join(root as string, relativePath);
+        assertNoSymlinkAncestors(root as string, destinationPath);
         if (options.createParents) {
-            const destinationPath = Path.join(root as string, relativePath);
             const destinationDirectory = Path.dirname(destinationPath);
             mkdirGuarded(guardedPath(destinationDirectory), { recursive: true });
         }
         await writeTextNoFollowGuarded(
-            guardedPath(Path.join(root as string, relativePath)),
+            guardedPath(destinationPath),
             content,
             options.mode
         );

@@ -162,7 +162,12 @@ export const configFileRoutes = {
                     { status: 403 }
                 );
             }
-            const file = await openReadNoFollowGuarded(guardedPath(fullPath));
+            const realFullPath = fs.realpathSync(fullPath);
+            const relativeRealPath = path.relative(root, realFullPath);
+            if (relativeRealPath.startsWith("..") || path.isAbsolute(relativeRealPath)) {
+                return json({ error: "Access denied" }, { status: 403 });
+            }
+            const file = await openReadNoFollowGuarded(guardedPath(realFullPath));
             let buffer: Buffer;
             try {
                 buffer = readFromOpenFile(file.fd, Math.min(stat.size, MAX_FILE_SIZE));

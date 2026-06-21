@@ -38,7 +38,11 @@ function getAppCommit(): string {
         return "unknown";
     }
 
-    return new TextDecoder().decode(result.stdout).trim() || "unknown";
+    try {
+        return new TextDecoder().decode(result.stdout).trim() || "unknown";
+    } catch {
+        return "unknown";
+    }
 }
 
 export async function buildFrontend({

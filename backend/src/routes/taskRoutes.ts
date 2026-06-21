@@ -329,6 +329,7 @@ export const taskRoutes = {
                     { status: 400 }
                 );
             }
+            const assignee = body.assignee;
             const now = nowIso();
             const labels = optionalLabels(body.labels) ?? [];
             const taskBody = optionalString(body.body, "Body") ?? "";
@@ -342,30 +343,33 @@ export const taskRoutes = {
                         : "todo"
             );
             const priority = derivePriority(labels);
-            const result = database
-                .prepare(
-                    `INSERT INTO tasks (title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-                )
-                .run(
+            const id = database.transaction(() => {
+                const result = database
+                    .prepare(
+                        `INSERT INTO tasks (title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                    )
+                    .run(
+                        title,
+                        taskBody,
+                        status,
+                        priority,
+                        JSON.stringify(labels),
+                        normalizeAutomationInput(body.automation),
+                        assignee,
+                        now,
+                        now
+                    );
+                const taskId = Number(result.lastInsertRowid);
+                recordEvent(taskId, "created", {
                     title,
-                    taskBody,
                     status,
                     priority,
-                    JSON.stringify(labels),
-                    normalizeAutomationInput(body.automation),
-                    body.assignee,
-                    now,
-                    now
-                );
-            const id = Number(result.lastInsertRowid);
-            recordEvent(id, "created", {
-                title,
-                status,
-                priority,
-                assignee: body.assignee,
-            });
-            if (body.assignee === TASK_ASSIGNEES.mira.id) {
+                    assignee,
+                });
+                return taskId;
+            })();
+            if (assignee === TASK_ASSIGNEES.mira.id) {
                 void notifyMira("created", { id, title });
             }
             return json(toFrontendTask(taskById(id) as DatabaseTask), { status: 201 });

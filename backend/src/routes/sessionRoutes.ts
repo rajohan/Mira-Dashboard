@@ -1,5 +1,6 @@
 import gateway from "../gateway.ts";
 import { json, readJson } from "../http.ts";
+import { httpStatusCode } from "../lib/errors.ts";
 import { stringFallback } from "../lib/values.ts";
 
 type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
@@ -10,7 +11,7 @@ function isValidSessionKey(sessionKey: string): boolean {
 
 function sessionRouteError(error: unknown, fallback = "Internal server error"): Response {
     console.error("[Sessions] Request failed:", error);
-    return json({ error: fallback }, { status: 500 });
+    return json({ error: fallback }, { status: httpStatusCode(error) });
 }
 
 export const sessionRoutes = {

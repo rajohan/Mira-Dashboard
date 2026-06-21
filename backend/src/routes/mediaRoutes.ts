@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { json } from "../http.ts";
+import { guardedPath, openReadNoFollowGuarded } from "../lib/guardedOps.ts";
 import { stringFallback } from "../lib/values.ts";
 
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
@@ -105,10 +106,8 @@ export const mediaRoutes = {
             }
 
             let realPath: string;
-            let stat: fs.Stats;
             try {
                 realPath = await fsp.realpath(fullPath);
-                stat = await fsp.stat(realPath);
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
                 if (code === "ENOENT" || code === "ENOTDIR") {
@@ -121,15 +120,45 @@ export const mediaRoutes = {
                 return json({ error: "Access denied" }, { status: 403 });
             }
 
-            if (!stat.isFile()) {
-                return json({ error: "Media path is not a file" }, { status: 400 });
+            let file: fs.promises.FileHandle;
+            try {
+                file = await openReadNoFollowGuarded(guardedPath(realPath));
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (code === "ENOENT" || code === "ENOTDIR") {
+                    return json({ error: "Media not found" }, { status: 404 });
+                }
+                if (code === "ELOOP") {
+                    return json({ error: "Access denied" }, { status: 403 });
+                }
+                throw error;
+            }
+            let buffer: Buffer;
+            try {
+                const stat = await file.stat();
+                const openedRealPath =
+                    process.platform === "linux"
+                        ? fs.realpathSync(`/proc/self/fd/${file.fd}`)
+                        : realPath;
+                const relativeOpenedPath = path.relative(realMediaRoot, openedRealPath);
+                if (
+                    relativeOpenedPath.startsWith("..") ||
+                    path.isAbsolute(relativeOpenedPath)
+                ) {
+                    return json({ error: "Access denied" }, { status: 403 });
+                }
+                if (!stat.isFile()) {
+                    return json({ error: "Media path is not a file" }, { status: 400 });
+                }
+                if (stat.size > MAX_MEDIA_SIZE) {
+                    return json({ error: "Media file too large" }, { status: 413 });
+                }
+                buffer = await file.readFile();
+            } finally {
+                await file.close();
             }
 
-            if (stat.size > MAX_MEDIA_SIZE) {
-                return json({ error: "Media file too large" }, { status: 413 });
-            }
-
-            return new Response(Bun.file(realPath), {
+            return new Response(buffer, {
                 headers: {
                     "Cache-Control": "private, max-age=3600",
                     "Content-Type": mimeTypeFromPath(realPath),

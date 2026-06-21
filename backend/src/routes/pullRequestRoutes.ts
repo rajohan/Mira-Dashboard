@@ -48,7 +48,9 @@ export const pullRequestRoutes = {
         POST: async (request: ParametersRequest<"number">) => {
             const number = parsePullRequestNumber(request.params.number);
             if (number instanceof Response) return number;
-            const body = await readJson<{ deploy?: unknown } | null>(request);
+            const body = request.body
+                ? await readJson<{ deploy?: unknown } | null>(request)
+                : null;
             try {
                 return json(await approvePullRequest(number, body?.deploy === true));
             } catch (error) {
@@ -60,7 +62,9 @@ export const pullRequestRoutes = {
         POST: async (request: ParametersRequest<"number">) => {
             const number = parsePullRequestNumber(request.params.number);
             if (number instanceof Response) return number;
-            const body = await readJson<{ comment?: unknown } | null>(request);
+            const body = request.body
+                ? await readJson<{ comment?: unknown } | null>(request)
+                : null;
             const comment =
                 typeof body?.comment === "string" && body.comment.trim()
                     ? body.comment.trim()

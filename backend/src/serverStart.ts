@@ -130,10 +130,13 @@ export function handleServerListening(): void {
         if (isGatewayStarted) {
             rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
         }
-        rollback(() => {
-            serverStartState.activeServer?.stop(true);
-            serverStartState.activeServer = null;
-        }, "[Backend] Failed to close server:");
+        const server = serverStartState.activeServer;
+        serverStartState.activeServer = null;
+        void server
+            ?.stop(true)
+            .catch((cleanupError) =>
+                console.error("[Backend] Failed to close server:", cleanupError)
+            );
         throw error;
     }
 }
