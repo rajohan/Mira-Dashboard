@@ -7,7 +7,7 @@ const ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/speech-to-text";
 const ELEVENLABS_STT_MODEL = process.env.ELEVENLABS_STT_MODEL || "scribe_v2";
 const ELEVENLABS_STT_LANGUAGE = process.env.ELEVENLABS_STT_LANGUAGE || "nor";
 
-const sttRouteState = { isActiveTranscription: false };
+const sttRouteState: { activeTranscriptionToken?: string } = {};
 
 function audioExtension(contentType?: string): string {
     if (!contentType) return ".webm";
@@ -99,20 +99,28 @@ async function transcribeWithElevenLabs(
 export const sttRoutes = {
     "/api/stt/transcribe": {
         POST: async (request: Request) => {
-            if (sttRouteState.isActiveTranscription) {
+            if (sttRouteState.activeTranscriptionToken) {
                 return json(
                     { error: "Another transcription is already running" },
                     { status: 429 }
                 );
             }
 
+            let transcriptionToken: string | undefined;
             try {
                 const audioBuffer = await readRequestBytes(request, MAX_AUDIO_BYTES);
                 if (audioBuffer.length === 0) {
                     return json({ error: "Missing audio payload" }, { status: 400 });
                 }
 
-                sttRouteState.isActiveTranscription = true;
+                if (sttRouteState.activeTranscriptionToken) {
+                    return json(
+                        { error: "Another transcription is already running" },
+                        { status: 429 }
+                    );
+                }
+                transcriptionToken = Bun.randomUUIDv7();
+                sttRouteState.activeTranscriptionToken = transcriptionToken;
                 const text = await transcribeWithElevenLabs(
                     audioBuffer,
                     request.headers.get("content-type") || undefined
@@ -128,8 +136,11 @@ export const sttRoutes = {
                 );
                 return json({ error: "Failed to transcribe audio" }, { status: 500 });
             } finally {
-                if (sttRouteState.isActiveTranscription) {
-                    sttRouteState.isActiveTranscription = false;
+                if (
+                    transcriptionToken &&
+                    sttRouteState.activeTranscriptionToken === transcriptionToken
+                ) {
+                    sttRouteState.activeTranscriptionToken = undefined;
                 }
             }
         },

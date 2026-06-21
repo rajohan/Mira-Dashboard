@@ -856,7 +856,7 @@ export const dockerRoutes = {
         },
     },
     "/api/docker/exec/:jobId/stop": {
-        POST: (request: Request) => {
+        POST: async (request: Request) => {
             const job = dockerExecJobs.get(stringFallback(parameters(request).jobId));
             if (!job)
                 return json({ error: "Docker exec job not found" }, { status: 404 });
@@ -866,20 +866,37 @@ export const dockerRoutes = {
             if (!job.process) {
                 return json({ error: "Process not available" }, { status: 400 });
             }
+            let containerStopError: string | undefined;
             if (job.containerPid) {
-                void runDocker([
-                    "exec",
-                    job.containerId,
-                    "kill",
-                    "-TERM",
-                    `-${job.containerPid}`,
-                ]).catch((error: unknown) => {
-                    job.stderr = trimOutput(
-                        `${job.stderr}\n${errorMessage(error, "Failed to stop in-container process")}`.trim()
-                    );
-                });
+                try {
+                    await runDocker([
+                        "exec",
+                        job.containerId,
+                        "kill",
+                        "-TERM",
+                        `-${job.containerPid}`,
+                    ]);
+                } catch (groupError) {
+                    try {
+                        await runDocker([
+                            "exec",
+                            job.containerId,
+                            "kill",
+                            "-TERM",
+                            String(job.containerPid),
+                        ]);
+                    } catch (processError) {
+                        containerStopError = `${errorMessage(groupError, "Failed to stop in-container process group")}; ${errorMessage(processError, "Failed to stop in-container process")}`;
+                        job.stderr = trimOutput(
+                            `${job.stderr}\n${containerStopError}`.trim()
+                        );
+                    }
+                }
             }
             killProcessGroup(job.process, "SIGTERM");
+            if (containerStopError) {
+                return json({ error: containerStopError }, { status: 500 });
+            }
             return json({ isSuccess: true });
         },
     },

@@ -1,5 +1,4 @@
 import fs from "node:fs/promises";
-import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
@@ -40,28 +39,13 @@ function json(method: string, body: unknown): RequestInit {
     };
 }
 
-async function findOpenPort(): Promise<number> {
-    return new Promise((resolve, reject) => {
-        const server = net.createServer();
-        server.once("error", reject);
-        server.listen(0, "127.0.0.1", () => {
-            const address = server.address();
-            if (!address || typeof address === "string") {
-                server.close(() => reject(new Error("Could not allocate test port")));
-                return;
-            }
-            server.close(() => resolve(address.port));
-        });
-    });
-}
-
 async function createTestServer(
     createServer: (port: number) => Server<unknown>
 ): Promise<Server<unknown>> {
     let lastError: unknown;
     for (let attempt = 0; attempt < 5; attempt += 1) {
         try {
-            return createServer(await findOpenPort());
+            return createServer(0);
         } catch (error) {
             lastError = error;
             if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") {

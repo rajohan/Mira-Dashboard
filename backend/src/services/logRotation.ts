@@ -838,6 +838,10 @@ async function rotateCopyTruncate(
         await fs.utimes(archivePath, file.stat.atime, new Date());
         await destination.close();
         await assertFileIdentity(filePath, file.stat, approvedRoots);
+        const currentStat = await file.handle.stat();
+        if (currentStat.size !== file.stat.size) {
+            throw new Error("Log file changed during rotation");
+        }
         await file.handle.truncate(0);
         isCommitted = true;
         return compressRotatedArchive(archivePath, shouldCompress, approvedRoots);

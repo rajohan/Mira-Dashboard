@@ -58,7 +58,7 @@ export function resolveListenPort(value = process.env.PORT): number {
         return 3100;
     }
     const port = Number(trimmed);
-    return port <= 65_535 ? port : 3100;
+    return port > 0 && port <= 65_535 ? port : 3100;
 }
 
 function dashboardSocketFromBun(

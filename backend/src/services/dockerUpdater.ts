@@ -965,7 +965,7 @@ function parseSafeTagRegexPattern(pattern: string): SafeTagPatternPart[] | null 
             index = closeIndex + 1;
             continue;
         }
-        if (/^[A-Za-z0-9._-]$/u.test(character)) {
+        if (/^[A-Za-z0-9_-]$/u.test(character)) {
             parts.push({ kind: "literal", value: character });
             continue;
         }
