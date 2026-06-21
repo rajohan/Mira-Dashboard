@@ -258,10 +258,6 @@ function startBackupJob(
             return;
         }
         isFinalizing = true;
-        if (hostAbortKillTimer) {
-            clearTimeout(hostAbortKillTimer);
-            hostAbortKillTimer = null;
-        }
         const interrupted = isAbortRequested || signalName !== null;
         let isNeedsAttention = false;
         if (interrupted && abortConfig) {
@@ -289,6 +285,10 @@ function startBackupJob(
                     `${job.stderr}\n${errorMessage(error, "Failed to verify host backup process exit")}`.trim()
                 );
             }
+        }
+        if (hostAbortKillTimer) {
+            clearTimeout(hostAbortKillTimer);
+            hostAbortKillTimer = null;
         }
         if (containerAbortKillTimer) {
             clearTimeout(containerAbortKillTimer);

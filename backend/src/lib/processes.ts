@@ -118,7 +118,11 @@ export async function runProcess(
         ]);
         return { code: didTimeout && code === 0 ? 1 : code, stderr, stdout };
     } catch (error) {
-        killProcessGroup(process, "SIGKILL");
+        try {
+            killProcessGroup(process, "SIGKILL");
+        } catch {
+            // Preserve the original read/exit error.
+        }
         throw error;
     } finally {
         if (timeout) clearTimeout(timeout);

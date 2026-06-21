@@ -46,7 +46,9 @@ function randomHex(byteLength: number): string {
 
 /** Performs verify password. */
 export function isPasswordVerified(password: string, storedHash: string): boolean {
-    const [algorithm, salt, hash] = storedHash.split(":");
+    const parts = storedHash.split(":");
+    if (parts.length !== 3) return false;
+    const [algorithm, salt, hash] = parts;
     if (algorithm !== "scrypt" || !salt || !hash) {
         return false;
     }

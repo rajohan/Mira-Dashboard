@@ -427,7 +427,14 @@ export function stopExecJob(jobId: string): { isSuccess: boolean; message: strin
         throw Object.assign(new Error("Process not available"), { statusCode: 400 });
     }
 
-    killProcessGroup(job.process, "SIGTERM");
+    try {
+        killProcessGroup(job.process, "SIGTERM");
+    } catch (error) {
+        throw Object.assign(
+            new Error(errorMessage(error, "Failed to stop exec job process")),
+            { statusCode: 409 }
+        );
+    }
     job.status = "signaled";
 
     const forceKillTimer = setTimeout(() => {

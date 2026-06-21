@@ -20,12 +20,30 @@ interface DashboardSocketData {
 const frontendPath =
     process.env.MIRA_DASHBOARD_FRONTEND_PATH ||
     path.join(import.meta.dirname, "..", "..", "dist");
+const configuredDashboardOrigins = new Set(
+    (process.env.MIRA_DASHBOARD_ALLOWED_ORIGINS || "")
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean)
+);
+const allowedLoopbackHostnames = new Set([
+    "localhost",
+    "127.0.0.1",
+    "::1",
+    "[::1]",
+    "::ffff:127.0.0.1",
+    "[::ffff:127.0.0.1]",
+]);
 
 function isAllowedWebSocketOrigin(request: Request): boolean {
     const origin = request.headers.get("origin");
     if (!origin) return true;
     try {
-        return new URL(origin).host === new URL(request.url).host;
+        const parsedOrigin = new URL(origin);
+        return (
+            configuredDashboardOrigins.has(parsedOrigin.origin) ||
+            allowedLoopbackHostnames.has(parsedOrigin.hostname)
+        );
     } catch {
         return false;
     }

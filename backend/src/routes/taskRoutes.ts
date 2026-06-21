@@ -492,13 +492,20 @@ export const taskRoutes = {
                 .prepare("SELECT id, title, assignee FROM tasks WHERE id = ?")
                 .get(id) as undefined | { assignee?: string; id: number; title: string };
             if (!existing) return json({ error: "Task not found" }, { status: 404 });
-            database.transaction(() => {
-                database.prepare("DELETE FROM task_updates WHERE task_id = ?").run(id);
-                database.prepare("DELETE FROM task_events WHERE task_id = ?").run(id);
-                database.prepare("DELETE FROM tasks WHERE id = ?").run(id);
-            })();
-            if (existing.assignee === TASK_ASSIGNEES.mira.id) {
-                void notifyMira("deleted", existing);
+            try {
+                database.transaction(() => {
+                    database
+                        .prepare("DELETE FROM task_updates WHERE task_id = ?")
+                        .run(id);
+                    database.prepare("DELETE FROM task_events WHERE task_id = ?").run(id);
+                    database.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+                })();
+                if (existing.assignee === TASK_ASSIGNEES.mira.id) {
+                    void notifyMira("deleted", existing);
+                }
+            } catch (error) {
+                console.error("[Tasks] Failed to delete task:", error);
+                return json({ error: "Failed to delete task" }, { status: 500 });
             }
             return json({ isOk: true });
         },
@@ -516,14 +523,21 @@ export const taskRoutes = {
             const assignee = body.assignee;
             const existing = taskById(id);
             if (!existing) return json({ error: "Task not found" }, { status: 404 });
-            database.transaction(() => {
-                database
-                    .prepare("UPDATE tasks SET assignee = ?, updated_at = ? WHERE id = ?")
-                    .run(assignee, nowIso(), id);
-                recordEvent(id, "assigned", { assignee });
-            })();
-            if (assignee === TASK_ASSIGNEES.mira.id) {
-                void notifyMira("assigned", { id, title: existing.title });
+            try {
+                database.transaction(() => {
+                    database
+                        .prepare(
+                            "UPDATE tasks SET assignee = ?, updated_at = ? WHERE id = ?"
+                        )
+                        .run(assignee, nowIso(), id);
+                    recordEvent(id, "assigned", { assignee });
+                })();
+                if (assignee === TASK_ASSIGNEES.mira.id) {
+                    void notifyMira("assigned", { id, title: existing.title });
+                }
+            } catch (error) {
+                console.error("[Tasks] Failed to assign task:", error);
+                return json({ error: "Failed to assign task" }, { status: 500 });
             }
             return json(toFrontendTask(taskById(id) as DatabaseTask));
         },

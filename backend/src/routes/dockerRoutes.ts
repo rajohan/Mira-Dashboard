@@ -1064,7 +1064,7 @@ export const dockerRoutes = {
                 );
             }
             const failed = blockingDockerUpdaterFailures(steps);
-            const code = updaterResultCode(steps);
+            const code = updaterResultCode(failed);
             if (failed.length > 0 && code === "NOT_FOUND") {
                 return json(
                     { error: failed[0].stderr || "Updater service not found" },
