@@ -7,6 +7,7 @@ import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
     guardedPath,
     lstatGuarded,
+    mkdirGuarded,
     openReadNoFollowGuarded,
     readdirGuarded,
     readFromOpenFile,
@@ -344,7 +345,17 @@ export const fileRoutes = {
             if (Buffer.byteLength(body.content, "utf8") > MAX_FILE_SIZE) {
                 return json({ error: "File is too large to write" }, { status: 413 });
             }
-            const root = fs.realpathSync(workspaceRoot());
+            const workspaceRootPath = workspaceRoot();
+            let root: string;
+            try {
+                root = fs.realpathSync(workspaceRootPath);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                    throw error;
+                }
+                mkdirGuarded(guardedPath(workspaceRootPath), { recursive: true });
+                root = fs.realpathSync(workspaceRootPath);
+            }
             const fullPath = safePathWithinRoot(relativePath, root);
             const safeFullPath = fullPath
                 ? prepareSafeWriteTargetWithinRoot(fullPath, root)
@@ -390,6 +401,9 @@ export const fileRoutes = {
                 try {
                     const openedStat = await file.stat();
                     if (!openedStat.isFile() || openedStat.nlink > 1) {
+                        return json({ error: "Access denied" }, { status: 403 });
+                    }
+                    if (!isOpenFileWithinRoot(file, root)) {
                         return json({ error: "Access denied" }, { status: 403 });
                     }
                     if (openedStat.size > MAX_FILE_SIZE) {

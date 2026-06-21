@@ -279,7 +279,7 @@ function startBackupJob(
         }
         if (interrupted && hostAbortPattern) {
             try {
-                isNeedsAttention = !(await waitForHostProcessExitWithRetries(
+                isNeedsAttention ||= !(await waitForHostProcessExitWithRetries(
                     hostAbortPattern,
                     job
                 ));

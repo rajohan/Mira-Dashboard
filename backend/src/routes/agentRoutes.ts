@@ -93,7 +93,7 @@ export const agentRoutes = {
                 const rawLimit = query.get("limit");
                 const parsedLimit = rawLimit === null ? NaN : Number(rawLimit);
                 const requestedLimit = Number.isNaN(parsedLimit) ? 8 : parsedLimit;
-                const limit = Math.max(1, Math.min(20, requestedLimit));
+                const limit = Math.max(1, Math.min(20, Math.floor(requestedLimit)));
                 closeStaleActiveTasks();
                 return json({
                     tasks: getLatestCompletedTasks(limit),

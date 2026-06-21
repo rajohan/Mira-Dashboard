@@ -73,6 +73,7 @@ describe("Bun-native dashboard backend", () => {
         await fs.mkdir(path.join(frontendRoot, "assets"), { recursive: true });
         await fs.mkdir(dockerRoot, { recursive: true });
         await fs.mkdir(workspaceRoot, { recursive: true });
+        await fs.mkdir(path.join(workspaceRoot, "notes"), { recursive: true });
         await fs.writeFile(path.join(workspaceRoot, "README.md"), "hello workspace\n");
         await fs.writeFile(path.join(openclawRoot, "openclaw.json"), "{}\n");
         await fs.writeFile(composeWrapper, "#!/bin/sh\nprintf 'compose:%s\\n' \"$*\"\n");

@@ -329,6 +329,16 @@ export async function openReadNoFollowGuarded(
     ]) as Promise<Fs.promises.FileHandle>;
 }
 
+/** Opens a validated path for reading without blocking on special files. */
+export async function openReadNoFollowNonblockingGuarded(
+    path: GuardedPath
+): Promise<Fs.promises.FileHandle> {
+    return Reflect.apply(fsPromiseOps.open, Fs.promises, [
+        guardedPathBuffer(path),
+        Fs.constants.O_RDONLY | Fs.constants.O_NOFOLLOW | Fs.constants.O_NONBLOCK,
+    ]) as Promise<Fs.promises.FileHandle>;
+}
+
 /** Writes UTF-8 text to a validated path. */
 export async function writeTextGuarded(
     path: GuardedPath,

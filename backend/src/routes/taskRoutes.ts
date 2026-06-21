@@ -65,11 +65,12 @@ function isValidAssignee(value: unknown): value is Assignee {
     return typeof value === "string" && TASK_ASSIGNEE_IDS.includes(value as Assignee);
 }
 
-function normalizeStatus(columnLabel?: string): Status {
+function normalizeStatus(columnLabel?: string): Status | null {
     if (columnLabel === "done") return "done";
     if (columnLabel === "blocked") return "blocked";
     if (columnLabel === "in-progress") return "in-progress";
-    return "todo";
+    if (columnLabel === "todo") return "todo";
+    return null;
 }
 
 function derivePriority(labels: string[]): "low" | "medium" | "high" {
@@ -516,6 +517,9 @@ export const taskRoutes = {
             const existing = taskById(id);
             if (!existing) return json({ error: "Task not found" }, { status: 404 });
             const status = normalizeStatus(columnLabel);
+            if (!status) {
+                return json({ error: "Invalid task status" }, { status: 400 });
+            }
             const labels = [
                 ...labelsFromTask(existing).filter(
                     (label) => !["todo", "in-progress", "blocked", "done"].includes(label)

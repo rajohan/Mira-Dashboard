@@ -6,7 +6,7 @@ import path from "node:path";
 import { json } from "../http.ts";
 import {
     guardedPath,
-    openReadNoFollowGuarded,
+    openReadNoFollowNonblockingGuarded,
     readFromOpenFile,
 } from "../lib/guardedOps.ts";
 import { stringFallback } from "../lib/values.ts";
@@ -130,11 +130,14 @@ export const mediaRoutes = {
 
             let file: fs.promises.FileHandle;
             try {
-                file = await openReadNoFollowGuarded(guardedPath(realPath));
+                file = await openReadNoFollowNonblockingGuarded(guardedPath(realPath));
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
                 if (code === "ENOENT" || code === "ENOTDIR") {
                     return json({ error: "Media not found" }, { status: 404 });
+                }
+                if (code === "ENXIO") {
+                    return json({ error: "Media path is not a file" }, { status: 400 });
                 }
                 if (code === "ELOOP") {
                     return json({ error: "Access denied" }, { status: 403 });

@@ -74,6 +74,10 @@ function optionalStringField(
         : { error: json({ error: `${field} must be a string` }, { status: 400 }) };
 }
 
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function validId(value: string | undefined): number | null {
     const id = Number(value);
     return Number.isSafeInteger(id) && Number.isFinite(id) && id > 0 ? id : null;
@@ -120,6 +124,9 @@ export const notificationRoutes = {
                     { error: errorMessage(error, "Invalid JSON") },
                     { status: httpStatusCode(error) }
                 );
+            }
+            if (!isJsonObject(body)) {
+                return json({ error: "Request body must be an object" }, { status: 400 });
             }
             const titleField = optionalStringField("title", body.title);
             if (titleField.error) return titleField.error;
@@ -225,7 +232,14 @@ export const notificationRoutes = {
                 body = {};
             } else {
                 try {
-                    body = JSON.parse(rawBody.toString("utf8")) as { source?: unknown };
+                    const parsed = JSON.parse(rawBody.toString("utf8")) as unknown;
+                    if (!isJsonObject(parsed)) {
+                        return json(
+                            { error: "Request body must be an object" },
+                            { status: 400 }
+                        );
+                    }
+                    body = parsed;
                 } catch {
                     return json({ error: "Invalid JSON" }, { status: 400 });
                 }

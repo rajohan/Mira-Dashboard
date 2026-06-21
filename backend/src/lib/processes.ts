@@ -82,9 +82,11 @@ export async function runProcess(
     const process = spawnProcess(executable, arguments_, options);
     let timeout: Timer | undefined;
     let forceKillTimeout: Timer | undefined;
+    let didTimeout = false;
     const timeoutMs = options.timeoutMs;
     if (timeoutMs !== undefined) {
         timeout = setTimeout(() => {
+            didTimeout = true;
             killProcessGroup(process, options.killSignal ?? "SIGTERM");
             forceKillTimeout = setTimeout(() => {
                 killProcessGroup(process, "SIGKILL");
@@ -106,7 +108,7 @@ export async function runProcess(
             ),
             process.exited,
         ]);
-        return { code, stderr, stdout };
+        return { code: didTimeout && code === 0 ? 1 : code, stderr, stdout };
     } catch (error) {
         killProcessGroup(process, "SIGKILL");
         throw error;

@@ -36,6 +36,19 @@ function isLogPathUnreadableErrorCode(code: string | undefined): boolean {
     return code !== undefined && LOG_PATH_UNREADABLE_ERROR_CODES.has(code);
 }
 
+function isOpenedLogPathWithinRoot(file: fs.promises.FileHandle, root: string): boolean {
+    if (process.platform !== "linux") return true;
+    try {
+        const openedPath = fs.realpathSync(`/proc/self/fd/${file.fd}`);
+        const relativeOpenedPath = path.relative(root, openedPath);
+        return (
+            !relativeOpenedPath.startsWith("..") && !path.isAbsolute(relativeOpenedPath)
+        );
+    } catch {
+        return false;
+    }
+}
+
 function resolveRealLogsDirectory(): string {
     return fs.realpathSync(logsDirectory);
 }
@@ -218,6 +231,9 @@ async function logContentResponse(request: Request): Promise<Response> {
             const stat = await file.stat();
             if (!stat.isFile()) {
                 return json({ error: "Log file not found" }, { status: 404 });
+            }
+            if (!isOpenedLogPathWithinRoot(file, realRoot) || stat.nlink > 1) {
+                return json({ error: "Access denied" }, { status: 403 });
             }
             content = await readLogContent(file, stat, lines);
         } finally {

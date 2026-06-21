@@ -220,6 +220,9 @@ async function sendLogHistory(ws: DashboardSocket): Promise<void> {
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                 throw error;
             }
+            logsRouteState.lastLogFile = logFile;
+            logsRouteState.lastLogSize = 0;
+            logsRouteState.pendingFragment = "";
             send({ type: "log_history_complete", count: 0 });
             return;
         }
