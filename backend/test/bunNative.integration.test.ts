@@ -130,13 +130,21 @@ describe("Bun-native dashboard backend", () => {
                 const code = await child.exited;
                 return { code, done: true as const };
             })();
+            let startupTimer: Timer | undefined;
             const startupTimeout = new Promise<never>((_, reject) => {
-                setTimeout(
+                startupTimer = setTimeout(
                     () => reject(new Error("Native server startup timed out")),
                     startupTimeoutMs
                 );
             });
-            const next = await Promise.race([reader.read(), exited, startupTimeout]);
+            let next:
+                | Awaited<ReturnType<typeof reader.read>>
+                | { code: number; done: true };
+            try {
+                next = await Promise.race([reader.read(), exited, startupTimeout]);
+            } finally {
+                if (startupTimer) clearTimeout(startupTimer);
+            }
             if ("code" in next) {
                 throw new Error(`Native server exited early: ${next.code}`);
             }
@@ -157,14 +165,22 @@ describe("Bun-native dashboard backend", () => {
     afterAll(async () => {
         state.child?.kill("SIGTERM");
         if (state.child) {
-            const gracefulExit = await Promise.race([
-                (async () => {
-                    await state.child!.exited;
-                    return true;
-                })(),
-                new Promise<false>((resolve) => setTimeout(() => resolve(false), 1000)),
-            ]);
-            if (!gracefulExit) {
+            let shutdownTimer: Timer | undefined;
+            let didExitGracefully: boolean;
+            try {
+                didExitGracefully = await Promise.race([
+                    (async () => {
+                        await state.child!.exited;
+                        return true;
+                    })(),
+                    new Promise<false>((resolve) => {
+                        shutdownTimer = setTimeout(() => resolve(false), 1000);
+                    }),
+                ]);
+            } finally {
+                if (shutdownTimer) clearTimeout(shutdownTimer);
+            }
+            if (!didExitGracefully) {
                 state.child.kill("SIGKILL");
                 try {
                     await state.child.exited;

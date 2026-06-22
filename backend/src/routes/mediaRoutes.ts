@@ -134,7 +134,7 @@ export const mediaRoutes = {
                 if (code === "ENOENT" || code === "ENOTDIR") {
                     return json({ error: "Media not found" }, { status: 404 });
                 }
-                if (code === "EACCES") {
+                if (["EACCES", "EPERM"].includes(code ?? "")) {
                     return json({ error: "Access denied" }, { status: 403 });
                 }
                 throw error;
@@ -192,6 +192,7 @@ export const mediaRoutes = {
                 headers: {
                     "Cache-Control": "private, max-age=3600",
                     "Content-Type": mimeTypeFromPath(openedRealPath),
+                    "X-Content-Type-Options": "nosniff",
                 },
             });
         },

@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 import type { Server } from "bun";
 
 import { authUser, HttpError, isTrustedProxyAddress, json, requestIp } from "./http.ts";
@@ -87,10 +89,19 @@ function rateLimitKey(
     server: Server<unknown>
 ): string {
     const peerAddress = requestIp(request, server);
-    const forwardedFor = isTrustedProxyAddress(peerAddress)
-        ? request.headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim()
+    const trustedClientAddress = isTrustedProxyAddress(peerAddress)
+        ? trustedProxyClientAddress(request)
         : undefined;
-    return `${rule.keyPrefix}:${forwardedFor || peerAddress || "unknown"}`;
+    return `${rule.keyPrefix}:${trustedClientAddress || peerAddress || "unknown"}`;
+}
+
+function trustedProxyClientAddress(request: Request): string | undefined {
+    const realIp = request.headers.get("x-real-ip")?.trim();
+    if (realIp && isIP(realIp)) return realIp;
+
+    const forwardedFor = request.headers.get("x-forwarded-for")?.trim();
+    if (!forwardedFor || forwardedFor.includes(",")) return undefined;
+    return isIP(forwardedFor) ? forwardedFor : undefined;
 }
 
 function withRateLimitHeaders(

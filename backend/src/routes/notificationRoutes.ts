@@ -83,36 +83,47 @@ function validId(value: string | undefined): number | null {
     return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
+function notificationRouteError(error: unknown, fallback: string): Response {
+    return json(
+        { error: errorMessage(error, fallback) },
+        { status: httpStatusCode(error) }
+    );
+}
+
 export const notificationRoutes = {
     "/api/notifications": {
         GET: (request: Request) => {
-            const rawLimit = new URL(request.url).searchParams.get("limit");
-            const limitValue = rawLimit === null ? null : Number(rawLimit);
-            const limit =
-                limitValue !== null && Number.isFinite(limitValue)
-                    ? Math.max(1, Math.min(200, Math.floor(limitValue)))
-                    : 100;
-            const unreadCount =
-                (
-                    database
-                        .prepare(
-                            "SELECT COUNT(*) as count FROM notifications WHERE is_read = 0"
-                        )
-                        .get() as { count?: number }
-                )?.count || 0;
-            const readCount =
-                (
-                    database
-                        .prepare(
-                            "SELECT COUNT(*) as count FROM notifications WHERE is_read = 1"
-                        )
-                        .get() as { count?: number }
-                )?.count || 0;
-            return json({
-                items: listNotifications(limit).map(toResponse),
-                readCount,
-                unreadCount,
-            });
+            try {
+                const rawLimit = new URL(request.url).searchParams.get("limit");
+                const limitValue = rawLimit === null ? null : Number(rawLimit);
+                const limit =
+                    limitValue !== null && Number.isFinite(limitValue)
+                        ? Math.max(1, Math.min(200, Math.floor(limitValue)))
+                        : 100;
+                const unreadCount =
+                    (
+                        database
+                            .prepare(
+                                "SELECT COUNT(*) as count FROM notifications WHERE is_read = 0"
+                            )
+                            .get() as { count?: number }
+                    )?.count || 0;
+                const readCount =
+                    (
+                        database
+                            .prepare(
+                                "SELECT COUNT(*) as count FROM notifications WHERE is_read = 1"
+                            )
+                            .get() as { count?: number }
+                    )?.count || 0;
+                return json({
+                    items: listNotifications(limit).map(toResponse),
+                    readCount,
+                    unreadCount,
+                });
+            } catch (error) {
+                return notificationRouteError(error, "Failed to list notifications");
+            }
         },
 
         POST: async (request: Request) => {
@@ -206,12 +217,16 @@ export const notificationRoutes = {
 
     "/api/notifications/mark-all-read": {
         POST: () => {
-            database
-                .prepare(
-                    "UPDATE notifications SET is_read = 1, updated_at = ? WHERE is_read = 0"
-                )
-                .run(nowIso());
-            return json({ isOk: true });
+            try {
+                database
+                    .prepare(
+                        "UPDATE notifications SET is_read = 1, updated_at = ? WHERE is_read = 0"
+                    )
+                    .run(nowIso());
+                return json({ isOk: true });
+            } catch (error) {
+                return notificationRouteError(error, "Failed to mark notifications read");
+            }
         },
     },
 
@@ -253,38 +268,52 @@ export const notificationRoutes = {
                 return json({ error: "source must be a string" }, { status: 400 });
             }
             const source = nullableString(stringFallback(rawSource).trim());
-            const result = source
-                ? database
-                      .prepare(
-                          "DELETE FROM notifications WHERE is_read = 1 AND source = ?"
-                      )
-                      .run(source)
-                : database.prepare("DELETE FROM notifications WHERE is_read = 1").run();
-            return json({ deleted: result.changes, isOk: true });
+            try {
+                const result = source
+                    ? database
+                          .prepare(
+                              "DELETE FROM notifications WHERE is_read = 1 AND source = ?"
+                          )
+                          .run(source)
+                    : database
+                          .prepare("DELETE FROM notifications WHERE is_read = 1")
+                          .run();
+                return json({ deleted: result.changes, isOk: true });
+            } catch (error) {
+                return notificationRouteError(error, "Failed to clear notifications");
+            }
         },
     },
 
     "/api/notifications/:id/read": {
         POST: (request: ParametersRequest<"id">) => {
-            const id = validId(request.params.id);
-            if (id === null) return json({ error: "invalid id" }, { status: 400 });
-            database
-                .prepare(
-                    "UPDATE notifications SET is_read = 1, updated_at = ? WHERE id = ?"
-                )
-                .run(nowIso(), id);
-            return json({ isOk: true });
+            try {
+                const id = validId(request.params.id);
+                if (id === null) return json({ error: "invalid id" }, { status: 400 });
+                database
+                    .prepare(
+                        "UPDATE notifications SET is_read = 1, updated_at = ? WHERE id = ?"
+                    )
+                    .run(nowIso(), id);
+                return json({ isOk: true });
+            } catch (error) {
+                return notificationRouteError(error, "Failed to mark notification read");
+            }
         },
     },
 
     "/api/notifications/:id": {
         DELETE: (request: ParametersRequest<"id">) => {
-            const id = validId(request.params.id);
-            if (id === null) return json({ error: "invalid id" }, { status: 400 });
-            const result = database
-                .prepare("DELETE FROM notifications WHERE id = ?")
-                .run(id);
-            return json({ deleted: result.changes || 0, isOk: true });
+            try {
+                const id = validId(request.params.id);
+                if (id === null) return json({ error: "invalid id" }, { status: 400 });
+                const result = database
+                    .prepare("DELETE FROM notifications WHERE id = ?")
+                    .run(id);
+                return json({ deleted: result.changes || 0, isOk: true });
+            } catch (error) {
+                return notificationRouteError(error, "Failed to delete notification");
+            }
         },
     },
 } as const;

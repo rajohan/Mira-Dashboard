@@ -122,7 +122,10 @@ async function fileResponse(filePath: string, contentType?: string): Promise<Res
 async function staticResponse(pathname: string): Promise<Response> {
     let decodedPath: string;
     try {
-        decodedPath = decodeURIComponent(pathname.replace(/^\/+/u, ""));
+        decodedPath = decodeURIComponent(pathname.replace(/^\/+/u, "")).replace(
+            /^\/+/u,
+            ""
+        );
     } catch {
         return new Response("Bad Request", { status: 400 });
     }

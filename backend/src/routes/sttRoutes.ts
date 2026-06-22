@@ -70,27 +70,26 @@ async function transcribeWithElevenLabs(
     }
 
     try {
-        let response: Response;
         try {
-            response = await fetch(ELEVENLABS_API_URL, {
+            const response = await fetch(ELEVENLABS_API_URL, {
                 body: formData,
                 headers: { "xi-api-key": apiKey },
                 method: "POST",
                 signal: controller.signal,
             });
+            if (!response.ok) {
+                const errorText = await readResponseTextFallback(response);
+                throw new Error(
+                    `ElevenLabs STT failed (${response.status}): ${errorText || response.statusText}`
+                );
+            }
+            return transcriptTextFromElevenLabs(await response.json());
         } catch (error) {
             if (error instanceof Error && error.name === "AbortError") {
                 throw new HttpError("STT request timed out", 504);
             }
             throw error;
         }
-        if (!response.ok) {
-            const errorText = await readResponseTextFallback(response);
-            throw new Error(
-                `ElevenLabs STT failed (${response.status}): ${errorText || response.statusText}`
-            );
-        }
-        return transcriptTextFromElevenLabs(await response.json());
     } finally {
         clearTimeout(timer);
     }
