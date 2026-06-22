@@ -159,10 +159,7 @@ function summarizeChecks(checks: unknown[] | undefined) {
         return { label: "No CI checks", variant: "default" as const };
     }
 
-    const records = checks.filter(
-        (check): check is Record<string, unknown> =>
-            Boolean(check) && typeof check === "object" && !Array.isArray(check)
-    );
+    const records = latestCheckRecords(checks);
     const values = records.map((check) => {
         const conclusion = normalizedCheckValue(check.conclusion);
         return conclusion || normalizedCheckValue(check.status ?? check.state);
@@ -198,10 +195,7 @@ function summarizeChecks(checks: unknown[] | undefined) {
 
 /** Returns whether pull request checks are conclusively passing. */
 function hasPullRequestChecksPassed(checks: unknown[] | undefined): boolean {
-    const records = (checks || []).filter(
-        (check): check is Record<string, unknown> =>
-            Boolean(check) && typeof check === "object" && !Array.isArray(check)
-    );
+    const records = latestCheckRecords(checks);
 
     if (records.length === 0) {
         return false;
@@ -218,6 +212,47 @@ function hasPullRequestChecksPassed(checks: unknown[] | undefined): boolean {
     });
 }
 
+/** Keeps only the latest check entry for each GitHub check name/context. */
+function latestCheckRecords(
+    checks: unknown[] | undefined
+): Array<Record<string, unknown>> {
+    const latestByKey = new Map<string, Record<string, unknown>>();
+    const checkValues = checks || [];
+    for (const check of checkValues) {
+        if (!check || typeof check !== "object" || Array.isArray(check)) continue;
+        const record = check as Record<string, unknown>;
+        const key = checkKey(record);
+        const existing = latestByKey.get(key);
+        if (!existing || checkTimestamp(record) >= checkTimestamp(existing)) {
+            latestByKey.set(key, record);
+        }
+    }
+    return latestByKey.values().toArray();
+}
+
+/** Returns a stable key for a GitHub status or check run. */
+function checkKey(check: Record<string, unknown>): string {
+    for (const key of ["name", "context", "workflowName"]) {
+        const value = check[key];
+        if (typeof value === "string" && value.trim()) {
+            return `${key}:${value.trim()}`;
+        }
+    }
+    return JSON.stringify(check);
+}
+
+/** Returns a comparable timestamp for a GitHub status or check run. */
+function checkTimestamp(check: Record<string, unknown>): number {
+    for (const key of ["completedAt", "startedAt", "createdAt"]) {
+        const value = check[key];
+        if (typeof value === "string") {
+            const timestamp = Date.parse(value);
+            if (Number.isFinite(timestamp)) return timestamp;
+        }
+    }
+    return 0;
+}
+
 /** Normalizes a GitHub check status or conclusion. */
 function normalizedCheckValue(value: unknown): string {
     return typeof value === "string" ? value.toLowerCase() : "";
@@ -229,6 +264,11 @@ function deploymentVariant(status: DeploymentJob["status"]) {
     if (status === "failed") return "error" as const;
     if (status === "restart-scheduled") return "warning" as const;
     return "info" as const;
+}
+
+/** Performs deployment status label. */
+function deploymentStatusLabel(status: DeploymentJob["status"]) {
+    return status === "isOk" ? "ok" : status;
 }
 
 /** Renders the deployment commit title and commit reference. */
@@ -489,7 +529,7 @@ function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
                                     variant={deploymentVariant(deployment.status)}
                                     className="shrink-0 whitespace-nowrap"
                                 >
-                                    {deployment.status}
+                                    {deploymentStatusLabel(deployment.status)}
                                 </Badge>
                             </div>
                             {deployment.note ? (
