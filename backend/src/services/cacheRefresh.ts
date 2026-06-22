@@ -712,6 +712,16 @@ async function runCommand(
     return stdout.trimEnd();
 }
 
+function latestOpenClawVersionFromUpdateStatus(value: unknown): string | null {
+    const updateStatus = asRecord(value);
+    const availability = asRecord(updateStatus.availability);
+    const update = asRecord(updateStatus.update);
+    const registry = asRecord(update.registry);
+    return (
+        stringOrNull(availability.latestVersion) || stringOrNull(registry.latestVersion)
+    );
+}
+
 function getDockerBin(): string {
     return nonEmptyEnvironmentFallback("MIRA_DOCKER_BIN", "docker");
 }
@@ -868,9 +878,10 @@ export async function refreshGitCache() {
 async function refreshSystemCache() {
     const openclawBin = getOpenclawBin();
     const checkedAt = nowIso();
-    const [statusResult, doctorResult, securityResult, hostResult] =
+    const [statusResult, updateStatusResult, doctorResult, securityResult, hostResult] =
         await Promise.allSettled([
             runCommand(openclawBin, ["status", "--json"]),
+            runCommand(openclawBin, ["update", "status", "--json"]),
             runCommand(openclawBin, ["doctor"]),
             runCommand(openclawBin, ["security", "audit", "--json"]),
             getHostSummary(),
@@ -923,7 +934,25 @@ async function refreshSystemCache() {
     const currentVersion = String(status.runtimeVersion || "unknown");
     const update = asRecord(status.update);
     const registry = asRecord(update.registry);
-    const latestVersion = registry.latestVersion ? String(registry.latestVersion) : null;
+    let updateStatusError =
+        updateStatusResult.status === "rejected"
+            ? errorMessage(updateStatusResult.reason)
+            : null;
+    let updateStatus: JsonRecord = {};
+    if (updateStatusResult.status === "fulfilled") {
+        try {
+            updateStatus = JSON.parse(updateStatusResult.value) as JsonRecord;
+        } catch (error) {
+            updateStatusError = errorMessage(error);
+            console.warn(
+                "[CacheRefresh] Failed to parse OpenClaw update status JSON:",
+                error
+            );
+        }
+    }
+    const latestVersion =
+        latestOpenClawVersionFromUpdateStatus(updateStatus) ||
+        stringOrNull(registry.latestVersion);
     const version = {
         current: currentVersion,
         latest: latestVersion,
@@ -945,6 +974,7 @@ async function refreshSystemCache() {
             hostError:
                 hostResult.status === "rejected" ? errorMessage(hostResult.reason) : null,
             openclawError: statusError,
+            updateStatusError,
         },
         checkedAt,
     };
@@ -963,6 +993,7 @@ async function refreshSystemCache() {
     } else {
         const openclawPayload = {
             version,
+            updateStatus,
             gateway: status.gateway ?? null,
             gatewayService: status.gatewayService ?? null,
             nodeService: status.nodeService ?? null,
@@ -974,6 +1005,7 @@ async function refreshSystemCache() {
             doctorWarningCount: doctorWarnings.length,
             security,
             securityError,
+            updateStatusError,
             checkedAt,
         };
         writeCacheSuccess({
