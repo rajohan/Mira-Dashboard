@@ -576,7 +576,17 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         });
 
         ws.addEventListener("message", async (event) => {
-            this.handleMessage(await websocketMessageToString(event.data));
+            try {
+                this.handleMessage(await websocketMessageToString(event.data));
+            } catch (error) {
+                const normalizedError =
+                    error instanceof Error
+                        ? error
+                        : new Error(`gateway message error: ${String(error)}`);
+                this.opts.onConnectError?.(normalizedError);
+                this.rejectAllPending(normalizedError);
+                ws.close(1011, "gateway message error");
+            }
         });
 
         ws.addEventListener("close", (event) => {

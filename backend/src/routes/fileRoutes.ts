@@ -74,6 +74,7 @@ function isHidden(name: string): boolean {
 function hasHiddenSegment(relativePath: string): boolean {
     return relativePath
         .split(/[\\/]+/u)
+        .filter(Boolean)
         .some((segment) => segment !== "." && isHidden(segment));
 }
 

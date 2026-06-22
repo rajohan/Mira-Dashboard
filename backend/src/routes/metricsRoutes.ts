@@ -101,6 +101,9 @@ async function getNetworkMetrics(): Promise<NetworkMetrics> {
 
         if (os.platform() === "linux") {
             try {
+                // Prefer the VPS default Linux interface, but allow deployments to
+                // override it; if neither it nor another non-loopback interface is
+                // available, network metrics fall back through the route error path.
                 const preferredInterface =
                     process.env.MIRA_DASHBOARD_NETWORK_INTERFACE?.trim() || "enp0s6";
                 const availableInterfaces = await readdir("/sys/class/net");

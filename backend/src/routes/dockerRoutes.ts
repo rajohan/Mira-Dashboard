@@ -251,6 +251,10 @@ function redactEnvironmentValue(value: unknown): string {
         : environmentValue;
 }
 
+function redactLabelValue([key, value]: [string, string]): [string, string] {
+    return [key, redactEnvironmentValue(`${key}=${value}`).slice(key.length + 1)];
+}
+
 function parseLabels(labelsRaw: string | undefined): Record<string, string> {
     if (!labelsRaw) return {};
     return Object.fromEntries(
@@ -417,7 +421,9 @@ async function getContainerDetails(containerId: string) {
     return {
         ...summary,
         env: arrayFallback(inspect.Config?.Env).map(redactEnvironmentValue),
-        labels: objectFallback(inspect.Config?.Labels),
+        labels: Object.fromEntries(
+            Object.entries(objectFallback(inspect.Config?.Labels)).map(redactLabelValue)
+        ),
         networks: Object.entries(objectFallback(inspect.NetworkSettings?.Networks)).map(
             ([name, value]) => {
                 const network = objectFallback(value);

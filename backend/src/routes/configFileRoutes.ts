@@ -102,7 +102,7 @@ function configTarget(relativePath: string, root: string): string | null {
     return safePathWithinRoot(relativePath, root);
 }
 
-async function realPathFromOpenFile(file: fs.promises.FileHandle, fallback: string) {
+function realPathFromOpenFile(file: fs.promises.FileHandle, fallback: string) {
     return process.platform === "linux"
         ? fs.realpathSync(`/proc/self/fd/${file.fd}`)
         : fallback;
@@ -117,7 +117,7 @@ async function validateOpenFileWithinRoot(
     if (!stat.isFile() || stat.nlink > 1) {
         return null;
     }
-    const realPath = await realPathFromOpenFile(file, fallbackPath);
+    const realPath = realPathFromOpenFile(file, fallbackPath);
     const relativeRealPath = path.relative(root, realPath);
     if (relativeRealPath.startsWith("..") || path.isAbsolute(relativeRealPath)) {
         return null;

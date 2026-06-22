@@ -106,7 +106,25 @@ export async function runProcess(
         timeout.unref();
     }
 
+    function clearExitTimers(): void {
+        if (timeout) {
+            clearTimeout(timeout);
+            timeout = undefined;
+        }
+        if (forceKillTimeout) {
+            clearTimeout(forceKillTimeout);
+            forceKillTimeout = undefined;
+        }
+    }
+
     try {
+        const exited = (async () => {
+            try {
+                return await process.exited;
+            } finally {
+                clearExitTimers();
+            }
+        })();
         const [stdout, stderr, code] = await Promise.all([
             readProcessText(
                 process.stdout as ReadableStream<Uint8Array> | undefined,
@@ -116,7 +134,7 @@ export async function runProcess(
                 process.stderr as ReadableStream<Uint8Array> | undefined,
                 maxBuffer
             ),
-            process.exited,
+            exited,
         ]);
         return { code: didTimeout && code === 0 ? 1 : code, stderr, stdout };
     } catch (error) {
@@ -127,8 +145,7 @@ export async function runProcess(
         }
         throw error;
     } finally {
-        if (timeout) clearTimeout(timeout);
-        if (forceKillTimeout) clearTimeout(forceKillTimeout);
+        clearExitTimers();
     }
 }
 
