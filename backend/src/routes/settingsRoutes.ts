@@ -25,6 +25,21 @@ const DEFAULT_SETTINGS: Settings = {
     sidebarCollapsed: false,
     theme: "dark",
 };
+const settingsRouteState = {
+    updateQueue: Promise.resolve(),
+};
+
+async function withSettingsUpdateLock<T>(callback: () => Promise<T>): Promise<T> {
+    const previous = settingsRouteState.updateQueue;
+    const current = Promise.withResolvers<void>();
+    settingsRouteState.updateQueue = current.promise;
+    await previous;
+    try {
+        return await callback();
+    } finally {
+        current.resolve();
+    }
+}
 
 function resolveSettingsDirectory(home = process.env.HOME): string {
     const normalizedHome = home?.trim() || os.homedir().trim();
@@ -169,26 +184,10 @@ export const settingsRoutes = {
             }
         },
         PUT: async (request: Request) => {
-            let current: Settings;
-            let updated: Settings;
-
-            try {
-                current = await loadSettings();
-            } catch (error) {
-                console.error("[Settings] Failed to load settings:", error);
-                return json({ error: "Failed to load settings" }, { status: 500 });
-            }
-
+            let patch: Partial<Settings>;
             try {
                 const body = await readJson(request);
-                try {
-                    updated = { ...current, ...parseSettingsPatch(body) };
-                } catch (error) {
-                    return json(
-                        { error: errorMessage(error, "Invalid settings payload") },
-                        { status: 400 }
-                    );
-                }
+                patch = parseSettingsPatch(body);
             } catch (error) {
                 const status = httpStatusCode(error);
                 return json(
@@ -196,17 +195,24 @@ export const settingsRoutes = {
                         error:
                             status >= 500
                                 ? "Internal server error"
-                                : errorMessage(error, "Invalid JSON"),
+                                : errorMessage(error, "Invalid settings payload"),
                     },
                     { status }
                 );
             }
 
             try {
-                await saveSettings(updated);
-                return json(updated);
+                return await withSettingsUpdateLock(async () => {
+                    const current = await loadSettings();
+                    const updated = { ...current, ...patch };
+                    await saveSettings(updated);
+                    return json(updated);
+                });
             } catch (error) {
-                console.error("[Settings] Save error:", (error as Error).message);
+                console.error(
+                    "[Settings] Save error:",
+                    errorMessage(error, "Unknown error")
+                );
                 return json({ error: "Failed to save settings" }, { status: 500 });
             }
         },

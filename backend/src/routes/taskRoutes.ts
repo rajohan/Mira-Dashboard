@@ -416,11 +416,15 @@ export const taskRoutes = {
 
     "/api/tasks/:id": {
         GET: async (request: ParametersRequest<"id">) => {
-            const id = safeId(request.params.id);
-            if (id === null) return json({ error: "Invalid id" }, { status: 400 });
-            const row = taskById(id);
-            if (!row) return json({ error: "Task not found" }, { status: 404 });
-            return json(toFrontendTask(row, await fetchCronJobsById()));
+            try {
+                const id = safeId(request.params.id);
+                if (id === null) return json({ error: "Invalid id" }, { status: 400 });
+                const row = taskById(id);
+                if (!row) return json({ error: "Task not found" }, { status: 404 });
+                return json(toFrontendTask(row, await fetchCronJobsById()));
+            } catch (error) {
+                return taskRouteError(error);
+            }
         },
 
         PATCH: async (request: ParametersRequest<"id">) => {

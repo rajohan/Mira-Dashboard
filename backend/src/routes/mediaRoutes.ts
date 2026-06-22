@@ -154,7 +154,7 @@ export const mediaRoutes = {
                 if (code === "ENXIO") {
                     return json({ error: "Media path is not a file" }, { status: 400 });
                 }
-                if (code === "ELOOP") {
+                if (["ELOOP", "EACCES", "EPERM"].includes(code ?? "")) {
                     return json({ error: "Access denied" }, { status: 403 });
                 }
                 throw error;

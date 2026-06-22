@@ -225,11 +225,7 @@ async function logContentResponse(request: Request): Promise<Response> {
         }
 
         if (lines) {
-            content = content
-                .split("\n")
-                .filter((line) => line.trim())
-                .slice(-lines)
-                .join("\n");
+            content = content.split("\n").slice(-lines).join("\n");
         }
 
         return json({ content, file: logFile });

@@ -125,6 +125,20 @@ async function validateOpenFileWithinRoot(
     return stat;
 }
 
+function guardedOpenErrorResponse(error: unknown): Response {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (["ENOENT", "ENOTDIR"].includes(code ?? "")) {
+        return json({ error: "File not found" }, { status: 404 });
+    }
+    if (code === "ENXIO") {
+        return json({ error: "Path is not a regular file" }, { status: 400 });
+    }
+    if (["ELOOP", "EACCES", "EPERM"].includes(code ?? "")) {
+        return json({ error: "Access denied" }, { status: 403 });
+    }
+    throw error;
+}
+
 export const configFileRoutes = {
     "/api/config-files": {
         GET: () => {
@@ -175,9 +189,14 @@ export const configFileRoutes = {
             if (!fs.statSync(realFullPath).isFile()) {
                 return json({ error: "Access denied" }, { status: 403 });
             }
-            const file = await openReadNoFollowNonblockingGuarded(
-                guardedPath(realFullPath)
-            );
+            let file: fs.promises.FileHandle;
+            try {
+                file = await openReadNoFollowNonblockingGuarded(
+                    guardedPath(realFullPath)
+                );
+            } catch (error) {
+                return guardedOpenErrorResponse(error);
+            }
             let buffer: Buffer;
             let stat: fs.Stats;
             try {
@@ -293,9 +312,14 @@ export const configFileRoutes = {
                     if (!fs.statSync(target).isFile()) {
                         return json({ error: "Access denied" }, { status: 403 });
                     }
-                    const file = await openReadNoFollowNonblockingGuarded(
-                        guardedPath(target)
-                    );
+                    let file: fs.promises.FileHandle;
+                    try {
+                        file = await openReadNoFollowNonblockingGuarded(
+                            guardedPath(target)
+                        );
+                    } catch (error) {
+                        return guardedOpenErrorResponse(error);
+                    }
                     let backupContent: string;
                     try {
                         const openedStat = await validateOpenFileWithinRoot(

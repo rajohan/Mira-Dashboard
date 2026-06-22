@@ -32,7 +32,7 @@ export const agentRoutes = {
             }
             try {
                 const body = await readJson<{ currentTask?: unknown } | null>(request);
-                if (!body || typeof body !== "object") {
+                if (!body || typeof body !== "object" || Array.isArray(body)) {
                     return json({ error: "Missing or invalid body" }, { status: 400 });
                 }
                 return json(await updateAgentCurrentTask(agentId, body?.currentTask));
