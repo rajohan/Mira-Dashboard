@@ -1070,7 +1070,7 @@ function isImageMatchPlatform(image: JsonRecord, platform: string): boolean {
     if (imageOs !== os || image.architecture !== architecture) return false;
     if (!variant) {
         return (
-            image.variant === undefined ||
+            image.variant == undefined ||
             (architecture === "arm64" && image.variant === "v8")
         );
     }

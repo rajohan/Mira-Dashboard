@@ -293,7 +293,9 @@ function parseDockerSizeToBytes(sizeRaw: string | undefined): number {
         TB: 1024 ** 4,
     };
     const [, value, unit] = match;
-    return Math.round(Number(value) * (multipliers[unit?.toUpperCase() ?? ""] ?? 0));
+    return Math.round(
+        Number(value ?? "0") * (multipliers[unit?.toUpperCase() ?? ""] ?? 0)
+    );
 }
 
 async function runDocker(arguments_: string[]): Promise<string> {

@@ -80,7 +80,7 @@ function derivePriority(labels: string[]): "low" | "medium" | "high" {
 }
 
 function optionalString(value: unknown, field: string): string | undefined {
-    if (value == undefined) return undefined;
+    if (value === undefined) return undefined;
     if (typeof value !== "string") {
         throw new HttpError(`${field} must be a string`, 400);
     }
@@ -88,7 +88,7 @@ function optionalString(value: unknown, field: string): string | undefined {
 }
 
 function optionalLabels(value: unknown): string[] | undefined {
-    if (value == undefined) return undefined;
+    if (value === undefined) return undefined;
     if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
         throw new HttpError("Labels must be an array of strings", 400);
     }
@@ -363,7 +363,7 @@ export const taskRoutes = {
             try {
                 const title = optionalString(body.title, "Title")?.trim();
                 if (!title) return json({ error: "Title is required" }, { status: 400 });
-                if (body.assignee != undefined && !isValidAssignee(body.assignee)) {
+                if (body.assignee !== undefined && !isValidAssignee(body.assignee)) {
                     return json({ error: INVALID_ASSIGNEE_MESSAGE }, { status: 400 });
                 }
                 const assignee = body.assignee ?? undefined;
@@ -530,7 +530,7 @@ export const taskRoutes = {
             const body = await readTaskJson<{ assignee?: string | undefined }>(request);
             if (body instanceof Response) return body;
             if (id === undefined) return json({ error: "Invalid id" }, { status: 400 });
-            if (body.assignee != undefined && !isValidAssignee(body.assignee)) {
+            if (body.assignee !== undefined && !isValidAssignee(body.assignee)) {
                 return json({ error: INVALID_ASSIGNEE_MESSAGE }, { status: 400 });
             }
             const assignee = body.assignee ?? undefined;

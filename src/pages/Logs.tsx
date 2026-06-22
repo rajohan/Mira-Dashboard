@@ -17,6 +17,7 @@ import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtilities";
 
 const LOG_BOTTOM_THRESHOLD_PX = 24;
 const logsPageState: { lastVisibleLogFiles: LogFile[] } = { lastVisibleLogFiles: [] };
+const NO_LOG_SCROLL_ELEMENT = JSON.parse("null") as HTMLDivElement | null;
 
 type LogViewportElement = Pick<
     HTMLDivElement,
@@ -249,7 +250,7 @@ export function Logs() {
 
     const rowVirtualizer = useVirtualizer({
         count: filteredLogs.length,
-        getScrollElement: () => logContainerReference.current ?? document.body,
+        getScrollElement: () => logContainerReference.current ?? NO_LOG_SCROLL_ELEMENT,
         estimateSize: () => 22,
         overscan: 15,
         getItemKey: (index) => filteredLogs[index]!.id,

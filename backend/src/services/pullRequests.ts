@@ -1237,11 +1237,11 @@ try {
     job.status,
     job.startedAt,
     job.updatedAt,
-    job.commit ?? undefined,
-    job.commitTitle ?? undefined,
-    job.note ?? undefined,
-    job.stdout ?? undefined,
-    job.stderr ?? undefined
+    sqlNullable(job.commit ?? undefined),
+    sqlNullable(job.commitTitle ?? undefined),
+    sqlNullable(job.note ?? undefined),
+    sqlNullable(job.stdout ?? undefined),
+    sqlNullable(job.stderr ?? undefined)
 );
     database.prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?").run(job.id);
     database.run("COMMIT");

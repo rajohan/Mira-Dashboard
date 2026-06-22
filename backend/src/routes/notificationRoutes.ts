@@ -12,8 +12,8 @@ interface NotificationRow {
     title: string;
     description: string;
     type: NotificationType;
-    source: string | undefined;
-    dedupe_key: string | undefined;
+    source: string | null;
+    dedupe_key: string | null;
     metadata_json: string;
     is_read: number;
     created_at: string;
@@ -49,13 +49,13 @@ function toResponse(row: NotificationRow) {
     }
     return {
         createdAt: row.created_at,
-        dedupeKey: row.dedupe_key,
+        dedupeKey: row.dedupe_key ?? undefined,
         description: row.description,
         id: row.id,
         isRead: row.is_read === 1,
         metadata,
         occurredAt: row.occurred_at,
-        source: row.source,
+        source: row.source ?? undefined,
         title: row.title,
         type: row.type,
         updatedAt: row.updated_at,
@@ -95,7 +95,7 @@ export const notificationRoutes = {
         GET: (request: Request) => {
             try {
                 const rawLimit = new URL(request.url).searchParams.get("limit");
-                const limitValue = rawLimit === undefined ? undefined : Number(rawLimit);
+                const limitValue = rawLimit == undefined ? undefined : Number(rawLimit);
                 const limit =
                     limitValue !== undefined && Number.isFinite(limitValue)
                         ? Math.max(1, Math.min(200, Math.floor(limitValue)))
@@ -260,7 +260,7 @@ export const notificationRoutes = {
                 }
             }
             const rawSource = body.source ?? querySource;
-            if (rawSource !== undefined && typeof rawSource !== "string") {
+            if (rawSource != undefined && typeof rawSource !== "string") {
                 return json({ error: "source must be a string" }, { status: 400 });
             }
             const source = nullableString(stringFallback(rawSource).trim());
