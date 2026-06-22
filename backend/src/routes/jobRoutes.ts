@@ -60,7 +60,16 @@ function invalidPatchField(patch: Record<string, unknown>): string | null {
 
 export const jobRoutes = {
     "/api/jobs": {
-        GET: () => json({ jobs: listScheduledJobs() }),
+        GET: () => {
+            try {
+                return json({ jobs: listScheduledJobs() });
+            } catch (error) {
+                return json(
+                    { error: errorMessage(error, "Scheduled job list failed") },
+                    { status: httpStatusCode(error) }
+                );
+            }
+        },
     },
 
     "/api/jobs/:id": {

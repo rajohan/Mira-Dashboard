@@ -120,6 +120,17 @@ async function fileResponse(filePath: string, contentType?: string): Promise<Res
 }
 
 async function staticResponse(pathname: string): Promise<Response> {
+    let decodedPath: string;
+    try {
+        decodedPath = decodeURIComponent(pathname.replace(/^\/+/u, ""));
+    } catch {
+        return new Response("Bad Request", { status: 400 });
+    }
+    const decodedPathname = `/${decodedPath}`;
+    if (decodedPathname === "/api" || decodedPathname.startsWith("/api/")) {
+        return Response.json({ error: "Not found" }, { status: 404 });
+    }
+
     const indexPath = path.join(frontendPath, "index.html");
     if (!fs.existsSync(indexPath)) {
         return new Response(
@@ -145,16 +156,6 @@ async function staticResponse(pathname: string): Promise<Response> {
         realRoot = await fsp.realpath(root);
     } catch {
         return new Response("Not found", { status: 404 });
-    }
-    let decodedPath: string;
-    try {
-        decodedPath = decodeURIComponent(pathname.replace(/^\/+/u, ""));
-    } catch {
-        return new Response("Bad Request", { status: 400 });
-    }
-    const decodedPathname = `/${decodedPath}`;
-    if (decodedPathname === "/api" || decodedPathname.startsWith("/api/")) {
-        return Response.json({ error: "Not found" }, { status: 404 });
     }
     const directPath = path.resolve(root, decodedPath);
     if (directPath.startsWith(`${root}${path.sep}`)) {
@@ -201,7 +202,11 @@ async function staticResponse(pathname: string): Promise<Response> {
     try {
         const realIndexPath = await fsp.realpath(indexPath);
         const relativeRealPath = path.relative(realRoot, realIndexPath);
-        if (relativeRealPath.startsWith("..") || path.isAbsolute(relativeRealPath)) {
+        if (
+            relativeRealPath.startsWith("..") ||
+            path.isAbsolute(relativeRealPath) ||
+            hasHiddenStaticSegment(relativeRealPath)
+        ) {
             return new Response("Not found", { status: 404 });
         }
         const stat = await fsp.stat(realIndexPath);

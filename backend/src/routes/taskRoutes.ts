@@ -155,6 +155,11 @@ function numberFromRecord(record: Record<string, unknown> | undefined, key: stri
     return typeof value === "number" ? value : undefined;
 }
 
+function booleanFromRecord(record: Record<string, unknown> | undefined, key: string) {
+    const value = record?.[key];
+    return typeof value === "boolean" ? value : undefined;
+}
+
 function formatScheduleSummary(schedule: Record<string, unknown> | undefined) {
     if (!schedule) return;
     if (schedule.kind === "cron") {
@@ -209,7 +214,7 @@ function toFrontendAutomation(task: DatabaseTask, cronJobsById?: Map<string, Cro
     const state = job?.state;
     return {
         type: "cron",
-        recurring: true,
+        recurring: booleanFromRecord(stored, "recurring") ?? true,
         cronJobId: id,
         jobName: job?.name || stringFromRecord(stored, "jobName"),
         enabled: job?.enabled,

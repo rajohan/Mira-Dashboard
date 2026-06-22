@@ -124,12 +124,19 @@ describe("Bun-native dashboard backend", () => {
         let stdout = "";
         const reader = (child.stdout as ReadableStream<Uint8Array>).getReader();
         const decoder = new TextDecoder();
+        const startupTimeoutMs = 10_000;
         while (!stdout.includes("\n")) {
             const exited = (async () => {
                 const code = await child.exited;
                 return { code, done: true as const };
             })();
-            const next = await Promise.race([reader.read(), exited]);
+            const startupTimeout = new Promise<never>((_, reject) => {
+                setTimeout(
+                    () => reject(new Error("Native server startup timed out")),
+                    startupTimeoutMs
+                );
+            });
+            const next = await Promise.race([reader.read(), exited, startupTimeout]);
             if ("code" in next) {
                 throw new Error(`Native server exited early: ${next.code}`);
             }

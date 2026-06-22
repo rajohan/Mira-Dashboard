@@ -189,7 +189,8 @@ export const settingsRoutes = {
                 const body = await readJson(request);
                 patch = parseSettingsPatch(body);
             } catch (error) {
-                const status = httpStatusCode(error);
+                const mappedStatus = httpStatusCode(error);
+                const status = mappedStatus === 500 ? 400 : mappedStatus;
                 return json(
                     {
                         error:

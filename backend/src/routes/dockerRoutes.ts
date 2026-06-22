@@ -184,7 +184,7 @@ function parameters(request: Request): Record<string, string | undefined> {
 
 function queryNumber(request: Request, key: string, fallback: number): number {
     const rawValue = new URL(request.url).searchParams.get(key);
-    if (rawValue === null) return fallback;
+    if (rawValue === null || rawValue === "") return fallback;
     const parsed = Number(rawValue);
     return Number.isFinite(parsed) ? parsed : fallback;
 }
