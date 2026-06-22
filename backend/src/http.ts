@@ -196,9 +196,13 @@ export function authUser(request: Request, server: Server<unknown>): AuthUser | 
     return sessionId ? getAuthUserFromSessionId(sessionId) : null;
 }
 
-function isProductionRequest(request: Request, server: Server<unknown>): boolean {
-    if (process.env.NODE_ENV === "production") {
-        return true;
+function isSecureRequest(request: Request, server: Server<unknown>): boolean {
+    try {
+        if (new URL(request.url).protocol === "https:") {
+            return true;
+        }
+    } catch {
+        return false;
     }
     const forwardedProtocol = request.headers.get("x-forwarded-proto");
     const peerAddress = requestIp(request, server);
@@ -221,7 +225,7 @@ export function sessionCookie(
         "SameSite=Strict",
         `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
     ];
-    if (isProductionRequest(request, server)) {
+    if (isSecureRequest(request, server)) {
         cookieParts.push("Secure");
     }
     return cookieParts.join("; ");
@@ -235,7 +239,7 @@ export function clearSessionCookie(request: Request, server: Server<unknown>): s
         "SameSite=Strict",
         "Max-Age=0",
     ];
-    if (isProductionRequest(request, server)) {
+    if (isSecureRequest(request, server)) {
         cookieParts.push("Secure");
     }
     return cookieParts.join("; ");
