@@ -184,7 +184,7 @@ function parameters(request: Request): Record<string, string | undefined> {
 
 function queryNumber(request: Request, key: string, fallback: number): number {
     const rawValue = new URL(request.url).searchParams.get(key);
-    if (rawValue === undefined || rawValue === "") return fallback;
+    if (rawValue === null || rawValue === "") return fallback;
     const parsed = Number(rawValue);
     return Number.isFinite(parsed) ? parsed : fallback;
 }
@@ -615,7 +615,9 @@ async function getDockerUpdaterEvents(limit: number) {
              ORDER BY e.created_at DESC
              LIMIT ?`
         )
-        .all(boundedLimit) as Array<Record<string, string | undefined>>;
+        .all(boundedLimit) as Array<
+        Record<string, string | null | undefined> & { managed_service_id: string | null }
+    >;
 
     return rows.map((row) => ({
         appSlug: row.app_slug,
@@ -625,9 +627,7 @@ async function getDockerUpdaterEvents(limit: number) {
         fromTag: nullableString(row.from_tag),
         id: Number(row.id),
         managedServiceId:
-            row.managed_service_id === undefined
-                ? undefined
-                : Number(row.managed_service_id),
+            row.managed_service_id === null ? undefined : Number(row.managed_service_id),
         message: undefined,
         serviceName: row.service_name,
         toDigest: nullableString(row.to_digest),

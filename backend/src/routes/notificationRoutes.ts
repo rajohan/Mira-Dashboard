@@ -75,7 +75,7 @@ function optionalStringField(
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== undefined && !Array.isArray(value);
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function validId(value: string | undefined): number | undefined {
@@ -260,11 +260,7 @@ export const notificationRoutes = {
                 }
             }
             const rawSource = body.source ?? querySource;
-            if (
-                rawSource !== undefined &&
-                rawSource !== undefined &&
-                typeof rawSource !== "string"
-            ) {
+            if (rawSource !== undefined && typeof rawSource !== "string") {
                 return json({ error: "source must be a string" }, { status: 400 });
             }
             const source = nullableString(stringFallback(rawSource).trim());

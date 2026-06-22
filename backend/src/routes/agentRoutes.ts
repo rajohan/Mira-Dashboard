@@ -96,7 +96,7 @@ export const agentRoutes = {
             try {
                 const query = new URL(request.url).searchParams;
                 const rawLimit = query.get("limit");
-                const parsedLimit = rawLimit === undefined ? NaN : Number(rawLimit);
+                const parsedLimit = rawLimit == undefined ? NaN : Number(rawLimit);
                 const requestedLimit = Number.isNaN(parsedLimit) ? 8 : parsedLimit;
                 const limit = Math.max(1, Math.min(20, Math.floor(requestedLimit)));
                 closeStaleActiveTasks();

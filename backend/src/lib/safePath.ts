@@ -136,7 +136,7 @@ export function safePathWithinRoot(
         return undefined;
     }
 
-    // Reject undefined bytes which can trick path resolution
+    // Reject null bytes which can trick path resolution.
     if (userPath.includes("\0")) {
         return undefined;
     }

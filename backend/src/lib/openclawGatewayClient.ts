@@ -380,7 +380,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
 
         if (
             typeof parsed === "object" &&
-            parsed !== undefined &&
+            parsed !== null &&
             (parsed as { type?: string }).type === "event"
         ) {
             const eventMessage = parsed as GatewayEvent;
@@ -403,7 +403,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
 
         if (
             typeof parsed !== "object" ||
-            parsed === undefined ||
+            parsed === null ||
             !["response", "res"].includes((parsed as { type?: string }).type || "")
         ) {
             return;

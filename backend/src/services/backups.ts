@@ -118,7 +118,7 @@ export function mapBackupJob(job: BackupJob | undefined) {
 
 /** Returns backup type from scheduled job payload. */
 function getScheduledBackupType(payload: unknown) {
-    if (typeof payload !== "object" || payload === undefined) {
+    if (typeof payload !== "object" || payload === null) {
         return;
     }
 

@@ -130,7 +130,7 @@ function validateExecRequest(payload: unknown): ExecRequest {
                 throw new ExecValidationError("all args must be strings");
             }
             if (argument.includes("\0")) {
-                throw new ExecValidationError("args cannot contain undefined bytes");
+                throw new ExecValidationError("args cannot contain null bytes");
             }
         }
     }

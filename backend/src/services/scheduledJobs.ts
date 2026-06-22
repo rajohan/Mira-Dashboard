@@ -112,11 +112,11 @@ interface ScheduledJobRow {
     enabled: number;
     schedule_type: string;
     interval_seconds: number;
-    time_of_day: string | undefined;
-    cron_expression: string | undefined;
+    time_of_day: string | null | undefined;
+    cron_expression: string | null | undefined;
     action_key: string;
     action_payload_json: string;
-    next_run_at: string | undefined;
+    next_run_at: string | null | undefined;
     created_at: string;
     updated_at: string;
 }
@@ -127,8 +127,8 @@ interface ScheduledJobRunRow {
     status: string;
     trigger_type: string;
     started_at: string;
-    finished_at: string | undefined;
-    message: string | undefined;
+    finished_at: string | null | undefined;
+    message: string | null | undefined;
     output_json: string;
 }
 
@@ -140,6 +140,10 @@ export class ScheduledJobValidationError extends Error {
         this.name = "ScheduledJobValidationError";
         this.statusCode = 400;
     }
+}
+
+function fromSqlNullable<T>(value: T | null | undefined): T | undefined {
+    return value ?? undefined;
 }
 
 export function isScheduledJobValidationError(
@@ -405,8 +409,8 @@ function mapRun(row: ScheduledJobRunRow | undefined): ScheduledJobRun | undefine
         status: row.status as ScheduledJobRunStatus,
         triggerType: row.trigger_type as ScheduledJobTriggerType,
         startedAt: row.started_at,
-        finishedAt: row.finished_at,
-        message: row.message,
+        finishedAt: fromSqlNullable(row.finished_at),
+        message: fromSqlNullable(row.message),
         output: parseJsonObject(row.output_json),
     };
 }
@@ -468,11 +472,11 @@ function mapJob(
         enabled: row.enabled === 1,
         scheduleType: row.schedule_type as ScheduledJobScheduleType,
         intervalSeconds: row.interval_seconds,
-        timeOfDay: row.time_of_day,
-        cronExpression: row.cron_expression,
+        timeOfDay: fromSqlNullable(row.time_of_day),
+        cronExpression: fromSqlNullable(row.cron_expression),
         actionKey: row.action_key,
         actionPayload: parseJsonObject(row.action_payload_json),
-        nextRunAt: row.next_run_at,
+        nextRunAt: fromSqlNullable(row.next_run_at),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         lastRun: latestRuns.get(row.id) ?? undefined,

@@ -1071,7 +1071,6 @@ function isImageMatchPlatform(image: JsonRecord, platform: string): boolean {
     if (!variant) {
         return (
             image.variant === undefined ||
-            image.variant === undefined ||
             (architecture === "arm64" && image.variant === "v8")
         );
     }
@@ -1578,7 +1577,7 @@ function listComposeFiles(root = getDockerAppsRoot()): string[] {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return (
-        value !== undefined &&
+        value !== null &&
         typeof value === "object" &&
         !Array.isArray(value) &&
         Object.getPrototypeOf(value) === Object.prototype

@@ -303,7 +303,7 @@ function validateConfig(config: LogRotationConfig): void {
     }
     if (
         config.defaults !== undefined &&
-        (config.defaults === undefined ||
+        (config.defaults === null ||
             typeof config.defaults !== "object" ||
             Array.isArray(config.defaults))
     ) {
@@ -1176,9 +1176,9 @@ async function applyArchiveOnlyRetention(
     }
 
     for (const archives of archivesByScope.values()) {
-        archives.toSorted((a, b) => b.mtimeMs - a.mtimeMs);
-        const deleteSet = retentionDeleteSet(archives, policy);
-        for (const archive of archives) {
+        const sortedArchives = archives.toSorted((a, b) => b.mtimeMs - a.mtimeMs);
+        const deleteSet = retentionDeleteSet(sortedArchives, policy);
+        for (const archive of sortedArchives) {
             if (!deleteSet.has(archive.path)) {
                 try {
                     const result = await archiveOnlyCompressArchiveIfNeeded(
