@@ -1040,9 +1040,11 @@ function validateDashboardPrForReviewApproval(pr: PullRequestSummary): void {
 
 /** Returns whether pull request checks are conclusively passing. */
 function hasPullRequestChecksPassed(checks: unknown[] | undefined): boolean {
-    const records = (checks || []).filter(
-        (check): check is Record<string, unknown> =>
-            Boolean(check) && typeof check === "object" && !Array.isArray(check)
+    const records = latestCheckRecords(
+        (checks || []).filter(
+            (check): check is Record<string, unknown> =>
+                Boolean(check) && typeof check === "object" && !Array.isArray(check)
+        )
     );
 
     if (records.length === 0) {
@@ -1058,6 +1060,44 @@ function hasPullRequestChecksPassed(checks: unknown[] | undefined): boolean {
         const status = normalizedCheckValue(check.status ?? check.state);
         return PASSING_CHECK_VALUES.has(status);
     });
+}
+
+/** Keeps only the latest check entry for each GitHub check name/context. */
+function latestCheckRecords(
+    checks: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+    const latestByKey = new Map<string, Record<string, unknown>>();
+    for (const check of checks) {
+        const key = checkKey(check);
+        const existing = latestByKey.get(key);
+        if (!existing || checkTimestamp(check) >= checkTimestamp(existing)) {
+            latestByKey.set(key, check);
+        }
+    }
+    return latestByKey.values().toArray();
+}
+
+/** Returns a stable key for a GitHub status or check run. */
+function checkKey(check: Record<string, unknown>): string {
+    for (const key of ["name", "context", "workflowName"]) {
+        const value = check[key];
+        if (typeof value === "string" && value.trim()) {
+            return `${key}:${value.trim()}`;
+        }
+    }
+    return JSON.stringify(check);
+}
+
+/** Returns a comparable timestamp for a GitHub status or check run. */
+function checkTimestamp(check: Record<string, unknown>): number {
+    for (const key of ["completedAt", "startedAt", "createdAt"]) {
+        const value = check[key];
+        if (typeof value === "string") {
+            const timestamp = Date.parse(value);
+            if (Number.isFinite(timestamp)) return timestamp;
+        }
+    }
+    return 0;
 }
 
 /** Normalizes a GitHub check status or conclusion. */
