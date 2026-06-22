@@ -12,7 +12,12 @@ import {
 import { stringFallback } from "../lib/values.ts";
 
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
-const mediaRouteState: { cachedMediaRoot?: string; cachedRealMediaRoot?: string } = {};
+const mediaRouteState: {
+    cachedMediaRoot?: string;
+    cachedOpenclawRoot?: string;
+    cachedRealMediaRoot?: string;
+    cachedRealOpenclawRoot?: string;
+} = {};
 
 const MIME_TYPES: Record<string, string> = {
     ".bmp": "image/bmp",
@@ -37,7 +42,7 @@ function resolveOpenclawRoot(): string | null {
     const configuredRoot =
         process.env.OPENCLAW_HOME?.trim() ||
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
-    const homeDirectory = (process.env.HOME?.trim() || os.homedir().trim()).trim();
+    const homeDirectory = process.env.HOME?.trim() || os.homedir().trim();
     if (
         !configuredRoot &&
         (!homeDirectory ||
@@ -55,9 +60,19 @@ function resolveOpenclawRoot(): string | null {
     ) {
         return null;
     }
+    if (
+        mediaRouteState.cachedOpenclawRoot === resolvedRoot &&
+        mediaRouteState.cachedRealOpenclawRoot
+    ) {
+        return mediaRouteState.cachedRealOpenclawRoot;
+    }
     try {
-        return fs.realpathSync(resolvedRoot);
+        mediaRouteState.cachedOpenclawRoot = resolvedRoot;
+        mediaRouteState.cachedRealOpenclawRoot = fs.realpathSync(resolvedRoot);
+        return mediaRouteState.cachedRealOpenclawRoot;
     } catch {
+        mediaRouteState.cachedOpenclawRoot = resolvedRoot;
+        mediaRouteState.cachedRealOpenclawRoot = resolvedRoot;
         return resolvedRoot;
     }
 }

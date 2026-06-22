@@ -31,12 +31,14 @@ import { ttsRoutes } from "./routes/ttsRoutes.ts";
 
 const BACKEND_COMMIT = (() => {
     try {
-        return Bun.spawnSync(["git", "rev-parse", "--short", "HEAD"], {
-            cwd: path.join(import.meta.dirname, ".."),
-            stderr: "ignore",
-        })
-            .stdout.toString()
-            .trim();
+        return (
+            Bun.spawnSync(["git", "rev-parse", "--short", "HEAD"], {
+                cwd: path.join(import.meta.dirname, ".."),
+                stderr: "ignore",
+            })
+                .stdout?.toString()
+                ?.trim() || "unknown"
+        );
     } catch {
         return "unknown";
     }
