@@ -12,7 +12,7 @@ export function nonEmptyEnvironmentFallback(name: string, fallback: string): str
 
 /** Converts optional values to strings while preserving empty/undefined fallback behavior. */
 export function stringFallback(value?: unknown, fallback = ""): string {
-    return value == undefined ? fallback : String(value);
+    return String(value ?? fallback);
 }
 
 /** Converts optional values to strings or undefined for API response fields. */

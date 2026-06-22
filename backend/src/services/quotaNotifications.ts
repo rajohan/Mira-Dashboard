@@ -38,13 +38,13 @@ function getProviderPercent(
     if (provider === "openrouter") {
         return hasQuotaStatus(quotas.openrouter)
             ? undefined
-            : quotas.openrouter.percentUsed;
+            : (quotas.openrouter.percentUsed ?? undefined);
     }
 
     if (provider === "elevenlabs") {
         return hasQuotaStatus(quotas.elevenlabs)
             ? undefined
-            : quotas.elevenlabs.percentUsed;
+            : (quotas.elevenlabs.percentUsed ?? undefined);
     }
 
     if (provider === "synthetic") {

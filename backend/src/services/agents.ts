@@ -602,7 +602,7 @@ function getActiveHistoryTask(agentId: string): AgentTaskHistoryItem | undefined
               task: string;
               status: string;
               started_at: string;
-              completed_at: string | undefined;
+              completed_at: string | null | undefined;
               last_activity_at: string;
           };
 
@@ -616,7 +616,7 @@ function getActiveHistoryTask(agentId: string): AgentTaskHistoryItem | undefined
         task: row.task,
         status: row.status,
         startedAt: row.started_at,
-        completedAt: row.completed_at,
+        completedAt: row.completed_at ?? undefined,
         lastActivityAt: row.last_activity_at,
     };
 }

@@ -1206,6 +1206,10 @@ function deploymentJobUpdateCommand(job: DeploymentJob): string {
 import { Database } from "bun:sqlite";
 const job = JSON.parse(process.env.MIRA_DEPLOYMENT_JOB || "{}");
 const database = new Database(process.env.MIRA_DEPLOYMENT_DB);
+const sqlNull = JSON.parse("null");
+function sqlNullable(value) {
+    return value === undefined ? sqlNull : value;
+}
 database.run("PRAGMA foreign_keys = ON");
 database.run("PRAGMA busy_timeout = 5000");
 try {

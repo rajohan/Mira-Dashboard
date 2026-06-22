@@ -15,17 +15,18 @@ const elevatedLogRotationRunner: LogRotationRunner = runElevatedLogRotationServi
 
 function normalizeLastRunErrors(run: Record<string, unknown>): unknown[] {
     if (Array.isArray(run.errors)) return run.errors;
+    const result = run.result ?? undefined;
     const message =
         typeof run.message === "string" && run.message.trim()
             ? run.message.trim()
             : typeof run.stderr === "string" && run.stderr.trim()
               ? run.stderr.trim()
               : "";
-    if (!message && run.result === undefined) return [];
+    if (!message && result === undefined) return [];
     return [
         {
             message: message || "Log rotation failed",
-            result: run.result ?? undefined,
+            result,
             stderr: typeof run.stderr === "string" ? run.stderr : "",
         },
     ];

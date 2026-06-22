@@ -37,6 +37,7 @@ async function updateTask(
         labels?: string[];
         automation?:
             | Pick<TaskAutomation, "cronJobId" | "scheduleSummary" | "sessionTarget">
+            | null
             | undefined;
     }
 ): Promise<Task> {
@@ -146,6 +147,7 @@ export function useUpdateTask() {
                           TaskAutomation,
                           "cronJobId" | "scheduleSummary" | "sessionTarget"
                       >
+                    | null
                     | undefined;
             };
         }) => updateTask(number, updates),

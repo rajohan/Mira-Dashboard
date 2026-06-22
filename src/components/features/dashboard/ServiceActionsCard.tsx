@@ -26,6 +26,9 @@ export function ServiceActionsCard() {
         };
     }>("system.host", 60_000);
     const versionInfo = systemHost?.data.version;
+    const versionAlertText = versionInfo?.latest
+        ? `New OpenClaw version available (${versionInfo.current} -> ${versionInfo.latest}).`
+        : `New OpenClaw version available (${versionInfo?.current} -> not available).`;
 
     const [pendingAction, setPendingAction] = useState<OpsActionDefinition | undefined>(
         undefined
@@ -118,7 +121,7 @@ export function ServiceActionsCard() {
         ? {
               action: runningActionLabel || "Running action",
               ranAt: execJob.data.startedAt,
-              code: execJob.data.status === "done" ? execJob.data.code : undefined,
+              ...(execJob.data.status === "done" && { code: execJob.data.code }),
               running: execJob.data.status === "running",
           }
         : result
@@ -159,8 +162,7 @@ export function ServiceActionsCard() {
                     <div className="border-primary-700 bg-primary-900/30 mb-3 rounded border px-3 py-2 text-xs text-amber-200">
                         <div className="flex items-center gap-2">
                             <AlertTriangle className="h-3.5 w-3.5" />
-                            New OpenClaw version available ({versionInfo.current} →{" "}
-                            {versionInfo.latest}).
+                            {versionAlertText}
                         </div>
                     </div>
                 ) : undefined}
@@ -224,7 +226,7 @@ export function ServiceActionsCard() {
                             {outputMeta.action} · {formatDate(new Date(outputMeta.ranAt))}
                             {outputMeta.running
                                 ? " · in progress"
-                                : ` · exit code ${String(outputMeta.code)}`}
+                                : ` · exit code ${String(outputMeta.code ?? "not available")}`}
                         </div>
                         <div className="text-primary-300 mb-1 inline-flex items-center gap-1 text-xs">
                             <Terminal className="h-3.5 w-3.5" />
