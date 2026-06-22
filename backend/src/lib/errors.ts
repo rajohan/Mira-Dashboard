@@ -1,5 +1,3 @@
-import type { RequestHandler } from "express";
-
 export interface HttpStatusError extends Error {
     statusCode?: number;
 }
@@ -25,27 +23,4 @@ export function httpStatusCode(error: unknown): number {
         }
     }
     return 500;
-}
-
-/** Wraps async Express handlers with consistent JSON error responses. */
-export function asyncRoute(
-    handler: RequestHandler,
-    { fallback = "Route failed", logLabel }: { fallback?: string; logLabel?: string } = {}
-): RequestHandler {
-    return async (request, response, next) => {
-        try {
-            await handler(request, response, next);
-        } catch (error) {
-            if (logLabel) {
-                console.error(logLabel, error);
-            }
-            if (response.headersSent) {
-                next(error);
-                return;
-            }
-            response.status(httpStatusCode(error)).json({
-                error: errorMessage(error, fallback),
-            });
-        }
-    };
 }

@@ -1,10 +1,8 @@
-import { pathToFileURL } from "node:url";
-
 import { getPersistedGatewayToken } from "./auth.ts";
 import gateway from "./gateway.ts";
-import { registerBackupScheduledJobs } from "./routes/backups.ts";
-import { resolveListenPort, server } from "./server.ts";
+import { createServer, resolveListenPort } from "./server.ts";
 import { shouldStartScheduledJobs } from "./serverStartPolicy.ts";
+import { registerBackupScheduledJobs } from "./services/backups.ts";
 import {
     registerCacheRefreshScheduledJobs,
     waitForLocalCacheSeed,
@@ -21,10 +19,14 @@ import {
     stopScheduledJobScheduler,
 } from "./services/scheduledJobs.ts";
 
-const serverStartState: { stopSchedulerOnServerClose?: () => void; isStarting: boolean } =
-    {
-        isStarting: false,
-    };
+const serverStartState: {
+    activeServer: ReturnType<typeof createServer> | null;
+    stopSchedulerOnServerClose?: () => void;
+    isStarting: boolean;
+} = {
+    activeServer: null,
+    isStarting: false,
+};
 
 export { runLogRotationCli } from "./services/logRotation.ts";
 
@@ -36,7 +38,6 @@ function installSchedulerCloseCleanup(): void {
         stopScheduledJobScheduler();
         serverStartState.stopSchedulerOnServerClose = undefined;
     };
-    server.once("close", serverStartState.stopSchedulerOnServerClose);
 }
 
 function removeSchedulerCloseCleanup(): void {
@@ -44,7 +45,6 @@ function removeSchedulerCloseCleanup(): void {
         return;
     }
 
-    server.removeListener("close", serverStartState.stopSchedulerOnServerClose);
     serverStartState.stopSchedulerOnServerClose = undefined;
 }
 
@@ -130,38 +130,45 @@ export function handleServerListening(): void {
         if (isGatewayStarted) {
             rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
         }
-        rollback(() => server.close(), "[Backend] Failed to close server:");
+        const server = serverStartState.activeServer;
+        serverStartState.activeServer = null;
+        void server
+            ?.stop(true)
+            .catch((cleanupError) =>
+                console.error("[Backend] Failed to close server:", cleanupError)
+            );
         throw error;
     }
 }
 
 /** Binds the HTTP server and starts runtime-only background services. */
 export function startBackendServer(port = resolveListenPort()): void {
-    if (server.listening || server.address() !== null || serverStartState.isStarting) {
+    if (serverStartState.activeServer || serverStartState.isStarting) {
         return;
     }
     serverStartState.isStarting = true;
-    const onListening = () => {
-        server.removeListener("error", onError);
+    try {
+        serverStartState.activeServer = createServer(port);
+        handleServerListening();
         serverStartState.isStarting = false;
-    };
-    const onError = (error: Error) => {
-        server.removeListener("listening", onListening);
-        server.removeListener("error", onError);
+    } catch (error) {
         serverStartState.isStarting = false;
+        serverStartState.activeServer = null;
         console.error("[Backend] Failed to start server:", error);
         process.exitCode = 1;
-        server.close();
-    };
-    server.once("listening", onListening);
-    server.once("error", onError);
-    try {
-        server.listen(port, handleServerListening);
-    } catch (error) {
-        server.removeListener("listening", onListening);
-        server.removeListener("error", onError);
-        serverStartState.isStarting = false;
         throw error;
+    }
+}
+
+export async function stopBackendServer(): Promise<void> {
+    const server = serverStartState.activeServer;
+    serverStartState.activeServer = null;
+    try {
+        removeSchedulerCloseCleanup();
+        stopScheduledJobScheduler();
+        gateway.shutdown();
+    } finally {
+        await server?.stop(true);
     }
 }
 
@@ -169,7 +176,7 @@ export function isDirectEntrypoint(
     argvPath = process.argv[1],
     moduleUrl = import.meta.url
 ): boolean {
-    return Boolean(argvPath && moduleUrl === pathToFileURL(argvPath).href);
+    return Boolean(argvPath && moduleUrl === Bun.pathToFileURL(argvPath).href);
 }
 
 export function shouldStartOnImport(
