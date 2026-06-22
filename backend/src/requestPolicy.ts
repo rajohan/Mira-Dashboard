@@ -100,10 +100,11 @@ function withRateLimitHeaders(
     resetAt: number
 ): Response {
     const headers = new Headers(response.headers);
+    const resetSeconds = Math.max(0, Math.ceil((resetAt - Date.now()) / 1000));
     headers.set("RateLimit-Policy", `${rule.max};w=${Math.floor(rule.windowMs / 1000)}`);
     headers.set(
         "RateLimit",
-        `limit=${rule.max}, remaining=${Math.max(remaining, 0)}, reset=${Math.ceil(resetAt / 1000)}`
+        `limit=${rule.max}, remaining=${Math.max(remaining, 0)}, reset=${resetSeconds}`
     );
     return new Response(response.body, {
         headers,

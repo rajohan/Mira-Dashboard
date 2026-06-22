@@ -32,6 +32,9 @@ export const agentRoutes = {
             }
             try {
                 const body = await readJson<{ currentTask?: unknown } | null>(request);
+                if (!body || typeof body !== "object") {
+                    return json({ error: "Missing or invalid body" }, { status: 400 });
+                }
                 return json(await updateAgentCurrentTask(agentId, body?.currentTask));
             } catch (error) {
                 return agentError(error, "Agent metadata update failed");

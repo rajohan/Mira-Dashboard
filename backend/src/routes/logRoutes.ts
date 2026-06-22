@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { json } from "../http.ts";
-import { guardedPath, openReadNoFollowGuarded } from "../lib/guardedOps.ts";
+import { guardedPath, openReadNoFollowNonblockingGuarded } from "../lib/guardedOps.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -198,7 +198,7 @@ async function logContentResponse(request: Request): Promise<Response> {
 
         let file: fs.promises.FileHandle;
         try {
-            file = await openReadNoFollowGuarded(guardedPath(candidatePath));
+            file = await openReadNoFollowNonblockingGuarded(guardedPath(candidatePath));
         } catch (error) {
             if (isLogPathUnreadableErrorCode((error as NodeJS.ErrnoException).code)) {
                 return json({ error: "Log file not found" }, { status: 404 });

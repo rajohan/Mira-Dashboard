@@ -97,6 +97,9 @@ export const mediaRoutes = {
             if (!requestedPath) {
                 return json({ error: "Access denied" }, { status: 403 });
             }
+            if (requestedPath.includes("\0")) {
+                return json({ error: "Invalid media path" }, { status: 400 });
+            }
 
             const mediaRoot = getMediaRoot();
             if (!mediaRoot) {

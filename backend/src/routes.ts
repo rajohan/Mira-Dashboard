@@ -60,8 +60,12 @@ function sessions() {
 }
 
 const routeTable = {
-    "/health": health,
-    "/api/health": health,
+    "/health": {
+        GET: health,
+    },
+    "/api/health": {
+        GET: health,
+    },
     "/api/sessions": {
         GET: sessions,
     },

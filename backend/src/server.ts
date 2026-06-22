@@ -6,7 +6,7 @@ import type { Server, ServerWebSocket } from "bun";
 
 import type { DashboardSocket } from "./dashboardSocket.ts";
 import gateway from "./gateway.ts";
-import { authUser } from "./http.ts";
+import { authUser, isAllowedDashboardOrigin } from "./http.ts";
 import { routes } from "./routes.ts";
 
 interface DashboardSocketData {
@@ -20,37 +20,10 @@ interface DashboardSocketData {
 const frontendPath =
     process.env.MIRA_DASHBOARD_FRONTEND_PATH ||
     path.join(import.meta.dirname, "..", "..", "dist");
-const configuredDashboardOrigins = new Set(
-    (process.env.MIRA_DASHBOARD_ALLOWED_ORIGINS || "")
-        .split(",")
-        .map((origin) => origin.trim())
-        .filter(Boolean)
-);
-const allowedLoopbackHostnames = new Set([
-    "localhost",
-    "127.0.0.1",
-    "::1",
-    "[::1]",
-    "::ffff:127.0.0.1",
-    "[::ffff:127.0.0.1]",
-]);
 const SERVER_IDLE_TIMEOUT_SECONDS = 240;
 
-function isAllowedWebSocketOrigin(request: Request): boolean {
-    const origin = request.headers.get("origin");
-    if (!origin) return true;
-    try {
-        const parsedOrigin = new URL(origin);
-        const requestUrl = new URL(request.url);
-        return (
-            configuredDashboardOrigins.has(parsedOrigin.origin) ||
-            (allowedLoopbackHostnames.has(parsedOrigin.hostname) &&
-                allowedLoopbackHostnames.has(requestUrl.hostname) &&
-                parsedOrigin.host === requestUrl.host)
-        );
-    } catch {
-        return false;
-    }
+function hasHiddenStaticSegment(relativePath: string): boolean {
+    return relativePath.split(path.sep).some((segment) => segment.startsWith("."));
 }
 
 export function resolveListenPort(value = process.env.PORT): number {
@@ -115,7 +88,7 @@ export function createServer(port = resolveListenPort()): Server<DashboardSocket
         fetch(request, server) {
             const url = new URL(request.url);
             if (url.pathname === "/ws") {
-                if (!isAllowedWebSocketOrigin(request)) {
+                if (!isAllowedDashboardOrigin(request)) {
                     return new Response("Forbidden", { status: 403 });
                 }
                 const user = authUser(request, server);
@@ -147,9 +120,6 @@ async function fileResponse(filePath: string, contentType?: string): Promise<Res
 }
 
 async function staticResponse(pathname: string): Promise<Response> {
-    if (pathname === "/api" || pathname.startsWith("/api/")) {
-        return Response.json({ error: "Not found" }, { status: 404 });
-    }
     const indexPath = path.join(frontendPath, "index.html");
     if (!fs.existsSync(indexPath)) {
         return new Response(
@@ -182,6 +152,10 @@ async function staticResponse(pathname: string): Promise<Response> {
     } catch {
         return new Response("Bad Request", { status: 400 });
     }
+    const decodedPathname = `/${decodedPath}`;
+    if (decodedPathname === "/api" || decodedPathname.startsWith("/api/")) {
+        return Response.json({ error: "Not found" }, { status: 404 });
+    }
     const directPath = path.resolve(root, decodedPath);
     if (directPath.startsWith(`${root}${path.sep}`)) {
         try {
@@ -189,7 +163,8 @@ async function staticResponse(pathname: string): Promise<Response> {
             const relativeRealPath = path.relative(realRoot, realDirectPath);
             if (
                 !relativeRealPath.startsWith("..") &&
-                !path.isAbsolute(relativeRealPath)
+                !path.isAbsolute(relativeRealPath) &&
+                !hasHiddenStaticSegment(relativeRealPath)
             ) {
                 const stat = await fsp.stat(realDirectPath);
                 if (stat.isFile()) return fileResponse(realDirectPath);
@@ -208,6 +183,9 @@ async function staticResponse(pathname: string): Promise<Response> {
             const realAssetPath = await fsp.realpath(assetPath);
             const relativeRealPath = path.relative(realRoot, realAssetPath);
             if (relativeRealPath.startsWith("..") || path.isAbsolute(relativeRealPath)) {
+                return new Response("Not found", { status: 404 });
+            }
+            if (hasHiddenStaticSegment(relativeRealPath)) {
                 return new Response("Not found", { status: 404 });
             }
             const stat = await fsp.stat(realAssetPath);

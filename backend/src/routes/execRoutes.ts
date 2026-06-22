@@ -10,10 +10,6 @@ import {
 type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
 
 function errorResponse(error: unknown): Response {
-    const statusCode = Number((error as { statusCode?: unknown }).statusCode);
-    if ([400, 404, 413, 429].includes(statusCode)) {
-        return json({ error: (error as Error).message }, { status: statusCode });
-    }
     const mapped = execErrorResponse(error);
     return json({ error: mapped.error }, { status: mapped.status });
 }

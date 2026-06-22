@@ -72,7 +72,9 @@ function isHidden(name: string): boolean {
 }
 
 function hasHiddenSegment(relativePath: string): boolean {
-    return relativePath.split(/[\\/]+/u).some((segment) => isHidden(segment));
+    return relativePath
+        .split(/[\\/]+/u)
+        .some((segment) => segment !== "." && isHidden(segment));
 }
 
 function isBinaryContent(content: string): boolean {
@@ -448,7 +450,7 @@ export const fileRoutes = {
                 }
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-                    throw error;
+                    return fileOpenErrorResponse(error);
                 }
             }
             const anchoredPath = path.relative(root, safeFullPath);

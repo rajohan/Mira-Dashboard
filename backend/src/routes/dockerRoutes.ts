@@ -33,7 +33,7 @@ const MIN_LOG_TAIL = 50;
 const MAX_LOG_TAIL = 5_000;
 const DOCKER_REQUEST_TIMEOUT_MS = 30_000;
 const SENSITIVE_ENV_KEY_PATTERN =
-    /(?:SECRET|TOKEN|KEY|PASSWORD|CREDENTIAL|PRIVATE|DSN|DATABASE[_-]?URL|DB[_-]?URL|REDIS[_-]?URL|MONGO(?:DB)?[_-]?URL|CONNECTION[_-]?STRING|API[_-]?KEY|ACCESS[_-]?TOKEN|(?:^|[_-])PAT(?:$|[_-])|(?:^|[_-])URL$)/iu;
+    /(?:SECRET|TOKEN|KEY|PASSWORD|CREDENTIAL|PRIVATE|AUTHORIZATION|AUTH|JWT|COOKIE|SESSION|DSN|DATABASE[_-]?URL|DB[_-]?URL|REDIS[_-]?URL|MONGO(?:DB)?[_-]?URL|CONNECTION[_-]?STRING|API[_-]?KEY|ACCESS[_-]?TOKEN|(?:^|[_-])PAT(?:$|[_-])|(?:^|[_-])URL$)/iu;
 
 interface DockerPsRow {
     Command: string;
@@ -444,6 +444,14 @@ function findContainerSummary(
         container.id.startsWith(identifier)
     );
     return prefixMatches.length === 1 ? prefixMatches[0] : null;
+}
+
+async function resolveContainerId(identifier: string): Promise<string | null> {
+    const containers = await getContainers();
+    const summary = findContainerSummary(containers, identifier);
+    if (!summary) return null;
+    const inspectMap = await getContainerInspectMap([summary.id]);
+    return stringFallback(inspectMap.get(summary.id)?.Id) || summary.id;
 }
 
 async function readDockerJson<T>(request: Request): Promise<T | Response> {
@@ -914,14 +922,18 @@ export const dockerRoutes = {
                 containerId?: unknown;
             }>(request);
             if (body instanceof Response) return body;
-            const containerId = dockerIdentifier(body?.containerId);
+            const requestedContainerId = dockerIdentifier(body?.containerId);
             if (
                 !body ||
-                !containerId ||
+                !requestedContainerId ||
                 typeof body.command !== "string" ||
                 !body.command.trim()
             ) {
                 return json({ error: "Missing containerId or command" }, { status: 400 });
+            }
+            const containerId = await resolveContainerId(requestedContainerId);
+            if (!containerId) {
+                return json({ error: "Container not found" }, { status: 404 });
             }
             cleanupDockerExecJobs();
             if (activeDockerExecJobCount() >= MAX_JOBS) {

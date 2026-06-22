@@ -19,7 +19,7 @@ export const sessionRoutes = {
         GET: (request: Request) => {
             try {
                 const query = new URL(request.url).searchParams;
-                let sessions = gateway.getSessions();
+                let sessions = [...gateway.getSessions()];
                 const type = query.get("type");
                 const model = query.get("model");
                 if (type) sessions = sessions.filter((session) => session.type === type);

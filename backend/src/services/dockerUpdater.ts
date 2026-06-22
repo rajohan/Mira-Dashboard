@@ -946,6 +946,9 @@ function parseSafeTagRegexPattern(pattern: string): SafeTagPatternPart[] | null 
                 }
                 parts.push({ kind: "digits" });
                 index += 2;
+                if (/^\d$/u.test(body[index + 1] ?? "")) {
+                    return null;
+                }
                 continue;
             }
             if (/^[-.+_]$/u.test(escaped)) {
@@ -969,9 +972,15 @@ function parseSafeTagRegexPattern(pattern: string): SafeTagPatternPart[] | null 
             }
             parts.push({ kind: "digits" });
             index = closeIndex + 1;
+            if (/^\d$/u.test(body[index + 1] ?? "")) {
+                return null;
+            }
             continue;
         }
         if (/^[A-Za-z0-9_-]$/u.test(character)) {
+            if (/^\d$/u.test(character) && parts.at(-1)?.kind === "digits") {
+                return null;
+            }
             parts.push({ kind: "literal", value: character });
             continue;
         }

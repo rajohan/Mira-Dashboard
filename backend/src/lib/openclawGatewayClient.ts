@@ -62,6 +62,18 @@ type PendingRequestEntry = {
     timeout: NodeJS.Timeout;
 };
 
+async function websocketMessageToString(data: unknown): Promise<string> {
+    if (typeof data === "string") return data;
+    if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8");
+    if (ArrayBuffer.isView(data)) {
+        return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString(
+            "utf8"
+        );
+    }
+    if (data instanceof Blob) return data.text();
+    return String(data);
+}
+
 /** Defines open claw gateway client options. */
 export type OpenClawGatewayClientOptions = {
     url?: string;
@@ -556,14 +568,15 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             MAX_TIMER_DELAY_MS
         );
         const ws = new WebSocket(trimmedUrl);
+        ws.binaryType = "arraybuffer";
         this.ws = ws;
 
         ws.addEventListener("open", () => {
             this.armConnectChallengeTimeout();
         });
 
-        ws.addEventListener("message", (event) => {
-            this.handleMessage(String(event.data));
+        ws.addEventListener("message", async (event) => {
+            this.handleMessage(await websocketMessageToString(event.data));
         });
 
         ws.addEventListener("close", (event) => {

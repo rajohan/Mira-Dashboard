@@ -545,12 +545,19 @@ export async function writeTextNoFollowAnchoredGuarded(
         await handles.at(-1)?.sync();
     } finally {
         if (isTemporaryCreated) {
-            await Reflect.apply(fsPromiseOps.rm, Fs.promises, [
-                temporaryPath,
-                { force: true },
-            ]);
+            try {
+                await Reflect.apply(fsPromiseOps.rm, Fs.promises, [
+                    temporaryPath,
+                    { force: true },
+                ]);
+            } finally {
+                await Promise.allSettled(
+                    handles.reverse().map((handle) => handle.close())
+                );
+            }
+        } else {
+            await Promise.allSettled(handles.reverse().map((handle) => handle.close()));
         }
-        await Promise.allSettled(handles.reverse().map((handle) => handle.close()));
     }
 }
 

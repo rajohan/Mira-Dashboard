@@ -287,5 +287,3 @@ export function unsubscribeFromLogs(ws: DashboardSocket): void {
         logsRouteState.logWatcher = null;
     }
 }
-
-/** Defines testing. */

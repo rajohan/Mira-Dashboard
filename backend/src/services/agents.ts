@@ -623,6 +623,9 @@ function getActiveHistoryTask(agentId: string): AgentTaskHistoryItem | null {
 
 /** Returns recently completed task-history entries for dashboard display. */
 export function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
+    const safeLimit = Number.isFinite(limit)
+        ? Math.max(1, Math.min(100, Math.floor(limit)))
+        : 8;
     const rows = database
         .prepare(
             `SELECT id, agent_id, task, status, started_at, completed_at, last_activity_at
@@ -631,7 +634,7 @@ export function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
          ORDER BY completed_at DESC
          LIMIT ?`
         )
-        .all(limit) as Array<{
+        .all(safeLimit) as Array<{
         id: number;
         agent_id: string;
         task: string;

@@ -221,11 +221,7 @@ export const terminalRoutes = {
             }
 
             const { cwd, partial } = body;
-            if (
-                typeof partial !== "string" ||
-                partial.length === 0 ||
-                partial.includes("\0")
-            ) {
+            if (typeof partial !== "string" || partial.includes("\0")) {
                 return json({ error: "Missing or invalid partial" }, { status: 400 });
             }
             const trimmedCwd = typeof cwd === "string" ? cwd.trim() : undefined;

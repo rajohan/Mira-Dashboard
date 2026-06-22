@@ -12,6 +12,20 @@ const TRUSTED_PROXY_IPS = new Set(
         .filter(Boolean)
 );
 const isLoopbackAuthEnabled = process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH === "1";
+const configuredDashboardOrigins = new Set(
+    (process.env.MIRA_DASHBOARD_ALLOWED_ORIGINS || "")
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean)
+);
+const allowedLoopbackHostnames = new Set([
+    "localhost",
+    "127.0.0.1",
+    "::1",
+    "[::1]",
+    "::ffff:127.0.0.1",
+    "[::ffff:127.0.0.1]",
+]);
 
 type HeaderInput = Record<string, string> | Array<[string, string]>;
 
@@ -131,6 +145,23 @@ export function isLoopbackRequest(request: Request, server: Server<unknown>): bo
     return isLoopbackAddress(requestIp(request, server));
 }
 
+export function isAllowedDashboardOrigin(request: Request): boolean {
+    const origin = request.headers.get("origin");
+    if (!origin) return true;
+    try {
+        const parsedOrigin = new URL(origin);
+        const requestUrl = new URL(request.url);
+        return (
+            configuredDashboardOrigins.has(parsedOrigin.origin) ||
+            (allowedLoopbackHostnames.has(parsedOrigin.hostname) &&
+                allowedLoopbackHostnames.has(requestUrl.hostname) &&
+                parsedOrigin.host === requestUrl.host)
+        );
+    } catch {
+        return false;
+    }
+}
+
 export function sessionIdFromCookie(request: Request): string | null {
     const cookieHeader = request.headers.get("cookie");
     if (!cookieHeader) {
@@ -156,7 +187,8 @@ export function authUser(request: Request, server: Server<unknown>): AuthUser | 
     if (
         isLoopbackAuthEnabled &&
         !hasForwardedClient &&
-        isLoopbackRequest(request, server)
+        isLoopbackRequest(request, server) &&
+        isAllowedDashboardOrigin(request)
     ) {
         return { id: 0, username: "mira-local" };
     }

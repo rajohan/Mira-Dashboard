@@ -65,11 +65,18 @@ export const jobRoutes = {
 
     "/api/jobs/:id": {
         GET: (request: ParametersRequest<"id">) => {
-            const job = getScheduledJob(String(request.params.id));
-            if (!job) {
-                return json({ error: "Scheduled job not found" }, { status: 404 });
+            try {
+                const job = getScheduledJob(String(request.params.id));
+                if (!job) {
+                    return json({ error: "Scheduled job not found" }, { status: 404 });
+                }
+                return json({ job });
+            } catch (error) {
+                return json(
+                    { error: errorMessage(error, "Scheduled job lookup failed") },
+                    { status: httpStatusCode(error) }
+                );
             }
-            return json({ job });
         },
         PATCH: async (request: ParametersRequest<"id">) => {
             let body: { patch?: unknown };
@@ -148,11 +155,18 @@ export const jobRoutes = {
 
     "/api/jobs/:id/runs": {
         GET: (request: ParametersRequest<"id">) => {
-            const job = getScheduledJob(String(request.params.id));
-            if (!job) {
-                return json({ error: "Scheduled job not found" }, { status: 404 });
+            try {
+                const job = getScheduledJob(String(request.params.id));
+                if (!job) {
+                    return json({ error: "Scheduled job not found" }, { status: 404 });
+                }
+                return json({ runs: listScheduledJobRuns(job.id) });
+            } catch (error) {
+                return json(
+                    { error: errorMessage(error, "Scheduled job run lookup failed") },
+                    { status: httpStatusCode(error) }
+                );
             }
-            return json({ runs: listScheduledJobRuns(job.id) });
         },
     },
 } as const;

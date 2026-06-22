@@ -81,10 +81,16 @@ async function withNetworkSampleLock<T>(callback: () => Promise<T> | T): Promise
     metricsRouteState.networkSampleLock = lock.promise;
     await previousLock;
     try {
-        return callback();
+        return await callback();
     } finally {
         lock.resolve();
     }
+}
+
+function safeErrorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    if (error == null) return "Unknown error";
+    return String(error);
 }
 
 async function getNetworkMetrics(): Promise<NetworkMetrics> {
@@ -114,7 +120,7 @@ async function getNetworkMetrics(): Promise<NetworkMetrics> {
                 }
                 didReadNetwork = true;
             } catch (error) {
-                console.error("[Metrics] network error:", (error as Error).message);
+                console.error("[Metrics] network error:", safeErrorMessage(error));
             }
         } else {
             // Network byte counters are currently supported through Linux /sys only.
@@ -200,7 +206,7 @@ async function getSystemMetrics(): Promise<SystemMetricsResponse> {
             diskPercent = Number(parts[2].replace(/%$/u, ""));
         }
     } catch (error) {
-        console.error("[Metrics] df error:", (error as Error).message);
+        console.error("[Metrics] df error:", safeErrorMessage(error));
     }
 
     return {

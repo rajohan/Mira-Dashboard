@@ -33,6 +33,8 @@ describe("Docker updater tag patterns", () => {
         expect(isSafeTagRegexPattern(String.raw`\d+\.\d+`)).toBe(false);
         expect(isSafeTagRegexPattern(String.raw`^\d+[0-9]+$`)).toBe(false);
         expect(isSafeTagRegexPattern(String.raw`^[0-9]+\d+$`)).toBe(false);
+        expect(isSafeTagRegexPattern(String.raw`^\d+1$`)).toBe(false);
+        expect(isSafeTagRegexPattern("^[0-9]+1$")).toBe(false);
         expect(isSafeTagPatternMatch(String.raw`^\d+\.\d+\.\d+$$`, "1.2.x")).toBe(false);
         expect(isSafeTagPatternMatch(String.raw`^v\d+\.\d+\.\d+$$`, "1.2.3")).toBe(false);
         expect(isSafeTagPatternMatch(String.raw`^1\.\d+\.\d+$$`, "2.2.3")).toBe(false);
