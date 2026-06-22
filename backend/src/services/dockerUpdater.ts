@@ -1,14 +1,10 @@
-import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 
-import { parse as parseDotenv } from "dotenv";
-import safeRegex from "safe-regex2";
-import YAML from "yaml";
+import { YAML } from "bun";
 
 import { database } from "../database.ts";
+import { runProcess } from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 import type { ScheduledJob } from "./scheduledJobs.ts";
 import {
@@ -24,7 +20,6 @@ const COMPOSE_FILENAMES = [
     "docker-compose.yaml",
     "docker-compose.yml",
 ];
-const execFileAsync = promisify(execFile);
 const SUPPORTED_REGISTRIES = new Set(["docker.io", "ghcr.io", "lscr.io"]);
 const REGISTRY_TAG_PAGE_SIZE = 1000;
 const MAX_REGISTRY_TAG_PAGES = 100;
@@ -94,10 +89,72 @@ function getDockerAppsRoot(): string {
 
 type ComposeEnvironment = Record<string, string>;
 
+function stripEnvironmentComment(line: string): string {
+    let quote: string | null = null;
+    for (let index = 0; index < line.length; index += 1) {
+        const character = line[index];
+        if (character === '"' || character === "'") {
+            let backslashCount = 0;
+            for (
+                let slashIndex = index - 1;
+                slashIndex >= 0 && line[slashIndex] === "\\";
+                slashIndex -= 1
+            ) {
+                backslashCount += 1;
+            }
+            if (backslashCount % 2 === 1) continue;
+            quote = quote === character ? null : (quote ?? character);
+            continue;
+        }
+        // Compose treats inline comments as comments only when the # follows whitespace.
+        if (character === "#" && quote === null && /\s/u.test(line[index - 1] ?? "")) {
+            return line.slice(0, index).trimEnd();
+        }
+    }
+    return line;
+}
+
+function unescapeDoubleQuotedEnvironmentValue(value: string): string {
+    return value.replaceAll(/\\([\\"nrt])/gu, (_match, escaped: string) => {
+        if (escaped === "n") return "\n";
+        if (escaped === "r") return "\r";
+        if (escaped === "t") return "\t";
+        return escaped;
+    });
+}
+
+function parseComposeEnvironmentFile(content: string): ComposeEnvironment {
+    const environment: ComposeEnvironment = {};
+    for (const rawLine of content.split(/\r?\n/u)) {
+        const line = stripEnvironmentComment(rawLine.trim());
+        if (!line || line.startsWith("#")) continue;
+        const withoutExport = line.startsWith("export ")
+            ? line.slice(7).trimStart()
+            : line;
+        const separatorIndex = withoutExport.indexOf("=");
+        if (separatorIndex <= 0) continue;
+        const key = withoutExport.slice(0, separatorIndex).trim();
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key)) continue;
+        let value = withoutExport.slice(separatorIndex + 1).trim();
+        const isDoubleQuoted =
+            value.length >= 2 && value.startsWith('"') && value.endsWith('"');
+        const isSingleQuoted =
+            value.length >= 2 && value.startsWith("'") && value.endsWith("'");
+        if (isDoubleQuoted || isSingleQuoted) {
+            value = value.slice(1, -1);
+            if (isDoubleQuoted) {
+                value = unescapeDoubleQuotedEnvironmentValue(value);
+            }
+        }
+        environment[key] = value;
+    }
+    return environment;
+}
+
 function readComposeEnvironmentFile(environmentPath: string): ComposeEnvironment {
     try {
         if (!fs.existsSync(environmentPath)) return {};
-        return parseDotenv(fs.readFileSync(environmentPath));
+        return parseComposeEnvironmentFile(fs.readFileSync(environmentPath, "utf8"));
     } catch {
         return {};
     }
@@ -852,24 +909,115 @@ function isTagMatch(service: ManagedServiceRow, tag: string): boolean {
         return tag === service.current_tag;
     }
     if (service.tag_match_type === "regex") {
-        if (!isSafeTagRegexPattern(service.tag_match_pattern)) {
-            return tag === service.current_tag;
-        }
-        try {
-            const matcher = new RegExp(service.tag_match_pattern);
-            return matcher.test(tag);
-        } catch {
-            return tag === service.current_tag;
-        }
+        return isSafeTagPatternMatch(service.tag_match_pattern, tag);
     }
     return tag === service.tag_match_pattern;
 }
 
-function isSafeTagRegexPattern(pattern: string): boolean {
-    if (pattern.length > 128) {
+type SafeTagPatternPart = { kind: "digits" } | { kind: "literal"; value: string };
+
+function parseSafeTagRegexPattern(pattern: string): SafeTagPatternPart[] | null {
+    if (pattern.length === 0 || pattern.length > 128) {
+        return null;
+    }
+    if (!pattern.startsWith("^") || !pattern.endsWith("$")) {
+        return null;
+    }
+
+    let body = pattern.slice(1);
+    while (body.endsWith("$")) {
+        body = body.slice(0, -1);
+    }
+    if (!body) {
+        return null;
+    }
+
+    const parts: SafeTagPatternPart[] = [];
+    for (let index = 0; index < body.length; index += 1) {
+        const character = body[index];
+        if (character === "\\") {
+            const escaped = body[index + 1];
+            if (!escaped) {
+                return null;
+            }
+            if (escaped === "d" && body[index + 2] === "+") {
+                if (parts.at(-1)?.kind === "digits") {
+                    return null;
+                }
+                parts.push({ kind: "digits" });
+                index += 2;
+                if (/^\d$/u.test(body[index + 1] ?? "")) {
+                    return null;
+                }
+                continue;
+            }
+            if (/^[-.+_]$/u.test(escaped)) {
+                parts.push({ kind: "literal", value: escaped });
+                index += 1;
+                continue;
+            }
+            return null;
+        }
+        if (character === "[") {
+            const closeIndex = body.indexOf("]", index + 1);
+            if (closeIndex === -1 || body[closeIndex + 1] !== "+") {
+                return null;
+            }
+            const characterClass = body.slice(index + 1, closeIndex);
+            if (characterClass !== "0-9" && characterClass !== String.raw`\d`) {
+                return null;
+            }
+            if (parts.at(-1)?.kind === "digits") {
+                return null;
+            }
+            parts.push({ kind: "digits" });
+            index = closeIndex + 1;
+            if (/^\d$/u.test(body[index + 1] ?? "")) {
+                return null;
+            }
+            continue;
+        }
+        if (/^[A-Za-z0-9_-]$/u.test(character)) {
+            if (/^\d$/u.test(character) && parts.at(-1)?.kind === "digits") {
+                return null;
+            }
+            parts.push({ kind: "literal", value: character });
+            continue;
+        }
+        return null;
+    }
+    return parts;
+}
+
+export function isSafeTagRegexPattern(pattern: string): boolean {
+    return parseSafeTagRegexPattern(pattern) !== null;
+}
+
+export function isSafeTagPatternMatch(pattern: string, tag: string): boolean {
+    const parts = parseSafeTagRegexPattern(pattern);
+    if (!parts) {
         return false;
     }
-    return safeRegex(pattern);
+
+    let offset = 0;
+    for (const part of parts) {
+        if (part.kind === "literal") {
+            if (tag[offset] !== part.value) {
+                return false;
+            }
+            offset += 1;
+            continue;
+        }
+
+        const digitStart = offset;
+        while (offset < tag.length && /\d/u.test(tag[offset])) {
+            offset += 1;
+        }
+        if (offset === digitStart) {
+            return false;
+        }
+    }
+    return offset === tag.length;
 }
 
 function shouldNeedFullTagScan(service: ManagedServiceRow): boolean {
@@ -1249,11 +1397,11 @@ async function applyComposeUpdateUnlocked(
     }> = [];
     const temporaryPath = path.join(
         path.dirname(composePath),
-        `${path.basename(composePath)}.tmp-${randomUUID()}`
+        `${path.basename(composePath)}.tmp-${Bun.randomUUIDv7()}`
     );
     const rollbackTemporaryPath = path.join(
         path.dirname(composePath),
-        `${path.basename(composePath)}.rollback-${randomUUID()}`
+        `${path.basename(composePath)}.rollback-${Bun.randomUUIDv7()}`
     );
     try {
         writeFileWithMetadata(rollbackTemporaryPath, raw, originalStats);
@@ -1273,11 +1421,11 @@ async function applyComposeUpdateUnlocked(
             setNestedValue(commandDocument, commandImageField, targetImageReference);
             const commandTemporaryPath = path.join(
                 path.dirname(realCommandComposePath),
-                `${path.basename(realCommandComposePath)}.tmp-${randomUUID()}`
+                `${path.basename(realCommandComposePath)}.tmp-${Bun.randomUUIDv7()}`
             );
             const commandRollbackTemporaryPath = path.join(
                 path.dirname(realCommandComposePath),
-                `${path.basename(realCommandComposePath)}.rollback-${randomUUID()}`
+                `${path.basename(realCommandComposePath)}.rollback-${Bun.randomUUIDv7()}`
             );
             writeFileWithMetadata(commandRollbackTemporaryPath, commandRaw, commandStats);
             commandRollbacks.push({
@@ -1294,12 +1442,19 @@ async function applyComposeUpdateUnlocked(
         }
         const command = getComposeCommand(configuredComposePath, service.service_name);
         isComposeStarted = true;
-        const { stdout, stderr } = await execFileAsync(command.file, command.args, {
+        const { code, stderr, stdout } = await runProcess(command.file, command.args, {
             cwd: command.cwd,
             env: process.env,
             maxBuffer: 10 * 1024 * 1024,
-            timeout: 180_000,
+            timeoutMs: 180_000,
         });
+        if (code !== 0) {
+            throw new Error(
+                `${command.file} ${command.args.join(" ")} failed with exit code ${code}: ${
+                    stderr.trim() || stdout.trim()
+                }`
+            );
+        }
         try {
             fs.unlinkSync(rollbackTemporaryPath);
         } catch {
@@ -1354,12 +1509,23 @@ async function applyComposeUpdateUnlocked(
                     configuredComposePath,
                     service.service_name
                 );
-                await execFileAsync(command.file, command.args, {
+                const rollbackResult = await runProcess(command.file, command.args, {
                     cwd: command.cwd,
                     env: process.env,
                     maxBuffer: 10 * 1024 * 1024,
-                    timeout: 180_000,
+                    timeoutMs: 180_000,
                 });
+                if (rollbackResult.code !== 0) {
+                    console.error(
+                        "[DockerUpdater] Re-applying restored compose file failed",
+                        {
+                            code: rollbackResult.code,
+                            output:
+                                rollbackResult.stderr.trim() ||
+                                rollbackResult.stdout.trim(),
+                        }
+                    );
+                }
             } catch (rollbackError) {
                 console.error(
                     "[DockerUpdater] Failed to re-apply restored compose file",
@@ -1466,19 +1632,6 @@ function servicesFromCompose(composePath: string):
             let tagMatchType: "exact" | "regex" = "exact";
             const tagMatchPattern = tagPattern ?? currentTag;
             if (tagPattern && isTagPatternIsRegex) {
-                try {
-                    new RegExp(tagPattern);
-                } catch (error) {
-                    const message = `Invalid tag pattern regex for ${appSlug}/${serviceName}: ${tagPattern} (${caughtMessage(error)})`;
-                    console.warn("[DockerUpdater] Ignoring invalid tag pattern regex", {
-                        appSlug,
-                        serviceName,
-                        tagPattern,
-                        error: caughtMessage(error),
-                    });
-                    serviceErrors.push(message);
-                    continue;
-                }
                 if (!isSafeTagRegexPattern(tagPattern)) {
                     const message = `Unsafe tag pattern regex for ${appSlug}/${serviceName}: ${tagPattern} (pattern failed safety checks)`;
                     console.warn("[DockerUpdater] Ignoring unsafe tag pattern regex", {
@@ -1975,11 +2128,16 @@ async function applyServiceUpdate(
 
 async function pruneDanglingImagesBestEffort(): Promise<void> {
     try {
-        await execFileAsync(getDockerBin(), ["image", "prune", "-f"], {
+        const result = await runProcess(getDockerBin(), ["image", "prune", "-f"], {
             env: process.env,
             maxBuffer: 10 * 1024 * 1024,
-            timeout: 120_000,
+            timeoutMs: 120_000,
         });
+        if (result.code !== 0) {
+            throw new Error(
+                result.stderr.trim() || `docker image prune exited ${result.code}`
+            );
+        }
     } catch (error) {
         console.error("[DockerUpdater] Failed to prune dangling images", {
             error: caughtMessage(error),

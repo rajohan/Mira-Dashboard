@@ -231,6 +231,11 @@ function deploymentVariant(status: DeploymentJob["status"]) {
     return "info" as const;
 }
 
+/** Performs deployment status label. */
+function deploymentStatusLabel(status: DeploymentJob["status"]) {
+    return status === "isOk" ? "ok" : status;
+}
+
 /** Renders the deployment commit title and commit reference. */
 function deploymentCommitLabel(deployment: DeploymentJob): ReactNode {
     const commit = deployment.commit || deployment.id;
@@ -489,7 +494,7 @@ function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
                                     variant={deploymentVariant(deployment.status)}
                                     className="shrink-0 whitespace-nowrap"
                                 >
-                                    {deployment.status}
+                                    {deploymentStatusLabel(deployment.status)}
                                 </Badge>
                             </div>
                             {deployment.note ? (

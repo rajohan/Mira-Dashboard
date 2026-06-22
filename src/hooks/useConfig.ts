@@ -143,13 +143,27 @@ async function fetchSkills(): Promise<Skill[]> {
 }
 
 /** Performs update config. */
-async function updateConfig(config: OpenClawConfig): Promise<void> {
-    await apiPut("/config", config);
+async function updateConfig(config: OpenClawConfig, baseHash?: string): Promise<void> {
+    const configHash = baseHash ?? config.__hash;
+    if (!configHash?.trim()) {
+        throw new Error("Config hash is required");
+    }
+    await apiPut("/config", { ...config, __hash: configHash.trim() });
 }
 
 /** Performs toggle skill. */
-async function toggleSkill(name: string, isEnabled: boolean): Promise<void> {
-    await apiPost(`/skills/${name}`, { enabled: isEnabled });
+async function toggleSkill(
+    name: string,
+    isEnabled: boolean,
+    baseHash?: string
+): Promise<void> {
+    if (!baseHash?.trim()) {
+        throw new Error("Config hash is required");
+    }
+    await apiPost(`/skills/${encodeURIComponent(name)}`, {
+        __hash: baseHash.trim(),
+        enabled: isEnabled,
+    });
 }
 
 /** Performs restart gateway. */
@@ -192,7 +206,7 @@ export function useUpdateConfig() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: updateConfig,
+        mutationFn: (config: OpenClawConfig) => updateConfig(config, config.__hash),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: configKeys.config() });
         },
@@ -204,9 +218,12 @@ export function useToggleSkill() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ name, enabled }: { name: string; enabled: boolean }) =>
-            toggleSkill(name, enabled),
+        mutationFn: ({ name, enabled }: { name: string; enabled: boolean }) => {
+            const current = queryClient.getQueryData<OpenClawConfig>(configKeys.config());
+            return toggleSkill(name, enabled, current?.__hash);
+        },
         onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: configKeys.config() });
             queryClient.invalidateQueries({ queryKey: configKeys.skills() });
         },
     });

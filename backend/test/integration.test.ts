@@ -1,13 +1,14 @@
 import fs from "node:fs/promises";
-import type http from "node:http";
 import os from "node:os";
 import path from "node:path";
 
+import type { Server } from "bun";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 
 const testState: {
     baseUrl: string;
-    server?: http.Server;
+    originalLoopbackAuth?: string;
+    server?: Server<unknown>;
     temporaryRoot: string;
 } = {
     baseUrl: "",
@@ -39,6 +40,23 @@ function json(method: string, body: unknown): RequestInit {
     };
 }
 
+async function createTestServer(
+    createServer: (port: number) => Server<unknown>
+): Promise<Server<unknown>> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+            return createServer(0);
+        } catch (error) {
+            lastError = error;
+            if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") {
+                throw error;
+            }
+        }
+    }
+    throw lastError;
+}
+
 describe("Mira Dashboard backend integration", () => {
     beforeAll(async () => {
         testState.temporaryRoot = await fs.mkdtemp(
@@ -55,6 +73,7 @@ describe("Mira Dashboard backend integration", () => {
         await fs.mkdir(path.join(frontendRoot, "assets"), { recursive: true });
         await fs.mkdir(dockerRoot, { recursive: true });
         await fs.mkdir(workspaceRoot, { recursive: true });
+        await fs.mkdir(path.join(workspaceRoot, "notes"), { recursive: true });
         await fs.writeFile(path.join(workspaceRoot, "README.md"), "hello workspace\n");
         await fs.writeFile(path.join(openclawRoot, "openclaw.json"), "{}\n");
         await fs.writeFile(composeWrapper, "#!/bin/sh\nprintf 'compose:%s\\n' \"$*\"\n");
@@ -68,10 +87,12 @@ describe("Mira Dashboard backend integration", () => {
             "export const isOk = true;\n"
         );
 
+        testState.originalLoopbackAuth = process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH;
         process.env.MIRA_DASHBOARD_DB_PATH = path.join(
             testState.temporaryRoot,
             "dashboard.database"
         );
+        process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH = "1";
         process.env.MIRA_DASHBOARD_FRONTEND_PATH = frontendRoot;
         process.env.WORKSPACE_ROOT = workspaceRoot;
         process.env.OPENCLAW_HOME = openclawRoot;
@@ -80,23 +101,18 @@ describe("Mira Dashboard backend integration", () => {
         process.env.TRUST_PROXY = "false";
 
         const serverModule = await import("../src/server.ts");
-        testState.server = serverModule.server;
-        await new Promise<void>((resolve) => {
-            testState.server?.listen(0, "127.0.0.1", resolve);
-        });
-        const address = testState.server.address();
-        if (!address || typeof address === "string") {
-            throw new Error("Test server did not bind to a TCP port");
-        }
-        testState.baseUrl = `http://127.0.0.1:${address.port}`;
+        testState.server = await createTestServer(serverModule.createServer);
+        testState.baseUrl = `http://127.0.0.1:${testState.server.port}`;
     });
 
     afterAll(async () => {
         const server = testState.server;
-        if (server) {
-            await new Promise<void>((resolve, reject) => {
-                server.close((error) => (error ? reject(error) : resolve()));
-            });
+        await server?.stop(true);
+        if (testState.originalLoopbackAuth === undefined) {
+            delete process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH;
+        } else {
+            process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH =
+                testState.originalLoopbackAuth;
         }
         await fs.rm(testState.temporaryRoot, { recursive: true, force: true });
     });
@@ -130,7 +146,7 @@ describe("Mira Dashboard backend integration", () => {
 
         const rootChunk = await fetch(`${testState.baseUrl}/${builtChunk}`);
         expect(rootChunk.status).toBe(200);
-        expect(rootChunk.headers.get("content-type")).toContain("javascript");
+        expect(rootChunk.headers.get("cache-control")).toBe("no-store");
 
         const missingChunk = await fetch(
             `${testState.baseUrl}/assets/index-missing-after-deploy.js`

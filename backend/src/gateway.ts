@@ -1,10 +1,8 @@
-import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import Path from "node:path";
 
-import WebSocket from "ws";
-
+import type { DashboardSocket } from "./dashboardSocket.ts";
 import { errorMessage } from "./lib/errors.ts";
 import {
     type DeviceIdentity,
@@ -71,7 +69,7 @@ function loadOrCreateDashboardDeviceIdentity(
 import {
     subscribeToLogs as logsSubscribe,
     unsubscribeFromLogs as logsUnsubscribe,
-} from "./routes/logs.ts";
+} from "./services/logStreams.ts";
 
 /** Represents session. */
 interface Session {
@@ -134,7 +132,7 @@ interface GatewaySession {
 
 /** Represents pending request. */
 interface PendingRequest {
-    clientWs: WebSocket;
+    clientWs: DashboardSocket;
     clientId: string;
     method?: string;
 }
@@ -181,7 +179,7 @@ const gatewayState: {
     requestId: 1000,
     currentToken: null,
 };
-const subscribers = new Set<WebSocket>();
+const subscribers = new Set<DashboardSocket>();
 const pendingRequests = new Map<string, PendingRequest>();
 type GatewayClientConstructor = new (
     options: OpenClawGatewayClientOptions
@@ -190,7 +188,7 @@ const GatewayClientCtor: GatewayClientConstructor = OpenClawGatewayClient;
 
 function sendPendingRequestError(pending: PendingRequest, error: string): void {
     try {
-        if (pending.clientWs.readyState === WebSocket.OPEN) {
+        if (pending.clientWs.isOpen()) {
             pending.clientWs.send(
                 JSON.stringify({
                     type: "response",
@@ -305,7 +303,9 @@ function broadcast(message: unknown): void {
     const data = JSON.stringify(message);
     for (const ws of subscribers) {
         try {
-            ws.send(data);
+            if (ws.isOpen()) {
+                ws.send(data);
+            }
         } catch {
             // Ignore errors from closed connections
         }
@@ -841,7 +841,7 @@ function init(token: string): void {
 async function forwardRequest(
     method: string,
     parameters: Record<string, unknown>,
-    clientWs?: WebSocket,
+    clientWs?: DashboardSocket,
     clientId?: string
 ): Promise<boolean> {
     if (!gatewayState.client || !gatewayState.isConnected) {
@@ -866,7 +866,7 @@ async function forwardRequest(
             const pending = pendingRequests.get(id);
             pendingRequests.delete(id);
             try {
-                if (pending?.clientWs.readyState === WebSocket.OPEN) {
+                if (pending?.clientWs.isOpen()) {
                     pending.clientWs.send(
                         JSON.stringify({
                             type: "response",
@@ -904,7 +904,7 @@ async function forwardRequest(
 }
 
 /** Processes Gateway WebSocket client events. */
-function handleClient(ws: WebSocket): void {
+function handleDashboardClient(ws: DashboardSocket): void {
     const cleanupClient = () => {
         subscribers.delete(ws);
         logsUnsubscribe(ws);
@@ -915,7 +915,7 @@ function handleClient(ws: WebSocket): void {
         }
     };
 
-    ws.on("error", (error) => {
+    ws.onError((error) => {
         console.error(
             "[Gateway] Client socket error:",
             errorMessage(error, String(error))
@@ -942,7 +942,7 @@ function handleClient(ws: WebSocket): void {
         return;
     }
 
-    ws.on("message", (data: Buffer) => {
+    ws.onMessage((data) => {
         void (async () => {
             try {
                 const message = JSON.parse(data.toString()) as {
@@ -1006,7 +1006,7 @@ function handleClient(ws: WebSocket): void {
                         ws,
                         message.id
                     );
-                    if (!isOk && message.id && ws.readyState === WebSocket.OPEN) {
+                    if (!isOk && message.id && ws.isOpen()) {
                         ws.send(
                             JSON.stringify({
                                 type: "response",
@@ -1026,7 +1026,7 @@ function handleClient(ws: WebSocket): void {
         })();
     });
 
-    ws.on("close", () => {
+    ws.onClose(() => {
         cleanupClient();
     });
 }
@@ -1071,7 +1071,7 @@ async function sendSessionMessage(sessionKey: string, message: string): Promise<
     await sendRequestAsync("chat.send", {
         sessionKey,
         message,
-        idempotencyKey: `tasks-notify-${crypto.randomUUID()}`,
+        idempotencyKey: `tasks-notify-${Bun.randomUUIDv7()}`,
         timeoutMs: 10_000,
     });
 }
@@ -1135,7 +1135,7 @@ function shutdown(): void {
 
 export default {
     init,
-    handleClient,
+    handleDashboardClient,
     getStatus,
     getSessions,
     isConnected,

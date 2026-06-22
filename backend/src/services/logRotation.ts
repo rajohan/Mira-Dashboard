@@ -1,19 +1,9 @@
-import { execFile } from "node:child_process";
-import {
-    accessSync,
-    constants,
-    createReadStream,
-    createWriteStream,
-    existsSync as fsSyncExists,
-} from "node:fs";
+import { constants, existsSync as fsSyncExists } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { pipeline } from "node:stream/promises";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { promisify } from "node:util";
-import { createGzip } from "node:zlib";
 
 import { database } from "../database.ts";
+import { runProcess } from "../lib/processes.ts";
 import { writeCacheSuccess } from "./cacheEntryWriter.ts";
 import {
     getScheduledJob,
@@ -57,8 +47,7 @@ async function ignoreMissingPath(
 }
 
 const STATE_CACHE_KEY = "log_rotation.state";
-const execFileAsync = promisify(execFile);
-const BUNDLED_CONFIG_PATH = fileURLToPath(
+const BUNDLED_CONFIG_PATH = Bun.fileURLToPath(
     new URL("../../config/log-rotation.json", import.meta.url)
 );
 const CWD_CONFIG_PATH = path.resolve(process.cwd(), "config/log-rotation.json");
@@ -82,7 +71,7 @@ const logRotationLockFile = DEFAULT_LOCK_FILE;
 
 type ExecFileRunner = (
     file: string,
-    arguments_: readonly string[] | undefined,
+    arguments_: readonly string[],
     options: {
         encoding?: BufferEncoding;
         env: NodeJS.ProcessEnv;
@@ -91,8 +80,24 @@ type ExecFileRunner = (
     }
 ) => Promise<{ stderr: string; stdout: string }>;
 
-const elevatedLogRotationExecFileRunner: ExecFileRunner = execFileAsync as ExecFileRunner;
-const gzipPipeline = pipeline;
+const elevatedLogRotationExecFileRunner: ExecFileRunner = async (
+    file,
+    arguments_,
+    options
+) => {
+    const result = await runProcess(file, arguments_, {
+        env: options.env,
+        maxBuffer: options.maxBuffer,
+        timeoutMs: options.timeout,
+    });
+    if (result.code !== 0) {
+        throw Object.assign(
+            new Error(result.stderr || `Command exited with code ${result.code}`),
+            { stderr: result.stderr, stdout: result.stdout }
+        );
+    }
+    return { stderr: result.stderr, stdout: result.stdout };
+};
 const writeLogRotationCacheSuccess = writeCacheSuccess;
 
 function caughtMessage(error: unknown): string {
@@ -121,21 +126,7 @@ function resolveExecutableFromPath(executable: string): string | null {
         return path.resolve(executable);
     }
 
-    const pathDirectories = (process.env.PATH || "").split(path.delimiter);
-    for (const directory of pathDirectories) {
-        if (!directory) {
-            continue;
-        }
-        const candidate = path.join(directory, executable);
-        try {
-            accessSync(candidate, constants.X_OK);
-            return candidate;
-        } catch {
-            // Keep searching PATH.
-        }
-    }
-
-    return null;
+    return Bun.which(executable);
 }
 
 function resolveBunExecutable(): string {
@@ -144,6 +135,84 @@ function resolveBunExecutable(): string {
         return resolved;
     }
     return BUN_EXECUTABLE === "bun" ? process.execPath : BUN_EXECUTABLE;
+}
+
+function fileHandleReadableStream(
+    handle: fs.FileHandle,
+    size: number
+): ReadableStream<Uint8Array> {
+    let position = 0;
+    return new ReadableStream<Uint8Array>({
+        async pull(controller) {
+            if (position >= size) {
+                controller.close();
+                return;
+            }
+            const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, size - position));
+            let bytesRead: number;
+            try {
+                ({ bytesRead } = await handle.read(buffer, 0, buffer.length, position));
+            } catch (error) {
+                controller.error(error);
+                return;
+            }
+            if (bytesRead === 0) {
+                controller.close();
+                return;
+            }
+            position += bytesRead;
+            controller.enqueue(buffer.subarray(0, bytesRead));
+        },
+    });
+}
+
+async function writeStreamToFileHandle(
+    stream: ReadableStream<Uint8Array>,
+    handle: fs.FileHandle
+): Promise<void> {
+    const reader = stream.getReader();
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+                return;
+            }
+            let written = 0;
+            while (written < value.byteLength) {
+                const { bytesWritten } = await handle.write(
+                    value,
+                    written,
+                    value.byteLength - written
+                );
+                written += bytesWritten;
+            }
+        }
+    } finally {
+        reader.releaseLock();
+    }
+}
+
+async function copyFileHandleBytes(
+    source: fs.FileHandle,
+    destination: fs.FileHandle,
+    size: number
+): Promise<void> {
+    await writeStreamToFileHandle(fileHandleReadableStream(source, size), destination);
+}
+
+async function gzipFileHandleBytes(
+    source: fs.FileHandle,
+    destination: fs.FileHandle,
+    size: number
+): Promise<void> {
+    const gzipStream = new CompressionStream("gzip") as unknown as ReadableWritablePair<
+        Uint8Array,
+        Uint8Array
+    >;
+    await writeStreamToFileHandle(
+        fileHandleReadableStream(source, size).pipeThrough(gzipStream),
+        destination
+    );
 }
 
 interface LogRotationOptions {
@@ -694,20 +763,12 @@ async function gzipFile(filePath: string, approvedRoots: string[]): Promise<stri
             uid: source.stat.uid,
             gid: source.stat.gid,
         });
-        await gzipPipeline(
-            createReadStream("", {
-                fd: source.handle.fd,
-                autoClose: false,
-                start: 0,
-            }),
-            createGzip(),
-            createWriteStream("", {
-                fd: destination.fd,
-                autoClose: false,
-                start: 0,
-            })
-        );
+        await gzipFileHandleBytes(source.handle, destination, source.stat.size);
         await assertFileIdentity(filePath, source.stat, approvedRoots);
+        const currentSourceStat = await source.handle.stat();
+        if (currentSourceStat.size !== source.stat.size) {
+            throw new Error("Source file changed during compression");
+        }
         await fs.utimes(gzPath, source.stat.atime, source.stat.mtime);
         await destination.close();
         destination = null;
@@ -773,13 +834,14 @@ async function rotateCopyTruncate(
     });
     let isCommitted = false;
     try {
-        await pipeline(
-            createReadStream("", { fd: file.handle.fd, autoClose: false, start: 0 }),
-            createWriteStream("", { fd: destination.fd, autoClose: false, start: 0 })
-        );
+        await copyFileHandleBytes(file.handle, destination, file.stat.size);
         await fs.utimes(archivePath, file.stat.atime, new Date());
         await destination.close();
         await assertFileIdentity(filePath, file.stat, approvedRoots);
+        const currentStat = await file.handle.stat();
+        if (currentStat.size !== file.stat.size) {
+            throw new Error("Log file changed during rotation");
+        }
         await file.handle.truncate(0);
         isCommitted = true;
         return compressRotatedArchive(archivePath, shouldCompress, approvedRoots);
@@ -1717,7 +1779,7 @@ export async function runLogRotationService(
 export async function runElevatedLogRotationService(options: {
     isDryRun: boolean;
 }): Promise<ElevatedLogRotationResult> {
-    const modulePath = fileURLToPath(import.meta.url);
+    const modulePath = Bun.fileURLToPath(import.meta.url);
     const arguments_ = buildElevatedLogRotationCliArguments(modulePath, options);
     let stderr: string;
     let stdout: string;
@@ -1934,7 +1996,7 @@ function buildElevatedLogRotationCliArguments(
     options: { isDryRun?: boolean } = {}
 ): string[] {
     const importLogRotationCli = [
-        `import { runLogRotationCli } from ${JSON.stringify(pathToFileURL(modulePath).href)};`,
+        `import { runLogRotationCli } from ${JSON.stringify(Bun.pathToFileURL(modulePath).href)};`,
         "await runLogRotationCli();",
     ].join("\n");
     return [

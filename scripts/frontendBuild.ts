@@ -1,4 +1,3 @@
-import { execSync } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 
@@ -29,11 +28,18 @@ const productionDevtoolsPlugin: Bun.BunPlugin = {
 
 function getAppCommit(): string {
     try {
-        return execSync("git rev-parse --short HEAD", {
-            stdio: ["ignore", "pipe", "ignore"],
-        })
-            .toString()
-            .trim();
+        const result = Bun.spawnSync({
+            cmd: ["git", "rev-parse", "--short", "HEAD"],
+            stderr: "ignore",
+            stdin: "ignore",
+            stdout: "pipe",
+        });
+
+        if (result.exitCode !== 0) {
+            return "unknown";
+        }
+
+        return new TextDecoder().decode(result.stdout).trim() || "unknown";
     } catch {
         return "unknown";
     }
