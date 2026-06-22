@@ -298,6 +298,9 @@ function taskById(id: number): DatabaseTask | undefined {
 }
 
 function safeId(value: string | undefined): number | null {
+    if (!value || !/^\d+$/u.test(value)) {
+        return null;
+    }
     const id = Number(value);
     return Number.isSafeInteger(id) && id > 0 ? id : null;
 }

@@ -45,7 +45,8 @@ function isAllowedWebSocketOrigin(request: Request): boolean {
         return (
             configuredDashboardOrigins.has(parsedOrigin.origin) ||
             (allowedLoopbackHostnames.has(parsedOrigin.hostname) &&
-                allowedLoopbackHostnames.has(requestUrl.hostname))
+                allowedLoopbackHostnames.has(requestUrl.hostname) &&
+                parsedOrigin.host === requestUrl.host)
         );
     } catch {
         return false;

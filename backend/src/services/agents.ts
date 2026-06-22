@@ -1756,7 +1756,6 @@ export async function updateAgentCurrentTask(
             console.error("[Agents] Task history sync rollback failed:", rollbackError);
         }
         console.error("[Agents] Task history sync failed:", error);
-        throw error;
     }
 
     return metadata;

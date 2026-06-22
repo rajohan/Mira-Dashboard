@@ -231,7 +231,10 @@ export const terminalRoutes = {
             const trimmedCwd = typeof cwd === "string" ? cwd.trim() : undefined;
             if (
                 cwd !== undefined &&
-                (typeof cwd !== "string" || !trimmedCwd || trimmedCwd.includes("\0"))
+                (typeof cwd !== "string" ||
+                    !trimmedCwd ||
+                    trimmedCwd.includes("\0") ||
+                    !path.isAbsolute(trimmedCwd))
             ) {
                 return json({ error: "Missing or invalid cwd" }, { status: 400 });
             }

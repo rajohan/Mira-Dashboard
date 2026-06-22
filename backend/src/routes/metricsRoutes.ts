@@ -67,85 +67,105 @@ interface MetricsResponse extends SystemMetricsResponse {
 }
 
 const metricsRouteState: {
+    networkSampleLock: Promise<void>;
     previousNetworkSample: null | {
         downloadBytes: number;
         timestamp: number;
         uploadBytes: number;
     };
-} = { previousNetworkSample: null };
+} = { networkSampleLock: Promise.resolve(), previousNetworkSample: null };
+
+async function withNetworkSampleLock<T>(callback: () => Promise<T> | T): Promise<T> {
+    const previousLock = metricsRouteState.networkSampleLock;
+    const lock = Promise.withResolvers<void>();
+    metricsRouteState.networkSampleLock = lock.promise;
+    await previousLock;
+    try {
+        return callback();
+    } finally {
+        lock.resolve();
+    }
+}
 
 async function getNetworkMetrics(): Promise<NetworkMetrics> {
-    let downloadBytes = 0;
-    let uploadBytes = 0;
-    let didReadNetwork = false;
+    return withNetworkSampleLock(async () => {
+        let downloadBytes = 0;
+        let uploadBytes = 0;
+        let didReadNetwork = false;
 
-    if (os.platform() === "linux") {
-        try {
-            const preferredInterface =
-                process.env.MIRA_DASHBOARD_NETWORK_INTERFACE?.trim() || "enp0s6";
-            const availableInterfaces = await readdir("/sys/class/net");
-            const interfaces = availableInterfaces.includes(preferredInterface)
-                ? [preferredInterface]
-                : availableInterfaces.filter((name) => name !== "lo");
+        if (os.platform() === "linux") {
+            try {
+                const preferredInterface =
+                    process.env.MIRA_DASHBOARD_NETWORK_INTERFACE?.trim() || "enp0s6";
+                const availableInterfaces = await readdir("/sys/class/net");
+                const interfaces = availableInterfaces.includes(preferredInterface)
+                    ? [preferredInterface]
+                    : availableInterfaces.filter((name) => name !== "lo");
 
-            for (const name of interfaces) {
-                const basePath = `/sys/class/net/${name}/statistics`;
-                const rxText = await Bun.file(`${basePath}/rx_bytes`).text();
-                const txText = await Bun.file(`${basePath}/tx_bytes`).text();
-                const rxBytes = Number(rxText.trim());
-                const txBytes = Number(txText.trim());
+                for (const name of interfaces) {
+                    const basePath = `/sys/class/net/${name}/statistics`;
+                    const rxText = await Bun.file(`${basePath}/rx_bytes`).text();
+                    const txText = await Bun.file(`${basePath}/tx_bytes`).text();
+                    const rxBytes = Number(rxText.trim());
+                    const txBytes = Number(txText.trim());
 
-                if (!Number.isNaN(rxBytes)) downloadBytes += rxBytes;
-                if (!Number.isNaN(txBytes)) uploadBytes += txBytes;
+                    if (!Number.isNaN(rxBytes)) downloadBytes += rxBytes;
+                    if (!Number.isNaN(txBytes)) uploadBytes += txBytes;
+                }
+                didReadNetwork = true;
+            } catch (error) {
+                console.error("[Metrics] network error:", (error as Error).message);
             }
-            didReadNetwork = true;
-        } catch (error) {
-            console.error("[Metrics] network error:", (error as Error).message);
+        } else {
+            // Network byte counters are currently supported through Linux /sys only.
         }
-    } else {
-        // Network byte counters are currently supported through Linux /sys only.
-    }
 
-    if (!didReadNetwork) {
-        return { downloadMbps: 0, uploadMbps: 0 };
-    }
-    const timestamp = Date.now();
-    if (!metricsRouteState.previousNetworkSample) {
+        if (!didReadNetwork) {
+            return { downloadMbps: 0, uploadMbps: 0 };
+        }
+        const timestamp = Date.now();
+        if (!metricsRouteState.previousNetworkSample) {
+            metricsRouteState.previousNetworkSample = {
+                downloadBytes,
+                timestamp,
+                uploadBytes,
+            };
+            return { downloadMbps: 0, uploadMbps: 0 };
+        }
+
+        const elapsedSeconds =
+            (timestamp - metricsRouteState.previousNetworkSample.timestamp) / 1000;
+        if (elapsedSeconds <= 0) {
+            metricsRouteState.previousNetworkSample = {
+                downloadBytes,
+                timestamp,
+                uploadBytes,
+            };
+            return { downloadMbps: 0, uploadMbps: 0 };
+        }
+
+        const downloadDelta = Math.max(
+            0,
+            downloadBytes - metricsRouteState.previousNetworkSample.downloadBytes
+        );
+        const uploadDelta = Math.max(
+            0,
+            uploadBytes - metricsRouteState.previousNetworkSample.uploadBytes
+        );
         metricsRouteState.previousNetworkSample = {
             downloadBytes,
             timestamp,
             uploadBytes,
         };
-        return { downloadMbps: 0, uploadMbps: 0 };
-    }
 
-    const elapsedSeconds =
-        (timestamp - metricsRouteState.previousNetworkSample.timestamp) / 1000;
-    if (elapsedSeconds <= 0) {
-        metricsRouteState.previousNetworkSample = {
-            downloadBytes,
-            timestamp,
-            uploadBytes,
+        return {
+            downloadMbps:
+                Math.round(((downloadDelta * 8) / 1_000_000 / elapsedSeconds) * 100) /
+                100,
+            uploadMbps:
+                Math.round(((uploadDelta * 8) / 1_000_000 / elapsedSeconds) * 100) / 100,
         };
-        return { downloadMbps: 0, uploadMbps: 0 };
-    }
-
-    const downloadDelta = Math.max(
-        0,
-        downloadBytes - metricsRouteState.previousNetworkSample.downloadBytes
-    );
-    const uploadDelta = Math.max(
-        0,
-        uploadBytes - metricsRouteState.previousNetworkSample.uploadBytes
-    );
-    metricsRouteState.previousNetworkSample = { downloadBytes, timestamp, uploadBytes };
-
-    return {
-        downloadMbps:
-            Math.round(((downloadDelta * 8) / 1_000_000 / elapsedSeconds) * 100) / 100,
-        uploadMbps:
-            Math.round(((uploadDelta * 8) / 1_000_000 / elapsedSeconds) * 100) / 100,
-    };
+    });
 }
 
 async function getSystemMetrics(): Promise<SystemMetricsResponse> {

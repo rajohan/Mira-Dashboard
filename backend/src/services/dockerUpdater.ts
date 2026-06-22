@@ -941,6 +941,9 @@ function parseSafeTagRegexPattern(pattern: string): SafeTagPatternPart[] | null 
                 return null;
             }
             if (escaped === "d" && body[index + 2] === "+") {
+                if (parts.at(-1)?.kind === "digits") {
+                    return null;
+                }
                 parts.push({ kind: "digits" });
                 index += 2;
                 continue;
@@ -959,6 +962,9 @@ function parseSafeTagRegexPattern(pattern: string): SafeTagPatternPart[] | null 
             }
             const characterClass = body.slice(index + 1, closeIndex);
             if (characterClass !== "0-9" && characterClass !== String.raw`\d`) {
+                return null;
+            }
+            if (parts.at(-1)?.kind === "digits") {
                 return null;
             }
             parts.push({ kind: "digits" });

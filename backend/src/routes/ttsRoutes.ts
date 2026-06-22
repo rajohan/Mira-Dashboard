@@ -85,7 +85,7 @@ export const ttsRoutes = {
                     );
                 }
 
-                return new Response(await elevenLabsResponse.arrayBuffer(), {
+                return new Response(elevenLabsResponse.body, {
                     headers: {
                         "Cache-Control": "no-store",
                         "Content-Type": "audio/mpeg",

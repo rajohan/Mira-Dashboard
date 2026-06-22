@@ -111,6 +111,17 @@ function isOpenFileWithinRoot(file: fs.promises.FileHandle, root: string): boole
     }
 }
 
+function fileOpenErrorResponse(error: unknown): Response {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (["ENOENT", "ENOTDIR"].includes(code ?? "")) {
+        return json({ error: "File not found" }, { status: 404 });
+    }
+    if (["ELOOP", "EACCES", "EPERM"].includes(code ?? "")) {
+        return json({ error: "Access denied" }, { status: 403 });
+    }
+    throw error;
+}
+
 function listFiles(directoryPath: string) {
     let root: string;
     try {
@@ -256,9 +267,14 @@ export const fileRoutes = {
                         { status: 413 }
                     );
                 }
-                const file = await openReadNoFollowNonblockingGuarded(
-                    guardedPath(fullPath)
-                );
+                let file: fs.promises.FileHandle;
+                try {
+                    file = await openReadNoFollowNonblockingGuarded(
+                        guardedPath(fullPath)
+                    );
+                } catch (error) {
+                    return fileOpenErrorResponse(error);
+                }
                 let buffer: Buffer;
                 let openedStat: fs.Stats;
                 try {
@@ -289,7 +305,12 @@ export const fileRoutes = {
                     size: openedStat.size,
                 });
             }
-            const file = await openReadNoFollowNonblockingGuarded(guardedPath(fullPath));
+            let file: fs.promises.FileHandle;
+            try {
+                file = await openReadNoFollowNonblockingGuarded(guardedPath(fullPath));
+            } catch (error) {
+                return fileOpenErrorResponse(error);
+            }
             let buffer: Buffer;
             let openedStat: fs.Stats;
             try {

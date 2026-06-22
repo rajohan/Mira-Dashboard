@@ -110,7 +110,7 @@ async function runDockerExec(
     environment: Record<string, string | undefined> = {}
 ) {
     const environmentArguments = Object.entries(environment).flatMap(([key, value]) =>
-        value === undefined ? [] : ["--env", `${key}=${value}`]
+        value === undefined ? [] : ["--env", key]
     );
     const { code, stderr, stdout } = await runProcess(
         "docker",

@@ -28,6 +28,7 @@ const logSubscribers = new Set<DashboardSocket>();
 const MIN_LOG_TAIL_BYTES = 64 * 1024;
 const LOG_BYTES_PER_REQUESTED_LINE = 1024;
 const LOG_TAIL_READ_CHUNK_BYTES = 64 * 1024;
+const MAX_LOG_TAIL_BYTES = 8 * 1024 * 1024;
 
 function resolveRealLogsDirectory(): string {
     if (fs.lstatSync(logsDirectory).isSymbolicLink()) {
@@ -59,6 +60,7 @@ async function readLogContent(
 
     const readWindowBytes = Math.min(
         stat.size,
+        MAX_LOG_TAIL_BYTES,
         Math.max(MIN_LOG_TAIL_BYTES, lines * LOG_BYTES_PER_REQUESTED_LINE)
     );
     const chunks: Buffer[] = [];

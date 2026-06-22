@@ -34,7 +34,13 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-    await fs.rm(testState.temporaryRoot, { recursive: true, force: true });
+    if (
+        path.isAbsolute(testState.temporaryRoot) &&
+        testState.temporaryRoot.startsWith(path.join(os.tmpdir(), "guarded-ops-test-"))
+    ) {
+        await fs.rm(testState.temporaryRoot, { recursive: true, force: true });
+    }
+    testState.temporaryRoot = "";
 });
 
 describe("guarded writes", () => {
@@ -55,6 +61,17 @@ describe("guarded writes", () => {
             )
         ).rejects.toThrow();
         await expect(fs.readFile(target, "utf8")).resolves.toBe("old");
+    });
+
+    it("rejects symlink root directories for anchored writes", async () => {
+        const realRoot = path.join(testState.temporaryRoot, "real-root");
+        const rootLink = path.join(testState.temporaryRoot, "root-link");
+        await fs.mkdir(realRoot);
+        await fs.symlink(realRoot, rootLink);
+
+        await expect(
+            writeTextNoFollowAnchoredGuarded(guardedPath(rootLink), "file.txt", "new")
+        ).rejects.toMatchObject({ code: "ELOOP" });
     });
 
     it.skipIf(process.platform === "win32")(

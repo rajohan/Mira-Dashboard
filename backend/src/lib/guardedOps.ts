@@ -64,6 +64,11 @@ function assertNoSymlinkAncestors(root: string, destinationPath: string): void {
     if (relativeDirectory.startsWith("..") || Path.isAbsolute(relativeDirectory)) {
         throw Object.assign(new Error("Invalid relative path"), { code: "EINVAL" });
     }
+    if (Fs.lstatSync(currentPath).isSymbolicLink()) {
+        throw Object.assign(new Error("Symlinked parent is not allowed"), {
+            code: "ELOOP",
+        });
+    }
     for (const part of relativeDirectory.split(Path.sep)) {
         if (!part) continue;
         currentPath = Path.join(currentPath, part);
@@ -447,10 +452,10 @@ export async function writeTextNoFollowAnchoredGuarded(
     if (options.createParents) {
         mkdirGuarded(root, { recursive: true });
     }
+    const destinationPath = Path.join(root as string, relativePath);
+    assertNoSymlinkAncestors(root as string, destinationPath);
     if (process.platform !== "linux") {
         validateRelativePath(relativePath);
-        const destinationPath = Path.join(root as string, relativePath);
-        assertNoSymlinkAncestors(root as string, destinationPath);
         if (options.createParents) {
             const destinationDirectory = Path.dirname(destinationPath);
             mkdirGuarded(guardedPath(destinationDirectory), { recursive: true });
@@ -468,7 +473,9 @@ export async function writeTextNoFollowAnchoredGuarded(
         relativePath,
         { createParents: options.createParents }
     );
-    const destinationPath = Buffer.from(Path.join(parentPath.toString(), basename));
+    const anchoredDestinationPath = Buffer.from(
+        Path.join(parentPath.toString(), basename)
+    );
     const temporaryPath = Buffer.from(
         Path.join(parentPath.toString(), `.${basename}.${Bun.randomUUIDv7()}.tmp`)
     );
@@ -479,7 +486,7 @@ export async function writeTextNoFollowAnchoredGuarded(
         let file: Fs.promises.FileHandle | undefined;
         try {
             file = await Fs.promises.open(
-                destinationPath,
+                anchoredDestinationPath,
                 Fs.constants.O_RDONLY | Fs.constants.O_NOFOLLOW | Fs.constants.O_NONBLOCK
             );
             const existingStat = await file.stat();
@@ -532,7 +539,7 @@ export async function writeTextNoFollowAnchoredGuarded(
         }
         await Reflect.apply(fsPromiseOps.rename, Fs.promises, [
             temporaryPath,
-            destinationPath,
+            anchoredDestinationPath,
         ]);
         isTemporaryCreated = false;
         await handles.at(-1)?.sync();
