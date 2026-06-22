@@ -7,7 +7,7 @@
     "browserslist": [
         "Chrome >= 140",
         "Firefox >= 133",
-        "Safari >= 18.2"
+        "Safari >= 18.4"
     ],
     "scripts": {
         "dev": "bun --watch scripts/developmentFrontend.ts",
