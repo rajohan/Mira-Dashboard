@@ -21,18 +21,18 @@ export interface Session {
     model: string;
     tokenCount: number;
     maxTokens: number;
-    createdAt: string | null;
-    updatedAt: number | null;
+    createdAt: string | undefined;
+    updatedAt: number | undefined;
     displayName: string;
     label: string;
     displayLabel: string;
     channel: string;
     status?: string;
-    endedAt?: string | number | null;
-    startedAt?: string | number | null;
-    runId?: string | null;
-    activeRunId?: string | null;
-    currentRunId?: string | null;
+    endedAt?: string | number | undefined;
+    startedAt?: string | number | undefined;
+    runId?: string | undefined;
+    activeRunId?: string | undefined;
+    currentRunId?: string | undefined;
     isRunning?: boolean;
     running?: boolean;
     thinkingLevel?: string;
@@ -56,11 +56,11 @@ export interface Agent {
     id: string;
     status: "active" | "thinking" | "idle" | "offline";
     model: string;
-    currentTask: string | null;
-    currentActivity: string | null;
-    lastActivity: string | null;
-    sessionKey: string | null;
-    channel: string | null;
+    currentTask: string | undefined;
+    currentActivity: string | undefined;
+    lastActivity: string | undefined;
+    sessionKey: string | undefined;
+    channel: string | undefined;
 }
 
 /** Represents agent task history item. */
@@ -70,6 +70,6 @@ export interface AgentTaskHistoryItem {
     task: string;
     status: string;
     startedAt: string;
-    completedAt: string | null;
+    completedAt: string | undefined;
     lastActivityAt: string;
 }

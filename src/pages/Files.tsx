@@ -60,7 +60,7 @@ export function Files() {
                         variant="ghost"
                         size="sm"
                         className="ml-auto"
-                        onClick={() => setError(null)}
+                        onClick={() => setError(undefined)}
                     >
                         <X size={16} />
                     </Button>

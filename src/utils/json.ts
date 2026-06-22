@@ -3,7 +3,7 @@ import JSON5 from "json5";
 /** Represents the result of JSON or JSON5 validation. */
 export interface JsonValidation {
     valid: boolean;
-    error: string | null;
+    error: string | undefined;
 }
 
 /**
@@ -22,7 +22,7 @@ export function validateJsonString(
         } else {
             JSON.parse(value);
         }
-        return { valid: true, error: null };
+        return { valid: true, error: undefined };
     } catch (error) {
         return {
             valid: false,

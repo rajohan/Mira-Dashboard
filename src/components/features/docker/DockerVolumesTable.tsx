@@ -168,7 +168,7 @@ export function DockerVolumesTable({
                                 <div className="text-primary-400 mt-2 text-xs break-words">
                                     Used by: {volume.usedBy.join(", ")}
                                 </div>
-                            ) : null}
+                            ) : undefined}
                             <Button
                                 size="sm"
                                 variant="danger"
@@ -214,9 +214,9 @@ export function DockerVolumesTable({
                                                     ) : header.column.getIsSorted() ===
                                                       "desc" ? (
                                                         <ChevronDown className="h-3 w-3 rotate-180" />
-                                                    ) : null}
+                                                    ) : undefined}
                                                 </span>
-                                            ) : null}
+                                            ) : undefined}
                                         </div>
                                     </th>
                                 ))}

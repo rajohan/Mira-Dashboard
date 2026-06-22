@@ -24,7 +24,7 @@ type LogViewportElement = Pick<
 >;
 
 /** Returns whether a log viewport is currently scrolled near the bottom. */
-export function isLogViewportAtBottom(viewport: LogViewportElement | null) {
+export function isLogViewportAtBottom(viewport: LogViewportElement | undefined) {
     if (!viewport) {
         return false;
     }
@@ -36,7 +36,7 @@ export function isLogViewportAtBottom(viewport: LogViewportElement | null) {
 }
 
 /** Scrolls a log viewport to the bottom when present. */
-export function scrollLogViewportToBottom(viewport: LogViewportElement | null) {
+export function scrollLogViewportToBottom(viewport: LogViewportElement | undefined) {
     if (!viewport) {
         return false;
     }
@@ -47,7 +47,7 @@ export function scrollLogViewportToBottom(viewport: LogViewportElement | null) {
 
 /** Scrolls a log viewport to the bottom and reports the new scroll position. */
 export function scrollLogViewportToBottomAndReport(
-    viewport: LogViewportElement | null,
+    viewport: LogViewportElement | undefined,
     onScrolled: (scrollTop: number) => void
 ) {
     if (!viewport) {
@@ -79,7 +79,7 @@ export function compareLogFileNamesDescending(
 
 /** Renders the logs UI. */
 export function Logs() {
-    const [selectedFile, setSelectedFile] = useState<string | null>(null);
+    const [selectedFile, setSelectedFile] = useState<string | undefined>(undefined);
     const [lineCount, setLineCount] = useState<number>(100);
     const [levelFilter, setLevelFilter] = useState<Set<string>>(
         new Set(["trace", "debug", "info", "warn", "error", "fatal"])
@@ -87,10 +87,10 @@ export function Logs() {
     const [search, setSearch] = useState("");
     const [isAtBottom, setIsAtBottom] = useState(true);
 
-    const logContainerReference = useRef<HTMLDivElement>(null);
+    const logContainerReference = useRef<HTMLDivElement | undefined>(undefined);
     const shouldStickToBottomReference = useRef(true);
     const lastKnownLogScrollTopReference = useRef(0);
-    const subscribedConnectionIdReference = useRef<number | null>(null);
+    const subscribedConnectionIdReference = useRef<number | undefined>(undefined);
     const requestSeqReference = useRef(0);
 
     // OpenClaw connection (shared WebSocket)
@@ -106,7 +106,7 @@ export function Logs() {
     );
     const { data: logFiles } = useLogFiles();
     const { refetch: refetchContent, isFetching: isLoadingContent } = useLogContent(
-        selectedFile || null,
+        selectedFile || undefined,
         lineCount,
         false
     );
@@ -142,7 +142,7 @@ export function Logs() {
             return;
         }
 
-        const sorted = [...availableLogFiles].sort(compareLogFileNamesDescending);
+        const sorted = [...availableLogFiles].toSorted(compareLogFileNamesDescending);
         const today = formatDateStamp();
         const todayFile = sorted.find((f) => f.name.includes(today));
         setSelectedFile(todayFile?.name || sorted[0]!.name);
@@ -160,7 +160,7 @@ export function Logs() {
                 await request("subscribe", { channel: "logs" });
             } catch (error) {
                 console.error("Failed to subscribe to logs:", error);
-                subscribedConnectionIdReference.current = null;
+                subscribedConnectionIdReference.current = undefined;
             }
         })();
     }, [isConnected, connectionId, request]);
@@ -182,7 +182,9 @@ export function Logs() {
             const lines = content.split("\n").filter((line) => line.trim());
             const parsedLogs = lines
                 .map((line, index) => parseLogLine(line, index))
-                .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+                .filter(
+                    (entry): entry is NonNullable<typeof entry> => entry !== undefined
+                );
 
             if (logsCollection.isReady()) {
                 // Replace full snapshot without relying on stale array references.
@@ -210,7 +212,7 @@ export function Logs() {
     }, [selectedFile, lineCount, availableLogFiles.length]);
 
     const filteredLogs = liveLogs.filter((log) => {
-        const level = typeof log.level === "string" ? log.level.toLowerCase() : null;
+        const level = typeof log.level === "string" ? log.level.toLowerCase() : undefined;
         if (level && !levelFilter.has(level)) {
             return false;
         }
@@ -247,7 +249,7 @@ export function Logs() {
 
     const rowVirtualizer = useVirtualizer({
         count: filteredLogs.length,
-        getScrollElement: () => logContainerReference.current,
+        getScrollElement: () => logContainerReference.current ?? (undefined as never),
         estimateSize: () => 22,
         overscan: 15,
         getItemKey: (index) => filteredLogs[index]!.id,
@@ -309,7 +311,7 @@ export function Logs() {
         return () => cancelAnimationFrame(followFrame);
     }, [filteredLogs.length, rowVirtualizer]);
 
-    const sortedLogFiles = [...availableLogFiles].sort(compareLogFileNamesDescending);
+    const sortedLogFiles = [...availableLogFiles].toSorted(compareLogFileNamesDescending);
 
     /** Performs clear logs. */
     const clearLogs = () => {
@@ -324,7 +326,7 @@ export function Logs() {
             <div className="mb-3 grid grid-cols-1 gap-3 sm:mb-4 md:grid-cols-[minmax(0,1fr)_8rem] lg:grid-cols-[minmax(0,1fr)_8rem_minmax(12rem,24rem)] xl:grid-cols-[minmax(0,1fr)_8rem_minmax(12rem,24rem)_auto] xl:items-center">
                 <Select
                     value={selectedFile || ""}
-                    onChange={(v) => setSelectedFile(v || null)}
+                    onChange={(v) => setSelectedFile(v || undefined)}
                     options={sortedLogFiles.map((f) => ({
                         value: f.name,
                         label: f.name,
@@ -400,7 +402,9 @@ export function Logs() {
                 variant="bordered"
             >
                 <div
-                    ref={logContainerReference}
+                    ref={(element) => {
+                        logContainerReference.current = element ?? undefined;
+                    }}
                     onScroll={handleScroll}
                     className="bg-primary-900/50 relative h-full overflow-y-auto font-mono text-[11px] sm:text-xs"
                     style={{ overflowAnchor: "none" }}

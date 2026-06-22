@@ -13,7 +13,7 @@ export function getCronJobName(job: CronJob): string {
 
 /** Sorts cron jobs. */
 export function sortCronJobs(jobs: CronJob[]): CronJob[] {
-    return [...jobs].sort((a, b) => {
+    return [...jobs].toSorted((a, b) => {
         const enabledA = a.enabled === false ? 1 : 0;
         const enabledB = b.enabled === false ? 1 : 0;
         if (enabledA !== enabledB) {
@@ -24,20 +24,20 @@ export function sortCronJobs(jobs: CronJob[]): CronJob[] {
     });
 }
 
-function isCronFieldValid(field: string, minimum: number, maximum: number): boolean {
-    const parseCronNumber = (value: string): number | null => {
-        if (!/^\d+$/u.test(value)) return null;
-        const number = Number(value);
-        return Number.isSafeInteger(number) ? number : null;
-    };
+function parseCronNumber(value: string): number | undefined {
+    if (!/^\d+$/u.test(value)) return undefined;
+    const number = Number(value);
+    return Number.isSafeInteger(number) ? number : undefined;
+}
 
+function isCronFieldValid(field: string, minimum: number, maximum: number): boolean {
     return field.split(",").every((part) => {
         if (!part) return false;
         const stepPieces = part.split("/");
         if (stepPieces.length > 2) return false;
         const [rangePart = "", stepPart] = stepPieces;
         const step = stepPart === undefined ? 1 : parseCronNumber(stepPart);
-        if (step === null) return false;
+        if (step === undefined) return false;
         if (!Number.isSafeInteger(step) || step < 1) return false;
         const rangePieces = rangePart.split("-");
         if (rangePieces.length > 2) return false;
@@ -45,13 +45,15 @@ function isCronFieldValid(field: string, minimum: number, maximum: number): bool
         let end = maximum;
         if (rangePart !== "*") {
             if (rangePart.includes("-")) {
-                const [parsedStart, parsedEnd] = rangePieces.map(parseCronNumber);
-                if (parsedStart === null || parsedEnd === null) return false;
+                const [parsedStart, parsedEnd] = rangePieces.map((value) =>
+                    parseCronNumber(value)
+                );
+                if (parsedStart === undefined || parsedEnd === undefined) return false;
                 start = parsedStart;
                 end = parsedEnd;
             } else {
                 const parsedValue = parseCronNumber(rangePart);
-                if (parsedValue === null) return false;
+                if (parsedValue === undefined) return false;
                 start = parsedValue;
                 end = stepPart === undefined ? parsedValue : maximum;
             }

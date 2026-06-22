@@ -14,7 +14,7 @@ import { Card } from "../../ui/Card";
 /** Returns finite cron timestamp values. */
 function cronTimestamp(job: CronJob, key: "lastRunAtMs" | "nextRunAtMs") {
     const value = getCronStateValue(job, key);
-    return typeof value === "number" && Number.isFinite(value) ? value : null;
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 /** Renders the cron overview card UI. */
@@ -26,19 +26,19 @@ export function CronOverviewCard() {
 
     const latestRunJob =
         [...jobs]
-            .filter((job) => cronTimestamp(job, "lastRunAtMs") !== null)
-            .sort(
+            .filter((job) => cronTimestamp(job, "lastRunAtMs") !== undefined)
+            .toSorted(
                 (a, b) =>
                     cronTimestamp(b, "lastRunAtMs")! - cronTimestamp(a, "lastRunAtMs")!
-            )[0] || null;
+            )[0] || undefined;
 
     const nextRunJob =
         [...jobs]
-            .filter((job) => cronTimestamp(job, "nextRunAtMs") !== null)
-            .sort(
+            .filter((job) => cronTimestamp(job, "nextRunAtMs") !== undefined)
+            .toSorted(
                 (a, b) =>
                     cronTimestamp(a, "nextRunAtMs")! - cronTimestamp(b, "nextRunAtMs")!
-            )[0] || null;
+            )[0] || undefined;
 
     const lastStatus = formatCronLastStatus(
         latestRunJob ? getCronStateValue(latestRunJob, "lastRunStatus") : undefined

@@ -190,7 +190,7 @@ export function usePullRequestDeployments() {
     return useQuery({
         queryKey: pullRequestKeys.deployments(),
         queryFn: fetchDeployments,
-        staleTime: 5_000,
+        staleTime: 5000,
         refetchInterval: AUTO_REFRESH_MS,
     });
 }
@@ -200,7 +200,7 @@ export function useProductionCheckout() {
     return useQuery({
         queryKey: pullRequestKeys.productionCheckout(),
         queryFn: fetchProductionCheckout,
-        staleTime: 5_000,
+        staleTime: 5000,
         refetchInterval: AUTO_REFRESH_MS,
     });
 }

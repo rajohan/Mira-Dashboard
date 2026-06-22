@@ -3,17 +3,17 @@ import { useCacheEntry } from "./useCache";
 /** Represents weather data. */
 export interface WeatherData {
     location: string;
-    temperatureC: number | null;
-    feelsLikeC: number | null;
-    humidityPercent: number | null;
-    windKph: number | null;
+    temperatureC: number | undefined;
+    feelsLikeC: number | undefined;
+    humidityPercent: number | undefined;
+    windKph: number | undefined;
     description: string;
-    minTempC: number | null;
-    maxTempC: number | null;
+    minTempC: number | undefined;
+    maxTempC: number | undefined;
     forecast: Array<{
         date: string;
-        minTempC: number | null;
-        maxTempC: number | null;
+        minTempC: number | undefined;
+        maxTempC: number | undefined;
         description: string;
     }>;
     fetchedAt: number;

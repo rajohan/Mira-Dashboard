@@ -72,22 +72,22 @@ function isJsonLike(code: string): boolean {
 }
 
 /** Parses JSON block. */
-function parseJsonBlock(code: string): object | null {
+function parseJsonBlock(code: string): object | undefined {
     try {
         const parsed = JSON5.parse(code) as unknown;
-        return typeof parsed === "object" && parsed !== null ? parsed : { value: parsed };
+        return parsed && typeof parsed === "object" ? parsed : { value: parsed };
     } catch {
-        return null;
+        return undefined;
     }
 }
 
 /** Returns pre code block. */
 export function getPreCodeBlock(
     children: ReactNode
-): null | { code: string; language: string } {
+): undefined | { code: string; language: string } {
     const child = Children.toArray(children)[0];
     if (!isValidElement<{ className?: string; children?: ReactNode }>(child)) {
-        return null;
+        return undefined;
     }
     return {
         code: childrenToText(child.props.children).replace(/\n$/, ""),
@@ -98,7 +98,7 @@ export function getPreCodeBlock(
 /** Renders the chat code block UI. */
 function ChatCodeBlock({ code, language }: { code: string; language: string }) {
     const shouldTryJson = JSON_LANGUAGES.has(language) || isJsonLike(code);
-    const parsedJson = shouldTryJson ? parseJsonBlock(code) : null;
+    const parsedJson = shouldTryJson ? parseJsonBlock(code) : undefined;
 
     if (parsedJson) {
         return (
@@ -203,7 +203,7 @@ export const markdownComponents: Components = {
         void node;
 
         if (!src) {
-            return null;
+            return;
         }
 
         return (

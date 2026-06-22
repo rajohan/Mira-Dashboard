@@ -33,6 +33,8 @@ interface MutableReference<T> {
     current: T;
 }
 
+type TimerHandle = ReturnType<typeof setTimeout>;
+
 /** Represents pending delta update. */
 interface PendingDeltaUpdate {
     runId: string;
@@ -92,7 +94,7 @@ export function formatToolName(value: string): string {
         .trim();
 
     return normalized
-        ? `${normalized[0].toUpperCase()}${normalized.slice(1)}`
+        ? `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`
         : normalized;
 }
 
@@ -273,12 +275,12 @@ function runtimeDisplayText(value: unknown): string {
         }
     }
 
-    if (value === undefined || value === null) {
+    if (value === undefined || value === undefined) {
         return "";
     }
 
     try {
-        return JSON.stringify(value, null, 2);
+        return JSON.stringify(value, undefined, 2);
     } catch {
         return String(value);
     }
@@ -397,13 +399,13 @@ interface UseChatRuntimeEventsParameters {
     showThinkingOutput: boolean;
     showToolOutput: boolean;
     activeStreamsReference: MutableReference<ActiveChatStreams>;
-    liveHistoryRefreshTimerReference: MutableReference<number | null>;
+    liveHistoryRefreshTimerReference: MutableReference<TimerHandle | undefined>;
     shouldStickToBottomReference: MutableReference<boolean>;
     updateActiveStreams: (
         updater: (wasPrevious: ActiveChatStreams) => ActiveChatStreams
     ) => void;
     setMessages: Dispatch<SetStateAction<ChatHistoryMessage[]>>;
-    setSendError: Dispatch<SetStateAction<string | null>>;
+    setSendError: Dispatch<SetStateAction<string | undefined>>;
     setIsAtBottom: Dispatch<SetStateAction<boolean>>;
     setHistoryLoadVersion: Dispatch<SetStateAction<number>>;
 }
@@ -427,7 +429,7 @@ export function useChatRuntimeEvents({
     setHistoryLoadVersion,
 }: UseChatRuntimeEventsParameters) {
     const pendingDeltaUpdatesReference = useRef<Record<string, PendingDeltaUpdate>>({});
-    const pendingDeltaFlushTimerReference = useRef<number | null>(null);
+    const pendingDeltaFlushTimerReference = useRef<TimerHandle | undefined>(undefined);
     const selectedSessionKeyReference = useRef(selectedSessionKey);
     const updateActiveStreamsReference = useRef(updateActiveStreams);
     const requestReference = useRef(request);
@@ -444,9 +446,9 @@ export function useChatRuntimeEvents({
 
         /** Performs flush pending delta updates. */
         const flushPendingDeltaUpdates = () => {
-            if (pendingDeltaFlushTimerReference.current !== null) {
-                window.clearTimeout(pendingDeltaFlushTimerReference.current);
-                pendingDeltaFlushTimerReference.current = null;
+            if (pendingDeltaFlushTimerReference.current !== undefined) {
+                clearTimeout(pendingDeltaFlushTimerReference.current);
+                pendingDeltaFlushTimerReference.current = undefined;
             }
 
             const pendingUpdates = pendingDeltaUpdatesReference.current;
@@ -534,8 +536,8 @@ export function useChatRuntimeEvents({
             pending.deltas = [...pending.deltas, deltaMessage];
             pendingDeltaUpdatesReference.current[streamSessionKey] = pending;
 
-            if (pendingDeltaFlushTimerReference.current === null) {
-                pendingDeltaFlushTimerReference.current = window.setTimeout(
+            if (pendingDeltaFlushTimerReference.current === undefined) {
+                pendingDeltaFlushTimerReference.current = setTimeout(
                     flushPendingDeltaUpdates,
                     75
                 );
@@ -545,12 +547,12 @@ export function useChatRuntimeEvents({
         /** Performs refresh selected history soon. */
         const refreshSelectedHistorySoon = (delayMs = 450) => {
             const sessionKeyAtCall = selectedSessionKey;
-            if (liveHistoryRefreshTimerReference.current !== null) {
-                window.clearTimeout(liveHistoryRefreshTimerReference.current);
+            if (liveHistoryRefreshTimerReference.current !== undefined) {
+                clearTimeout(liveHistoryRefreshTimerReference.current);
             }
 
-            liveHistoryRefreshTimerReference.current = window.setTimeout(async () => {
-                liveHistoryRefreshTimerReference.current = null;
+            liveHistoryRefreshTimerReference.current = setTimeout(async () => {
+                liveHistoryRefreshTimerReference.current = undefined;
 
                 if (isCancelled || !shouldStickToBottomReference.current) {
                     return;
@@ -844,11 +846,11 @@ export function useChatRuntimeEvents({
                     ) {
                         delete pendingDeltaUpdatesReference.current[streamSessionKey];
                         if (
-                            pendingDeltaFlushTimerReference.current !== null &&
+                            pendingDeltaFlushTimerReference.current !== undefined &&
                             Object.keys(pendingDeltaUpdatesReference.current).length === 0
                         ) {
-                            window.clearTimeout(pendingDeltaFlushTimerReference.current);
-                            pendingDeltaFlushTimerReference.current = null;
+                            clearTimeout(pendingDeltaFlushTimerReference.current);
+                            pendingDeltaFlushTimerReference.current = undefined;
                         }
 
                         const message = mergeStreamMessage(
@@ -882,7 +884,7 @@ export function useChatRuntimeEvents({
 
             /** Performs refresh history after terminal event. */
             const refreshHistoryAfterTerminalEvent = (sessionKey: string) => {
-                window.setTimeout(async () => {
+                setTimeout(async () => {
                     if (isCancelled || !shouldStickToBottomReference.current) {
                         return;
                     }
@@ -946,7 +948,7 @@ export function useChatRuntimeEvents({
                               timestamp: currentIsoString(),
                               runId: payload.runId,
                           }
-                        : null;
+                        : undefined;
 
                 if (messageToAppend && eventMatchesSelected) {
                     setMessages((wasPrevious) =>
@@ -1009,9 +1011,9 @@ export function useChatRuntimeEvents({
             isCancelled = true;
             flushPendingDeltaUpdates();
             unsubscribe();
-            if (liveHistoryRefreshTimerReference.current !== null) {
-                window.clearTimeout(liveHistoryRefreshTimerReference.current);
-                liveHistoryRefreshTimerReference.current = null;
+            if (liveHistoryRefreshTimerReference.current !== undefined) {
+                clearTimeout(liveHistoryRefreshTimerReference.current);
+                liveHistoryRefreshTimerReference.current = undefined;
             }
             pendingDeltaUpdatesReference.current = {};
         };

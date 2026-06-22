@@ -5,7 +5,7 @@ import { CONFIG_TOP_FILES, HOOKS_DIR_FILES } from "./fileConstants";
 
 /** Provides props for config section. */
 interface ConfigSectionProperties {
-    selectedPath: string | null;
+    selectedPath: string | undefined;
     onSelect: (path: string) => void;
 }
 

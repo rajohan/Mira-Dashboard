@@ -13,7 +13,7 @@ export interface ColumnConfig {
     title: string;
     dotColor: string;
     label: string;
-    filter: (t: Task) => boolean;
+    acceptsTask: (t: Task) => boolean;
 }
 
 /** Defines column config. */
@@ -23,7 +23,7 @@ export const COLUMN_CONFIG: ColumnConfig[] = [
         title: "New",
         dotColor: "bg-orange-500",
         label: "todo",
-        filter: (t: Task) =>
+        acceptsTask: (t: Task) =>
             t.state === "OPEN" &&
             t.labels.every((l: { name: string }) => l.name !== "blocked") &&
             t.labels.every((l: { name: string }) => l.name !== "in-progress"),
@@ -33,7 +33,7 @@ export const COLUMN_CONFIG: ColumnConfig[] = [
         title: "In Progress",
         dotColor: "bg-blue-500",
         label: "in-progress",
-        filter: (t: Task) =>
+        acceptsTask: (t: Task) =>
             t.state === "OPEN" &&
             t.labels.every((l: { name: string }) => l.name !== "blocked") &&
             t.labels.some((l: { name: string }) => l.name === "in-progress"),
@@ -43,7 +43,7 @@ export const COLUMN_CONFIG: ColumnConfig[] = [
         title: "Blocked",
         dotColor: "bg-red-500",
         label: "blocked",
-        filter: (t: Task) =>
+        acceptsTask: (t: Task) =>
             t.state === "OPEN" &&
             t.labels.some((l: { name: string }) => l.name === "blocked"),
     },
@@ -52,7 +52,7 @@ export const COLUMN_CONFIG: ColumnConfig[] = [
         title: "Done",
         dotColor: "bg-green-500",
         label: "done",
-        filter: (t: Task) => t.state === "CLOSED",
+        acceptsTask: (t: Task) => t.state === "CLOSED",
     },
 ];
 
@@ -119,8 +119,8 @@ export function isTaskMatchSearch(task: Task, search: string): boolean {
         ...getTaskNumberSearchValues(task.number),
         task.title,
         task.body,
-        ...task.labels.map(getTaskLabelSearchValue),
-        ...task.assignees.flatMap(getTaskAssigneeSearchValues),
+        ...task.labels.map((label) => getTaskLabelSearchValue(label)),
+        ...task.assignees.flatMap((assignee) => getTaskAssigneeSearchValues(assignee)),
         task.automation?.cronJobId,
         task.automation?.jobName,
         task.automation?.scheduleSummary,
@@ -135,13 +135,13 @@ export function isTaskMatchSearch(task: Task, search: string): boolean {
 
 /** Returns column ID. */
 export function getColumnId(taskOrId: Task): ColumnId;
-export function getColumnId(taskOrId: string): ColumnId | null;
-export function getColumnId(taskOrId: Task | string): ColumnId | null {
+export function getColumnId(taskOrId: string): ColumnId | undefined;
+export function getColumnId(taskOrId: Task | string): ColumnId | undefined {
     if (typeof taskOrId === "string") {
         if (["todo", "in-progress", "blocked", "done"].includes(taskOrId)) {
             return taskOrId as ColumnId;
         }
-        return null;
+        return undefined;
     }
 
     const task = taskOrId as Task;

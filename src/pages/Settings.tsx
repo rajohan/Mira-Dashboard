@@ -31,15 +31,15 @@ import { currentIsoString } from "../utils/date";
 
 /** Performs patch success. */
 export function patchSuccess(
-    setSuccess: (value: string | null) => void,
+    setSuccess: (value: string | undefined) => void,
     message: string,
-    timerReference?: { current: ReturnType<typeof setTimeout> | null }
+    timerReference?: { current: ReturnType<typeof setTimeout> | undefined }
 ) {
     if (timerReference?.current) clearTimeout(timerReference.current);
     setSuccess(message);
     const timeoutId = setTimeout(() => {
-        setSuccess(null);
-        if (timerReference) timerReference.current = null;
+        setSuccess(undefined);
+        if (timerReference) timerReference.current = undefined;
     }, 3000);
     if (timerReference) timerReference.current = timeoutId;
 }
@@ -64,7 +64,7 @@ export function configuredChannels(config?: OpenClawConfig): ChannelSummary[] {
                       ? `${value.allowFrom.length} allowed senders`
                       : undefined,
         }))
-        .sort((a, b) => a.id.localeCompare(b.id));
+        .toSorted((a, b) => a.id.localeCompare(b.id));
 }
 
 /** Performs number from duration. */
@@ -104,19 +104,21 @@ export function optionalFormValue(value?: string): string | undefined {
 interface SystemHostCache {
     version?: {
         current?: string;
-        latest?: string | null;
+        latest?: string | undefined;
         updateAvailable?: boolean;
     };
 }
 
 /** Renders the settings UI. */
 export function Settings() {
-    const [error, setError] = useState<string | null>(null);
-    const [success, setSuccess] = useState<string | null>(null);
+    const [error, setError] = useState<string | undefined>(undefined);
+    const [success, setSuccess] = useState<string | undefined>(undefined);
     const [showRestartModal, setShowRestartModal] = useState(false);
-    const successTimerReference = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const restartReloadTimerReference = useRef<ReturnType<typeof setTimeout> | null>(
-        null
+    const successTimerReference = useRef<ReturnType<typeof setTimeout> | undefined>(
+        undefined
+    );
+    const restartReloadTimerReference = useRef<ReturnType<typeof setTimeout> | undefined>(
+        undefined
     );
 
     // Queries
@@ -148,7 +150,7 @@ export function Settings() {
             await restartGateway.mutateAsync();
             setShowRestartModal(false);
             restartReloadTimerReference.current = setTimeout(
-                () => window.location.reload(),
+                () => location.reload(),
                 2000
             );
         } catch (error_) {
@@ -160,7 +162,7 @@ export function Settings() {
     async function handleBackup() {
         try {
             const result = await createBackup.mutateAsync();
-            const blob = new Blob([JSON.stringify(result, null, 2)], {
+            const blob = new Blob([JSON.stringify(result, undefined, 2)], {
                 type: "application/json",
             });
             const url = URL.createObjectURL(blob);
@@ -185,7 +187,7 @@ export function Settings() {
 
     /** Responds to session save events. */
     async function handleSessionSave(idleMinutes: number) {
-        setError(null);
+        setError(undefined);
         try {
             await updateConfig.mutateAsync({
                 session: { reset: { idleMinutes } },
@@ -198,7 +200,7 @@ export function Settings() {
 
     /** Responds to heartbeat save events. */
     async function handleHeartbeatSave(every: number, target: string) {
-        setError(null);
+        setError(undefined);
         try {
             const nextEvery = every % 60 === 0 ? `${every / 60}m` : `${every}s`;
             const agents = config?.agents?.list || [];
@@ -234,7 +236,7 @@ export function Settings() {
 
     /** Responds to agent access save events. */
     async function handleAgentAccessSave(agents: AgentConfig[]) {
-        setError(null);
+        setError(undefined);
         try {
             await updateConfig.mutateAsync({
                 agents: {
@@ -253,7 +255,7 @@ export function Settings() {
 
     /** Responds to model save events. */
     async function handleModelSave(values: { primary: string; fallbacks: string[] }) {
-        setError(null);
+        setError(undefined);
         try {
             await updateConfig.mutateAsync({
                 agents: { defaults: { model: values } },
@@ -266,7 +268,7 @@ export function Settings() {
 
     /** Responds to tool save events. */
     async function handleToolSave(values: ToolSettings) {
-        setError(null);
+        setError(undefined);
         try {
             await updateConfig.mutateAsync({
                 tools: {
@@ -297,7 +299,7 @@ export function Settings() {
 
     /** Responds to channels save events. */
     async function handleChannelsSave(channels: ChannelSummary[]) {
-        setError(null);
+        setError(undefined);
         try {
             await updateConfig.mutateAsync({
                 channels: Object.fromEntries(
@@ -408,7 +410,7 @@ export function Settings() {
                         variant="ghost"
                         size="sm"
                         className="ml-auto"
-                        onClick={() => setError(null)}
+                        onClick={() => setError(undefined)}
                     >
                         ×
                     </Button>

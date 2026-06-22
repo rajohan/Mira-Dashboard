@@ -20,6 +20,16 @@ import { SessionActionsDropdown } from "./SessionActionsDropdown";
 
 const columnHelper = createColumnHelper<Session>();
 
+function getSessionName(session: Session, fallback = "unknown") {
+    return (
+        session.displayLabel ||
+        session.label ||
+        session.displayName ||
+        session.id ||
+        fallback
+    );
+}
+
 /** Provides props for sessions table. */
 interface SessionsTableProperties {
     sessions: Session[];
@@ -37,12 +47,6 @@ export function SessionsTable({
 }: SessionsTableProperties) {
     const [sorting, setSorting] = useState<SortingState>([]);
     const tableSessions = Array.isArray(sessions) ? sessions : [];
-    const getSessionName = (session: Session, fallback = "unknown") =>
-        session.displayLabel ||
-        session.label ||
-        session.displayName ||
-        session.id ||
-        fallback;
 
     const columns = [
         columnHelper.accessor("type", {
@@ -229,7 +233,7 @@ export function SessionsTable({
                                                     ) : header.column.getIsSorted() ===
                                                       "desc" ? (
                                                         <ChevronDown className="h-3 w-3 rotate-180" />
-                                                    ) : null}
+                                                    ) : undefined}
                                                 </span>
                                             )}
                                         </div>

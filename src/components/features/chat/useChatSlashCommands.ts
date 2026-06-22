@@ -18,7 +18,7 @@ interface UseChatSlashCommandsParameters {
     ) => void;
     setMessages: Dispatch<SetStateAction<ChatHistoryMessage[]>>;
     setDraft: Dispatch<SetStateAction<string>>;
-    setSendError: Dispatch<SetStateAction<string | null>>;
+    setSendError: Dispatch<SetStateAction<string | undefined>>;
     confirmResetSession: () => Promise<boolean>;
 }
 
@@ -65,18 +65,18 @@ export function useChatSlashCommands({
 
             if (!isConfirmed) {
                 setDraft("");
-                setSendError(null);
+                setSendError(undefined);
                 addSystemMessage("Reset canceled.");
                 return true;
             }
 
             setDraft("");
-            setSendError(null);
+            setSendError(undefined);
             return false;
         }
 
         setDraft("");
-        setSendError(null);
+        setSendError(undefined);
 
         try {
             await request("chat.abort", { sessionKey: selectedSessionKey });

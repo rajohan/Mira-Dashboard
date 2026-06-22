@@ -19,7 +19,7 @@ interface TaskCardProperties {
 /** Returns compact live automation status for task cards. */
 function getTaskAutomationStatusBadge(automation: Task["automation"]) {
     if (!automation?.recurring) {
-        return null;
+        return;
     }
 
     if (automation.runningAtMs) {
@@ -37,7 +37,7 @@ function getTaskAutomationStatusBadge(automation: Task["automation"]) {
         };
     }
 
-    return null;
+    return;
 }
 
 /** Renders the task card UI. */
@@ -135,9 +135,9 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProperties) {
                                 />
                             ) : (
                                 <span className="bg-primary-700 text-primary-300 flex h-5 w-5 items-center justify-center rounded-full text-[10px]">
-                                    {(assignee.login ||
-                                        assignee.name ||
-                                        "?")[0].toUpperCase()}
+                                    {(assignee.login || assignee.name || "?")
+                                        .charAt(0)
+                                        .toUpperCase()}
                                 </span>
                             )}
                         </span>

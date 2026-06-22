@@ -53,7 +53,7 @@ function DiagnosticToggle({
 
 /** Provides props for chat header. */
 interface ChatHeaderProperties {
-    selectedSession: Session | null;
+    selectedSession: Session | undefined;
     selectedAgentId: string;
     selectedSessionKey: string;
     sessionOptions: Option[];
@@ -67,7 +67,7 @@ interface ChatHeaderProperties {
 }
 
 /** Formats header status for display. */
-function formatHeaderStatus(selectedSession: Session | null): string {
+function formatHeaderStatus(selectedSession: Session | undefined): string {
     if (!selectedSession) {
         return "Choose a session to begin";
     }
@@ -134,7 +134,7 @@ export function ChatHeader({
                                 width="w-full"
                                 menuWidth="max-w-[min(42rem,calc(100vw-2rem))]"
                             />
-                        ) : null}
+                        ) : undefined}
                         <Select
                             value={selectedSessionKey}
                             onChange={onSelectSession}

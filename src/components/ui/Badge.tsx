@@ -43,19 +43,24 @@ export function Badge({ children, variant = "default", className }: BadgePropert
 
 /** Returns session type variant. */
 export function getSessionTypeVariant(
-    type: string | null | undefined
+    type: string | undefined | undefined
 ): BadgeProperties["variant"] {
     const t = (type || "unknown").toUpperCase();
     switch (t) {
-        case "MAIN":
+        case "MAIN": {
             return "main";
-        case "HOOK":
+        }
+        case "HOOK": {
             return "hook";
-        case "CRON":
+        }
+        case "CRON": {
             return "cron";
-        case "SUBAGENT":
+        }
+        case "SUBAGENT": {
             return "subagent";
-        default:
+        }
+        default: {
             return "default";
+        }
     }
 }

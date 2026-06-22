@@ -58,7 +58,7 @@ export function useFiles(path?: string) {
 }
 
 /** Provides file content. */
-export function useFileContent(path: string | null) {
+export function useFileContent(path: string | undefined) {
     return useQuery({
         queryKey: fileKeys.content(path || ""),
         queryFn: () => fetchFileContent(path!),

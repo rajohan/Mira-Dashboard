@@ -63,12 +63,12 @@ function formatScheduledJobSchedule(job: ScheduledJob): string {
 }
 
 function getInitialJobsView(): JobsView {
-    const parameters = new URLSearchParams(window.location.search);
+    const parameters = new URLSearchParams(location.search);
     return parameters.get("view") === "openclaw" ? "openclaw" : "scheduled";
 }
 
 function getInitialCronJobId(): string {
-    const parameters = new URLSearchParams(window.location.search);
+    const parameters = new URLSearchParams(location.search);
     return parameters.get("job") || "";
 }
 
@@ -87,18 +87,18 @@ function scheduledJobStatusLabel(job: ScheduledJob): string {
 }
 
 function sortScheduledJobs(jobs: ScheduledJob[]): ScheduledJob[] {
-    return [...jobs].sort(
+    return [...jobs].toSorted(
         (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
     );
 }
 
-function parsePositiveInteger(value: string): number | null {
+function parsePositiveInteger(value: string): number | undefined {
     const parsed = Number(value);
-    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function formatRunOutput(output: Record<string, unknown>): string {
-    return JSON.stringify(output, null, 2);
+    return JSON.stringify(output, undefined, 2);
 }
 
 interface ScheduledJobListProperties {
@@ -178,7 +178,7 @@ interface ScheduledJobDetailsProperties {
     intervalDraft: string;
     timeDraft: string;
     cronDraft: string;
-    editError: string | null;
+    editError: string | undefined;
     runPending: boolean;
     updatePending: boolean;
     onScheduleTypeChange: (value: ScheduledJob["scheduleType"]) => void;
@@ -237,7 +237,7 @@ function ScheduledJobDetails({
                     <p className="text-primary-400 mt-1 text-xs break-all">{job.id}</p>
                     {job.description ? (
                         <p className="text-primary-300 mt-2 text-sm">{job.description}</p>
-                    ) : null}
+                    ) : undefined}
                 </div>
                 <Badge
                     className="shrink-0 whitespace-nowrap"
@@ -310,7 +310,7 @@ function ScheduledJobDetails({
                                 onChange={(event) => onIntervalChange(event.target.value)}
                             />
                         </div>
-                    ) : null}
+                    ) : undefined}
                     {scheduleTypeDraft === "daily" ? (
                         <div>
                             <label className="text-primary-300 mb-1 block text-xs">
@@ -340,7 +340,7 @@ function ScheduledJobDetails({
                                 />
                             </div>
                         </div>
-                    ) : null}
+                    ) : undefined}
                     {scheduleTypeDraft === "cron" ? (
                         <div>
                             <label className="text-primary-300 mb-1 block text-xs">
@@ -353,7 +353,7 @@ function ScheduledJobDetails({
                                 placeholder="0 4 * * *"
                             />
                         </div>
-                    ) : null}
+                    ) : undefined}
                     <Button
                         size="sm"
                         disabled={saveDisabled}
@@ -368,20 +368,20 @@ function ScheduledJobDetails({
                     <p className="mt-2 text-xs text-red-400">
                         Interval must be a positive number of seconds.
                     </p>
-                ) : null}
+                ) : undefined}
                 {isDailyInvalid ? (
                     <p className="mt-2 text-xs text-red-400">
                         Daily schedules require HH:MM.
                     </p>
-                ) : null}
+                ) : undefined}
                 {isCronInvalid ? (
                     <p className="mt-2 text-xs text-red-400">
                         Cron schedules require a valid five-field expression.
                     </p>
-                ) : null}
+                ) : undefined}
                 {editError ? (
                     <p className="mt-2 text-xs text-red-400">{editError}</p>
-                ) : null}
+                ) : undefined}
             </div>
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -439,7 +439,7 @@ function ScheduledJobDetails({
                                             <div className="mt-1 text-xs text-red-300">
                                                 {run.message}
                                             </div>
-                                        ) : null}
+                                        ) : undefined}
                                     </div>
                                     <Badge
                                         className="shrink-0 whitespace-nowrap"
@@ -498,36 +498,45 @@ export function Jobs() {
     const [view, setView] = useState<JobsView>(getInitialJobsView);
     const [selectedScheduledJobId, setSelectedScheduledJobId] = useState("");
     const [selectedCronJobId, setSelectedCronJobId] = useState(getInitialCronJobId);
-    const lastScheduledDraftJobId = useRef<string | null>(null);
-    const dailyTimeDraftSource = useRef<null | {
-        displayTimeOfDay: string;
-        jobId: string;
-        utcTimeOfDay: string;
-    }>(null);
+    const lastScheduledDraftJobId = useRef<string | undefined>(undefined);
+    const dailyTimeDraftSource = useRef<
+        | undefined
+        | {
+              displayTimeOfDay: string;
+              jobId: string;
+              utcTimeOfDay: string;
+          }
+    >(undefined);
     const [lastCronRunAt, setLastCronRunAt] = useState<Record<string, number>>({});
     const [cronNameDraft, setCronNameDraft] = useState("");
     const [cronScheduleDraft, setCronScheduleDraft] = useState("{}");
     const [cronPayloadDraft, setCronPayloadDraft] = useState("{}");
     const [cronDeliveryDraft, setCronDeliveryDraft] = useState("{}");
-    const [cronEditError, setCronEditError] = useState<string | null>(null);
+    const [cronEditError, setCronEditError] = useState<string | undefined>(undefined);
     const [isCronEditMode, setIsCronEditMode] = useState(false);
-    const [deleteCandidate, setDeleteCandidate] = useState<CronJob | null>(null);
+    const [deleteCandidate, setDeleteCandidate] = useState<CronJob | undefined>(
+        undefined
+    );
     const [scheduleTypeDraft, setScheduleTypeDraft] =
         useState<ScheduledJob["scheduleType"]>("interval");
     const [intervalDraft, setIntervalDraft] = useState("");
     const [timeDraft, setTimeDraft] = useState("");
     const [cronExpressionDraft, setCronExpressionDraft] = useState("");
-    const [scheduledEditError, setScheduledEditError] = useState<string | null>(null);
-    const [actionError, setActionError] = useState<string | null>(null);
+    const [scheduledEditError, setScheduledEditError] = useState<string | undefined>(
+        undefined
+    );
+    const [actionError, setActionError] = useState<string | undefined>(undefined);
 
     const selectedScheduledJob =
-        sortedScheduledJobs.find((job) => job.id === selectedScheduledJobId) || null;
-    const currentScheduledJob = selectedScheduledJob || sortedScheduledJobs[0] || null;
+        sortedScheduledJobs.find((job) => job.id === selectedScheduledJobId) || undefined;
+    const currentScheduledJob =
+        selectedScheduledJob || sortedScheduledJobs[0] || undefined;
     const currentScheduledJobId = currentScheduledJob?.id || "";
     const selectedCronJob =
-        sortedCronJobs.find((job) => getCronJobId(job) === selectedCronJobId) || null;
+        sortedCronJobs.find((job) => getCronJobId(job) === selectedCronJobId) ||
+        undefined;
     const selectedCronId = selectedCronJob ? getCronJobId(selectedCronJob) : "";
-    const currentCronJob = selectedCronJob || sortedCronJobs[0] || null;
+    const currentCronJob = selectedCronJob || sortedCronJobs[0] || undefined;
     const currentCronJobId = currentCronJob ? getCronJobId(currentCronJob) : "";
 
     const cronScheduleValidation = validateJsonString(cronScheduleDraft);
@@ -541,10 +550,10 @@ export function Jobs() {
     useEffect(() => {
         if (!currentCronJob) return;
         setCronNameDraft(String(currentCronJob.name || ""));
-        setCronScheduleDraft(JSON.stringify(currentCronJob.schedule || {}, null, 2));
-        setCronPayloadDraft(JSON.stringify(currentCronJob.payload || {}, null, 2));
-        setCronDeliveryDraft(JSON.stringify(currentCronJob.delivery || {}, null, 2));
-        setCronEditError(null);
+        setCronScheduleDraft(JSON.stringify(currentCronJob.schedule || {}, undefined, 2));
+        setCronPayloadDraft(JSON.stringify(currentCronJob.payload || {}, undefined, 2));
+        setCronDeliveryDraft(JSON.stringify(currentCronJob.delivery || {}, undefined, 2));
+        setCronEditError(undefined);
         setIsCronEditMode(false);
     }, [currentCronJob]);
 
@@ -566,10 +575,10 @@ export function Jobs() {
                   jobId: currentScheduledJob.id,
                   utcTimeOfDay: currentScheduledJob.timeOfDay,
               }
-            : null;
+            : undefined;
         setTimeDraft(displayTimeOfDay);
         setCronExpressionDraft(currentScheduledJob.cronExpression || "");
-        setScheduledEditError(null);
+        setScheduledEditError(undefined);
     }, [currentScheduledJob]);
 
     async function handleScheduledToggle(job: ScheduledJob, isEnabled: boolean) {
@@ -578,7 +587,7 @@ export function Jobs() {
                 id: job.id,
                 patch: { enabled: isEnabled },
             });
-            setActionError(null);
+            setActionError(undefined);
         } catch (error) {
             setActionError(
                 getErrorMessage(error, "Failed to update scheduled job state")
@@ -589,14 +598,14 @@ export function Jobs() {
     async function handleScheduledRun(job: ScheduledJob) {
         try {
             await runScheduledJob.mutateAsync({ id: job.id });
-            setActionError(null);
+            setActionError(undefined);
         } catch (error) {
             setActionError(getErrorMessage(error, "Failed to run scheduled job"));
         }
     }
 
-    function getDailyTimeOfDayPatch(job: ScheduledJob): string | null {
-        if (scheduleTypeDraft !== "daily") return null;
+    function getDailyTimeOfDayPatch(job: ScheduledJob): string | undefined {
+        if (scheduleTypeDraft !== "daily") return undefined;
         const draftSource = dailyTimeDraftSource.current;
         if (draftSource?.jobId === job.id && timeDraft === draftSource.displayTimeOfDay) {
             return draftSource.utcTimeOfDay;
@@ -613,12 +622,12 @@ export function Jobs() {
                     : job.intervalSeconds,
             timeOfDay: getDailyTimeOfDayPatch(job),
             cronExpression:
-                scheduleTypeDraft === "cron" ? cronExpressionDraft.trim() : null,
+                scheduleTypeDraft === "cron" ? cronExpressionDraft.trim() : undefined,
         };
         try {
             await updateScheduledJob.mutateAsync({ id: job.id, patch });
-            setScheduledEditError(null);
-            setActionError(null);
+            setScheduledEditError(undefined);
+            setActionError(undefined);
         } catch (error) {
             setScheduledEditError(getErrorMessage(error, "Scheduled job update failed"));
         }
@@ -629,7 +638,7 @@ export function Jobs() {
         if (!id) return;
         try {
             await toggleCronJob.mutateAsync({ id, enabled: isEnabled });
-            setActionError(null);
+            setActionError(undefined);
         } catch (error) {
             setActionError(getErrorMessage(error, "Failed to update cron job state"));
         }
@@ -641,7 +650,7 @@ export function Jobs() {
         try {
             await runCronNow.mutateAsync({ id });
             setLastCronRunAt((wasPrevious) => ({ ...wasPrevious, [id]: Date.now() }));
-            setActionError(null);
+            setActionError(undefined);
         } catch (error) {
             setActionError(getErrorMessage(error, "Failed to run cron job"));
         }
@@ -660,8 +669,8 @@ export function Jobs() {
                     delivery: JSON.parse(cronDeliveryDraft),
                 },
             });
-            setCronEditError(null);
-            setActionError(null);
+            setCronEditError(undefined);
+            setActionError(undefined);
         } catch (error) {
             setCronEditError(getErrorMessage(error, "Invalid JSON in edit fields"));
         }
@@ -670,14 +679,14 @@ export function Jobs() {
     async function handleCronDelete(job: CronJob) {
         const id = getCronJobId(job);
         if (!id) {
-            setDeleteCandidate(null);
+            setDeleteCandidate(undefined);
             return;
         }
         try {
             await deleteCronJob.mutateAsync({ id });
             setSelectedCronJobId("");
-            setDeleteCandidate(null);
-            setActionError(null);
+            setDeleteCandidate(undefined);
+            setActionError(undefined);
         } catch (error) {
             setActionError(getErrorMessage(error, "Failed to delete cron job"));
         }
@@ -702,7 +711,7 @@ export function Jobs() {
                 <Card variant="bordered" className="border-red-500/40 bg-red-500/10 p-3">
                     <p className="text-sm text-red-300">{actionError}</p>
                 </Card>
-            ) : null}
+            ) : undefined}
 
             <Card variant="bordered" className="p-2">
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -805,7 +814,7 @@ export function Jobs() {
                         isEditMode={isCronEditMode}
                         onEditModeChange={(isEnabled) => {
                             setIsCronEditMode(isEnabled);
-                            if (!isEnabled) setCronEditError(null);
+                            if (!isEnabled) setCronEditError(undefined);
                         }}
                         nameDraft={cronNameDraft}
                         onNameDraftChange={setCronNameDraft}
@@ -838,12 +847,12 @@ export function Jobs() {
                     confirmLoadingLabel="Deleting"
                     loading={deleteCronJob.isPending}
                     danger
-                    onCancel={() => setDeleteCandidate(null)}
+                    onCancel={() => setDeleteCandidate(undefined)}
                     onConfirm={() => {
                         void handleCronDelete(deleteCandidate);
                     }}
                 />
-            ) : null}
+            ) : undefined}
         </div>
     );
 }

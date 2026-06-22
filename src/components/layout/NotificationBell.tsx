@@ -53,7 +53,7 @@ export function NotificationBell() {
             ? "Open notifications"
             : `Open notifications, ${unreadCount} unread`;
 
-    const sortedItems = [...items].sort(
+    const sortedItems = [...items].toSorted(
         (a, b) => getNotificationTimestamp(b) - getNotificationTimestamp(a)
     );
 

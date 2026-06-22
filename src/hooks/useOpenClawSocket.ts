@@ -17,7 +17,7 @@ import { getWebSocketUrl } from "../utils/websocket";
 /** Represents OpenClaw socket context value. */
 interface OpenClawSocketContextValue {
     isConnected: boolean;
-    error: string | null;
+    error: string | undefined;
     connectionId: number;
     connect: () => void;
     disconnect: () => void;
@@ -28,16 +28,18 @@ interface OpenClawSocketContextValue {
     subscribe: (listener: (data: unknown) => void) => () => void;
 }
 
-const OpenClawSocketContext = createContext<OpenClawSocketContextValue | null>(null);
+const OpenClawSocketContext = createContext<OpenClawSocketContextValue | undefined>(
+    undefined
+);
 
 /** Provides OpenClaw socket state. */
 export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const isAuthenticated = useSelector(authStore, (state) => state.isAuthenticated);
-    const clientReference = useRef<SocketClient | null>(null);
+    const clientReference = useRef<SocketClient | undefined>(undefined);
     const listenersReference = useRef(new Set<(data: unknown) => void>());
 
     const [isConnected, setIsConnected] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const [error, setError] = useState<string | undefined>(undefined);
     const [connectionId, setConnectionId] = useState(0);
 
     /** Performs connect. */
@@ -52,7 +54,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                 url: getWebSocketUrl(),
                 onOpen: () => {
                     setIsConnected(true);
-                    setError(null);
+                    setError(undefined);
                     setConnectionId((wasPrevious) => wasPrevious + 1);
                     void (async () => {
                         try {
@@ -71,7 +73,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                 onMessage: (data) => {
                     try {
                         const connectionState = handleSocketMessage(data);
-                        if (connectionState !== null) {
+                        if (connectionState !== undefined) {
                             setIsConnected(connectionState);
                         }
                         for (const listener of listenersReference.current) {
@@ -90,7 +92,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     /** Performs disconnect. */
     const disconnect = () => {
         clientReference.current?.disconnect();
-        clientReference.current = null;
+        clientReference.current = undefined;
         setIsConnected(false);
     };
 
@@ -111,7 +113,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
             connect();
         } else {
             disconnect();
-            setError(null);
+            setError(undefined);
         }
     }, [isAuthenticated]);
 
@@ -171,19 +173,19 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
 
         document.addEventListener("visibilitychange", resyncVisibleSocket);
         window.addEventListener("focus", resyncVisibleSocket);
-        window.addEventListener("online", resyncVisibleSocket);
+        addEventListener("online", resyncVisibleSocket);
 
         return () => {
             document.removeEventListener("visibilitychange", resyncVisibleSocket);
             window.removeEventListener("focus", resyncVisibleSocket);
-            window.removeEventListener("online", resyncVisibleSocket);
+            removeEventListener("online", resyncVisibleSocket);
         };
     }, [isAuthenticated]);
 
     useEffect(() => {
         return () => {
             clientReference.current?.disconnect();
-            clientReference.current = null;
+            clientReference.current = undefined;
         };
     }, []);
 

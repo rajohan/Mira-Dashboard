@@ -28,7 +28,7 @@ export interface SocketClient {
 
 /** Creates socket client. */
 export function createSocketClient(options: SocketClientOptions): SocketClient {
-    let ws: WebSocket | null = null;
+    let ws: WebSocket | undefined;
     let shouldReconnect = true;
     let requestId = 0;
     const pendingRequests = new Map<string, PendingRequest>();
@@ -74,7 +74,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         ws.addEventListener("close", () => {
             options.onClose?.();
             if (shouldReconnect) {
-                window.setTimeout(() => {
+                setTimeout(() => {
                     if (shouldReconnect) {
                         connect();
                     }
@@ -91,7 +91,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
     const disconnect = () => {
         shouldReconnect = false;
         ws?.close(1000, "Intentional disconnect");
-        ws = null;
+        ws = undefined;
 
         for (const pending of pendingRequests.values()) {
             pending.reject(new Error("WebSocket disconnected"));
@@ -125,7 +125,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                 })
             );
 
-            window.setTimeout(() => {
+            setTimeout(() => {
                 if (!pendingRequests.has(id)) {
                     return;
                 }

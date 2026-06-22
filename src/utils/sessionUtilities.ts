@@ -8,7 +8,7 @@ export function formatSessionType(session: Session): string {
 }
 
 /** Returns type sort order. */
-export function getTypeSortOrder(type: string | null | undefined): number {
+export function getTypeSortOrder(type: string | undefined | undefined): number {
     const t = (type || "unknown").toUpperCase();
     switch (t) {
         case "MAIN": {
@@ -23,8 +23,9 @@ export function getTypeSortOrder(type: string | null | undefined): number {
         case "CRON": {
             return 3;
         }
-        default:
+        default: {
             return 4;
+        }
     }
 }
 
@@ -39,7 +40,7 @@ function getDefaultChatSortOrder(session: Session): number {
 
 /** Sorts sessions by type and activity. */
 export function sortSessionsByTypeAndActivity(sessions: Session[]): Session[] {
-    return [...sessions].sort((a, b) => {
+    return [...sessions].toSorted((a, b) => {
         const defaultChatOrder = getDefaultChatSortOrder(a) - getDefaultChatSortOrder(b);
         if (defaultChatOrder !== 0) {
             return defaultChatOrder;

@@ -6,7 +6,7 @@ import { getFileExtension } from "../../../utils/fileUtilities";
 /** Provides props for file tree item. */
 interface FileTreeItemProperties {
     node: FileNode;
-    selectedPath: string | null;
+    selectedPath: string | undefined;
     expandedPaths: Set<string>;
     onSelect: (path: string) => void;
     onToggle: (path: string) => void;
@@ -81,7 +81,7 @@ export function FileTreeItem({
         node.type === "directory" && !node.loaded && expandedPaths.has(node.path);
     const sortedChildren =
         node.type === "directory" && isExpanded && node.children
-            ? [...node.children].sort((a, b) => {
+            ? [...node.children].toSorted((a, b) => {
                   if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
                   return a.name.localeCompare(b.name);
               })

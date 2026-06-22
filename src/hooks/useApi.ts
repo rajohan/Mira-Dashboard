@@ -13,7 +13,7 @@ export class UnauthorizedError extends Error {
 /** Responds to unauthorized events. */
 function handleUnauthorized() {
     authActions.clearSession();
-    window.dispatchEvent(new CustomEvent("openclaw:unauthorized"));
+    dispatchEvent(new CustomEvent("openclaw:unauthorized"));
 }
 
 /** Performs API fetch. */
