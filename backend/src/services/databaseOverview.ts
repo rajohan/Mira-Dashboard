@@ -104,12 +104,19 @@ function numberFrom(value: string | null | undefined): number {
 }
 
 /** Runs a command inside a Docker container and returns raw stdout. */
-async function runDockerExec(container: string, command: string[]) {
+async function runDockerExec(
+    container: string,
+    command: string[],
+    environment: Record<string, string | undefined> = {}
+) {
+    const environmentArguments = Object.entries(environment).flatMap(([key, value]) =>
+        value === undefined ? [] : ["--env", `${key}=${value}`]
+    );
     const { code, stderr, stdout } = await runProcess(
         "docker",
-        ["exec", container, ...command],
+        ["exec", ...environmentArguments, container, ...command],
         {
-            env: process.env,
+            env: { ...process.env, ...environment },
             maxBuffer: 10 * 1024 * 1024,
             timeoutMs: DOCKER_EXEC_TIMEOUT_MS,
         }
@@ -170,64 +177,57 @@ function normalizePostgresPort(value: string | undefined): string {
     return String(portNumber);
 }
 
-/** Builds a PostgreSQL connection URI from environment defaults for the requested database. */
-function buildPostgresUri(database = "postgres") {
+interface PostgresConnection {
+    password: string;
+    uri: string;
+}
+
+/** Builds PostgreSQL connection details from environment defaults for the requested database. */
+function buildPostgresConnection(database = "postgres"): PostgresConnection {
     const username = encodeURIComponent(
         environmentValueOrDefault(process.env.DATABASE_USERNAME, "postgres")
     );
-    const password = encodeURIComponent(
-        environmentValueOrDefault(process.env.DATABASE_PASSWORD, "postgres")
-    );
+    const password = environmentValueOrDefault(process.env.DATABASE_PASSWORD, "postgres");
     const host = normalizePostgresHost(process.env.DATABASE_HOST, "postgres");
     const port = normalizePostgresPort(process.env.DATABASE_PORT);
     const database_ = encodeURIComponent(database);
-    return `postgresql://${username}:${password}@${host}:${port}/${database_}`;
+    return { password, uri: `postgresql://${username}@${host}:${port}/${database_}` };
 }
 
-/** Builds a PgBouncer admin connection URI from environment defaults. */
-function buildPgBouncerUri(database = "pgbouncer") {
+/** Builds PgBouncer admin connection details from environment defaults. */
+function buildPgBouncerConnection(database = "pgbouncer"): PostgresConnection {
     const username = encodeURIComponent(
         environmentValueOrDefault(process.env.DATABASE_USERNAME, "postgres")
     );
-    const password = encodeURIComponent(
-        environmentValueOrDefault(process.env.DATABASE_PASSWORD, "postgres")
-    );
+    const password = environmentValueOrDefault(process.env.DATABASE_PASSWORD, "postgres");
     const host = normalizePostgresHost(process.env.PGBOUNCER_HOST, "pgbouncer");
     const port = normalizePostgresPort(process.env.PGBOUNCER_PORT);
     const database_ = encodeURIComponent(database);
-    return `postgresql://${username}:${password}@${host}:${port}/${database_}`;
+    return { password, uri: `postgresql://${username}@${host}:${port}/${database_}` };
 }
 
 /** Executes SQL against Postgres through the postgres container and returns tab-delimited stdout. */
 async function queryPostgres(sql: string, database = "postgres") {
-    const uri = buildPostgresUri(database);
-    return runDockerExec("postgres", [
-        "psql",
-        uri,
-        "-P",
-        "footer=off",
-        "-F",
-        "\t",
-        "--no-align",
-        "-c",
-        sql,
-    ]);
+    const connection = buildPostgresConnection(database);
+    return runDockerExec(
+        "postgres",
+        ["psql", connection.uri, "-P", "footer=off", "-F", "\t", "--no-align", "-c", sql],
+        {
+            PGPASSWORD: connection.password,
+        }
+    );
 }
 
 /** Executes SQL against the PgBouncer admin database and returns tab-delimited stdout. */
 async function queryPgBouncer(sql: string) {
-    const uri = buildPgBouncerUri();
-    return runDockerExec("postgres", [
-        "psql",
-        uri,
-        "-P",
-        "footer=off",
-        "-F",
-        "\t",
-        "--no-align",
-        "-c",
-        sql,
-    ]);
+    const connection = buildPgBouncerConnection();
+    return runDockerExec(
+        "postgres",
+        ["psql", connection.uri, "-P", "footer=off", "-F", "\t", "--no-align", "-c", sql],
+        {
+            PGPASSWORD: connection.password,
+        }
+    );
 }
 
 /** Sums numeric values selected from a row collection. */
@@ -277,22 +277,34 @@ async function getTorrentCounts() {
         return databaseRouteState.torrentCountCache.data;
     }
 
-    const cometCount = stringFallback(
-        parseTable<{ count: string }>(
-            await queryPostgres("SELECT count(*)::text AS count FROM torrents;", "comet")
-        )[0]?.count,
-        "0"
-    );
-
-    const bitmagnetCount = stringFallback(
-        parseTable<{ count: string }>(
-            await queryPostgres(
-                "SELECT count(*)::text AS count FROM torrents;",
-                "bitmagnet"
-            )
-        )[0]?.count,
-        "0"
-    );
+    let cometCount = "0";
+    let bitmagnetCount = "0";
+    try {
+        cometCount = stringFallback(
+            parseTable<{ count: string }>(
+                await queryPostgres(
+                    "SELECT count(*)::text AS count FROM torrents;",
+                    "comet"
+                )
+            )[0]?.count,
+            "0"
+        );
+    } catch (error) {
+        console.warn("[DatabaseOverview] Failed to read Comet torrent count:", error);
+    }
+    try {
+        bitmagnetCount = stringFallback(
+            parseTable<{ count: string }>(
+                await queryPostgres(
+                    "SELECT count(*)::text AS count FROM torrents;",
+                    "bitmagnet"
+                )
+            )[0]?.count,
+            "0"
+        );
+    } catch (error) {
+        console.warn("[DatabaseOverview] Failed to read Bitmagnet torrent count:", error);
+    }
 
     const data = { comet: numberFrom(cometCount), bitmagnet: numberFrom(bitmagnetCount) };
     databaseRouteState.torrentCountCache = { data, timestamp: Date.now() };

@@ -476,38 +476,33 @@ export async function writeTextNoFollowAnchoredGuarded(
     let shouldApplyMode = options.mode !== undefined;
 
     try {
-        if (options.mode === undefined) {
-            let file: Fs.promises.FileHandle | undefined;
-            try {
-                file = await Fs.promises.open(
-                    destinationPath,
-                    Fs.constants.O_RDONLY |
-                        Fs.constants.O_NOFOLLOW |
-                        Fs.constants.O_NONBLOCK
-                );
-                const existingStat = await file.stat();
-                if (!existingStat.isFile()) {
-                    throw Object.assign(new Error("Destination must be a regular file"), {
-                        code: "EINVAL",
-                    });
-                }
-                if (existingStat.nlink > 1) {
-                    throw Object.assign(
-                        new Error("Hard-linked files are not supported"),
-                        {
-                            code: "EMLINK",
-                        }
-                    );
-                }
+        let file: Fs.promises.FileHandle | undefined;
+        try {
+            file = await Fs.promises.open(
+                destinationPath,
+                Fs.constants.O_RDONLY | Fs.constants.O_NOFOLLOW | Fs.constants.O_NONBLOCK
+            );
+            const existingStat = await file.stat();
+            if (!existingStat.isFile()) {
+                throw Object.assign(new Error("Destination must be a regular file"), {
+                    code: "EINVAL",
+                });
+            }
+            if (existingStat.nlink > 1) {
+                throw Object.assign(new Error("Hard-linked files are not supported"), {
+                    code: "EMLINK",
+                });
+            }
+            if (options.mode === undefined) {
                 existingMode = existingStat.mode;
                 shouldApplyMode = true;
-            } catch (error) {
-                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-                    throw error;
-                }
-            } finally {
-                await file?.close();
             }
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                throw error;
+            }
+        } finally {
+            await file?.close();
         }
     } catch (error) {
         await Promise.allSettled(handles.reverse().map((handle) => handle.close()));

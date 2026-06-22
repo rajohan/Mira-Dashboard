@@ -652,6 +652,7 @@ async function runGhJsonLines<T>(
         const stdoutDone = pipeProcessOutput(
             child.stdout as ReadableStream<Uint8Array> | undefined,
             (chunk) => {
+                if (isSettled) return;
                 stdoutBuffer += chunk;
 
                 const lines = stdoutBuffer.split("\n");
@@ -698,6 +699,7 @@ async function runGhJsonLines<T>(
         const stderrDone = pipeProcessOutput(
             child.stderr as ReadableStream<Uint8Array> | undefined,
             (chunk) => {
+                if (isSettled) return;
                 stderr = trimOutput(stderr + chunk);
             }
         );

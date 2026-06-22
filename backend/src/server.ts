@@ -83,6 +83,30 @@ function dashboardSocketFromBun(
 }
 
 export function createServer(port = resolveListenPort()): Server<DashboardSocketData> {
+    const websocket = {
+        close(ws: ServerWebSocket<DashboardSocketData>) {
+            for (const handler of ws.data.closeHandlers) {
+                handler();
+            }
+        },
+        error(ws: ServerWebSocket<DashboardSocketData>, error: unknown) {
+            for (const handler of ws.data.errorHandlers) {
+                handler(error);
+            }
+        },
+        message(ws: ServerWebSocket<DashboardSocketData>, message: string | Buffer) {
+            const data = typeof message === "string" ? message : Buffer.from(message);
+            for (const handler of ws.data.messageHandlers) {
+                handler(data);
+            }
+        },
+        open(ws: ServerWebSocket<DashboardSocketData>) {
+            const socket = dashboardSocketFromBun(ws);
+            ws.data.socket = socket;
+            gateway.handleDashboardClient(socket);
+        },
+    };
+
     return Bun.serve<DashboardSocketData>({
         idleTimeout: SERVER_IDLE_TIMEOUT_SECONDS,
         port,
@@ -111,24 +135,7 @@ export function createServer(port = resolveListenPort()): Server<DashboardSocket
             }
             return staticResponse(url.pathname);
         },
-        websocket: {
-            close(ws: ServerWebSocket<DashboardSocketData>) {
-                for (const handler of ws.data.closeHandlers) {
-                    handler();
-                }
-            },
-            message(ws: ServerWebSocket<DashboardSocketData>, message: string | Buffer) {
-                const data = typeof message === "string" ? message : Buffer.from(message);
-                for (const handler of ws.data.messageHandlers) {
-                    handler(data);
-                }
-            },
-            open(ws: ServerWebSocket<DashboardSocketData>) {
-                const socket = dashboardSocketFromBun(ws);
-                ws.data.socket = socket;
-                gateway.handleDashboardClient(socket);
-            },
-        },
+        websocket,
     });
 }
 

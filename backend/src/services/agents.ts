@@ -318,6 +318,21 @@ interface SessionInfo {
     label?: string;
 }
 
+function isSessionInfo(value: unknown): value is SessionInfo {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return false;
+    }
+    const session = value as SessionInfo;
+    return (
+        typeof session.key === "string" &&
+        (session.sessionId === undefined || typeof session.sessionId === "string") &&
+        (session.updatedAt === undefined || typeof session.updatedAt === "number") &&
+        (session.channel === undefined || typeof session.channel === "string") &&
+        (session.displayName === undefined || typeof session.displayName === "string") &&
+        (session.label === undefined || typeof session.label === "string")
+    );
+}
+
 /** Summarizes dashboard-facing status, activity, and metadata for one agent. */
 interface AgentStatus {
     id: string;
@@ -712,7 +727,7 @@ async function getAgentSessionsFromFiles(agentId: string): Promise<SessionInfo[]
             guardedPath(Path.join(sessionsDirectory, "sessions.json"))
         );
         const sessions = Bun.JSON5.parse(content);
-        return Array.isArray(sessions) ? sessions : [];
+        return Array.isArray(sessions) ? sessions.filter(isSessionInfo) : [];
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") {
             return [];
@@ -1354,6 +1369,9 @@ function getSessionFileModificationTime(agentId: string): number | null {
 /** Infers the source channel encoded in an OpenClaw session key. */
 function getChannelFromSessionKey(sessionKey: string): string | null {
     const parts = sessionKey.split(":");
+    if (parts[0] === "agent") {
+        return parts[2] || null;
+    }
     if (parts[0] === "channel") {
         return parts[1] || null;
     }
@@ -1738,6 +1756,7 @@ export async function updateAgentCurrentTask(
             console.error("[Agents] Task history sync rollback failed:", rollbackError);
         }
         console.error("[Agents] Task history sync failed:", error);
+        throw error;
     }
 
     return metadata;

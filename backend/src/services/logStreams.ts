@@ -30,6 +30,11 @@ const LOG_BYTES_PER_REQUESTED_LINE = 1024;
 const LOG_TAIL_READ_CHUNK_BYTES = 64 * 1024;
 
 function resolveRealLogsDirectory(): string {
+    if (fs.lstatSync(logsDirectory).isSymbolicLink()) {
+        throw Object.assign(new Error("Log directory must not be a symlink"), {
+            code: "ELOOP",
+        });
+    }
     return fs.realpathSync(logsDirectory);
 }
 

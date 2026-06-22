@@ -77,11 +77,12 @@ const metricsRouteState: {
 async function getNetworkMetrics(): Promise<NetworkMetrics> {
     let downloadBytes = 0;
     let uploadBytes = 0;
-    let didReadNetwork = os.platform() !== "linux";
+    let didReadNetwork = false;
 
     if (os.platform() === "linux") {
         try {
-            const preferredInterface = "enp0s6";
+            const preferredInterface =
+                process.env.MIRA_DASHBOARD_NETWORK_INTERFACE?.trim() || "enp0s6";
             const availableInterfaces = await readdir("/sys/class/net");
             const interfaces = availableInterfaces.includes(preferredInterface)
                 ? [preferredInterface]

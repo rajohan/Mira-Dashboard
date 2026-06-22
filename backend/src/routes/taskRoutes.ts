@@ -345,7 +345,7 @@ export const taskRoutes = {
 
         POST: async (request: Request) => {
             const body = await readTaskJson<{
-                assignee?: Assignee;
+                assignee?: Assignee | null;
                 automation?: TaskAutomationInput;
                 body?: string;
                 labels?: string[];
@@ -355,10 +355,10 @@ export const taskRoutes = {
             try {
                 const title = optionalString(body.title, "Title")?.trim();
                 if (!title) return json({ error: "Title is required" }, { status: 400 });
-                if (!isValidAssignee(body.assignee)) {
+                if (body.assignee != null && !isValidAssignee(body.assignee)) {
                     return json({ error: INVALID_ASSIGNEE_MESSAGE }, { status: 400 });
                 }
-                const assignee = body.assignee;
+                const assignee = body.assignee ?? null;
                 const now = nowIso();
                 const labels = optionalLabels(body.labels) ?? [];
                 const taskBody = optionalString(body.body, "Body") ?? "";
@@ -517,10 +517,10 @@ export const taskRoutes = {
             const body = await readTaskJson<{ assignee?: string | null }>(request);
             if (body instanceof Response) return body;
             if (id === null) return json({ error: "Invalid id" }, { status: 400 });
-            if (!isValidAssignee(body.assignee)) {
+            if (body.assignee != null && !isValidAssignee(body.assignee)) {
                 return json({ error: INVALID_ASSIGNEE_MESSAGE }, { status: 400 });
             }
-            const assignee = body.assignee;
+            const assignee = body.assignee ?? null;
             const existing = taskById(id);
             if (!existing) return json({ error: "Task not found" }, { status: 404 });
             try {

@@ -182,8 +182,12 @@ export const authRoutes = {
                 }
                 user = createdUser;
             } catch (error_) {
-                const message = error_ instanceof Error ? error_.message : String(error_);
-                if (message.includes("UNIQUE")) {
+                if (
+                    error_ &&
+                    typeof error_ === "object" &&
+                    "code" in error_ &&
+                    error_.code === "SQLITE_CONSTRAINT_UNIQUE"
+                ) {
                     return json({ error: "Username already exists" }, { status: 409 });
                 }
                 return json({ error: "Failed to create first user" }, { status: 500 });

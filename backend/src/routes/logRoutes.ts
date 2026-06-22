@@ -196,25 +196,9 @@ async function logContentResponse(request: Request): Promise<Response> {
             return json({ error: "Access denied" }, { status: 403 });
         }
 
-        let filePath: string;
-        try {
-            filePath = fs.realpathSync(candidatePath);
-        } catch (error) {
-            if (isLogPathUnreadableErrorCode((error as NodeJS.ErrnoException).code)) {
-                return json({ error: "Log file not found" }, { status: 404 });
-            }
-            throw error;
-        }
-        if (filePath === realRoot) {
-            return json({ error: "Log file not found" }, { status: 404 });
-        }
-        if (!filePath.startsWith(`${realRoot}${path.sep}`)) {
-            return json({ error: "Access denied" }, { status: 403 });
-        }
-
         let file: fs.promises.FileHandle;
         try {
-            file = await openReadNoFollowGuarded(guardedPath(filePath));
+            file = await openReadNoFollowGuarded(guardedPath(candidatePath));
         } catch (error) {
             if (isLogPathUnreadableErrorCode((error as NodeJS.ErrnoException).code)) {
                 return json({ error: "Log file not found" }, { status: 404 });

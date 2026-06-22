@@ -893,7 +893,14 @@ export const dockerRoutes = {
                     }
                 }
             }
-            killProcessGroup(job.process, "SIGTERM");
+            try {
+                killProcessGroup(job.process, "SIGTERM");
+            } catch (error) {
+                return json(
+                    { error: errorMessage(error, "Failed to stop Docker exec job") },
+                    { status: 500 }
+                );
+            }
             if (containerStopError) {
                 return json({ error: containerStopError }, { status: 500 });
             }

@@ -83,7 +83,7 @@ describe("Bun-native dashboard backend", () => {
             '<!doctype html><html><body><div id="root"></div></body></html>'
         );
         await fs.writeFile(
-            path.join(frontendRoot, "assets", "index-fixture.js"),
+            path.join(frontendRoot, "index-fixture.js"),
             "export const isOk = true;\n"
         );
         const serverScript = path.join(state.temporaryRoot, "native-server.ts");

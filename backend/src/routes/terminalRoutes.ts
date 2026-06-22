@@ -86,26 +86,35 @@ function completionInput(input: string): { pathPart: string; prefix: string } {
     let quote: "'" | '"' | null = null;
     let isEscaped = false;
     let tokenStart = 0;
-    for (const [index, character] of [...input].entries()) {
+    for (let index = 0; index < input.length; ) {
+        const character = input.codePointAt(index);
+        if (character === undefined) break;
+        const characterText = String.fromCodePoint(character);
+        const nextIndex = index + characterText.length;
         if (isEscaped) {
             isEscaped = false;
+            index = nextIndex;
             continue;
         }
-        if (character === "\\") {
+        if (characterText === "\\") {
             isEscaped = true;
+            index = nextIndex;
             continue;
         }
-        if ((character === "'" || character === '"') && quote === null) {
-            quote = character;
+        if ((characterText === "'" || characterText === '"') && quote === null) {
+            quote = characterText;
+            index = nextIndex;
             continue;
         }
-        if (character === quote) {
+        if (characterText === quote) {
             quote = null;
+            index = nextIndex;
             continue;
         }
-        if (quote === null && /\s/u.test(character)) {
-            tokenStart = index + 1;
+        if (quote === null && /\s/u.test(characterText)) {
+            tokenStart = nextIndex;
         }
+        index = nextIndex;
     }
     return {
         pathPart: unescapeShellToken(input.slice(tokenStart)),
