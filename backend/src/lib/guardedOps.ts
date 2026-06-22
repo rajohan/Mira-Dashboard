@@ -512,7 +512,7 @@ export async function writeTextNoFollowAnchoredGuarded(
             await file?.close();
         }
     } catch (error) {
-        await Promise.allSettled(handles.reverse().map((handle) => handle.close()));
+        await Promise.allSettled(handles.toReversed().map((handle) => handle.close()));
         throw error;
     }
 
@@ -552,11 +552,13 @@ export async function writeTextNoFollowAnchoredGuarded(
                 ]);
             } finally {
                 await Promise.allSettled(
-                    handles.reverse().map((handle) => handle.close())
+                    handles.toReversed().map((handle) => handle.close())
                 );
             }
         } else {
-            await Promise.allSettled(handles.reverse().map((handle) => handle.close()));
+            await Promise.allSettled(
+                handles.toReversed().map((handle) => handle.close())
+            );
         }
     }
 }

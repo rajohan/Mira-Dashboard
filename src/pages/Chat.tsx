@@ -262,7 +262,7 @@ export function writeStoredChatDiagnosticVisibility(
 
 /** Performs supported audio recording MIME type. */
 export function supportedAudioRecordingMimeType(): string | undefined {
-    if (MediaRecorder === undefined) {
+    if (typeof MediaRecorder === "undefined") {
         return undefined;
     }
 
@@ -837,8 +837,7 @@ export function Chat() {
     const messagesVirtualizer = useVirtualizer({
         count: chatRows.length,
         getItemKey: (index) => chatRows[index]?.key ?? `row-${index}`,
-        getScrollElement: () =>
-            messagesContainerReference.current ?? (undefined as never),
+        getScrollElement: () => messagesContainerReference.current ?? document.body,
         estimateSize: (index) => (chatRows[index]?.kind === "typing" ? 76 : 160),
         overscan: 12,
         useAnimationFrameWithResizeObserver: true,
@@ -1130,7 +1129,7 @@ export function Chat() {
         const canUseDirectRecorder =
             Boolean(mediaDevices) &&
             typeof mediaDevices?.getUserMedia === "function" &&
-            MediaRecorder !== undefined;
+            typeof MediaRecorder !== "undefined";
 
         if (!canUseDirectRecorder) {
             setSendError(

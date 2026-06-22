@@ -73,7 +73,7 @@ export function formatDockerMemory(value: string | undefined): string {
 }
 
 /** Formats timestamp for display. */
-export function formatTimestamp(value: string | undefined | undefined): string {
+export function formatTimestamp(value: string | undefined): string {
     if (!value) {
         return "—";
     }

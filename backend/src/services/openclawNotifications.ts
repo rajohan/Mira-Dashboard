@@ -1,4 +1,4 @@
-import { database } from "../database.ts";
+import { database, sqlNullable } from "../database.ts";
 import { fetchCachedSystemHost } from "../lib/systemCache.ts";
 import { pruneReadNotifications } from "./notificationMaintenance.ts";
 import {
@@ -17,7 +17,7 @@ const OPENCLAW_NOTIFICATION_JOB_ID = "notifications.openclaw";
 /** Represents alert state. */
 interface AlertState {
     is_armed: number;
-    last_latest: string | null;
+    last_latest: string | undefined;
 }
 
 /** Returns state. */
@@ -28,7 +28,7 @@ function getState(): AlertState {
 
     return {
         is_armed: row?.is_armed ?? 1,
-        last_latest: row?.last_latest ?? null,
+        last_latest: row?.last_latest ?? undefined,
     };
 }
 
@@ -43,7 +43,7 @@ function setState(state: AlertState): void {
             last_latest = excluded.last_latest,
             updated_at = excluded.updated_at`
         )
-        .run(state.is_armed, state.last_latest, dateToISOString(new Date()));
+        .run(state.is_armed, sqlNullable(state.last_latest), dateToISOString(new Date()));
 }
 
 /** Performs insert update available notification. */
@@ -141,8 +141,8 @@ export function registerOpenClawNotificationScheduledJobs(): void {
             enabled: existing?.enabled ?? true,
             scheduleType: existing?.scheduleType ?? "interval",
             intervalSeconds: existing?.intervalSeconds ?? 60 * 60,
-            timeOfDay: existing?.timeOfDay ?? null,
-            cronExpression: existing?.cronExpression ?? null,
+            timeOfDay: existing?.timeOfDay ?? undefined,
+            cronExpression: existing?.cronExpression ?? undefined,
             actionKey: "notifications.openclaw",
             actionPayload: {},
         });

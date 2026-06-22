@@ -3,7 +3,7 @@ import {
     TASK_ASSIGNEES,
     type TaskAssigneeId,
 } from "../constants/taskActors.ts";
-import { database } from "../database.ts";
+import { database, sqlNullable } from "../database.ts";
 import gateway from "../gateway.ts";
 import { HttpError, json, readJson } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
@@ -30,7 +30,7 @@ interface DatabaseTask {
     priority: "low" | "medium" | "high";
     labels_json: string;
     automation_json: string;
-    assignee: Assignee | null;
+    assignee: Assignee | undefined;
     created_at: string;
     updated_at: string;
 }
@@ -65,12 +65,12 @@ function isValidAssignee(value: unknown): value is Assignee {
     return typeof value === "string" && TASK_ASSIGNEE_IDS.includes(value as Assignee);
 }
 
-function normalizeStatus(columnLabel?: string): Status | null {
+function normalizeStatus(columnLabel?: string): Status | undefined {
     if (columnLabel === "done") return "done";
     if (columnLabel === "blocked") return "blocked";
     if (columnLabel === "in-progress") return "in-progress";
     if (columnLabel === "todo") return "todo";
-    return null;
+    return undefined;
 }
 
 function derivePriority(labels: string[]): "low" | "medium" | "high" {
@@ -80,7 +80,7 @@ function derivePriority(labels: string[]): "low" | "medium" | "high" {
 }
 
 function optionalString(value: unknown, field: string): string | undefined {
-    if (value === undefined || value === null) return undefined;
+    if (value == undefined) return undefined;
     if (typeof value !== "string") {
         throw new HttpError(`${field} must be a string`, 400);
     }
@@ -88,7 +88,7 @@ function optionalString(value: unknown, field: string): string | undefined {
 }
 
 function optionalLabels(value: unknown): string[] | undefined {
-    if (value === undefined || value === null) return undefined;
+    if (value == undefined) return undefined;
     if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
         throw new HttpError("Labels must be an array of strings", 400);
     }
@@ -267,9 +267,9 @@ function serializeTaskEventPayload(payload: unknown): string {
     return (
         JSON.stringify(
             typeof payload === "object"
-                ? objectFallback(payload as object | null | undefined)
+                ? objectFallback(payload as object | undefined)
                 : payload
-        ) ?? "null"
+        ) ?? "{}"
     );
 }
 
@@ -302,12 +302,12 @@ function taskById(id: number): DatabaseTask | undefined {
         .get(id) as DatabaseTask | undefined;
 }
 
-function safeId(value: string | undefined): number | null {
+function safeId(value: string | undefined): number | undefined {
     if (!value || !/^\d+$/u.test(value)) {
-        return null;
+        return undefined;
     }
     const id = Number(value);
-    return Number.isSafeInteger(id) && id > 0 ? id : null;
+    return Number.isSafeInteger(id) && id > 0 ? id : undefined;
 }
 
 async function readTaskJson<T>(request: Request): Promise<T | Response> {
@@ -353,7 +353,7 @@ export const taskRoutes = {
 
         POST: async (request: Request) => {
             const body = await readTaskJson<{
-                assignee?: Assignee | null;
+                assignee?: Assignee | undefined;
                 automation?: TaskAutomationInput;
                 body?: string;
                 labels?: string[];
@@ -363,10 +363,10 @@ export const taskRoutes = {
             try {
                 const title = optionalString(body.title, "Title")?.trim();
                 if (!title) return json({ error: "Title is required" }, { status: 400 });
-                if (body.assignee != null && !isValidAssignee(body.assignee)) {
+                if (body.assignee != undefined && !isValidAssignee(body.assignee)) {
                     return json({ error: INVALID_ASSIGNEE_MESSAGE }, { status: 400 });
                 }
-                const assignee = body.assignee ?? null;
+                const assignee = body.assignee ?? undefined;
                 const now = nowIso();
                 const labels = optionalLabels(body.labels) ?? [];
                 const taskBody = optionalString(body.body, "Body") ?? "";
@@ -394,7 +394,7 @@ export const taskRoutes = {
                             priority,
                             JSON.stringify(labels),
                             normalizeAutomationInput(body.automation),
-                            assignee,
+                            sqlNullable(assignee),
                             now,
                             now
                         );
@@ -423,7 +423,8 @@ export const taskRoutes = {
         GET: async (request: ParametersRequest<"id">) => {
             try {
                 const id = safeId(request.params.id);
-                if (id === null) return json({ error: "Invalid id" }, { status: 400 });
+                if (id === undefined)
+                    return json({ error: "Invalid id" }, { status: 400 });
                 const row = taskById(id);
                 if (!row) return json({ error: "Task not found" }, { status: 404 });
                 return json(toFrontendTask(row, await fetchCronJobsById()));
@@ -434,11 +435,11 @@ export const taskRoutes = {
 
         PATCH: async (request: ParametersRequest<"id">) => {
             const id = safeId(request.params.id);
-            if (id === null) return json({ error: "Invalid id" }, { status: 400 });
+            if (id === undefined) return json({ error: "Invalid id" }, { status: 400 });
             const existing = taskById(id);
             if (!existing) return json({ error: "Task not found" }, { status: 404 });
             const body = await readTaskJson<{
-                automation?: TaskAutomationInput | null;
+                automation?: TaskAutomationInput | undefined;
                 body?: string;
                 labels?: string[];
                 title?: string;
@@ -499,7 +500,7 @@ export const taskRoutes = {
 
         DELETE: (request: ParametersRequest<"id">) => {
             const id = safeId(request.params.id);
-            if (id === null) return json({ error: "Invalid id" }, { status: 400 });
+            if (id === undefined) return json({ error: "Invalid id" }, { status: 400 });
             const existing = database
                 .prepare("SELECT id, title, assignee FROM tasks WHERE id = ?")
                 .get(id) as undefined | { assignee?: string; id: number; title: string };
@@ -526,13 +527,13 @@ export const taskRoutes = {
     "/api/tasks/:id/assign": {
         POST: async (request: ParametersRequest<"id">) => {
             const id = safeId(request.params.id);
-            const body = await readTaskJson<{ assignee?: string | null }>(request);
+            const body = await readTaskJson<{ assignee?: string | undefined }>(request);
             if (body instanceof Response) return body;
-            if (id === null) return json({ error: "Invalid id" }, { status: 400 });
-            if (body.assignee != null && !isValidAssignee(body.assignee)) {
+            if (id === undefined) return json({ error: "Invalid id" }, { status: 400 });
+            if (body.assignee != undefined && !isValidAssignee(body.assignee)) {
                 return json({ error: INVALID_ASSIGNEE_MESSAGE }, { status: 400 });
             }
-            const assignee = body.assignee ?? null;
+            const assignee = body.assignee ?? undefined;
             const existing = taskById(id);
             if (!existing) return json({ error: "Task not found" }, { status: 404 });
             try {
@@ -541,7 +542,7 @@ export const taskRoutes = {
                         .prepare(
                             "UPDATE tasks SET assignee = ?, updated_at = ? WHERE id = ?"
                         )
-                        .run(assignee, nowIso(), id);
+                        .run(sqlNullable(assignee), nowIso(), id);
                     recordEvent(id, "assigned", { assignee });
                 })();
                 if (assignee === TASK_ASSIGNEES.mira.id) {
@@ -562,7 +563,7 @@ export const taskRoutes = {
             if (body instanceof Response) return body;
             try {
                 const columnLabel = optionalString(body.columnLabel, "Column label");
-                if (id === null || !columnLabel) {
+                if (id === undefined || !columnLabel) {
                     return json({ error: "Invalid request" }, { status: 400 });
                 }
                 const existing = taskById(id);
@@ -596,7 +597,7 @@ export const taskRoutes = {
     "/api/tasks/:id/updates": {
         GET: (request: ParametersRequest<"id">) => {
             const id = safeId(request.params.id);
-            if (id === null) return json({ error: "Invalid id" }, { status: 400 });
+            if (id === undefined) return json({ error: "Invalid id" }, { status: 400 });
             try {
                 const rows = database
                     .prepare(
@@ -606,7 +607,7 @@ export const taskRoutes = {
                          ORDER BY datetime(created_at) DESC, id DESC`
                     )
                     .all(id) as DatabaseTaskUpdate[];
-                return json(rows.map(toFrontendTaskUpdate));
+                return json(rows.map((row) => toFrontendTaskUpdate(row)));
             } catch (error) {
                 return taskRouteError(error);
             }
@@ -620,7 +621,7 @@ export const taskRoutes = {
             if (body instanceof Response) return body;
             try {
                 const messageMd = optionalString(body.messageMd, "Message")?.trim();
-                if (id === null || !isValidAssignee(body.author) || !messageMd) {
+                if (id === undefined || !isValidAssignee(body.author) || !messageMd) {
                     return json({ error: "Invalid update payload" }, { status: 400 });
                 }
                 if (!database.prepare("SELECT id FROM tasks WHERE id = ?").get(id)) {
@@ -647,7 +648,7 @@ export const taskRoutes = {
                     .get(Number(result.lastInsertRowid)) as DatabaseTaskUpdate;
                 const task = database
                     .prepare("SELECT title, assignee FROM tasks WHERE id = ?")
-                    .get(id) as { assignee: Assignee | null; title: string };
+                    .get(id) as { assignee: Assignee | undefined; title: string };
                 if (task.assignee === TASK_ASSIGNEES.mira.id) {
                     void notifyMira("progress", { id, title: task.title });
                 }
@@ -669,8 +670,8 @@ export const taskRoutes = {
             try {
                 const messageMd = optionalString(body.messageMd, "Message")?.trim();
                 if (
-                    id === null ||
-                    updateId === null ||
+                    id === undefined ||
+                    updateId === undefined ||
                     !isValidAssignee(body.author) ||
                     !messageMd
                 ) {
@@ -706,7 +707,7 @@ export const taskRoutes = {
         DELETE: (request: ParametersRequest<"id" | "updateId">) => {
             const id = safeId(request.params.id);
             const updateId = safeId(request.params.updateId);
-            if (id === null || updateId === null) {
+            if (id === undefined || updateId === undefined) {
                 return json({ error: "Invalid id" }, { status: 400 });
             }
             const existing = database

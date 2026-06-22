@@ -45,24 +45,24 @@ async function readAuthBody(request: Request): Promise<AuthBody | Response> {
     }
 }
 
-function validateUsername(username: unknown): string | null {
+function validateUsername(username: unknown): string | undefined {
     if (typeof username !== "string") {
-        return null;
+        return undefined;
     }
     const normalized = username.trim().toLowerCase();
-    return /^[a-z0-9._-]{3,32}$/u.test(normalized) ? normalized : null;
+    return /^[a-z0-9._-]{3,32}$/u.test(normalized) ? normalized : undefined;
 }
 
-function validatePassword(password: unknown): string | null {
+function validatePassword(password: unknown): string | undefined {
     return typeof password === "string" && password.length >= 8 && password.length <= 256
         ? password
-        : null;
+        : undefined;
 }
 
 function rollbackFirstUserBootstrap(
     userId: number,
     gatewayToken: string,
-    previousGatewayToken: string | null = null
+    previousGatewayToken?: string | undefined
 ): void {
     database.run("BEGIN IMMEDIATE");
     try {
@@ -134,7 +134,7 @@ export const authRoutes = {
     "/api/auth/session": {
         GET: (request: Request, server: Server<unknown>) => {
             const needsBootstrap = isBootstrapRequired();
-            const user = needsBootstrap ? null : authUser(request, server);
+            const user = needsBootstrap ? undefined : authUser(request, server);
             return json({
                 authenticated: Boolean(user),
                 isBootstrapRequired: needsBootstrap,
@@ -193,7 +193,7 @@ export const authRoutes = {
                 return json({ error: "Failed to create first user" }, { status: 500 });
             }
 
-            let previousGatewayToken: string | null = null;
+            let previousGatewayToken: string | undefined;
             let isAttemptedGatewaySwitch = false;
             try {
                 previousGatewayToken = getPersistedGatewayToken();

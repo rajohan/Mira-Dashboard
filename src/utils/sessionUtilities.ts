@@ -8,7 +8,7 @@ export function formatSessionType(session: Session): string {
 }
 
 /** Returns type sort order. */
-export function getTypeSortOrder(type: string | undefined | undefined): number {
+export function getTypeSortOrder(type: string | undefined): number {
     const t = (type || "unknown").toUpperCase();
     switch (t) {
         case "MAIN": {

@@ -5,7 +5,7 @@ export interface CacheEntryRow {
     key: string;
     data: string;
     source: string;
-    updated_at: string | null;
+    updated_at: string | undefined;
     last_attempt_at: string;
     expires_at: string;
     status: string;
@@ -17,28 +17,28 @@ export interface CacheEntryRow {
 
 interface SqliteCacheEntryRow {
     key: string;
-    data_json: string | null;
+    data_json: string | undefined;
     source: string;
-    updated_at: string | null;
+    updated_at: string | undefined;
     last_attempt_at: string;
     expires_at: string;
     status: string;
-    error_code: string | null;
-    error_message: string | null;
+    error_code: string | undefined;
+    error_message: string | undefined;
     consecutive_failures: number;
     metadata_json: string;
 }
 
 /** Parses JSON field. */
-export function parseJsonField<T>(value: string): T | null {
+export function parseJsonField<T>(value: string): T | undefined {
     if (!value) {
-        return null;
+        return undefined;
     }
 
     try {
         return JSON.parse(value) as T;
     } catch {
-        return null;
+        return undefined;
     }
 }
 
@@ -60,9 +60,9 @@ export function parseTable<T extends object>(output: string): T[] {
         });
 }
 
-function mapCacheEntry(row: SqliteCacheEntryRow | undefined): CacheEntryRow | null {
+function mapCacheEntry(row: SqliteCacheEntryRow | undefined): CacheEntryRow | undefined {
     if (!row) {
-        return null;
+        return undefined;
     }
     const expiresAtMs = row.expires_at === "" ? NaN : Date.parse(row.expires_at);
     const isExpired =
@@ -86,7 +86,7 @@ function mapCacheEntry(row: SqliteCacheEntryRow | undefined): CacheEntryRow | nu
 }
 
 /** Returns cache entry. */
-export async function getCacheEntry(key: string): Promise<CacheEntryRow | null> {
+export async function getCacheEntry(key: string): Promise<CacheEntryRow | undefined> {
     const row = database
         .prepare(
             `SELECT
@@ -133,5 +133,5 @@ export async function getAllCacheEntries(): Promise<CacheEntryRow[]> {
 
     return rows
         .map((row) => mapCacheEntry(row))
-        .filter((row): row is CacheEntryRow => row !== null);
+        .filter((row): row is CacheEntryRow => row !== undefined);
 }

@@ -20,11 +20,11 @@ import {
 } from "./services/scheduledJobs.ts";
 
 const serverStartState: {
-    activeServer: ReturnType<typeof createServer> | null;
+    activeServer: ReturnType<typeof createServer> | undefined;
     stopSchedulerOnServerClose?: () => void;
     isStarting: boolean;
 } = {
-    activeServer: null,
+    activeServer: undefined,
     isStarting: false,
 };
 
@@ -38,6 +38,14 @@ function installSchedulerCloseCleanup(): void {
         stopScheduledJobScheduler();
         serverStartState.stopSchedulerOnServerClose = undefined;
     };
+}
+
+function rollbackBackgroundServiceStartup(function_: () => void, label: string): void {
+    try {
+        function_();
+    } catch (cleanupError) {
+        console.error(label, cleanupError);
+    }
 }
 
 function removeSchedulerCloseCleanup(): void {
@@ -113,25 +121,21 @@ export function handleServerListening(): void {
         }
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
-        const rollback = (function_: () => void, label: string): void => {
-            try {
-                function_();
-            } catch (cleanupError) {
-                console.error(label, cleanupError);
-            }
-        };
         if (isScheduledJobSchedulerStarted) {
             removeSchedulerCloseCleanup();
-            rollback(
+            rollbackBackgroundServiceStartup(
                 stopScheduledJobScheduler,
                 "[Backend] Failed to stop scheduled job scheduler:"
             );
         }
         if (isGatewayStarted) {
-            rollback(() => gateway.shutdown(), "[Backend] Failed to stop gateway:");
+            rollbackBackgroundServiceStartup(
+                () => gateway.shutdown(),
+                "[Backend] Failed to stop gateway:"
+            );
         }
         const server = serverStartState.activeServer;
-        serverStartState.activeServer = null;
+        serverStartState.activeServer = undefined;
         void server
             ?.stop(true)
             .catch((cleanupError) =>
@@ -153,7 +157,7 @@ export function startBackendServer(port = resolveListenPort()): void {
         serverStartState.isStarting = false;
     } catch (error) {
         serverStartState.isStarting = false;
-        serverStartState.activeServer = null;
+        serverStartState.activeServer = undefined;
         console.error("[Backend] Failed to start server:", error);
         process.exitCode = 1;
         throw error;
@@ -162,7 +166,7 @@ export function startBackendServer(port = resolveListenPort()): void {
 
 export async function stopBackendServer(): Promise<void> {
     const server = serverStartState.activeServer;
-    serverStartState.activeServer = null;
+    serverStartState.activeServer = undefined;
     try {
         removeSchedulerCloseCleanup();
         stopScheduledJobScheduler();

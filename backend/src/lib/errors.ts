@@ -11,7 +11,7 @@ export function errorMessage(error: unknown, fallback: string): string {
 }
 
 export function httpStatusCode(error: unknown): number {
-    if (typeof error === "object" && error !== null) {
+    if (typeof error === "object" && error !== undefined) {
         const statusCode = (error as HttpStatusError).statusCode;
         if (
             typeof statusCode === "number" &&

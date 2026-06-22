@@ -249,7 +249,7 @@ export function Logs() {
 
     const rowVirtualizer = useVirtualizer({
         count: filteredLogs.length,
-        getScrollElement: () => logContainerReference.current ?? (undefined as never),
+        getScrollElement: () => logContainerReference.current ?? document.body,
         estimateSize: () => 22,
         overscan: 15,
         getItemKey: (index) => filteredLogs[index]!.id,

@@ -18,15 +18,15 @@ function mapCacheRowForResponse(row: CacheEntryRow) {
     return {
         consecutiveFailures: Number(row.consecutive_failures) || 0,
         data: parseJsonFieldOrValue(row.data),
-        errorCode: row.error_code || null,
-        errorMessage: row.error_message || null,
-        expiresAt: row.expires_at || null,
+        errorCode: row.error_code || undefined,
+        errorMessage: row.error_message || undefined,
+        expiresAt: row.expires_at || undefined,
         key: row.key,
-        lastAttemptAt: row.last_attempt_at || null,
+        lastAttemptAt: row.last_attempt_at || undefined,
         meta: parseJsonField<unknown>(row.meta) ?? {},
         source: row.source,
         status: row.status,
-        updatedAt: row.updated_at || null,
+        updatedAt: row.updated_at || undefined,
     };
 }
 
@@ -60,7 +60,7 @@ export const cacheRoutes = {
     "/api/cache/heartbeat": {
         GET: async () => {
             const rows = await getAllCacheEntries();
-            const entries = rows.map(mapCacheRowForResponse);
+            const entries = rows.map((row) => mapCacheRowForResponse(row));
             return json({
                 count: entries.length,
                 entries,

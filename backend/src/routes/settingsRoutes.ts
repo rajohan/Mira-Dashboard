@@ -130,7 +130,7 @@ function parseSettingsPatch(input: unknown): Partial<Settings> {
             throw new TypeError("Invalid refreshInterval setting");
         }
         patch.refreshInterval = Math.max(
-            1_000,
+            1000,
             Math.min(60_000, Math.trunc(body.refreshInterval))
         );
     }
@@ -167,7 +167,7 @@ async function saveSettings(settings: Settings): Promise<void> {
     await withPinnedSettingsFile(settingsDirectory, (settingsFile) =>
         writeTextNoFollowGuarded(
             guardedPath(settingsFile),
-            JSON.stringify(settings, null, 2)
+            JSON.stringify(settings, undefined, 2)
         )
     );
 }

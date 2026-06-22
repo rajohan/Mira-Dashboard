@@ -30,7 +30,7 @@ const dockerBin = nonEmptyEnvironmentFallback("MIRA_DOCKER_BIN", "docker");
 const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
 const MIN_LOG_TAIL = 50;
-const MAX_LOG_TAIL = 5_000;
+const MAX_LOG_TAIL = 5000;
 const DOCKER_REQUEST_TIMEOUT_MS = 30_000;
 const SENSITIVE_ENV_KEY_PATTERN =
     /(?:SECRET|TOKEN|KEY|PASSWORD|CREDENTIAL|PRIVATE|AUTHORIZATION|AUTH|JWT|COOKIE|SESSION|DSN|DATABASE[_-]?URL|DB[_-]?URL|REDIS[_-]?URL|MONGO(?:DB)?[_-]?URL|CONNECTION[_-]?STRING|API[_-]?KEY|ACCESS[_-]?TOKEN|(?:^|[_-])PAT(?:$|[_-])|(?:^|[_-])URL$)/iu;
@@ -115,10 +115,10 @@ interface DockerVolumeRow {
 }
 
 interface DockerExecJob {
-    code: number | null;
+    code: number | undefined;
     containerId: string;
     containerPid?: number;
-    endedAt: number | null;
+    endedAt: number | undefined;
     id: string;
     process?: BunProcess;
     startedAt: number;
@@ -184,7 +184,7 @@ function parameters(request: Request): Record<string, string | undefined> {
 
 function queryNumber(request: Request, key: string, fallback: number): number {
     const rawValue = new URL(request.url).searchParams.get(key);
-    if (rawValue === null || rawValue === "") return fallback;
+    if (rawValue === undefined || rawValue === "") return fallback;
     const parsed = Number(rawValue);
     return Number.isFinite(parsed) ? parsed : fallback;
 }
@@ -193,13 +193,13 @@ function trimOutput(text: string): string {
     return text.length <= MAX_OUTPUT_CHARS ? text : text.slice(-MAX_OUTPUT_CHARS);
 }
 
-function dockerIdentifier(value: unknown): string | null {
+function dockerIdentifier(value: unknown): string | undefined {
     const identifier = stringFallback(value).trim();
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(identifier)) return null;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(identifier)) return undefined;
     return identifier;
 }
 
-function dockerImageIdentifier(value: unknown): string | null {
+function dockerImageIdentifier(value: unknown): string | undefined {
     const identifier = stringFallback(value).trim();
     if (/^sha256:[a-f0-9]{64}$/iu.test(identifier)) return identifier;
     return dockerIdentifier(identifier);
@@ -217,12 +217,12 @@ function parseJsonLines<T>(input: string): T[] {
         .map((line) => JSON.parse(line) as T);
 }
 
-function parseJsonField<T>(value: string | undefined): T | null {
-    if (!value) return null;
+function parseJsonField<T>(value: string | undefined): T | undefined {
+    if (!value) return undefined;
     try {
         return JSON.parse(value) as T;
     } catch {
-        return null;
+        return undefined;
     }
 }
 
@@ -292,7 +292,8 @@ function parseDockerSizeToBytes(sizeRaw: string | undefined): number {
         PB: 1024 ** 5,
         TB: 1024 ** 4,
     };
-    return Math.round(Number(match[1]) * (multipliers[match[2].toUpperCase()] ?? 0));
+    const [, value, unit] = match;
+    return Math.round(Number(value) * (multipliers[unit?.toUpperCase() ?? ""] ?? 0));
 }
 
 async function runDocker(arguments_: string[]): Promise<string> {
@@ -367,7 +368,7 @@ async function getContainers() {
         return {
             command: row.Command,
             createdAt: stringFallback(inspect?.Created ?? row.CreatedAt),
-            finishedAt: inspect?.State?.FinishedAt || null,
+            finishedAt: inspect?.State?.FinishedAt || undefined,
             health: inspect?.State?.Health?.Status || "unknown",
             id: row.ID,
             image: row.Image,
@@ -390,11 +391,11 @@ async function getContainers() {
                 : [],
             name: row.Names,
             ports: parsePorts(row.Ports),
-            project: labels["com.docker.compose.project"] || null,
+            project: labels["com.docker.compose.project"] || undefined,
             restartCount: Number(inspect?.RestartCount || 0),
             runningFor: row.RunningFor,
-            service: labels["com.docker.compose.service"] || null,
-            startedAt: inspect?.State?.StartedAt || null,
+            service: labels["com.docker.compose.service"] || undefined,
+            startedAt: inspect?.State?.StartedAt || undefined,
             state: row.State,
             stats: stats
                 ? {
@@ -405,7 +406,7 @@ async function getContainers() {
                       netIO: stats.NetIO,
                       pids: stats.PIDs,
                   }
-                : null,
+                : undefined,
             status: row.Status,
         };
     });
@@ -414,15 +415,19 @@ async function getContainers() {
 async function getContainerDetails(containerId: string) {
     const containers = await getContainers();
     const summary = findContainerSummary(containers, containerId);
-    if (!summary) return null;
+    if (!summary) return;
     const inspectMap = await getContainerInspectMap([summary.id]);
     const inspect = inspectMap.get(summary.id);
-    if (!inspect) return null;
+    if (!inspect) return;
     return {
         ...summary,
-        env: arrayFallback(inspect.Config?.Env).map(redactEnvironmentValue),
+        env: arrayFallback(inspect.Config?.Env).map((value) =>
+            redactEnvironmentValue(value)
+        ),
         labels: Object.fromEntries(
-            Object.entries(objectFallback(inspect.Config?.Labels)).map(redactLabelValue)
+            Object.entries(objectFallback(inspect.Config?.Labels)).map((entry) =>
+                redactLabelValue(entry)
+            )
         ),
         networks: Object.entries(objectFallback(inspect.NetworkSettings?.Networks)).map(
             ([name, value]) => {
@@ -449,13 +454,13 @@ function findContainerSummary(
     const prefixMatches = containers.filter((container) =>
         container.id.startsWith(identifier)
     );
-    return prefixMatches.length === 1 ? prefixMatches[0] : null;
+    return prefixMatches.length === 1 ? prefixMatches[0] : undefined;
 }
 
-async function resolveContainerId(identifier: string): Promise<string | null> {
+async function resolveContainerId(identifier: string): Promise<string | undefined> {
     const containers = await getContainers();
     const summary = findContainerSummary(containers, identifier);
-    if (!summary) return null;
+    if (!summary) return undefined;
     const inspectMap = await getContainerInspectMap([summary.id]);
     return stringFallback(inspectMap.get(summary.id)?.Id) || summary.id;
 }
@@ -571,7 +576,7 @@ async function getDockerUpdaterServices() {
              ORDER BY app_slug, service_name`
         )
         .all() as unknown as DockerUpdaterServiceRow[];
-    return rows.map(mapDockerUpdaterRow);
+    return rows.map((row) => mapDockerUpdaterRow(row));
 }
 
 async function getDockerUpdaterServiceById(serviceId: number) {
@@ -583,7 +588,7 @@ async function getDockerUpdaterServiceById(serviceId: number) {
              LIMIT 1`
         )
         .all(Math.floor(serviceId)) as unknown as DockerUpdaterServiceRow[];
-    return rows[0] ? mapDockerUpdaterRow(rows[0]) : null;
+    return rows[0] ? mapDockerUpdaterRow(rows[0]) : undefined;
 }
 
 function blockingDockerUpdaterFailures(steps: DockerUpdaterStepResult[]) {
@@ -610,7 +615,7 @@ async function getDockerUpdaterEvents(limit: number) {
              ORDER BY e.created_at DESC
              LIMIT ?`
         )
-        .all(boundedLimit) as Array<Record<string, string | null>>;
+        .all(boundedLimit) as Array<Record<string, string | undefined>>;
 
     return rows.map((row) => ({
         appSlug: row.app_slug,
@@ -620,19 +625,21 @@ async function getDockerUpdaterEvents(limit: number) {
         fromTag: nullableString(row.from_tag),
         id: Number(row.id),
         managedServiceId:
-            row.managed_service_id === null ? null : Number(row.managed_service_id),
-        message: null,
+            row.managed_service_id === undefined
+                ? undefined
+                : Number(row.managed_service_id),
+        message: undefined,
         serviceName: row.service_name,
         toDigest: nullableString(row.to_digest),
         toTag: nullableString(row.to_tag),
     }));
 }
 
-function parseServiceId(request: Request): number | null {
+function parseServiceId(request: Request): number | undefined {
     const rawValue = parameters(request).serviceId;
-    if (!rawValue || !/^\d+$/u.test(rawValue)) return null;
+    if (!rawValue || !/^\d+$/u.test(rawValue)) return undefined;
     const serviceId = Number(rawValue);
-    return Number.isSafeInteger(serviceId) && serviceId > 0 ? serviceId : null;
+    return Number.isSafeInteger(serviceId) && serviceId > 0 ? serviceId : undefined;
 }
 
 function updaterResultCode(steps: DockerUpdaterStepResult[]): string {
@@ -677,7 +684,7 @@ function cleanupDockerExecJobs(): void {
         .values()
         .filter((job) => job.status === "done")
         .toArray()
-        .sort((a, b) => a.startedAt - b.startedAt);
+        .toSorted((a, b) => a.startedAt - b.startedAt);
     const jobsToDelete = doneJobs.slice(0, dockerExecJobs.size - MAX_JOBS);
     for (const job of jobsToDelete) {
         dockerExecJobs.delete(job.id);
@@ -950,9 +957,9 @@ export const dockerRoutes = {
             }
             const jobId = Bun.randomUUIDv7();
             dockerExecJobs.set(jobId, {
-                code: null,
+                code: undefined,
                 containerId,
-                endedAt: null,
+                endedAt: undefined,
                 id: jobId,
                 startedAt: Date.now(),
                 status: "running",
@@ -1021,7 +1028,7 @@ export const dockerRoutes = {
                     blockingDockerUpdaterFailures(steps).length === 0
                         ? "success"
                         : "failed",
-                    null,
+                    undefined,
                     { steps }
                 );
                 return json({
@@ -1067,7 +1074,7 @@ export const dockerRoutes = {
     "/api/docker/updater/services/:serviceId/update": {
         POST: async (request: Request) => {
             const serviceId = parseServiceId(request);
-            if (serviceId === null) {
+            if (serviceId === undefined) {
                 return json({ error: "Invalid service id" }, { status: 400 });
             }
             const service = await getDockerUpdaterServiceById(serviceId);
@@ -1095,7 +1102,7 @@ export const dockerRoutes = {
                     blockingDockerUpdaterFailures(steps).length === 0
                         ? "success"
                         : "failed",
-                    null,
+                    undefined,
                     { serviceId, steps }
                 );
             } catch (error) {
@@ -1112,27 +1119,28 @@ export const dockerRoutes = {
             }
             const failed = blockingDockerUpdaterFailures(steps);
             const code = updaterResultCode(failed);
-            if (failed.length > 0 && code === "NOT_FOUND") {
+            const firstFailure = failed[0];
+            if (firstFailure && code === "NOT_FOUND") {
                 return json(
-                    { error: failed[0].stderr || "Updater service not found" },
+                    { error: firstFailure.stderr || "Updater service not found" },
                     { status: 404 }
                 );
             }
-            if (failed.length > 0 && code === "DISABLED") {
+            if (firstFailure && code === "DISABLED") {
                 return json(
-                    { error: failed[0].stderr || "Updater service is disabled" },
+                    { error: firstFailure.stderr || "Updater service is disabled" },
                     { status: 400 }
                 );
             }
-            if (failed.length > 0 && code === "CONFLICT") {
+            if (firstFailure && code === "CONFLICT") {
                 return json(
-                    { error: failed[0].stderr || "No update available" },
+                    { error: firstFailure.stderr || "No update available" },
                     { status: 409 }
                 );
             }
-            if (failed.length > 0 && code === "UNSUPPORTED_REGISTRY") {
+            if (firstFailure && code === "UNSUPPORTED_REGISTRY") {
                 return json(
-                    { error: failed[0].stderr || "Unsupported image registry" },
+                    { error: firstFailure.stderr || "Unsupported image registry" },
                     { status: 422 }
                 );
             }

@@ -275,7 +275,7 @@ function runtimeDisplayText(value: unknown): string {
         }
     }
 
-    if (value === undefined || value === undefined) {
+    if (value == undefined) {
         return "";
     }
 

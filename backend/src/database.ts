@@ -1,9 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { Database } from "bun:sqlite";
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 
 type DatabaseSync = Database;
+
+const SQLITE_NULL = JSON.parse("null") as SQLQueryBindings;
+
+/** Converts optional values to SQLite NULL-compatible bindings. */
+export function sqlNullable(value: SQLQueryBindings | undefined): SQLQueryBindings {
+    return value === undefined ? SQLITE_NULL : value;
+}
 
 const configuredDatabasePath = process.env.MIRA_DASHBOARD_DB_PATH?.trim();
 export const miraDatabasePath = configuredDatabasePath

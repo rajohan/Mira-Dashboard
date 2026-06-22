@@ -15,9 +15,7 @@ interface QuotaOverviewCardProperties {
 }
 
 /** Maps quota usage percentage to a visual severity level. */
-function getSeverity(
-    percent: number | undefined | undefined
-): "success" | "warning" | "error" {
+function getSeverity(percent: number | undefined): "success" | "warning" | "error" {
     if (!percent || percent < 80) return "success";
     if (percent < 95) return "warning";
     return "error";
@@ -85,7 +83,7 @@ function tryParseOpenAiReset(value: string): Date | undefined {
 }
 
 /** Formats quota reset metadata for display in the dashboard. */
-function formatResetValue(value: string | undefined | undefined): string {
+function formatResetValue(value: string | undefined): string {
     if (!value || value === "unknown") {
         return "unknown";
     }
@@ -104,7 +102,7 @@ function formatResetValue(value: string | undefined | undefined): string {
 }
 
 /** Formats short rolling-window reset times without repeating today's date. */
-function formatResetTime(value: string | undefined | undefined): string {
+function formatResetTime(value: string | undefined): string {
     if (!value || value === "unknown") {
         return "unknown";
     }
@@ -136,10 +134,7 @@ function normalizeSyntheticTickPercent(value: number): number {
 function formatSyntheticWeeklyRegenAmount(
     weeklyTokenLimit: SyntheticQuota["weeklyTokenLimit"]
 ): string | undefined {
-    if (
-        weeklyTokenLimit.nextRegenPercent !== undefined &&
-        weeklyTokenLimit.nextRegenPercent !== undefined
-    ) {
+    if (weeklyTokenLimit.nextRegenPercent != undefined) {
         return `+${formatPercent(weeklyTokenLimit.nextRegenPercent)}%`;
     }
 
@@ -154,10 +149,7 @@ function formatSyntheticWeeklyRegenAmount(
 function formatSyntheticFiveHourRegenAmount(
     rollingFiveHourLimit: SyntheticQuota["rollingFiveHourLimit"]
 ): string | undefined {
-    if (
-        rollingFiveHourLimit.tickPercent !== undefined &&
-        rollingFiveHourLimit.tickPercent !== undefined
-    ) {
+    if (rollingFiveHourLimit.tickPercent != undefined) {
         return `+${formatPercent(normalizeSyntheticTickPercent(rollingFiveHourLimit.tickPercent))}%`;
     }
 
@@ -167,9 +159,9 @@ function formatSyntheticFiveHourRegenAmount(
 /** Formats one Synthetic.new regeneration window segment. */
 function formatSyntheticRegenSegment(
     label: string,
-    resetAt: string | undefined | undefined,
+    resetAt: string | undefined,
     amount: string | undefined,
-    formatReset: (value: string | undefined | undefined) => string = formatResetValue
+    formatReset: (value: string | undefined) => string = formatResetValue
 ): string {
     const amountSuffix = amount ? ` (${amount})` : "";
 

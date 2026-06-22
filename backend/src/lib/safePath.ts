@@ -11,7 +11,10 @@ function canonicalizePotentialPath(targetPath: string): string {
             const canonicalAncestor = fs.realpathSync(existingAncestor);
             let canonicalResolved = canonicalAncestor;
             for (let index = missingParts.length - 1; index >= 0; index -= 1) {
-                canonicalResolved = path.join(canonicalResolved, missingParts[index]);
+                const missingPart = missingParts[index];
+                if (missingPart !== undefined) {
+                    canonicalResolved = path.join(canonicalResolved, missingPart);
+                }
             }
 
             return canonicalResolved;
@@ -46,7 +49,7 @@ function isSameFile(left: fs.Stats, right: fs.Stats): boolean {
 function createChildDirectoryFromVerifiedParent(
     realParent: string,
     childName: string
-): string | null {
+): string | undefined {
     if (process.platform !== "linux") {
         const nextParent = path.join(realParent, childName);
         const checkedRealParent = fs.realpathSync(Buffer.from(realParent));
@@ -54,7 +57,7 @@ function createChildDirectoryFromVerifiedParent(
             checkedRealParent !== realParent ||
             !fs.statSync(Buffer.from(checkedRealParent)).isDirectory()
         ) {
-            return null;
+            return undefined;
         }
         try {
             fs.mkdirSync(Buffer.from(nextParent));
@@ -68,7 +71,7 @@ function createChildDirectoryFromVerifiedParent(
             realNextParent !== nextParent ||
             !fs.statSync(Buffer.from(realNextParent)).isDirectory()
         ) {
-            return null;
+            return undefined;
         }
         return realNextParent;
     }
@@ -81,7 +84,7 @@ function createChildDirectoryFromVerifiedParent(
         const parentStatBefore = fs.fstatSync(parentFd);
         const pathParentStatBefore = fs.statSync(Buffer.from(realParent));
         if (!isSameFile(parentStatBefore, pathParentStatBefore)) {
-            return null;
+            return undefined;
         }
 
         const nextParent = path.join("/proc/self/fd", String(parentFd), childName);
@@ -99,7 +102,7 @@ function createChildDirectoryFromVerifiedParent(
             !isSameFile(parentStatBefore, parentStatAfter) ||
             !isSameFile(parentStatAfter, pathParentStatAfter)
         ) {
-            return null;
+            return undefined;
         }
 
         const realNextParent = fs.realpathSync(Buffer.from(nextParent));
@@ -107,7 +110,7 @@ function createChildDirectoryFromVerifiedParent(
             realNextParent !== path.join(realParent, childName) ||
             !fs.statSync(Buffer.from(realNextParent)).isDirectory()
         ) {
-            return null;
+            return undefined;
         }
         return realNextParent;
     } finally {
@@ -123,25 +126,25 @@ function createChildDirectoryFromVerifiedParent(
  * then verifies the result starts with the root. This pattern is recommended by
  * CodeQL (js/path-injection) as a path sanitizer.
  *
- * Returns the resolved absolute path if safe, or null if the path escapes root.
+ * Returns the resolved absolute path if safe, or undefined if the path escapes root.
  */
 export function safePathWithinRoot(
     userPath: string,
     rootDirectory: string
-): string | null {
+): string | undefined {
     if (!userPath || typeof userPath !== "string") {
-        return null;
+        return undefined;
     }
 
-    // Reject null bytes which can trick path resolution
+    // Reject undefined bytes which can trick path resolution
     if (userPath.includes("\0")) {
-        return null;
+        return undefined;
     }
 
     try {
         const canonicalRoot = canonicalizePotentialPath(path.resolve(rootDirectory));
         if (isFilesystemRoot(canonicalRoot)) {
-            return null;
+            return undefined;
         }
 
         const canonicalResolved = canonicalizePotentialPath(
@@ -153,9 +156,9 @@ export function safePathWithinRoot(
             return canonicalResolved;
         }
 
-        return null;
+        return undefined;
     } catch {
-        return null;
+        return undefined;
     }
 }
 
@@ -169,15 +172,15 @@ export function safePathWithinRoot(
 export function prepareSafeWriteTargetWithinRoot(
     fullPath: string,
     rootDirectory: string
-): string | null {
+): string | undefined {
     if (!fullPath || fullPath.includes("\0")) {
-        return null;
+        return undefined;
     }
 
     try {
         const canonicalRoot = canonicalizePotentialPath(path.resolve(rootDirectory));
         if (isFilesystemRoot(canonicalRoot)) {
-            return null;
+            return undefined;
         }
 
         const resolvedTarget = path.resolve(fullPath);
@@ -200,7 +203,7 @@ export function prepareSafeWriteTargetWithinRoot(
                 normalizedCanonicalRoot
             )
         ) {
-            return null;
+            return undefined;
         }
 
         const rootMissingSegments: string[] = [];
@@ -212,17 +215,21 @@ export function prepareSafeWriteTargetWithinRoot(
                     realRootAncestor !== rootExistingAncestor ||
                     !fs.statSync(Buffer.from(realRootAncestor)).isDirectory()
                 ) {
-                    return null;
+                    return undefined;
                 }
 
                 let realParent = realRootAncestor;
                 for (let index = rootMissingSegments.length - 1; index >= 0; index -= 1) {
+                    const rootMissingSegment = rootMissingSegments[index];
+                    if (rootMissingSegment === undefined) {
+                        return undefined;
+                    }
                     const realNextParent = createChildDirectoryFromVerifiedParent(
                         realParent,
-                        rootMissingSegments[index]
+                        rootMissingSegment
                     );
                     if (!realNextParent) {
-                        return null;
+                        return undefined;
                     }
                     realParent = realNextParent;
                 }
@@ -234,7 +241,7 @@ export function prepareSafeWriteTargetWithinRoot(
 
                 const parent = path.dirname(rootExistingAncestor);
                 if (parent === rootExistingAncestor) {
-                    return null;
+                    return undefined;
                 }
 
                 rootMissingSegments.push(path.basename(rootExistingAncestor));
@@ -244,13 +251,13 @@ export function prepareSafeWriteTargetWithinRoot(
 
         const realRoot = fs.realpathSync(canonicalRoot);
         if (realRoot !== canonicalRoot) {
-            return null;
+            return undefined;
         }
         const normalizedRoot = realRoot + path.sep;
 
         try {
             if (fs.lstatSync(Buffer.from(resolvedTarget)).isSymbolicLink()) {
-                return null;
+                return undefined;
             }
         } catch (error) {
             const code = (error as NodeJS.ErrnoException).code;
@@ -268,21 +275,25 @@ export function prepareSafeWriteTargetWithinRoot(
                 const realAncestor = fs.realpathSync(existingAncestor);
                 const ancestorStat = fs.statSync(Buffer.from(realAncestor));
                 if (!ancestorStat.isDirectory()) {
-                    return null;
+                    return undefined;
                 }
 
                 if (!isWithinCanonicalRoot(realAncestor, realRoot, normalizedRoot)) {
-                    return null;
+                    return undefined;
                 }
 
                 let realParent = realAncestor;
                 for (let index = missingSegments.length - 1; index >= 0; index -= 1) {
+                    const missingSegment = missingSegments[index];
+                    if (missingSegment === undefined) {
+                        return undefined;
+                    }
                     const realNextParent = createChildDirectoryFromVerifiedParent(
                         realParent,
-                        missingSegments[index]
+                        missingSegment
                     );
                     if (!realNextParent) {
-                        return null;
+                        return undefined;
                     }
 
                     realParent = realNextParent;
@@ -296,7 +307,7 @@ export function prepareSafeWriteTargetWithinRoot(
 
                 const parent = path.dirname(existingAncestor);
                 if (parent === existingAncestor) {
-                    return null;
+                    return undefined;
                 }
 
                 missingSegments.push(path.basename(existingAncestor));
@@ -304,7 +315,7 @@ export function prepareSafeWriteTargetWithinRoot(
             }
         }
     } catch {
-        return null;
+        return undefined;
     }
 }
 

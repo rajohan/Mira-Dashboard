@@ -16,7 +16,6 @@ type DatabaseColumnDefinition<T extends object> =
     | ColumnDef<T, string>
     | ColumnDef<T, number>
     | ColumnDef<T, boolean>
-    | ColumnDef<T, undefined>
     | ColumnDef<T, undefined>;
 
 /** Represents props. */

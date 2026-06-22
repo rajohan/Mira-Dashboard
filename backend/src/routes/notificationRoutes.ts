@@ -1,4 +1,4 @@
-import { database } from "../database.ts";
+import { database, sqlNullable } from "../database.ts";
 import { json, readJson, readRequestBytes } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import { nullableString, objectFallback, stringFallback } from "../lib/values.ts";
@@ -12,8 +12,8 @@ interface NotificationRow {
     title: string;
     description: string;
     type: NotificationType;
-    source: string | null;
-    dedupe_key: string | null;
+    source: string | undefined;
+    dedupe_key: string | undefined;
     metadata_json: string;
     is_read: number;
     created_at: string;
@@ -66,7 +66,7 @@ function optionalStringField(
     field: string,
     value: unknown
 ): { error?: Response; value?: string } {
-    if (value === undefined || value === null) {
+    if (value == undefined) {
         return {};
     }
     return typeof value === "string"
@@ -75,12 +75,12 @@ function optionalStringField(
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
+    return typeof value === "object" && value !== undefined && !Array.isArray(value);
 }
 
-function validId(value: string | undefined): number | null {
+function validId(value: string | undefined): number | undefined {
     const id = Number(value);
-    return Number.isSafeInteger(id) && id > 0 ? id : null;
+    return Number.isSafeInteger(id) && id > 0 ? id : undefined;
 }
 
 function notificationRouteError(error: unknown, fallback: string): Response {
@@ -95,9 +95,9 @@ export const notificationRoutes = {
         GET: (request: Request) => {
             try {
                 const rawLimit = new URL(request.url).searchParams.get("limit");
-                const limitValue = rawLimit === null ? null : Number(rawLimit);
+                const limitValue = rawLimit === undefined ? undefined : Number(rawLimit);
                 const limit =
-                    limitValue !== null && Number.isFinite(limitValue)
+                    limitValue !== undefined && Number.isFinite(limitValue)
                         ? Math.max(1, Math.min(200, Math.floor(limitValue)))
                         : 100;
                 const unreadCount =
@@ -117,7 +117,7 @@ export const notificationRoutes = {
                             .get() as { count?: number }
                     )?.count || 0;
                 return json({
-                    items: listNotifications(limit).map(toResponse),
+                    items: listNotifications(limit).map((item) => toResponse(item)),
                     readCount,
                     unreadCount,
                 });
@@ -190,13 +190,13 @@ export const notificationRoutes = {
                     title,
                     description,
                     type,
-                    source,
-                    dedupeKey,
+                    sqlNullable(source),
+                    sqlNullable(dedupeKey),
                     JSON.stringify(metadata),
                     now,
                     now,
                     occurredAt
-                ) as { id?: unknown } | null | undefined;
+                ) as { id?: unknown } | undefined;
             if (typeof row?.id !== "number") {
                 return json(
                     { error: "Failed to create notification", isOk: false },
@@ -262,7 +262,7 @@ export const notificationRoutes = {
             const rawSource = body.source ?? querySource;
             if (
                 rawSource !== undefined &&
-                rawSource !== null &&
+                rawSource !== undefined &&
                 typeof rawSource !== "string"
             ) {
                 return json({ error: "source must be a string" }, { status: 400 });
@@ -289,7 +289,8 @@ export const notificationRoutes = {
         POST: (request: ParametersRequest<"id">) => {
             try {
                 const id = validId(request.params.id);
-                if (id === null) return json({ error: "invalid id" }, { status: 400 });
+                if (id === undefined)
+                    return json({ error: "invalid id" }, { status: 400 });
                 database
                     .prepare(
                         "UPDATE notifications SET is_read = 1, updated_at = ? WHERE id = ?"
@@ -306,7 +307,8 @@ export const notificationRoutes = {
         DELETE: (request: ParametersRequest<"id">) => {
             try {
                 const id = validId(request.params.id);
-                if (id === null) return json({ error: "invalid id" }, { status: 400 });
+                if (id === undefined)
+                    return json({ error: "invalid id" }, { status: 400 });
                 const result = database
                     .prepare("DELETE FROM notifications WHERE id = ?")
                     .run(id);

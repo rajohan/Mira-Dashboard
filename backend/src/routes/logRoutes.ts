@@ -10,7 +10,7 @@ function dateToISOString(date: Date): string {
 
 const logsDirectory = "/tmp/openclaw";
 const MIN_LOG_TAIL_BYTES = 64 * 1024;
-const MAX_LOG_LINE_COUNT = 5_000;
+const MAX_LOG_LINE_COUNT = 5000;
 const MAX_LOG_TAIL_BYTES = 2 * 1024 * 1024;
 const LOG_BYTES_PER_REQUESTED_LINE = 1024;
 const LOG_TAIL_READ_CHUNK_BYTES = 64 * 1024;
@@ -53,20 +53,20 @@ function resolveRealLogsDirectory(): string {
     return fs.realpathSync(logsDirectory);
 }
 
-function parsePositiveLineCount(value: unknown): number | null {
-    if (typeof value !== "string") return null;
+function parsePositiveLineCount(value: unknown): number | undefined {
+    if (typeof value !== "string") return undefined;
     const trimmed = value.trim();
-    if (!/^\d+$/u.test(trimmed)) return null;
+    if (!/^\d+$/u.test(trimmed)) return undefined;
     const parsed = Number(trimmed);
     return Number.isFinite(parsed) && parsed > 0
         ? Math.min(parsed, MAX_LOG_LINE_COUNT)
-        : null;
+        : undefined;
 }
 
 async function readLogContent(
     file: fs.promises.FileHandle,
     stat: fs.Stats,
-    lines: number | null
+    lines: number | undefined
 ): Promise<string> {
     if (!lines) {
         const byteLength = Math.min(stat.size, MIN_LOG_TAIL_BYTES);
@@ -147,7 +147,7 @@ function logInfoResponse(): Response {
                 if (!stat.isFile() || stat.isSymbolicLink()) return [];
                 return [{ modified: stat.mtime, name: fileName, size: stat.size }];
             })
-            .sort((a, b) => b.modified.getTime() - a.modified.getTime());
+            .toSorted((a, b) => b.modified.getTime() - a.modified.getTime());
 
         return json({ logs: files });
     } catch (error) {
@@ -160,7 +160,7 @@ async function logContentResponse(request: Request): Promise<Response> {
     const query = new URL(request.url).searchParams;
     let logFile = query.get("file") || undefined;
     const lines = parsePositiveLineCount(query.get("lines"));
-    if (query.has("lines") && lines === null) {
+    if (query.has("lines") && lines === undefined) {
         return json({ error: "Invalid lines" }, { status: 400 });
     }
 

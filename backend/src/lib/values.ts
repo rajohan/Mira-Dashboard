@@ -10,20 +10,20 @@ export function nonEmptyEnvironmentFallback(name: string, fallback: string): str
     return value && value.length > 0 ? value : fallback;
 }
 
-/** Converts optional values to strings while preserving empty/null fallback behavior. */
+/** Converts optional values to strings while preserving empty/undefined fallback behavior. */
 export function stringFallback(value?: unknown, fallback = ""): string {
-    return value == null ? fallback : String(value);
+    return value == undefined ? fallback : String(value);
 }
 
-/** Converts optional values to strings or null for API response fields. */
-export function nullableString(value?: unknown): string | null {
+/** Converts optional values to strings or undefined for API response fields. */
+export function nullableString(value?: unknown): string | undefined {
     const text = stringFallback(value);
-    return text || null;
+    return text || undefined;
 }
 
 /** Returns a fallback object for nullish values. */
-export function objectFallback<T extends object>(value?: T | null): T {
-    return value !== null && typeof value === "object" && !Array.isArray(value)
+export function objectFallback<T extends object>(value?: T | undefined): T {
+    return value !== undefined && typeof value === "object" && !Array.isArray(value)
         ? value
         : ({} as T);
 }

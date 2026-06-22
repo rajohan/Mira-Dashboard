@@ -31,7 +31,9 @@ export const agentRoutes = {
                 return json({ error: "Invalid agent ID" }, { status: 400 });
             }
             try {
-                const body = await readJson<{ currentTask?: unknown } | null>(request);
+                const body = await readJson<{ currentTask?: unknown } | undefined>(
+                    request
+                );
                 if (!body || typeof body !== "object" || Array.isArray(body)) {
                     return json({ error: "Missing or invalid body" }, { status: 400 });
                 }
@@ -94,7 +96,7 @@ export const agentRoutes = {
             try {
                 const query = new URL(request.url).searchParams;
                 const rawLimit = query.get("limit");
-                const parsedLimit = rawLimit === null ? NaN : Number(rawLimit);
+                const parsedLimit = rawLimit === undefined ? NaN : Number(rawLimit);
                 const requestedLimit = Number.isNaN(parsedLimit) ? 8 : parsedLimit;
                 const limit = Math.max(1, Math.min(20, Math.floor(requestedLimit)));
                 closeStaleActiveTasks();

@@ -44,7 +44,7 @@ type BackupCacheData = {
     tool?: string;
     latest?: BackupSnapshot[];
     snapshotsByPath?: BackupSnapshotGroup[];
-    stale?: Array<{ path: string | undefined; endTime: string | undefined }>;
+    stale?: Array<{ path?: string; endTime?: string }>;
     isOk?: boolean;
 };
 
@@ -79,7 +79,7 @@ function getVariant(status?: string, isOk?: boolean) {
 }
 
 /** Formats path for display. */
-function formatPath(path: string | undefined | undefined) {
+function formatPath(path: string | undefined) {
     if (!path) return "Unknown source";
     if (path === "/source/docker") return "Docker";
     if (path === "/source/projects") return "Projects";

@@ -56,7 +56,7 @@ function expandPath(inputPath: string, cwd: string): string {
 
 function unescapeShellToken(token: string): string {
     let output = "";
-    let quote: "'" | '"' | null = null;
+    let quote: "'" | '"' | undefined;
     let isEscaped = false;
     for (const character of token) {
         if (isEscaped) {
@@ -68,12 +68,12 @@ function unescapeShellToken(token: string): string {
             isEscaped = true;
             continue;
         }
-        if ((character === "'" || character === '"') && quote === null) {
+        if ((character === "'" || character === '"') && quote === undefined) {
             quote = character;
             continue;
         }
         if (character === quote) {
-            quote = null;
+            quote = undefined;
             continue;
         }
         output += character;
@@ -83,7 +83,7 @@ function unescapeShellToken(token: string): string {
 }
 
 function completionInput(input: string): { pathPart: string; prefix: string } {
-    let quote: "'" | '"' | null = null;
+    let quote: "'" | '"' | undefined;
     let isEscaped = false;
     let tokenStart = 0;
     for (let index = 0; index < input.length; ) {
@@ -101,17 +101,17 @@ function completionInput(input: string): { pathPart: string; prefix: string } {
             index = nextIndex;
             continue;
         }
-        if ((characterText === "'" || characterText === '"') && quote === null) {
+        if ((characterText === "'" || characterText === '"') && quote === undefined) {
             quote = characterText;
             index = nextIndex;
             continue;
         }
         if (characterText === quote) {
-            quote = null;
+            quote = undefined;
             index = nextIndex;
             continue;
         }
-        if (quote === null && /\s/u.test(characterText)) {
+        if (quote === undefined && /\s/u.test(characterText)) {
             tokenStart = nextIndex;
         }
         index = nextIndex;
@@ -183,7 +183,7 @@ async function getCompletions(
             });
         }
 
-        matches.sort((a, b) => {
+        const sortedMatches = matches.toSorted((a, b) => {
             const typeOrder = { directory: 0, executable: 1, file: 2 };
             if (typeOrder[a.type] !== typeOrder[b.type]) {
                 return typeOrder[a.type] - typeOrder[b.type];
@@ -192,12 +192,14 @@ async function getCompletions(
         });
 
         let commonPrefix = "";
-        if (matches.length > 0) {
-            const first = matches[0].completion;
+        const first = sortedMatches[0]?.completion;
+        if (first) {
             let index = first.length;
             while (index >= searchPrefix.length) {
                 const candidate = first.slice(0, index);
-                if (matches.every((match) => match.completion.startsWith(candidate))) {
+                if (
+                    sortedMatches.every((match) => match.completion.startsWith(candidate))
+                ) {
                     commonPrefix = candidate;
                     break;
                 }
@@ -205,7 +207,7 @@ async function getCompletions(
             }
         }
 
-        return { commonPrefix, completions: matches.slice(0, 20) };
+        return { commonPrefix, completions: sortedMatches.slice(0, 20) };
     } catch {
         return { commonPrefix: "", completions: [] };
     }
@@ -214,7 +216,7 @@ async function getCompletions(
 export const terminalRoutes = {
     "/api/terminal/complete": {
         POST: async (request: Request) => {
-            const body = await readTerminalJson<CompletionRequest | null>(request);
+            const body = await readTerminalJson<CompletionRequest | undefined>(request);
             if (body instanceof Response) return body;
             if (!body || typeof body !== "object") {
                 return json({ error: "Missing or invalid body" }, { status: 400 });
@@ -240,7 +242,7 @@ export const terminalRoutes = {
 
     "/api/terminal/cd": {
         POST: async (request: Request) => {
-            const body = await readTerminalJson<CdRequest | null>(request);
+            const body = await readTerminalJson<CdRequest | undefined>(request);
             if (body instanceof Response) return body;
             if (!body || typeof body !== "object") {
                 return json(

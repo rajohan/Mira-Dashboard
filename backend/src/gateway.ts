@@ -82,18 +82,18 @@ interface Session {
     model: string;
     tokenCount: number;
     maxTokens: number;
-    createdAt: string | null;
+    createdAt: string | undefined;
     updatedAt?: number;
     displayName: string;
     label: string;
     displayLabel: string;
     channel: string;
     status?: string;
-    endedAt?: string | number | null;
-    startedAt?: string | number | null;
-    runId?: string | null;
-    activeRunId?: string | null;
-    currentRunId?: string | null;
+    endedAt?: string | number | undefined;
+    startedAt?: string | number | undefined;
+    runId?: string | undefined;
+    activeRunId?: string | undefined;
+    currentRunId?: string | undefined;
     isRunning?: boolean;
     running?: boolean;
     thinkingLevel?: string;
@@ -116,11 +116,11 @@ interface GatewaySession {
     label?: string;
     channel?: string;
     status?: string;
-    endedAt?: string | number | null;
-    startedAt?: string | number | null;
-    runId?: string | null;
-    activeRunId?: string | null;
-    currentRunId?: string | null;
+    endedAt?: string | number | undefined;
+    startedAt?: string | number | undefined;
+    runId?: string | undefined;
+    activeRunId?: string | undefined;
+    currentRunId?: string | undefined;
     isRunning?: boolean;
     running?: boolean;
     thinkingLevel?: string;
@@ -167,17 +167,17 @@ interface RawTranscriptImageMessage {
 }
 
 const gatewayState: {
-    client: OpenClawGatewayClientInstance | null;
+    client: OpenClawGatewayClientInstance | undefined;
     sessions: Session[];
     isConnected: boolean;
     requestId: number;
-    currentToken: string | null;
+    currentToken: string | undefined;
 } = {
-    client: null,
+    client: undefined,
     sessions: [],
     isConnected: false,
     requestId: 1000,
-    currentToken: null,
+    currentToken: undefined,
 };
 const subscribers = new Set<DashboardSocket>();
 const pendingRequests = new Map<string, PendingRequest>();
@@ -261,10 +261,8 @@ function transformSession(session: GatewaySession): Session {
     }
 
     const createdAtDate =
-        session.updatedAt === null || session.updatedAt === undefined
-            ? null
-            : new Date(session.updatedAt);
-    const createdAt = createdAtDate ? createdAtDate.toISOString() : null;
+        session.updatedAt == undefined ? undefined : new Date(session.updatedAt);
+    const createdAt = createdAtDate ? createdAtDate.toISOString() : undefined;
 
     return {
         id: session.sessionId || session.key || "unknown",
@@ -275,7 +273,7 @@ function transformSession(session: GatewaySession): Session {
         kind: session.kind,
         model: session.model || "Unknown",
         tokenCount: session.totalTokens || 0,
-        maxTokens: session.contextTokens || 200000,
+        maxTokens: session.contextTokens || 200_000,
         createdAt,
         updatedAt: session.updatedAt,
         displayName: session.displayName || "",
@@ -313,10 +311,10 @@ function broadcast(message: unknown): void {
 }
 
 /** Performs as record. */
-function asRecord(value: unknown): Record<string, unknown> | null {
+function asRecord(value: unknown): Record<string, unknown> | undefined {
     return value && typeof value === "object" && !Array.isArray(value)
         ? (value as Record<string, unknown>)
-        : null;
+        : undefined;
 }
 
 /** Performs string field. */
@@ -420,15 +418,15 @@ function isPathInsideRoot(root: string, candidate: string): boolean {
 }
 
 /** Returns candidate when it stays inside root. */
-function resolvePathInsideRoot(root: string, candidate: string): string | null {
-    return isPathInsideRoot(root, candidate) ? candidate : null;
+function resolvePathInsideRoot(root: string, candidate: string): string | undefined {
+    return isPathInsideRoot(root, candidate) ? candidate : undefined;
 }
 
 /** Returns transcript path. */
-function getTranscriptPath(sessionKey: string, sessionId?: string): string | null {
+function getTranscriptPath(sessionKey: string, sessionId?: string): string | undefined {
     const parts = sessionKey.split(":");
     if (parts[0]?.toLowerCase() !== "agent") {
-        return null;
+        return undefined;
     }
 
     if (!sessionId) {
@@ -436,7 +434,7 @@ function getTranscriptPath(sessionKey: string, sessionId?: string): string | nul
         sessionId = session?.id;
     }
     if (!sessionId || sessionId === "unknown") {
-        return null;
+        return undefined;
     }
 
     const agentId = parts[1];
@@ -449,7 +447,7 @@ function getTranscriptPath(sessionKey: string, sessionId?: string): string | nul
         !safeAgentPathSegment.test(agentId) ||
         !safeSessionPathSegment.test(sessionId)
     ) {
-        return null;
+        return undefined;
     }
 
     const openClawRoot = Path.resolve(OPENCLAW_HOME);
@@ -463,21 +461,21 @@ function getTranscriptPath(sessionKey: string, sessionId?: string): string | nul
         realOpenClawRoot = fs.realpathSync(openClawRoot);
         const realAgentDirectory = fs.realpathSync(agentDirectory);
         if (realAgentDirectory !== Path.resolve(realOpenClawRoot, "agents", agentId)) {
-            return null;
+            return undefined;
         }
         realAgentsSessionsRoot = fs.realpathSync(
             Path.resolve(realAgentDirectory, "sessions")
         );
         if (!realAgentsSessionsRoot.startsWith(`${realAgentDirectory}${Path.sep}`)) {
-            return null;
+            return undefined;
         }
         realTranscriptPath = fs.realpathSync(transcriptPath);
     } catch {
-        return null;
+        return undefined;
     }
 
     if (!realTranscriptPath.startsWith(`${realAgentsSessionsRoot}${Path.sep}`)) {
-        return null;
+        return undefined;
     }
 
     return resolvePathInsideRoot(realOpenClawRoot, realTranscriptPath);
@@ -573,7 +571,7 @@ function hydrateOmittedChatHistoryImages(
     payload: unknown,
     requestedSessionKey?: string
 ): unknown {
-    const history = asRecord(payload) as ChatHistoryPayload | null;
+    const history = asRecord(payload) as ChatHistoryPayload | undefined;
     const sessionKey = history?.sessionKey || requestedSessionKey;
 
     if (!history || !sessionKey || !Array.isArray(history.messages)) {
@@ -651,7 +649,7 @@ function isCurrentGatewayClient(expectedClient: OpenClawGatewayClientInstance): 
 
 /** Performs refresh sessions. */
 async function refreshSessions(
-    expectedClient: OpenClawGatewayClientInstance | null = gatewayState.client
+    expectedClient: OpenClawGatewayClientInstance | undefined = gatewayState.client
 ): Promise<void> {
     if (
         !expectedClient ||
@@ -669,12 +667,11 @@ async function refreshSessions(
             .map((entry) => asRecord(entry))
             .filter(
                 (entry): entry is Record<string, unknown> =>
-                    entry !== null &&
+                    entry !== undefined &&
                     (entry.sessionId === undefined ||
                         typeof entry.sessionId === "string") &&
                     (entry.key === undefined || typeof entry.key === "string") &&
                     (entry.updatedAt === undefined ||
-                        entry.updatedAt === null ||
                         (typeof entry.updatedAt === "number" &&
                             Number.isFinite(entry.updatedAt)) ||
                         (typeof entry.updatedAt === "string" &&
@@ -699,6 +696,20 @@ async function refreshSessions(
     }
 }
 
+/** Refreshes Gateway sessions and logs failures from event callbacks. */
+async function refreshGatewaySessions(
+    activeClient: OpenClawGatewayClientInstance
+): Promise<void> {
+    try {
+        await refreshSessions(activeClient);
+    } catch (error) {
+        console.error(
+            "[Gateway] Failed to refresh sessions:",
+            errorMessage(error, String(error))
+        );
+    }
+}
+
 /** Performs init. */
 function init(token: string): void {
     if (gatewayState.currentToken === token && gatewayState.client) {
@@ -710,23 +721,22 @@ function init(token: string): void {
     } catch (error) {
         console.error("[Gateway] Failed to stop wasPrevious client before init:", {
             error,
-            hadPreviousGatewayClient: previousGatewayClient !== null,
+            hadPreviousGatewayClient: previousGatewayClient !== undefined,
         });
     }
     if (gatewayState.client === previousGatewayClient) {
-        gatewayState.client = null;
+        gatewayState.client = undefined;
     }
     gatewayState.isConnected = false;
     gatewayState.sessions = [];
     failPendingRequests("Gateway disconnected");
     broadcast({ type: "disconnected", gatewayConnected: false });
     gatewayState.currentToken = token;
-    let thisGatewayClient: OpenClawGatewayClientInstance | null = null;
     /** Returns the active Gateway client when this callback belongs to it. */
-    function getCurrentInitGatewayClient(): OpenClawGatewayClientInstance | null {
+    function getCurrentInitGatewayClient(): OpenClawGatewayClientInstance | undefined {
         return thisGatewayClient && isCurrentGatewayClient(thisGatewayClient)
             ? thisGatewayClient
-            : null;
+            : undefined;
     }
     /** Handles successful Gateway hello negotiation and subscribes to live events. */
     function handleGatewayHelloOk(): void {
@@ -778,19 +788,6 @@ function init(token: string): void {
             void refreshGatewaySessions(activeClient);
         }
     }
-    /** Refreshes Gateway sessions and logs failures from event callbacks. */
-    async function refreshGatewaySessions(
-        activeClient: OpenClawGatewayClientInstance
-    ): Promise<void> {
-        try {
-            await refreshSessions(activeClient);
-        } catch (error) {
-            console.error(
-                "[Gateway] Failed to refresh sessions:",
-                errorMessage(error, String(error))
-            );
-        }
-    }
     /** Logs Gateway connection failures. */
     function handleGatewayConnectError(error: Error): void {
         if (!getCurrentInitGatewayClient()) {
@@ -808,7 +805,7 @@ function init(token: string): void {
         failPendingRequests("Gateway disconnected");
         broadcast({ type: "disconnected", gatewayConnected: false });
     }
-    thisGatewayClient = new GatewayClientCtor({
+    const thisGatewayClient = new GatewayClientCtor({
         url: process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789",
         token,
         role: "operator",
@@ -830,8 +827,8 @@ function init(token: string): void {
         thisGatewayClient.start();
     } catch (error) {
         if (gatewayState.client === thisGatewayClient) {
-            gatewayState.client = null;
-            gatewayState.currentToken = null;
+            gatewayState.client = undefined;
+            gatewayState.currentToken = undefined;
         }
         throw error;
     }
@@ -1050,8 +1047,8 @@ function isConnected(): boolean {
 }
 
 /** Returns gateway ws. */
-function getGatewayWs(): null {
-    return null;
+function getGatewayWs(): undefined {
+    return;
 }
 
 /** Performs send request async. */
@@ -1118,15 +1115,15 @@ function shutdown(): void {
     } catch (error) {
         console.error("[Gateway] Failed to stop wasPrevious client during shutdown:", {
             error,
-            hadPreviousGatewayClient: previousGatewayClient !== null,
+            hadPreviousGatewayClient: previousGatewayClient !== undefined,
         });
     }
     if (gatewayState.client === previousGatewayClient) {
-        gatewayState.client = null;
+        gatewayState.client = undefined;
     }
     gatewayState.isConnected = false;
     gatewayState.sessions = [];
-    gatewayState.currentToken = null;
+    gatewayState.currentToken = undefined;
     failPendingRequests("Gateway disconnected");
     broadcast({ type: "disconnected", gatewayConnected: false });
 }

@@ -1,5 +1,5 @@
-import fs from "fs";
-import path from "path";
+import fs from "node:fs";
+import path from "node:path";
 
 import type { DashboardSocket } from "../dashboardSocket.ts";
 import { errorMessage } from "../lib/errors.ts";
@@ -11,13 +11,13 @@ function dateToISOString(date: Date): string {
 
 const logsDirectory = "/tmp/openclaw";
 const logsRouteState: {
-    logWatcher: NodeJS.Timeout | null;
+    logWatcher: NodeJS.Timeout | undefined;
     isLogPollInFlight: boolean;
     lastLogSize: number;
     lastLogFile: string;
     pendingFragment: string;
 } = {
-    logWatcher: null,
+    logWatcher: undefined,
     isLogPollInFlight: false,
     lastLogSize: 0,
     lastLogFile: "",
@@ -48,7 +48,7 @@ function getTodayLogFile(root = resolveRealLogsDirectory()): string {
 async function readLogContent(
     file: fs.promises.FileHandle,
     stat: fs.Stats,
-    lines: number | null
+    lines: number | undefined
 ): Promise<string> {
     if (!lines) {
         const byteLength = Math.min(stat.size, MIN_LOG_TAIL_BYTES);
@@ -284,6 +284,6 @@ export function unsubscribeFromLogs(ws: DashboardSocket): void {
     logSubscribers.delete(ws);
     if (logSubscribers.size === 0 && logsRouteState.logWatcher) {
         clearInterval(logsRouteState.logWatcher);
-        logsRouteState.logWatcher = null;
+        logsRouteState.logWatcher = undefined;
     }
 }

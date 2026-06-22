@@ -30,7 +30,7 @@ interface ChatMessagesListProperties {
     chatRows: ChatRow[];
     messagesBottomReference: RefObject<HTMLDivElement | undefined>;
     messagesContainerReference: RefObject<HTMLDivElement | undefined>;
-    messagesVirtualizer: Virtualizer<HTMLDivElement, Element>;
+    messagesVirtualizer: Virtualizer<HTMLElement, Element>;
     onDynamicContentLoad: () => void;
     onFollow: () => void;
     onPreview: (isPreview: ChatPreviewItem) => void;

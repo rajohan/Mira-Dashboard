@@ -49,8 +49,8 @@ const authRule: RateLimitRule = {
 const buckets = new Map<string, RateLimitBucket>();
 const BUCKET_CLEANUP_INTERVAL_MS = 60_000;
 const BUCKET_STALE_MS = Math.max(apiRule.windowMs, authRule.windowMs) * 2;
-const rateLimitState: { bucketCleanupTimer: Timer | null } = {
-    bucketCleanupTimer: null,
+const rateLimitState: { bucketCleanupTimer: Timer | undefined } = {
+    bucketCleanupTimer: undefined,
 };
 
 function cleanupStaleBuckets(): void {
@@ -128,7 +128,7 @@ function checkRateLimit(
     request: Request,
     server: Server<unknown>,
     rule: RateLimitRule
-): Response | null {
+): Response | undefined {
     const now = Date.now();
     ensureBucketCleanupTimer();
     const key = rateLimitKey(rule, request, server);
@@ -141,7 +141,7 @@ function checkRateLimit(
     bucket.lastSeenAt = now;
     bucket.used += 1;
     if (bucket.used <= rule.max) {
-        return null;
+        return undefined;
     }
 
     const remaining = rule.max - bucket.used;
@@ -174,7 +174,7 @@ function secureHandler(routePath: string, handler: BunHandler | Response): BunHa
             ? authRule
             : isApiRoute(pathname)
               ? apiRule
-              : null;
+              : undefined;
         if (rateRule) {
             const limited = checkRateLimit(request, server, rateRule);
             if (limited) return limited;
@@ -240,6 +240,6 @@ export function resetRequestPolicyForTests(): void {
     buckets.clear();
     if (rateLimitState.bucketCleanupTimer) {
         clearInterval(rateLimitState.bucketCleanupTimer);
-        rateLimitState.bucketCleanupTimer = null;
+        rateLimitState.bucketCleanupTimer = undefined;
     }
 }

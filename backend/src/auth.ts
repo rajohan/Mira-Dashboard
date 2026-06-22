@@ -77,7 +77,7 @@ export function isBootstrapRequired(): boolean {
 }
 
 /** Performs find user by username. */
-export function findUserByUsername(username: string): UserRow | null {
+export function findUserByUsername(username: string): UserRow | undefined {
     const row = database
         .prepare(
             `SELECT id, username, password_hash, created_at, updated_at
@@ -85,7 +85,7 @@ export function findUserByUsername(username: string): UserRow | null {
              WHERE username = ?`
         )
         .get(normalizeUsername(username)) as UserRow | undefined;
-    return row || null;
+    return row || undefined;
 }
 
 /** Creates user. */
@@ -108,7 +108,10 @@ export function createUser(username: string, password: string): AuthUser {
 }
 
 /** Atomically creates the first user only when no users exist. */
-export function createFirstUser(username: string, password: string): AuthUser | null {
+export function createFirstUser(
+    username: string,
+    password: string
+): AuthUser | undefined {
     const normalizedUsername = normalizeUsername(username);
     const timestamp = nowIso();
     const passwordHash = hashPassword(password);
@@ -138,7 +141,7 @@ export function createFirstUser(username: string, password: string): AuthUser | 
             .run(normalizedUsername, passwordHash, timestamp, timestamp);
         if (result.changes === 0) {
             rollback();
-            return null;
+            return undefined;
         }
         database.run("COMMIT");
         return {
@@ -164,11 +167,11 @@ export function persistGatewayToken(token: string): void {
 }
 
 /** Returns persisted gateway token. */
-export function getPersistedGatewayToken(): string | null {
+export function getPersistedGatewayToken(): string | undefined {
     const row = database
         .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
         .get() as undefined | { value: string };
-    return row?.value || null;
+    return row?.value || undefined;
 }
 
 /** Creates session. */
@@ -199,7 +202,7 @@ export function cleanupExpiredSessions(): void {
 }
 
 /** Returns auth user from session ID. */
-export function getAuthUserFromSessionId(sessionId: string): AuthUser | null {
+export function getAuthUserFromSessionId(sessionId: string): AuthUser | undefined {
     cleanupExpiredSessions();
 
     const row = database
@@ -211,5 +214,5 @@ export function getAuthUserFromSessionId(sessionId: string): AuthUser | null {
         )
         .get(sessionId, nowIso()) as AuthUser | undefined;
 
-    return row || null;
+    return row || undefined;
 }

@@ -19,6 +19,7 @@
         "noUnusedParameters": true,
         "noImplicitAny": true,
         "noImplicitReturns": true,
+        "noUncheckedIndexedAccess": true,
         "noFallthroughCasesInSwitch": true,
         "noImplicitOverride": true,
         "declaration": true,

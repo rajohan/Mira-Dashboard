@@ -7,7 +7,7 @@ const ELEVENLABS_TTS_VOICE_ID =
     process.env.ELEVENLABS_TTS_VOICE_ID ||
     process.env.ELEVENLABS_VOICE_ID ||
     "q7O4dHCU5KzDbUYNsckR";
-const MAX_TTS_TEXT_LENGTH = 4_000;
+const MAX_TTS_TEXT_LENGTH = 4000;
 
 interface TtsRequestBody {
     text?: unknown;

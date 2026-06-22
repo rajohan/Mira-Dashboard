@@ -131,11 +131,11 @@ export function requestIp(request: Request, server: Server<unknown>): string | u
     return server.requestIP(request)?.address;
 }
 
-export function isLoopbackAddress(address?: string | null): boolean {
+export function isLoopbackAddress(address?: string | undefined): boolean {
     return Boolean(address && ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address));
 }
 
-export function isTrustedProxyAddress(address?: string | null): boolean {
+export function isTrustedProxyAddress(address?: string | undefined): boolean {
     return (
         isLoopbackAddress(address) || Boolean(address && TRUSTED_PROXY_IPS.has(address))
     );
@@ -162,10 +162,10 @@ export function isAllowedDashboardOrigin(request: Request): boolean {
     }
 }
 
-export function sessionIdFromCookie(request: Request): string | null {
+export function sessionIdFromCookie(request: Request): string | undefined {
     const cookieHeader = request.headers.get("cookie");
     if (!cookieHeader) {
-        return null;
+        return undefined;
     }
     for (const part of cookieHeader.split(";")) {
         const trimmed = part.trim();
@@ -173,14 +173,17 @@ export function sessionIdFromCookie(request: Request): string | null {
             try {
                 return decodeURIComponent(trimmed.slice(SESSION_COOKIE.length + 1));
             } catch {
-                return null;
+                return undefined;
             }
         }
     }
-    return null;
+    return undefined;
 }
 
-export function authUser(request: Request, server: Server<unknown>): AuthUser | null {
+export function authUser(
+    request: Request,
+    server: Server<unknown>
+): AuthUser | undefined {
     const hasForwardedClient =
         Boolean(request.headers.get("x-forwarded-for")) ||
         Boolean(request.headers.get("x-real-ip"));
@@ -193,7 +196,7 @@ export function authUser(request: Request, server: Server<unknown>): AuthUser | 
         return { id: 0, username: "mira-local" };
     }
     const sessionId = sessionIdFromCookie(request);
-    return sessionId ? getAuthUserFromSessionId(sessionId) : null;
+    return sessionId ? getAuthUserFromSessionId(sessionId) : undefined;
 }
 
 function isSecureRequest(request: Request, server: Server<unknown>): boolean {

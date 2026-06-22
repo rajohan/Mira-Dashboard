@@ -1,7 +1,7 @@
 import { rm } from "node:fs/promises";
 import path from "node:path";
 
-import { database, miraDatabasePath } from "../database.ts";
+import { database, miraDatabasePath, sqlNullable } from "../database.ts";
 import { errorMessage } from "../lib/errors.ts";
 import {
     killProcessGroup,
@@ -41,7 +41,7 @@ const OPINIONATED_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DIS
 const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "restart-scheduled"]);
 const BUN_EXECUTABLE = process.env.BUN_BINARY || "bun";
 
-function resolveExecutableFromPath(executable: string): string | null {
+function resolveExecutableFromPath(executable: string): string | undefined {
     if (path.isAbsolute(executable)) {
         return executable;
     }
@@ -49,7 +49,7 @@ function resolveExecutableFromPath(executable: string): string | null {
         return path.resolve(executable);
     }
 
-    return Bun.which(executable);
+    return Bun.which(executable) ?? undefined;
 }
 
 function resolveBunExecutable(): string {
@@ -208,11 +208,11 @@ function writeDeploymentJob(job: DeploymentJob): void {
             job.status,
             job.startedAt,
             job.updatedAt,
-            job.commit ?? null,
-            job.commitTitle ?? null,
-            job.note ?? null,
-            job.stdout ?? null,
-            job.stderr ?? null
+            sqlNullable(job.commit ?? undefined),
+            sqlNullable(job.commitTitle ?? undefined),
+            sqlNullable(job.note ?? undefined),
+            sqlNullable(job.stdout ?? undefined),
+            sqlNullable(job.stderr ?? undefined)
         );
 }
 
@@ -221,11 +221,11 @@ interface DeploymentJobRow {
     status: DeploymentJob["status"];
     started_at: string;
     updated_at: string;
-    commit_sha: string | null;
-    commit_title: string | null;
-    note: string | null;
-    stdout: string | null;
-    stderr: string | null;
+    commit_sha: string | undefined;
+    commit_title: string | undefined;
+    note: string | undefined;
+    stdout: string | undefined;
+    stderr: string | undefined;
 }
 
 function mapDeploymentJob(row: DeploymentJobRow): DeploymentJob {
@@ -383,7 +383,7 @@ export function readDeploymentJobs(): DeploymentJob[] {
                 `
             )
             .all(RECENT_DEPLOYMENTS_LIMIT) as unknown as DeploymentJobRow[]
-    ).map(mapDeploymentJob);
+    ).map((row) => mapDeploymentJob(row));
 }
 
 /** Performs trim output. */
@@ -468,7 +468,7 @@ function hasReviewerApproval(pr: PullRequestSummary): boolean {
             review.author?.login === author &&
             OPINIONATED_REVIEW_STATES.has(review.state?.toUpperCase() || "")
     );
-    const latestReview = reviews.sort((a, b) =>
+    const latestReview = reviews.toSorted((a, b) =>
         String(b.submittedAt || "").localeCompare(String(a.submittedAt || ""))
     )[0];
     return latestReview?.state?.toUpperCase() === "APPROVED";
@@ -571,16 +571,16 @@ function toGhJsonParseError(error: unknown): Error {
 }
 
 function clearForceKillTimerIfAllowed(
-    forceKillTimer: NodeJS.Timeout | null,
+    forceKillTimer: NodeJS.Timeout | undefined,
     options: { keepForceKillTimer?: boolean },
     shouldPreserveForceKillTimer: boolean,
     clearTimer: (timer: NodeJS.Timeout) => void = clearTimeout
-): NodeJS.Timeout | null {
+): NodeJS.Timeout | undefined {
     if (!forceKillTimer || options.keepForceKillTimer || shouldPreserveForceKillTimer) {
         return forceKillTimer;
     }
     clearTimer(forceKillTimer);
-    return null;
+    return undefined;
 }
 
 /** Streams newline-delimited JSON values from a GitHub CLI command. */
@@ -597,7 +597,7 @@ async function runGhJsonLines<T>(
         let stdoutBuffer = "";
         let stderr = "";
         let isSettled = false;
-        let forceKillTimer: NodeJS.Timeout | null = null;
+        let forceKillTimer: NodeJS.Timeout | undefined;
         let isPreserveForceKillTimer = false;
         const terminateGhProcess = (signal: NodeJS.Signals) => {
             try {
@@ -613,7 +613,7 @@ async function runGhJsonLines<T>(
 
             forceKillTimer = setTimeout(() => {
                 terminateGhProcess("SIGKILL");
-            }, 5_000);
+            }, 5000);
             forceKillTimer.unref();
         };
         const timeout = setTimeout(() => {
@@ -820,7 +820,9 @@ export async function listDashboardPullRequests(): Promise<PullRequestSummary[]>
         })
     );
 
-    return refreshedPullRequests.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return refreshedPullRequests.toSorted((a, b) =>
+        b.updatedAt.localeCompare(a.updatedAt)
+    );
 }
 
 /** Returns whether a blocked list state should be verified with fresh PR details. */
@@ -915,7 +917,7 @@ function isPathInsideRoot(value: string, root: string): boolean {
 }
 
 /** Performs find worktree for branch. */
-async function findWorktreeForBranch(branch: string): Promise<GitWorktree | null> {
+async function findWorktreeForBranch(branch: string): Promise<GitWorktree | undefined> {
     const { stdout } = await runCommand("git", ["worktree", "list", "--porcelain"], {
         timeoutMs: 30_000,
     });
@@ -924,7 +926,7 @@ async function findWorktreeForBranch(branch: string): Promise<GitWorktree | null
         parseGitWorktrees(stdout).find(
             (worktree) =>
                 worktree.branch === expectedReference || worktree.branch === branch
-        ) || null
+        ) || undefined
     );
 }
 
@@ -1235,11 +1237,11 @@ try {
     job.status,
     job.startedAt,
     job.updatedAt,
-    job.commit ?? null,
-    job.commitTitle ?? null,
-    job.note ?? null,
-    job.stdout ?? null,
-    job.stderr ?? null
+    job.commit ?? undefined,
+    job.commitTitle ?? undefined,
+    job.note ?? undefined,
+    job.stdout ?? undefined,
+    job.stderr ?? undefined
 );
     database.prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?").run(job.id);
     database.run("COMMIT");
