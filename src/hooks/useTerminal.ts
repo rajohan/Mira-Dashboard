@@ -7,11 +7,11 @@ import { apiFetchRequired, apiPost, apiPostRequired } from "./useApi";
 export interface TerminalJobResponse {
     jobId: string;
     status: "running" | "done";
-    code: number | undefined;
+    code?: number;
     stdout: string;
     stderr: string;
     startedAt: number;
-    endedAt: number | undefined;
+    endedAt?: number;
 }
 
 /** Represents terminal command. */
@@ -63,11 +63,11 @@ export interface CommandHistoryEntry {
     cwd: string;
     jobId: string | undefined;
     status: "pending" | "running" | "done" | "error";
-    code: number | undefined;
+    code?: number;
     stdout: string;
     stderr: string;
     startedAt: number;
-    endedAt: number | undefined;
+    endedAt?: number;
 }
 
 /** Represents completion item. */

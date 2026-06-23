@@ -527,10 +527,16 @@ export const taskRoutes = {
     "/api/tasks/:id/assign": {
         POST: async (request: ParametersRequest<"id">) => {
             const id = safeId(request.params.id);
-            const body = await readTaskJson<{ assignee?: string | undefined }>(request);
+            const body = await readTaskJson<{ assignee?: string | null | undefined }>(
+                request
+            );
             if (body instanceof Response) return body;
             if (id === undefined) return json({ error: "Invalid id" }, { status: 400 });
-            if (body.assignee !== undefined && !isValidAssignee(body.assignee)) {
+            if (
+                body.assignee !== undefined &&
+                body.assignee !== null &&
+                !isValidAssignee(body.assignee)
+            ) {
                 return json({ error: INVALID_ASSIGNEE_MESSAGE }, { status: 400 });
             }
             const assignee = body.assignee ?? undefined;

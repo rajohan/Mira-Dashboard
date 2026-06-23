@@ -938,7 +938,11 @@ export function registerBackupScheduledJobs(): void {
                 scheduleType: existing?.scheduleType ?? job.scheduleType,
                 intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
                 timeOfDay: existing?.timeOfDay ?? job.timeOfDay,
-                cronExpression: existing?.cronExpression ?? undefined,
+                cronExpression:
+                    existing?.cronExpression ??
+                    ("cronExpression" in job && typeof job.cronExpression === "string"
+                        ? job.cronExpression
+                        : undefined),
             });
         }
         database.run("COMMIT");

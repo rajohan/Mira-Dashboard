@@ -23,6 +23,21 @@ interface SystemHostPayload {
     checkedAt?: string;
 }
 
+function normalizeCacheNulls(value: unknown): unknown {
+    if (value === null) {
+        return undefined;
+    }
+    if (Array.isArray(value)) {
+        return value.map((entry) => normalizeCacheNulls(entry));
+    }
+    if (typeof value === "object" && value !== null) {
+        return Object.fromEntries(
+            Object.entries(value).map(([key, entry]) => [key, normalizeCacheNulls(entry)])
+        );
+    }
+    return value;
+}
+
 /** Represents the cached system host API response. */
 export interface CachedSystemHostResponse {
     source: string;
@@ -43,10 +58,11 @@ export async function fetchCachedSystemHost(): Promise<CachedSystemHostResponse>
         throw new Error("System host cache entry not found or not fresh");
     }
 
-    const data = parseJsonField<SystemHostPayload>(row.data);
-    if (!data) {
+    const parsedData = parseJsonField<SystemHostPayload>(row.data);
+    if (!parsedData) {
         throw new Error("System host cache payload is invalid");
     }
+    const data = normalizeCacheNulls(parsedData) as SystemHostPayload;
 
     return {
         source: row.source,

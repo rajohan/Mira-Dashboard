@@ -29,6 +29,8 @@ import { Input } from "../../ui/Input";
 import { Modal } from "../../ui/Modal";
 import { Textarea } from "../../ui/Textarea";
 
+const CLEAR_TASK_AUTOMATION = JSON.parse("null") as null;
+
 /** Returns a stable task column for movement controls. */
 export function normalizeTaskDetailColumn(column?: ColumnId | undefined): ColumnId {
     return column ?? "todo";
@@ -74,6 +76,7 @@ interface TaskDetailModalProperties {
         labels?: string[];
         automation?:
             | Pick<TaskAutomation, "cronJobId" | "scheduleSummary" | "sessionTarget">
+            | null
             | undefined;
     }) => Promise<Task>;
     updates: TaskUpdate[];
@@ -230,7 +233,7 @@ export function TaskDetailModal({
                       scheduleSummary,
                       sessionTarget,
                   }
-                : undefined,
+                : CLEAR_TASK_AUTOMATION,
         });
 
         setIsEditingTask(false);

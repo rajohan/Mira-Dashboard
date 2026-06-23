@@ -140,7 +140,7 @@ function toNumber(value: unknown, fallback = 0): number {
     return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function toNullableNumber(value: unknown): number | undefined {
+function toOptionalNumber(value: unknown): number | undefined {
     if (value == undefined) {
         return undefined;
     }
@@ -151,11 +151,11 @@ function toNullableNumber(value: unknown): number | undefined {
     return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function stringOrNull(value: unknown): string | undefined {
+function toOptionalString(value: unknown): string | undefined {
     return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
-function numberOrNull(value: unknown): number | undefined {
+function toOptionalFiniteNumber(value: unknown): number | undefined {
     return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
@@ -603,18 +603,18 @@ async function fetchSpydebergWeather() {
             source: "wttr.in",
             data: {
                 location: SPYDEBERG.name,
-                temperatureC: toNullableNumber(current.temp_C),
-                feelsLikeC: toNullableNumber(current.FeelsLikeC),
-                humidityPercent: toNullableNumber(current.humidity),
-                windKph: toNullableNumber(current.windspeedKmph),
+                temperatureC: toOptionalNumber(current.temp_C),
+                feelsLikeC: toOptionalNumber(current.FeelsLikeC),
+                humidityPercent: toOptionalNumber(current.humidity),
+                windKph: toOptionalNumber(current.windspeedKmph),
                 description:
                     asRecord(
                         Array.isArray(current.weatherDesc)
                             ? current.weatherDesc[0]
                             : undefined
                     ).value || "Unknown",
-                minTempC: toNullableNumber(today.mintempC),
-                maxTempC: toNullableNumber(today.maxtempC),
+                minTempC: toOptionalNumber(today.mintempC),
+                maxTempC: toOptionalNumber(today.maxtempC),
                 forecast: (Array.isArray(data.weather) ? data.weather : [])
                     .slice(0, 3)
                     .map((dayValue) => {
@@ -624,8 +624,8 @@ async function fetchSpydebergWeather() {
                         );
                         return {
                             date: day.date,
-                            minTempC: toNullableNumber(day.mintempC),
-                            maxTempC: toNullableNumber(day.maxtempC),
+                            minTempC: toOptionalNumber(day.mintempC),
+                            maxTempC: toOptionalNumber(day.maxtempC),
                             description:
                                 asRecord(
                                     Array.isArray(hourly.weatherDesc)
@@ -721,7 +721,8 @@ function latestOpenClawVersionFromUpdateStatus(value: unknown): string | undefin
     const update = asRecord(updateStatus.update);
     const registry = asRecord(update.registry);
     return (
-        stringOrNull(availability.latestVersion) || stringOrNull(registry.latestVersion)
+        toOptionalString(availability.latestVersion) ||
+        toOptionalString(registry.latestVersion)
     );
 }
 
@@ -961,7 +962,7 @@ async function refreshSystemCache() {
     }
     const latestVersion =
         latestOpenClawVersionFromUpdateStatus(updateStatus) ||
-        stringOrNull(registry.latestVersion);
+        toOptionalString(registry.latestVersion);
     const version = {
         current: currentVersion,
         latest: latestVersion,
@@ -1073,15 +1074,15 @@ function summarizeKopiaSnapshot(value: unknown) {
     const source = asRecord(snapshot.source);
     const stats = asRecord(snapshot.stats);
     return {
-        id: stringOrNull(snapshot.id),
-        path: stringOrNull(source.path),
-        description: stringOrNull(snapshot.description),
-        startTime: stringOrNull(snapshot.startTime),
-        endTime: stringOrNull(snapshot.endTime),
-        fileCount: numberOrNull(stats.fileCount),
-        totalSize: numberOrNull(stats.totalSize),
-        errorCount: numberOrNull(stats.errorCount),
-        ignoredErrorCount: numberOrNull(stats.ignoredErrorCount),
+        id: toOptionalString(snapshot.id),
+        path: toOptionalString(source.path),
+        description: toOptionalString(snapshot.description),
+        startTime: toOptionalString(snapshot.startTime),
+        endTime: toOptionalString(snapshot.endTime),
+        fileCount: toOptionalFiniteNumber(stats.fileCount),
+        totalSize: toOptionalFiniteNumber(stats.totalSize),
+        errorCount: toOptionalFiniteNumber(stats.errorCount),
+        ignoredErrorCount: toOptionalFiniteNumber(stats.ignoredErrorCount),
         retentionReason: Array.isArray(snapshot.retentionReason)
             ? snapshot.retentionReason
             : [],
@@ -1192,25 +1193,25 @@ async function refreshKopiaBackupCache() {
 function summarizeWalgBackup(value: unknown) {
     const backup = asRecord(value);
     const modified = firstValidTimestampValue(
-        stringOrNull(backup.finish_time),
-        stringOrNull(backup.start_time),
-        stringOrNull(backup.time),
-        stringOrNull(backup.modified)
+        toOptionalString(backup.finish_time),
+        toOptionalString(backup.start_time),
+        toOptionalString(backup.time),
+        toOptionalString(backup.modified)
     );
     const freshnessTime = firstValidTimestampValue(
-        stringOrNull(backup.finish_time),
-        stringOrNull(backup.start_time),
-        stringOrNull(backup.time)
+        toOptionalString(backup.finish_time),
+        toOptionalString(backup.start_time),
+        toOptionalString(backup.time)
     );
     return {
-        backupName: stringOrNull(backup.backup_name),
+        backupName: toOptionalString(backup.backup_name),
         modified,
-        time: stringOrNull(backup.time),
-        startTime: stringOrNull(backup.start_time),
-        finishTime: stringOrNull(backup.finish_time),
+        time: toOptionalString(backup.time),
+        startTime: toOptionalString(backup.start_time),
+        finishTime: toOptionalString(backup.finish_time),
         freshnessTime: freshnessTime ?? modified,
-        walFileName: stringOrNull(backup.wal_file_name),
-        storageName: stringOrNull(backup.storage_name),
+        walFileName: toOptionalString(backup.wal_file_name),
+        storageName: toOptionalString(backup.storage_name),
     };
 }
 
@@ -1311,10 +1312,10 @@ async function checkElevenLabsQuota() {
     const subscription = asRecord(data.subscription);
     const used = toNumber(subscription.character_count);
     const total = toNumber(subscription.character_limit);
-    const resetMsCandidate = toNullableNumber(
+    const resetMsCandidate = toOptionalNumber(
         subscription.next_character_count_reset_unix_ms
     );
-    const resetSecCandidate = toNullableNumber(
+    const resetSecCandidate = toOptionalNumber(
         subscription.next_character_count_reset_unix
     );
     return {
@@ -1354,7 +1355,7 @@ async function checkSyntheticQuota() {
     const weeklyMaxCredits = toCurrencyNumber(weeklyTokenLimit.maxCredits);
     const weeklyRemainingCredits = toCurrencyNumber(weeklyTokenLimit.remainingCredits);
     const weeklyNextRegenCredits = toCurrencyNumber(weeklyTokenLimit.nextRegenCredits);
-    const explicitWeeklyPercentRemaining = toNullableNumber(
+    const explicitWeeklyPercentRemaining = toOptionalNumber(
         weeklyTokenLimit.percentRemaining
     );
     const computedWeeklyPercentRemaining =
@@ -2179,7 +2180,11 @@ export function registerCacheRefreshScheduledJobs(): void {
                     : "timeOfDay" in job && typeof job.timeOfDay === "string"
                       ? job.timeOfDay
                       : undefined,
-                cronExpression: existing?.cronExpression ?? undefined,
+                cronExpression:
+                    existing?.cronExpression ??
+                    ("cronExpression" in job && typeof job.cronExpression === "string"
+                        ? job.cronExpression
+                        : undefined),
             });
             if (existing?.enabled ?? true) {
                 seedKeys.push(job.actionPayload.key);

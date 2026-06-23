@@ -233,6 +233,7 @@ export function Tasks() {
             labels?: string[];
             automation?:
                 | Pick<TaskAutomation, "cronJobId" | "scheduleSummary" | "sessionTarget">
+                | null
                 | undefined;
         }
     ) => {
