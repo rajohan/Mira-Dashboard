@@ -89,8 +89,7 @@ function rollbackFirstUserBootstrap(
             throw new AggregateError(
                 [error, rollbackError],
                 "First-user rollback transaction and rollback failed",
-                // eslint-disable-next-line preserve-caught-error -- the root transaction error should remain the cause; rollbackError is included in errors.
-                { cause: error }
+                { cause: rollbackError }
             );
         }
         throw error;
@@ -114,8 +113,7 @@ function rollbackCreatedFirstUser(userId: number): void {
             throw new AggregateError(
                 [error, rollbackError],
                 "First-user cleanup transaction and rollback failed",
-                // eslint-disable-next-line preserve-caught-error -- the root transaction error should remain the cause; rollbackError is included in errors.
-                { cause: error }
+                { cause: rollbackError }
             );
         }
         throw error;

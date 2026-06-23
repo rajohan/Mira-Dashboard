@@ -56,41 +56,6 @@ export interface MoltbookCacheResponse<T> {
     meta: Record<string, unknown>;
 }
 
-const CACHE_NULL_SENTINEL_FIELDS = new Set([
-    "agent",
-    "authorName",
-    "createdAt",
-    "exploreCount",
-    "feedFilter",
-    "feedType",
-    "latestAnnouncement",
-    "postId",
-    "postsFromAccountsYouFollowCount",
-    "previewText",
-    "tip",
-    "title",
-]);
-
-function normalizeCacheNulls(value: unknown): unknown {
-    if (value === null) {
-        return value;
-    }
-    if (Array.isArray(value)) {
-        return value;
-    }
-    if (typeof value === "object") {
-        return Object.fromEntries(
-            Object.entries(value).map(([key, entry]) => [
-                key,
-                entry === null && CACHE_NULL_SENTINEL_FIELDS.has(key)
-                    ? undefined
-                    : normalizeCacheNulls(entry),
-            ])
-        );
-    }
-    return value;
-}
-
 /** Fetches cached moltbook entry. */
 async function fetchCachedMoltbookEntry<T>(
     key: string
@@ -104,8 +69,6 @@ async function fetchCachedMoltbookEntry<T>(
     if (parsedData === undefined) {
         throw new Error(`Moltbook cache payload is invalid: ${key}`);
     }
-    const data = normalizeCacheNulls(parsedData) as T;
-
     return {
         source: row.source,
         status: row.status,
@@ -115,7 +78,7 @@ async function fetchCachedMoltbookEntry<T>(
         errorCode: row.error_code || undefined,
         errorMessage: row.error_message || undefined,
         consecutiveFailures: Number(row.consecutive_failures),
-        data,
+        data: parsedData,
         meta: parseJsonField<Record<string, unknown>>(row.meta) ?? {},
     };
 }
