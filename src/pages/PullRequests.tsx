@@ -428,9 +428,13 @@ function PullRequestDescription({ body }: { body: string }) {
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeRaw, rehypeSanitize]}
                     components={{
-                        a: ({ node, ...properties }) => {
+                        a: ({ node, children, ...properties }) => {
                             void node;
-                            return <a {...properties} target="_blank" rel="noreferrer" />;
+                            return (
+                                <a {...properties} target="_blank" rel="noreferrer">
+                                    {children}
+                                </a>
+                            );
                         },
                     }}
                 >

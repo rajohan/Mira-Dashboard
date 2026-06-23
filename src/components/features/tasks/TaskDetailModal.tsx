@@ -308,10 +308,10 @@ export function TaskDetailModal({
                                     onChange={(event) => setEditBody(event.target.value)}
                                     rows={4}
                                 />
-                                <div>
-                                    <label className="text-primary-300 mb-1.5 block text-sm font-medium">
+                                <fieldset>
+                                    <legend className="text-primary-300 mb-1.5 block text-sm font-medium">
                                         Priority
-                                    </label>
+                                    </legend>
                                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                                         {(["low", "medium", "high"] as const).map((p) => (
                                             <Button
@@ -329,7 +329,7 @@ export function TaskDetailModal({
                                             </Button>
                                         ))}
                                     </div>
-                                </div>
+                                </fieldset>
                                 <div className="border-primary-700 bg-primary-900/30 space-y-3 rounded-lg border p-3">
                                     <div>
                                         <h3 className="text-primary-200 text-sm font-semibold">

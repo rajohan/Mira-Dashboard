@@ -155,7 +155,7 @@ function ChatCodeBlock({ code, language }: { code: string; language: string }) {
 
 export const markdownComponents: Components = {
     a(properties) {
-        const { node, className, ...anchorProperties } = properties;
+        const { node, className, children, ...anchorProperties } = properties;
         void node;
 
         return (
@@ -167,7 +167,9 @@ export const markdownComponents: Components = {
                     "text-inherit underline decoration-current/50 underline-offset-2 hover:opacity-80",
                     className
                 )}
-            />
+            >
+                {children}
+            </a>
         );
     },
     blockquote(properties) {

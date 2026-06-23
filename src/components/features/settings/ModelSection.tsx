@@ -44,26 +44,18 @@ export function ModelSection({
         <ExpandableCard title="Model Configuration" icon={Wrench}>
             <div className="space-y-4">
                 <div className="grid gap-4 lg:grid-cols-2">
-                    <div>
-                        <label className="text-primary-300 mb-1.5 block text-sm font-medium">
-                            Default model
-                        </label>
-                        <Input
-                            value={primary}
-                            onChange={(event) => setPrimary(event.target.value)}
-                            placeholder="codex"
-                        />
-                    </div>
-                    <div>
-                        <label className="text-primary-300 mb-1.5 block text-sm font-medium">
-                            Fallback models
-                        </label>
-                        <Input
-                            value={fallbackText}
-                            onChange={(event) => setFallbackText(event.target.value)}
-                            placeholder="glm51, kimi"
-                        />
-                    </div>
+                    <Input
+                        label="Default model"
+                        value={primary}
+                        onChange={(event) => setPrimary(event.target.value)}
+                        placeholder="codex"
+                    />
+                    <Input
+                        label="Fallback models"
+                        value={fallbackText}
+                        onChange={(event) => setFallbackText(event.target.value)}
+                        placeholder="glm51, kimi"
+                    />
                 </div>
 
                 <div className="border-primary-800 bg-primary-900/50 rounded-lg border px-3 py-2">

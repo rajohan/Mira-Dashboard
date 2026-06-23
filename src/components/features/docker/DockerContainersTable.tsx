@@ -271,16 +271,16 @@ export function DockerContainersTable({
             cell: (info) => {
                 const container = info.row.original;
                 return (
-                    <div
-                        className="flex flex-nowrap items-center gap-2"
-                        onClick={(event) => event.stopPropagation()}
-                    >
+                    <div className="flex flex-nowrap items-center gap-2">
                         <Button
                             size="sm"
                             variant="secondary"
                             title={`Show logs for ${container.name}`}
                             aria-label={`Show logs for ${container.name}`}
-                            onClick={() => onLogs(container.id)}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onLogs(container.id);
+                            }}
                         >
                             <FileText className="h-4 w-4" />
                         </Button>
@@ -289,7 +289,10 @@ export function DockerContainersTable({
                             variant="secondary"
                             title={`Open console for ${container.name}`}
                             aria-label={`Open console for ${container.name}`}
-                            onClick={() => onConsole(container.id)}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onConsole(container.id);
+                            }}
                         >
                             <SquareTerminal className="h-4 w-4" />
                         </Button>
@@ -298,7 +301,10 @@ export function DockerContainersTable({
                             variant="secondary"
                             title={`Restart ${container.name}`}
                             aria-label={`Restart ${container.name}`}
-                            onClick={() => onRestart(container.id)}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onRestart(container.id);
+                            }}
                         >
                             <RotateCcw className="h-4 w-4" />
                         </Button>
@@ -397,15 +403,15 @@ export function DockerContainersTable({
                                     Ports: {container.ports.join(", ")}
                                 </div>
                             ) : undefined}
-                            <div
-                                className="mt-3 grid grid-cols-3 gap-2"
-                                onClick={(event) => event.stopPropagation()}
-                            >
+                            <div className="mt-3 grid grid-cols-3 gap-2">
                                 <Button
                                     size="sm"
                                     variant="secondary"
                                     aria-label={`Show logs for ${container.name}`}
-                                    onClick={() => onLogs(container.id)}
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        onLogs(container.id);
+                                    }}
                                 >
                                     <FileText className="h-4 w-4" />
                                 </Button>
@@ -413,7 +419,10 @@ export function DockerContainersTable({
                                     size="sm"
                                     variant="secondary"
                                     aria-label={`Open console for ${container.name}`}
-                                    onClick={() => onConsole(container.id)}
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        onConsole(container.id);
+                                    }}
                                 >
                                     <SquareTerminal className="h-4 w-4" />
                                 </Button>
@@ -421,7 +430,10 @@ export function DockerContainersTable({
                                     size="sm"
                                     variant="secondary"
                                     aria-label={`Restart ${container.name}`}
-                                    onClick={() => onRestart(container.id)}
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        onRestart(container.id);
+                                    }}
                                 >
                                     <RotateCcw className="h-4 w-4" />
                                 </Button>

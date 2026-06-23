@@ -117,10 +117,7 @@ export function SessionsTable({
             header: "",
             /** Renders the row action menu without selecting the row. */
             cell: ({ row }) => (
-                <div
-                    className="flex justify-end"
-                    onClick={(event_) => event_.stopPropagation()}
-                >
+                <div className="flex justify-end">
                     <SessionActionsDropdown
                         ariaLabel={`Actions for ${getSessionName(row.original, "unknown")}`}
                         onCompact={() => onCompact(row.original.key)}
@@ -170,10 +167,7 @@ export function SessionsTable({
                                         {name}
                                     </div>
                                 </div>
-                                <div
-                                    className="shrink-0"
-                                    onClick={(event) => event.stopPropagation()}
-                                >
+                                <div className="shrink-0">
                                     <SessionActionsDropdown
                                         ariaLabel={`Actions for ${name}`}
                                         onCompact={() => onCompact(session.key)}

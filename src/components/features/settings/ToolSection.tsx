@@ -80,25 +80,21 @@ export function ToolSection({
         <ExpandableCard title="Tools" icon={Wrench}>
             <div className="space-y-4">
                 <div className="grid gap-4 lg:grid-cols-3">
+                    <Input
+                        label="Tool profile"
+                        value={draft.profile || ""}
+                        onChange={(event) =>
+                            setDraft((wasPrevious) => ({
+                                ...wasPrevious,
+                                profile: event.target.value,
+                            }))
+                        }
+                        placeholder="full"
+                    />
                     <div>
-                        <label className="text-primary-300 mb-1.5 block text-sm font-medium">
-                            Tool profile
-                        </label>
-                        <Input
-                            value={draft.profile || ""}
-                            onChange={(event) =>
-                                setDraft((wasPrevious) => ({
-                                    ...wasPrevious,
-                                    profile: event.target.value,
-                                }))
-                            }
-                            placeholder="full"
-                        />
-                    </div>
-                    <div>
-                        <label className="text-primary-300 mb-1.5 block text-sm font-medium">
+                        <div className="text-primary-300 mb-1.5 block text-sm font-medium">
                             Exec security
-                        </label>
+                        </div>
                         <Select
                             value={draft.execSecurity}
                             onChange={(value) =>
@@ -112,13 +108,14 @@ export function ToolSection({
                                 { value: "allowlist", label: "Allowlist" },
                                 { value: "full", label: "Full" },
                             ]}
+                            ariaLabel="Exec security"
                             width="w-full"
                         />
                     </div>
                     <div>
-                        <label className="text-primary-300 mb-1.5 block text-sm font-medium">
+                        <div className="text-primary-300 mb-1.5 block text-sm font-medium">
                             Exec approval
-                        </label>
+                        </div>
                         <Select
                             value={draft.execAsk}
                             onChange={(value) =>
@@ -132,6 +129,7 @@ export function ToolSection({
                                 { value: "on-miss", label: "On miss" },
                                 { value: "always", label: "Always" },
                             ]}
+                            ariaLabel="Exec approval"
                             width="w-full"
                         />
                     </div>
@@ -189,36 +187,28 @@ export function ToolSection({
                 </div>
 
                 <div className="grid gap-4 lg:grid-cols-2">
-                    <div>
-                        <label className="text-primary-300 mb-1.5 block text-sm font-medium">
-                            Web search provider
-                        </label>
-                        <Input
-                            value={draft.webSearchProvider}
-                            onChange={(event) =>
-                                setDraft((wasPrevious) => ({
-                                    ...wasPrevious,
-                                    webSearchProvider: event.target.value,
-                                }))
-                            }
-                            placeholder="brave"
-                        />
-                    </div>
-                    <div>
-                        <label className="text-primary-300 mb-1.5 block text-sm font-medium">
-                            Sessions visibility
-                        </label>
-                        <Input
-                            value={draft.sessionsVisibility || ""}
-                            onChange={(event) =>
-                                setDraft((wasPrevious) => ({
-                                    ...wasPrevious,
-                                    sessionsVisibility: event.target.value,
-                                }))
-                            }
-                            placeholder="all"
-                        />
-                    </div>
+                    <Input
+                        label="Web search provider"
+                        value={draft.webSearchProvider}
+                        onChange={(event) =>
+                            setDraft((wasPrevious) => ({
+                                ...wasPrevious,
+                                webSearchProvider: event.target.value,
+                            }))
+                        }
+                        placeholder="brave"
+                    />
+                    <Input
+                        label="Sessions visibility"
+                        value={draft.sessionsVisibility || ""}
+                        onChange={(event) =>
+                            setDraft((wasPrevious) => ({
+                                ...wasPrevious,
+                                sessionsVisibility: event.target.value,
+                            }))
+                        }
+                        placeholder="all"
+                    />
                 </div>
 
                 <div className="flex justify-end">
