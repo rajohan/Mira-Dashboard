@@ -19,7 +19,7 @@ interface SqliteCacheEntryRow {
     key: string;
     data_json: string | undefined;
     source: string;
-    updated_at: string | null | undefined;
+    updated_at: string | undefined;
     last_attempt_at: string;
     expires_at: string;
     status: string;
@@ -74,7 +74,7 @@ function mapCacheEntry(row: SqliteCacheEntryRow | undefined): CacheEntryRow | un
         key: row.key,
         data: row.data_json ?? "",
         source: row.source,
-        updated_at: row.updated_at ?? undefined,
+        updated_at: row.updated_at,
         last_attempt_at: row.last_attempt_at,
         expires_at: row.expires_at,
         status: isExpired ? "stale" : row.status,

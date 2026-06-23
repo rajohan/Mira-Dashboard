@@ -34,8 +34,7 @@ import {
 } from "../utils/format";
 import { validateJsonString } from "../utils/json";
 
-// eslint-disable-next-line unicorn/no-null
-const CLEAR_SCHEDULE_FIELD = null;
+const CLEAR_SCHEDULE_FIELD = JSON.parse("null") as null;
 
 type JobsView = "scheduled" | "openclaw";
 

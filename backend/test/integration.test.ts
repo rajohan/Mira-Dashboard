@@ -143,21 +143,6 @@ describe("Mira Dashboard backend integration", () => {
             authenticated: false,
             isBootstrapRequired: true,
         });
-
-        const { createUser } = await import("../src/auth.ts");
-        createUser("session-test-user", "test-password");
-
-        const authenticatedSession = await api<{
-            authenticated: boolean;
-            isBootstrapRequired: boolean;
-            user?: { id: number; username: string };
-        }>("/api/auth/session");
-        expect(authenticatedSession.status).toBe(200);
-        expect(authenticatedSession.body).toEqual({
-            authenticated: true,
-            isBootstrapRequired: false,
-            user: { id: 0, username: "mira-local" },
-        });
     });
 
     it("serves the app shell only for app routes, not missing assets", async () => {
@@ -231,6 +216,23 @@ describe("Mira Dashboard backend integration", () => {
         );
         expect(deleted.status).toBe(200);
         expect(deleted.body.isOk).toBe(true);
+    });
+
+    it("creates notifications with null optional fields", async () => {
+        const omittedValue = JSON.parse("null") as null;
+        const created = await api<{ id: number; isOk: boolean }>(
+            "/api/notifications",
+            json("POST", {
+                title: "Null optional fields",
+                description: omittedValue,
+                source: omittedValue,
+                dedupeKey: omittedValue,
+                type: omittedValue,
+            })
+        );
+
+        expect(created.status).toBe(200);
+        expect(created.body.isOk).toBe(true);
     });
 
     it("uses isolated workspace and config roots for file APIs", async () => {

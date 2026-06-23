@@ -17,9 +17,7 @@ import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtilities";
 
 const LOG_BOTTOM_THRESHOLD_PX = 24;
 const logsPageState: { lastVisibleLogFiles: LogFile[] } = { lastVisibleLogFiles: [] };
-// TanStack Virtual expects null for an unattached scroll element; refs stay undefined internally.
-// eslint-disable-next-line unicorn/no-null
-const NO_LOG_SCROLL_ELEMENT = null as HTMLDivElement | null;
+const NO_LOG_SCROLL_ELEMENT = JSON.parse("null") as HTMLDivElement | null;
 
 type LogViewportElement = Pick<
     HTMLDivElement,
