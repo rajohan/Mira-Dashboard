@@ -3,12 +3,12 @@ import path from "node:path";
 
 import { json } from "../http.ts";
 import { guardedPath, openReadNoFollowNonblockingGuarded } from "../lib/guardedOps.ts";
+import { resolveRealLogsDirectory } from "../lib/logRoots.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
 }
 
-const DEFAULT_LOGS_DIRECTORY = "/tmp/openclaw";
 const MIN_LOG_TAIL_BYTES = 64 * 1024;
 const MAX_LOG_LINE_COUNT = 5000;
 const MAX_LOG_TAIL_BYTES = 2 * 1024 * 1024;
@@ -47,12 +47,6 @@ function isOpenedLogPathWithinRoot(file: fs.promises.FileHandle, root: string): 
     } catch {
         return false;
     }
-}
-
-function resolveRealLogsDirectory(): string {
-    const logsDirectory =
-        process.env.MIRA_DASHBOARD_LOGS_ROOT?.trim() || DEFAULT_LOGS_DIRECTORY;
-    return fs.realpathSync(logsDirectory);
 }
 
 function parsePositiveLineCount(value: unknown): number | undefined {

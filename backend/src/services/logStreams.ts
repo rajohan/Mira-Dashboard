@@ -4,12 +4,12 @@ import path from "node:path";
 import type { DashboardSocket } from "../dashboardSocket.ts";
 import { errorMessage } from "../lib/errors.ts";
 import { guardedPath, openReadNoFollowNonblockingGuarded } from "../lib/guardedOps.ts";
+import { resolveRealLogsDirectory } from "../lib/logRoots.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
 }
 
-const DEFAULT_LOGS_DIRECTORY = "/tmp/openclaw";
 const logsRouteState: {
     logWatcher: NodeJS.Timeout | undefined;
     isLogPollInFlight: boolean;
@@ -29,17 +29,6 @@ const MIN_LOG_TAIL_BYTES = 64 * 1024;
 const LOG_BYTES_PER_REQUESTED_LINE = 1024;
 const LOG_TAIL_READ_CHUNK_BYTES = 64 * 1024;
 const MAX_LOG_TAIL_BYTES = 8 * 1024 * 1024;
-
-function resolveRealLogsDirectory(): string {
-    const logsDirectory =
-        process.env.MIRA_DASHBOARD_LOGS_ROOT?.trim() || DEFAULT_LOGS_DIRECTORY;
-    if (fs.lstatSync(logsDirectory).isSymbolicLink()) {
-        throw Object.assign(new Error("Log directory must not be a symlink"), {
-            code: "ELOOP",
-        });
-    }
-    return fs.realpathSync(logsDirectory);
-}
 
 /** Returns today log file. */
 function getTodayLogFile(root = resolveRealLogsDirectory()): string {

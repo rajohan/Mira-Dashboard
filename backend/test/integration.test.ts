@@ -179,6 +179,8 @@ async function createTestServer(
 describe("Mira Dashboard backend integration", () => {
     beforeAll(async () => {
         testState.originalHome = process.env.HOME;
+        testState.originalLoopbackAuth = process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH;
+        testState.originalLogsRoot = process.env.MIRA_DASHBOARD_LOGS_ROOT;
         testState.temporaryRoot = await fs.mkdtemp(
             path.join(os.tmpdir(), "mira-dashboard-test-")
         );
@@ -217,8 +219,6 @@ describe("Mira Dashboard backend integration", () => {
             "export const isOk = true;\n"
         );
 
-        testState.originalLoopbackAuth = process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH;
-        testState.originalLogsRoot = process.env.MIRA_DASHBOARD_LOGS_ROOT;
         process.env.MIRA_DASHBOARD_DB_PATH = path.join(
             testState.temporaryRoot,
             "dashboard.database"
