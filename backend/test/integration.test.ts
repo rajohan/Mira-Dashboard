@@ -9,6 +9,7 @@ const testState: {
     baseUrl: string;
     openclawRoot: string;
     originalHome?: string;
+    originalLogsRoot?: string;
     originalLoopbackAuth?: string;
     server?: Server<unknown>;
     temporaryRoot: string;
@@ -217,6 +218,7 @@ describe("Mira Dashboard backend integration", () => {
         );
 
         testState.originalLoopbackAuth = process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH;
+        testState.originalLogsRoot = process.env.MIRA_DASHBOARD_LOGS_ROOT;
         process.env.MIRA_DASHBOARD_DB_PATH = path.join(
             testState.temporaryRoot,
             "dashboard.database"
@@ -226,6 +228,7 @@ describe("Mira Dashboard backend integration", () => {
         process.env.HOME = homeRoot;
         process.env.WORKSPACE_ROOT = workspaceRoot;
         process.env.OPENCLAW_HOME = openclawRoot;
+        process.env.MIRA_DASHBOARD_LOGS_ROOT = openclawRoot;
         process.env.MIRA_DOCKER_ROOT = dockerRoot;
         process.env.MIRA_DOCKER_COMPOSE_WRAPPER = composeWrapper;
         process.env.TRUST_PROXY = "false";
@@ -248,6 +251,11 @@ describe("Mira Dashboard backend integration", () => {
             delete process.env.HOME;
         } else {
             process.env.HOME = testState.originalHome;
+        }
+        if (testState.originalLogsRoot === undefined) {
+            delete process.env.MIRA_DASHBOARD_LOGS_ROOT;
+        } else {
+            process.env.MIRA_DASHBOARD_LOGS_ROOT = testState.originalLogsRoot;
         }
         await fs.rm(testState.temporaryRoot, { recursive: true, force: true });
     });
