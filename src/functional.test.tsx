@@ -1,16 +1,85 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
 
+import type { ChatHistoryMessage } from "./components/features/chat/chatTypes";
+import {
+    chatErrorMessage,
+    dataUrlToBase64,
+    dedupeMessages,
+    displayMimeType,
+    isRecoveredAssistantText,
+    mergeWithRecentOptimisticMessages,
+    messageDeleteKey,
+    messageIdentity,
+} from "./components/features/chat/chatUtilities";
+import {
+    buildSlashCommandSuggestions,
+    slashCommandCanonicalName,
+} from "./components/features/chat/slashCommands";
 import { NotificationBell } from "./components/layout/NotificationBell";
 import { apiFetch, UnauthorizedError } from "./hooks/useApi";
+import { useKopiaBackup, useRunKopiaBackup, useWalgBackup } from "./hooks/useBackups";
+import { useFileContent, useFiles, useSaveFile } from "./hooks/useFiles";
+import { useLogContent, useLogFiles } from "./hooks/useLogs";
 import type { NotificationItem } from "./hooks/useNotifications";
+import {
+    useProductionCheckout,
+    usePullRequestDeployments,
+    usePullRequests,
+} from "./hooks/usePullRequests";
+import {
+    useRunScheduledJobNow,
+    useScheduledJobRuns,
+    useScheduledJobs,
+    useUpdateScheduledJob,
+} from "./hooks/useScheduledJobs";
 import { handleSocketMessage } from "./lib/socket/socketMessageRouter";
 import { Tasks } from "./pages/Tasks";
 import { authActions, authStore } from "./stores/authStore";
 import type { Task } from "./types/task";
+import {
+    formatCronLastStatus,
+    formatCronTimestamp,
+    getCronJobId,
+    getCronJobName,
+    getCronStateValue,
+    getCronStatusVariant,
+    isCronExpressionValid,
+    sortCronJobs,
+} from "./utils/cronUtilities";
+import {
+    getFileExtension,
+    getLanguage,
+    getSyntaxClass,
+    isBinaryFile,
+    isCodeFile,
+    isImageFile,
+    isJsonFile,
+    isMarkdownFile,
+} from "./utils/fileUtilities";
+import {
+    appTimeOfDayToUtcTimeOfDay,
+    formatSize,
+    formatTokenCount,
+    formatTokens,
+    formatUptime,
+    formatUtcTimeOfDayInAppTimeZone,
+    getTokenPercent,
+} from "./utils/format";
+import {
+    formatLogTime,
+    getLevelColor,
+    getSubsystemColor,
+    parseLogLine,
+} from "./utils/logUtilities";
+import {
+    formatSessionType,
+    getTypeSortOrder,
+    sortSessionsByTypeAndActivity,
+} from "./utils/sessionUtilities";
 import { getColumnId, getPriority, isTaskMatchSearch } from "./utils/taskUtilities";
 
 function task(overrides: Partial<Task> & Pick<Task, "number" | "title">): Task {
@@ -165,6 +234,40 @@ function renderWithQueryClient(children: ReactNode) {
     };
 }
 
+function renderHookWithQueryClient<Result>(callback: () => Result) {
+    const queryClient = new QueryClient({
+        defaultOptions: {
+            queries: { retry: false },
+            mutations: { retry: false },
+        },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+        createElement(QueryClientProvider, { client: queryClient }, children);
+
+    return {
+        ...renderHook(callback, { wrapper }),
+        queryClient,
+    };
+}
+
+function chatMessage(
+    overrides: Partial<ChatHistoryMessage> & Pick<ChatHistoryMessage, "role">
+): ChatHistoryMessage {
+    return {
+        role: overrides.role,
+        content: overrides.content ?? overrides.text ?? "",
+        text: overrides.text ?? "",
+        images: overrides.images,
+        attachments: overrides.attachments,
+        thinking: overrides.thinking,
+        toolCalls: overrides.toolCalls,
+        toolResult: overrides.toolResult,
+        timestamp: overrides.timestamp,
+        local: overrides.local,
+        runId: overrides.runId,
+    };
+}
+
 describe("Mira Dashboard frontend behavior", () => {
     beforeEach(() => {
         authActions.clearSession();
@@ -273,6 +376,272 @@ describe("Mira Dashboard frontend behavior", () => {
         ).toBeUndefined();
     });
 
+    it("fetches log, file, job, backup, and pull request APIs through dashboard hooks", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/logs/info" && method === "GET") {
+                    return Response.json({
+                        logs: [
+                            { name: "openclaw.log", size: 123 },
+                            { name: " ".repeat(3), size: 1 },
+                            { size: 2 },
+                        ],
+                    });
+                }
+
+                if (
+                    url === "/api/logs/content?file=openclaw.log&lines=50" &&
+                    method === "GET"
+                ) {
+                    return Response.json({ content: "info line\nerror line" });
+                }
+
+                if (url === "/api/files?path=src" && method === "GET") {
+                    return Response.json({
+                        files: [{ path: "src/main.tsx", name: "main.tsx", type: "file" }],
+                    });
+                }
+
+                if (url === "/api/files/src%2Fmain.tsx" && method === "GET") {
+                    return Response.json({
+                        path: "src/main.tsx",
+                        content: "render app",
+                        isBinary: false,
+                    });
+                }
+
+                if (url === "/api/config-files/openclaw.json" && method === "GET") {
+                    return Response.json({
+                        path: "config:openclaw.json",
+                        content: "{}",
+                        isBinary: false,
+                    });
+                }
+
+                if (url === "/api/files/src%2Fmain.tsx" && method === "PUT") {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        content: "updated",
+                    });
+                    return new Response(undefined, { status: 204 });
+                }
+
+                if (url === "/api/jobs" && method === "GET") {
+                    return Response.json({
+                        jobs: [
+                            {
+                                id: "job-1",
+                                name: "Job One",
+                                description: "Runs things",
+                                enabled: true,
+                                scheduleType: "interval",
+                                intervalSeconds: 60,
+                                actionKey: "test",
+                                actionPayload: {},
+                                createdAt: "2026-06-23T08:00:00.000Z",
+                                updatedAt: "2026-06-23T08:00:00.000Z",
+                                isRunning: false,
+                            },
+                        ],
+                    });
+                }
+
+                if (url === "/api/jobs/job-1/runs" && method === "GET") {
+                    return Response.json({
+                        runs: [
+                            {
+                                id: 1,
+                                jobId: "job-1",
+                                status: "success",
+                                triggerType: "manual",
+                                startedAt: "2026-06-23T08:00:00.000Z",
+                                output: { ok: true },
+                            },
+                        ],
+                    });
+                }
+
+                if (url === "/api/jobs/job-1" && method === "PATCH") {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        patch: { enabled: false },
+                    });
+                    return Response.json({ isOk: true, job: { id: "job-1" } });
+                }
+
+                if (url === "/api/jobs/job-1/run" && method === "POST") {
+                    return Response.json({
+                        isOk: true,
+                        run: {
+                            id: 2,
+                            jobId: "job-1",
+                            status: "success",
+                            triggerType: "manual",
+                            startedAt: "2026-06-23T08:00:00.000Z",
+                            output: {},
+                        },
+                    });
+                }
+
+                if (url === "/api/backups/kopia" && method === "GET") {
+                    return Response.json({
+                        job: { id: "kopia-1", type: "kopia", status: "done" },
+                    });
+                }
+
+                if (url === "/api/backups/walg" && method === "GET") {
+                    return Response.json({});
+                }
+
+                if (url === "/api/backups/kopia/run" && method === "POST") {
+                    return Response.json({
+                        isOk: true,
+                        job: { id: "kopia-2", type: "kopia", status: "running" },
+                    });
+                }
+
+                if (url === "/api/pull-requests" && method === "GET") {
+                    return Response.json({
+                        pullRequests: [
+                            {
+                                number: 189,
+                                title: "Functional tests",
+                                url: "/pull/189",
+                                headRefName: "tests",
+                                baseRefName: "main",
+                                author: { login: "mira-2026" },
+                                createdAt: "2026-06-23T08:00:00.000Z",
+                                updatedAt: "2026-06-23T08:00:00.000Z",
+                                isDraft: false,
+                            },
+                        ],
+                    });
+                }
+
+                if (url === "/api/pull-requests/deployments" && method === "GET") {
+                    return Response.json({
+                        deployments: [
+                            {
+                                id: "deploy-1",
+                                status: "isOk",
+                                startedAt: "2026-06-23T08:00:00.000Z",
+                                updatedAt: "2026-06-23T08:01:00.000Z",
+                            },
+                        ],
+                    });
+                }
+
+                if (
+                    url === "/api/pull-requests/production-checkout" &&
+                    method === "GET"
+                ) {
+                    return Response.json({
+                        checkout: {
+                            root: "/srv/app",
+                            expectedRoot: "/srv/app",
+                            worktreeRoot: "/srv/app",
+                            branch: "main",
+                            expectedBranch: "main",
+                            head: "abc123",
+                            isClean: true,
+                            isProductionRoot: true,
+                            isSafeForDeploy: true,
+                        },
+                    });
+                }
+
+                throw new Error(`Unexpected hook API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const logFiles = renderHookWithQueryClient(() => useLogFiles());
+        await waitFor(() => expect(logFiles.result.current.data).toHaveLength(1));
+        expect(logFiles.result.current.data?.[0]?.name).toBe("openclaw.log");
+
+        const logContent = renderHookWithQueryClient(() =>
+            useLogContent("openclaw.log", 50)
+        );
+        await waitFor(() =>
+            expect(logContent.result.current.data).toBe("info line\nerror line")
+        );
+
+        const files = renderHookWithQueryClient(() => useFiles("src"));
+        await waitFor(() =>
+            expect(files.result.current.data?.[0]?.path).toBe("src/main.tsx")
+        );
+
+        const fileContent = renderHookWithQueryClient(() =>
+            useFileContent("src/main.tsx")
+        );
+        await waitFor(() =>
+            expect(fileContent.result.current.data?.content).toBe("render app")
+        );
+
+        const configContent = renderHookWithQueryClient(() =>
+            useFileContent("config:openclaw.json")
+        );
+        await waitFor(() =>
+            expect(configContent.result.current.data?.content).toBe("{}")
+        );
+
+        const saveFile = renderHookWithQueryClient(() => useSaveFile());
+        await saveFile.result.current.mutateAsync({
+            path: "src/main.tsx",
+            content: "updated",
+        });
+
+        const jobs = renderHookWithQueryClient(() => useScheduledJobs());
+        await waitFor(() => expect(jobs.result.current.data?.[0]?.id).toBe("job-1"));
+
+        const jobRuns = renderHookWithQueryClient(() => useScheduledJobRuns("job-1"));
+        await waitFor(() =>
+            expect(jobRuns.result.current.data?.[0]?.status).toBe("success")
+        );
+
+        const updateJob = renderHookWithQueryClient(() => useUpdateScheduledJob());
+        await updateJob.result.current.mutateAsync({
+            id: "job-1",
+            patch: { enabled: false },
+        });
+
+        const runJob = renderHookWithQueryClient(() => useRunScheduledJobNow());
+        await expect(runJob.result.current.mutateAsync({ id: "job-1" })).resolves.toEqual(
+            expect.objectContaining({ isOk: true })
+        );
+
+        const kopia = renderHookWithQueryClient(() => useKopiaBackup());
+        await waitFor(() => expect(kopia.result.current.data?.job?.id).toBe("kopia-1"));
+
+        const walg = renderHookWithQueryClient(() => useWalgBackup());
+        await waitFor(() => expect(walg.result.current.data?.job).toBeUndefined());
+
+        const runKopia = renderHookWithQueryClient(() => useRunKopiaBackup());
+        await expect(runKopia.result.current.mutateAsync()).resolves.toEqual(
+            expect.objectContaining({ isOk: true })
+        );
+
+        const pullRequests = renderHookWithQueryClient(() => usePullRequests());
+        await waitFor(() =>
+            expect(pullRequests.result.current.data?.[0]?.number).toBe(189)
+        );
+
+        const deployments = renderHookWithQueryClient(() => usePullRequestDeployments());
+        await waitFor(() =>
+            expect(deployments.result.current.data?.[0]?.id).toBe("deploy-1")
+        );
+
+        const production = renderHookWithQueryClient(() => useProductionCheckout());
+        await waitFor(() =>
+            expect(production.result.current.data?.isSafeForDeploy).toBe(true)
+        );
+    });
+
     it("drives notification filtering and mutations through the bell menu", async () => {
         const notifications = [
             notification({
@@ -340,6 +709,162 @@ describe("Mira Dashboard frontend behavior", () => {
                 expect.objectContaining({ method: "POST" })
             )
         );
+    });
+
+    it("keeps log, file, cron, session, and format utilities aligned with UI behavior", () => {
+        const structured = parseLogLine(
+            '{"_meta":{"logLevelName":"WARN","date":"2026-06-23T08:00:00.000Z"},"0":"[agent/main] Ready"}',
+            1
+        );
+        expect(structured).toMatchObject({
+            level: "warn",
+            subsystem: "main",
+            msg: "Ready",
+        });
+        expect(parseLogLine("gateway: connected", 2)).toMatchObject({
+            subsystem: "gateway",
+            msg: "connected",
+        });
+        expect(parseLogLine("")).toBeUndefined();
+        expect(formatLogTime("not-a-date")).toBe("--:--:--");
+        expect(getLevelColor("error")).toContain("text-red");
+        expect(getSubsystemColor("ws")).toContain("amber");
+
+        expect(getFileExtension("README.MD")).toBe("md");
+        expect(isMarkdownFile("notes.markdown")).toBe(true);
+        expect(isJsonFile("config.json5")).toBe(true);
+        expect(isCodeFile("main.tsx")).toBe(true);
+        expect(isImageFile("avatar.webp")).toBe(true);
+        expect(isBinaryFile("archive.zip")).toBe(true);
+        expect(getLanguage("query.graphql")).toBe("graphql");
+        expect(getSyntaxClass("config.yaml")).toBe("text-purple-400");
+
+        expect(isCronExpressionValid("*/15 0-23 * * 1-5")).toBe(true);
+        expect(isCronExpressionValid("60 * * * *")).toBe(false);
+        const sortedCronJobs = sortCronJobs([
+            { id: "b", name: "Beta", enabled: false },
+            { jobId: "a", name: "Alpha", enabled: true },
+        ] as never);
+        expect(sortedCronJobs.map((job) => getCronJobName(job))).toEqual([
+            "Alpha",
+            "Beta",
+        ]);
+        expect(getCronJobId({ jobId: "job-id" } as never)).toBe("job-id");
+        expect(
+            getCronStateValue({ state: { lastStatus: "ok" } } as never, "lastStatus")
+        ).toBe("ok");
+        expect(formatCronTimestamp("bad")).toBe("—");
+        expect(formatCronLastStatus(" success ")).toBe("SUCCESS");
+        expect(getCronStatusVariant("failed")).toBe("error");
+
+        const sortedSessions = sortSessionsByTypeAndActivity([
+            {
+                key: "cron",
+                type: "cron",
+                updatedAt: 3,
+                displayLabel: "Cron",
+            },
+            {
+                key: "agent:main:main",
+                type: "main",
+                updatedAt: 1,
+                displayLabel: "Main",
+            },
+            {
+                key: "sub",
+                type: "subagent",
+                agentType: "researcher",
+                updatedAt: 2,
+                displayLabel: "Research",
+            },
+        ] as never);
+        expect(sortedSessions.map((session) => session.key)).toEqual([
+            "agent:main:main",
+            "sub",
+            "cron",
+        ]);
+        expect(formatSessionType(sortedSessions[1]!)).toBe("RESEARCHER");
+        expect(getTypeSortOrder("unknown")).toBe(4);
+
+        expect(formatSize(1536)).toBe("1.5 KB");
+        expect(formatSize(-1)).toBe("Unknown");
+        expect(formatUptime(90_061)).toBe("1d 1h");
+        expect(formatTokens(12_345, 200_000)).toBe("12.3k / 200k");
+        expect(formatTokenCount(1_250_000)).toBe("1.25M");
+        expect(getTokenPercent(60, 120)).toBe(50);
+        expect(formatUtcTimeOfDayInAppTimeZone("bad")).toBe("--:--");
+        expect(appTimeOfDayToUtcTimeOfDay("bad")).toBe("bad");
+    });
+
+    it("keeps chat utility behavior stable for slash commands, diagnostics, and optimistic messages", () => {
+        expect(chatErrorMessage(new Error("  failed  "), "fallback")).toBe("failed");
+        expect(chatErrorMessage("failed", "fallback")).toBe("fallback");
+        expect(dataUrlToBase64("data:text/plain;base64,SGVsbG8=")).toBe("SGVsbG8=");
+        expect(displayMimeType(new File(["hello"], "hello.txt"))).toBe(
+            "application/octet-stream"
+        );
+
+        expect(slashCommandCanonicalName("/abort")).toBe("/stop");
+        expect(
+            buildSlashCommandSuggestions("/model gpt", [
+                { id: "openai/gpt-5.5" },
+                { label: "ollama/glm-5" },
+            ])
+        ).toContainEqual(
+            expect.objectContaining({
+                value: "/model openai/gpt-5.5",
+                title: "openai/gpt-5.5",
+            })
+        );
+        expect(buildSlashCommandSuggestions("hello", [])).toEqual([]);
+
+        const toolResult = chatMessage({
+            role: "tool",
+            text: "",
+            timestamp: "2026-06-23T08:00:00.000Z",
+            toolResult: { id: "tool-1", name: "exec", content: "done" },
+        });
+        expect(messageIdentity(toolResult)).toContain("tool-result::tool-1::exec");
+        expect(messageDeleteKey(toolResult)).toContain("tool-result::tool-1::exec");
+
+        const duplicateMessages = dedupeMessages([
+            chatMessage({ role: "assistant", text: "same" }),
+            chatMessage({ role: "assistant", text: "same" }),
+            chatMessage({ role: "user", text: "different" }),
+        ]);
+        expect(duplicateMessages.map((message) => message.text)).toEqual([
+            "same",
+            "different",
+        ]);
+
+        expect(
+            isRecoveredAssistantText(
+                "This is a sufficiently long assistant response",
+                "sufficiently long assistant"
+            )
+        ).toBe(true);
+
+        const previousMessages = [
+            chatMessage({
+                role: "user",
+                text: "optimistic",
+                local: true,
+                timestamp: new Date().toISOString(),
+            }),
+        ];
+        const nextMessages = [
+            chatMessage({
+                role: "assistant",
+                text: "remote",
+                timestamp: new Date(Date.now() + 1000).toISOString(),
+            }),
+            chatMessage({ role: "assistant", text: "no timestamp" }),
+        ];
+        expect(
+            mergeWithRecentOptimisticMessages(previousMessages, nextMessages).map(
+                (message) => message.text
+            )
+        ).toEqual(["optimistic", "remote", "no timestamp"]);
     });
 
     it("renders the task board from the API and creates a task through the real hooks", async () => {

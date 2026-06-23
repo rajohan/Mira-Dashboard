@@ -726,6 +726,103 @@ describe("Mira Dashboard backend integration", () => {
         expect(invalidReject.body.error).toBe("Invalid pull request number");
     });
 
+    it("validates terminal, speech, config, metrics, and cache-backed route contracts", async () => {
+        const terminalComplete = await api<{
+            commonPrefix: string;
+            completions: Array<{ display: string; type: string }>;
+        }>(
+            "/api/terminal/complete",
+            json("POST", { cwd: testState.temporaryRoot, partial: "work" })
+        );
+        expect(terminalComplete.status).toBe(200);
+        expect(terminalComplete.body.completions).toContainEqual(
+            expect.objectContaining({ display: "workspace/", type: "directory" })
+        );
+
+        const terminalCd = await api<{ isSuccess: boolean; newCwd: string }>(
+            "/api/terminal/cd",
+            json("POST", { cwd: testState.temporaryRoot, path: "workspace" })
+        );
+        expect(terminalCd.status).toBe(200);
+        expect(terminalCd.body).toEqual({
+            isSuccess: true,
+            newCwd: path.join(testState.temporaryRoot, "workspace"),
+        });
+
+        const invalidTerminalCd = await api<{ error: string; isSuccess: boolean }>(
+            "/api/terminal/cd",
+            json("POST", { cwd: testState.temporaryRoot, path: "\0" })
+        );
+        expect(invalidTerminalCd.status).toBe(400);
+        expect(invalidTerminalCd.body).toMatchObject({
+            error: "Missing or invalid path",
+            isSuccess: false,
+        });
+
+        const previousElevenLabsApiKey = process.env.ELEVENLABS_API_KEY;
+        delete process.env.ELEVENLABS_API_KEY;
+        try {
+            const tts = await api<{ error: string }>(
+                "/api/tts/speak",
+                json("POST", { text: "hello" })
+            );
+            expect(tts.status).toBe(500);
+            expect(tts.body.error).toBe("ELEVENLABS_API_KEY is not configured");
+        } finally {
+            if (previousElevenLabsApiKey === undefined) {
+                delete process.env.ELEVENLABS_API_KEY;
+            } else {
+                process.env.ELEVENLABS_API_KEY = previousElevenLabsApiKey;
+            }
+        }
+
+        const stt = await fetch(`${testState.baseUrl}/api/stt/transcribe`, {
+            body: "",
+            method: "POST",
+        });
+        expect(stt.status).toBe(400);
+        expect(await stt.json()).toEqual({ error: "Missing audio payload" });
+
+        const invalidConfigPut = await api<{ error: string }>(
+            "/api/config",
+            json("PUT", { theme: "dark" })
+        );
+        expect(invalidConfigPut.status).toBe(400);
+        expect(invalidConfigPut.body.error).toBe("Config hash is required");
+
+        const invalidSkill = await api<{ error: string }>(
+            "/api/skills/__proto__",
+            json("POST", { __hash: "hash", enabled: true })
+        );
+        expect(invalidSkill.status).toBe(400);
+        expect(invalidSkill.body.error).toBe("Invalid skill name");
+
+        const metrics = await api<{
+            cpu: { count: number; loadAvg: number[] };
+            memory: { total: number; used: number };
+            system: { hostname: string; platform: string };
+            tokens: { total: number };
+        }>("/api/metrics");
+        expect(metrics.status).toBe(200);
+        expect(metrics.body.cpu.count).toBeGreaterThan(0);
+        expect(metrics.body.cpu.loadAvg).toHaveLength(3);
+        expect(metrics.body.memory.total).toBeGreaterThan(0);
+        expect(metrics.body.memory.used).toBeGreaterThanOrEqual(0);
+        expect(metrics.body.system.hostname.length).toBeGreaterThan(0);
+        expect(metrics.body.tokens.total).toBe(0);
+
+        const moltbook = await api<Record<string, unknown> & { error?: string }>(
+            "/api/moltbook/home"
+        );
+        expect([200, 503]).toContain(moltbook.status);
+        if (moltbook.status === 503) {
+            expect(moltbook.body.error).toContain("Cache key not found");
+        } else {
+            expect(typeof moltbook.body).toBe("object");
+            expect(moltbook.body).not.toBeNull();
+        }
+    });
+
     it("uses isolated workspace and config roots for file APIs", async () => {
         const files = await api<{ files: Array<{ path: string }>; root: string }>(
             "/api/files"
