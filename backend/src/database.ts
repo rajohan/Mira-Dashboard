@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { Database, type SQLQueryBindings } from "bun:sqlite";
@@ -16,6 +17,26 @@ const configuredDatabasePath = process.env.MIRA_DASHBOARD_DB_PATH?.trim();
 export const miraDatabasePath = configuredDatabasePath
     ? path.resolve(configuredDatabasePath)
     : path.join(process.cwd(), "data", "mira-dashboard.db");
+
+function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
+    const relativePath = path.relative(rootPath, candidatePath);
+    return (
+        relativePath === "" ||
+        (!relativePath.startsWith("..") && !path.isAbsolute(relativePath))
+    );
+}
+
+function assertTestDatabasePath(databasePath: string): void {
+    if (process.env.NODE_ENV !== "test") {
+        return;
+    }
+    const temporaryRoot = path.resolve(os.tmpdir());
+    if (!configuredDatabasePath || !isPathWithinRoot(databasePath, temporaryRoot)) {
+        throw new Error(
+            `Refusing to open non-temporary Dashboard test database: ${databasePath}`
+        );
+    }
+}
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -249,6 +270,7 @@ function runSchemaSql(databaseConnection: DatabaseSync, schemaSql: string): void
 }
 
 function initializeDatabase(): DatabaseSync {
+    assertTestDatabasePath(miraDatabasePath);
     const dataDirectory = path.dirname(miraDatabasePath);
     fs.mkdirSync(dataDirectory, { recursive: true });
 
