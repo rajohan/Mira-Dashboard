@@ -16,6 +16,8 @@ import {
 } from "../src/http.ts";
 import { parseJsonField, parseTable } from "../src/lib/cacheStore.ts";
 import { errorMessage, httpStatusCode } from "../src/lib/errors.ts";
+import { loadOrCreateDeviceIdentity } from "../src/lib/openclawGatewayClient.ts";
+import { pipeProcessOutput, runProcess } from "../src/lib/processes.ts";
 import {
     prepareSafeWriteTargetWithinRoot,
     safePathWithinRoot,
@@ -211,6 +213,52 @@ describe("backend service utilities", () => {
             startedAt: 1,
             endedAt: 2,
         });
+    });
+
+    it("persists and repairs OpenClaw Gateway device identity files", () => {
+        const root = mkdtempSync(path.join(tmpdir(), "mira-device-identity-"));
+        const identityPath = path.join(root, "nested", "identity.json");
+        try {
+            const created = loadOrCreateDeviceIdentity(identityPath);
+            expect(created.deviceId).toMatch(/^[a-f0-9]{64}$/u);
+            expect(created.publicKeyPem).toContain("PUBLIC KEY");
+            expect(created.privateKeyPem).toContain("PRIVATE KEY");
+
+            const loaded = loadOrCreateDeviceIdentity(identityPath);
+            expect(loaded).toEqual(created);
+
+            writeFileSync(identityPath, JSON.stringify({ broken: true }));
+            const repaired = loadOrCreateDeviceIdentity(identityPath);
+            expect(repaired.deviceId).toMatch(/^[a-f0-9]{64}$/u);
+            expect(repaired.deviceId).not.toBe(created.deviceId);
+        } finally {
+            rmSync(root, { force: true, recursive: true });
+        }
+    });
+
+    it("runs and limits local processes through the shared process helpers", async () => {
+        await expect(
+            runProcess(process.execPath, ["--eval", "console.log('hello');"])
+        ).resolves.toEqual({ code: 0, stdout: "hello\n", stderr: "" });
+
+        await expect(
+            runProcess(process.execPath, ["--eval", "console.log('too much');"], {
+                maxBuffer: 4,
+            })
+        ).rejects.toThrow("Process output exceeded maxBuffer");
+
+        const chunks: string[] = [];
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode("one"));
+                controller.enqueue(new TextEncoder().encode("two"));
+                controller.close();
+            },
+        });
+        await pipeProcessOutput(stream, (chunk) => {
+            chunks.push(chunk);
+        });
+        expect(chunks.join("")).toBe("onetwo");
     });
 
     it("parses HTTP helpers for JSON, cookies, origins, and body limits", async () => {
