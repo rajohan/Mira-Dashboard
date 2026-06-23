@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import type { Server } from "bun";
 import { describe, expect, it } from "bun:test";
 
@@ -11,7 +15,22 @@ import {
     withCookie,
 } from "../src/http.ts";
 import { parseJsonField, parseTable } from "../src/lib/cacheStore.ts";
+import { errorMessage, httpStatusCode } from "../src/lib/errors.ts";
+import {
+    prepareSafeWriteTargetWithinRoot,
+    safePathWithinRoot,
+    sanitizeFilename,
+} from "../src/lib/safePath.ts";
+import {
+    arrayFallback,
+    environmentFallback,
+    nonEmptyEnvironmentFallback,
+    nullableString,
+    objectFallback,
+    stringFallback,
+} from "../src/lib/values.ts";
 import { isValidAgentId } from "../src/services/agents.ts";
+import { mapBackupJob } from "../src/services/backups.ts";
 import { getResolvedRoots, validatePrNumber } from "../src/services/pullRequests.ts";
 
 function serverWithAddress(address: string): Server<unknown> {
@@ -53,6 +72,86 @@ describe("backend service utilities", () => {
         expect(sqlNullable(undefined)).toBeNull();
     });
 
+    it("normalizes optional backend values for API responses and environment defaults", () => {
+        const originalValue = process.env.MIRA_TEST_OPTIONAL_VALUE;
+        try {
+            delete process.env.MIRA_TEST_OPTIONAL_VALUE;
+            expect(environmentFallback("MIRA_TEST_OPTIONAL_VALUE", "fallback")).toBe(
+                "fallback"
+            );
+            expect(
+                nonEmptyEnvironmentFallback("MIRA_TEST_OPTIONAL_VALUE", "fallback")
+            ).toBe("fallback");
+
+            process.env.MIRA_TEST_OPTIONAL_VALUE = "  configured  ";
+            expect(environmentFallback("MIRA_TEST_OPTIONAL_VALUE", "fallback")).toBe(
+                "  configured  "
+            );
+            expect(
+                nonEmptyEnvironmentFallback("MIRA_TEST_OPTIONAL_VALUE", "fallback")
+            ).toBe("configured");
+
+            expect(stringFallback(undefined, "fallback")).toBe("fallback");
+            expect(stringFallback(42)).toBe("42");
+            expect(nullableString("")).toBeUndefined();
+            expect(nullableString("mira")).toBe("mira");
+            expect(objectFallback({ ok: true })).toEqual({ ok: true });
+            expect(objectFallback()).toEqual({});
+            expect(
+                objectFallback<Record<string, unknown>>("not-object" as never)
+            ).toEqual({});
+            expect(arrayFallback(["a"])).toEqual(["a"]);
+            expect(arrayFallback("not-array", ["fallback"])).toEqual(["fallback"]);
+        } finally {
+            if (originalValue === undefined) {
+                delete process.env.MIRA_TEST_OPTIONAL_VALUE;
+            } else {
+                process.env.MIRA_TEST_OPTIONAL_VALUE = originalValue;
+            }
+        }
+    });
+
+    it("maps operational errors without leaking unknown values", () => {
+        const blankError = new Error(" ".repeat(3));
+        expect(errorMessage(new Error("  failed  "), "fallback")).toBe("failed");
+        expect(errorMessage(blankError, "fallback")).toBe("fallback");
+        expect(errorMessage("raw secret-ish value", "fallback")).toBe("fallback");
+        const notFoundError = Object.assign(new Error("missing"), { statusCode: 404 });
+        const invalidStatusError = Object.assign(new Error("bad"), { statusCode: 399 });
+        expect(httpStatusCode(notFoundError)).toBe(404);
+        expect(httpStatusCode(invalidStatusError)).toBe(500);
+        expect(httpStatusCode(undefined)).toBe(500);
+    });
+
+    it("keeps filesystem helpers inside their configured root", () => {
+        const root = mkdtempSync(path.join(tmpdir(), "mira-safe-path-"));
+        const outside = mkdtempSync(path.join(tmpdir(), "mira-safe-path-outside-"));
+        try {
+            writeFileSync(path.join(root, "inside.txt"), "ok");
+            symlinkSync(outside, path.join(root, "outside-link"));
+
+            expect(safePathWithinRoot("inside.txt", root)).toBe(
+                path.join(root, "inside.txt")
+            );
+            expect(safePathWithinRoot("../escape.txt", root)).toBeUndefined();
+            expect(safePathWithinRoot("outside-link/escape.txt", root)).toBeUndefined();
+            expect(safePathWithinRoot("bad\0name", root)).toBeUndefined();
+
+            const writeTarget = path.join(root, "nested", "report.txt");
+            expect(prepareSafeWriteTargetWithinRoot(writeTarget, root)).toBe(writeTarget);
+            expect(
+                prepareSafeWriteTargetWithinRoot(path.join(outside, "report.txt"), root)
+            ).toBeUndefined();
+
+            expect(sanitizeFilename(" report/../name?.txt ")).toBe("name?.txt ");
+            expect(() => sanitizeFilename("..")).toThrow("Invalid filename");
+            expect(() => sanitizeFilename("bad\0name")).toThrow("Invalid filename");
+        } finally {
+            rmSync(root, { force: true, recursive: true });
+            rmSync(outside, { force: true, recursive: true });
+        }
+    });
+
     it("validates pull request numbers and configured Dashboard roots", () => {
         const originalRoot = process.env.MIRA_DASHBOARD_ROOT;
         const originalWorktreeRoot = process.env.MIRA_DASHBOARD_WORKTREE_ROOT;
@@ -84,6 +183,34 @@ describe("backend service utilities", () => {
                 process.env.MIRA_DASHBOARD_WORKTREE_ROOT = originalWorktreeRoot;
             }
         }
+    });
+
+    it("serializes backup jobs without exposing live process handles", () => {
+        expect(mapBackupJob(undefined)).toBeUndefined();
+        const completed = Promise.resolve(undefined);
+        expect(
+            mapBackupJob({
+                id: "backup-1",
+                type: "kopia",
+                status: "needs_attention",
+                code: 130,
+                stdout: "stdout",
+                stderr: "stderr",
+                startedAt: 1,
+                endedAt: 2,
+                completed,
+                process: { pid: 123 },
+            } as never)
+        ).toEqual({
+            id: "backup-1",
+            type: "kopia",
+            status: "needs_attention",
+            code: 130,
+            stdout: "stdout",
+            stderr: "stderr",
+            startedAt: 1,
+            endedAt: 2,
+        });
     });
 
     it("parses HTTP helpers for JSON, cookies, origins, and body limits", async () => {

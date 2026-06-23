@@ -163,6 +163,24 @@ describe("Mira Dashboard backend integration", () => {
             authenticated: false,
             isBootstrapRequired: true,
         });
+
+        const preBootstrapLogin = await api<{ error: string }>(
+            "/api/auth/login",
+            json("POST", { username: "session-test-user", password: "test-password" })
+        );
+        expect(preBootstrapLogin.status).toBe(409);
+        expect(preBootstrapLogin.body.error).toBe(
+            "Create the first user before logging in"
+        );
+
+        const invalidBootstrap = await api<{ error: string }>(
+            "/api/auth/register-first-user",
+            json("POST", { username: "x", password: "short", gatewayToken: "" })
+        );
+        expect(invalidBootstrap.status).toBe(400);
+        expect(invalidBootstrap.body.error).toBe(
+            "Username must be 3-32 chars: letters, numbers, dot, dash, underscore"
+        );
     });
 
     it("serves the app shell only for app routes, not missing assets", async () => {
@@ -795,6 +813,72 @@ describe("Mira Dashboard backend integration", () => {
         );
         expect(invalidReject.status).toBe(400);
         expect(invalidReject.body.error).toBe("Invalid pull request number");
+    });
+
+    it("maps deployment rows into recent pull request deployment summaries", async () => {
+        const [{ database, sqlNullable }, { readDeploymentJobs }] = await Promise.all([
+            import("../src/database.ts"),
+            import("../src/services/pullRequests.ts"),
+        ]);
+        database.prepare("DELETE FROM deployment_jobs").run();
+        database
+            .prepare(
+                `
+                INSERT INTO deployment_jobs (
+                    id,
+                    status,
+                    started_at,
+                    updated_at,
+                    commit_sha,
+                    commit_title,
+                    note,
+                    stdout,
+                    stderr
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `
+            )
+            .run(
+                "older",
+                "isOk",
+                "2026-06-23T10:00:00.000Z",
+                "2026-06-23T10:01:00.000Z",
+                "abc def",
+                "Older deploy",
+                sqlNullable(undefined),
+                "ok",
+                sqlNullable(undefined),
+                "newer",
+                "failed",
+                "2026-06-23T11:00:00.000Z",
+                "2026-06-23T11:05:00.000Z",
+                sqlNullable(undefined),
+                sqlNullable(undefined),
+                "failed note",
+                sqlNullable(undefined),
+                "boom"
+            );
+
+        expect(readDeploymentJobs()).toEqual([
+            {
+                id: "newer",
+                status: "failed",
+                startedAt: "2026-06-23T11:00:00.000Z",
+                updatedAt: "2026-06-23T11:05:00.000Z",
+                note: "failed note",
+                stderr: "boom",
+            },
+            {
+                id: "older",
+                status: "isOk",
+                startedAt: "2026-06-23T10:00:00.000Z",
+                updatedAt: "2026-06-23T10:01:00.000Z",
+                commit: "abc def",
+                commitTitle: "Older deploy",
+                commitUrl: "https://github.com/rajohan/Mira-Dashboard/commit/abc%20def",
+                stdout: "ok",
+            },
+        ]);
     });
 
     it("validates terminal, speech, config, metrics, and cache-backed route contracts", async () => {

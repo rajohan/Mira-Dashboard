@@ -1342,6 +1342,33 @@ describe("Mira Dashboard frontend behavior", () => {
                     });
                 }
 
+                if (url === "/api/cache/moltbook.feed.new" && method === "GET") {
+                    return Response.json({
+                        key: "moltbook.feed.new",
+                        source: "moltbook",
+                        status: "fresh",
+                        consecutiveFailures: 0,
+                        data: {
+                            posts: [
+                                {
+                                    id: "post-2",
+                                    title: "Nested author",
+                                    content: "Full post",
+                                    author: {
+                                        name: "raymond",
+                                        display_name: "Raymond",
+                                        avatar_url: "/avatar.png",
+                                    },
+                                    created_at: "2026-06-23T08:30:00.000Z",
+                                    submolt_name: "dashboard",
+                                    you_follow_author: true,
+                                },
+                            ],
+                        },
+                        meta: {},
+                    });
+                }
+
                 if (url === "/api/cache/moltbook.profile" && method === "GET") {
                     return Response.json({
                         key: "moltbook.profile",
@@ -1647,6 +1674,30 @@ describe("Mira Dashboard frontend behavior", () => {
         const moltbook = renderHookWithQueryClient(() => useMoltbookData("hot"));
         await waitFor(() => expect(moltbook.result.current.posts[0]?.id).toBe("post-1"));
         expect(moltbook.result.current.profile?.name).toBe("Mira");
+        act(() => {
+            moltbook.result.current.refetch();
+        });
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/cache/moltbook.home",
+                expect.objectContaining({ credentials: "include" })
+            )
+        );
+
+        const newestMoltbook = renderHookWithQueryClient(() => useMoltbookData("new"));
+        await waitFor(() =>
+            expect(newestMoltbook.result.current.posts[0]).toMatchObject({
+                id: "post-2",
+                content: "Full post",
+                author: {
+                    name: "raymond",
+                    display_name: "Raymond",
+                    avatar_url: "/avatar.png",
+                },
+                upvotes: 0,
+                you_follow_author: true,
+            })
+        );
 
         const refreshCache = renderHookWithQueryClient(() => useRefreshCacheEntry());
         await expect(
@@ -2624,6 +2675,47 @@ describe("Mira Dashboard frontend behavior", () => {
             )
         );
         expect(await screen.findByText("Write useful tests")).toBeInTheDocument();
+    });
+
+    it("filters the task board by assignee and search text", async () => {
+        const tasks = [
+            task({
+                number: 10,
+                title: "Mira backend follow-up",
+                assignees: [{ login: "mira-2026", name: "Mira" }],
+                labels: [{ name: "priority-high" }],
+            }),
+            task({
+                number: 11,
+                title: "Raymond review queue",
+                assignees: [{ login: "rajohan", name: "Raymond" }],
+                labels: [{ name: "blocked" }],
+            }),
+        ];
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: createApi(tasks),
+            writable: true,
+        });
+        const user = userEvent.setup();
+
+        renderWithQueryClient(createElement(Tasks));
+
+        expect(await screen.findByText("Mira backend follow-up")).toBeInTheDocument();
+        expect(screen.getByText("Raymond review queue")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Raymond" }));
+        expect(screen.queryByText("Mira backend follow-up")).not.toBeInTheDocument();
+        expect(screen.getByText("Raymond review queue")).toBeInTheDocument();
+
+        await user.type(screen.getByPlaceholderText("Search tasks..."), "nothing");
+        expect(
+            screen.getByText("No tasks match the current filters.")
+        ).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Clear filters" }));
+        expect(await screen.findByText("Mira backend follow-up")).toBeInTheDocument();
+        expect(screen.getByText("Raymond review queue")).toBeInTheDocument();
     });
 
     it("keeps task classification and search aligned with dashboard behavior", () => {
