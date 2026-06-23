@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 
 const testState: {
     baseUrl: string;
+    originalHome?: string;
     originalLoopbackAuth?: string;
     server?: Server<unknown>;
     temporaryRoot: string;
@@ -64,6 +65,7 @@ describe("Mira Dashboard backend integration", () => {
         );
         const workspaceRoot = path.join(testState.temporaryRoot, "workspace");
         const openclawRoot = path.join(testState.temporaryRoot, "openclaw");
+        const homeRoot = path.join(testState.temporaryRoot, "home");
         const frontendRoot = path.join(testState.temporaryRoot, "frontend");
         const dockerRoot = path.join(testState.temporaryRoot, "docker");
         const composeWrapper = path.join(testState.temporaryRoot, "compose-wrapper.sh");
@@ -72,6 +74,7 @@ describe("Mira Dashboard backend integration", () => {
         });
         await fs.mkdir(path.join(frontendRoot, "assets"), { recursive: true });
         await fs.mkdir(dockerRoot, { recursive: true });
+        await fs.mkdir(homeRoot, { recursive: true });
         await fs.mkdir(workspaceRoot, { recursive: true });
         await fs.mkdir(path.join(workspaceRoot, "notes"), { recursive: true });
         await fs.writeFile(path.join(workspaceRoot, "README.md"), "hello workspace\n");
@@ -88,12 +91,14 @@ describe("Mira Dashboard backend integration", () => {
         );
 
         testState.originalLoopbackAuth = process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH;
+        testState.originalHome = process.env.HOME;
         process.env.MIRA_DASHBOARD_DB_PATH = path.join(
             testState.temporaryRoot,
             "dashboard.database"
         );
         process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH = "1";
         process.env.MIRA_DASHBOARD_FRONTEND_PATH = frontendRoot;
+        process.env.HOME = homeRoot;
         process.env.WORKSPACE_ROOT = workspaceRoot;
         process.env.OPENCLAW_HOME = openclawRoot;
         process.env.MIRA_DOCKER_ROOT = dockerRoot;
@@ -113,6 +118,11 @@ describe("Mira Dashboard backend integration", () => {
         } else {
             process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH =
                 testState.originalLoopbackAuth;
+        }
+        if (testState.originalHome === undefined) {
+            delete process.env.HOME;
+        } else {
+            process.env.HOME = testState.originalHome;
         }
         await fs.rm(testState.temporaryRoot, { recursive: true, force: true });
     });
@@ -233,6 +243,251 @@ describe("Mira Dashboard backend integration", () => {
 
         expect(created.status).toBe(200);
         expect(created.body.isOk).toBe(true);
+    });
+
+    it("lists, marks, filters, clears, and deletes notifications through the API", async () => {
+        const omittedValue = JSON.parse("null") as null;
+        const first = await api<{ id: number; isOk: boolean }>(
+            "/api/notifications",
+            json("POST", {
+                title: "Cache refresh failed",
+                description: "Refresh failed twice",
+                source: "cache",
+                dedupeKey: "cache-refresh",
+                type: "warning",
+                metadata: { key: "moltbook.home" },
+                occurredAt: "2026-06-23T10:00:00.000Z",
+            })
+        );
+        const second = await api<{ id: number; isOk: boolean }>(
+            "/api/notifications",
+            json("POST", {
+                title: "Backup healthy",
+                source: "backup",
+                type: "success",
+                occurredAt: "2026-06-23T11:00:00.000Z",
+            })
+        );
+        expect(first.status).toBe(200);
+        expect(second.status).toBe(200);
+
+        const listed = await api<{
+            items: Array<{
+                id: number;
+                isRead: boolean;
+                metadata: Record<string, unknown>;
+                source?: string;
+                title: string;
+                type: string;
+            }>;
+            unreadCount: number;
+        }>("/api/notifications?limit=10");
+        expect(listed.status).toBe(200);
+        expect(listed.body.unreadCount).toBeGreaterThanOrEqual(2);
+        expect(
+            listed.body.items.find((item) => item.id === second.body.id)
+        ).toMatchObject({
+            source: "backup",
+            title: "Backup healthy",
+            type: "success",
+        });
+        expect(listed.body.items.find((item) => item.id === first.body.id)).toMatchObject(
+            {
+                metadata: { key: "moltbook.home" },
+                source: "cache",
+                title: "Cache refresh failed",
+            }
+        );
+
+        const read = await api<{ isOk: boolean }>(
+            `/api/notifications/${first.body.id}/read`,
+            { method: "POST" }
+        );
+        expect(read.status).toBe(200);
+        expect(read.body.isOk).toBe(true);
+
+        const clearOtherSource = await api<{ deleted: number; isOk: boolean }>(
+            "/api/notifications/clear-read",
+            json("POST", { source: "backup" })
+        );
+        expect(clearOtherSource.status).toBe(200);
+        expect(clearOtherSource.body.deleted).toBe(0);
+
+        const rejectNullSource = await api<{ error: string }>(
+            "/api/notifications/clear-read",
+            json("POST", { source: omittedValue })
+        );
+        expect(rejectNullSource.status).toBe(400);
+        expect(rejectNullSource.body.error).toBe("source must be a string");
+
+        const clearCache = await api<{ deleted: number; isOk: boolean }>(
+            "/api/notifications/clear-read",
+            json("POST", { source: "cache" })
+        );
+        expect(clearCache.status).toBe(200);
+        expect(clearCache.body).toEqual({ deleted: 1, isOk: true });
+
+        const deleteUnread = await api<{ deleted: number; isOk: boolean }>(
+            `/api/notifications/${second.body.id}`,
+            { method: "DELETE" }
+        );
+        expect(deleteUnread.status).toBe(200);
+        expect(deleteUnread.body).toEqual({ deleted: 1, isOk: true });
+    });
+
+    it("loads, validates, clamps, and persists dashboard settings", async () => {
+        const defaults = await api<{
+            defaultModel: string;
+            gateway: { gateway: string; sessions: number };
+            refreshInterval: number;
+            sidebarCollapsed: boolean;
+            theme: string;
+        }>("/api/settings");
+        expect(defaults.status).toBe(200);
+        expect(defaults.body).toMatchObject({
+            defaultModel: "ollama/glm-5",
+            refreshInterval: 5000,
+            sidebarCollapsed: false,
+            theme: "dark",
+        });
+        expect(defaults.body.gateway).toEqual({
+            gateway: "disconnected",
+            sessions: 0,
+        });
+
+        const updated = await api<{
+            defaultModel: string;
+            refreshInterval: number;
+            sidebarCollapsed: boolean;
+            theme: string;
+        }>(
+            "/api/settings",
+            json("PUT", {
+                defaultModel: "  openai/gpt-5.5  ",
+                refreshInterval: 61_999,
+                sidebarCollapsed: true,
+                theme: "system",
+            })
+        );
+        expect(updated.status).toBe(200);
+        expect(updated.body).toMatchObject({
+            defaultModel: "openai/gpt-5.5",
+            refreshInterval: 60_000,
+            sidebarCollapsed: true,
+            theme: "system",
+        });
+
+        const persisted = await api<{
+            defaultModel: string;
+            refreshInterval: number;
+            sidebarCollapsed: boolean;
+            theme: string;
+        }>("/api/settings");
+        expect(persisted.status).toBe(200);
+        expect(persisted.body).toMatchObject(updated.body);
+
+        const invalid = await api<{ error: string }>(
+            "/api/settings",
+            json("PUT", { theme: "blue" })
+        );
+        expect(invalid.status).toBe(400);
+        expect(invalid.body.error).toBe("Invalid theme");
+    });
+
+    it("reports cache heartbeat entries and individual cache state", async () => {
+        const { database } = await import("../src/database.ts");
+        const missingValue = JSON.parse("null") as null;
+        database
+            .prepare(
+                `INSERT INTO cache_entries (
+                    key, data_json, source, updated_at, last_attempt_at, expires_at,
+                    status, error_code, error_message, consecutive_failures, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            )
+            .run(
+                "moltbook.home",
+                JSON.stringify({ posts: [{ id: "post-1" }] }),
+                "moltbook",
+                "2026-06-23T09:00:00.000Z",
+                "2026-06-23T09:00:00.000Z",
+                "2099-01-01T00:00:00.000Z",
+                "fresh",
+                missingValue,
+                missingValue,
+                0,
+                JSON.stringify({ provider: "moltbook" })
+            );
+        database
+            .prepare(
+                `INSERT INTO cache_entries (
+                    key, data_json, source, updated_at, last_attempt_at, expires_at,
+                    status, error_code, error_message, consecutive_failures, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            )
+            .run(
+                "quota.openai",
+                missingValue,
+                "quota",
+                missingValue,
+                "2026-06-23T09:05:00.000Z",
+                "2026-06-23T10:05:00.000Z",
+                "error",
+                "rate_limited",
+                "Quota API failed",
+                2,
+                "{}"
+            );
+
+        const heartbeat = await api<{
+            count: number;
+            entries: Array<{
+                consecutiveFailures: number;
+                data: unknown;
+                errorCode: string | null;
+                errorMessage: string | null;
+                key: string;
+                meta: Record<string, unknown>;
+                status: string;
+                updatedAt: string | null;
+            }>;
+        }>("/api/cache/heartbeat");
+        expect(heartbeat.status).toBe(200);
+        expect(heartbeat.body.count).toBeGreaterThanOrEqual(2);
+        expect(
+            heartbeat.body.entries.find((entry) => entry.key === "moltbook.home")
+        ).toMatchObject({
+            data: { posts: [{ id: "post-1" }] },
+            errorCode: "",
+            errorMessage: "",
+            meta: { provider: "moltbook" },
+            status: "fresh",
+            updatedAt: "2026-06-23T09:00:00.000Z",
+        });
+        expect(
+            heartbeat.body.entries.find((entry) => entry.key === "quota.openai")
+        ).toMatchObject({
+            consecutiveFailures: 2,
+            data: "",
+            errorCode: "rate_limited",
+            errorMessage: "Quota API failed",
+            status: "error",
+            updatedAt: missingValue,
+        });
+
+        const entry = await api<{ key: string; status: string }>(
+            "/api/cache/moltbook.home"
+        );
+        expect(entry.status).toBe(200);
+        expect(entry.body).toMatchObject({ key: "moltbook.home", status: "fresh" });
+
+        const missing = await api<{ error: string; key: string }>(
+            "/api/cache/not-present"
+        );
+        expect(missing.status).toBe(404);
+        expect(missing.body).toEqual({
+            error: "Cache key not found",
+            key: "not-present",
+        });
     });
 
     it("uses isolated workspace and config roots for file APIs", async () => {

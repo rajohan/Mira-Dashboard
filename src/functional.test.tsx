@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
 
 import { apiFetch, UnauthorizedError } from "./hooks/useApi";
+import { handleSocketMessage } from "./lib/socket/socketMessageRouter";
 import { Tasks } from "./pages/Tasks";
 import { authActions, authStore } from "./stores/authStore";
 import type { Task } from "./types/task";
@@ -106,6 +107,81 @@ describe("Mira Dashboard frontend behavior", () => {
 
         expect(authStore.state.isAuthenticated).toBe(false);
         expect(unauthorizedEvents).toHaveLength(1);
+    });
+
+    it("parses successful, empty, and failed API responses consistently", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/health" && method === "GET") {
+                    return Response.json({ status: "isOk" });
+                }
+
+                if (url === "/api/restart" && method === "POST") {
+                    return new Response(undefined, { status: 204 });
+                }
+
+                if (url === "/api/tasks" && method === "POST") {
+                    return Response.json({ error: "title is required" }, { status: 400 });
+                }
+
+                if (url === "/api/broken" && method === "GET") {
+                    return new Response("not-json", { status: 500 });
+                }
+
+                throw new Error(`Unexpected API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        await expect(apiFetch("/health")).resolves.toEqual({ status: "isOk" });
+        await expect(apiFetch("/restart", { method: "POST" })).resolves.toBeUndefined();
+        await expect(
+            apiFetch("/tasks", { body: JSON.stringify({}), method: "POST" })
+        ).rejects.toThrow("title is required");
+        await expect(apiFetch("/broken")).rejects.toThrow("Unknown error");
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/health",
+            expect.objectContaining({
+                credentials: "include",
+                headers: expect.objectContaining({ "Content-Type": "application/json" }),
+            })
+        );
+    });
+
+    it("routes socket messages into dashboard connection state", () => {
+        expect(handleSocketMessage({})).toBeUndefined();
+        expect(handleSocketMessage({ type: "state", gatewayConnected: false })).toBe(
+            false
+        );
+        expect(handleSocketMessage({ type: "state" })).toBe(true);
+        expect(handleSocketMessage({ type: "connected" })).toBe(true);
+        expect(handleSocketMessage({ type: "disconnected" })).toBe(false);
+        expect(
+            handleSocketMessage({
+                payload: { data: { sessions: [{ id: "session-1", key: "session-1" }] } },
+                type: "response",
+            })
+        ).toBeUndefined();
+        expect(
+            handleSocketMessage({
+                event: "agents.list",
+                payload: [{ id: "mira-2026", status: "online" }],
+                type: "event",
+            })
+        ).toBeUndefined();
+        expect(
+            handleSocketMessage({
+                line: "2026-06-23T10:00:00.000Z info dashboard ready",
+                type: "log",
+            })
+        ).toBeUndefined();
     });
 
     it("renders the task board from the API and creates a task through the real hooks", async () => {
