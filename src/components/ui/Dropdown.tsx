@@ -75,7 +75,10 @@ export function Dropdown({
                         <MenuItem key={index} disabled={item.disabled}>
                             <button
                                 type="button"
-                                onClick={item.onClick}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    item.onClick?.();
+                                }}
                                 className={cn(
                                     "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
                                     "hover:bg-primary-700 hover:text-primary-100 data-[focus]:bg-primary-700 data-[focus]:text-primary-100 outline-none focus:outline-none data-[focus]:outline-none",

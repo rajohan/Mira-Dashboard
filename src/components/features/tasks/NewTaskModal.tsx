@@ -90,7 +90,6 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProperti
                             value={field.state.value}
                             onChange={(event_) => field.handleChange(event_.target.value)}
                             placeholder="Task title..."
-                            autoFocus
                         />
                     )}
                 </form.Field>
@@ -110,10 +109,10 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProperti
 
                 <form.Field name="priority">
                     {(field) => (
-                        <div>
-                            <label className="text-primary-300 mb-1.5 block text-sm font-medium">
+                        <fieldset>
+                            <legend className="text-primary-300 mb-1.5 block text-sm font-medium">
                                 Priority
-                            </label>
+                            </legend>
                             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                                 {(["low", "medium", "high"] as const).map((p) => (
                                     <Button
@@ -136,16 +135,16 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProperti
                                     </Button>
                                 ))}
                             </div>
-                        </div>
+                        </fieldset>
                     )}
                 </form.Field>
 
                 <form.Field name="assignee">
                     {(field) => (
-                        <div>
-                            <label className="text-primary-300 mb-1.5 block text-sm font-medium">
+                        <fieldset>
+                            <legend className="text-primary-300 mb-1.5 block text-sm font-medium">
                                 Assignee
-                            </label>
+                            </legend>
                             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                                 <Button
                                     type="button"
@@ -176,7 +175,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProperti
                                     Raymond
                                 </Button>
                             </div>
-                        </div>
+                        </fieldset>
                     )}
                 </form.Field>
 

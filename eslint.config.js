@@ -1,5 +1,6 @@
 import eslintConfigs from "@eslint/js";
 import { defineConfig } from "eslint/config";
+import jsxA11y from "eslint-plugin-jsx-a11y";
 import eslintPluginPrettierRecommended from "eslint-plugin-prettier/recommended";
 import reactPlugin from "eslint-plugin-react";
 import reactHooks from "eslint-plugin-react-hooks";
@@ -27,6 +28,16 @@ const eslintConfig = defineConfig(
     tsEslint.configs.recommended,
     reactPlugin.configs.flat["jsx-runtime"],
     unicorn.configs.recommended,
+    {
+        files: ["**/*.{jsx,tsx}"],
+        ...jsxA11y.flatConfigs.recommended,
+        languageOptions: {
+            ...jsxA11y.flatConfigs.recommended.languageOptions,
+            globals: {
+                ...globals.browser,
+            },
+        },
+    },
     {
         files: ["**/*.{js,mjs,cjs,jsx,ts,tsx}"],
         ...reactPlugin.configs.flat.recommended,

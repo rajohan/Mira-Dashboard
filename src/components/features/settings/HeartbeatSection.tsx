@@ -36,43 +36,33 @@ export function HeartbeatSection({
                 }}
                 className="space-y-4"
             >
-                <div>
-                    <label className="text-primary-300 mb-1.5 block text-sm font-medium">
-                        Interval (seconds)
-                    </label>
-                    <form.Field name="every">
-                        {(field) => (
-                            <Input
-                                type="number"
-                                value={field.state.value}
-                                onChange={(event_) =>
-                                    field.handleChange(Number(event_.target.value))
-                                }
-                                min={60}
-                                max={3600}
-                                className="w-full sm:w-32"
-                            />
-                        )}
-                    </form.Field>
-                </div>
-                <div>
-                    <label className="text-primary-300 mb-1.5 block text-sm font-medium">
-                        Target Channel
-                    </label>
-                    <form.Field name="target">
-                        {(field) => (
-                            <Input
-                                type="text"
-                                value={field.state.value}
-                                onChange={(event_) =>
-                                    field.handleChange(event_.target.value)
-                                }
-                                placeholder="Channel ID or name"
-                                className="w-full sm:w-64"
-                            />
-                        )}
-                    </form.Field>
-                </div>
+                <form.Field name="every">
+                    {(field) => (
+                        <Input
+                            label="Interval (seconds)"
+                            type="number"
+                            value={field.state.value}
+                            onChange={(event_) =>
+                                field.handleChange(Number(event_.target.value))
+                            }
+                            min={60}
+                            max={3600}
+                            className="w-full sm:w-32"
+                        />
+                    )}
+                </form.Field>
+                <form.Field name="target">
+                    {(field) => (
+                        <Input
+                            label="Target Channel"
+                            type="text"
+                            value={field.state.value}
+                            onChange={(event_) => field.handleChange(event_.target.value)}
+                            placeholder="Channel ID or name"
+                            className="w-full sm:w-64"
+                        />
+                    )}
+                </form.Field>
                 <div className="flex justify-end">
                     <Button
                         type="submit"

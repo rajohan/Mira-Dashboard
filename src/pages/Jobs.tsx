@@ -285,9 +285,7 @@ function ScheduledJobDetails({
                 </div>
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(12rem,16rem)_1fr_auto] lg:items-end">
                     <div>
-                        <label className="text-primary-300 mb-1 block text-xs">
-                            Type
-                        </label>
+                        <div className="text-primary-300 mb-1 block text-xs">Type</div>
                         <Select
                             value={scheduleTypeDraft}
                             options={scheduleTypeOptions}
@@ -301,23 +299,18 @@ function ScheduledJobDetails({
                         />
                     </div>
                     {scheduleTypeDraft === "interval" ? (
-                        <div>
-                            <label className="text-primary-300 mb-1 block text-xs">
-                                Interval seconds
-                            </label>
-                            <Input
-                                aria-label="Interval seconds"
-                                inputMode="numeric"
-                                value={intervalDraft}
-                                onChange={(event) => onIntervalChange(event.target.value)}
-                            />
-                        </div>
+                        <Input
+                            label="Interval seconds"
+                            inputMode="numeric"
+                            value={intervalDraft}
+                            onChange={(event) => onIntervalChange(event.target.value)}
+                        />
                     ) : undefined}
                     {scheduleTypeDraft === "daily" ? (
                         <div>
-                            <label className="text-primary-300 mb-1 block text-xs">
+                            <div className="text-primary-300 mb-1 block text-xs">
                                 Time of day
-                            </label>
+                            </div>
                             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                                 <Select
                                     ariaLabel="Time of day hour"
@@ -344,17 +337,12 @@ function ScheduledJobDetails({
                         </div>
                     ) : undefined}
                     {scheduleTypeDraft === "cron" ? (
-                        <div>
-                            <label className="text-primary-300 mb-1 block text-xs">
-                                Cron expression
-                            </label>
-                            <Input
-                                aria-label="Cron expression"
-                                value={cronDraft}
-                                onChange={(event) => onCronChange(event.target.value)}
-                                placeholder="0 4 * * *"
-                            />
-                        </div>
+                        <Input
+                            label="Cron expression"
+                            value={cronDraft}
+                            onChange={(event) => onCronChange(event.target.value)}
+                            placeholder="0 4 * * *"
+                        />
                     ) : undefined}
                     <Button
                         size="sm"

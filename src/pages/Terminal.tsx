@@ -423,7 +423,6 @@ export function Terminal() {
                                 placeholder="Enter command..."
                                 className="w-full bg-black font-mono text-base sm:text-sm"
                                 disabled={startCommand.isPending}
-                                autoFocus
                                 autoComplete="off"
                                 autoCorrect="off"
                                 autoCapitalize="off"

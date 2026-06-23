@@ -34,25 +34,21 @@ export function SessionSection({
                 }}
                 className="space-y-4"
             >
-                <div>
-                    <label className="text-primary-300 mb-1.5 block text-sm font-medium">
-                        Idle Timeout (minutes)
-                    </label>
-                    <form.Field name="idleMinutes">
-                        {(field) => (
-                            <Input
-                                type="number"
-                                value={field.state.value}
-                                onChange={(event_) =>
-                                    field.handleChange(Number(event_.target.value))
-                                }
-                                min={0}
-                                max={1440}
-                                className="w-full sm:w-32"
-                            />
-                        )}
-                    </form.Field>
-                </div>
+                <form.Field name="idleMinutes">
+                    {(field) => (
+                        <Input
+                            label="Idle Timeout (minutes)"
+                            type="number"
+                            value={field.state.value}
+                            onChange={(event_) =>
+                                field.handleChange(Number(event_.target.value))
+                            }
+                            min={0}
+                            max={1440}
+                            className="w-full sm:w-32"
+                        />
+                    )}
+                </form.Field>
                 <div className="flex justify-end">
                     <Button
                         type="submit"
