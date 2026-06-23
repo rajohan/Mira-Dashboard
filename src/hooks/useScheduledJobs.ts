@@ -34,10 +34,10 @@ export interface ScheduledJobRun {
 }
 
 export type ScheduledJobPatch = Partial<
-    Pick<
-        ScheduledJob,
-        "cronExpression" | "enabled" | "intervalSeconds" | "scheduleType" | "timeOfDay"
-    >
+    Omit<Pick<ScheduledJob, "enabled" | "intervalSeconds" | "scheduleType">, never> & {
+        cronExpression?: string | null | undefined;
+        timeOfDay?: string | null | undefined;
+    }
 >;
 
 interface ScheduledJobRunsResponse {

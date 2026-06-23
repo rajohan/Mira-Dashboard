@@ -34,6 +34,8 @@ import {
 } from "../utils/format";
 import { validateJsonString } from "../utils/json";
 
+const CLEAR_SCHEDULE_FIELD = JSON.parse("null") as null;
+
 type JobsView = "scheduled" | "openclaw";
 
 const scheduleTypeOptions = [
@@ -604,8 +606,8 @@ export function Jobs() {
         }
     }
 
-    function getDailyTimeOfDayPatch(job: ScheduledJob): string | undefined {
-        if (scheduleTypeDraft !== "daily") return undefined;
+    function getDailyTimeOfDayPatch(job: ScheduledJob): string | null {
+        if (scheduleTypeDraft !== "daily") return CLEAR_SCHEDULE_FIELD;
         const draftSource = dailyTimeDraftSource.current;
         if (draftSource?.jobId === job.id && timeDraft === draftSource.displayTimeOfDay) {
             return draftSource.utcTimeOfDay;
@@ -622,7 +624,9 @@ export function Jobs() {
                     : job.intervalSeconds,
             timeOfDay: getDailyTimeOfDayPatch(job),
             cronExpression:
-                scheduleTypeDraft === "cron" ? cronExpressionDraft.trim() : undefined,
+                scheduleTypeDraft === "cron"
+                    ? cronExpressionDraft.trim()
+                    : CLEAR_SCHEDULE_FIELD,
         };
         try {
             await updateScheduledJob.mutateAsync({ id: job.id, patch });

@@ -30,7 +30,7 @@ function normalizeCacheNulls(value: unknown): unknown {
     if (Array.isArray(value)) {
         return value.map((entry) => normalizeCacheNulls(entry));
     }
-    if (typeof value === "object" && value !== null) {
+    if (typeof value === "object") {
         return Object.fromEntries(
             Object.entries(value).map(([key, entry]) => [key, normalizeCacheNulls(entry)])
         );

@@ -218,7 +218,8 @@ async function getSystemMetrics(): Promise<SystemMetricsResponse> {
         cpu: {
             count: cpus.length,
             loadAvg: loadAvg.map((value) => Math.round(value * 100) / 100),
-            loadPercent: Math.round(((loadAvg[0] ?? 0) / cpus.length) * 100),
+            loadPercent:
+                cpus.length > 0 ? Math.round(((loadAvg[0] ?? 0) / cpus.length) * 100) : 0,
             model: stringFallback(cpus[0]?.model, "Unknown"),
         },
         disk: {
