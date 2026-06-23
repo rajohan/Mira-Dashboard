@@ -382,7 +382,11 @@ export const taskRoutes = {
             try {
                 const title = optionalString(body.title, "Title")?.trim();
                 if (!title) return json({ error: "Title is required" }, { status: 400 });
-                if (body.assignee !== undefined && !isValidAssignee(body.assignee)) {
+                if (
+                    body.assignee !== undefined &&
+                    body.assignee !== null &&
+                    !isValidAssignee(body.assignee)
+                ) {
                     return json({ error: INVALID_ASSIGNEE_MESSAGE }, { status: 400 });
                 }
                 const assignee = body.assignee ?? undefined;

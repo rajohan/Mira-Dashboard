@@ -52,7 +52,7 @@ function shouldSendFromEnter(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
         return false;
     }
 
-    const coarsePointerQuery = globalThis.matchMedia?.("(pointer: coarse)") ?? undefined;
+    const coarsePointerQuery = globalThis.matchMedia?.("(pointer: coarse)");
     return !coarsePointerQuery?.matches;
 }
 

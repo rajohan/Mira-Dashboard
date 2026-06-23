@@ -134,7 +134,7 @@ function normalizeSyntheticTickPercent(value: number): number {
 function formatSyntheticWeeklyRegenAmount(
     weeklyTokenLimit: SyntheticQuota["weeklyTokenLimit"]
 ): string | undefined {
-    if (weeklyTokenLimit.nextRegenPercent != undefined) {
+    if (weeklyTokenLimit.nextRegenPercent !== undefined) {
         return `+${formatPercent(weeklyTokenLimit.nextRegenPercent)}%`;
     }
 
@@ -149,7 +149,7 @@ function formatSyntheticWeeklyRegenAmount(
 function formatSyntheticFiveHourRegenAmount(
     rollingFiveHourLimit: SyntheticQuota["rollingFiveHourLimit"]
 ): string | undefined {
-    if (rollingFiveHourLimit.tickPercent != undefined) {
+    if (rollingFiveHourLimit.tickPercent !== undefined) {
         return `+${formatPercent(normalizeSyntheticTickPercent(rollingFiveHourLimit.tickPercent))}%`;
     }
 

@@ -173,12 +173,14 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
 
         document.addEventListener("visibilitychange", resyncVisibleSocket);
         window.addEventListener("focus", resyncVisibleSocket);
-        addEventListener("online", resyncVisibleSocket);
+        // eslint-disable-next-line unicorn/prefer-global-this
+        window.addEventListener("online", resyncVisibleSocket);
 
         return () => {
             document.removeEventListener("visibilitychange", resyncVisibleSocket);
             window.removeEventListener("focus", resyncVisibleSocket);
-            removeEventListener("online", resyncVisibleSocket);
+            // eslint-disable-next-line unicorn/prefer-global-this
+            window.removeEventListener("online", resyncVisibleSocket);
         };
     }, [isAuthenticated]);
 

@@ -680,12 +680,26 @@ async function refreshSessions(
                         stringFallback(entry.key).trim()) !== ""
             )
             .map((entry) => {
+                const session = entry as GatewaySession & {
+                    activeRunId?: string | null | undefined;
+                    currentRunId?: string | null | undefined;
+                    endedAt?: string | number | null | undefined;
+                    runId?: string | null | undefined;
+                    startedAt?: string | number | null | undefined;
+                };
                 const updatedAt =
                     typeof entry.updatedAt === "string"
                         ? Date.parse(entry.updatedAt)
                         : entry.updatedAt;
                 return transformSession({
-                    ...(entry as GatewaySession),
+                    ...session,
+                    activeRunId:
+                        session.activeRunId === null ? undefined : session.activeRunId,
+                    currentRunId:
+                        session.currentRunId === null ? undefined : session.currentRunId,
+                    endedAt: session.endedAt === null ? undefined : session.endedAt,
+                    runId: session.runId === null ? undefined : session.runId,
+                    startedAt: session.startedAt === null ? undefined : session.startedAt,
                     updatedAt:
                         typeof updatedAt === "number" && Number.isFinite(updatedAt)
                             ? updatedAt

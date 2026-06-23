@@ -56,16 +56,35 @@ export interface MoltbookCacheResponse<T> {
     meta: Record<string, unknown>;
 }
 
+const CACHE_NULL_SENTINEL_FIELDS = new Set([
+    "authorName",
+    "createdAt",
+    "exploreCount",
+    "feedFilter",
+    "feedType",
+    "latestAnnouncement",
+    "postId",
+    "postsFromAccountsYouFollowCount",
+    "previewText",
+    "tip",
+    "title",
+]);
+
 function normalizeCacheNulls(value: unknown): unknown {
     if (value === null) {
-        return undefined;
+        return value;
     }
     if (Array.isArray(value)) {
-        return value.map((entry) => normalizeCacheNulls(entry));
+        return value;
     }
     if (typeof value === "object") {
         return Object.fromEntries(
-            Object.entries(value).map(([key, entry]) => [key, normalizeCacheNulls(entry)])
+            Object.entries(value).map(([key, entry]) => [
+                key,
+                entry === null && CACHE_NULL_SENTINEL_FIELDS.has(key)
+                    ? undefined
+                    : normalizeCacheNulls(entry),
+            ])
         );
     }
     return value;
