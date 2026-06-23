@@ -725,6 +725,106 @@ describe("Mira Dashboard backend integration", () => {
         expect(missing.body.error).toBe("Scheduled job not found");
     });
 
+    it("validates legacy cron route payloads and reports log rotation state", async () => {
+        const invalidToggle = await api<{ error: string }>(
+            "/api/cron/jobs/example/toggle",
+            json("POST", { enabled: "yes" })
+        );
+        expect(invalidToggle.status).toBe(400);
+        expect(invalidToggle.body.error).toBe("enabled must be a boolean");
+
+        const invalidUpdate = await api<{ error: string }>(
+            "/api/cron/jobs/example/update",
+            json("POST", { patch: [] })
+        );
+        expect(invalidUpdate.status).toBe(400);
+        expect(invalidUpdate.body.error).toBe("patch must be an object");
+
+        const { database, sqlNullable } = await import("../src/database.ts");
+        database
+            .prepare(
+                `
+                INSERT INTO cache_entries (
+                    key,
+                    data_json,
+                    source,
+                    updated_at,
+                    last_attempt_at,
+                    expires_at,
+                    status,
+                    error_code,
+                    error_message,
+                    consecutive_failures,
+                    metadata_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    data_json = excluded.data_json,
+                    source = excluded.source,
+                    updated_at = excluded.updated_at,
+                    last_attempt_at = excluded.last_attempt_at,
+                    expires_at = excluded.expires_at,
+                    status = excluded.status,
+                    error_code = excluded.error_code,
+                    error_message = excluded.error_message,
+                    consecutive_failures = excluded.consecutive_failures,
+                    metadata_json = excluded.metadata_json
+                `
+            )
+            .run(
+                "log_rotation.state",
+                JSON.stringify({
+                    lastRun: {
+                        checkedFiles: "2",
+                        checkedGroups: "1",
+                        compressedFiles: "1",
+                        deletedArchives: "0",
+                        finishedAt: "2026-06-23T08:00:00.000Z",
+                        groups: [{ name: "dashboard" }],
+                        isDryRun: true,
+                        isOk: false,
+                        message: "compression failed",
+                        rotatedFiles: "1",
+                        skippedFiles: "0",
+                        warnings: ["large file"],
+                    },
+                }),
+                "ops",
+                "2026-06-23T08:00:00.000Z",
+                "2026-06-23T08:00:00.000Z",
+                "2026-06-23T09:00:00.000Z",
+                "fresh",
+                sqlNullable(undefined),
+                sqlNullable(undefined),
+                0,
+                "{}"
+            );
+
+        const status = await api<{
+            isSuccess: boolean;
+            lastRun: {
+                checkedFiles: number;
+                errors: Array<{ message: string }>;
+                groups: Array<{ name: string }>;
+                isDryRun: boolean;
+                isOk: boolean;
+                warnings: string[];
+            };
+        }>("/api/ops/log-rotation/status");
+        expect(status.status).toBe(200);
+        expect(status.body).toMatchObject({
+            isSuccess: true,
+            lastRun: {
+                checkedFiles: 2,
+                errors: [{ message: "compression failed" }],
+                groups: [{ name: "dashboard" }],
+                isDryRun: true,
+                isOk: false,
+                warnings: ["large file"],
+            },
+        });
+    });
+
     it("serves log metadata/content and media files while rejecting unsafe inputs", async () => {
         const logsRoot = "/tmp/openclaw";
         await fs.mkdir(logsRoot, { recursive: true });
