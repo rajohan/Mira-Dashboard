@@ -130,7 +130,8 @@ function parseSettingsPatch(input: unknown): Partial<Settings> {
             throw new TypeError("Invalid refreshInterval setting");
         }
         patch.refreshInterval = Math.max(
-            1000,
+            // eslint-disable-next-line unicorn/numeric-separators-style
+            1_000,
             Math.min(60_000, Math.trunc(body.refreshInterval))
         );
     }

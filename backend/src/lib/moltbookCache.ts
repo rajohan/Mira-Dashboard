@@ -57,6 +57,7 @@ export interface MoltbookCacheResponse<T> {
 }
 
 const CACHE_NULL_SENTINEL_FIELDS = new Set([
+    "agent",
     "authorName",
     "createdAt",
     "exploreCount",

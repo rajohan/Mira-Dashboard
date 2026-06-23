@@ -34,7 +34,8 @@ import {
 } from "../utils/format";
 import { validateJsonString } from "../utils/json";
 
-const CLEAR_SCHEDULE_FIELD = JSON.parse("null") as null;
+// eslint-disable-next-line unicorn/no-null
+const CLEAR_SCHEDULE_FIELD = null;
 
 type JobsView = "scheduled" | "openclaw";
 
@@ -89,7 +90,7 @@ function scheduledJobStatusLabel(job: ScheduledJob): string {
 }
 
 function sortScheduledJobs(jobs: ScheduledJob[]): ScheduledJob[] {
-    return [...jobs].toSorted(
+    return jobs.toSorted(
         (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
     );
 }

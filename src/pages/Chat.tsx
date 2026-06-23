@@ -62,7 +62,8 @@ const CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY =
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
 const LIVE_HISTORY_POLL_MS = 2000;
 const ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS = 120_000;
-const NO_CHAT_SCROLL_ELEMENT = JSON.parse("null") as HTMLDivElement | null;
+// eslint-disable-next-line unicorn/no-null
+const NO_CHAT_SCROLL_ELEMENT: HTMLDivElement | null = null;
 
 /** Normalizes chat agent IDs for case-insensitive session bucketing. */
 function normalizeChatAgentId(agentId: string): string {

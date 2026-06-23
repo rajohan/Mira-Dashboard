@@ -267,6 +267,7 @@ export function ChatMessagesList({
     const audioReference = useRef<HTMLAudioElement | undefined>(undefined);
     const audioUrlReference = useRef<string | undefined>(undefined);
     const speakRequestReference = useRef(0);
+    const ttsAbortControllerReference = useRef<AbortController | undefined>(undefined);
     const [playingMessageKey, setPlayingMessageKey] = useState<string | undefined>(
         undefined
     );
@@ -278,8 +279,11 @@ export function ChatMessagesList({
         stopAudioPlayback(audioReference, audioUrlReference, setPlayingMessageKey);
 
     useEffect(
-        () => () =>
-            stopAudioPlayback(audioReference, audioUrlReference, setPlayingMessageKey),
+        () => () => {
+            ttsAbortControllerReference.current?.abort();
+            ttsAbortControllerReference.current = undefined;
+            stopAudioPlayback(audioReference, audioUrlReference, setPlayingMessageKey);
+        },
         []
     );
 
@@ -296,6 +300,9 @@ export function ChatMessagesList({
         const isLatestRequest = () => speakRequestReference.current === requestToken;
 
         stopAudio();
+        ttsAbortControllerReference.current?.abort();
+        const abortController = new AbortController();
+        ttsAbortControllerReference.current = abortController;
         setLoadingMessageKey(messageKey);
         onTtsError("");
 
@@ -304,6 +311,7 @@ export function ChatMessagesList({
                 method: "POST",
                 credentials: "include",
                 headers: { "Content-Type": "application/json" },
+                signal: abortController.signal,
                 body: JSON.stringify({ text }),
             });
 
@@ -357,6 +365,9 @@ export function ChatMessagesList({
         } finally {
             if (isLatestRequest()) {
                 setLoadingMessageKey(undefined);
+                if (ttsAbortControllerReference.current === abortController) {
+                    ttsAbortControllerReference.current = undefined;
+                }
             }
         }
     };

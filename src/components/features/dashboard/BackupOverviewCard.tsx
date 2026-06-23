@@ -44,7 +44,7 @@ type BackupCacheData = {
     tool?: string;
     latest?: BackupSnapshot[];
     snapshotsByPath?: BackupSnapshotGroup[];
-    stale?: Array<{ path?: string; endTime?: string }>;
+    stale?: Array<{ path?: string; endTime?: string; missing?: boolean }>;
     isOk?: boolean;
 };
 

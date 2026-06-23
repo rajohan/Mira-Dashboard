@@ -85,7 +85,6 @@ export interface QuotasResponse {
 export function hasQuotaStatus(value: unknown): value is QuotaError {
     return (
         typeof value === "object" &&
-        value !== undefined &&
         value !== null &&
         "status" in value &&
         (value.status === "not_configured" || value.status === "error")
