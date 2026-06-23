@@ -1175,7 +1175,7 @@ describe("Mira Dashboard frontend behavior", () => {
         );
     });
 
-    it("fetches and mutates remaining dashboard API surfaces through hooks", async () => {
+    it("fetches health and metrics through dashboard hooks", async () => {
         const fetchMock = jest.fn(
             async (input: RequestInfo | URL, init?: RequestInit) => {
                 const url = String(input);
@@ -1235,6 +1235,28 @@ describe("Mira Dashboard frontend behavior", () => {
                         timestamp: 123_456,
                     });
                 }
+
+                throw new Error(`Unexpected health API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const health = renderHookWithQueryClient(() => useHealth());
+        await waitFor(() => expect(health.result.current.data?.status).toBe("isOk"));
+
+        const metrics = renderHookWithQueryClient(() => useMetrics());
+        await waitFor(() => expect(metrics.result.current.data?.tokens.total).toBe(42));
+    });
+
+    it("fetches and refreshes cache-backed dashboard data through hooks", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
 
                 if (url === "/api/cache/heartbeat" && method === "GET") {
                     return Response.json({
@@ -1409,6 +1431,77 @@ describe("Mira Dashboard frontend behavior", () => {
                     });
                 }
 
+                throw new Error(`Unexpected cache API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const cacheHeartbeat = renderHookWithQueryClient(() => useCacheHeartbeat());
+        await waitFor(() => expect(cacheHeartbeat.result.current.data?.count).toBe(1));
+
+        const weatherEntry = renderHookWithQueryClient(() =>
+            useCacheEntry<{ location: string }>("weather.spydeberg")
+        );
+        await waitFor(() =>
+            expect(weatherEntry.result.current.data?.data.location).toBe("Spydeberg")
+        );
+
+        const weather = renderHookWithQueryClient(() => useWeather());
+        await waitFor(() =>
+            expect(weather.result.current.data?.location).toBe("Spydeberg")
+        );
+
+        const quotas = renderHookWithQueryClient(() => useQuotas());
+        await waitFor(() =>
+            expect(quotas.result.current.data?.openrouter).toMatchObject({
+                remaining: 9,
+            })
+        );
+
+        const moltbook = renderHookWithQueryClient(() => useMoltbookData("hot"));
+        await waitFor(() => expect(moltbook.result.current.posts[0]?.id).toBe("post-1"));
+        await waitFor(() => expect(moltbook.result.current.profile?.name).toBe("Mira"));
+        act(() => {
+            moltbook.result.current.refetch();
+        });
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/cache/moltbook.home",
+                expect.objectContaining({ credentials: "include" })
+            )
+        );
+
+        const newestMoltbook = renderHookWithQueryClient(() => useMoltbookData("new"));
+        await waitFor(() =>
+            expect(newestMoltbook.result.current.posts[0]).toMatchObject({
+                id: "post-2",
+                content: "Full post",
+                author: {
+                    name: "raymond",
+                    display_name: "Raymond",
+                    avatar_url: "/avatar.png",
+                },
+                upvotes: 0,
+                you_follow_author: true,
+            })
+        );
+
+        const refreshCache = renderHookWithQueryClient(() => useRefreshCacheEntry());
+        await expect(
+            refreshCache.result.current.mutateAsync(" weather.spydeberg ,, ")
+        ).resolves.toMatchObject({ keys: ["weather.spydeberg"] });
+    });
+
+    it("fetches and mutates cron jobs through hooks", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
                 if (url === "/api/cron/jobs" && method === "GET") {
                     return Response.json({
                         jobs: [{ id: "cron-1", name: "Cron One", enabled: true }],
@@ -1434,6 +1527,40 @@ describe("Mira Dashboard frontend behavior", () => {
                 if (url === "/api/cron/jobs/cron-1/delete" && method === "POST") {
                     return Response.json({ isOk: true });
                 }
+
+                throw new Error(`Unexpected cron API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const cronJobs = renderHookWithQueryClient(() => useCronJobs());
+        await waitFor(() => expect(cronJobs.result.current.data?.[0]?.id).toBe("cron-1"));
+
+        const toggleCron = renderHookWithQueryClient(() => useToggleCronJob());
+        await toggleCron.result.current.mutateAsync({ id: "cron-1", enabled: false });
+
+        const updateCron = renderHookWithQueryClient(() => useUpdateCronJob());
+        await updateCron.result.current.mutateAsync({
+            id: "cron-1",
+            patch: { schedule: { kind: "interval", every: "5m" } },
+        });
+
+        const runCron = renderHookWithQueryClient(() => useRunCronJobNow());
+        await runCron.result.current.mutateAsync({ id: "cron-1" });
+
+        const deleteCron = renderHookWithQueryClient(() => useDeleteCronJob());
+        await deleteCron.result.current.mutateAsync({ id: "cron-1" });
+    });
+
+    it("fetches and mutates config, skills, and service operations through hooks", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
 
                 if (url === "/api/config" && method === "GET") {
                     return Response.json({
@@ -1483,6 +1610,53 @@ describe("Mira Dashboard frontend behavior", () => {
                     return new Response(undefined, { status: 204 });
                 }
 
+                throw new Error(`Unexpected config API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const config = renderHookWithQueryClient(() => useConfig());
+        await waitFor(() => expect(config.result.current.data?.__hash).toBe("hash-1"));
+
+        const skills = renderHookWithQueryClient(() => useSkills());
+        await waitFor(() =>
+            expect(skills.result.current.data?.[0]?.name).toBe("weather")
+        );
+
+        const toggleSkill = renderHookWithQueryClient(() => useToggleSkill());
+        toggleSkill.queryClient.setQueryData(["config"], { __hash: "hash-1" });
+        await toggleSkill.result.current.mutateAsync({
+            name: "weather",
+            enabled: false,
+        });
+
+        const updateConfig = renderHookWithQueryClient(() => useUpdateConfig());
+        await updateConfig.result.current.mutateAsync({
+            __hash: "hash-1",
+            agents: { defaults: { model: { primary: "codex" } } },
+        });
+
+        const restartGateway = renderHookWithQueryClient(() => useRestartGateway());
+        await expect(
+            restartGateway.result.current.mutateAsync()
+        ).resolves.toBeUndefined();
+
+        const backup = renderHookWithQueryClient(() => useCreateBackup());
+        await expect(backup.result.current.mutateAsync()).resolves.toMatchObject({
+            hash: "hash-1",
+        });
+    });
+
+    it("fetches database overview and mutates sessions through hooks", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
                 if (url === "/api/database/overview" && method === "GET") {
                     return Response.json({
                         overview: {
@@ -1517,6 +1691,36 @@ describe("Mira Dashboard frontend behavior", () => {
                 if (url === "/api/sessions/session-1" && method === "DELETE") {
                     return Response.json({ isOk: true });
                 }
+
+                throw new Error(`Unexpected database/session API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const database = renderHookWithQueryClient(() => useDatabaseOverview());
+        await waitFor(() =>
+            expect(database.result.current.data?.overview.totalBackends).toBe(2)
+        );
+
+        const sessionAction = renderHookWithQueryClient(() => useSessionAction());
+        await sessionAction.result.current.mutateAsync({
+            key: "session-1",
+            action: "compact",
+        });
+
+        const deleteSession = renderHookWithQueryClient(() => useDeleteSession());
+        await deleteSession.result.current.mutateAsync("session-1");
+    });
+
+    it("runs terminal and exec operations through hooks", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
 
                 if (url === "/api/exec/start" && method === "POST") {
                     const body = JSON.parse(String(init?.body)) as {
@@ -1574,6 +1778,76 @@ describe("Mira Dashboard frontend behavior", () => {
                 if (url === "/api/exec/job-1/stop" && method === "POST") {
                     return new Response(undefined, { status: 204 });
                 }
+
+                throw new Error(`Unexpected terminal API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const terminalStart = renderHookWithQueryClient(() => useStartTerminalCommand());
+        await expect(
+            terminalStart.result.current.mutateAsync({ command: "pwd", cwd: "/tmp" })
+        ).resolves.toEqual({ jobId: "job-1" });
+
+        const opsStart = renderHookWithQueryClient(() => useStartOpsAction());
+        await expect(
+            opsStart.result.current.mutateAsync(OPS_ACTIONS[0]!)
+        ).resolves.toEqual({ jobId: "job-1" });
+
+        const opsJob = renderHookWithQueryClient(() => useExecJob("job-1"));
+        await waitFor(() => expect(opsJob.result.current.data?.status).toBe("done"));
+
+        const terminalJob = renderHookWithQueryClient(() => useTerminalJob("job-1"));
+        await waitFor(() => expect(terminalJob.result.current.data?.stdout).toBe("/tmp"));
+
+        await expect(getCompletions("sr", "/tmp")).resolves.toMatchObject({
+            commonPrefix: "src",
+        });
+        await expect(changeDirectory("src", "/tmp")).resolves.toEqual({
+            isSuccess: true,
+            newCwd: "/tmp/src",
+        });
+        await expect(stopTerminalJob("job-1")).resolves.toBeUndefined();
+
+        const terminalHistory = renderHookWithQueryClient(() => useTerminalHistory());
+        let historyId = "";
+        act(() => {
+            historyId = terminalHistory.result.current.addCommand({
+                command: "pwd",
+                cwd: "/tmp",
+                jobId: "job-1",
+                status: "running",
+                stdout: "",
+                stderr: "",
+                startedAt: 1,
+            });
+        });
+        expect(terminalHistory.result.current.history).toHaveLength(1);
+        act(() => {
+            terminalHistory.result.current.updateCommand(historyId, {
+                status: "done",
+                stdout: "/tmp",
+            });
+        });
+        expect(terminalHistory.result.current.history[0]).toMatchObject({
+            status: "done",
+            stdout: "/tmp",
+        });
+        act(() => {
+            terminalHistory.result.current.clearHistory();
+        });
+        expect(terminalHistory.result.current.history).toEqual([]);
+    });
+
+    it("mutates pull request review and deploy operations through hooks", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
 
                 if (url === "/api/pull-requests/189/approve" && method === "POST") {
                     expect(JSON.parse(String(init?.body))).toEqual({ deploy: true });
@@ -1638,7 +1912,7 @@ describe("Mira Dashboard frontend behavior", () => {
                     });
                 }
 
-                throw new Error(`Unexpected remaining hook API call: ${method} ${url}`);
+                throw new Error(`Unexpected pull request API call: ${method} ${url}`);
             }
         );
         Object.defineProperty(globalThis, "fetch", {
@@ -1646,184 +1920,6 @@ describe("Mira Dashboard frontend behavior", () => {
             value: fetchMock,
             writable: true,
         });
-
-        const health = renderHookWithQueryClient(() => useHealth());
-        await waitFor(() => expect(health.result.current.data?.status).toBe("isOk"));
-
-        const metrics = renderHookWithQueryClient(() => useMetrics());
-        await waitFor(() => expect(metrics.result.current.data?.tokens.total).toBe(42));
-
-        const cacheHeartbeat = renderHookWithQueryClient(() => useCacheHeartbeat());
-        await waitFor(() => expect(cacheHeartbeat.result.current.data?.count).toBe(1));
-
-        const weatherEntry = renderHookWithQueryClient(() =>
-            useCacheEntry<{ location: string }>("weather.spydeberg")
-        );
-        await waitFor(() =>
-            expect(weatherEntry.result.current.data?.data.location).toBe("Spydeberg")
-        );
-
-        const weather = renderHookWithQueryClient(() => useWeather());
-        await waitFor(() =>
-            expect(weather.result.current.data?.location).toBe("Spydeberg")
-        );
-
-        const quotas = renderHookWithQueryClient(() => useQuotas());
-        await waitFor(() =>
-            expect(quotas.result.current.data?.openrouter).toMatchObject({
-                remaining: 9,
-            })
-        );
-
-        const moltbook = renderHookWithQueryClient(() => useMoltbookData("hot"));
-        await waitFor(() => expect(moltbook.result.current.posts[0]?.id).toBe("post-1"));
-        expect(moltbook.result.current.profile?.name).toBe("Mira");
-        act(() => {
-            moltbook.result.current.refetch();
-        });
-        await waitFor(() =>
-            expect(fetchMock).toHaveBeenCalledWith(
-                "/api/cache/moltbook.home",
-                expect.objectContaining({ credentials: "include" })
-            )
-        );
-
-        const newestMoltbook = renderHookWithQueryClient(() => useMoltbookData("new"));
-        await waitFor(() =>
-            expect(newestMoltbook.result.current.posts[0]).toMatchObject({
-                id: "post-2",
-                content: "Full post",
-                author: {
-                    name: "raymond",
-                    display_name: "Raymond",
-                    avatar_url: "/avatar.png",
-                },
-                upvotes: 0,
-                you_follow_author: true,
-            })
-        );
-
-        const refreshCache = renderHookWithQueryClient(() => useRefreshCacheEntry());
-        await expect(
-            refreshCache.result.current.mutateAsync(" weather.spydeberg ,, ")
-        ).resolves.toMatchObject({ keys: ["weather.spydeberg"] });
-
-        const cronJobs = renderHookWithQueryClient(() => useCronJobs());
-        await waitFor(() => expect(cronJobs.result.current.data?.[0]?.id).toBe("cron-1"));
-
-        const toggleCron = renderHookWithQueryClient(() => useToggleCronJob());
-        await toggleCron.result.current.mutateAsync({ id: "cron-1", enabled: false });
-
-        const updateCron = renderHookWithQueryClient(() => useUpdateCronJob());
-        await updateCron.result.current.mutateAsync({
-            id: "cron-1",
-            patch: { schedule: { kind: "interval", every: "5m" } },
-        });
-
-        const runCron = renderHookWithQueryClient(() => useRunCronJobNow());
-        await runCron.result.current.mutateAsync({ id: "cron-1" });
-
-        const deleteCron = renderHookWithQueryClient(() => useDeleteCronJob());
-        await deleteCron.result.current.mutateAsync({ id: "cron-1" });
-
-        const config = renderHookWithQueryClient(() => useConfig());
-        await waitFor(() => expect(config.result.current.data?.__hash).toBe("hash-1"));
-
-        const skills = renderHookWithQueryClient(() => useSkills());
-        await waitFor(() =>
-            expect(skills.result.current.data?.[0]?.name).toBe("weather")
-        );
-
-        const toggleSkill = renderHookWithQueryClient(() => useToggleSkill());
-        toggleSkill.queryClient.setQueryData(["config"], { __hash: "hash-1" });
-        await toggleSkill.result.current.mutateAsync({
-            name: "weather",
-            enabled: false,
-        });
-
-        const updateConfig = renderHookWithQueryClient(() => useUpdateConfig());
-        await updateConfig.result.current.mutateAsync({
-            __hash: "hash-1",
-            agents: { defaults: { model: { primary: "codex" } } },
-        });
-
-        const restartGateway = renderHookWithQueryClient(() => useRestartGateway());
-        await expect(
-            restartGateway.result.current.mutateAsync()
-        ).resolves.toBeUndefined();
-
-        const backup = renderHookWithQueryClient(() => useCreateBackup());
-        await expect(backup.result.current.mutateAsync()).resolves.toMatchObject({
-            hash: "hash-1",
-        });
-
-        const database = renderHookWithQueryClient(() => useDatabaseOverview());
-        await waitFor(() =>
-            expect(database.result.current.data?.overview.totalBackends).toBe(2)
-        );
-
-        const sessionAction = renderHookWithQueryClient(() => useSessionAction());
-        await sessionAction.result.current.mutateAsync({
-            key: "session-1",
-            action: "compact",
-        });
-
-        const deleteSession = renderHookWithQueryClient(() => useDeleteSession());
-        await deleteSession.result.current.mutateAsync("session-1");
-
-        const terminalStart = renderHookWithQueryClient(() => useStartTerminalCommand());
-        await expect(
-            terminalStart.result.current.mutateAsync({ command: "pwd", cwd: "/tmp" })
-        ).resolves.toEqual({ jobId: "job-1" });
-
-        const opsStart = renderHookWithQueryClient(() => useStartOpsAction());
-        await expect(
-            opsStart.result.current.mutateAsync(OPS_ACTIONS[0]!)
-        ).resolves.toEqual({ jobId: "job-1" });
-
-        const opsJob = renderHookWithQueryClient(() => useExecJob("job-1"));
-        await waitFor(() => expect(opsJob.result.current.data?.status).toBe("done"));
-
-        const terminalJob = renderHookWithQueryClient(() => useTerminalJob("job-1"));
-        await waitFor(() => expect(terminalJob.result.current.data?.stdout).toBe("/tmp"));
-
-        await expect(getCompletions("sr", "/tmp")).resolves.toMatchObject({
-            commonPrefix: "src",
-        });
-        await expect(changeDirectory("src", "/tmp")).resolves.toEqual({
-            isSuccess: true,
-            newCwd: "/tmp/src",
-        });
-        await expect(stopTerminalJob("job-1")).resolves.toBeUndefined();
-
-        const terminalHistory = renderHookWithQueryClient(() => useTerminalHistory());
-        let historyId = "";
-        act(() => {
-            historyId = terminalHistory.result.current.addCommand({
-                command: "pwd",
-                cwd: "/tmp",
-                jobId: "job-1",
-                status: "running",
-                stdout: "",
-                stderr: "",
-                startedAt: 1,
-            });
-        });
-        expect(terminalHistory.result.current.history).toHaveLength(1);
-        act(() => {
-            terminalHistory.result.current.updateCommand(historyId, {
-                status: "done",
-                stdout: "/tmp",
-            });
-        });
-        expect(terminalHistory.result.current.history[0]).toMatchObject({
-            status: "done",
-            stdout: "/tmp",
-        });
-        act(() => {
-            terminalHistory.result.current.clearHistory();
-        });
-        expect(terminalHistory.result.current.history).toEqual([]);
 
         const approvePullRequest = renderHookWithQueryClient(() =>
             useApprovePullRequest()

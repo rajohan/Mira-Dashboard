@@ -177,6 +177,7 @@ async function createTestServer(
 
 describe("Mira Dashboard backend integration", () => {
     beforeAll(async () => {
+        testState.originalHome = process.env.HOME;
         testState.temporaryRoot = await fs.mkdtemp(
             path.join(os.tmpdir(), "mira-dashboard-test-")
         );
@@ -216,7 +217,6 @@ describe("Mira Dashboard backend integration", () => {
         );
 
         testState.originalLoopbackAuth = process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH;
-        testState.originalHome = process.env.HOME;
         process.env.MIRA_DASHBOARD_DB_PATH = path.join(
             testState.temporaryRoot,
             "dashboard.database"
@@ -290,7 +290,11 @@ describe("Mira Dashboard backend integration", () => {
 
         const invalidBootstrap = await api<{ error: string }>(
             "/api/auth/register-first-user",
-            json("POST", { username: "x", password: "short", gatewayToken: "" })
+            json("POST", {
+                username: "x",
+                password: "valid-password",
+                gatewayToken: "",
+            })
         );
         expect(invalidBootstrap.status).toBe(400);
         expect(invalidBootstrap.body.error).toBe(
@@ -1148,7 +1152,7 @@ describe("Mira Dashboard backend integration", () => {
     });
 
     it("serves log metadata/content and media files while rejecting unsafe inputs", async () => {
-        const logsRoot = "/tmp/openclaw";
+        const logsRoot = testState.openclawRoot;
         await fs.mkdir(logsRoot, { recursive: true });
         await fs.writeFile(
             path.join(logsRoot, "openclaw-dashboard-functional-test.log"),
@@ -1388,16 +1392,13 @@ describe("Mira Dashboard backend integration", () => {
         expect(metrics.body.system.hostname.length).toBeGreaterThan(0);
         expect(metrics.body.tokens.total).toBe(0);
 
-        const moltbook = await api<Record<string, unknown> & { error?: string }>(
-            "/api/moltbook/home"
+        const { database } = await import("../src/database.ts");
+        database.prepare("DELETE FROM cache_entries WHERE key = ?").run("moltbook.home");
+        const missingMoltbook = await api<{ error: string }>("/api/moltbook/home");
+        expect(missingMoltbook.status).toBe(503);
+        expect(missingMoltbook.body.error).toBe(
+            "Moltbook cache entry not found or not fresh: moltbook.home"
         );
-        expect([200, 503]).toContain(moltbook.status);
-        if (moltbook.status === 503) {
-            expect(moltbook.body.error).toContain("Cache key not found");
-        } else {
-            expect(typeof moltbook.body).toBe("object");
-            expect(moltbook.body).not.toBeNull();
-        }
     });
 
     it("proxies successful TTS and STT provider responses", async () => {

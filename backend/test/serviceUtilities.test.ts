@@ -1,11 +1,10 @@
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { Server } from "bun";
 import { describe, expect, it } from "bun:test";
 
-import { sqlNullable } from "../src/database.ts";
 import {
     isAllowedDashboardOrigin,
     readJson,
@@ -14,7 +13,6 @@ import {
     text,
     withCookie,
 } from "../src/http.ts";
-import { parseJsonField, parseTable } from "../src/lib/cacheStore.ts";
 import { errorMessage, httpStatusCode } from "../src/lib/errors.ts";
 import { loadOrCreateDeviceIdentity } from "../src/lib/openclawGatewayClient.ts";
 import { pipeProcessOutput, runProcess } from "../src/lib/processes.ts";
@@ -40,6 +38,10 @@ function serverWithAddress(address: string): Server<unknown> {
     return {
         requestIP: () => ({ address, family: "IPv4", port: 12_345 }),
     } as unknown as Server<unknown>;
+}
+
+function canonicalPath(value: string): string {
+    return path.join(realpathSync(path.dirname(value)), path.basename(value));
 }
 
 async function callTestRoute(
@@ -68,23 +70,40 @@ describe("backend service utilities", () => {
         expect(isValidAgentId("x".repeat(65))).toBe(false);
     });
 
-    it("parses cache JSON and tabular command output defensively", () => {
-        expect(parseJsonField<{ ok: boolean }>('{"ok":true}')).toEqual({ ok: true });
-        expect(parseJsonField("")).toBeUndefined();
-        expect(parseJsonField("{")).toBeUndefined();
+    it("parses cache JSON and tabular command output defensively", async () => {
+        const originalDatabasePath = process.env.MIRA_DASHBOARD_DB_PATH;
+        const root = mkdtempSync(path.join(tmpdir(), "mira-cache-store-test-"));
+        try {
+            process.env.MIRA_DASHBOARD_DB_PATH = path.join(root, "dashboard.db");
+            const { parseJsonField, parseTable } =
+                await import("../src/lib/cacheStore.ts");
+            expect(parseJsonField<{ ok: boolean }>('{"ok":true}')).toEqual({
+                ok: true,
+            });
+            expect(parseJsonField("")).toBeUndefined();
+            expect(parseJsonField("{")).toBeUndefined();
 
-        expect(
-            parseTable<{ name: string; status: string }>(
-                "name\tstatus\nmira\tonline\nraymond\t\n\n"
-            )
-        ).toEqual([
-            { name: "mira", status: "online" },
-            { name: "raymond", status: "" },
-        ]);
-        expect(parseTable("")).toEqual([]);
+            expect(
+                parseTable<{ name: string; status: string }>(
+                    "name\tstatus\nmira\tonline\nraymond\t\n\n"
+                )
+            ).toEqual([
+                { name: "mira", status: "online" },
+                { name: "raymond", status: "" },
+            ]);
+            expect(parseTable("")).toEqual([]);
+        } finally {
+            if (originalDatabasePath === undefined) {
+                delete process.env.MIRA_DASHBOARD_DB_PATH;
+            } else {
+                process.env.MIRA_DASHBOARD_DB_PATH = originalDatabasePath;
+            }
+            rmSync(root, { force: true, recursive: true });
+        }
     });
 
-    it("maps undefined bindings to SQLite null while preserving concrete values", () => {
+    it("maps undefined bindings to SQLite null while preserving concrete values", async () => {
+        const { sqlNullable } = await import("../src/database.ts");
         expect(sqlNullable("value")).toBe("value");
         expect(sqlNullable(0)).toBe(0);
         expect(sqlNullable(undefined)).toBeNull();
@@ -148,8 +167,8 @@ describe("backend service utilities", () => {
             writeFileSync(path.join(root, "inside.txt"), "ok");
             symlinkSync(outside, path.join(root, "outside-link"));
 
-            expect(safePathWithinRoot("inside.txt", root)).toBe(
-                path.join(root, "inside.txt")
+            expect(canonicalPath(safePathWithinRoot("inside.txt", root)!)).toBe(
+                canonicalPath(path.join(root, "inside.txt"))
             );
             expect(safePathWithinRoot("../escape.txt", root)).toBeUndefined();
             expect(safePathWithinRoot("outside-link/escape.txt", root)).toBeUndefined();
@@ -277,7 +296,7 @@ describe("backend service utilities", () => {
         expect(chunks.join("")).toBe("onetwo");
     });
 
-    it("parses HTTP helpers for JSON, cookies, origins, and body limits", async () => {
+    it("parses valid JSON request bodies", async () => {
         const validJsonBody = JSON.stringify({ ok: true });
         await expect(
             readJson<{ ok: boolean }>(
@@ -287,9 +306,15 @@ describe("backend service utilities", () => {
                 })
             )
         ).resolves.toEqual({ ok: true });
+    });
+
+    it("rejects invalid JSON request bodies", async () => {
         await expect(
             readJson(new Request("http://localhost/api", { body: "{", method: "POST" }))
         ).rejects.toThrow("Invalid JSON");
+    });
+
+    it("enforces request body size limits", async () => {
         await expect(
             readRequestBytes(
                 new Request("http://localhost/api", {
@@ -300,10 +325,15 @@ describe("backend service utilities", () => {
                 4
             )
         ).rejects.toThrow("Request body too large");
+    });
 
+    it("adds cookies to text responses", () => {
         const response = withCookie(text("hello", { status: 201 }), "a=b");
         expect(response.status).toBe(201);
         expect(response.headers.get("set-cookie")).toBe("a=b");
+    });
+
+    it("extracts dashboard session cookies safely", () => {
         expect(sessionIdFromCookie(new Request("http://localhost/api"))).toBeUndefined();
         expect(
             sessionIdFromCookie(
@@ -319,6 +349,9 @@ describe("backend service utilities", () => {
                 })
             )
         ).toBeUndefined();
+    });
+
+    it("validates allowed dashboard origins", () => {
         expect(isAllowedDashboardOrigin(new Request("http://localhost:3100/api"))).toBe(
             true
         );
@@ -336,6 +369,9 @@ describe("backend service utilities", () => {
                 })
             )
         ).toBe(false);
+    });
+
+    it("uses fake server request addresses in tests", () => {
         expect(serverWithAddress("127.0.0.1").requestIP(new Request("http://x"))).toEqual(
             { address: "127.0.0.1", family: "IPv4", port: 12_345 }
         );
@@ -392,19 +428,22 @@ describe("backend service utilities", () => {
 
             resetRequestPolicyForTests();
             const originalConsoleError = console.error;
-            Object.defineProperty(console, "error", {
-                configurable: true,
-                value: () => {},
-            });
-            const generic = await callTestRoute(routes, "/generic-error", server);
-            Object.defineProperty(console, "error", {
-                configurable: true,
-                value: originalConsoleError,
-            });
-            expect(generic.status).toBe(500);
-            await expect(generic.json()).resolves.toEqual({
-                error: "Internal server error",
-            });
+            try {
+                Object.defineProperty(console, "error", {
+                    configurable: true,
+                    value: () => {},
+                });
+                const generic = await callTestRoute(routes, "/generic-error", server);
+                expect(generic.status).toBe(500);
+                await expect(generic.json()).resolves.toEqual({
+                    error: "Internal server error",
+                });
+            } finally {
+                Object.defineProperty(console, "error", {
+                    configurable: true,
+                    value: originalConsoleError,
+                });
+            }
         } finally {
             resetRequestPolicyForTests();
         }

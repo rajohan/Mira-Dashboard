@@ -129,11 +129,10 @@ describe("database overview service", () => {
     it("summarizes Postgres, PgBouncer, and torrent metrics from command output", async () => {
         const originalPath = process.env.PATH;
         const temporaryRoot = mkdtempSync(path.join(tmpdir(), "mira-fake-docker-"));
-        writeFakeDocker(path.join(temporaryRoot, "docker"));
-        const { getDatabaseOverview } =
-            await import("../src/services/databaseOverview.ts");
-
         try {
+            writeFakeDocker(path.join(temporaryRoot, "docker"));
+            const { getDatabaseOverview } =
+                await import("../src/services/databaseOverview.ts");
             process.env.PATH = `${temporaryRoot}:${originalPath ?? ""}`;
             const overview = await getDatabaseOverview();
 
