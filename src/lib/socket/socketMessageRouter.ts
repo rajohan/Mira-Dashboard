@@ -3,7 +3,7 @@ import { writeLogFromWebSocket } from "../../collections/logs";
 import { replaceSessionsFromWebSocket } from "../../collections/sessions";
 import type { AgentInfo, Session } from "../../types/session";
 import type { SocketEnvelope } from "../../types/socket";
-import { sessionsPayloadSchema, socketEnvelopeSchema } from "../../types/socket";
+import { isSocketEnvelope, readSessionsPayload } from "../../types/socket";
 
 /** Extracts sessions from payload. */
 function extractSessionsFromPayload(payload: unknown): Session[] {
@@ -11,22 +11,22 @@ function extractSessionsFromPayload(payload: unknown): Session[] {
         return payload as Session[];
     }
 
-    const parsed = sessionsPayloadSchema.safeParse(payload);
-    if (parsed.success) {
-        return parsed.data.sessions as Session[];
+    const sessions = readSessionsPayload(payload);
+    if (sessions) {
+        return sessions as Session[];
     }
 
     if (payload && typeof payload === "object") {
         const maybe = payload as { result?: unknown; data?: unknown };
 
-        const fromResult = sessionsPayloadSchema.safeParse(maybe.result);
-        if (fromResult.success) {
-            return fromResult.data.sessions as Session[];
+        const fromResult = readSessionsPayload(maybe.result);
+        if (fromResult) {
+            return fromResult as Session[];
         }
 
-        const fromData = sessionsPayloadSchema.safeParse(maybe.data);
-        if (fromData.success) {
-            return fromData.data.sessions as Session[];
+        const fromData = readSessionsPayload(maybe.data);
+        if (fromData) {
+            return fromData as Session[];
         }
     }
 
@@ -48,12 +48,11 @@ function readGatewayConnectionState(data: SocketEnvelope): boolean | undefined {
 
 /** Responds to socket message events. */
 export function handleSocketMessage(raw: unknown): boolean | undefined {
-    const validated = socketEnvelopeSchema.safeParse(raw);
-    if (!validated.success) {
+    if (!isSocketEnvelope(raw)) {
         return undefined;
     }
 
-    const data = raw as SocketEnvelope;
+    const data = raw;
 
     if (data.type === "state" && data.sessions) {
         replaceSessionsFromWebSocket(data.sessions);
