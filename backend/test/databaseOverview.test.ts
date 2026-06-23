@@ -133,7 +133,7 @@ describe("database overview service", () => {
             writeFakeDocker(path.join(temporaryRoot, "docker"));
             const { getDatabaseOverview } =
                 await import("../src/services/databaseOverview.ts");
-            process.env.PATH = `${temporaryRoot}:${originalPath ?? ""}`;
+            process.env.PATH = `${temporaryRoot}${path.delimiter}${originalPath ?? ""}`;
             const overview = await getDatabaseOverview();
 
             expect(overview.overview).toMatchObject({

@@ -175,7 +175,9 @@ describe("backend service utilities", () => {
             expect(safePathWithinRoot("bad\0name", root)).toBeUndefined();
 
             const writeTarget = path.join(root, "nested", "report.txt");
-            expect(prepareSafeWriteTargetWithinRoot(writeTarget, root)).toBe(writeTarget);
+            expect(
+                path.resolve(prepareSafeWriteTargetWithinRoot(writeTarget, root)!)
+            ).toBe(path.resolve(writeTarget));
             expect(
                 prepareSafeWriteTargetWithinRoot(path.join(outside, "report.txt"), root)
             ).toBeUndefined();

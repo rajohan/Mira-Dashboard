@@ -896,7 +896,7 @@ describe("Mira Dashboard backend integration", () => {
         );
         await writeFakeDocker(path.join(temporaryRoot, "docker"));
         try {
-            process.env.PATH = `${temporaryRoot}:${originalPath ?? ""}`;
+            process.env.PATH = `${temporaryRoot}${path.delimiter}${originalPath ?? ""}`;
             const overview = await api<{
                 overview: {
                     totalBackends: number;
