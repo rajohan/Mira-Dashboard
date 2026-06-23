@@ -69,7 +69,7 @@ function normalizeLastRun(value: unknown) {
 async function readLogRotationStatus() {
     const row = database
         .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
-        .get(LOG_ROTATION_STATE_KEY) as undefined | { data_json?: string | undefined };
+        .get(LOG_ROTATION_STATE_KEY) as undefined | { data_json: string | null };
     const raw = row?.data_json ?? "";
     let data: undefined | { lastRun?: unknown };
     if (raw) {

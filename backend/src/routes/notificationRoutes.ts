@@ -260,7 +260,7 @@ export const notificationRoutes = {
                 }
             }
             const rawSource = "source" in body ? body.source : querySource;
-            if (rawSource !== undefined && typeof rawSource !== "string") {
+            if (rawSource != undefined && typeof rawSource !== "string") {
                 return json({ error: "source must be a string" }, { status: 400 });
             }
             const source = nullableString(stringFallback(rawSource).trim());

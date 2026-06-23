@@ -189,7 +189,7 @@ function insertMessagesByTimestamp(
 
         const insertionIndex = merged.findIndex((candidate) => {
             const candidateTimestamp = messageTimestampMs(candidate);
-            return candidateTimestamp !== undefined && candidateTimestamp > timestamp;
+            return candidateTimestamp === undefined || candidateTimestamp > timestamp;
         });
 
         if (insertionIndex === -1) {

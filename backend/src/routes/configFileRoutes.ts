@@ -40,7 +40,11 @@ function openclawRoot(): string | undefined {
         return undefined;
     }
     try {
-        return fs.realpathSync(root);
+        const resolvedRoot = fs.realpathSync(root);
+        return path.isAbsolute(resolvedRoot) &&
+            resolvedRoot !== path.parse(resolvedRoot).root
+            ? resolvedRoot
+            : undefined;
     } catch {
         return root;
     }

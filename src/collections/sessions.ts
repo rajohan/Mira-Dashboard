@@ -6,7 +6,8 @@ import type { Session } from "../types/session";
 
 /** Returns session collection key. */
 function getSessionCollectionKey(item: Partial<Session>): string | undefined {
-    const key = item.key || item.id;
+    const hasKey = typeof item.key === "string" && item.key.trim().length > 0;
+    const key = hasKey ? item.key : item.id;
     return typeof key === "string" && key.trim().length > 0 ? key : undefined;
 }
 

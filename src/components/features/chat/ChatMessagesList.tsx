@@ -266,6 +266,7 @@ export function ChatMessagesList({
 }: ChatMessagesListProperties) {
     const audioReference = useRef<HTMLAudioElement | undefined>(undefined);
     const audioUrlReference = useRef<string | undefined>(undefined);
+    const speakRequestReference = useRef(0);
     const [playingMessageKey, setPlayingMessageKey] = useState<string | undefined>(
         undefined
     );
@@ -285,9 +286,14 @@ export function ChatMessagesList({
     /** Speaks or stops the selected chat message. */
     const speakMessage = async (messageKey: string, text: string) => {
         if (playingMessageKey === messageKey) {
+            speakRequestReference.current += 1;
             stopAudio();
             return;
         }
+
+        speakRequestReference.current += 1;
+        const requestToken = speakRequestReference.current;
+        const isLatestRequest = () => speakRequestReference.current === requestToken;
 
         stopAudio();
         setLoadingMessageKey(messageKey);
@@ -311,14 +317,30 @@ export function ChatMessagesList({
                 throw new Error(error.error || `HTTP ${response.status}`);
             }
 
-            const audioUrl = URL.createObjectURL(await response.blob());
+            const audioBlob = await response.blob();
+            if (!isLatestRequest()) {
+                return;
+            }
+
+            const audioUrl = URL.createObjectURL(audioBlob);
             const audio = new Audio(audioUrl);
             audioReference.current = audio;
             audioUrlReference.current = audioUrl;
-            audio.addEventListener("ended", stopAudio, { once: true });
+            audio.addEventListener(
+                "ended",
+                () => {
+                    if (isLatestRequest()) {
+                        stopAudio();
+                    }
+                },
+                { once: true }
+            );
             audio.addEventListener(
                 "error",
                 () => {
+                    if (!isLatestRequest()) {
+                        return;
+                    }
                     onTtsError("Failed to play generated speech.");
                     stopAudio();
                 },
@@ -327,10 +349,15 @@ export function ChatMessagesList({
             setPlayingMessageKey(messageKey);
             await audio.play();
         } catch (error_) {
+            if (!isLatestRequest()) {
+                return;
+            }
             stopAudio();
             onTtsError(chatErrorMessage(error_, "Failed to read message aloud"));
         } finally {
-            setLoadingMessageKey(undefined);
+            if (isLatestRequest()) {
+                setLoadingMessageKey(undefined);
+            }
         }
     };
     const virtualItems = messagesVirtualizer.getVirtualItems();

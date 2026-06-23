@@ -671,7 +671,7 @@ async function refreshSessions(
                     (entry.sessionId === undefined ||
                         typeof entry.sessionId === "string") &&
                     (entry.key === undefined || typeof entry.key === "string") &&
-                    (entry.updatedAt == undefined ||
+                    (entry.updatedAt === undefined ||
                         (typeof entry.updatedAt === "number" &&
                             Number.isFinite(entry.updatedAt)) ||
                         (typeof entry.updatedAt === "string" &&
