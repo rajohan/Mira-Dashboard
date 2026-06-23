@@ -221,11 +221,11 @@ interface DeploymentJobRow {
     status: DeploymentJob["status"];
     started_at: string;
     updated_at: string;
-    commit_sha: string | undefined;
-    commit_title: string | undefined;
-    note: string | undefined;
-    stdout: string | undefined;
-    stderr: string | undefined;
+    commit_sha: string | null;
+    commit_title: string | null;
+    note: string | null;
+    stdout: string | null;
+    stderr: string | null;
 }
 
 function mapDeploymentJob(row: DeploymentJobRow): DeploymentJob {

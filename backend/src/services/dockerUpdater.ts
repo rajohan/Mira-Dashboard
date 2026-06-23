@@ -600,7 +600,7 @@ interface ManagedServiceRow {
     tag_match_type: string;
     tag_match_pattern: string | undefined;
     enabled: number;
-    metadata_json?: string;
+    metadata_json: string | undefined;
     last_status: string | undefined;
 }
 

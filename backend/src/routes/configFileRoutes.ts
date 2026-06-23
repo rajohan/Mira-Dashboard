@@ -30,7 +30,12 @@ function openclawRoot(): string | undefined {
     ) {
         return undefined;
     }
-    const root = path.resolve(configured || path.join(home, ".openclaw"));
+    if (configured && !path.isAbsolute(configured)) {
+        return undefined;
+    }
+    const root = configured
+        ? path.resolve(configured)
+        : path.resolve(path.join(home, ".openclaw"));
     if (!path.isAbsolute(root) || root === path.parse(root).root) {
         return undefined;
     }

@@ -61,7 +61,12 @@ export function useFiles(path?: string) {
 export function useFileContent(path: string | undefined) {
     return useQuery({
         queryKey: fileKeys.content(path || ""),
-        queryFn: () => fetchFileContent(path!),
+        queryFn: () => {
+            if (!path) {
+                throw new Error("File path is required");
+            }
+            return fetchFileContent(path);
+        },
         enabled: !!path,
         staleTime: 0, // Always refetch when path changes
     });

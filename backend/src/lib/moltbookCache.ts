@@ -56,6 +56,21 @@ export interface MoltbookCacheResponse<T> {
     meta: Record<string, unknown>;
 }
 
+function normalizeCacheNulls(value: unknown): unknown {
+    if (value === null) {
+        return undefined;
+    }
+    if (Array.isArray(value)) {
+        return value.map((entry) => normalizeCacheNulls(entry));
+    }
+    if (typeof value === "object") {
+        return Object.fromEntries(
+            Object.entries(value).map(([key, entry]) => [key, normalizeCacheNulls(entry)])
+        );
+    }
+    return value;
+}
+
 /** Fetches cached moltbook entry. */
 async function fetchCachedMoltbookEntry<T>(
     key: string
@@ -65,10 +80,11 @@ async function fetchCachedMoltbookEntry<T>(
         throw new Error(`Moltbook cache entry not found or not fresh: ${key}`);
     }
 
-    const data = parseJsonField<T>(row.data);
-    if (!data) {
+    const parsedData = parseJsonField<T>(row.data);
+    if (!parsedData) {
         throw new Error(`Moltbook cache payload is invalid: ${key}`);
     }
+    const data = normalizeCacheNulls(parsedData) as T;
 
     return {
         source: row.source,

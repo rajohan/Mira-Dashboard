@@ -66,7 +66,7 @@ function optionalStringField(
     field: string,
     value: unknown
 ): { error?: Response; value?: string } {
-    if (value == undefined) {
+    if (value === undefined) {
         return {};
     }
     return typeof value === "string"

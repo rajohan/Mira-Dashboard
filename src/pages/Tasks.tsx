@@ -97,29 +97,24 @@ export function Tasks() {
     };
 
     for (const col of COLUMN_CONFIG) {
-        const columnTasks: Task[] = [];
-        for (const taskItem of filteredTasks) {
-            if (col.acceptsTask(taskItem)) {
-                columnTasks.push(taskItem);
-            }
-        }
+        tasksByColumn[col.id] = filteredTasks
+            .filter((taskItem) => col.acceptsTask(taskItem))
+            .toSorted((a, b) => {
+                const updatedDiff = getTaskUpdatedAtMs(b) - getTaskUpdatedAtMs(a);
 
-        tasksByColumn[col.id] = columnTasks.toSorted((a, b) => {
-            const updatedDiff = getTaskUpdatedAtMs(b) - getTaskUpdatedAtMs(a);
+                if (col.id === "done") {
+                    return updatedDiff || b.number - a.number;
+                }
 
-            if (col.id === "done") {
+                const rank = { high: 0, medium: 1, low: 2 };
+                const priorityDiff =
+                    rank[getPriority(a.labels)] - rank[getPriority(b.labels)];
+                if (priorityDiff !== 0) {
+                    return priorityDiff;
+                }
+
                 return updatedDiff || b.number - a.number;
-            }
-
-            const rank = { high: 0, medium: 1, low: 2 };
-            const priorityDiff =
-                rank[getPriority(a.labels)] - rank[getPriority(b.labels)];
-            if (priorityDiff !== 0) {
-                return priorityDiff;
-            }
-
-            return updatedDiff || b.number - a.number;
-        });
+            });
     }
 
     /** Responds to drag start events. */

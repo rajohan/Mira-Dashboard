@@ -63,7 +63,8 @@ function resolveSafeAbsolutePath(candidate: string | undefined): string | undefi
         return undefined;
     }
     try {
-        return fs.realpathSync(resolvedPath);
+        const realPath = fs.realpathSync(resolvedPath);
+        return realPath === path.parse(realPath).root ? undefined : realPath;
     } catch {
         return resolvedPath;
     }
