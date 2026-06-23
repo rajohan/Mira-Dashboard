@@ -406,6 +406,8 @@ describe("Mira Dashboard backend integration", () => {
 
     it("reports cache heartbeat entries and individual cache state", async () => {
         const { database } = await import("../src/database.ts");
+        const { writeCacheSuccess } = await import("../src/services/cacheEntryWriter.ts");
+        const { writeCacheFailure } = await import("../src/services/cacheRefresh.ts");
         const missingValue = JSON.parse("null") as null;
         database
             .prepare(
@@ -467,6 +469,31 @@ describe("Mira Dashboard backend integration", () => {
                 0,
                 "{}"
             );
+        writeCacheSuccess({
+            key: "git.status",
+            data: { branch: "main" },
+            source: "git",
+            ttl: 5,
+            ttlUnit: "minutes",
+            metadata: { producer: "test" },
+        });
+        writeCacheSuccess({
+            key: "git.status",
+            data: { branch: "ignored" },
+            source: "git",
+            ttl: 5,
+            ttlUnit: "minutes",
+            metadata: { producer: "preserve" },
+            preserveExistingData: true,
+        });
+        writeCacheFailure({
+            key: "weather.failure",
+            source: "weather",
+            ttl: 5,
+            ttlUnit: "minutes",
+            error: new Error("Weather offline"),
+            metadata: { producer: "test" },
+        });
 
         const heartbeat = await api<{
             count: number;
@@ -509,6 +536,23 @@ describe("Mira Dashboard backend integration", () => {
             data: { location: "Expired" },
             status: "stale",
             updatedAt: "2026-06-23T08:00:00.000Z",
+        });
+        expect(
+            heartbeat.body.entries.find((entry) => entry.key === "git.status")
+        ).toMatchObject({
+            data: { branch: "main" },
+            meta: { producer: "preserve" },
+            status: "fresh",
+        });
+        expect(
+            heartbeat.body.entries.find((entry) => entry.key === "weather.failure")
+        ).toMatchObject({
+            consecutiveFailures: 1,
+            data: "",
+            errorCode: "check_failed",
+            errorMessage: "Weather offline",
+            status: "error",
+            updatedAt: missingValue,
         });
 
         const entry = await api<{ key: string; status: string }>(

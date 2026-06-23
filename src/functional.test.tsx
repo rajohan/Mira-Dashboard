@@ -51,12 +51,20 @@ import {
     formatVersionDisplay,
 } from "./components/features/docker/dockerFormatters";
 import { TaskDetailModal } from "./components/features/tasks/TaskDetailModal";
+import { TaskOverlay } from "./components/features/tasks/TaskOverlay";
 import { NotificationBell } from "./components/layout/NotificationBell";
 import { Badge, getSessionTypeVariant } from "./components/ui/Badge";
 import { ConfirmModal } from "./components/ui/ConfirmModal";
 import { SearchInput } from "./components/ui/SearchInput";
 import { apiFetch, UnauthorizedError } from "./hooks/useApi";
-import { useKopiaBackup, useRunKopiaBackup, useWalgBackup } from "./hooks/useBackups";
+import {
+    useClearKopiaBackupAttention,
+    useClearWalgBackupAttention,
+    useKopiaBackup,
+    useRunKopiaBackup,
+    useRunWalgBackup,
+    useWalgBackup,
+} from "./hooks/useBackups";
 import { useCacheEntry, useCacheHeartbeat, useRefreshCacheEntry } from "./hooks/useCache";
 import {
     useConfig,
@@ -80,6 +88,10 @@ import { useLogContent, useLogFiles } from "./hooks/useLogs";
 import { useMetrics } from "./hooks/useMetrics";
 import { useMoltbookData } from "./hooks/useMoltbook";
 import type { NotificationItem } from "./hooks/useNotifications";
+import {
+    useCreateNotification,
+    useMarkAllNotificationsRead,
+} from "./hooks/useNotifications";
 import { OpenClawSocketProvider, useOpenClawSocket } from "./hooks/useOpenClawSocket";
 import { OPS_ACTIONS, useExecJob, useStartOpsAction } from "./hooks/useOpsActions";
 import {
@@ -92,7 +104,7 @@ import {
     useRejectPullRequest,
     useUpdatePullRequestBranch,
 } from "./hooks/usePullRequests";
-import { useQuotas } from "./hooks/useQuotas";
+import { hasQuotaStatus, useQuotas } from "./hooks/useQuotas";
 import {
     useRunScheduledJobNow,
     useScheduledJobRuns,
@@ -158,6 +170,13 @@ import {
 } from "./utils/fileUtilities";
 import {
     appTimeOfDayToUtcTimeOfDay,
+    formatDate,
+    formatDateStamp,
+    formatDuration,
+    formatLoad,
+    formatOsloClock,
+    formatOsloDate,
+    formatOsloTime,
     formatSize,
     formatTokenCount,
     formatTokens,
@@ -547,6 +566,55 @@ describe("Mira Dashboard frontend behavior", () => {
             expect.objectContaining({
                 credentials: "include",
                 headers: expect.objectContaining({ "Content-Type": "application/json" }),
+            })
+        );
+    });
+
+    it("initializes, refreshes, and clears auth state through the shared auth store", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/auth/session" && method === "GET") {
+                    return Response.json({
+                        authenticated: true,
+                        isBootstrapRequired: false,
+                        user: { id: 2, username: "mira" },
+                    });
+                }
+
+                if (url === "/api/auth/logout" && method === "POST") {
+                    return new Response(undefined, { status: 204 });
+                }
+
+                throw new Error(`Unexpected auth API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        await authActions.initialize();
+        expect(authStore.state).toMatchObject({
+            isAuthenticated: true,
+            isInitialized: true,
+            user: { id: 2, username: "mira" },
+        });
+
+        await authActions.logout();
+        expect(authStore.state).toMatchObject({
+            isAuthenticated: false,
+            isInitialized: true,
+            user: undefined,
+        });
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/auth/logout",
+            expect.objectContaining({
+                credentials: "include",
+                method: "POST",
             })
         );
     });
@@ -1893,6 +1961,152 @@ describe("Mira Dashboard frontend behavior", () => {
         await expect(
             deleteTask.result.current.mutateAsync({ number: 1 })
         ).resolves.toBeUndefined();
+    });
+
+    it("drives backup attention, notification creation, quota guards, overlay, and date format behavior", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/backups/walg/run" && method === "POST") {
+                    return Response.json({
+                        isOk: true,
+                        job: {
+                            id: "walg-1",
+                            type: "walg",
+                            status: "running",
+                            stdout: "",
+                            stderr: "",
+                            startedAt: 1,
+                        },
+                    });
+                }
+
+                if (
+                    url === "/api/backups/kopia/clear-needs-attention" &&
+                    method === "POST"
+                ) {
+                    return Response.json({
+                        isOk: true,
+                        cleared: {
+                            id: "kopia-attention",
+                            type: "kopia",
+                            status: "needs_attention",
+                            stdout: "warn",
+                            stderr: "",
+                            startedAt: 1,
+                        },
+                    });
+                }
+
+                if (
+                    url === "/api/backups/walg/clear-needs-attention" &&
+                    method === "POST"
+                ) {
+                    return Response.json({
+                        isOk: true,
+                        cleared: {
+                            id: "walg-attention",
+                            type: "walg",
+                            status: "needs_attention",
+                            stdout: "warn",
+                            stderr: "",
+                            startedAt: 1,
+                        },
+                    });
+                }
+
+                if (url === "/api/notifications" && method === "POST") {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        title: "Functional coverage",
+                        description: "Created from a hook",
+                        source: "tests",
+                    });
+                    return Response.json({ isOk: true, id: 123 });
+                }
+
+                if (url === "/api/notifications/mark-all-read" && method === "POST") {
+                    return Response.json({ isOk: true });
+                }
+
+                throw new Error(`Unexpected extended hook API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const runWalg = renderHookWithQueryClient(() => useRunWalgBackup());
+        await expect(runWalg.result.current.mutateAsync()).resolves.toMatchObject({
+            job: { id: "walg-1", status: "running" },
+        });
+
+        const clearKopia = renderHookWithQueryClient(() =>
+            useClearKopiaBackupAttention()
+        );
+        await expect(clearKopia.result.current.mutateAsync()).resolves.toMatchObject({
+            cleared: { id: "kopia-attention" },
+        });
+
+        const clearWalg = renderHookWithQueryClient(() => useClearWalgBackupAttention());
+        await expect(clearWalg.result.current.mutateAsync()).resolves.toMatchObject({
+            cleared: { id: "walg-attention" },
+        });
+
+        const createNotification = renderHookWithQueryClient(() =>
+            useCreateNotification()
+        );
+        await expect(
+            createNotification.result.current.mutateAsync({
+                title: "Functional coverage",
+                description: "Created from a hook",
+                source: "tests",
+            })
+        ).resolves.toEqual({ isOk: true, id: 123 });
+
+        const markAllRead = renderHookWithQueryClient(() =>
+            useMarkAllNotificationsRead()
+        );
+        await expect(markAllRead.result.current.mutateAsync()).resolves.toEqual({
+            isOk: true,
+        });
+
+        expect(hasQuotaStatus({ status: "error", note: "offline" })).toBe(true);
+        expect(hasQuotaStatus({ status: "fresh" })).toBe(false);
+        expect(hasQuotaStatus(undefined)).toBe(false);
+
+        render(
+            createElement(TaskOverlay, {
+                task: task({
+                    number: 9,
+                    title: "Recurring overlay task",
+                    labels: [{ name: "priority-low" }],
+                    automation: {
+                        type: "cron",
+                        recurring: true,
+                        cronJobId: "cron-9",
+                    },
+                }),
+            })
+        );
+        expect(screen.getByText("#9")).toBeInTheDocument();
+        expect(screen.getByText("LOW")).toBeInTheDocument();
+        expect(screen.getByText("Recurring")).toBeInTheDocument();
+
+        const osloDate = new Date("2026-06-23T12:34:56.000Z");
+        expect(formatDate(osloDate)).toBe("23.06.2026, 14:34");
+        expect(formatOsloClock(osloDate)).toBe("14:34");
+        expect(formatDateStamp(osloDate)).toBe("2026-06-23");
+        expect(formatOsloTime(osloDate)).toBe("14:34:56");
+        expect(formatOsloDate(osloDate)).toContain("Tuesday 23. Jun 2026");
+        expect(formatDuration(undefined)).toBe("Unknown");
+        expect(formatLoad([0.1234, 2])).toBe("0.12, 2.00");
+        expect(formatTokenCount(999)).toBe("999");
+        expect(getTokenPercent(undefined, 100)).toBe(0);
+        expect(getTokenPercent(150, 100)).toBe(100);
     });
 
     it("drives notification filtering and mutations through the bell menu", async () => {
