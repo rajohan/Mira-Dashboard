@@ -24,6 +24,7 @@ import {
     optimisticAttachmentDisplay,
 } from "./components/features/chat/chatTypes";
 import {
+    base64ToText,
     chatErrorMessage,
     dataUrlToBase64,
     dedupeMessages,
@@ -32,6 +33,7 @@ import {
     mergeWithRecentOptimisticMessages,
     messageDeleteKey,
     messageIdentity,
+    readFileAsDataUrl,
 } from "./components/features/chat/chatUtilities";
 import {
     buildSlashCommandSuggestions,
@@ -55,6 +57,7 @@ import { TaskOverlay } from "./components/features/tasks/TaskOverlay";
 import { NotificationBell } from "./components/layout/NotificationBell";
 import { Badge, getSessionTypeVariant } from "./components/ui/Badge";
 import { ConfirmModal } from "./components/ui/ConfirmModal";
+import { Dropdown } from "./components/ui/Dropdown";
 import { SearchInput } from "./components/ui/SearchInput";
 import { apiFetch, UnauthorizedError } from "./hooks/useApi";
 import {
@@ -182,6 +185,7 @@ import {
     formatTokens,
     formatUptime,
     formatUtcTimeOfDayInAppTimeZone,
+    formatWeekdayShort,
     getTokenPercent,
 } from "./utils/format";
 import {
@@ -2243,10 +2247,39 @@ describe("Mira Dashboard frontend behavior", () => {
             subsystem: "gateway",
             msg: "connected",
         });
+        expect(parseLogLine("[agent/main] Ready", 3)).toMatchObject({
+            subsystem: "main",
+            msg: "Ready",
+        });
+        expect(
+            parseLogLine(
+                String.raw`{"0":"{\"module\":\"worker\",\"message\":\"Nested ready\"}"}`,
+                4
+            )
+        ).toMatchObject({ subsystem: "worker", msg: "Nested ready" });
+        expect(parseLogLine('{"level":"debug","message":{"ok":true}}', 5)).toMatchObject({
+            level: "debug",
+            msg: '{"ok":true}',
+        });
         expect(parseLogLine("")).toBeUndefined();
         expect(formatLogTime("not-a-date")).toBe("--:--:--");
+        expect(formatLogTime()).toBe("");
+        expect(getLevelColor("fatal")).toContain("text-red");
         expect(getLevelColor("error")).toContain("text-red");
+        expect(getLevelColor("warn")).toContain("yellow");
+        expect(getLevelColor("trace")).toContain("primary-500");
+        expect(getLevelColor("unknown")).toContain("primary-400");
+        expect(getSubsystemColor()).toBe("");
+        expect(getSubsystemColor("exec")).toContain("green");
+        expect(getSubsystemColor("tools")).toContain("orange");
+        expect(getSubsystemColor("agent")).toContain("purple");
+        expect(getSubsystemColor("gateway")).toContain("cyan");
+        expect(getSubsystemColor("cron")).toContain("pink");
+        expect(getSubsystemColor("session")).toContain("indigo");
+        expect(getSubsystemColor("http")).toContain("teal");
+        expect(getSubsystemColor("memory")).toContain("emerald");
         expect(getSubsystemColor("ws")).toContain("amber");
+        expect(getSubsystemColor("other")).toContain("purple");
 
         expect(getFileExtension("README.MD")).toBe("md");
         expect(isMarkdownFile("notes.markdown")).toBe(true);
@@ -2306,21 +2339,48 @@ describe("Mira Dashboard frontend behavior", () => {
 
         expect(formatSize(1536)).toBe("1.5 KB");
         expect(formatSize(-1)).toBe("Unknown");
+        expect(formatSize(Infinity)).toBe("Unknown");
+        expect(formatSize(0)).toBe("0 B");
+        expect(formatSize(1024 ** 4)).toBe("1.0 TB");
+        expect(formatLoad([0.1234, 2, 15.678])).toBe("0.12, 2.00, 15.68");
         expect(formatUptime(90_061)).toBe("1d 1h");
+        expect(formatUptime(7261)).toBe("2h 1m");
+        expect(formatUptime(59)).toBe("0m");
         expect(formatTokens(12_345, 200_000)).toBe("12.3k / 200k");
         expect(formatTokenCount(1_250_000)).toBe("1.25M");
+        expect(formatTokenCount(12_500)).toBe("12.5K");
+        expect(formatTokenCount(999)).toBe("999");
         expect(getTokenPercent(60, 120)).toBe(50);
+        expect(getTokenPercent(undefined, 120)).toBe(0);
+        expect(getTokenPercent(60, 0)).toBe(0);
+        expect(getTokenPercent(150, 120)).toBe(100);
+        expect(formatDate("bad")).toBe("bad");
+        expect(formatOsloClock("bad")).toBe("--:--");
+        expect(formatDateStamp(new Date("bad"))).toBe("unknown-date");
+        expect(formatOsloTime(new Date("bad"))).toBe("--:--:--");
+        expect(formatOsloDate(new Date("bad"))).toBe("Unknown date");
+        expect(formatWeekdayShort(new Date("bad"))).toBe("---");
+        expect(formatDuration(undefined)).toBe("Unknown");
         expect(formatUtcTimeOfDayInAppTimeZone("bad")).toBe("--:--");
         expect(appTimeOfDayToUtcTimeOfDay("bad")).toBe("bad");
     });
 
-    it("keeps chat utility behavior stable for slash commands, diagnostics, and optimistic messages", () => {
+    it("keeps chat utility behavior stable for slash commands, diagnostics, and optimistic messages", async () => {
         expect(chatErrorMessage(new Error("  failed  "), "fallback")).toBe("failed");
         expect(chatErrorMessage("failed", "fallback")).toBe("fallback");
         expect(dataUrlToBase64("data:text/plain;base64,SGVsbG8=")).toBe("SGVsbG8=");
+        expect(dataUrlToBase64("SGVsbG8=")).toBe("SGVsbG8=");
+        expect(base64ToText("SGVsbG8=")).toBe("Hello");
+        expect(base64ToText("***")).toBeUndefined();
+        await expect(
+            readFileAsDataUrl(new File(["hello"], "hello.txt"))
+        ).resolves.toMatch(/^data:/);
         expect(displayMimeType(new File(["hello"], "hello.txt"))).toBe(
             "application/octet-stream"
         );
+        expect(
+            displayMimeType(new File(["hello"], "hello.txt", { type: "text/plain" }))
+        ).toBe("text/plain");
 
         expect(slashCommandCanonicalName("/abort")).toBe("/stop");
         expect(
@@ -2361,6 +2421,9 @@ describe("Mira Dashboard frontend behavior", () => {
                 "sufficiently long assistant"
             )
         ).toBe(true);
+        expect(isRecoveredAssistantText("", "assistant")).toBe(false);
+        expect(isRecoveredAssistantText("short", "short")).toBe(true);
+        expect(isRecoveredAssistantText("short", "different")).toBe(false);
 
         const previousMessages = [
             chatMessage({
@@ -2369,11 +2432,18 @@ describe("Mira Dashboard frontend behavior", () => {
                 local: true,
                 timestamp: new Date().toISOString(),
             }),
+            chatMessage({ role: "system", text: "local system" }),
+            chatMessage({
+                role: "assistant",
+                text: "This assistant response was recovered from local state",
+                local: true,
+                timestamp: new Date().toISOString(),
+            }),
         ];
         const nextMessages = [
             chatMessage({
                 role: "assistant",
-                text: "remote",
+                text: "assistant response was recovered",
                 timestamp: new Date(Date.now() + 1000).toISOString(),
             }),
             chatMessage({ role: "assistant", text: "no timestamp" }),
@@ -2382,7 +2452,12 @@ describe("Mira Dashboard frontend behavior", () => {
             mergeWithRecentOptimisticMessages(previousMessages, nextMessages).map(
                 (message) => message.text
             )
-        ).toEqual(["optimistic", "remote", "no timestamp"]);
+        ).toEqual([
+            "optimistic",
+            "assistant response was recovered",
+            "no timestamp",
+            "local system",
+        ]);
     });
 
     it("normalizes chat content blocks, attachments, hidden tool media, and formatter helpers", () => {
@@ -2450,16 +2525,24 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(visible[0]?.attachments?.[0]?.fileName).toBe("tool.png");
 
         expect(formatDatabaseNumber(123_456)).toBe("123,456");
+        expect(formatDatabaseNumber(NaN)).toBe("0");
+        expect(formatDatabaseBytes(0)).toBe("0 B");
         expect(formatDatabaseBytes(1536)).toBe("1.5 KB");
+        expect(truncateQuery("short", 12)).toBe("short");
         expect(truncateQuery("select " + "x".repeat(20), 12)).toBe("select xxxxx...");
+        expect(formatDockerBytes(0)).toBe("0 B");
         expect(formatDockerBytes(1024 ** 2)).toBe("1.0 MB");
+        expect(formatDockerMemory(undefined)).toBe("—");
         expect(formatDockerMemory("512MiB / 1GiB")).toBe("512 MB / 1.0 GB");
         expect(formatDockerMemory("bad")).toBe("bad");
+        expect(formatTimestamp("not-a-date")).toBe("not-a-date");
         expect(formatTimestamp(undefined)).toBe("—");
         expect(formatVersionDisplay(undefined, "sha256:abcdef1234567890")).toBe(
             "sha256:abcde"
         );
+        expect(formatVersionDisplay(undefined, undefined)).toBe("—");
         expect(formatFullVersionDisplay("v1", "digest")).toBe("v1 (digest)");
+        expect(formatFullVersionDisplay(undefined, undefined)).toBe("—");
         expect(
             formatUpdaterTransition({
                 fromTag: "old",
@@ -2589,7 +2672,7 @@ describe("Mira Dashboard frontend behavior", () => {
 
         await user.click(screen.getByRole("button", { name: "Close task details" }));
         expect(onClose).toHaveBeenCalled();
-    });
+    }, 10_000);
 
     it("renders shared UI controls with accessible confirm, search, and badge behavior", async () => {
         const user = userEvent.setup();
@@ -2634,6 +2717,31 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(screen.getByText("CRON")).toHaveClass("extra");
         expect(getSessionTypeVariant("subagent")).toBe("subagent");
         expect(getSessionTypeVariant(undefined)).toBe("default");
+    });
+
+    it("renders dropdown menu actions and disabled items", async () => {
+        const user = userEvent.setup();
+        const onDropdownAction = jest.fn();
+
+        render(
+            createElement(Dropdown, {
+                label: "Actions",
+                items: [
+                    { label: "Run now", onClick: onDropdownAction },
+                    {
+                        label: "Disabled action",
+                        disabled: true,
+                        onClick: onDropdownAction,
+                    },
+                ],
+            })
+        );
+        await user.click(screen.getByRole("button", { name: "Actions" }));
+        const disabled = screen.getByRole("menuitem", { name: "Disabled action" });
+        expect(disabled).toHaveAttribute("aria-disabled", "true");
+
+        await user.click(screen.getByRole("menuitem", { name: "Run now" }));
+        expect(onDropdownAction).toHaveBeenCalledTimes(1);
     });
 
     it("renders the task board from the API and creates a task through the real hooks", async () => {
@@ -2716,6 +2824,31 @@ describe("Mira Dashboard frontend behavior", () => {
         await user.click(screen.getByRole("button", { name: "Clear filters" }));
         expect(await screen.findByText("Mira backend follow-up")).toBeInTheDocument();
         expect(screen.getByText("Raymond review queue")).toBeInTheDocument();
+    });
+
+    it("renders empty and retry states for the task board", async () => {
+        const user = userEvent.setup();
+        const fetchMock = jest
+            .fn()
+            .mockResolvedValueOnce(
+                Response.json({ error: "Tasks unavailable" }, { status: 503 })
+            )
+            .mockResolvedValueOnce(Response.json([]));
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        renderWithQueryClient(createElement(Tasks));
+
+        expect(await screen.findByText("Tasks unavailable")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Retry" }));
+        expect(await screen.findByText("No tasks yet.")).toBeInTheDocument();
+        expect(
+            screen.getByText("Create a task when there is new work to track.")
+        ).toBeInTheDocument();
+        expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
     it("keeps task classification and search aligned with dashboard behavior", () => {

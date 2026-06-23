@@ -31,6 +31,7 @@ import {
     objectFallback,
     stringFallback,
 } from "../src/lib/values.ts";
+import { resetRequestPolicyForTests, withRequestPolicy } from "../src/requestPolicy.ts";
 import { isValidAgentId } from "../src/services/agents.ts";
 import { mapBackupJob } from "../src/services/backups.ts";
 import { getResolvedRoots, validatePrNumber } from "../src/services/pullRequests.ts";
@@ -39,6 +40,21 @@ function serverWithAddress(address: string): Server<unknown> {
     return {
         requestIP: () => ({ address, family: "IPv4", port: 12_345 }),
     } as unknown as Server<unknown>;
+}
+
+async function callTestRoute(
+    routes: Record<
+        string,
+        (request: Request, server: Server<unknown>) => Response | Promise<Response>
+    >,
+    path: string,
+    server: Server<unknown>
+): Promise<Response> {
+    const handler = routes[path];
+    if (!handler) {
+        throw new Error(`Missing test route: ${path}`);
+    }
+    return handler(new Request(`http://localhost${path}`), server);
 }
 
 describe("backend service utilities", () => {
@@ -323,5 +339,74 @@ describe("backend service utilities", () => {
         expect(serverWithAddress("127.0.0.1").requestIP(new Request("http://x"))).toEqual(
             { address: "127.0.0.1", family: "IPv4", port: 12_345 }
         );
+    });
+
+    it("applies request policy auth, rate limit, and handler error behavior", async () => {
+        resetRequestPolicyForTests();
+        try {
+            const routeEntries: Record<
+                string,
+                (request: Request, server: Server<unknown>) => Response
+            > = {
+                "/api/health": () => new Response("ok"),
+                "/api/private": () => new Response("private"),
+                "/api/auth/login": () => new Response("login"),
+                "/syntax": () => {
+                    throw new SyntaxError("bad json");
+                },
+                "/generic-error": () => {
+                    throw new Error("boom");
+                },
+            };
+            const routes = withRequestPolicy(routeEntries);
+            const server = serverWithAddress("203.0.113.10");
+
+            const health = await callTestRoute(routes, "/api/health", server);
+            expect(health.status).toBe(200);
+            expect(health.headers.get("ratelimit-policy")).toBe("600;w=60");
+
+            const privateResponse = await callTestRoute(routes, "/api/private", server);
+            expect(privateResponse.status).toBe(401);
+            await expect(privateResponse.json()).resolves.toEqual({
+                error: "Unauthorized",
+            });
+
+            const syntaxResponse = await callTestRoute(routes, "/syntax", server);
+            expect(syntaxResponse.status).toBe(400);
+            await expect(syntaxResponse.json()).resolves.toEqual({
+                error: "Invalid JSON",
+            });
+
+            const authRequest = new Request("http://localhost/api/auth/login");
+            const authLogin = routes["/api/auth/login"];
+            if (!authLogin) {
+                throw new Error("Missing auth login test route");
+            }
+            for (let index = 0; index < 20; index += 1) {
+                const response = await authLogin(authRequest, server);
+                expect(response.status).toBe(200);
+            }
+            const limited = await authLogin(authRequest, server);
+            expect(limited.status).toBe(429);
+            expect(limited.headers.get("retry-after")).toBeDefined();
+
+            resetRequestPolicyForTests();
+            const originalConsoleError = console.error;
+            Object.defineProperty(console, "error", {
+                configurable: true,
+                value: () => {},
+            });
+            const generic = await callTestRoute(routes, "/generic-error", server);
+            Object.defineProperty(console, "error", {
+                configurable: true,
+                value: originalConsoleError,
+            });
+            expect(generic.status).toBe(500);
+            await expect(generic.json()).resolves.toEqual({
+                error: "Internal server error",
+            });
+        } finally {
+            resetRequestPolicyForTests();
+        }
     });
 });

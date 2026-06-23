@@ -43,6 +43,121 @@ function json(method: string, body: unknown): RequestInit {
     };
 }
 
+function table(headers: string[], rows: string[][]): string {
+    return [headers.join("\t"), ...rows.map((row) => row.join("\t"))].join("\n");
+}
+
+async function writeFakeDocker(binaryPath: string): Promise<void> {
+    const outputs: Record<string, string> = {
+        activity: table(
+            ["state", "count"],
+            [
+                ["active", "1"],
+                ["idle", "2"],
+            ]
+        ),
+        bitmagnet: table(["count"], [["11"]]),
+        comet: table(["count"], [["7"]]),
+        databases: table(["datname"], [["mira"]]),
+        deadTuples: table(
+            [
+                "schemaname",
+                "relname",
+                "n_live_tup",
+                "n_dead_tup",
+                "dead_pct",
+                "last_autovacuum",
+                "last_autoanalyze",
+            ],
+            [["public", "tasks", "20", "2", "10", "2026-06-23", ""]]
+        ),
+        extensions: table(["extname"], [["pg_stat_statements"]]),
+        pgbouncerPools: table(
+            [
+                "database",
+                "user",
+                "cl_active",
+                "cl_waiting",
+                "sv_active",
+                "sv_idle",
+                "sv_used",
+                "maxwait",
+                "pool_mode",
+            ],
+            [["mira", "postgres", "1", "0", "1", "1", "1", "0", "transaction"]]
+        ),
+        pgbouncerStats: table(
+            [
+                "database",
+                "total_xact_count",
+                "total_query_count",
+                "total_xact_time",
+                "total_query_time",
+                "avg_xact_time",
+                "avg_query_time",
+                "total_received",
+                "total_sent",
+            ],
+            [["mira", "5", "6", "50", "60", "10", "10", "512", "1024"]]
+        ),
+        stats: table(
+            [
+                "datname",
+                "size_pretty",
+                "size_bytes",
+                "numbackends",
+                "xact_commit",
+                "xact_rollback",
+                "blks_hit",
+                "blks_read",
+                "cache_hit_ratio",
+            ],
+            [["mira", "2 MB", "2097152", "3", "50", "1", "80", "20", "80"]]
+        ),
+        topQueries: table(
+            [
+                "query",
+                "calls",
+                "total_exec_time",
+                "mean_exec_time",
+                "rows",
+                "shared_blks_hit",
+                "shared_blks_read",
+            ],
+            [["SELECT now()", "2", "6", "3", "2", "5", "0"]]
+        ),
+    };
+    const script = `#!/usr/bin/env bun
+const arguments_ = process.argv.slice(2);
+const sql = arguments_.at(-1) ?? "";
+const command = arguments_.join(" ");
+const outputs = ${JSON.stringify(outputs)};
+let key = "";
+if (sql.includes("FROM torrents")) {
+  key = command.includes("/comet") ? "comet" : "bitmagnet";
+} else if (sql.includes("FROM pg_stat_database")) {
+  key = "stats";
+} else if (sql.includes("FROM pg_stat_activity")) {
+  key = "activity";
+} else if (sql.includes("FROM pg_database")) {
+  key = "databases";
+} else if (sql.includes("FROM pg_stat_user_tables")) {
+  key = "deadTuples";
+} else if (sql.includes("FROM pg_extension")) {
+  key = "extensions";
+} else if (sql.includes("FROM pg_stat_statements")) {
+  key = "topQueries";
+} else if (sql === "SHOW POOLS;") {
+  key = "pgbouncerPools";
+} else if (sql === "SHOW STATS;") {
+  key = "pgbouncerStats";
+}
+process.stdout.write(outputs[key] ?? "");
+`;
+    await fs.writeFile(binaryPath, script);
+    await fs.chmod(binaryPath, 0o755);
+}
+
 async function createTestServer(
     createServer: (port: number) => Server<unknown>
 ): Promise<Server<unknown>> {
@@ -180,6 +295,33 @@ describe("Mira Dashboard backend integration", () => {
         expect(invalidBootstrap.status).toBe(400);
         expect(invalidBootstrap.body.error).toBe(
             "Username must be 3-32 chars: letters, numbers, dot, dash, underscore"
+        );
+
+        const malformedBootstrapBody = await api<{ error: string }>(
+            "/api/auth/register-first-user",
+            {
+                body: "{",
+                headers: { "content-type": "application/json" },
+                method: "POST",
+            }
+        );
+        expect(malformedBootstrapBody.status).toBe(400);
+        expect(malformedBootstrapBody.body.error).toBe("Invalid JSON");
+
+        const invalidBootstrapBody = await api<{ error: string }>(
+            "/api/auth/register-first-user",
+            json("POST", ["not", "an", "object"])
+        );
+        expect(invalidBootstrapBody.status).toBe(400);
+        expect(invalidBootstrapBody.body.error).toBe("Invalid request body");
+
+        const invalidLoginBody = await api<{ error: string }>(
+            "/api/auth/login",
+            json("POST", "not an object")
+        );
+        expect(invalidLoginBody.status).toBe(409);
+        expect(invalidLoginBody.body.error).toBe(
+            "Create the first user before logging in"
         );
     });
 
@@ -512,6 +654,22 @@ describe("Mira Dashboard backend integration", () => {
             error: new Error("Weather offline"),
             metadata: { producer: "test" },
         });
+        writeCacheSuccess({
+            key: "weather.success-then-failure",
+            data: { lastGood: true },
+            source: "weather",
+            ttl: 5,
+            ttlUnit: "minutes",
+            metadata: { producer: "success" },
+        });
+        writeCacheFailure({
+            key: "weather.success-then-failure",
+            source: "weather",
+            ttl: 5,
+            ttlUnit: "minutes",
+            error: new Error("Weather refresh failed"),
+            metadata: { producer: "failure" },
+        });
 
         const heartbeat = await api<{
             count: number;
@@ -572,6 +730,22 @@ describe("Mira Dashboard backend integration", () => {
             status: "error",
             updatedAt: missingValue,
         });
+        expect(
+            heartbeat.body.entries.find(
+                (entry) => entry.key === "weather.success-then-failure"
+            )
+        ).toMatchObject({
+            consecutiveFailures: 1,
+            data: { lastGood: true },
+            errorCode: "check_failed",
+            errorMessage: "Weather refresh failed",
+            status: "error",
+        });
+        expect(
+            heartbeat.body.entries.find(
+                (entry) => entry.key === "weather.success-then-failure"
+            )?.updatedAt
+        ).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
 
         const entry = await api<{ key: string; status: string }>(
             "/api/cache/moltbook.home"
@@ -587,6 +761,154 @@ describe("Mira Dashboard backend integration", () => {
             error: "Cache key not found",
             key: "not-present",
         });
+    });
+
+    it("serves Moltbook cached home, feed, profile, and authored content", async () => {
+        const { writeCacheSuccess } = await import("../src/services/cacheEntryWriter.ts");
+        writeCacheSuccess({
+            key: "moltbook.home",
+            data: {
+                activityOnYourPosts: [{ id: "activity-1" }],
+                activityOnYourPostsCount: 1,
+                exploreCount: 2,
+                fetchedAt: "2026-06-23T12:00:00.000Z",
+                latestAnnouncement: {
+                    authorName: "Mira",
+                    createdAt: "2026-06-23T11:00:00.000Z",
+                    postId: "announcement-1",
+                    previewText: "Preview",
+                    title: "Announcement",
+                },
+                nextActions: ["reply"],
+                pendingRequestCount: 0,
+                postsFromAccountsYouFollowCount: 3,
+                unreadMessageCount: 1,
+            },
+            source: "moltbook",
+            ttl: 10,
+            ttlUnit: "minutes",
+            metadata: { route: "home" },
+        });
+        writeCacheSuccess({
+            key: "moltbook.feed.hot",
+            data: {
+                feedFilter: "all",
+                feedType: "hot",
+                hasMore: false,
+                posts: [{ id: "hot-post" }],
+                tip: "tip",
+            },
+            source: "moltbook",
+            ttl: 10,
+            ttlUnit: "minutes",
+            metadata: {},
+        });
+        writeCacheSuccess({
+            key: "moltbook.feed.new",
+            data: {
+                feedFilter: "following",
+                feedType: "new",
+                hasMore: true,
+                posts: [{ id: "new-post" }],
+                tip: "fresh",
+            },
+            source: "moltbook",
+            ttl: 10,
+            ttlUnit: "minutes",
+            metadata: {},
+        });
+        writeCacheSuccess({
+            key: "moltbook.profile",
+            data: { agent: { id: "mira-2026", displayName: "Mira" } },
+            source: "moltbook",
+            ttl: 10,
+            ttlUnit: "minutes",
+            metadata: {},
+        });
+        writeCacheSuccess({
+            key: "moltbook.my-content",
+            data: { comments: [{ id: "comment-1" }], posts: [{ id: "post-1" }] },
+            source: "moltbook",
+            ttl: 10,
+            ttlUnit: "minutes",
+            metadata: {},
+        });
+
+        const home = await api<{
+            latestAnnouncement: { title: string };
+            nextActions: string[];
+        }>("/api/moltbook/home");
+        expect(home.status).toBe(200);
+        expect(home.body.latestAnnouncement.title).toBe("Announcement");
+        expect(home.body.nextActions).toEqual(["reply"]);
+
+        const hotFeed = await api<{ feedType: string; posts: Array<{ id: string }> }>(
+            "/api/moltbook/feed"
+        );
+        expect(hotFeed.status).toBe(200);
+        expect(hotFeed.body).toMatchObject({
+            feedType: "hot",
+            posts: [{ id: "hot-post" }],
+        });
+
+        const newFeed = await api<{ feedType: string; hasMore: boolean }>(
+            "/api/moltbook/feed?sort=new"
+        );
+        expect(newFeed.status).toBe(200);
+        expect(newFeed.body).toMatchObject({ feedType: "new", hasMore: true });
+
+        const profile = await api<{ agent: { displayName: string; id: string } }>(
+            "/api/moltbook/profile"
+        );
+        expect(profile.status).toBe(200);
+        expect(profile.body.agent).toEqual({
+            displayName: "Mira",
+            id: "mira-2026",
+        });
+
+        const myPosts = await api<{
+            comments: Array<{ id: string }>;
+            posts: Array<{ id: string }>;
+        }>("/api/moltbook/my-posts");
+        expect(myPosts.status).toBe(200);
+        expect(myPosts.body).toEqual({
+            comments: [{ id: "comment-1" }],
+            posts: [{ id: "post-1" }],
+        });
+    });
+
+    it("serves database overview through the HTTP route", async () => {
+        const originalPath = process.env.PATH;
+        const temporaryRoot = await fs.mkdtemp(
+            path.join(os.tmpdir(), "mira-route-fake-docker-")
+        );
+        await writeFakeDocker(path.join(temporaryRoot, "docker"));
+        try {
+            process.env.PATH = `${temporaryRoot}:${originalPath ?? ""}`;
+            const overview = await api<{
+                overview: {
+                    totalBackends: number;
+                    totalDatabaseSizeBytes: number;
+                    torrentCounts: { bitmagnet: number; comet: number };
+                };
+                topQueries: Array<{ query: string }>;
+            }>("/api/database/overview");
+
+            expect(overview.status).toBe(200);
+            expect(overview.body.overview).toMatchObject({
+                totalBackends: 3,
+                totalDatabaseSizeBytes: 2_097_152,
+                torrentCounts: { bitmagnet: 11, comet: 7 },
+            });
+            expect(overview.body.topQueries[0]?.query).toBe("SELECT now()");
+        } finally {
+            if (originalPath === undefined) {
+                delete process.env.PATH;
+            } else {
+                process.env.PATH = originalPath;
+            }
+            await fs.rm(temporaryRoot, { force: true, recursive: true });
+        }
     });
 
     it("validates exec and session action API contracts", async () => {
@@ -1078,6 +1400,152 @@ describe("Mira Dashboard backend integration", () => {
         }
     });
 
+    it("proxies successful TTS and STT provider responses", async () => {
+        const previousApiKey = process.env.ELEVENLABS_API_KEY;
+        const originalFetch = fetch;
+        process.env.ELEVENLABS_API_KEY = "test-elevenlabs-key";
+        const providerCalls: Array<{ body: unknown; url: string }> = [];
+        const fetchMock = async (input: Request | URL | string, init?: RequestInit) => {
+            const url = String(input);
+            if (url.startsWith(testState.baseUrl)) {
+                return originalFetch(input, init);
+            }
+            providerCalls.push({ body: init?.body, url });
+            if (url.includes("/text-to-speech/")) {
+                return new Response(new Uint8Array([1, 2, 3]), {
+                    headers: { "Content-Type": "audio/mpeg" },
+                    status: 200,
+                });
+            }
+            if (url.includes("/speech-to-text")) {
+                return Response.json({ words: [{ text: "hei" }, { text: "mira" }] });
+            }
+            return Response.json({ error: "unexpected provider URL" }, { status: 500 });
+        };
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        try {
+            const tts = await fetch(`${testState.baseUrl}/api/tts/speak`, {
+                body: JSON.stringify({ text: "Hei Mira" }),
+                headers: { "Content-Type": "application/json" },
+                method: "POST",
+            });
+            expect(tts.status).toBe(200);
+            expect(tts.headers.get("content-type")).toBe("audio/mpeg");
+            const ttsBytes = new Uint8Array(await tts.arrayBuffer());
+            expect([...ttsBytes]).toEqual([1, 2, 3]);
+
+            const stt = await fetch(`${testState.baseUrl}/api/stt/transcribe`, {
+                body: new Uint8Array([4, 5, 6]),
+                headers: { "Content-Type": "audio/webm" },
+                method: "POST",
+            });
+            expect(stt.status).toBe(200);
+            expect(await stt.json()).toEqual({
+                provider: "elevenlabs",
+                text: "hei mira",
+            });
+            expect(providerCalls.map((call) => call.url)).toEqual([
+                expect.stringContaining("/text-to-speech/"),
+                "https://api.elevenlabs.io/v1/speech-to-text",
+            ]);
+        } finally {
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: originalFetch,
+                writable: true,
+            });
+            if (previousApiKey === undefined) {
+                delete process.env.ELEVENLABS_API_KEY;
+            } else {
+                process.env.ELEVENLABS_API_KEY = previousApiKey;
+            }
+        }
+    });
+
+    it("handles TTS and STT provider validation and failure responses", async () => {
+        const previousApiKey = process.env.ELEVENLABS_API_KEY;
+        const originalFetch = fetch;
+        const originalConsoleError = console.error;
+        Object.defineProperty(console, "error", {
+            configurable: true,
+            value: () => {},
+            writable: true,
+        });
+        process.env.ELEVENLABS_API_KEY = "test-elevenlabs-key";
+        const fetchMock = async (input: Request | URL | string, init?: RequestInit) => {
+            const url = String(input);
+            if (url.startsWith(testState.baseUrl)) {
+                return originalFetch(input, init);
+            }
+            if (url.includes("/text-to-speech/")) {
+                return Response.json({ error: "voice unavailable" }, { status: 502 });
+            }
+            if (url.includes("/speech-to-text")) {
+                return Response.json({ error: "audio rejected" }, { status: 400 });
+            }
+            return Response.json({ error: "unexpected provider URL" }, { status: 500 });
+        };
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        try {
+            const missingText = await api<{ error: string }>(
+                "/api/tts/speak",
+                json("POST", { text: " ".repeat(3) })
+            );
+            expect(missingText.status).toBe(400);
+            expect(missingText.body.error).toBe("Missing text");
+
+            const tooLong = await api<{ error: string }>(
+                "/api/tts/speak",
+                json("POST", { text: "x".repeat(4001) })
+            );
+            expect(tooLong.status).toBe(400);
+            expect(tooLong.body.error).toBe("Text is too long. Max is 4000 characters.");
+
+            const providerFailure = await api<{ error: string }>(
+                "/api/tts/speak",
+                json("POST", { text: "provider should fail" })
+            );
+            expect(providerFailure.status).toBe(502);
+            expect(providerFailure.body.error).toBe(
+                "TTS service temporarily unavailable"
+            );
+
+            const stt = await fetch(`${testState.baseUrl}/api/stt/transcribe`, {
+                body: new Uint8Array([7, 8, 9]),
+                headers: { "Content-Type": "audio/mp3" },
+                method: "POST",
+            });
+            expect(stt.status).toBe(500);
+            expect(await stt.json()).toEqual({ error: "Failed to transcribe audio" });
+        } finally {
+            Object.defineProperty(console, "error", {
+                configurable: true,
+                value: originalConsoleError,
+                writable: true,
+            });
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: originalFetch,
+                writable: true,
+            });
+            if (previousApiKey === undefined) {
+                delete process.env.ELEVENLABS_API_KEY;
+            } else {
+                process.env.ELEVENLABS_API_KEY = previousApiKey;
+            }
+        }
+    });
+
     it("uses isolated workspace and config roots for file APIs", async () => {
         const files = await api<{ files: Array<{ path: string }>; root: string }>(
             "/api/files"
@@ -1111,6 +1579,149 @@ describe("Mira Dashboard backend integration", () => {
             content: "{}\n",
             relativePath: "openclaw.json",
         });
+
+        const configFiles = await api<{
+            files: Array<{ relativePath: string; type: string }>;
+            root: string;
+        }>("/api/config-files");
+        expect(configFiles.status).toBe(200);
+        expect(configFiles.body.root).toBe(testState.openclawRoot);
+        expect(configFiles.body.files).toContainEqual(
+            expect.objectContaining({ relativePath: "openclaw.json", type: "file" })
+        );
+
+        const updatedTransform = await api<{
+            isSuccess: boolean;
+            relativePath: string;
+        }>(
+            "/api/config-files/hooks/transforms/agentmail.ts",
+            json("PUT", { content: "export default function transform() {}\n" })
+        );
+        expect(updatedTransform.status).toBe(200);
+        expect(updatedTransform.body).toMatchObject({
+            isSuccess: true,
+            relativePath: "hooks/transforms/agentmail.ts",
+        });
+
+        const transform = await api<{ content: string; relativePath: string }>(
+            "/api/config-files/hooks/transforms/agentmail.ts"
+        );
+        expect(transform.status).toBe(200);
+        expect(transform.body).toMatchObject({
+            content: "export default function transform() {}\n",
+            relativePath: "hooks/transforms/agentmail.ts",
+        });
+
+        const deniedConfig = await api<{ error: string }>(
+            "/api/config-files/agents/main/config.json",
+            json("PUT", { content: "{}" })
+        );
+        expect(deniedConfig.status).toBe(403);
+        expect(deniedConfig.body.error).toBe("Access denied: file not in allowed list");
+    });
+
+    it("loads agent config, status, metadata updates, and task history from OpenClaw home", async () => {
+        const agentsRoot = path.join(testState.openclawRoot, "agents");
+        const agentSessions = path.join(agentsRoot, "mira-2026", "sessions");
+        await fs.mkdir(agentSessions, { recursive: true });
+        await fs.writeFile(
+            path.join(testState.openclawRoot, "openclaw.json"),
+            JSON.stringify({
+                agents: {
+                    defaults: {
+                        model: { primary: "codex" },
+                        models: { "openai/gpt-5.5": { alias: "codex" } },
+                    },
+                    list: [{ id: "mira-2026", model: { primary: "codex" } }],
+                },
+            })
+        );
+        await fs.writeFile(
+            path.join(agentSessions, "sessions.json"),
+            JSON.stringify([
+                {
+                    key: "agent:main:main",
+                    sessionId: "session-1",
+                    updatedAt: Date.now(),
+                    channel: "webchat",
+                    displayName: "Main session",
+                },
+            ])
+        );
+        await fs.writeFile(
+            path.join(agentSessions, "session-1.jsonl"),
+            [
+                JSON.stringify({ role: "user", content: "Investigate dashboard tests" }),
+                JSON.stringify({
+                    type: "tool_call",
+                    name: "exec_command",
+                    arguments: JSON.stringify({ command: "bun test" }),
+                }),
+            ].join("\n")
+        );
+
+        const config = await api<{ list: Array<{ id: string }> }>("/api/agents/config");
+        expect(config.status).toBe(200);
+        expect(config.body.list).toContainEqual(
+            expect.objectContaining({ id: "mira-2026" })
+        );
+
+        const metadata = await api<{ currentTask: string; updatedAt: string }>(
+            "/api/agents/mira-2026/metadata",
+            json("PUT", { currentTask: "Cover agent dashboard behavior" })
+        );
+        expect(metadata.status).toBe(200);
+        expect(metadata.body.currentTask).toBe("Cover agent dashboard behavior");
+        expect(typeof metadata.body.updatedAt).toBe("string");
+
+        const status = await api<{
+            agents: Array<{
+                currentTask?: string;
+                id: string;
+                model: string;
+                sessionKey?: string;
+            }>;
+        }>("/api/agents/status");
+        expect(status.status).toBe(200);
+        expect(status.body.agents).toContainEqual(
+            expect.objectContaining({
+                currentTask: "Cover agent dashboard behavior",
+                id: "mira-2026",
+                model: "gpt-5.5",
+                sessionKey: "agent:main:main",
+            })
+        );
+
+        const singleStatus = await api<{ currentTask?: string; id: string }>(
+            "/api/agents/mira-2026/status"
+        );
+        expect(singleStatus.status).toBe(200);
+        expect(singleStatus.body).toMatchObject({
+            currentTask: "Cover agent dashboard behavior",
+            id: "mira-2026",
+        });
+
+        await api<{ currentTask: string }>(
+            "/api/agents/mira-2026/metadata",
+            json("PUT", { currentTask: "Next task" })
+        );
+        const history = await api<{
+            tasks: Array<{ agentId: string; status: string; task: string }>;
+        }>("/api/agents/tasks/history?limit=1");
+        expect(history.status).toBe(200);
+        expect(history.body.tasks).toContainEqual(
+            expect.objectContaining({
+                agentId: "mira-2026",
+                status: "completed",
+                task: "Cover agent dashboard behavior",
+            })
+        );
+
+        const invalidMetadata = await api<{ error: string }>(
+            "/api/agents/../metadata",
+            json("PUT", { currentTask: "escape" })
+        );
+        expect(invalidMetadata.status).toBe(404);
     });
 
     it("allows valid dotted Docker Compose service names", async () => {
