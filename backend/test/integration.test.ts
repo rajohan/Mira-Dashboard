@@ -8,16 +8,28 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 const testState: {
     baseUrl: string;
     openclawRoot: string;
-    originalHome?: string;
-    originalLogsRoot?: string;
-    originalLoopbackAuth?: string;
+    originalEnv: Record<string, string | undefined>;
     server?: Server<unknown>;
     temporaryRoot: string;
 } = {
     baseUrl: "",
     openclawRoot: "",
+    originalEnv: {},
     temporaryRoot: "",
 };
+
+const TEST_ENV_KEYS = [
+    "HOME",
+    "MIRA_DASHBOARD_DB_PATH",
+    "MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH",
+    "MIRA_DASHBOARD_FRONTEND_PATH",
+    "MIRA_DASHBOARD_LOGS_ROOT",
+    "MIRA_DOCKER_COMPOSE_WRAPPER",
+    "MIRA_DOCKER_ROOT",
+    "OPENCLAW_HOME",
+    "TRUST_PROXY",
+    "WORKSPACE_ROOT",
+] as const;
 
 async function api<T>(
     endpoint: string,
@@ -178,9 +190,9 @@ async function createTestServer(
 
 describe("Mira Dashboard backend integration", () => {
     beforeAll(async () => {
-        testState.originalHome = process.env.HOME;
-        testState.originalLoopbackAuth = process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH;
-        testState.originalLogsRoot = process.env.MIRA_DASHBOARD_LOGS_ROOT;
+        testState.originalEnv = Object.fromEntries(
+            TEST_ENV_KEYS.map((key) => [key, process.env[key]])
+        );
         testState.temporaryRoot = await fs.mkdtemp(
             path.join(os.tmpdir(), "mira-dashboard-test-")
         );
@@ -241,21 +253,13 @@ describe("Mira Dashboard backend integration", () => {
     afterAll(async () => {
         const server = testState.server;
         await server?.stop(true);
-        if (testState.originalLoopbackAuth === undefined) {
-            delete process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH;
-        } else {
-            process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH =
-                testState.originalLoopbackAuth;
-        }
-        if (testState.originalHome === undefined) {
-            delete process.env.HOME;
-        } else {
-            process.env.HOME = testState.originalHome;
-        }
-        if (testState.originalLogsRoot === undefined) {
-            delete process.env.MIRA_DASHBOARD_LOGS_ROOT;
-        } else {
-            process.env.MIRA_DASHBOARD_LOGS_ROOT = testState.originalLogsRoot;
+        for (const key of TEST_ENV_KEYS) {
+            const originalValue = testState.originalEnv[key];
+            if (originalValue === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = originalValue;
+            }
         }
         await fs.rm(testState.temporaryRoot, { recursive: true, force: true });
     });

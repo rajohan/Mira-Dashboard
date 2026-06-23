@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,37 +10,44 @@ async function readText(stream: ReadableStream<Uint8Array>): Promise<string> {
     return new Response(stream).text();
 }
 
+async function importDatabaseInChild(databasePath: string): Promise<{
+    exitCode: number;
+    stderr: string;
+}> {
+    const databaseModuleUrl = pathToFileURL(
+        path.resolve(import.meta.dirname, "../src/database.ts")
+    ).href;
+    const child = Bun.spawn({
+        cmd: [
+            process.execPath,
+            "--eval",
+            `await import(${JSON.stringify(databaseModuleUrl)});`,
+        ],
+        env: {
+            ...process.env,
+            MIRA_DASHBOARD_DB_PATH: databasePath,
+            NODE_ENV: "test",
+        },
+        stderr: "pipe",
+        stdout: "pipe",
+    });
+    const [exitCode, stderr] = await Promise.all([
+        child.exited,
+        readText(child.stderr),
+        readText(child.stdout),
+    ]);
+    return { exitCode, stderr };
+}
+
 describe("database test safety guard", () => {
     it("refuses to open a non-temporary database while running tests", async () => {
-        const root = await mkdtemp(path.join(tmpdir(), "mira-db-guard-test-"));
-        const unsafeDatabasePath = path.resolve(
-            import.meta.dirname,
-            "../data/mira-dashboard.db"
+        const root = await mkdtemp(
+            path.join(import.meta.dirname, ".mira-db-guard-test-")
         );
-        const databaseModuleUrl = pathToFileURL(
-            path.resolve(import.meta.dirname, "../src/database.ts")
-        ).href;
+        const unsafeDatabasePath = path.join(root, "mira-dashboard.db");
 
         try {
-            const child = Bun.spawn({
-                cmd: [
-                    process.execPath,
-                    "--eval",
-                    `await import(${JSON.stringify(databaseModuleUrl)});`,
-                ],
-                env: {
-                    ...process.env,
-                    MIRA_DASHBOARD_DB_PATH: unsafeDatabasePath,
-                    NODE_ENV: "test",
-                },
-                stderr: "pipe",
-                stdout: "pipe",
-            });
-            const [exitCode, stderr] = await Promise.all([
-                child.exited,
-                readText(child.stderr),
-                readText(child.stdout),
-            ]);
+            const { exitCode, stderr } = await importDatabaseInChild(unsafeDatabasePath);
 
             expect(exitCode).not.toBe(0);
             expect(stderr).toContain(
@@ -49,6 +56,32 @@ describe("database test safety guard", () => {
             expect(existsSync(unsafeDatabasePath)).toBe(false);
         } finally {
             await rm(root, { force: true, recursive: true });
+        }
+    });
+
+    it("refuses symlinked temporary database paths", async () => {
+        const outsideRoot = await mkdtemp(
+            path.join(import.meta.dirname, ".mira-db-guard-target-")
+        );
+        const temporaryRoot = await mkdtemp(
+            path.join(tmpdir(), "mira-db-guard-symlink-")
+        );
+        const outsideDatabasePath = path.join(outsideRoot, "target.db");
+        const symlinkedDatabasePath = path.join(temporaryRoot, "dashboard.db");
+
+        try {
+            await writeFile(outsideDatabasePath, "");
+            await symlink(outsideDatabasePath, symlinkedDatabasePath);
+            const { exitCode, stderr } =
+                await importDatabaseInChild(symlinkedDatabasePath);
+
+            expect(exitCode).not.toBe(0);
+            expect(stderr).toContain(
+                "Refusing to open symlinked Dashboard test database"
+            );
+        } finally {
+            await rm(temporaryRoot, { force: true, recursive: true });
+            await rm(outsideRoot, { force: true, recursive: true });
         }
     });
 });

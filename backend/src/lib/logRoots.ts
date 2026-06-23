@@ -28,5 +28,10 @@ export function resolveRealLogsDirectory(): string {
     if (!path.isAbsolute(realRoot) || realRoot === path.parse(realRoot).root) {
         throw invalidLogRoot("Resolved log directory is unsafe");
     }
+    if (!fs.statSync(realRoot).isDirectory()) {
+        throw Object.assign(new Error("Log directory must be a directory"), {
+            code: "ENOTDIR",
+        });
+    }
     return realRoot;
 }

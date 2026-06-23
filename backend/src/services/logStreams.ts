@@ -32,6 +32,7 @@ const MAX_LOG_TAIL_BYTES = 8 * 1024 * 1024;
 const LOG_ROOT_RESOLUTION_ERROR_CODES = new Set([
     "ELOOP",
     "ENOENT",
+    "ENOTDIR",
     "ERR_INVALID_ARG_VALUE",
 ]);
 

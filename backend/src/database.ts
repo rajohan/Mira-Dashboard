@@ -31,9 +31,22 @@ function assertTestDatabasePath(databasePath: string): void {
         return;
     }
     const temporaryRoot = path.resolve(os.tmpdir());
+    const databaseParent = path.dirname(databasePath);
+    const realDatabaseParent = fs.realpathSync(databaseParent);
+    const existingDatabaseStat = fs.existsSync(databasePath)
+        ? fs.lstatSync(databasePath)
+        : undefined;
     if (!configuredDatabasePath || !isPathWithinRoot(databasePath, temporaryRoot)) {
         throw new Error(
             `Refusing to open non-temporary Dashboard test database: ${databasePath}`
+        );
+    }
+    if (
+        !isPathWithinRoot(realDatabaseParent, temporaryRoot) ||
+        existingDatabaseStat?.isSymbolicLink() === true
+    ) {
+        throw new Error(
+            `Refusing to open symlinked Dashboard test database: ${databasePath}`
         );
     }
 }
