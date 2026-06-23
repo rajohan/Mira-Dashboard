@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
@@ -22,20 +22,57 @@ import {
 import { NotificationBell } from "./components/layout/NotificationBell";
 import { apiFetch, UnauthorizedError } from "./hooks/useApi";
 import { useKopiaBackup, useRunKopiaBackup, useWalgBackup } from "./hooks/useBackups";
-import { useFileContent, useFiles, useSaveFile } from "./hooks/useFiles";
-import { useLogContent, useLogFiles } from "./hooks/useLogs";
-import type { NotificationItem } from "./hooks/useNotifications";
+import { useCacheEntry, useCacheHeartbeat, useRefreshCacheEntry } from "./hooks/useCache";
 import {
+    useConfig,
+    useCreateBackup,
+    useRestartGateway,
+    useSkills,
+    useToggleSkill,
+    useUpdateConfig,
+} from "./hooks/useConfig";
+import {
+    useCronJobs,
+    useDeleteCronJob,
+    useRunCronJobNow,
+    useToggleCronJob,
+    useUpdateCronJob,
+} from "./hooks/useCron";
+import { useDatabaseOverview } from "./hooks/useDatabase";
+import { useFileContent, useFiles, useSaveFile } from "./hooks/useFiles";
+import { useHealth } from "./hooks/useHealth";
+import { useLogContent, useLogFiles } from "./hooks/useLogs";
+import { useMetrics } from "./hooks/useMetrics";
+import { useMoltbookData } from "./hooks/useMoltbook";
+import type { NotificationItem } from "./hooks/useNotifications";
+import { OPS_ACTIONS, useExecJob, useStartOpsAction } from "./hooks/useOpsActions";
+import {
+    useApprovePullRequest,
+    useApprovePullRequestReview,
+    useDeployDashboard,
     useProductionCheckout,
     usePullRequestDeployments,
     usePullRequests,
+    useRejectPullRequest,
+    useUpdatePullRequestBranch,
 } from "./hooks/usePullRequests";
+import { useQuotas } from "./hooks/useQuotas";
 import {
     useRunScheduledJobNow,
     useScheduledJobRuns,
     useScheduledJobs,
     useUpdateScheduledJob,
 } from "./hooks/useScheduledJobs";
+import { useDeleteSession, useSessionAction } from "./hooks/useSessions";
+import {
+    changeDirectory,
+    getCompletions,
+    stopTerminalJob,
+    useStartTerminalCommand,
+    useTerminalHistory,
+    useTerminalJob,
+} from "./hooks/useTerminal";
+import { useWeather } from "./hooks/useWeather";
 import { handleSocketMessage } from "./lib/socket/socketMessageRouter";
 import { Tasks } from "./pages/Tasks";
 import { authActions, authStore } from "./stores/authStore";
@@ -640,6 +677,639 @@ describe("Mira Dashboard frontend behavior", () => {
         await waitFor(() =>
             expect(production.result.current.data?.isSafeForDeploy).toBe(true)
         );
+    });
+
+    it("fetches and mutates remaining dashboard API surfaces through hooks", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/health" && method === "GET") {
+                    return Response.json({
+                        status: "isOk",
+                        gatewayConnected: true,
+                        sessionCount: 2,
+                        backendCommit: "abc123",
+                    });
+                }
+
+                if (url === "/api/metrics" && method === "GET") {
+                    return Response.json({
+                        cpu: {
+                            count: 4,
+                            model: "test cpu",
+                            loadAvg: [0.1, 0.2, 0.3],
+                            loadPercent: 5,
+                        },
+                        memory: {
+                            total: 100,
+                            used: 40,
+                            free: 60,
+                            percent: 40,
+                            totalGB: 0.1,
+                            usedGB: 0.04,
+                        },
+                        disk: {
+                            total: 1000,
+                            used: 250,
+                            percent: 25,
+                            totalGB: 1,
+                            usedGB: 0.25,
+                        },
+                        system: {
+                            uptime: 123,
+                            platform: "linux",
+                            hostname: "dashboard-test",
+                        },
+                        network: { downloadMbps: 1, uploadMbps: 2 },
+                        tokens: {
+                            total: 42,
+                            byModel: { codex: 42 },
+                            sessionsByModel: { codex: 1 },
+                            byAgent: [
+                                {
+                                    label: "Mira",
+                                    model: "codex",
+                                    tokens: 42,
+                                    type: "MAIN",
+                                },
+                            ],
+                        },
+                        timestamp: 123_456,
+                    });
+                }
+
+                if (url === "/api/cache/heartbeat" && method === "GET") {
+                    return Response.json({
+                        generatedAt: "2026-06-23T08:00:00.000Z",
+                        count: 1,
+                        entries: [
+                            {
+                                key: "weather.spydeberg",
+                                source: "weather",
+                                status: "fresh",
+                                updatedAt: "2026-06-23T08:00:00.000Z",
+                                lastAttemptAt: "2026-06-23T08:00:00.000Z",
+                                expiresAt: "2026-06-23T09:00:00.000Z",
+                                consecutiveFailures: 0,
+                                data: { location: "Spydeberg" },
+                                meta: {},
+                            },
+                        ],
+                    });
+                }
+
+                if (url === "/api/cache/weather.spydeberg" && method === "GET") {
+                    return Response.json({
+                        key: "weather.spydeberg",
+                        source: "weather",
+                        status: "fresh",
+                        consecutiveFailures: 0,
+                        data: {
+                            location: "Spydeberg",
+                            temperatureC: 20,
+                            description: "Clear",
+                            forecast: [],
+                            fetchedAt: 123,
+                        },
+                        meta: {},
+                    });
+                }
+
+                if (url === "/api/cache/quotas.summary" && method === "GET") {
+                    return Response.json({
+                        key: "quotas.summary",
+                        source: "quota",
+                        status: "fresh",
+                        consecutiveFailures: 0,
+                        data: {
+                            checkedAt: 123,
+                            cacheAgeMs: 100,
+                            openrouter: {
+                                usage: 1,
+                                totalCredits: 10,
+                                remaining: 9,
+                                usageMonthly: 1,
+                                percentUsed: 10,
+                            },
+                            elevenlabs: { status: "not_configured" },
+                            synthetic: { status: "error", note: "offline" },
+                            openai: {
+                                fiveHourLeftPercent: 90,
+                                weeklyLeftPercent: 80,
+                                percentUsed: 10,
+                            },
+                        },
+                        meta: {},
+                    });
+                }
+
+                if (url === "/api/cache/moltbook.home" && method === "GET") {
+                    return Response.json({
+                        key: "moltbook.home",
+                        source: "moltbook",
+                        status: "fresh",
+                        consecutiveFailures: 0,
+                        data: {
+                            pendingRequestCount: 1,
+                            unreadMessageCount: 2,
+                            activityOnYourPostsCount: 0,
+                            activityOnYourPosts: [],
+                            postsFromAccountsYouFollowCount: 1,
+                            exploreCount: 1,
+                            nextActions: ["reply"],
+                            fetchedAt: "2026-06-23T08:00:00.000Z",
+                        },
+                        meta: {},
+                    });
+                }
+
+                if (url === "/api/cache/moltbook.feed.hot" && method === "GET") {
+                    return Response.json({
+                        key: "moltbook.feed.hot",
+                        source: "moltbook",
+                        status: "fresh",
+                        consecutiveFailures: 0,
+                        data: {
+                            posts: [
+                                {
+                                    post_id: "post-1",
+                                    title: "Hello",
+                                    content_preview: "Preview",
+                                    author_name: "mira",
+                                    upvotes: 3,
+                                    downvotes: 0,
+                                    comment_count: 1,
+                                    created_at: "2026-06-23T08:00:00.000Z",
+                                    submolt_name: "agents",
+                                },
+                            ],
+                        },
+                        meta: {},
+                    });
+                }
+
+                if (url === "/api/cache/moltbook.profile" && method === "GET") {
+                    return Response.json({
+                        key: "moltbook.profile",
+                        source: "moltbook",
+                        status: "fresh",
+                        consecutiveFailures: 0,
+                        data: { agent: { id: "mira", name: "Mira" } },
+                        meta: {},
+                    });
+                }
+
+                if (url === "/api/cache/moltbook.my-content" && method === "GET") {
+                    return Response.json({
+                        key: "moltbook.my-content",
+                        source: "moltbook",
+                        status: "fresh",
+                        consecutiveFailures: 0,
+                        data: { posts: [], comments: [] },
+                        meta: {},
+                    });
+                }
+
+                if (url === "/api/cache/weather.spydeberg/refresh" && method === "POST") {
+                    return Response.json({
+                        isOk: true,
+                        entry: {
+                            key: "weather.spydeberg",
+                            source: "weather",
+                            status: "fresh",
+                            consecutiveFailures: 0,
+                            data: { location: "Spydeberg" },
+                            meta: {},
+                        },
+                    });
+                }
+
+                if (url === "/api/cron/jobs" && method === "GET") {
+                    return Response.json({
+                        jobs: [{ id: "cron-1", name: "Cron One", enabled: true }],
+                    });
+                }
+
+                if (url === "/api/cron/jobs/cron-1/toggle" && method === "POST") {
+                    expect(JSON.parse(String(init?.body))).toEqual({ enabled: false });
+                    return Response.json({ isOk: true });
+                }
+
+                if (url === "/api/cron/jobs/cron-1/update" && method === "POST") {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        patch: { schedule: { kind: "interval", every: "5m" } },
+                    });
+                    return Response.json({ isOk: true });
+                }
+
+                if (url === "/api/cron/jobs/cron-1/run" && method === "POST") {
+                    return Response.json({ isOk: true });
+                }
+
+                if (url === "/api/cron/jobs/cron-1/delete" && method === "POST") {
+                    return Response.json({ isOk: true });
+                }
+
+                if (url === "/api/config" && method === "GET") {
+                    return Response.json({
+                        __hash: "hash-1",
+                        agents: { defaults: { model: { primary: "codex" } } },
+                    });
+                }
+
+                if (url === "/api/config" && method === "PUT") {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        __hash: "hash-1",
+                        agents: { defaults: { model: { primary: "codex" } } },
+                    });
+                    return new Response(undefined, { status: 204 });
+                }
+
+                if (url === "/api/skills" && method === "GET") {
+                    return Response.json({
+                        skills: [
+                            {
+                                name: "weather",
+                                path: "skills.entries.weather",
+                                enabled: true,
+                                source: "workspace",
+                            },
+                        ],
+                    });
+                }
+
+                if (url === "/api/skills/weather" && method === "POST") {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        __hash: "hash-1",
+                        enabled: false,
+                    });
+                    return Response.json({ isOk: true });
+                }
+
+                if (url === "/api/backup" && method === "POST") {
+                    return Response.json({
+                        createdAt: "2026-06-23T08:00:00.000Z",
+                        hash: "hash-1",
+                        config: { agents: {} },
+                    });
+                }
+
+                if (url === "/api/restart" && method === "POST") {
+                    return new Response(undefined, { status: 204 });
+                }
+
+                if (url === "/api/database/overview" && method === "GET") {
+                    return Response.json({
+                        overview: {
+                            totalDatabaseSizeBytes: 1024,
+                            totalBackends: 2,
+                            averageCacheHitRatio: 99,
+                            connections: {},
+                            pgStatStatementsEnabled: true,
+                            torrentCounts: { comet: 1, bitmagnet: 2 },
+                            pgbouncer: {
+                                clientConnections: 1,
+                                serverConnections: 1,
+                                waitingClients: 0,
+                                maxWait: 0,
+                                avgQueryTime: 1,
+                                avgTransactionTime: 2,
+                            },
+                        },
+                        databases: [],
+                        deadTuples: [],
+                        topQueries: [],
+                        pgbouncerPools: [],
+                        pgbouncerStats: [],
+                    });
+                }
+
+                if (url === "/api/sessions/session-1/action" && method === "POST") {
+                    expect(JSON.parse(String(init?.body))).toEqual({ action: "compact" });
+                    return new Response(undefined, { status: 204 });
+                }
+
+                if (url === "/api/sessions/session-1" && method === "DELETE") {
+                    return Response.json({ isOk: true });
+                }
+
+                if (url === "/api/exec/start" && method === "POST") {
+                    const body = JSON.parse(String(init?.body)) as {
+                        command?: string;
+                        cwd?: string;
+                        shell?: boolean;
+                    };
+                    if (body.command === "pwd") {
+                        expect(body).toEqual({
+                            command: "pwd",
+                            cwd: "/tmp",
+                        });
+                    } else {
+                        expect(body).toMatchObject({
+                            command: OPS_ACTIONS[0]!.command,
+                            shell: true,
+                        });
+                    }
+                    return Response.json({ jobId: "job-1" });
+                }
+
+                if (url === "/api/exec/job-1" && method === "GET") {
+                    return Response.json({
+                        jobId: "job-1",
+                        status: "done",
+                        code: 0,
+                        stdout: "/tmp",
+                        stderr: "",
+                        startedAt: 1,
+                        endedAt: 2,
+                    });
+                }
+
+                if (url === "/api/terminal/complete" && method === "POST") {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        partial: "sr",
+                        cwd: "/tmp",
+                    });
+                    return Response.json({
+                        commonPrefix: "src",
+                        completions: [
+                            { completion: "src", display: "src/", type: "directory" },
+                        ],
+                    });
+                }
+
+                if (url === "/api/terminal/cd" && method === "POST") {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        path: "src",
+                        cwd: "/tmp",
+                    });
+                    return Response.json({ isSuccess: true, newCwd: "/tmp/src" });
+                }
+
+                if (url === "/api/exec/job-1/stop" && method === "POST") {
+                    return new Response(undefined, { status: 204 });
+                }
+
+                if (url === "/api/pull-requests/189/approve" && method === "POST") {
+                    expect(JSON.parse(String(init?.body))).toEqual({ deploy: true });
+                    return Response.json({ isOk: true, message: "approved" });
+                }
+
+                if (
+                    url === "/api/pull-requests/189/review-approval" &&
+                    method === "POST"
+                ) {
+                    return Response.json({
+                        isOk: true,
+                        message: "review approved",
+                        pullRequest: {
+                            number: 189,
+                            title: "Updated review",
+                            url: "/pull/189",
+                            headRefName: "tests",
+                            baseRefName: "main",
+                            author: {},
+                            createdAt: "2026-06-23T08:00:00.000Z",
+                            updatedAt: "2026-06-23T09:00:00.000Z",
+                            isDraft: false,
+                        },
+                    });
+                }
+
+                if (url === "/api/pull-requests/189/update-branch" && method === "POST") {
+                    return Response.json({
+                        isOk: true,
+                        message: "updated",
+                        pullRequest: {
+                            number: 189,
+                            title: "Updated branch",
+                            url: "/pull/189",
+                            headRefName: "tests",
+                            baseRefName: "main",
+                            author: {},
+                            createdAt: "2026-06-23T08:00:00.000Z",
+                            updatedAt: "2026-06-23T09:00:00.000Z",
+                            isDraft: false,
+                        },
+                    });
+                }
+
+                if (url === "/api/pull-requests/189/reject" && method === "POST") {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        comment: "needs work",
+                    });
+                    return Response.json({ isOk: true, message: "rejected" });
+                }
+
+                if (url === "/api/pull-requests/deploy" && method === "POST") {
+                    return Response.json({
+                        isOk: true,
+                        deployment: {
+                            id: "deploy-2",
+                            status: "building",
+                            startedAt: "2026-06-23T08:00:00.000Z",
+                            updatedAt: "2026-06-23T08:00:00.000Z",
+                        },
+                    });
+                }
+
+                throw new Error(`Unexpected remaining hook API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const health = renderHookWithQueryClient(() => useHealth());
+        await waitFor(() => expect(health.result.current.data?.status).toBe("isOk"));
+
+        const metrics = renderHookWithQueryClient(() => useMetrics());
+        await waitFor(() => expect(metrics.result.current.data?.tokens.total).toBe(42));
+
+        const cacheHeartbeat = renderHookWithQueryClient(() => useCacheHeartbeat());
+        await waitFor(() => expect(cacheHeartbeat.result.current.data?.count).toBe(1));
+
+        const weatherEntry = renderHookWithQueryClient(() =>
+            useCacheEntry<{ location: string }>("weather.spydeberg")
+        );
+        await waitFor(() =>
+            expect(weatherEntry.result.current.data?.data.location).toBe("Spydeberg")
+        );
+
+        const weather = renderHookWithQueryClient(() => useWeather());
+        await waitFor(() =>
+            expect(weather.result.current.data?.location).toBe("Spydeberg")
+        );
+
+        const quotas = renderHookWithQueryClient(() => useQuotas());
+        await waitFor(() =>
+            expect(quotas.result.current.data?.openrouter).toMatchObject({
+                remaining: 9,
+            })
+        );
+
+        const moltbook = renderHookWithQueryClient(() => useMoltbookData("hot"));
+        await waitFor(() => expect(moltbook.result.current.posts[0]?.id).toBe("post-1"));
+        expect(moltbook.result.current.profile?.name).toBe("Mira");
+
+        const refreshCache = renderHookWithQueryClient(() => useRefreshCacheEntry());
+        await expect(
+            refreshCache.result.current.mutateAsync(" weather.spydeberg ,, ")
+        ).resolves.toMatchObject({ keys: ["weather.spydeberg"] });
+
+        const cronJobs = renderHookWithQueryClient(() => useCronJobs());
+        await waitFor(() => expect(cronJobs.result.current.data?.[0]?.id).toBe("cron-1"));
+
+        const toggleCron = renderHookWithQueryClient(() => useToggleCronJob());
+        await toggleCron.result.current.mutateAsync({ id: "cron-1", enabled: false });
+
+        const updateCron = renderHookWithQueryClient(() => useUpdateCronJob());
+        await updateCron.result.current.mutateAsync({
+            id: "cron-1",
+            patch: { schedule: { kind: "interval", every: "5m" } },
+        });
+
+        const runCron = renderHookWithQueryClient(() => useRunCronJobNow());
+        await runCron.result.current.mutateAsync({ id: "cron-1" });
+
+        const deleteCron = renderHookWithQueryClient(() => useDeleteCronJob());
+        await deleteCron.result.current.mutateAsync({ id: "cron-1" });
+
+        const config = renderHookWithQueryClient(() => useConfig());
+        await waitFor(() => expect(config.result.current.data?.__hash).toBe("hash-1"));
+
+        const skills = renderHookWithQueryClient(() => useSkills());
+        await waitFor(() =>
+            expect(skills.result.current.data?.[0]?.name).toBe("weather")
+        );
+
+        const toggleSkill = renderHookWithQueryClient(() => useToggleSkill());
+        toggleSkill.queryClient.setQueryData(["config"], { __hash: "hash-1" });
+        await toggleSkill.result.current.mutateAsync({
+            name: "weather",
+            enabled: false,
+        });
+
+        const updateConfig = renderHookWithQueryClient(() => useUpdateConfig());
+        await updateConfig.result.current.mutateAsync({
+            __hash: "hash-1",
+            agents: { defaults: { model: { primary: "codex" } } },
+        });
+
+        const restartGateway = renderHookWithQueryClient(() => useRestartGateway());
+        await expect(
+            restartGateway.result.current.mutateAsync()
+        ).resolves.toBeUndefined();
+
+        const backup = renderHookWithQueryClient(() => useCreateBackup());
+        await expect(backup.result.current.mutateAsync()).resolves.toMatchObject({
+            hash: "hash-1",
+        });
+
+        const database = renderHookWithQueryClient(() => useDatabaseOverview());
+        await waitFor(() =>
+            expect(database.result.current.data?.overview.totalBackends).toBe(2)
+        );
+
+        const sessionAction = renderHookWithQueryClient(() => useSessionAction());
+        await sessionAction.result.current.mutateAsync({
+            key: "session-1",
+            action: "compact",
+        });
+
+        const deleteSession = renderHookWithQueryClient(() => useDeleteSession());
+        await deleteSession.result.current.mutateAsync("session-1");
+
+        const terminalStart = renderHookWithQueryClient(() => useStartTerminalCommand());
+        await expect(
+            terminalStart.result.current.mutateAsync({ command: "pwd", cwd: "/tmp" })
+        ).resolves.toEqual({ jobId: "job-1" });
+
+        const opsStart = renderHookWithQueryClient(() => useStartOpsAction());
+        await expect(
+            opsStart.result.current.mutateAsync(OPS_ACTIONS[0]!)
+        ).resolves.toEqual({ jobId: "job-1" });
+
+        const opsJob = renderHookWithQueryClient(() => useExecJob("job-1"));
+        await waitFor(() => expect(opsJob.result.current.data?.status).toBe("done"));
+
+        const terminalJob = renderHookWithQueryClient(() => useTerminalJob("job-1"));
+        await waitFor(() => expect(terminalJob.result.current.data?.stdout).toBe("/tmp"));
+
+        await expect(getCompletions("sr", "/tmp")).resolves.toMatchObject({
+            commonPrefix: "src",
+        });
+        await expect(changeDirectory("src", "/tmp")).resolves.toEqual({
+            isSuccess: true,
+            newCwd: "/tmp/src",
+        });
+        await expect(stopTerminalJob("job-1")).resolves.toBeUndefined();
+
+        const terminalHistory = renderHookWithQueryClient(() => useTerminalHistory());
+        let historyId = "";
+        act(() => {
+            historyId = terminalHistory.result.current.addCommand({
+                command: "pwd",
+                cwd: "/tmp",
+                jobId: "job-1",
+                status: "running",
+                stdout: "",
+                stderr: "",
+                startedAt: 1,
+            });
+        });
+        expect(terminalHistory.result.current.history).toHaveLength(1);
+        act(() => {
+            terminalHistory.result.current.updateCommand(historyId, {
+                status: "done",
+                stdout: "/tmp",
+            });
+        });
+        expect(terminalHistory.result.current.history[0]).toMatchObject({
+            status: "done",
+            stdout: "/tmp",
+        });
+        act(() => {
+            terminalHistory.result.current.clearHistory();
+        });
+        expect(terminalHistory.result.current.history).toEqual([]);
+
+        const approvePullRequest = renderHookWithQueryClient(() =>
+            useApprovePullRequest()
+        );
+        await approvePullRequest.result.current.mutateAsync({
+            number: 189,
+            willDeploy: true,
+        });
+
+        const approveReview = renderHookWithQueryClient(() =>
+            useApprovePullRequestReview()
+        );
+        await expect(
+            approveReview.result.current.mutateAsync({ number: 189 })
+        ).resolves.toMatchObject({ message: "review approved" });
+
+        const updateBranch = renderHookWithQueryClient(() =>
+            useUpdatePullRequestBranch()
+        );
+        await expect(
+            updateBranch.result.current.mutateAsync({ number: 189 })
+        ).resolves.toMatchObject({ message: "updated" });
+
+        const rejectPullRequest = renderHookWithQueryClient(() => useRejectPullRequest());
+        await rejectPullRequest.result.current.mutateAsync({
+            number: 189,
+            comment: "needs work",
+        });
+
+        const deploy = renderHookWithQueryClient(() => useDeployDashboard());
+        await expect(deploy.result.current.mutateAsync()).resolves.toMatchObject({
+            deployment: { id: "deploy-2" },
+        });
     });
 
     it("drives notification filtering and mutations through the bell menu", async () => {
