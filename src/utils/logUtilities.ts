@@ -87,7 +87,7 @@ function normalizeStructuredMessage(parsed: Record<string, unknown>): {
                     nestedRecord["0"];
                 if (typeof nestedMessage === "string" && nestedMessage.trim()) {
                     message = nestedMessage;
-                } else if (nestedMessage != undefined && String(nestedMessage).trim()) {
+                } else if (nestedMessage !== undefined && String(nestedMessage).trim()) {
                     message = stringifyCompact(nestedMessage);
                 } else if (!subsystem) {
                     message = positionalZero;
@@ -98,13 +98,13 @@ function normalizeStructuredMessage(parsed: Record<string, unknown>): {
         } else {
             message = positionalZero;
         }
-    } else if (positionalZero != undefined && String(positionalZero) !== "") {
+    } else if (positionalZero !== undefined && String(positionalZero) !== "") {
         message = stringifyCompact(positionalZero);
     }
 
     if (!message && typeof positionalOne === "string") {
         message = positionalOne;
-    } else if (!message && positionalOne != undefined && String(positionalOne) !== "") {
+    } else if (!message && positionalOne !== undefined && String(positionalOne) !== "") {
         message = stringifyCompact(positionalOne);
     }
 
@@ -116,7 +116,7 @@ function normalizeStructuredMessage(parsed: Record<string, unknown>): {
         const fallback = parsed.msg ?? parsed.message;
         if (typeof fallback === "string") {
             message = fallback;
-        } else if (fallback != undefined) {
+        } else if (fallback !== undefined) {
             message = stringifyCompact(fallback);
         }
     }

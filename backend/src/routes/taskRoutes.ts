@@ -35,6 +35,10 @@ interface DatabaseTask {
     updated_at: string;
 }
 
+type DatabaseTaskRow = Omit<DatabaseTask, "assignee"> & {
+    assignee: Assignee | null | undefined;
+};
+
 interface CronJob {
     id?: string;
     jobId?: string;
@@ -55,6 +59,16 @@ interface TaskAutomationInput {
     model?: string;
     thinking?: string;
     [key: string]: unknown;
+}
+
+function normalizeDatabaseTask(
+    task: DatabaseTaskRow | undefined
+): DatabaseTask | undefined {
+    return task ? { ...task, assignee: task.assignee ?? undefined } : undefined;
+}
+
+function normalizeDatabaseTasks(tasks: DatabaseTaskRow[]): DatabaseTask[] {
+    return tasks.map((task) => normalizeDatabaseTask(task)!);
 }
 
 function nowIso(): string {
@@ -294,12 +308,13 @@ async function notifyMira(eventType: string, task: { id: number; title: string }
 }
 
 function taskById(id: number): DatabaseTask | undefined {
-    return database
+    const row = database
         .prepare(
             `SELECT id, title, body, status, priority, labels_json, automation_json, assignee, created_at, updated_at
              FROM tasks WHERE id = ?`
         )
-        .get(id) as DatabaseTask | undefined;
+        .get(id) as DatabaseTaskRow | undefined;
+    return normalizeDatabaseTask(row);
 }
 
 function safeId(value: string | undefined): number | undefined {
@@ -342,9 +357,13 @@ export const taskRoutes = {
                          FROM tasks
                          ORDER BY datetime(updated_at) DESC, id DESC`
                     )
-                    .all() as DatabaseTask[];
+                    .all() as DatabaseTaskRow[];
                 const cronJobsById = await fetchCronJobsById();
-                return json(rows.map((task) => toFrontendTask(task, cronJobsById)));
+                return json(
+                    normalizeDatabaseTasks(rows).map((task) =>
+                        toFrontendTask(task, cronJobsById)
+                    )
+                );
             } catch (error) {
                 console.error("[Tasks] Failed to list tasks:", error);
                 return json({ error: "Failed to list tasks" }, { status: 500 });
@@ -503,8 +522,11 @@ export const taskRoutes = {
             if (id === undefined) return json({ error: "Invalid id" }, { status: 400 });
             const existing = database
                 .prepare("SELECT id, title, assignee FROM tasks WHERE id = ?")
-                .get(id) as undefined | { assignee?: string; id: number; title: string };
+                .get(id) as
+                | undefined
+                | { assignee: Assignee | null | undefined; id: number; title: string };
             if (!existing) return json({ error: "Task not found" }, { status: 404 });
+            const existingAssignee = existing.assignee ?? undefined;
             try {
                 database.transaction(() => {
                     database
@@ -513,7 +535,7 @@ export const taskRoutes = {
                     database.prepare("DELETE FROM task_events WHERE task_id = ?").run(id);
                     database.prepare("DELETE FROM tasks WHERE id = ?").run(id);
                 })();
-                if (existing.assignee === TASK_ASSIGNEES.mira.id) {
+                if (existingAssignee === TASK_ASSIGNEES.mira.id) {
                     void notifyMira("deleted", existing);
                 }
             } catch (error) {
@@ -654,8 +676,8 @@ export const taskRoutes = {
                     .get(Number(result.lastInsertRowid)) as DatabaseTaskUpdate;
                 const task = database
                     .prepare("SELECT title, assignee FROM tasks WHERE id = ?")
-                    .get(id) as { assignee: Assignee | undefined; title: string };
-                if (task.assignee === TASK_ASSIGNEES.mira.id) {
+                    .get(id) as { assignee: Assignee | null | undefined; title: string };
+                if ((task.assignee ?? undefined) === TASK_ASSIGNEES.mira.id) {
                     void notifyMira("progress", { id, title: task.title });
                 }
                 return json(toFrontendTaskUpdate(row), { status: 201 });

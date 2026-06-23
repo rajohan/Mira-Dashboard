@@ -62,7 +62,7 @@ function getWeatherIcon(description?: string) {
 
 /** Formats temp for display. */
 function formatTemporary(value: number | undefined): string {
-    if (value == undefined || Number.isNaN(value)) {
+    if (value === undefined || Number.isNaN(value)) {
         return "--";
     }
 

@@ -91,8 +91,13 @@ async function withNetworkSampleLock<T>(callback: () => Promise<T> | T): Promise
 
 function safeErrorMessage(error: unknown): string {
     if (error instanceof Error) return error.message;
-    if (error == undefined) return "Unknown error";
+    if (error === undefined) return "Unknown error";
     return String(error);
+}
+
+function finiteNumber(value: unknown): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
 }
 
 async function getNetworkMetrics(): Promise<NetworkMetrics> {
@@ -202,13 +207,13 @@ async function getSystemMetrics(): Promise<SystemMetricsResponse> {
         if (code !== 0) throw new Error(stderr || `df exited ${code}`);
         const parts = (stdout.trim().split("\n").at(-1) ?? "").trim().split(/\s+/u);
         if (isDarwin && parts.length >= 5) {
-            diskTotal = Number(parts[1] ?? 0) * 1024;
-            diskUsed = Number(parts[2] ?? 0) * 1024;
-            diskPercent = Number((parts[4] ?? "0").replace(/%$/u, ""));
+            diskTotal = finiteNumber(parts[1]) * 1024;
+            diskUsed = finiteNumber(parts[2]) * 1024;
+            diskPercent = finiteNumber((parts[4] ?? "0").replace(/%$/u, ""));
         } else if (!isDarwin && parts.length >= 3) {
-            diskTotal = Number(parts[0] ?? 0);
-            diskUsed = Number(parts[1] ?? 0);
-            diskPercent = Number((parts[2] ?? "0").replace(/%$/u, ""));
+            diskTotal = finiteNumber(parts[0]);
+            diskUsed = finiteNumber(parts[1]);
+            diskPercent = finiteNumber((parts[2] ?? "0").replace(/%$/u, ""));
         }
     } catch (error) {
         console.error("[Metrics] df error:", safeErrorMessage(error));

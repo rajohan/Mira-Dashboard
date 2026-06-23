@@ -81,7 +81,7 @@ async function fetchCachedMoltbookEntry<T>(
     }
 
     const parsedData = parseJsonField<T>(row.data);
-    if (!parsedData) {
+    if (parsedData === undefined) {
         throw new Error(`Moltbook cache payload is invalid: ${key}`);
     }
     const data = normalizeCacheNulls(parsedData) as T;

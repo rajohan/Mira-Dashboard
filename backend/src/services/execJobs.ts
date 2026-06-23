@@ -176,7 +176,7 @@ export function execErrorResponse(error: unknown): { error: string; status: numb
     if (error instanceof ExecValidationError) {
         return { error: error.message, status: 400 };
     }
-    if (error != undefined) {
+    if (error !== undefined && error !== null) {
         const statusCode = Number((error as { statusCode?: unknown }).statusCode);
         if (Number.isSafeInteger(statusCode) && statusCode >= 400 && statusCode < 600) {
             return { error: errorMessage(error, "request failed"), status: statusCode };
@@ -185,7 +185,7 @@ export function execErrorResponse(error: unknown): { error: string; status: numb
     const message =
         error instanceof Error
             ? error.message
-            : error == undefined
+            : error === undefined || error === null
               ? "Unknown error"
               : String(error);
     console.error("[Exec] Route error:", message);

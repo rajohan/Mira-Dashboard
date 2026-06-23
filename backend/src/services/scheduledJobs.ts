@@ -5,10 +5,6 @@ function dateToISOString(date: Date): string {
     return date.toISOString();
 }
 
-function patchValue<T>(value: T | undefined, existing: T): T {
-    return value === undefined ? existing : value;
-}
-
 const schedulerTickMs = 30_000;
 const defaultScheduledJobRunTimeoutMs = 5 * 60 * 1000;
 const minimumIntervalSeconds = 60;
@@ -101,8 +97,8 @@ export interface ScheduledJobPatch {
     enabled?: boolean;
     scheduleType?: ScheduledJobScheduleType;
     intervalSeconds?: number;
-    timeOfDay?: string | undefined;
-    cronExpression?: string | undefined;
+    timeOfDay?: string | null | undefined;
+    cronExpression?: string | null | undefined;
 }
 
 interface ScheduledJobRow {
@@ -652,8 +648,14 @@ export function updateScheduledJob(
         enabled: patch.enabled ?? existing.enabled,
         scheduleType: patch.scheduleType ?? existing.scheduleType,
         intervalSeconds: patch.intervalSeconds ?? existing.intervalSeconds,
-        timeOfDay: patchValue(patch.timeOfDay, existing.timeOfDay),
-        cronExpression: patchValue(patch.cronExpression, existing.cronExpression),
+        timeOfDay:
+            patch.timeOfDay === undefined
+                ? existing.timeOfDay
+                : (patch.timeOfDay ?? undefined),
+        cronExpression:
+            patch.cronExpression === undefined
+                ? existing.cronExpression
+                : (patch.cronExpression ?? undefined),
     };
     assertValidSchedule(
         next.scheduleType,

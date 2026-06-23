@@ -167,7 +167,7 @@ export function appTimeOfDayToUtcTimeOfDay(
 
 /** Formats milliseconds as a compact duration string. */
 export function formatDuration(updatedAt: number | undefined): string {
-    if (updatedAt == undefined) return "Unknown";
+    if (updatedAt === undefined) return "Unknown";
     try {
         return formatDistanceToNow(new Date(updatedAt), {
             addSuffix: true,
@@ -231,6 +231,6 @@ export function formatTokenCount(tokens: number): string {
 
 /** Calculates token usage percentage from used and limit values. */
 export function getTokenPercent(current: number | undefined, max: number): number {
-    if (current == undefined || max <= 0) return 0;
+    if (current === undefined || max <= 0) return 0;
     return Math.min(Math.round((current / max) * 100), 100);
 }

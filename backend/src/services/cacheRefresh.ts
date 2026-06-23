@@ -141,7 +141,7 @@ function toNumber(value: unknown, fallback = 0): number {
 }
 
 function toOptionalNumber(value: unknown): number | undefined {
-    if (value == undefined) {
+    if (value === undefined || value === null) {
         return undefined;
     }
     if (typeof value === "string" && value.trim() === "") {
@@ -578,7 +578,7 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
 }
 
 function openMeteoCodeToDescription(code: unknown): string {
-    if (code == undefined) return "Unknown";
+    if (code === undefined) return "Unknown";
     if (typeof code === "string" && code.trim() === "") return "Unknown";
     const numericCode = Number(code);
     if (!Number.isFinite(numericCode)) return "Unknown";

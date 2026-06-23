@@ -1092,7 +1092,8 @@ function isImageMatchPlatform(image: JsonRecord, platform: string): boolean {
     if (imageOs !== os || image.architecture !== architecture) return false;
     if (!variant) {
         return (
-            image.variant == undefined ||
+            image.variant === undefined ||
+            image.variant === null ||
             (architecture === "arm64" && image.variant === "v8")
         );
     }
@@ -1579,7 +1580,7 @@ async function applyComposeUpdateUnlocked(
 }
 
 function isBooleanLabel(value: string | undefined, isFallback = false): boolean {
-    if (value == undefined || value === "") return isFallback;
+    if (value === undefined || value === "") return isFallback;
     return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
