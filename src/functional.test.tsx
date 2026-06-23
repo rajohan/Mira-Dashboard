@@ -4,7 +4,25 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
 
+import { agentsCollection, writeAgentsFromWebSocket } from "./collections/agents";
+import { logsCollection, writeLogFromWebSocket } from "./collections/logs";
+import {
+    deleteSessionFromCollection,
+    replaceSessionsFromWebSocket,
+    sessionsCollection,
+} from "./collections/sessions";
 import type { ChatHistoryMessage } from "./components/features/chat/chatTypes";
+import {
+    attachmentKind,
+    extractImages,
+    extractThinkingBlocks,
+    extractToolCalls,
+    gatewayAttachments,
+    normalizeChatHistoryMessage,
+    normalizeText,
+    normalizeVisibleChatHistoryMessages,
+    optimisticAttachmentDisplay,
+} from "./components/features/chat/chatTypes";
 import {
     chatErrorMessage,
     dataUrlToBase64,
@@ -19,7 +37,24 @@ import {
     buildSlashCommandSuggestions,
     slashCommandCanonicalName,
 } from "./components/features/chat/slashCommands";
+import {
+    formatBytes as formatDatabaseBytes,
+    formatNumber as formatDatabaseNumber,
+    truncateQuery,
+} from "./components/features/database/databaseUtilities";
+import {
+    formatBytes as formatDockerBytes,
+    formatDockerMemory,
+    formatFullVersionDisplay,
+    formatTimestamp,
+    formatUpdaterTransition,
+    formatVersionDisplay,
+} from "./components/features/docker/dockerFormatters";
+import { TaskDetailModal } from "./components/features/tasks/TaskDetailModal";
 import { NotificationBell } from "./components/layout/NotificationBell";
+import { Badge, getSessionTypeVariant } from "./components/ui/Badge";
+import { ConfirmModal } from "./components/ui/ConfirmModal";
+import { SearchInput } from "./components/ui/SearchInput";
 import { apiFetch, UnauthorizedError } from "./hooks/useApi";
 import { useKopiaBackup, useRunKopiaBackup, useWalgBackup } from "./hooks/useBackups";
 import { useCacheEntry, useCacheHeartbeat, useRefreshCacheEntry } from "./hooks/useCache";
@@ -45,6 +80,7 @@ import { useLogContent, useLogFiles } from "./hooks/useLogs";
 import { useMetrics } from "./hooks/useMetrics";
 import { useMoltbookData } from "./hooks/useMoltbook";
 import type { NotificationItem } from "./hooks/useNotifications";
+import { OpenClawSocketProvider, useOpenClawSocket } from "./hooks/useOpenClawSocket";
 import { OPS_ACTIONS, useExecJob, useStartOpsAction } from "./hooks/useOpsActions";
 import {
     useApprovePullRequest,
@@ -65,6 +101,17 @@ import {
 } from "./hooks/useScheduledJobs";
 import { useDeleteSession, useSessionAction } from "./hooks/useSessions";
 import {
+    taskKeys,
+    useAssignTask,
+    useCreateTaskUpdate,
+    useDeleteTask,
+    useDeleteTaskUpdate,
+    useMoveTask,
+    useTaskUpdates,
+    useUpdateTask,
+    useUpdateTaskUpdate,
+} from "./hooks/useTasks";
+import {
     changeDirectory,
     getCompletions,
     stopTerminalJob,
@@ -73,6 +120,7 @@ import {
     useTerminalJob,
 } from "./hooks/useTerminal";
 import { useWeather } from "./hooks/useWeather";
+import { createSocketClient } from "./lib/socket/socketClient";
 import { handleSocketMessage } from "./lib/socket/socketMessageRouter";
 import { Tasks } from "./pages/Tasks";
 import { authActions, authStore } from "./stores/authStore";
@@ -87,6 +135,17 @@ import {
     isCronExpressionValid,
     sortCronJobs,
 } from "./utils/cronUtilities";
+import {
+    APP_TIME_ZONE,
+    appTimeZoneParts,
+    appTimeZoneShortMonth,
+    appTimeZoneShortWeekday,
+    appZonedUtcDate,
+    currentIsoString,
+    currentYear,
+    isoStringFromDate,
+    timestampFromDateString,
+} from "./utils/date";
 import {
     getFileExtension,
     getLanguage,
@@ -287,6 +346,61 @@ function renderHookWithQueryClient<Result>(callback: () => Result) {
     };
 }
 
+function openClawSocketWrapper({ children }: { children: ReactNode }) {
+    return createElement(OpenClawSocketProvider, undefined, children);
+}
+
+function patchWritableCollection(
+    collection: object,
+    entries: Array<[string, unknown]>,
+    utilities: {
+        writeDelete?: (key: string) => void;
+        writeUpsert?: (item: Partial<Record<string, unknown>>) => void;
+    }
+) {
+    const isReadyDescriptor = Object.getOwnPropertyDescriptor(collection, "isReady");
+    const iteratorDescriptor = Object.getOwnPropertyDescriptor(
+        collection,
+        Symbol.iterator
+    );
+    const utilitiesDescriptor = Object.getOwnPropertyDescriptor(collection, "utils");
+
+    Object.defineProperties(collection, {
+        isReady: {
+            configurable: true,
+            value: () => true,
+        },
+        [Symbol.iterator]: {
+            configurable: true,
+            value: function* collectionIterator() {
+                yield* entries;
+            },
+        },
+        utils: {
+            configurable: true,
+            value: utilities,
+        },
+    });
+
+    return () => {
+        if (isReadyDescriptor) {
+            Object.defineProperty(collection, "isReady", isReadyDescriptor);
+        } else {
+            delete (collection as Record<string, unknown>).isReady;
+        }
+
+        if (iteratorDescriptor) {
+            Object.defineProperty(collection, Symbol.iterator, iteratorDescriptor);
+        } else {
+            delete (collection as Record<symbol, unknown>)[Symbol.iterator];
+        }
+
+        if (utilitiesDescriptor) {
+            Object.defineProperty(collection, "utils", utilitiesDescriptor);
+        }
+    };
+}
+
 function chatMessage(
     overrides: Partial<ChatHistoryMessage> & Pick<ChatHistoryMessage, "role">
 ): ChatHistoryMessage {
@@ -303,6 +417,59 @@ function chatMessage(
         local: overrides.local,
         runId: overrides.runId,
     };
+}
+
+type FakeWebSocketListener = (event: { data?: string }) => void;
+
+class FakeWebSocket {
+    static instances: FakeWebSocket[] = [];
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSING = 2;
+    static readonly CLOSED = 3;
+
+    private readonly listeners = new Map<string, FakeWebSocketListener[]>();
+    readonly sent: string[] = [];
+    readonly url: string;
+    readyState = FakeWebSocket.CONNECTING;
+
+    constructor(url: string) {
+        this.url = url;
+        FakeWebSocket.instances.push(this);
+    }
+
+    private dispatch(type: string, event: { data?: string } = {}) {
+        const listeners = this.listeners.get(type) || [];
+        for (const listener of listeners) {
+            listener(event);
+        }
+    }
+
+    addEventListener(type: string, listener: FakeWebSocketListener) {
+        this.listeners.set(type, [...(this.listeners.get(type) || []), listener]);
+    }
+
+    send(data: string) {
+        this.sent.push(data);
+    }
+
+    close() {
+        this.readyState = FakeWebSocket.CLOSED;
+        this.dispatch("close");
+    }
+
+    open() {
+        this.readyState = FakeWebSocket.OPEN;
+        this.dispatch("open");
+    }
+
+    message(data: unknown) {
+        this.dispatch("message", { data: JSON.stringify(data) });
+    }
+
+    error() {
+        this.dispatch("error");
+    }
 }
 
 describe("Mira Dashboard frontend behavior", () => {
@@ -411,6 +578,263 @@ describe("Mira Dashboard frontend behavior", () => {
                 type: "log",
             })
         ).toBeUndefined();
+    });
+
+    it("drives socket client request, response, error, and disconnect behavior", async () => {
+        const originalWebSocket = WebSocket;
+        FakeWebSocket.instances = [];
+        Object.defineProperty(globalThis, "WebSocket", {
+            configurable: true,
+            value: FakeWebSocket,
+            writable: true,
+        });
+        const events: string[] = [];
+
+        try {
+            const client = createSocketClient({
+                url: "ws://dashboard.test/socket",
+                onOpen: () => {
+                    events.push("open");
+                },
+                onClose: () => {
+                    events.push("close");
+                },
+                onError: () => {
+                    events.push("error");
+                },
+                onMessage: () => {
+                    events.push("message");
+                },
+            });
+
+            await expect(client.request("before-open")).rejects.toThrow(
+                "WebSocket not connected"
+            );
+
+            client.connect();
+            client.connect();
+            const socket = FakeWebSocket.instances[0]!;
+            expect(FakeWebSocket.instances).toHaveLength(1);
+            expect(socket.url).toBe("ws://dashboard.test/socket");
+
+            socket.open();
+            expect(client.isOpen()).toBe(true);
+            expect(events).toContain("open");
+
+            const requestPromise = client.request<{ answer: number }>("answer", {
+                question: true,
+            });
+            expect(JSON.parse(socket.sent[0]!)).toEqual({
+                type: "req",
+                id: "1",
+                method: "answer",
+                params: { question: true },
+            });
+            socket.message({
+                type: "response",
+                id: "1",
+                isOk: true,
+                payload: { answer: 42 },
+            });
+            await expect(requestPromise).resolves.toEqual({ answer: 42 });
+
+            const rejectedPromise = client.request("fail");
+            socket.message({
+                type: "response",
+                id: "2",
+                isOk: false,
+                error: "nope",
+            });
+            await expect(rejectedPromise).rejects.toBe("nope");
+
+            socket.message({ type: "event", event: "agents.list", payload: [] });
+            socket.error();
+            expect(events).toContain("message");
+            expect(events).toContain("error");
+
+            const pendingPromise = client.request("pending");
+            client.disconnect();
+            await expect(pendingPromise).rejects.toThrow("WebSocket disconnected");
+            expect(client.isOpen()).toBe(false);
+        } finally {
+            Object.defineProperty(globalThis, "WebSocket", {
+                configurable: true,
+                value: originalWebSocket,
+                writable: true,
+            });
+        }
+    });
+
+    it("connects the OpenClaw socket provider, publishes messages, and cleans up", async () => {
+        const originalWebSocket = WebSocket;
+        FakeWebSocket.instances = [];
+        Object.defineProperty(globalThis, "WebSocket", {
+            configurable: true,
+            value: FakeWebSocket,
+            writable: true,
+        });
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            user: { id: 1, username: "raymond" },
+        });
+        const receivedMessages: unknown[] = [];
+        const lifecycle: string[] = [];
+
+        try {
+            const { result, unmount } = renderHook(
+                () =>
+                    useOpenClawSocket({
+                        onConnect: () => {
+                            lifecycle.push("connect");
+                        },
+                        onDisconnect: () => {
+                            lifecycle.push("disconnect");
+                        },
+                    }),
+                { wrapper: openClawSocketWrapper }
+            );
+
+            await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+            const socket = FakeWebSocket.instances[0]!;
+            const unsubscribe = result.current.subscribe((message) => {
+                receivedMessages.push(message);
+            });
+
+            act(() => {
+                socket.open();
+            });
+            await waitFor(() => expect(result.current.isConnected).toBe(true));
+            expect(lifecycle).toContain("connect");
+            act(() => {
+                socket.message({ type: "response", id: "1", isOk: true, payload: [] });
+            });
+
+            const request = result.current.request<{ pong: true }>("ping", {
+                value: 1,
+            });
+            expect(JSON.parse(socket.sent.at(-1)!)).toEqual({
+                type: "req",
+                id: "2",
+                method: "ping",
+                params: { value: 1 },
+            });
+            act(() => {
+                socket.message({
+                    type: "response",
+                    id: "2",
+                    isOk: true,
+                    payload: { pong: true },
+                });
+            });
+            await expect(request).resolves.toEqual({ pong: true });
+
+            act(() => {
+                socket.message({ type: "state", gatewayConnected: false });
+            });
+            await waitFor(() => expect(result.current.isConnected).toBe(false));
+            expect(receivedMessages).toContainEqual({
+                type: "state",
+                gatewayConnected: false,
+            });
+
+            unsubscribe();
+            act(() => {
+                result.current.disconnect();
+            });
+            expect(result.current.isConnected).toBe(false);
+            unmount();
+        } finally {
+            authActions.clearSession();
+            Object.defineProperty(globalThis, "WebSocket", {
+                configurable: true,
+                value: originalWebSocket,
+                writable: true,
+            });
+        }
+    });
+
+    it("writes live agent, log, and session updates into ready collections", () => {
+        const agentUpserts: Array<Partial<Record<string, unknown>>> = [];
+        const restoreAgents = patchWritableCollection(agentsCollection, [], {
+            writeUpsert: (item) => {
+                agentUpserts.push(item);
+            },
+        });
+        try {
+            writeAgentsFromWebSocket([
+                { id: "mira-2026", name: "Mira", status: "online" },
+            ]);
+            expect(agentUpserts).toEqual([
+                { id: "mira-2026", name: "Mira", status: "online" },
+            ]);
+        } finally {
+            restoreAgents();
+        }
+
+        const logUpserts: Array<Partial<Record<string, unknown>>> = [];
+        const restoreLogs = patchWritableCollection(logsCollection, [], {
+            writeUpsert: (item) => {
+                logUpserts.push(item);
+            },
+        });
+        try {
+            writeLogFromWebSocket(
+                '{"_meta":{"logLevelName":"INFO","date":"2026-06-23T08:00:00.000Z"},"0":"[gateway] connected"}'
+            );
+            writeLogFromWebSocket("");
+            expect(logUpserts[0]).toMatchObject({
+                level: "info",
+                subsystem: "gateway",
+                msg: "connected",
+            });
+            expect(logUpserts).toHaveLength(1);
+        } finally {
+            restoreLogs();
+        }
+
+        const sessionDeletes: string[] = [];
+        const sessionUpserts: Array<Partial<Record<string, unknown>>> = [];
+        const restoreSessions = patchWritableCollection(
+            sessionsCollection,
+            [
+                ["old-session", { key: "old-session" }],
+                ["fallback-id", { key: "fallback-id" }],
+            ],
+            {
+                writeDelete: (key) => {
+                    sessionDeletes.push(key);
+                },
+                writeUpsert: (item) => {
+                    sessionUpserts.push(item);
+                },
+            }
+        );
+        try {
+            replaceSessionsFromWebSocket([
+                {
+                    id: "fallback-id",
+                    key: " ".repeat(3),
+                    type: "main",
+                    displayLabel: "Fallback",
+                },
+                { id: "", key: " ".repeat(3), type: "invalid" },
+            ]);
+            expect(sessionDeletes).toEqual(["old-session"]);
+            expect(sessionUpserts).toEqual([
+                {
+                    id: "fallback-id",
+                    key: " ".repeat(3),
+                    type: "main",
+                    displayLabel: "Fallback",
+                },
+            ]);
+
+            deleteSessionFromCollection("fallback-id");
+            expect(sessionDeletes).toEqual(["old-session", "fallback-id"]);
+        } finally {
+            restoreSessions();
+        }
     });
 
     it("fetches log, file, job, backup, and pull request APIs through dashboard hooks", async () => {
@@ -1312,6 +1736,165 @@ describe("Mira Dashboard frontend behavior", () => {
         });
     });
 
+    it("drives task update, move, assignment, deletion, and progress update hooks", async () => {
+        const clearedAutomation = JSON.parse("null") as null;
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/tasks/1/updates" && method === "GET") {
+                    return Response.json([
+                        {
+                            id: 7,
+                            taskId: 1,
+                            author: "mira-2026",
+                            messageMd: "Initial update",
+                            createdAt: "2026-06-23T08:00:00.000Z",
+                            updatedAt: "2026-06-23T08:00:00.000Z",
+                        },
+                    ]);
+                }
+
+                if (url === "/api/tasks/1" && method === "PATCH") {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        title: "Updated task",
+                        automation: clearedAutomation,
+                    });
+                    return Response.json(task({ number: 1, title: "Updated task" }));
+                }
+
+                if (url === "/api/tasks/1/move" && method === "POST") {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        columnLabel: "done",
+                    });
+                    return Response.json(
+                        task({
+                            number: 1,
+                            title: "Moved task",
+                            labels: [{ name: "done" }],
+                        })
+                    );
+                }
+
+                if (url === "/api/tasks/1/assign" && method === "POST") {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        assignee: "mira-2026",
+                    });
+                    return Response.json(
+                        task({
+                            number: 1,
+                            title: "Assigned task",
+                            assignees: [{ login: "mira-2026", name: "Mira" }],
+                        })
+                    );
+                }
+
+                if (url === "/api/tasks/1" && method === "DELETE") {
+                    return new Response(undefined, { status: 204 });
+                }
+
+                if (url === "/api/tasks/1/updates" && method === "POST") {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        author: "mira-2026",
+                        messageMd: "Progress",
+                    });
+                    return Response.json({
+                        id: 8,
+                        taskId: 1,
+                        author: "mira-2026",
+                        messageMd: "Progress",
+                        createdAt: "2026-06-23T09:00:00.000Z",
+                        updatedAt: "2026-06-23T09:00:00.000Z",
+                    });
+                }
+
+                if (url === "/api/tasks/1/updates/7" && method === "PATCH") {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        author: "rajohan",
+                        messageMd: "Edited",
+                    });
+                    return Response.json({
+                        id: 7,
+                        taskId: 1,
+                        author: "rajohan",
+                        messageMd: "Edited",
+                        createdAt: "2026-06-23T08:00:00.000Z",
+                    });
+                }
+
+                if (url === "/api/tasks/1/updates/7" && method === "DELETE") {
+                    return new Response(undefined, { status: 204 });
+                }
+
+                throw new Error(`Unexpected task API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const updates = renderHookWithQueryClient(() => useTaskUpdates(1));
+        await waitFor(() =>
+            expect(updates.result.current.data?.[0]?.messageMd).toBe("Initial update")
+        );
+
+        const updateTask = renderHookWithQueryClient(() => useUpdateTask());
+        updateTask.queryClient.setQueryData(taskKeys.list(), [
+            task({ number: 1, title: "Old task" }),
+        ]);
+        await expect(
+            updateTask.result.current.mutateAsync({
+                number: 1,
+                updates: { title: "Updated task", automation: clearedAutomation },
+            })
+        ).resolves.toMatchObject({ title: "Updated task" });
+
+        const moveTask = renderHookWithQueryClient(() => useMoveTask());
+        await expect(
+            moveTask.result.current.mutateAsync({ number: 1, columnLabel: "done" })
+        ).resolves.toMatchObject({ title: "Moved task" });
+
+        const assignTask = renderHookWithQueryClient(() => useAssignTask());
+        await expect(
+            assignTask.result.current.mutateAsync({
+                number: 1,
+                assignee: "mira-2026",
+            })
+        ).resolves.toMatchObject({ title: "Assigned task" });
+
+        const createUpdate = renderHookWithQueryClient(() => useCreateTaskUpdate());
+        await expect(
+            createUpdate.result.current.mutateAsync({
+                taskId: 1,
+                author: "mira-2026",
+                messageMd: "Progress",
+            })
+        ).resolves.toMatchObject({ id: 8, messageMd: "Progress" });
+
+        const editUpdate = renderHookWithQueryClient(() => useUpdateTaskUpdate());
+        await expect(
+            editUpdate.result.current.mutateAsync({
+                taskId: 1,
+                updateId: 7,
+                author: "rajohan",
+                messageMd: "Edited",
+            })
+        ).resolves.toMatchObject({ author: "rajohan", messageMd: "Edited" });
+
+        const deleteUpdate = renderHookWithQueryClient(() => useDeleteTaskUpdate());
+        await expect(
+            deleteUpdate.result.current.mutateAsync({ taskId: 1, updateId: 7 })
+        ).resolves.toBeUndefined();
+
+        const deleteTask = renderHookWithQueryClient(() => useDeleteTask());
+        await expect(
+            deleteTask.result.current.mutateAsync({ number: 1 })
+        ).resolves.toBeUndefined();
+    });
+
     it("drives notification filtering and mutations through the bell menu", async () => {
         const notifications = [
             notification({
@@ -1535,6 +2118,257 @@ describe("Mira Dashboard frontend behavior", () => {
                 (message) => message.text
             )
         ).toEqual(["optimistic", "remote", "no timestamp"]);
+    });
+
+    it("normalizes chat content blocks, attachments, hidden tool media, and formatter helpers", () => {
+        const contentBlocks = [
+            { type: "text", text: "hello" },
+            { type: "thinking", thinking: "considering" },
+            { type: "toolCall", id: "call-1", name: "exec", arguments: { cmd: "pwd" } },
+            { type: "image", data: "abc", mimeType: "image/png" },
+        ];
+        expect(extractImages(contentBlocks)).toHaveLength(1);
+        expect(extractThinkingBlocks(contentBlocks)).toEqual([{ text: "considering" }]);
+        expect(extractToolCalls(contentBlocks)).toEqual([
+            { id: "call-1", name: "exec", arguments: { cmd: "pwd" } },
+        ]);
+        expect(normalizeText(contentBlocks)).toBe("hello\n\n[image]");
+        expect(attachmentKind("image/png")).toBe("image");
+        expect(attachmentKind("application/json")).toBe("text");
+        expect(attachmentKind("application/pdf")).toBe("file");
+
+        const sendAttachment = {
+            id: "att-1",
+            file: new File(["hello"], "hello.txt", { type: "text/plain" }),
+            fileName: "hello.txt",
+            mimeType: "text/plain",
+            sizeBytes: 5,
+            contentBase64: "aGVsbG8=",
+            kind: "text" as const,
+        };
+        expect(gatewayAttachments([sendAttachment])).toEqual([
+            {
+                type: "text",
+                mimeType: "text/plain",
+                fileName: "hello.txt",
+                content: "aGVsbG8=",
+            },
+        ]);
+        expect(optimisticAttachmentDisplay([sendAttachment])[0]).toMatchObject({
+            id: "att-1",
+            fileName: "hello.txt",
+            kind: "text",
+        });
+
+        const normalized = normalizeChatHistoryMessage({
+            role: "assistant",
+            content: `Here\nMEDIA:images/result.png\n<file name="note.txt" mime="text/plain">hello</file>`,
+            timestamp: 1_782_172_800_000,
+        });
+        expect(normalized.text).toBe("Here");
+        expect(normalized.timestamp).toBe("2026-06-23T00:00:00.000Z");
+        expect(normalized.attachments?.map((attachment) => attachment.fileName)).toEqual([
+            "result.png",
+            "note.txt",
+        ]);
+
+        const visible = normalizeVisibleChatHistoryMessages([
+            {
+                role: "tool",
+                content: '<file name="tool.png" mime="image/png">abc</file>',
+                toolCallId: "tool-1",
+                toolName: "image",
+            },
+            { role: "assistant", content: "done" },
+        ]);
+        expect(visible).toHaveLength(1);
+        expect(visible[0]?.attachments?.[0]?.fileName).toBe("tool.png");
+
+        expect(formatDatabaseNumber(123_456)).toBe("123,456");
+        expect(formatDatabaseBytes(1536)).toBe("1.5 KB");
+        expect(truncateQuery("select " + "x".repeat(20), 12)).toBe("select xxxxx...");
+        expect(formatDockerBytes(1024 ** 2)).toBe("1.0 MB");
+        expect(formatDockerMemory("512MiB / 1GiB")).toBe("512 MB / 1.0 GB");
+        expect(formatDockerMemory("bad")).toBe("bad");
+        expect(formatTimestamp(undefined)).toBe("—");
+        expect(formatVersionDisplay(undefined, "sha256:abcdef1234567890")).toBe(
+            "sha256:abcde"
+        );
+        expect(formatFullVersionDisplay("v1", "digest")).toBe("v1 (digest)");
+        expect(
+            formatUpdaterTransition({
+                fromTag: "old",
+                toTag: undefined,
+                fromDigest: undefined,
+                toDigest: "sha256:newdigest",
+            })
+        ).toBe("old → sha256:newdi");
+
+        const osloParts = appTimeZoneParts(new Date("2026-06-23T12:34:56.000Z"));
+        expect(osloParts.year).toBe(2026);
+        expect(appTimeZoneShortWeekday(new Date("2026-06-23T12:00:00.000Z"))).toBe("Tue");
+        expect(appTimeZoneShortMonth(new Date("2026-06-23T12:00:00.000Z"))).toBe("Jun");
+        expect(
+            appZonedUtcDate(new Date("2026-06-23T12:34:56.789Z")).getUTCFullYear()
+        ).toBe(2026);
+        expect(currentIsoString()).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
+        expect(() => isoStringFromDate("bad")).toThrow(RangeError);
+        expect(timestampFromDateString("bad")).toBeUndefined();
+        expect(currentYear()).toBeGreaterThanOrEqual(2026);
+        expect(APP_TIME_ZONE).toBe("Europe/Oslo");
+    });
+
+    it("drives task detail modal editing, assignment, movement, and progress updates", async () => {
+        const user = userEvent.setup();
+        const onClose = jest.fn();
+        const onMove = jest.fn(async () => {});
+        const onAssign = jest.fn(async () => {});
+        const onDelete = jest.fn(async () => {});
+        const onUpdate = jest.fn(async () =>
+            task({ number: 7, title: "Edited detail task" })
+        );
+        const onAddUpdate = jest.fn(async () => {});
+        const onEditUpdate = jest.fn(async () => {});
+        const onDeleteUpdate = jest.fn(async () => {});
+        const detailTask = task({
+            number: 7,
+            title: "Detail task",
+            body: "**Investigate** behavior",
+            labels: [{ name: "priority-high" }, { name: "in-progress" }],
+            assignees: [{ login: "mira-2026", name: "Mira" }],
+            automation: {
+                type: "cron",
+                recurring: true,
+                cronJobId: "cron-7",
+                scheduleSummary: "Every hour",
+                sessionTarget: "agent:main:main",
+                enabled: true,
+                lastRunStatus: "success",
+                lastRunAtMs: Date.UTC(2026, 5, 23, 8),
+                nextRunAtMs: Date.UTC(2026, 5, 23, 9),
+                lastDurationMs: 125_000,
+                model: "codex",
+                thinking: "high",
+                source: "cron",
+            },
+        });
+
+        render(
+            createElement(TaskDetailModal, {
+                task: detailTask,
+                onClose,
+                onMove,
+                onAssign,
+                onDelete,
+                onUpdate,
+                updates: [
+                    {
+                        id: 11,
+                        taskId: 7,
+                        author: "mira-2026",
+                        messageMd: "First **progress** update",
+                        createdAt: "2026-06-23T08:00:00.000Z",
+                    },
+                ],
+                onAddUpdate,
+                onEditUpdate,
+                onDeleteUpdate,
+            })
+        );
+
+        expect(screen.getByText("#7: Detail task")).toBeInTheDocument();
+        expect(screen.getByText("Backed by OpenClaw cron")).toBeInTheDocument();
+        expect(screen.getByText("2m 5s")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Mark Done" }));
+        expect(onMove).toHaveBeenCalledWith("done");
+
+        await user.click(screen.getByRole("button", { name: "Assign to Raymond" }));
+        expect(onAssign).toHaveBeenCalledWith("rajohan");
+
+        await user.click(screen.getByRole("button", { name: "Edit" }));
+        await user.clear(screen.getByLabelText("Title"));
+        await user.type(screen.getByLabelText("Title"), "Edited detail task");
+        await user.clear(screen.getByLabelText("Cron job ID"));
+        await user.type(screen.getByLabelText("Cron job ID"), "cron-edited");
+        await user.click(screen.getByRole("button", { name: "Save Changes" }));
+        expect(onUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                title: "Edited detail task",
+                automation: expect.objectContaining({ cronJobId: "cron-edited" }),
+            })
+        );
+
+        await user.type(screen.getByLabelText("Add progress update"), "More progress");
+        await user.click(screen.getByRole("button", { name: "Add Update" }));
+        expect(onAddUpdate).toHaveBeenCalledWith("More progress");
+
+        await user.click(
+            screen.getByRole("button", { name: "Edit progress update #11" })
+        );
+        await user.clear(screen.getByLabelText("Message for progress update #11"));
+        await user.type(
+            screen.getByLabelText("Message for progress update #11"),
+            "Edited progress"
+        );
+        await user.click(screen.getByRole("button", { name: "Save" }));
+        expect(onEditUpdate).toHaveBeenCalledWith(11, "Edited progress");
+
+        await user.click(
+            screen.getByRole("button", { name: "Delete progress update #11" })
+        );
+        expect(onDeleteUpdate).toHaveBeenCalledWith(11);
+
+        await user.click(screen.getByRole("button", { name: "Delete" }));
+        expect(onDelete).toHaveBeenCalled();
+
+        await user.click(screen.getByRole("button", { name: "Close task details" }));
+        expect(onClose).toHaveBeenCalled();
+    });
+
+    it("renders shared UI controls with accessible confirm, search, and badge behavior", async () => {
+        const user = userEvent.setup();
+        const onConfirm = jest.fn();
+        const onCancel = jest.fn();
+        const onSearch = jest.fn();
+
+        render(
+            createElement(
+                "div",
+                undefined,
+                createElement(ConfirmModal, {
+                    isOpen: true,
+                    title: "Delete task",
+                    message: "This cannot be undone.",
+                    confirmLabel: "Delete",
+                    danger: true,
+                    onConfirm,
+                    onCancel,
+                }),
+                createElement(SearchInput, {
+                    value: "cache",
+                    label: "Search tasks",
+                    onChange: onSearch,
+                }),
+                createElement(Badge, {
+                    variant: "cron",
+                    className: "extra",
+                    children: "CRON",
+                })
+            )
+        );
+
+        expect(screen.getByText("This cannot be undone.")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Delete" }));
+        expect(onConfirm).toHaveBeenCalled();
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(onCancel).toHaveBeenCalled();
+
+        await user.click(screen.getByRole("button", { name: "Clear search tasks" }));
+        expect(onSearch).toHaveBeenCalledWith("");
+        expect(screen.getByText("CRON")).toHaveClass("extra");
+        expect(getSessionTypeVariant("subagent")).toBe("subagent");
+        expect(getSessionTypeVariant(undefined)).toBe("default");
     });
 
     it("renders the task board from the API and creates a task through the real hooks", async () => {

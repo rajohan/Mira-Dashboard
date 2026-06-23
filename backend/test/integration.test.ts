@@ -447,6 +447,26 @@ describe("Mira Dashboard backend integration", () => {
                 2,
                 "{}"
             );
+        database
+            .prepare(
+                `INSERT INTO cache_entries (
+                    key, data_json, source, updated_at, last_attempt_at, expires_at,
+                    status, error_code, error_message, consecutive_failures, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            )
+            .run(
+                "weather.expired",
+                JSON.stringify({ location: "Expired" }),
+                "weather",
+                "2026-06-23T08:00:00.000Z",
+                "2026-06-23T08:00:00.000Z",
+                "2000-01-01T00:00:00.000Z",
+                "fresh",
+                missingValue,
+                missingValue,
+                0,
+                "{}"
+            );
 
         const heartbeat = await api<{
             count: number;
@@ -482,6 +502,13 @@ describe("Mira Dashboard backend integration", () => {
             errorMessage: "Quota API failed",
             status: "error",
             updatedAt: missingValue,
+        });
+        expect(
+            heartbeat.body.entries.find((entry) => entry.key === "weather.expired")
+        ).toMatchObject({
+            data: { location: "Expired" },
+            status: "stale",
+            updatedAt: "2026-06-23T08:00:00.000Z",
         });
 
         const entry = await api<{ key: string; status: string }>(
