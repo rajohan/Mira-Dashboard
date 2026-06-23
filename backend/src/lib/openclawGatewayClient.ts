@@ -264,29 +264,18 @@ function buildDeviceAuthPayloadV3(parameters: {
 export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
     private static readonly MAX_PENDING_REQUESTS = 1000;
     declare private readonly opts: OpenClawGatewayClientOptions;
-    declare private ws: WebSocket | undefined;
-    declare private requestId: number;
-    declare private readonly pending: Map<string, PendingRequestEntry>;
-    declare private closed: boolean;
-    declare private reconnectTimer: NodeJS.Timeout | undefined;
-    declare private connectChallengeTimer: NodeJS.Timeout | undefined;
-    declare private backoffMs: number;
-    declare private tickTimer: NodeJS.Timeout | undefined;
-    declare private tickIntervalMs: number;
-    declare private lastTickAt: number;
+    private ws: WebSocket | undefined = undefined;
+    private requestId = 0;
+    private readonly pending = new Map<string, PendingRequestEntry>();
+    private closed = false;
+    private reconnectTimer: NodeJS.Timeout | undefined = undefined;
+    private connectChallengeTimer: NodeJS.Timeout | undefined = undefined;
+    private backoffMs = 1000;
+    private tickTimer: NodeJS.Timeout | undefined = undefined;
+    private tickIntervalMs = DEFAULT_TICK_INTERVAL_MS;
+    private lastTickAt = 0;
 
-    /* eslint-disable unicorn/prefer-class-fields -- Constructor assignments avoid emitted class-field coverage counters. */
     constructor(options: OpenClawGatewayClientOptions) {
-        this.requestId = 0;
-        this.pending = new Map();
-        this.ws = undefined;
-        this.closed = false;
-        this.reconnectTimer = undefined;
-        this.connectChallengeTimer = undefined;
-        this.backoffMs = 1000;
-        this.tickTimer = undefined;
-        this.tickIntervalMs = DEFAULT_TICK_INTERVAL_MS;
-        this.lastTickAt = 0;
         this.opts = {
             url: "ws://127.0.0.1:18789",
             requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
@@ -300,7 +289,6 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             ...options,
         };
     }
-    /* eslint-enable unicorn/prefer-class-fields */
 
     private armConnectChallengeTimeout(): void {
         this.clearConnectChallengeTimeout();

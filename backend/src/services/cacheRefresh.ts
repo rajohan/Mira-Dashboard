@@ -286,7 +286,7 @@ export function writeCacheFailure(options: CacheFailureOptions): void {
             `INSERT INTO cache_entries (
             key, data_json, source, updated_at, last_attempt_at, expires_at,
             status, error_code, error_message, consecutive_failures, metadata_json
-         ) VALUES (?, NULL, ?, ?, ?, ?, 'error', 'check_failed', ?, ?, ?)
+         ) VALUES (?, NULL, ?, NULL, ?, ?, 'error', 'check_failed', ?, ?, ?)
          ON CONFLICT(key) DO UPDATE SET
             last_attempt_at = excluded.last_attempt_at,
             expires_at = excluded.expires_at,
@@ -299,7 +299,6 @@ export function writeCacheFailure(options: CacheFailureOptions): void {
         .run(
             options.key,
             options.source,
-            timestamp,
             timestamp,
             ttlDate(options.ttl, options.ttlUnit),
             errorMessage(options.error),
