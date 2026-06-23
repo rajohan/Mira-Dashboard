@@ -110,7 +110,7 @@ function stripEnvironmentComment(line: string): string {
         if (
             character === "#" &&
             quote === undefined &&
-            /\s/u.test(line[index - 1] ?? "")
+            (index === 0 || /\s/u.test(line[index - 1] ?? ""))
         ) {
             return line.slice(0, index).trimEnd();
         }
@@ -602,6 +602,28 @@ interface ManagedServiceRow {
     enabled: number;
     metadata_json?: string;
     last_status: string | undefined;
+}
+
+function normalizeManagedServiceRow(
+    row: ManagedServiceRow | undefined
+): ManagedServiceRow | undefined {
+    if (!row) return undefined;
+    return {
+        ...row,
+        compose_image_field: row.compose_image_field ?? undefined,
+        compose_image_ref: row.compose_image_ref ?? undefined,
+        current_digest: row.current_digest ?? undefined,
+        current_tag: row.current_tag ?? undefined,
+        last_status: row.last_status ?? undefined,
+        latest_digest: row.latest_digest ?? undefined,
+        latest_tag: row.latest_tag ?? undefined,
+        metadata_json: row.metadata_json ?? undefined,
+        tag_match_pattern: row.tag_match_pattern ?? undefined,
+    };
+}
+
+function normalizeManagedServiceRows(rows: ManagedServiceRow[]): ManagedServiceRow[] {
+    return rows.map((row) => normalizeManagedServiceRow(row)!);
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -1894,7 +1916,7 @@ export async function pollDockerUpdaterRegistries(
     serviceId?: number
 ): Promise<DockerUpdaterStepResult> {
     const timestamp = nowIso();
-    const services =
+    const services = normalizeManagedServiceRows(
         serviceId === undefined
             ? (database
                   .prepare(
@@ -1905,7 +1927,8 @@ export async function pollDockerUpdaterRegistries(
                   .prepare(
                       "SELECT * FROM docker_managed_services WHERE id = ? AND enabled = 1 ORDER BY app_slug, service_name"
                   )
-                  .all(serviceId) as unknown as ManagedServiceRow[]);
+                  .all(serviceId) as unknown as ManagedServiceRow[])
+    );
     const isChecked: string[] = [];
     const updates: string[] = [];
     const newUpdates: string[] = [];
@@ -2009,9 +2032,11 @@ async function applyServiceUpdate(
     eventPrefix: "auto" | "manual"
 ): Promise<DockerUpdaterStepResult> {
     return withComposeUpdateLock(service, async () => {
-        const lockedService = database
-            .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
-            .get(service.id) as ManagedServiceRow | undefined;
+        const lockedService = normalizeManagedServiceRow(
+            database
+                .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
+                .get(service.id) as ManagedServiceRow | undefined
+        );
         if (!lockedService || lockedService.enabled !== 1) {
             const code = lockedService ? "DISABLED" : "NOT_FOUND";
             return {
@@ -2171,17 +2196,23 @@ export async function runDockerUpdaterService(
     const requestedService =
         serviceId === undefined
             ? undefined
-            : (database
-                  .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
-                  .get(serviceId) as ManagedServiceRow | undefined);
+            : normalizeManagedServiceRow(
+                  database
+                      .prepare(
+                          "SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1"
+                      )
+                      .get(serviceId) as ManagedServiceRow | undefined
+              );
     const register = await registerDockerUpdaterServices();
     if (serviceId === undefined && shouldBlockGlobalUpdateForDiscoveryFailure(register)) {
         return [register];
     }
     if (serviceId !== undefined) {
-        const service = database
-            .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
-            .get(serviceId) as ManagedServiceRow | undefined;
+        const service = normalizeManagedServiceRow(
+            database
+                .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
+                .get(serviceId) as ManagedServiceRow | undefined
+        );
         if (!service) {
             if (
                 requestedService &&
@@ -2244,9 +2275,11 @@ export async function runDockerUpdaterService(
                 (step): step is DockerUpdaterStepResult => step !== undefined
             );
         }
-        const refreshedService = database
-            .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
-            .get(serviceId) as ManagedServiceRow | undefined;
+        const refreshedService = normalizeManagedServiceRow(
+            database
+                .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
+                .get(serviceId) as ManagedServiceRow | undefined
+        );
         if (!refreshedService) {
             return [
                 register,
@@ -2307,11 +2340,13 @@ export async function runDockerUpdaterService(
     }
     const blockedAppSlugs = failedDiscoveryAppSlugs(register);
     const poll = await pollDockerUpdaterRegistries();
-    const autoServices = database
-        .prepare(
-            "SELECT * FROM docker_managed_services WHERE enabled = 1 AND policy = 'auto'"
-        )
-        .all() as unknown as ManagedServiceRow[];
+    const autoServices = normalizeManagedServiceRows(
+        database
+            .prepare(
+                "SELECT * FROM docker_managed_services WHERE enabled = 1 AND policy = 'auto'"
+            )
+            .all() as unknown as ManagedServiceRow[]
+    );
     const applyResults: DockerUpdaterStepResult[] = [];
     for (const service of autoServices) {
         if (

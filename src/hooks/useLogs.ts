@@ -74,7 +74,12 @@ export function useLogFiles() {
 export function useLogContent(file: string | undefined, lines: number, isEnabled = true) {
     return useQuery({
         queryKey: logKeys.content(file || "", lines),
-        queryFn: () => fetchLogContent(file!, lines),
+        queryFn: () => {
+            if (file === undefined) {
+                throw new Error("Log file is required");
+            }
+            return fetchLogContent(file, lines);
+        },
         enabled: isEnabled && !!file,
         staleTime: 0, // Always refetch
     });

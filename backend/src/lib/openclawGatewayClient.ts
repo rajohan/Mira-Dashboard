@@ -424,7 +424,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
 
         const isSuccess =
             response.isOk === true ||
-            (response.isOk == undefined && response.ok === true);
+            (response.isOk === undefined && response.ok === true);
 
         if (isSuccess) {
             const payload = response.payload;

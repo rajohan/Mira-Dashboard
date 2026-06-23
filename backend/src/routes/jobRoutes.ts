@@ -41,10 +41,10 @@ function invalidPatchField(patch: Record<string, unknown>): string | undefined {
     ) {
         return "scheduleType";
     }
-    if (patch.cronExpression != undefined && typeof patch.cronExpression !== "string") {
+    if (patch.cronExpression !== undefined && typeof patch.cronExpression !== "string") {
         return "cronExpression";
     }
-    if (patch.timeOfDay != undefined && typeof patch.timeOfDay !== "string") {
+    if (patch.timeOfDay !== undefined && typeof patch.timeOfDay !== "string") {
         return "timeOfDay";
     }
     return undefined;
