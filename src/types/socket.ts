@@ -1,5 +1,3 @@
-import { z } from "zod";
-
 import type { Session } from "./session";
 
 /** Represents socket envelope. */
@@ -15,12 +13,21 @@ export interface SocketEnvelope {
     gatewayConnected?: boolean;
 }
 
-/** Defines socket envelope schema. */
-export const socketEnvelopeSchema = z.object({
-    type: z.string(),
-});
+/** Checks whether a value is a socket envelope with a string type. */
+export function isSocketEnvelope(value: unknown): value is SocketEnvelope {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        typeof (value as { type?: unknown }).type === "string"
+    );
+}
 
-/** Defines sessions payload schema. */
-export const sessionsPayloadSchema = z.object({
-    sessions: z.array(z.unknown()),
-});
+/** Reads a sessions array from an unknown payload shape. */
+export function readSessionsPayload(value: unknown): unknown[] | undefined {
+    if (typeof value !== "object" || value === null) {
+        return undefined;
+    }
+
+    const sessions = (value as { sessions?: unknown }).sessions;
+    return Array.isArray(sessions) ? sessions : undefined;
+}
