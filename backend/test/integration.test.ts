@@ -7,12 +7,14 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 
 const testState: {
     baseUrl: string;
+    openclawRoot: string;
     originalHome?: string;
     originalLoopbackAuth?: string;
     server?: Server<unknown>;
     temporaryRoot: string;
 } = {
     baseUrl: "",
+    openclawRoot: "",
     temporaryRoot: "",
 };
 
@@ -65,11 +67,15 @@ describe("Mira Dashboard backend integration", () => {
         );
         const workspaceRoot = path.join(testState.temporaryRoot, "workspace");
         const openclawRoot = path.join(testState.temporaryRoot, "openclaw");
+        testState.openclawRoot = openclawRoot;
         const homeRoot = path.join(testState.temporaryRoot, "home");
         const frontendRoot = path.join(testState.temporaryRoot, "frontend");
         const dockerRoot = path.join(testState.temporaryRoot, "docker");
         const composeWrapper = path.join(testState.temporaryRoot, "compose-wrapper.sh");
         await fs.mkdir(path.join(openclawRoot, "hooks", "transforms"), {
+            recursive: true,
+        });
+        await fs.mkdir(path.join(openclawRoot, "media", "images"), {
             recursive: true,
         });
         await fs.mkdir(path.join(frontendRoot, "assets"), { recursive: true });
@@ -79,6 +85,10 @@ describe("Mira Dashboard backend integration", () => {
         await fs.mkdir(path.join(workspaceRoot, "notes"), { recursive: true });
         await fs.writeFile(path.join(workspaceRoot, "README.md"), "hello workspace\n");
         await fs.writeFile(path.join(openclawRoot, "openclaw.json"), "{}\n");
+        await fs.writeFile(
+            path.join(openclawRoot, "media", "images", "dashboard-test.txt"),
+            "media fixture\n"
+        );
         await fs.writeFile(composeWrapper, "#!/bin/sh\nprintf 'compose:%s\\n' \"$*\"\n");
         await fs.chmod(composeWrapper, 0o755);
         await fs.writeFile(
@@ -488,6 +498,232 @@ describe("Mira Dashboard backend integration", () => {
             error: "Cache key not found",
             key: "not-present",
         });
+    });
+
+    it("validates exec and session action API contracts", async () => {
+        const directExec = await api<{ error: string }>(
+            "/api/exec",
+            json("POST", { args: ["hello"], command: "printf" })
+        );
+        expect(directExec.status).toBe(400);
+        expect(directExec.body.error).toBe("command executable is not approved");
+
+        const shellExec = await api<{ code: number; stderr: string; stdout: string }>(
+            "/api/exec",
+            json("POST", {
+                command: "__mira_dashboard_shell_smoke_test__",
+                shell: true,
+            })
+        );
+        expect(shellExec.status).toBe(200);
+        expect(shellExec.body.code).not.toBe(0);
+        expect(shellExec.body.stderr).toContain("__mira_dashboard_shell_smoke_test__");
+
+        const stats = await api<{
+            activeInLastHour: number;
+            byModel: Record<string, number>;
+            byType: Record<string, number>;
+            total: number;
+            totalTokens: number;
+        }>("/api/sessions/stats");
+        expect(stats.status).toBe(200);
+        expect(stats.body).toEqual({
+            activeInLastHour: 0,
+            byModel: {},
+            byType: {},
+            total: 0,
+            totalTokens: 0,
+        });
+
+        const unsupportedAction = await api<{ error: string }>(
+            "/api/sessions/session-1/action",
+            json("POST", { action: "archive" })
+        );
+        expect(unsupportedAction.status).toBe(400);
+        expect(unsupportedAction.body.error).toBe("Unsupported action: archive");
+
+        const malformedAction = await api<{ error: string }>(
+            "/api/sessions/session-1/action",
+            json("POST", [])
+        );
+        expect(malformedAction.status).toBe(400);
+        expect(malformedAction.body.error).toBe("Request body must be an object");
+    });
+
+    it("lists, updates, runs, and reports scheduled jobs through the API", async () => {
+        const { registerScheduledJobAction, upsertScheduledJob } =
+            await import("../src/services/scheduledJobs.ts");
+        registerScheduledJobAction("test.functional", () => ({
+            result: "ran from integration test",
+        }));
+        const seeded = upsertScheduledJob({
+            actionKey: "test.functional",
+            description: "Functional test job",
+            enabled: false,
+            id: "functional.test.job",
+            intervalSeconds: 120,
+            name: "Functional Test Job",
+            scheduleType: "interval",
+        });
+        expect(seeded.id).toBe("functional.test.job");
+
+        const listed = await api<{
+            jobs: Array<{ enabled: boolean; id: string; name: string }>;
+        }>("/api/jobs");
+        expect(listed.status).toBe(200);
+        expect(listed.body.jobs).toContainEqual(
+            expect.objectContaining({
+                enabled: false,
+                id: "functional.test.job",
+                name: "Functional Test Job",
+            })
+        );
+
+        const updated = await api<{
+            isOk: boolean;
+            job: { enabled: boolean; intervalSeconds: number };
+        }>(
+            "/api/jobs/functional.test.job",
+            json("PATCH", { patch: { enabled: true, intervalSeconds: 300 } })
+        );
+        expect(updated.status).toBe(200);
+        expect(updated.body).toMatchObject({
+            isOk: true,
+            job: { enabled: true, intervalSeconds: 300 },
+        });
+
+        const invalidPatch = await api<{ error: string }>(
+            "/api/jobs/functional.test.job",
+            json("PATCH", { patch: { unknown: true } })
+        );
+        expect(invalidPatch.status).toBe(400);
+        expect(invalidPatch.body.error).toBe("invalid patch field: unknown");
+
+        const run = await api<{
+            isOk: boolean;
+            run: {
+                jobId: string;
+                output: Record<string, unknown>;
+                status: string;
+                triggerType: string;
+            };
+        }>("/api/jobs/functional.test.job/run", { method: "POST" });
+        expect(run.status).toBe(200);
+        expect(run.body).toMatchObject({
+            isOk: true,
+            run: {
+                jobId: "functional.test.job",
+                output: { result: "ran from integration test" },
+                status: "success",
+                triggerType: "manual",
+            },
+        });
+
+        const runs = await api<{
+            runs: Array<{ jobId: string; status: string; triggerType: string }>;
+        }>("/api/jobs/functional.test.job/runs");
+        expect(runs.status).toBe(200);
+        expect(runs.body.runs).toContainEqual(
+            expect.objectContaining({
+                jobId: "functional.test.job",
+                status: "success",
+                triggerType: "manual",
+            })
+        );
+
+        const missing = await api<{ error: string }>("/api/jobs/not-present");
+        expect(missing.status).toBe(404);
+        expect(missing.body.error).toBe("Scheduled job not found");
+    });
+
+    it("serves log metadata/content and media files while rejecting unsafe inputs", async () => {
+        const logsRoot = "/tmp/openclaw";
+        await fs.mkdir(logsRoot, { recursive: true });
+        await fs.writeFile(
+            path.join(logsRoot, "openclaw-dashboard-functional-test.log"),
+            "first line\nsecond line\nthird line\n"
+        );
+
+        const logs = await api<{
+            logs: Array<{ name: string; size: number }>;
+        }>("/api/logs/info");
+        expect(logs.status).toBe(200);
+        expect(logs.body.logs).toContainEqual(
+            expect.objectContaining({
+                name: "openclaw-dashboard-functional-test.log",
+                size: "first line\nsecond line\nthird line\n".length,
+            })
+        );
+
+        const content = await api<{ content: string; file: string }>(
+            "/api/logs/content?file=openclaw-dashboard-functional-test.log&lines=2"
+        );
+        expect(content.status).toBe(200);
+        expect(content.body).toEqual({
+            content: "second line\nthird line",
+            file: "openclaw-dashboard-functional-test.log",
+        });
+
+        const invalidLines = await api<{ error: string }>(
+            "/api/logs/content?file=openclaw-dashboard-functional-test.log&lines=abc"
+        );
+        expect(invalidLines.status).toBe(400);
+        expect(invalidLines.body.error).toBe("Invalid lines");
+
+        const traversal = await api<{ error: string }>(
+            "/api/logs/content?file=../openclaw-dashboard-functional-test.log"
+        );
+        expect(traversal.status).toBe(404);
+        expect(traversal.body.error).toBe("Log file not found");
+
+        const media = await fetch(
+            `${testState.baseUrl}/api/media?path=images/dashboard-test.txt`
+        );
+        expect(media.status).toBe(200);
+        expect(media.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+        expect(media.headers.get("x-content-type-options")).toBe("nosniff");
+        expect(await media.text()).toBe("media fixture\n");
+
+        const missingMedia = await api<{ error: string }>(
+            "/api/media?path=images/not-present.txt"
+        );
+        expect(missingMedia.status).toBe(404);
+        expect(missingMedia.body.error).toBe("Media not found");
+
+        const deniedMedia = await api<{ error: string }>("/api/media");
+        expect(deniedMedia.status).toBe(403);
+        expect(deniedMedia.body.error).toBe("Access denied");
+    });
+
+    it("reports idle backup state and validates pull request action inputs", async () => {
+        const kopia = await api<{ job?: unknown }>("/api/backups/kopia");
+        expect(kopia.status).toBe(200);
+        expect(kopia.body).toEqual({});
+
+        const walg = await api<{ job?: unknown }>("/api/backups/walg");
+        expect(walg.status).toBe(200);
+        expect(walg.body).toEqual({});
+
+        const clearKopia = await api<{ error: string }>(
+            "/api/backups/kopia/clear-needs-attention",
+            { method: "POST" }
+        );
+        expect(clearKopia.status).toBe(404);
+        expect(clearKopia.body.error).toBe("KOPIA backup job not found");
+
+        const invalidApprove = await api<{ error: string }>(
+            "/api/pull-requests/not-a-number/approve",
+            { method: "POST" }
+        );
+        expect(invalidApprove.status).toBe(400);
+        expect(invalidApprove.body.error).toBe("Invalid pull request number");
+
+        const invalidReject = await api<{ error: string }>(
+            "/api/pull-requests/0/reject",
+            json("POST", { comment: "Nope" })
+        );
+        expect(invalidReject.status).toBe(400);
+        expect(invalidReject.body.error).toBe("Invalid pull request number");
     });
 
     it("uses isolated workspace and config roots for file APIs", async () => {

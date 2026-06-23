@@ -4,7 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
 
+import { NotificationBell } from "./components/layout/NotificationBell";
 import { apiFetch, UnauthorizedError } from "./hooks/useApi";
+import type { NotificationItem } from "./hooks/useNotifications";
 import { handleSocketMessage } from "./lib/socket/socketMessageRouter";
 import { Tasks } from "./pages/Tasks";
 import { authActions, authStore } from "./stores/authStore";
@@ -56,6 +58,93 @@ function createApi(tasks: Task[]) {
 
         throw new Error(`Unexpected frontend API call: ${method} ${url}`);
     });
+}
+
+function notification(
+    overrides: Partial<NotificationItem> & Pick<NotificationItem, "id" | "title">
+): NotificationItem {
+    return {
+        id: overrides.id,
+        title: overrides.title,
+        description: overrides.description ?? "",
+        type: overrides.type ?? "info",
+        source: overrides.source,
+        dedupeKey: overrides.dedupeKey,
+        metadata: overrides.metadata ?? {},
+        isRead: overrides.isRead ?? false,
+        createdAt: overrides.createdAt ?? "2026-06-23T08:00:00.000Z",
+        updatedAt: overrides.updatedAt ?? "2026-06-23T08:00:00.000Z",
+        occurredAt: overrides.occurredAt ?? "2026-06-23T08:00:00.000Z",
+    };
+}
+
+function createNotificationsApi(notifications: NotificationItem[]) {
+    return jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+
+        if (url === "/api/notifications" && method === "GET") {
+            return Response.json({
+                items: notifications,
+                readCount: notifications.filter((item) => item.isRead).length,
+                unreadCount: notifications.filter((item) => !item.isRead).length,
+            });
+        }
+
+        const markReadMatch = /^\/api\/notifications\/(\d+)\/read$/u.exec(url);
+        if (markReadMatch && method === "POST") {
+            const id = Number(markReadMatch[1]);
+            notifications.splice(
+                0,
+                notifications.length,
+                ...notifications.map((item) =>
+                    item.id === id ? { ...item, isRead: true } : item
+                )
+            );
+            return Response.json({ isOk: true });
+        }
+
+        if (url === "/api/notifications/mark-all-read" && method === "POST") {
+            notifications.splice(
+                0,
+                notifications.length,
+                ...notifications.map((item) => ({ ...item, isRead: true }))
+            );
+            return Response.json({ isOk: true });
+        }
+
+        if (url === "/api/notifications/clear-read" && method === "POST") {
+            const before = notifications.length;
+            notifications.splice(
+                0,
+                notifications.length,
+                ...notifications.filter((item) => !item.isRead)
+            );
+            return Response.json({ deleted: before - notifications.length, isOk: true });
+        }
+
+        const deleteMatch = /^\/api\/notifications\/(\d+)$/u.exec(url);
+        if (deleteMatch && method === "DELETE") {
+            const id = Number(deleteMatch[1]);
+            const before = notifications.length;
+            notifications.splice(
+                0,
+                notifications.length,
+                ...notifications.filter((item) => item.id !== id)
+            );
+            return Response.json({ deleted: before - notifications.length, isOk: true });
+        }
+
+        throw new Error(`Unexpected notification API call: ${method} ${url}`);
+    });
+}
+
+function getButtonByText(text: string, index = 0): HTMLButtonElement {
+    const button = screen.getAllByText(text)[index]?.closest("button");
+    if (!(button instanceof HTMLButtonElement)) {
+        throw new TypeError(`Button not found for text: ${text}`);
+    }
+    return button;
 }
 
 function renderWithQueryClient(children: ReactNode) {
@@ -182,6 +271,75 @@ describe("Mira Dashboard frontend behavior", () => {
                 type: "log",
             })
         ).toBeUndefined();
+    });
+
+    it("drives notification filtering and mutations through the bell menu", async () => {
+        const notifications = [
+            notification({
+                id: 1,
+                title: "Cache refresh failed",
+                description: "Needs attention",
+                type: "warning",
+                occurredAt: "2026-06-23T10:00:00.000Z",
+            }),
+            notification({
+                id: 2,
+                title: "Backup complete",
+                isRead: true,
+                type: "success",
+                occurredAt: "2026-06-23T09:00:00.000Z",
+            }),
+        ];
+        const fetchMock = createNotificationsApi(notifications);
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+        const user = userEvent.setup();
+
+        renderWithQueryClient(createElement(NotificationBell));
+
+        await user.click(
+            await screen.findByRole("button", {
+                name: /open notifications, 1 unread/i,
+            })
+        );
+        expect(await screen.findByText("Cache refresh failed")).toBeInTheDocument();
+        expect(screen.getByText("Backup complete")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("menuitemradio", { name: "Unread" }));
+        expect(screen.getByText("Cache refresh failed")).toBeInTheDocument();
+        expect(screen.queryByText("Backup complete")).not.toBeInTheDocument();
+
+        await user.click(getButtonByText("Mark read"));
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/notifications/1/read",
+                expect.objectContaining({ method: "POST" })
+            )
+        );
+
+        await user.click(screen.getByRole("menuitemradio", { name: "All" }));
+        await waitFor(() =>
+            expect(screen.getByText("Backup complete")).toBeInTheDocument()
+        );
+
+        await user.click(getButtonByText("Clear"));
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/notifications/1",
+                expect.objectContaining({ method: "DELETE" })
+            )
+        );
+
+        await user.click(getButtonByText("Clear read"));
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/notifications/clear-read",
+                expect.objectContaining({ method: "POST" })
+            )
+        );
     });
 
     it("renders the task board from the API and creates a task through the real hooks", async () => {
