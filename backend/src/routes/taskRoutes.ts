@@ -571,7 +571,7 @@ export const taskRoutes = {
                             "UPDATE tasks SET assignee = ?, updated_at = ? WHERE id = ?"
                         )
                         .run(sqlNullable(assignee), nowIso(), id);
-                    recordEvent(id, "assigned", { assignee });
+                    recordEvent(id, "assigned", { assignee: body.assignee });
                 })();
                 if (assignee === TASK_ASSIGNEES.mira.id) {
                     void notifyMira("assigned", { id, title: existing.title });

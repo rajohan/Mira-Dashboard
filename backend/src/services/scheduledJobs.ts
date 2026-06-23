@@ -235,12 +235,20 @@ function parseCronField(
             end = maximum;
         } else if (rangePart.includes("-")) {
             const [rawStart, rawEnd] = rangePieces;
-            if (rawStart === undefined || rawEnd === undefined) {
+            if (
+                rawStart === undefined ||
+                rawStart === "" ||
+                rawEnd === undefined ||
+                rawEnd === ""
+            ) {
                 return undefined;
             }
             start = Number(rawStart);
             end = Number(rawEnd);
         } else {
+            if (rangePart === "") {
+                return undefined;
+            }
             start = Number(rangePart);
             end = stepPart === undefined ? Number(rangePart) : maximum;
         }

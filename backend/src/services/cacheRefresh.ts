@@ -578,7 +578,7 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
 }
 
 function openMeteoCodeToDescription(code: unknown): string {
-    if (code === undefined) return "Unknown";
+    if (code === undefined || code === null) return "Unknown";
     if (typeof code === "string" && code.trim() === "") return "Unknown";
     const numericCode = Number(code);
     if (!Number.isFinite(numericCode)) return "Unknown";

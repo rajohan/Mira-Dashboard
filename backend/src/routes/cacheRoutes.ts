@@ -15,18 +15,19 @@ function parseJsonFieldOrValue(value: string) {
 }
 
 function mapCacheRowForResponse(row: CacheEntryRow) {
+    const missingValue = JSON.parse("null") as null;
     return {
-        consecutiveFailures: Number(row.consecutive_failures) || 0,
+        consecutiveFailures: Number(row.consecutive_failures ?? 0),
         data: parseJsonFieldOrValue(row.data),
-        errorCode: row.error_code || undefined,
-        errorMessage: row.error_message || undefined,
-        expiresAt: row.expires_at || undefined,
+        errorCode: row.error_code ?? missingValue,
+        errorMessage: row.error_message ?? missingValue,
+        expiresAt: row.expires_at ?? missingValue,
         key: row.key,
-        lastAttemptAt: row.last_attempt_at || undefined,
+        lastAttemptAt: row.last_attempt_at ?? missingValue,
         meta: parseJsonField<unknown>(row.meta) ?? {},
         source: row.source,
         status: row.status,
-        updatedAt: row.updated_at || undefined,
+        updatedAt: row.updated_at ?? missingValue,
     };
 }
 

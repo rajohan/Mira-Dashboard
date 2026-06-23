@@ -95,10 +95,7 @@ export const notificationRoutes = {
         GET: (request: Request) => {
             try {
                 const rawLimit = new URL(request.url).searchParams.get("limit");
-                const limitValue =
-                    rawLimit === null || rawLimit === undefined
-                        ? undefined
-                        : Number(rawLimit);
+                const limitValue = rawLimit === null ? undefined : Number(rawLimit);
                 const limit =
                     limitValue !== undefined && Number.isFinite(limitValue)
                         ? Math.max(1, Math.min(200, Math.floor(limitValue)))
@@ -262,12 +259,8 @@ export const notificationRoutes = {
                     return json({ error: "Invalid JSON" }, { status: 400 });
                 }
             }
-            const rawSource = body.source ?? querySource;
-            if (
-                rawSource !== undefined &&
-                rawSource !== null &&
-                typeof rawSource !== "string"
-            ) {
+            const rawSource = "source" in body ? body.source : querySource;
+            if (rawSource !== undefined && typeof rawSource !== "string") {
                 return json({ error: "source must be a string" }, { status: 400 });
             }
             const source = nullableString(stringFallback(rawSource).trim());

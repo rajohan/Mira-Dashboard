@@ -45,7 +45,7 @@ export type GatewayEvent = {
 type GatewayResponse = {
     type?: string;
     id?: string;
-    isOk?: boolean | undefined;
+    isOk?: boolean | undefined | null;
     ok?: boolean;
     payload?: unknown;
     error?: {
