@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 interface PageStateProperties {
     isLoading?: boolean;
     loading?: ReactNode;
-    error?: string | null;
+    error?: string | undefined;
     errorView?: ReactNode;
     isEmpty?: boolean;
     empty?: ReactNode;
@@ -22,15 +22,15 @@ export function PageState({
     children,
 }: PageStateProperties) {
     if (isLoading) {
-        return <>{loading ?? null}</>;
+        return <>{loading ?? undefined}</>;
     }
 
     if (error) {
-        return <>{errorView ?? null}</>;
+        return <>{errorView ?? undefined}</>;
     }
 
     if (isEmpty) {
-        return <>{empty ?? null}</>;
+        return <>{empty ?? undefined}</>;
     }
 
     return <>{children}</>;

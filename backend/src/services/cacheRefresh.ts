@@ -31,7 +31,7 @@ function dateGetTime(date: Date): number {
 }
 
 const codexTrustConfigLocks = new Map<string, Promise<void>>();
-const CODEX_TRUST_LOCK_TIMEOUT_MS = 5_000;
+const CODEX_TRUST_LOCK_TIMEOUT_MS = 5000;
 const CODEX_TRUST_LOCK_RETRY_MS = 100;
 const CODEX_TRUST_STALE_LOCK_MS = 5 * 60 * 1000;
 const KOPIA_EXPECTED_SOURCE_PATHS = [
@@ -113,7 +113,7 @@ function ttlDate(ttl: number, unit: CacheTtlUnit): string {
     return dateToISOString(new Date(Date.now() + ttl * multiplier));
 }
 
-function backupStatusTtlHours(timestamps: Array<string | null | undefined>): number {
+function backupStatusTtlHours(timestamps: Array<string | undefined>): number {
     let ttl = BACKUP_STATUS_MAX_TTL_HOURS;
     const now = Date.now();
     for (const timestamp of timestamps) {
@@ -140,38 +140,38 @@ function toNumber(value: unknown, fallback = 0): number {
     return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function toNullableNumber(value: unknown): number | null {
-    if (value === null || value === undefined) {
-        return null;
+function toOptionalNumber(value: unknown): number | undefined {
+    if (value === undefined || value === null) {
+        return undefined;
     }
     if (typeof value === "string" && value.trim() === "") {
-        return null;
+        return undefined;
     }
     const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
+    return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function stringOrNull(value: unknown): string | null {
-    return typeof value === "string" && value.trim() !== "" ? value : null;
+function toOptionalString(value: unknown): string | undefined {
+    return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
-function numberOrNull(value: unknown): number | null {
-    return typeof value === "number" && Number.isFinite(value) ? value : null;
+function toOptionalFiniteNumber(value: unknown): number | undefined {
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function toCurrencyNumber(value: unknown): number | null {
+function toCurrencyNumber(value: unknown): number | undefined {
     if (typeof value === "number") {
-        return Number.isFinite(value) ? value : null;
+        return Number.isFinite(value) ? value : undefined;
     }
     if (typeof value !== "string") {
-        return null;
+        return undefined;
     }
     const cleaned = value.replaceAll(/[^0-9.-]/gu, "");
     if (cleaned === "" || !/\d/u.test(cleaned)) {
-        return null;
+        return undefined;
     }
     const parsed = Number(cleaned);
-    return Number.isFinite(parsed) ? parsed : null;
+    return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -365,19 +365,20 @@ function normalizeMoltbookHome(value: unknown) {
         latestAnnouncement:
             Object.keys(announcement).length > 0
                 ? {
-                      postId: announcement.post_id ?? null,
-                      title: announcement.title ?? null,
-                      authorName: announcement.author_name ?? null,
-                      createdAt: announcement.created_at ?? null,
-                      previewText: announcement.preview ?? announcement.isPreview ?? null,
+                      postId: announcement.post_id ?? undefined,
+                      title: announcement.title ?? undefined,
+                      authorName: announcement.author_name ?? undefined,
+                      createdAt: announcement.created_at ?? undefined,
+                      previewText:
+                          announcement.preview ?? announcement.isPreview ?? undefined,
                   }
-                : null,
+                : undefined,
         postsFromAccountsYouFollowCount: Array.isArray(
             data.posts_from_accounts_you_follow
         )
             ? data.posts_from_accounts_you_follow.length
-            : null,
-        exploreCount: Array.isArray(data.explore) ? data.explore.length : null,
+            : undefined,
+        exploreCount: Array.isArray(data.explore) ? data.explore.length : undefined,
         nextActions: next,
         fetchedAt: nowIso(),
     };
@@ -388,9 +389,9 @@ function normalizeMoltbookFeed(value: unknown, sort: "hot" | "new") {
     return {
         posts: Array.isArray(data.posts) ? data.posts : [],
         feedType: data.feed_type ?? sort,
-        feedFilter: data.feed_filter ?? null,
+        feedFilter: data.feed_filter ?? undefined,
         hasMore: Boolean(data.has_more),
-        tip: data.tip ?? null,
+        tip: data.tip ?? undefined,
     };
 }
 
@@ -521,7 +522,7 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
         if (requestedKeys.includes("moltbook.profile")) {
             writes.push({
                 key: "moltbook.profile",
-                data: { agent: profile.agent ?? null },
+                data: { agent: profile.agent ?? undefined },
                 metadata: { workflow: "Cache Foundation - Moltbook", kind: "profile" },
             });
         }
@@ -577,7 +578,7 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
 }
 
 function openMeteoCodeToDescription(code: unknown): string {
-    if (code === null || code === undefined) return "Unknown";
+    if (code === undefined || code === null) return "Unknown";
     if (typeof code === "string" && code.trim() === "") return "Unknown";
     const numericCode = Number(code);
     if (!Number.isFinite(numericCode)) return "Unknown";
@@ -595,45 +596,47 @@ async function fetchSpydebergWeather() {
     try {
         const data = asRecord(await fetchJson(SPYDEBERG.wttrUrl));
         const current = asRecord(
-            Array.isArray(data.current_condition) ? data.current_condition[0] : null
+            Array.isArray(data.current_condition) ? data.current_condition[0] : undefined
         );
-        const today = asRecord(Array.isArray(data.weather) ? data.weather[0] : null);
+        const today = asRecord(Array.isArray(data.weather) ? data.weather[0] : undefined);
         return {
             source: "wttr.in",
             data: {
                 location: SPYDEBERG.name,
-                temperatureC: toNullableNumber(current.temp_C),
-                feelsLikeC: toNullableNumber(current.FeelsLikeC),
-                humidityPercent: toNullableNumber(current.humidity),
-                windKph: toNullableNumber(current.windspeedKmph),
+                temperatureC: toOptionalNumber(current.temp_C),
+                feelsLikeC: toOptionalNumber(current.FeelsLikeC),
+                humidityPercent: toOptionalNumber(current.humidity),
+                windKph: toOptionalNumber(current.windspeedKmph),
                 description:
                     asRecord(
-                        Array.isArray(current.weatherDesc) ? current.weatherDesc[0] : null
+                        Array.isArray(current.weatherDesc)
+                            ? current.weatherDesc[0]
+                            : undefined
                     ).value || "Unknown",
-                minTempC: toNullableNumber(today.mintempC),
-                maxTempC: toNullableNumber(today.maxtempC),
+                minTempC: toOptionalNumber(today.mintempC),
+                maxTempC: toOptionalNumber(today.maxtempC),
                 forecast: (Array.isArray(data.weather) ? data.weather : [])
                     .slice(0, 3)
                     .map((dayValue) => {
                         const day = asRecord(dayValue);
                         const hourly = asRecord(
-                            Array.isArray(day.hourly) ? day.hourly[0] : null
+                            Array.isArray(day.hourly) ? day.hourly[0] : undefined
                         );
                         return {
                             date: day.date,
-                            minTempC: toNullableNumber(day.mintempC),
-                            maxTempC: toNullableNumber(day.maxtempC),
+                            minTempC: toOptionalNumber(day.mintempC),
+                            maxTempC: toOptionalNumber(day.maxtempC),
                             description:
                                 asRecord(
                                     Array.isArray(hourly.weatherDesc)
                                         ? hourly.weatherDesc[0]
-                                        : null
+                                        : undefined
                                 ).value || "Unknown",
                         };
                     }),
                 fetchedAt: nowIso(),
             },
-            fallbackReason: null,
+            fallbackReason: undefined,
         };
     } catch (error) {
         const data = asRecord(await fetchJson(SPYDEBERG.openMeteoUrl));
@@ -650,19 +653,19 @@ async function fetchSpydebergWeather() {
             source: "open-meteo",
             data: {
                 location: SPYDEBERG.name,
-                temperatureC: current.temperature_2m ?? null,
-                feelsLikeC: current.apparent_temperature ?? null,
-                humidityPercent: current.relative_humidity_2m ?? null,
-                windKph: current.wind_speed_10m ?? null,
+                temperatureC: current.temperature_2m ?? undefined,
+                feelsLikeC: current.apparent_temperature ?? undefined,
+                humidityPercent: current.relative_humidity_2m ?? undefined,
+                windKph: current.wind_speed_10m ?? undefined,
                 description: openMeteoCodeToDescription(current.weather_code),
-                minTempC: minTemps[0] ?? null,
-                maxTempC: maxTemps[0] ?? null,
+                minTempC: minTemps[0] ?? undefined,
+                maxTempC: maxTemps[0] ?? undefined,
                 forecast: (Array.isArray(daily.time) ? daily.time : [])
                     .slice(0, 3)
                     .map((date: string, index: number) => ({
                         date,
-                        minTempC: minTemps[index] ?? null,
-                        maxTempC: maxTemps[index] ?? null,
+                        minTempC: minTemps[index] ?? undefined,
+                        maxTempC: maxTemps[index] ?? undefined,
                         description: openMeteoCodeToDescription(weatherCodes[index]),
                     })),
                 fetchedAt: nowIso(),
@@ -712,13 +715,14 @@ async function runCommand(
     return stdout.trimEnd();
 }
 
-function latestOpenClawVersionFromUpdateStatus(value: unknown): string | null {
+function latestOpenClawVersionFromUpdateStatus(value: unknown): string | undefined {
     const updateStatus = asRecord(value);
     const availability = asRecord(updateStatus.availability);
     const update = asRecord(updateStatus.update);
     const registry = asRecord(update.registry);
     return (
-        stringOrNull(availability.latestVersion) || stringOrNull(registry.latestVersion)
+        toOptionalString(availability.latestVersion) ||
+        toOptionalString(registry.latestVersion)
     );
 }
 
@@ -771,9 +775,9 @@ function emptyStatusSummary(): ReturnType<typeof summarizeStatus> {
     return summarizeStatus([]);
 }
 
-function sanitizeRemoteUrl(value: string | null): string | null {
+function sanitizeRemoteUrl(value: string | undefined): string | undefined {
     if (!value) {
-        return null;
+        return undefined;
     }
     try {
         const url = new URL(value);
@@ -832,11 +836,11 @@ export async function refreshGitCache() {
         repos.push({
             ...repo,
             exists: true,
-            branch: branch.isOk ? branch.output || null : null,
-            head: head.isOk ? head.output || null : null,
+            branch: branch.isOk ? branch.output || undefined : undefined,
+            head: head.isOk ? head.output || undefined : undefined,
             remote: remote.isOk
-                ? sanitizeRemoteUrl(remote.output.split(/\s+/u, 2)[1] || null)
-                : null,
+                ? sanitizeRemoteUrl(remote.output.split(/\s+/u, 2)[1] || undefined)
+                : undefined,
             dirty: isDirty,
             statusSummary,
             statusShort: porcelain.slice(0, 25),
@@ -887,9 +891,11 @@ async function refreshSystemCache() {
             getHostSummary(),
         ]);
     let statusError =
-        statusResult.status === "rejected" ? errorMessage(statusResult.reason) : null;
+        statusResult.status === "rejected"
+            ? errorMessage(statusResult.reason)
+            : undefined;
     let statusFailure: unknown =
-        statusResult.status === "rejected" ? statusResult.reason : null;
+        statusResult.status === "rejected" ? statusResult.reason : undefined;
     let status: JsonRecord = {};
     if (statusResult.status === "fulfilled") {
         try {
@@ -901,10 +907,14 @@ async function refreshSystemCache() {
         }
     }
     const doctorError =
-        doctorResult.status === "rejected" ? errorMessage(doctorResult.reason) : null;
+        doctorResult.status === "rejected"
+            ? errorMessage(doctorResult.reason)
+            : undefined;
     let securityError =
-        securityResult.status === "rejected" ? errorMessage(securityResult.reason) : null;
-    let security: JsonRecord | null = null;
+        securityResult.status === "rejected"
+            ? errorMessage(securityResult.reason)
+            : undefined;
+    let security: JsonRecord | undefined;
     if (securityResult.status === "fulfilled") {
         try {
             security = JSON.parse(securityResult.value) as JsonRecord;
@@ -937,7 +947,7 @@ async function refreshSystemCache() {
     let updateStatusError =
         updateStatusResult.status === "rejected"
             ? errorMessage(updateStatusResult.reason)
-            : null;
+            : undefined;
     let updateStatus: JsonRecord = {};
     if (updateStatusResult.status === "fulfilled") {
         try {
@@ -952,7 +962,7 @@ async function refreshSystemCache() {
     }
     const latestVersion =
         latestOpenClawVersionFromUpdateStatus(updateStatus) ||
-        stringOrNull(registry.latestVersion);
+        toOptionalString(registry.latestVersion);
     const version = {
         current: currentVersion,
         latest: latestVersion,
@@ -972,7 +982,9 @@ async function refreshSystemCache() {
         version: {
             ...version,
             hostError:
-                hostResult.status === "rejected" ? errorMessage(hostResult.reason) : null,
+                hostResult.status === "rejected"
+                    ? errorMessage(hostResult.reason)
+                    : undefined,
             openclawError: statusError,
             updateStatusError,
         },
@@ -994,12 +1006,12 @@ async function refreshSystemCache() {
         const openclawPayload = {
             version,
             updateStatus,
-            gateway: status.gateway ?? null,
-            gatewayService: status.gatewayService ?? null,
-            nodeService: status.nodeService ?? null,
-            heartbeat: status.heartbeat ?? null,
-            tasks: status.tasks ?? null,
-            taskAudit: status.taskAudit ?? null,
+            gateway: status.gateway ?? undefined,
+            gatewayService: status.gatewayService ?? undefined,
+            nodeService: status.nodeService ?? undefined,
+            heartbeat: status.heartbeat ?? undefined,
+            tasks: status.tasks ?? undefined,
+            taskAudit: status.taskAudit ?? undefined,
             doctorWarnings,
             doctorError,
             doctorWarningCount: doctorWarnings.length,
@@ -1043,7 +1055,7 @@ async function refreshSystemCache() {
     return { refreshed: ["system.openclaw", "system.host"] };
 }
 
-function firstValidTimestamp(value: string | null): number {
+function firstValidTimestamp(value: string | undefined): number {
     if (!value) {
         return 0;
     }
@@ -1051,8 +1063,10 @@ function firstValidTimestamp(value: string | null): number {
     return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function firstValidTimestampValue(...values: Array<string | null>): string | null {
-    return values.find((value) => firstValidTimestamp(value) > 0) ?? null;
+function firstValidTimestampValue(
+    ...values: Array<string | undefined>
+): string | undefined {
+    return values.find((value) => firstValidTimestamp(value) > 0) ?? undefined;
 }
 
 function summarizeKopiaSnapshot(value: unknown) {
@@ -1060,22 +1074,25 @@ function summarizeKopiaSnapshot(value: unknown) {
     const source = asRecord(snapshot.source);
     const stats = asRecord(snapshot.stats);
     return {
-        id: stringOrNull(snapshot.id),
-        path: stringOrNull(source.path),
-        description: stringOrNull(snapshot.description),
-        startTime: stringOrNull(snapshot.startTime),
-        endTime: stringOrNull(snapshot.endTime),
-        fileCount: numberOrNull(stats.fileCount),
-        totalSize: numberOrNull(stats.totalSize),
-        errorCount: numberOrNull(stats.errorCount),
-        ignoredErrorCount: numberOrNull(stats.ignoredErrorCount),
+        id: toOptionalString(snapshot.id),
+        path: toOptionalString(source.path),
+        description: toOptionalString(snapshot.description),
+        startTime: toOptionalString(snapshot.startTime),
+        endTime: toOptionalString(snapshot.endTime),
+        fileCount: toOptionalFiniteNumber(stats.fileCount),
+        totalSize: toOptionalFiniteNumber(stats.totalSize),
+        errorCount: toOptionalFiniteNumber(stats.errorCount),
+        ignoredErrorCount: toOptionalFiniteNumber(stats.ignoredErrorCount),
         retentionReason: Array.isArray(snapshot.retentionReason)
             ? snapshot.retentionReason
             : [],
     };
 }
 
-function getSnapshotTime(snapshot: { endTime: string | null; startTime: string | null }) {
+function getSnapshotTime(snapshot: {
+    endTime: string | undefined;
+    startTime: string | undefined;
+}) {
     return firstValidTimestamp(
         firstValidTimestampValue(snapshot.endTime, snapshot.startTime)
     );
@@ -1105,20 +1122,26 @@ async function refreshKopiaBackupCache() {
     }
 
     const snapshotsByPath = [...byPath]
-        .sort(([pathA], [pathB]) => pathA.localeCompare(pathB))
+        .toSorted(([pathA], [pathB]) => pathA.localeCompare(pathB))
         .map(([pathName, groupedSnapshots]) => {
-            const sortedSnapshots = groupedSnapshots.sort(
+            const sortedSnapshots = groupedSnapshots.toSorted(
                 (snapshotA, snapshotB) =>
                     getSnapshotTime(snapshotB) - getSnapshotTime(snapshotA)
             );
+            const latestSnapshot = sortedSnapshots[0];
             return {
                 path: pathName,
-                latest: sortedSnapshots[0],
+                latest: latestSnapshot,
                 snapshots: sortedSnapshots,
                 snapshotCount: sortedSnapshots.length,
             };
         });
-    const latest = snapshotsByPath.map((group) => group.latest).filter(Boolean);
+    const latest = snapshotsByPath
+        .map((group) => group.latest)
+        .filter(
+            (snapshot): snapshot is ReturnType<typeof summarizeKopiaSnapshot> =>
+                snapshot !== undefined
+        );
     const staleSnapshots = latest
         .filter((snapshot) => {
             if (!snapshot.endTime) {
@@ -1135,8 +1158,8 @@ async function refreshKopiaBackupCache() {
     const missingSources = KOPIA_EXPECTED_SOURCE_PATHS.filter(
         (pathName) => !byPath.has(pathName)
     )
-        .sort((pathA, pathB) => pathA.localeCompare(pathB))
-        .map((pathName) => ({ path: pathName, endTime: null, missing: true }));
+        .toSorted((pathA, pathB) => pathA.localeCompare(pathB))
+        .map((pathName) => ({ path: pathName, endTime: undefined, missing: true }));
     const stale = [...staleSnapshots, ...missingSources];
     const payload = {
         checkedAt: nowIso(),
@@ -1170,29 +1193,29 @@ async function refreshKopiaBackupCache() {
 function summarizeWalgBackup(value: unknown) {
     const backup = asRecord(value);
     const modified = firstValidTimestampValue(
-        stringOrNull(backup.finish_time),
-        stringOrNull(backup.start_time),
-        stringOrNull(backup.time),
-        stringOrNull(backup.modified)
+        toOptionalString(backup.finish_time),
+        toOptionalString(backup.start_time),
+        toOptionalString(backup.time),
+        toOptionalString(backup.modified)
     );
     const freshnessTime = firstValidTimestampValue(
-        stringOrNull(backup.finish_time),
-        stringOrNull(backup.start_time),
-        stringOrNull(backup.time)
+        toOptionalString(backup.finish_time),
+        toOptionalString(backup.start_time),
+        toOptionalString(backup.time)
     );
     return {
-        backupName: stringOrNull(backup.backup_name),
+        backupName: toOptionalString(backup.backup_name),
         modified,
-        time: stringOrNull(backup.time),
-        startTime: stringOrNull(backup.start_time),
-        finishTime: stringOrNull(backup.finish_time),
+        time: toOptionalString(backup.time),
+        startTime: toOptionalString(backup.start_time),
+        finishTime: toOptionalString(backup.finish_time),
         freshnessTime: freshnessTime ?? modified,
-        walFileName: stringOrNull(backup.wal_file_name),
-        storageName: stringOrNull(backup.storage_name),
+        walFileName: toOptionalString(backup.wal_file_name),
+        storageName: toOptionalString(backup.storage_name),
     };
 }
 
-function getWalgBackupTime(backup: { freshnessTime: string | null }) {
+function getWalgBackupTime(backup: { freshnessTime: string | undefined }) {
     return firstValidTimestamp(backup.freshnessTime);
 }
 
@@ -1206,20 +1229,22 @@ async function refreshWalgBackupCache() {
         "--json",
     ]);
     const backups = (JSON.parse(output || "[]") as unknown[])
-        .map(summarizeWalgBackup)
-        .sort(
+        .map((backup) => summarizeWalgBackup(backup))
+        .toSorted(
             (backupA, backupB) => getWalgBackupTime(backupB) - getWalgBackupTime(backupA)
         );
 
-    const latest = backups[0] ?? null;
+    const latest = backups[0] ?? undefined;
     const latestFreshnessMs = latest?.freshnessTime
         ? dateGetTime(new Date(latest.freshnessTime))
         : NaN;
     const latestAgeHours = Number.isFinite(latestFreshnessMs)
         ? (Date.now() - latestFreshnessMs) / 36e5
-        : null;
+        : undefined;
     const isStale =
-        !latest || latestAgeHours === null || latestAgeHours > BACKUP_STATUS_STALE_HOURS;
+        !latest ||
+        latestAgeHours === undefined ||
+        latestAgeHours > BACKUP_STATUS_STALE_HOURS;
     const payload = {
         checkedAt: nowIso(),
         tool: "wal-g",
@@ -1244,7 +1269,7 @@ async function refreshWalgBackupCache() {
             summary: {
                 isOk: payload.isOk,
                 backupCount: payload.backupCount,
-                latestBackupName: payload.latest?.backupName ?? null,
+                latestBackupName: payload.latest?.backupName ?? undefined,
                 stale: payload.stale,
                 latestAgeHours: payload.latestAgeHours,
             },
@@ -1271,7 +1296,8 @@ async function checkOpenRouterQuota() {
         totalCredits,
         remaining: Math.max(totalCredits - usage, 0),
         usageMonthly: toNumber(asRecord(keyInfo.data).usage_monthly),
-        percentUsed: totalCredits > 0 ? Math.round((usage / totalCredits) * 100) : null,
+        percentUsed:
+            totalCredits > 0 ? Math.round((usage / totalCredits) * 100) : undefined,
     };
 }
 
@@ -1286,10 +1312,10 @@ async function checkElevenLabsQuota() {
     const subscription = asRecord(data.subscription);
     const used = toNumber(subscription.character_count);
     const total = toNumber(subscription.character_limit);
-    const resetMsCandidate = toNullableNumber(
+    const resetMsCandidate = toOptionalNumber(
         subscription.next_character_count_reset_unix_ms
     );
-    const resetSecCandidate = toNullableNumber(
+    const resetSecCandidate = toOptionalNumber(
         subscription.next_character_count_reset_unix
     );
     return {
@@ -1297,13 +1323,13 @@ async function checkElevenLabsQuota() {
         total,
         remaining: Math.max(total - used, 0),
         tier: subscription.tier || "unknown",
-        percentUsed: total > 0 ? Math.round((used / total) * 100) : null,
+        percentUsed: total > 0 ? Math.round((used / total) * 100) : undefined,
         resetAt:
-            resetMsCandidate !== null && resetMsCandidate > 0
+            resetMsCandidate !== undefined && resetMsCandidate > 0
                 ? dateToISOString(new Date(resetMsCandidate))
-                : resetSecCandidate !== null && resetSecCandidate > 0
+                : resetSecCandidate !== undefined && resetSecCandidate > 0
                   ? dateToISOString(new Date(resetSecCandidate * 1000))
-                  : null,
+                  : undefined,
     };
 }
 
@@ -1329,16 +1355,16 @@ async function checkSyntheticQuota() {
     const weeklyMaxCredits = toCurrencyNumber(weeklyTokenLimit.maxCredits);
     const weeklyRemainingCredits = toCurrencyNumber(weeklyTokenLimit.remainingCredits);
     const weeklyNextRegenCredits = toCurrencyNumber(weeklyTokenLimit.nextRegenCredits);
-    const explicitWeeklyPercentRemaining = toNullableNumber(
+    const explicitWeeklyPercentRemaining = toOptionalNumber(
         weeklyTokenLimit.percentRemaining
     );
     const computedWeeklyPercentRemaining =
-        weeklyMaxCredits && weeklyRemainingCredits !== null
+        weeklyMaxCredits && weeklyRemainingCredits !== undefined
             ? (weeklyRemainingCredits / weeklyMaxCredits) * 100
-            : null;
+            : undefined;
     const weeklyPercentRemaining =
         explicitWeeklyPercentRemaining ?? computedWeeklyPercentRemaining;
-    if (weeklyPercentRemaining === null) {
+    if (weeklyPercentRemaining === undefined) {
         return {
             status: "error",
             note: "Synthetic weekly token percentage missing",
@@ -1349,38 +1375,38 @@ async function checkSyntheticQuota() {
             limit: subscriptionLimit,
             requests: subscriptionRequests,
             remaining: Math.max(subscriptionLimit - subscriptionRequests, 0),
-            renewsAt: subscription.renewsAt || null,
+            renewsAt: subscription.renewsAt || undefined,
             percentUsed:
                 subscriptionLimit > 0
                     ? Math.round((subscriptionRequests / subscriptionLimit) * 100)
-                    : null,
+                    : undefined,
         },
         searchHourly: {
             limit: searchHourlyLimit,
             requests: searchHourlyRequests,
             remaining: Math.max(searchHourlyLimit - searchHourlyRequests, 0),
-            renewsAt: searchHourly.renewsAt || null,
+            renewsAt: searchHourly.renewsAt || undefined,
             percentUsed:
                 searchHourlyLimit > 0
                     ? Math.round((searchHourlyRequests / searchHourlyLimit) * 100)
-                    : null,
+                    : undefined,
         },
         weeklyTokenLimit: {
             percentRemaining: weeklyPercentRemaining,
-            nextRegenAt: weeklyTokenLimit.nextRegenAt || null,
-            maxCredits: weeklyTokenLimit.maxCredits || null,
-            remainingCredits: weeklyTokenLimit.remainingCredits || null,
-            nextRegenCredits: weeklyTokenLimit.nextRegenCredits || null,
+            nextRegenAt: weeklyTokenLimit.nextRegenAt || undefined,
+            maxCredits: weeklyTokenLimit.maxCredits || undefined,
+            remainingCredits: weeklyTokenLimit.remainingCredits || undefined,
+            nextRegenCredits: weeklyTokenLimit.nextRegenCredits || undefined,
             nextRegenPercent:
-                weeklyMaxCredits && weeklyNextRegenCredits !== null
+                weeklyMaxCredits && weeklyNextRegenCredits !== undefined
                     ? (weeklyNextRegenCredits / weeklyMaxCredits) * 100
-                    : null,
+                    : undefined,
         },
         rollingFiveHourLimit: {
             remaining: rollingFiveHourRemaining,
             max: rollingFiveHourMax,
             limited: Boolean(rollingFiveHourLimit.limited),
-            nextTickAt: rollingFiveHourLimit.nextTickAt || null,
+            nextTickAt: rollingFiveHourLimit.nextTickAt || undefined,
             tickPercent: toNumber(rollingFiveHourLimit.tickPercent, 0),
             percentUsed:
                 rollingFiveHourMax > 0
@@ -1389,7 +1415,7 @@ async function checkSyntheticQuota() {
                               rollingFiveHourMax) *
                               100
                       )
-                    : null,
+                    : undefined,
         },
     };
 }
@@ -1478,7 +1504,7 @@ async function ensureCodexTrustConfig(codexHome: string) {
 
 async function updateCodexTrustConfig(codexHome: string) {
     const lockPath = `${codexHome}/config.toml.lock`;
-    let lockHandle: CodexTrustConfigFileHandle | null = null;
+    let lockHandle: CodexTrustConfigFileHandle | undefined;
     try {
         await mkdir(codexHome, { recursive: true });
         lockHandle = await acquireCodexTrustConfigLockAsync(lockPath);
@@ -1495,7 +1521,7 @@ async function updateCodexTrustConfig(codexHome: string) {
         const additions = CODEX_TRUSTED_DIRS.flatMap((directory) => {
             const header = `[projects.${JSON.stringify(directory)}]`;
             const normalizedConfig = ensureCodexTrustedSection(next, header);
-            if (normalizedConfig === null) {
+            if (normalizedConfig === undefined) {
                 return [`${header}\ntrust_level = "trusted"\n`];
             }
             next = normalizedConfig;
@@ -1512,7 +1538,7 @@ async function updateCodexTrustConfig(codexHome: string) {
             await rename(temporaryPath, configPath);
         }
     } finally {
-        if (lockHandle !== null) {
+        if (lockHandle !== undefined) {
             await lockHandle.close();
             await rm(lockPath, { force: true });
         }
@@ -1523,7 +1549,7 @@ function ensureCodexTrustedSection(config: string, header: string) {
     const lines = config.split("\n");
     const headerIndex = lines.findIndex((line) => line.trim() === header);
     if (headerIndex === -1) {
-        return null;
+        return;
     }
     const nextHeaderIndex = lines.findIndex(
         (line, index) => index > headerIndex && /^\s*\[.*\]\s*$/u.test(line)
@@ -1550,8 +1576,8 @@ function stripAnsi(value: string) {
 }
 
 function cleanPanelText(value: string | undefined) {
-    if (!value) return null;
-    return value.replaceAll(/[│╭╮╰╯]/gu, "").trim() || null;
+    if (!value) return;
+    return value.replaceAll(/[│╭╮╰╯]/gu, "").trim() || undefined;
 }
 
 function parseOpenAiQuotaOutput(output: string) {
@@ -1569,14 +1595,14 @@ function parseOpenAiQuotaOutput(output: string) {
         const index = lines.findIndex((line) =>
             line.toLowerCase().includes(prefix.toLowerCase())
         );
-        if (index === -1) return null;
+        if (index === -1) return;
         const joined = `${lines[index]} ${lines[index + 1] || ""} ${lines[index + 2] || ""}`;
         const leftMatch = joined.match(/(\d+)%\s*left/iu);
-        if (!leftMatch) return null;
+        if (!leftMatch) return;
         const resetMatch = joined.match(/\(resets\s*([^)]+)\)/iu);
         return {
             leftPercent: toNumber(leftMatch[1]),
-            resetAt: resetMatch?.[1]?.trim() || null,
+            resetAt: resetMatch?.[1]?.trim() || undefined,
         };
     }
     const fiveHour = parseLimit("5h limit:");
@@ -1664,10 +1690,10 @@ function buildQuotaMissingProviders(
     openai: Record<string, unknown>
 ) {
     return [
-        openrouter.status === "not_configured" ? "openrouter" : null,
-        elevenlabs.status === "not_configured" ? "elevenlabs" : null,
-        synthetic.status === "not_configured" ? "synthetic" : null,
-        openai.status === "not_configured" ? "openai" : null,
+        openrouter.status === "not_configured" ? "openrouter" : undefined,
+        elevenlabs.status === "not_configured" ? "elevenlabs" : undefined,
+        synthetic.status === "not_configured" ? "synthetic" : undefined,
+        openai.status === "not_configured" ? "openai" : undefined,
     ].filter(Boolean);
 }
 
@@ -1723,7 +1749,7 @@ async function refreshQuotasCache() {
 async function refreshLogRotationStateCache() {
     const row = database
         .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
-        .get(LOG_ROTATION_STATE_KEY) as undefined | { data_json?: string | null };
+        .get(LOG_ROTATION_STATE_KEY) as undefined | { data_json?: string | undefined };
     let data: unknown = { version: 1, files: {} };
     let isPreserveExistingData = false;
     if (row?.data_json) {
@@ -1952,7 +1978,7 @@ export async function refreshCacheProducer(
             ([inFlightKey]) =>
                 inFlightKey === scopeKey || scopeKey.startsWith(`${inFlightKey}.`)
         )
-        .sort(([left], [right]) => left.length - right.length)[0]?.[1];
+        .toSorted(([left], [right]) => left.length - right.length)[0]?.[1];
     if (!options.force && existing !== undefined) {
         return await waitForExistingRefresh(key, scopeKey, existing, signal);
     }
@@ -2153,8 +2179,12 @@ export function registerCacheRefreshScheduledJobs(): void {
                     ? existing.timeOfDay
                     : "timeOfDay" in job && typeof job.timeOfDay === "string"
                       ? job.timeOfDay
-                      : null,
-                cronExpression: existing?.cronExpression ?? null,
+                      : undefined,
+                cronExpression:
+                    existing?.cronExpression ??
+                    ("cronExpression" in job && typeof job.cronExpression === "string"
+                        ? job.cronExpression
+                        : undefined),
             });
             if (existing?.enabled ?? true) {
                 seedKeys.push(job.actionPayload.key);

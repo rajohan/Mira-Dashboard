@@ -118,7 +118,7 @@ function defaultConfigPath(): string {
     return BUNDLED_CONFIG_PATH;
 }
 
-function resolveExecutableFromPath(executable: string): string | null {
+function resolveExecutableFromPath(executable: string): string | undefined {
     if (path.isAbsolute(executable)) {
         return executable;
     }
@@ -126,7 +126,7 @@ function resolveExecutableFromPath(executable: string): string | null {
         return path.resolve(executable);
     }
 
-    return Bun.which(executable);
+    return Bun.which(executable) ?? undefined;
 }
 
 function resolveBunExecutable(): string {
@@ -218,7 +218,7 @@ async function gzipFileHandleBytes(
 interface LogRotationOptions {
     isDryRun: boolean;
     config?: string;
-    group?: string | null;
+    group?: string | undefined;
     verbose?: boolean;
 }
 
@@ -269,9 +269,9 @@ interface LogRotationConfig {
     groups: LogRotationPolicy[];
 }
 
-function byteLimitFromMb(value: unknown): number | null {
+function byteLimitFromMb(value: unknown): number | undefined {
     const parsed = Number(value);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed * 1024 * 1024 : null;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed * 1024 * 1024 : undefined;
 }
 
 function mergePolicy(defaults: LogRotationPolicy, group: LogRotationPolicy) {
@@ -504,7 +504,7 @@ async function resolveGlob(
     for (const [index, segment] of segments.entries()) {
         const hasWildcard = hasGlobMeta(segment);
         const isLastSegment = index === segments.length - 1;
-        const regex = hasWildcard ? segmentRegex(segment) : null;
+        const regex = hasWildcard ? segmentRegex(segment) : undefined;
         const nextCandidates: string[] = [];
 
         for (const candidate of candidates) {
@@ -553,7 +553,7 @@ async function appendGlobWildcardCandidates(options: {
     candidate: string;
     isLastSegment: boolean;
     nextCandidates: string[];
-    regex: RegExp | null;
+    regex: RegExp | undefined;
 }): Promise<void> {
     let entries: Array<import("node:fs").Dirent>;
     try {
@@ -599,13 +599,13 @@ async function assertSafePath(
                 return await fs.realpath(root);
             } catch (error) {
                 if (isMissingPathError(error)) {
-                    return null;
+                    return;
                 }
                 throw error;
             }
         })
     );
-    const realRoots = resolvedRoots.filter((root): root is string => root !== null);
+    const realRoots = resolvedRoots.filter((root): root is string => root !== undefined);
     if (realRoots.length === 0) {
         throw new Error(`No approved roots exist: ${approvedRoots.join(", ")}`);
     }
@@ -628,11 +628,11 @@ async function assertSafeNewFileParent(
             try {
                 return await fs.realpath(root);
             } catch {
-                return null;
+                return;
             }
         })
     );
-    const realRoots = resolvedRoots.filter((root): root is string => root !== null);
+    const realRoots = resolvedRoots.filter((root): root is string => root !== undefined);
     if (realRoots.length === 0) {
         throw new Error(`No approved roots exist: ${approvedRoots.join(", ")}`);
     }
@@ -668,11 +668,13 @@ async function openVerifiedFile(
                 try {
                     return await fs.realpath(root);
                 } catch {
-                    return null;
+                    return;
                 }
             })
         );
-        const realRoots = resolvedRoots.filter((root): root is string => root !== null);
+        const realRoots = resolvedRoots.filter(
+            (root): root is string => root !== undefined
+        );
         if (realRoots.length === 0) {
             throw new Error(`No approved roots exist: ${approvedRoots.join(", ")}`);
         }
@@ -755,7 +757,7 @@ async function createNoFollowFile(
 async function gzipFile(filePath: string, approvedRoots: string[]): Promise<string> {
     const source = await openVerifiedFile(filePath, approvedRoots, constants.O_RDONLY);
     const gzPath = `${filePath}.gz`;
-    let destination: fs.FileHandle | null = null;
+    let destination: fs.FileHandle | undefined;
     let isSourceRemoved = false;
     try {
         await assertSafeNewFileParent(gzPath, approvedRoots);
@@ -771,7 +773,7 @@ async function gzipFile(filePath: string, approvedRoots: string[]): Promise<stri
         }
         await fs.utimes(gzPath, source.stat.atime, source.stat.mtime);
         await destination.close();
-        destination = null;
+        destination = undefined;
         await unlinkVerified(filePath, approvedRoots);
         isSourceRemoved = true;
         await source.handle.close();
@@ -978,7 +980,7 @@ async function listArchives(
     return uniqueArchives
         .values()
         .toArray()
-        .sort((a, b) => b.mtimeMs - a.mtimeMs);
+        .toSorted((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
 async function addConfiguredArchiveIfInRetentionScope(
@@ -1078,7 +1080,6 @@ async function applyRetention(
         if (result.compressed) compressed.push(result.archive.path);
         if (result.warning) warnings.push(result.warning);
     }
-    archives.sort((a, b) => b.mtimeMs - a.mtimeMs);
     const deleted: string[] = [];
     for (const archive of deleteSet.values()) {
         deleted.push(archive.path);
@@ -1147,7 +1148,7 @@ async function listArchiveOnlyArchives(
         archives: archives
             .values()
             .toArray()
-            .sort((a, b) => b.mtimeMs - a.mtimeMs),
+            .toSorted((a, b) => b.mtimeMs - a.mtimeMs),
         warnings,
     };
 }
@@ -1175,9 +1176,9 @@ async function applyArchiveOnlyRetention(
     }
 
     for (const archives of archivesByScope.values()) {
-        archives.sort((a, b) => b.mtimeMs - a.mtimeMs);
-        const deleteSet = retentionDeleteSet(archives, policy);
-        for (const archive of archives) {
+        const sortedArchives = archives.toSorted((a, b) => b.mtimeMs - a.mtimeMs);
+        const deleteSet = retentionDeleteSet(sortedArchives, policy);
+        for (const archive of sortedArchives) {
             if (!deleteSet.has(archive.path)) {
                 try {
                     const result = await archiveOnlyCompressArchiveIfNeeded(
@@ -1219,7 +1220,7 @@ async function applyArchiveOnlyRetention(
 
 function hasRotatedInCadence(
     stateEntry: undefined | { lastRotatedAt?: string },
-    cadence: "daily" | "weekly" | null
+    cadence: "daily" | "weekly" | undefined
 ): boolean {
     if (!cadence || !stateEntry?.lastRotatedAt) return false;
     const lastDate = new Date(stateEntry.lastRotatedAt);
@@ -1247,8 +1248,8 @@ function shouldRotate({
     stateEntry: undefined | { lastRotatedAt?: string };
 }) {
     const maxBytes = byteLimitFromMb(policy.maxSizeMb);
-    const isOverSize = maxBytes !== null && stat.size >= maxBytes;
-    const cadence = policy.weekly ? "weekly" : policy.daily ? "daily" : null;
+    const isOverSize = maxBytes !== undefined && stat.size >= maxBytes;
+    const cadence = policy.weekly ? "weekly" : policy.daily ? "daily" : undefined;
     const isCadenceDue = Boolean(cadence && !hasRotatedInCadence(stateEntry, cadence));
     return {
         rotate: isOverSize || isCadenceDue,
@@ -1263,7 +1264,7 @@ function emptyState(): LogRotationState {
 function readLogRotationState(): LogRotationState {
     const row = database
         .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
-        .get(STATE_CACHE_KEY) as undefined | { data_json?: string | null };
+        .get(STATE_CACHE_KEY) as undefined | { data_json?: string | undefined };
     if (!row?.data_json) {
         return emptyState();
     }
@@ -1330,7 +1331,7 @@ export interface LogRotationSummary {
     isOk: boolean;
     isDryRun: boolean;
     startedAt: string;
-    finishedAt: string | null;
+    finishedAt: string | undefined;
     checkedGroups: number;
     checkedFiles: number;
     rotatedFiles: number;
@@ -1477,7 +1478,7 @@ async function processRotationCandidate({
 }
 
 async function acquireLogRotationLock(isDryRun: boolean) {
-    if (isDryRun) return null;
+    if (isDryRun) return;
     const lockFile = logRotationLockFile;
     await fs.mkdir(path.dirname(lockFile), { recursive: true });
     const openLock = async () => {
@@ -1519,7 +1520,7 @@ async function reclaimStaleLogRotationLock(
             (error as NodeJS.ErrnoException).code === "EEXIST"
         ) {
             if (!(await removeStaleReclaimDirectory(reclaimDirectory))) {
-                return null;
+                return;
             }
             try {
                 await fs.mkdir(reclaimDirectory);
@@ -1529,7 +1530,7 @@ async function reclaimStaleLogRotationLock(
                     "code" in reclaimError &&
                     (reclaimError as NodeJS.ErrnoException).code === "EEXIST"
                 ) {
-                    return null;
+                    return;
                 }
                 throw reclaimError;
             }
@@ -1539,7 +1540,7 @@ async function reclaimStaleLogRotationLock(
     }
     try {
         let rawPid = "";
-        let lockStat: Awaited<ReturnType<typeof fs.stat>> | null = null;
+        let lockStat: Awaited<ReturnType<typeof fs.stat>> | undefined;
         try {
             const handle = await fs.open(lockFile, "r");
             try {
@@ -1554,14 +1555,14 @@ async function reclaimStaleLogRotationLock(
             }
         }
         const pid = Number(rawPid.trim());
-        const lockAgeMs = lockStat ? Date.now() - lockStat.mtimeMs : Infinity;
+        const lockAgeMs = lockStat ? Date.now() - Number(lockStat.mtimeMs) : Infinity;
         if (
             Number.isSafeInteger(pid) &&
             pid > 0 &&
             isProcessRunning(pid) &&
             lockAgeMs < LOCK_STALE_MS
         ) {
-            return null;
+            return;
         }
         await ignoreMissingPath(fs.unlink(lockFile));
         try {
@@ -1572,7 +1573,7 @@ async function reclaimStaleLogRotationLock(
                 "code" in error &&
                 (error as NodeJS.ErrnoException).code === "EEXIST"
             ) {
-                return null;
+                return;
             }
             throw error;
         }
@@ -1609,7 +1610,7 @@ function isProcessRunning(pid: number): boolean {
     }
 }
 
-async function releaseLogRotationLock(handle: fs.FileHandle | null) {
+async function releaseLogRotationLock(handle: fs.FileHandle | undefined) {
     if (!handle) return;
     const lockFile = logRotationLockFile;
     try {
@@ -1638,7 +1639,7 @@ export async function runLogRotationService(
         isOk: true,
         isDryRun: options.isDryRun,
         startedAt: startedAt.toISOString(),
-        finishedAt: null,
+        finishedAt: undefined,
         checkedGroups: groups.length,
         checkedFiles: 0,
         rotatedFiles: 0,
@@ -1715,7 +1716,7 @@ export async function runLogRotationService(
                         excluded.add(file);
                     }
                 }
-                for (const filePath of [...matched].sort(compareStrings)) {
+                for (const filePath of [...matched].toSorted(compareStrings)) {
                     await processRotationCandidate({
                         filePath,
                         seenFiles,
@@ -1844,10 +1845,10 @@ export async function runElevatedLogRotationService(options: {
     }
 }
 
-function parseJsonObjectFromOutput(output: string): Record<string, unknown> | null {
+function parseJsonObjectFromOutput(output: string): Record<string, unknown> | undefined {
     const trimmed = output.trim();
     if (!trimmed) {
-        return null;
+        return undefined;
     }
 
     for (let startIndex = 0; startIndex < trimmed.length; startIndex += 1) {
@@ -1862,7 +1863,7 @@ function parseJsonObjectFromOutput(output: string): Record<string, unknown> | nu
         }
     }
 
-    return null;
+    return undefined;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -1910,7 +1911,7 @@ function readLogRotationStateCacheForFailure(): Record<string, unknown> {
     const fallback = { version: 1, files: {} };
     const row = database
         .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
-        .get(STATE_CACHE_KEY) as undefined | { data_json?: string | null };
+        .get(STATE_CACHE_KEY) as undefined | { data_json?: string | undefined };
     if (!row?.data_json) {
         return fallback;
     }
@@ -1976,7 +1977,7 @@ export function registerLogRotationScheduledJobs(): void {
             scheduleType: existing?.scheduleType ?? "daily",
             intervalSeconds: existing?.intervalSeconds ?? 24 * 60 * 60,
             timeOfDay: existing ? existing.timeOfDay : "02:10",
-            cronExpression: existing?.cronExpression ?? null,
+            cronExpression: existing?.cronExpression ?? undefined,
             actionKey: LOG_ROTATION_JOB_ID,
             actionPayload: { key: STATE_CACHE_KEY },
         });

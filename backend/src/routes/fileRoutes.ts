@@ -85,7 +85,7 @@ function isBinaryContent(content: string): boolean {
     return false;
 }
 
-function imageMime(filename: string): string | null {
+function imageMime(filename: string): string | undefined {
     const extension = filename.split(".").pop()?.toLowerCase();
     const map: Record<string, string> = {
         bmp: "image/bmp",
@@ -97,7 +97,7 @@ function imageMime(filename: string): string | null {
         svg: "image/svg+xml",
         webp: "image/webp",
     };
-    return extension ? (map[extension] ?? null) : null;
+    return extension ? (map[extension] ?? undefined) : undefined;
 }
 
 function isPathWithinRoot(candidatePath: string, root: string): boolean {
@@ -139,12 +139,12 @@ function listFiles(directoryPath: string) {
         }
         throw error;
     }
-    if (hasHiddenSegment(directoryPath)) return null;
+    if (hasHiddenSegment(directoryPath)) return;
     const fullPath = safePathWithinRoot(directoryPath || ".", root);
-    if (!fullPath) return null;
+    if (!fullPath) return;
     const resolved = safePathWithinRoot(fs.realpathSync(fullPath), root);
-    if (!resolved) return null;
-    if (hasHiddenSegment(path.relative(root, resolved))) return null;
+    if (!resolved) return;
+    if (hasHiddenSegment(path.relative(root, resolved))) return;
     const items: FileItem[] = [];
     const entries = readdirGuarded(guardedPath(resolved), { withFileTypes: true });
     for (const entry of entries) {
@@ -169,19 +169,19 @@ function listFiles(directoryPath: string) {
             items.push({ error: true, name: entry.name, path: itemPath, type: "file" });
         }
     }
-    return items.sort(
+    return items.toSorted(
         (a, b) =>
             (a.type === b.type ? 0 : a.type === "directory" ? -1 : 1) ||
             a.name.localeCompare(b.name)
     );
 }
 
-function filePathFromRequest(request: Request): string | null {
+function filePathFromRequest(request: Request): string | undefined {
     const url = new URL(request.url);
     try {
         return decodeURIComponent(url.pathname.slice("/api/files/".length));
     } catch {
-        return null;
+        return undefined;
     }
 }
 
@@ -211,7 +211,7 @@ export const fileRoutes = {
     "/api/files/*": {
         GET: async (request: Request) => {
             const relativePath = filePathFromRequest(request);
-            if (relativePath === null) {
+            if (relativePath === undefined) {
                 return json({ error: "Malformed file path" }, { status: 400 });
             }
             if (hasHiddenSegment(relativePath)) {
@@ -345,7 +345,7 @@ export const fileRoutes = {
 
         PUT: async (request: Request) => {
             const relativePath = filePathFromRequest(request);
-            if (relativePath === null) {
+            if (relativePath === undefined) {
                 return json({ error: "Malformed file path" }, { status: 400 });
             }
             if (hasHiddenSegment(relativePath)) {
@@ -388,7 +388,7 @@ export const fileRoutes = {
             const fullPath = safePathWithinRoot(relativePath, root);
             const safeFullPath = fullPath
                 ? prepareSafeWriteTargetWithinRoot(fullPath, root)
-                : null;
+                : undefined;
             if (!safeFullPath) {
                 return json(
                     { error: "Access denied: path outside workspace" },

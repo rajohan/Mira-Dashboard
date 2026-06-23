@@ -44,7 +44,7 @@ export function SearchInput({
                 >
                     <X aria-hidden="true" className="h-4 w-4" />
                 </button>
-            ) : null}
+            ) : undefined}
         </div>
     );
 }

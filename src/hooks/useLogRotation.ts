@@ -8,7 +8,7 @@ export interface LogRotationSummary {
     isOk: boolean;
     isDryRun: boolean;
     startedAt: string;
-    finishedAt: string | null;
+    finishedAt: string | undefined;
     checkedGroups: number;
     checkedFiles: number;
     rotatedFiles: number;
@@ -37,7 +37,7 @@ export interface LogRotationRunResult {
 /** Represents log rotation status. */
 export interface LogRotationStatus {
     isSuccess: boolean;
-    lastRun: LogRotationSummary | null;
+    lastRun: LogRotationSummary | undefined;
 }
 
 /** Defines log rotation keys. */
@@ -51,7 +51,7 @@ export function useLogRotationStatus(refreshInterval: number | false = false) {
         queryKey: logRotationKeys.status,
         queryFn: () => apiFetchRequired<LogRotationStatus>("/ops/log-rotation/status"),
         refetchInterval: refreshInterval,
-        staleTime: 2_000,
+        staleTime: 2000,
     });
 }
 

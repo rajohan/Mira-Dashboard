@@ -10,14 +10,14 @@ export interface ScheduledJob {
     enabled: boolean;
     scheduleType: "interval" | "daily" | "cron";
     intervalSeconds: number;
-    timeOfDay: string | null;
-    cronExpression: string | null;
+    timeOfDay?: string | undefined;
+    cronExpression?: string | undefined;
     actionKey: string;
     actionPayload: Record<string, unknown>;
-    nextRunAt: string | null;
+    nextRunAt?: string | undefined;
     createdAt: string;
     updatedAt: string;
-    lastRun: ScheduledJobRun | null;
+    lastRun?: ScheduledJobRun | undefined;
     isRunning: boolean;
 }
 
@@ -28,16 +28,16 @@ export interface ScheduledJobRun {
     status: "running" | "success" | "failed";
     triggerType: "manual" | "schedule";
     startedAt: string;
-    finishedAt: string | null;
-    message: string | null;
+    finishedAt?: string | undefined;
+    message?: string | undefined;
     output: Record<string, unknown>;
 }
 
 export type ScheduledJobPatch = Partial<
-    Pick<
-        ScheduledJob,
-        "cronExpression" | "enabled" | "intervalSeconds" | "scheduleType" | "timeOfDay"
-    >
+    Omit<Pick<ScheduledJob, "enabled" | "intervalSeconds" | "scheduleType">, never> & {
+        cronExpression?: string | null | undefined;
+        timeOfDay?: string | null | undefined;
+    }
 >;
 
 interface ScheduledJobRunsResponse {

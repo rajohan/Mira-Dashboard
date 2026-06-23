@@ -14,7 +14,7 @@ function safeJsonParse(value: string): unknown {
     try {
         return JSON.parse(value);
     } catch {
-        return null;
+        return undefined;
     }
 }
 
@@ -87,7 +87,7 @@ function normalizeStructuredMessage(parsed: Record<string, unknown>): {
                     nestedRecord["0"];
                 if (typeof nestedMessage === "string" && nestedMessage.trim()) {
                     message = nestedMessage;
-                } else if (nestedMessage != null && String(nestedMessage).trim()) {
+                } else if (nestedMessage !== undefined && String(nestedMessage).trim()) {
                     message = stringifyCompact(nestedMessage);
                 } else if (!subsystem) {
                     message = positionalZero;
@@ -98,13 +98,13 @@ function normalizeStructuredMessage(parsed: Record<string, unknown>): {
         } else {
             message = positionalZero;
         }
-    } else if (positionalZero != null && String(positionalZero) !== "") {
+    } else if (positionalZero !== undefined && String(positionalZero) !== "") {
         message = stringifyCompact(positionalZero);
     }
 
     if (!message && typeof positionalOne === "string") {
         message = positionalOne;
-    } else if (!message && positionalOne != null && String(positionalOne) !== "") {
+    } else if (!message && positionalOne !== undefined && String(positionalOne) !== "") {
         message = stringifyCompact(positionalOne);
     }
 
@@ -116,7 +116,7 @@ function normalizeStructuredMessage(parsed: Record<string, unknown>): {
         const fallback = parsed.msg ?? parsed.message;
         if (typeof fallback === "string") {
             message = fallback;
-        } else if (fallback != null) {
+        } else if (fallback !== undefined) {
             message = stringifyCompact(fallback);
         }
     }
@@ -152,8 +152,8 @@ function buildDedupeKey(entry: {
 }
 
 /** Parses log line. */
-export function parseLogLine(line: string, index?: number): LogEntry | null {
-    if (!line || !line.trim()) return null;
+export function parseLogLine(line: string, index?: number): LogEntry | undefined {
+    if (!line || !line.trim()) return undefined;
 
     let jsonString = line;
 
@@ -166,7 +166,7 @@ export function parseLogLine(line: string, index?: number): LogEntry | null {
 
     try {
         const parsed = JSON.parse(jsonString) as Record<string, unknown>;
-        const meta = typeof parsed._meta === "object" ? parsed._meta : null;
+        const meta = typeof parsed._meta === "object" ? parsed._meta : undefined;
         const levelSource =
             meta && "logLevelName" in meta
                 ? (meta as Record<string, unknown>).logLevelName
@@ -286,7 +286,8 @@ export function getSubsystemColor(subsystem?: string): string {
         case "memory": {
             return "text-emerald-400";
         }
-        default:
+        default: {
             return "text-purple-400";
+        }
     }
 }

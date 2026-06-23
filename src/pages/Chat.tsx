@@ -60,8 +60,10 @@ import {
 const CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY =
     "mira-dashboard-chat-diagnostic-visibility";
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
-const LIVE_HISTORY_POLL_MS = 2_000;
+const LIVE_HISTORY_POLL_MS = 2000;
 const ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS = 120_000;
+// eslint-disable-next-line unicorn/no-null
+const NO_CHAT_SCROLL_ELEMENT: HTMLDivElement | null = null;
 
 /** Normalizes chat agent IDs for case-insensitive session bucketing. */
 function normalizeChatAgentId(agentId: string): string {
@@ -117,7 +119,7 @@ export function readDeletedMessageKeys(sessionKey: string): Set<string> {
     }
 
     try {
-        const raw = window.localStorage.getItem(deletedMessagesStorageKey(sessionKey));
+        const raw = localStorage.getItem(deletedMessagesStorageKey(sessionKey));
         const parsed = raw ? (JSON.parse(raw) as unknown) : [];
         return new Set(
             Array.isArray(parsed)
@@ -136,7 +138,7 @@ export function writeDeletedMessageKeys(sessionKey: string, keys: Set<string>): 
     }
 
     try {
-        window.localStorage.setItem(
+        localStorage.setItem(
             deletedMessagesStorageKey(sessionKey),
             JSON.stringify([...keys])
         );
@@ -152,7 +154,7 @@ interface StoredChatDiagnosticVisibility {
 }
 
 /** Performs session timestamp milliseconds. */
-export function sessionTimestampMs(value: unknown): number | null {
+export function sessionTimestampMs(value: unknown): number | undefined {
     if (typeof value === "number" && Number.isFinite(value)) {
         return value;
     }
@@ -161,7 +163,7 @@ export function sessionTimestampMs(value: unknown): number | null {
         return timestampFromDateString(value);
     }
 
-    return null;
+    return undefined;
 }
 
 /** Performs history has newer assistant message. */
@@ -171,7 +173,7 @@ export function hasNewerAssistantMessageInHistory(
 ): boolean {
     const streamUpdatedAt = sessionTimestampMs(updatedAt);
 
-    if (streamUpdatedAt === null) {
+    if (streamUpdatedAt === undefined) {
         return false;
     }
 
@@ -181,7 +183,7 @@ export function hasNewerAssistantMessageInHistory(
         }
 
         const messageTimestamp = sessionTimestampMs(message.timestamp);
-        return messageTimestamp !== null && messageTimestamp >= streamUpdatedAt;
+        return messageTimestamp !== undefined && messageTimestamp >= streamUpdatedAt;
     });
 }
 
@@ -200,7 +202,7 @@ export function nextHistoryBottomState(
 
 /** Returns the next send error after a history load failure. */
 export function nextHistoryLoadSendError(
-    wasPrevious: string | null,
+    wasPrevious: string | undefined,
     wasCanceled: boolean,
     historyLoadError: string
 ) {
@@ -231,7 +233,7 @@ export function readStoredChatDiagnosticVisibility(): StoredChatDiagnosticVisibi
     }
 
     try {
-        const raw = window.localStorage.getItem(CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY);
+        const raw = localStorage.getItem(CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY);
         if (!raw) {
             return { thinking: false, tools: false };
         }
@@ -251,7 +253,7 @@ export function writeStoredChatDiagnosticVisibility(
     visibility: StoredChatDiagnosticVisibility
 ): void {
     try {
-        window.localStorage.setItem(
+        localStorage.setItem(
             CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY,
             JSON.stringify(visibility)
         );
@@ -262,7 +264,7 @@ export function writeStoredChatDiagnosticVisibility(
 
 /** Performs supported audio recording MIME type. */
 export function supportedAudioRecordingMimeType(): string | undefined {
-    if (window.MediaRecorder === undefined) {
+    if (typeof MediaRecorder === "undefined") {
         return undefined;
     }
 
@@ -274,34 +276,38 @@ export function supportedAudioRecordingMimeType(): string | undefined {
         "audio/ogg;codecs=opus",
     ];
 
-    return candidates.find((mimeType) => window.MediaRecorder.isTypeSupported(mimeType));
+    return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
 }
 
 /** Renders the chat UI. */
 export function Chat() {
     const { connectionId, isConnected, error, request, subscribe } = useOpenClawSocket();
-    const messagesContainerReference = useRef<HTMLDivElement | null>(null);
-    const messagesBottomReference = useRef<HTMLDivElement | null>(null);
-    const fileInputReference = useRef<HTMLInputElement | null>(null);
+    const messagesContainerReference = useRef<HTMLDivElement | undefined>(undefined);
+    const messagesBottomReference = useRef<HTMLDivElement | undefined>(undefined);
+    const fileInputReference = useRef<HTMLInputElement | undefined>(undefined);
     const shouldStickToBottomReference = useRef(true);
     const lastKnownMessagesScrollTopReference = useRef(0);
     const activeStreamsReference = useRef<ActiveChatStreams>({});
-    const liveHistoryRefreshTimerReference = useRef<number | null>(null);
-    const backgroundHistoryRefreshAbortReference = useRef<AbortController | null>(null);
-    const mediaRecorderReference = useRef<MediaRecorder | null>(null);
+    const liveHistoryRefreshTimerReference = useRef<
+        ReturnType<typeof setTimeout> | undefined
+    >(undefined);
+    const backgroundHistoryRefreshAbortReference = useRef<AbortController | undefined>(
+        undefined
+    );
+    const mediaRecorderReference = useRef<MediaRecorder | undefined>(undefined);
     const recordingChunksReference = useRef<Blob[]>([]);
-    const voiceFileInputReference = useRef<HTMLInputElement | null>(null);
+    const voiceFileInputReference = useRef<HTMLInputElement | undefined>(undefined);
     const loadedHistorySessionReference = useRef("");
     const selectedSessionKeyReference = useRef("");
     const previousChatRowsLengthReference = useRef(0);
     const previousSelectedSessionKeyReference = useRef("");
     const previousSelectedStreamTextReference = useRef("");
-    const bottomFollowFrameReference = useRef<number | null>(null);
+    const bottomFollowFrameReference = useRef<number | undefined>(undefined);
     const sendInFlightCountReference = useRef(0);
     const sendEpochReference = useRef(0);
     const resetConfirmResolverReference = useRef<
-        ((wasConfirmed: boolean) => void) | null
-    >(null);
+        ((wasConfirmed: boolean) => void) | undefined
+    >(undefined);
 
     const [selectedSessionKey, setSelectedSessionKey] = useState("");
     const [draft, setDraft] = useState("");
@@ -309,19 +315,21 @@ export function Chat() {
     const [messages, setMessages] = useState<ChatHistoryMessage[]>([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const [activeStreams, setActiveStreams] = useState<ActiveChatStreams>({});
-    const [sendError, setSendError] = useState<string | null>(null);
+    const [sendError, setSendError] = useState<string | undefined>(undefined);
     const [deletedMessageKeys, setDeletedMessageKeys] = useState<Set<string>>(
         () => new Set()
     );
-    const [pendingDeleteMessageKey, setPendingDeleteMessageKey] = useState<string | null>(
-        null
-    );
+    const [pendingDeleteMessageKey, setPendingDeleteMessageKey] = useState<
+        string | undefined
+    >(undefined);
     const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [isSending, setIsSending] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
-    const [previewItem, setPreviewItem] = useState<ChatPreviewItem | null>(null);
+    const [previewItem, setPreviewItem] = useState<ChatPreviewItem | undefined>(
+        undefined
+    );
     const [showThinkingOutput, setShowThinkingOutput] = useState(
         () => readStoredChatDiagnosticVisibility().thinking
     );
@@ -352,10 +360,10 @@ export function Chat() {
     const sessionMap = new Map(sortedSessions.map((session) => [session.key, session]));
     const selectedSessionUpdatedAt = selectedSessionKey
         ? sessionMap.get(selectedSessionKey)?.updatedAt
-        : null;
+        : undefined;
     const selectedSession = selectedSessionKey
-        ? sessionMap.get(selectedSessionKey) || null
-        : null;
+        ? sessionMap.get(selectedSessionKey) || undefined
+        : undefined;
     selectedSessionKeyReference.current = selectedSessionKey;
     const selectedAgentId = selectedSession ? getChatAgentId(selectedSession) : "";
     const sessionsForSelectedAgent = selectedAgentId
@@ -374,7 +382,7 @@ export function Chat() {
     );
     const selectedStreamUpdatedAt = sessionTimestampMs(selectedStream?.updatedAt);
     const isSelectedStreamIsQuiet =
-        selectedStreamUpdatedAt === null ||
+        selectedStreamUpdatedAt === undefined ||
         Date.now() - selectedStreamUpdatedAt >= ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
     const isSelectedStreamIsRecoveredInMessages = Boolean(
         selectedStreamText.trim() &&
@@ -453,7 +461,7 @@ export function Chat() {
         setDeletedMessageKeys(
             selectedSessionKey ? readDeletedMessageKeys(selectedSessionKey) : new Set()
         );
-        setPendingDeleteMessageKey(null);
+        setPendingDeleteMessageKey(undefined);
     }, [selectedSessionKey]);
 
     useEffect(() => {
@@ -464,9 +472,9 @@ export function Chat() {
 
             updateActiveStreams(() => ({}));
 
-            if (liveHistoryRefreshTimerReference.current !== null) {
-                window.clearTimeout(liveHistoryRefreshTimerReference.current);
-                liveHistoryRefreshTimerReference.current = null;
+            if (liveHistoryRefreshTimerReference.current !== undefined) {
+                clearTimeout(liveHistoryRefreshTimerReference.current);
+                liveHistoryRefreshTimerReference.current = undefined;
             }
 
             return;
@@ -528,7 +536,7 @@ export function Chat() {
         /** Performs load history. */
         const loadHistory = async () => {
             setIsLoadingHistory(true);
-            setSendError(null);
+            setSendError(undefined);
 
             try {
                 const result = (await request("chat.history", {
@@ -604,85 +612,75 @@ export function Chat() {
         backgroundHistoryRefreshAbortReference.current = abortController;
         let isCancelled = false;
 
-        /** Performs refresh history. */
-        const refreshHistory = async () => {
-            const refreshVisibleHistory = async () => {
-                try {
-                    const result = (await request("chat.history", {
-                        sessionKey: requestSessionKey,
-                        limit: CHAT_HISTORY_LIMIT,
-                    })) as {
-                        messages?: RawChatHistoryMessage[];
-                    };
-                    const shouldApplyResult =
-                        !isCancelled &&
-                        !abortController.signal.aborted &&
-                        selectedSessionKeyReference.current === requestSessionKey;
-                    if (!shouldApplyResult) {
-                        return;
-                    }
-
-                    const nextMessages = visibleHistoryMessages(
-                        result.messages,
-                        createChatVisibility(showThinkingOutput, showToolOutput)
-                    );
-                    const activeStream =
-                        activeStreamsReference.current[requestSessionKey];
-                    const activeStreamUpdatedAt = sessionTimestampMs(
-                        activeStream?.updatedAt
-                    );
-                    const isActiveStreamIsQuiet =
-                        activeStreamUpdatedAt === null ||
-                        Date.now() - activeStreamUpdatedAt >=
-                            ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
-                    const isRecoveredStreamInHistory = Boolean(
-                        activeStream &&
-                        isActiveStreamIsQuiet &&
-                        ((activeStream.text &&
-                            hasRecoveredStreamHistory(nextMessages, activeStream.text)) ||
-                            hasNewerAssistantMessageInHistory(
-                                nextMessages,
-                                activeStream.updatedAt
-                            ))
-                    );
-                    setMessages((wasPrevious) => {
-                        const previousLast = wasPrevious.at(-1)?.timestamp;
-                        const nextLast = nextMessages.at(-1)?.timestamp;
-
-                        if (
-                            wasPrevious.length === nextMessages.length &&
-                            previousLast === nextLast
-                        ) {
-                            return wasPrevious;
-                        }
-
-                        return mergeWithRecentOptimisticMessages(
-                            wasPrevious,
-                            nextMessages
-                        );
-                    });
-                    setIsAtBottom(shouldStickToBottomReference.current);
-                    if (isRecoveredStreamInHistory) {
-                        updateActiveStreams((wasPrevious) => {
-                            const next = { ...wasPrevious };
-                            delete next[requestSessionKey];
-                            return next;
-                        });
-                    }
-                } catch {
-                    // Ignore background refresh failures.
+        /** Performs refresh visible history. */
+        const refreshVisibleHistory = async () => {
+            try {
+                const result = (await request("chat.history", {
+                    sessionKey: requestSessionKey,
+                    limit: CHAT_HISTORY_LIMIT,
+                })) as {
+                    messages?: RawChatHistoryMessage[];
+                };
+                const shouldApplyResult =
+                    !isCancelled &&
+                    !abortController.signal.aborted &&
+                    selectedSessionKeyReference.current === requestSessionKey;
+                if (!shouldApplyResult) {
+                    return;
                 }
-            };
 
-            await refreshVisibleHistory();
+                const nextMessages = visibleHistoryMessages(
+                    result.messages,
+                    createChatVisibility(showThinkingOutput, showToolOutput)
+                );
+                const activeStream = activeStreamsReference.current[requestSessionKey];
+                const activeStreamUpdatedAt = sessionTimestampMs(activeStream?.updatedAt);
+                const isActiveStreamIsQuiet =
+                    activeStreamUpdatedAt === undefined ||
+                    Date.now() - activeStreamUpdatedAt >=
+                        ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
+                const isRecoveredStreamInHistory = Boolean(
+                    activeStream &&
+                    isActiveStreamIsQuiet &&
+                    ((activeStream.text &&
+                        hasRecoveredStreamHistory(nextMessages, activeStream.text)) ||
+                        hasNewerAssistantMessageInHistory(
+                            nextMessages,
+                            activeStream.updatedAt
+                        ))
+                );
+                setMessages((wasPrevious) => {
+                    const previousLast = wasPrevious.at(-1)?.timestamp;
+                    const nextLast = nextMessages.at(-1)?.timestamp;
+
+                    if (
+                        wasPrevious.length === nextMessages.length &&
+                        previousLast === nextLast
+                    ) {
+                        return wasPrevious;
+                    }
+
+                    return mergeWithRecentOptimisticMessages(wasPrevious, nextMessages);
+                });
+                setIsAtBottom(shouldStickToBottomReference.current);
+                if (isRecoveredStreamInHistory) {
+                    updateActiveStreams((wasPrevious) => {
+                        const next = { ...wasPrevious };
+                        delete next[requestSessionKey];
+                        return next;
+                    });
+                }
+            } catch {
+                // Ignore background refresh failures.
+            }
         };
 
-        void refreshHistory();
+        void refreshVisibleHistory();
 
         return () => {
             isCancelled = true;
             abortController.abort();
-            backgroundHistoryRefreshAbortReference.current = null;
+            backgroundHistoryRefreshAbortReference.current = undefined;
         };
     }, [
         isLoadingHistory,
@@ -756,14 +754,14 @@ export function Chat() {
             }
         };
 
-        const interval = window.setInterval(
+        const interval = setInterval(
             () => void refreshVisibleHistory(),
             LIVE_HISTORY_POLL_MS
         );
 
         return () => {
             isCancelled = true;
-            window.clearInterval(interval);
+            clearInterval(interval);
         };
     }, [isConnected, request, selectedSessionKey, showThinkingOutput, showToolOutput]);
 
@@ -828,12 +826,12 @@ export function Chat() {
 
     /** Performs schedule bottom follow. */
     const scheduleBottomFollow = () => {
-        if (bottomFollowFrameReference.current !== null) {
+        if (bottomFollowFrameReference.current !== undefined) {
             return;
         }
 
         bottomFollowFrameReference.current = requestAnimationFrame(() => {
-            bottomFollowFrameReference.current = null;
+            bottomFollowFrameReference.current = undefined;
             scrollMessagesToBottom();
         });
     };
@@ -841,7 +839,8 @@ export function Chat() {
     const messagesVirtualizer = useVirtualizer({
         count: chatRows.length,
         getItemKey: (index) => chatRows[index]?.key ?? `row-${index}`,
-        getScrollElement: () => messagesContainerReference.current,
+        getScrollElement: () =>
+            messagesContainerReference.current ?? NO_CHAT_SCROLL_ELEMENT,
         estimateSize: (index) => (chatRows[index]?.kind === "typing" ? 76 : 160),
         overscan: 12,
         useAnimationFrameWithResizeObserver: true,
@@ -896,14 +895,14 @@ export function Chat() {
     }, [chatRows.length, selectedStreamText, selectedSessionKey]);
 
     const sessionOptions = sessionsForSelectedAgent
-        .filter(hasSessionKey)
+        .filter((session) => hasSessionKey(session))
         .map((session) => ({
             value: session.key,
             label: formatChatSessionLabel(session, selectedAgentId),
             description: `${formatSessionType(session)} · ${session.model || "Unknown"}`,
         }));
 
-    const selectableSessions = sortedSessions.filter(hasSessionKey);
+    const selectableSessions = sortedSessions.filter((session) => hasSessionKey(session));
     const agentSessionCounts = new Map<string, number>();
     for (const session of selectableSessions) {
         const agentId = getChatAgentId(session);
@@ -967,13 +966,13 @@ export function Chat() {
             writeDeletedMessageKeys(selectedSessionKey, next);
             return next;
         });
-        setPendingDeleteMessageKey(null);
+        setPendingDeleteMessageKey(undefined);
     };
 
     /** Resolves a pending reset confirmation and hides the modal. */
     const closeResetConfirm = (wasConfirmed: boolean) => {
         resetConfirmResolverReference.current?.(wasConfirmed);
-        resetConfirmResolverReference.current = null;
+        resetConfirmResolverReference.current = undefined;
         setIsResetConfirmOpen(false);
     };
 
@@ -988,17 +987,17 @@ export function Chat() {
     useEffect(() => {
         return () => {
             resetConfirmResolverReference.current?.(false);
-            resetConfirmResolverReference.current = null;
+            resetConfirmResolverReference.current = undefined;
         };
     }, []);
 
     /** Responds to files selected events. */
-    const handleFilesSelected = async (files: FileList | null) => {
+    const handleFilesSelected = async (files: FileList | undefined) => {
         if (!files || files.length === 0) {
             return;
         }
 
-        setSendError(null);
+        setSendError(undefined);
 
         const remainingSlots = MAX_ATTACHMENTS - attachments.length;
         const selectedFiles = [...files].slice(0, remainingSlots);
@@ -1058,7 +1057,7 @@ export function Chat() {
         }
 
         setIsTranscribing(true);
-        setSendError(null);
+        setSendError(undefined);
 
         try {
             const response = await fetch("/api/stt/transcribe", {
@@ -1099,7 +1098,7 @@ export function Chat() {
     };
 
     /** Responds to voice file selected events. */
-    const handleVoiceFileSelected = async (files: FileList | null) => {
+    const handleVoiceFileSelected = async (files: FileList | undefined) => {
         const file = files?.[0];
         if (!file) {
             return;
@@ -1133,11 +1132,11 @@ export function Chat() {
         const canUseDirectRecorder =
             Boolean(mediaDevices) &&
             typeof mediaDevices?.getUserMedia === "function" &&
-            window.MediaRecorder !== undefined;
+            typeof MediaRecorder !== "undefined";
 
         if (!canUseDirectRecorder) {
             setSendError(
-                window.isSecureContext
+                isSecureContext
                     ? "Direct voice recording is not supported here. Choose or record an audio file instead."
                     : "Direct voice recording requires HTTPS or localhost. Choose or record an audio file instead."
             );
@@ -1145,16 +1144,16 @@ export function Chat() {
             return;
         }
 
-        let stream: MediaStream | null = null;
+        let stream: MediaStream | undefined;
 
         try {
-            setSendError(null);
+            setSendError(undefined);
             stream = await mediaDevices!.getUserMedia({ audio: true });
             const recordingStream = stream;
             const mimeType = supportedAudioRecordingMimeType();
             const recorder = mimeType
-                ? new window.MediaRecorder(recordingStream, { mimeType })
-                : new window.MediaRecorder(recordingStream);
+                ? new MediaRecorder(recordingStream, { mimeType })
+                : new MediaRecorder(recordingStream);
             recordingChunksReference.current = [];
             mediaRecorderReference.current = recorder;
 
@@ -1169,7 +1168,7 @@ export function Chat() {
                     track.stop();
                 }
                 setIsRecording(false);
-                mediaRecorderReference.current = null;
+                mediaRecorderReference.current = undefined;
                 const audioBlob = new Blob(recordingChunksReference.current, {
                     type: recorder.mimeType || "audio/webm",
                 });
@@ -1282,7 +1281,7 @@ export function Chat() {
         }
         setDraft("");
         setAttachments([]);
-        setSendError(null);
+        setSendError(undefined);
         shouldStickToBottomReference.current = true;
         setIsAtBottom(true);
         scheduleBottomFollow();
@@ -1436,13 +1435,15 @@ export function Chat() {
                     )}
 
                     <input
-                        ref={voiceFileInputReference}
+                        ref={(element) => {
+                            voiceFileInputReference.current = element ?? undefined;
+                        }}
                         type="file"
                         accept="audio/*"
                         capture
                         className="hidden"
                         onChange={(event) =>
-                            void handleVoiceFileSelected(event.target.files)
+                            void handleVoiceFileSelected(event.target.files ?? undefined)
                         }
                     />
 
@@ -1470,7 +1471,7 @@ export function Chat() {
 
             <AttachmentPreviewModal
                 previewItem={previewItem}
-                onClose={() => setPreviewItem(null)}
+                onClose={() => setPreviewItem(undefined)}
             />
 
             <ConfirmModal
@@ -1479,7 +1480,7 @@ export function Chat() {
                 message="Delete this message from your chat view?"
                 confirmLabel="Delete"
                 danger
-                onCancel={() => setPendingDeleteMessageKey(null)}
+                onCancel={() => setPendingDeleteMessageKey(undefined)}
                 onConfirm={confirmDeleteMessage}
             />
 

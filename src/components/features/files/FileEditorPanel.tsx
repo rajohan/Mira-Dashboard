@@ -15,7 +15,7 @@ import { PreviewToggle } from "./PreviewToggle";
 
 /** Provides props for file editor panel. */
 interface FileEditorPanelProperties {
-    selectedPath: string | null;
+    selectedPath: string | undefined;
     fileContent?: FileContent;
     contentLoading: boolean;
     isEditable: boolean;
@@ -28,7 +28,7 @@ interface FileEditorPanelProperties {
     codeEditMode: boolean;
     syntaxClass: string;
     isJsonEditing: boolean;
-    jsonValidation: { valid: boolean; error: string | null };
+    jsonValidation: { valid: boolean; error: string | undefined };
     onSave: () => void;
     onContentChange: (value: string) => void;
     onMarkdownPreviewChange: (isValue: boolean) => void;

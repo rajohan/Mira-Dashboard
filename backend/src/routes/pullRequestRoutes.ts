@@ -50,8 +50,8 @@ export const pullRequestRoutes = {
             if (number instanceof Response) return number;
             try {
                 const body = request.body
-                    ? await readJson<{ deploy?: unknown } | null>(request)
-                    : null;
+                    ? await readJson<{ deploy?: unknown } | undefined>(request)
+                    : undefined;
                 return json(await approvePullRequest(number, body?.deploy === true));
             } catch (error) {
                 return routeError(error);
@@ -64,8 +64,8 @@ export const pullRequestRoutes = {
             if (number instanceof Response) return number;
             try {
                 const body = request.body
-                    ? await readJson<{ comment?: unknown } | null>(request)
-                    : null;
+                    ? await readJson<{ comment?: unknown } | undefined>(request)
+                    : undefined;
                 const comment =
                     typeof body?.comment === "string" && body.comment.trim()
                         ? body.comment.trim()

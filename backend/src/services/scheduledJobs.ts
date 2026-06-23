@@ -1,12 +1,8 @@
-import { database } from "../database.ts";
+import { database, sqlNullable } from "../database.ts";
 import { errorMessage } from "../lib/errors.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
-}
-
-function patchValue<T>(value: T | undefined, existing: T): T {
-    return value === undefined ? existing : value;
 }
 
 const schedulerTickMs = 30_000;
@@ -19,10 +15,10 @@ const actionHandlers = new Map<string, ScheduledJobActionRegistration>();
 const abortHandlerSettled = new WeakMap<ScheduledJobAbortError, Promise<unknown>>();
 
 const scheduledJobRuntimeState: {
-    scheduler: NodeJS.Timeout | null;
+    scheduler: NodeJS.Timeout | undefined;
     isSchedulerTickRunning: boolean;
 } = {
-    scheduler: null,
+    scheduler: undefined,
     isSchedulerTickRunning: false,
 };
 const scheduledJobRunTimeoutMs = defaultScheduledJobRunTimeoutMs;
@@ -62,14 +58,14 @@ export interface ScheduledJob {
     enabled: boolean;
     scheduleType: ScheduledJobScheduleType;
     intervalSeconds: number;
-    timeOfDay: string | null;
-    cronExpression: string | null;
+    timeOfDay: string | undefined;
+    cronExpression: string | undefined;
     actionKey: string;
     actionPayload: Record<string, unknown>;
-    nextRunAt: string | null;
+    nextRunAt: string | undefined;
     createdAt: string;
     updatedAt: string;
-    lastRun: ScheduledJobRun | null;
+    lastRun: ScheduledJobRun | undefined;
     isRunning: boolean;
 }
 
@@ -79,8 +75,8 @@ export interface ScheduledJobRun {
     status: ScheduledJobRunStatus;
     triggerType: ScheduledJobTriggerType;
     startedAt: string;
-    finishedAt: string | null;
-    message: string | null;
+    finishedAt: string | undefined;
+    message: string | undefined;
     output: Record<string, unknown>;
 }
 
@@ -91,8 +87,8 @@ export interface ScheduledJobDefinition {
     enabled?: boolean;
     scheduleType: ScheduledJobScheduleType;
     intervalSeconds?: number;
-    timeOfDay?: string | null;
-    cronExpression?: string | null;
+    timeOfDay?: string | undefined;
+    cronExpression?: string | undefined;
     actionKey: string;
     actionPayload?: Record<string, unknown>;
 }
@@ -101,8 +97,8 @@ export interface ScheduledJobPatch {
     enabled?: boolean;
     scheduleType?: ScheduledJobScheduleType;
     intervalSeconds?: number;
-    timeOfDay?: string | null;
-    cronExpression?: string | null;
+    timeOfDay?: string | null | undefined;
+    cronExpression?: string | null | undefined;
 }
 
 interface ScheduledJobRow {
@@ -112,11 +108,11 @@ interface ScheduledJobRow {
     enabled: number;
     schedule_type: string;
     interval_seconds: number;
-    time_of_day: string | null;
-    cron_expression: string | null;
+    time_of_day: string | null | undefined;
+    cron_expression: string | null | undefined;
     action_key: string;
     action_payload_json: string;
-    next_run_at: string | null;
+    next_run_at: string | null | undefined;
     created_at: string;
     updated_at: string;
 }
@@ -127,8 +123,8 @@ interface ScheduledJobRunRow {
     status: string;
     trigger_type: string;
     started_at: string;
-    finished_at: string | null;
-    message: string | null;
+    finished_at: string | null | undefined;
+    message: string | null | undefined;
     output_json: string;
 }
 
@@ -140,6 +136,10 @@ export class ScheduledJobValidationError extends Error {
         this.name = "ScheduledJobValidationError";
         this.statusCode = 400;
     }
+}
+
+function fromSqlNullable<T>(value: T | null | undefined): T | undefined {
+    return value ?? undefined;
 }
 
 export function isScheduledJobValidationError(
@@ -178,8 +178,8 @@ function assertValidActionKey(actionKey: string): void {
 function assertValidSchedule(
     scheduleType: ScheduledJobScheduleType,
     intervalSeconds: number,
-    timeOfDay: string | null,
-    cronExpression: string | null
+    timeOfDay: string | undefined,
+    cronExpression: string | undefined
 ): void {
     if (scheduleType === "interval") {
         if (
@@ -209,34 +209,49 @@ function parseCronField(
     field: string,
     minimum: number,
     maximum: number
-): Set<number> | null {
+): Set<number> | undefined {
     const values = new Set<number>();
     for (const part of field.split(",")) {
         if (!part) {
-            return null;
+            return undefined;
         }
         const stepPieces = part.split("/");
         if (stepPieces.length > 2) {
-            return null;
+            return undefined;
         }
         const [rangePart = "", stepPart] = stepPieces;
         const step = stepPart === undefined ? 1 : Number(stepPart);
         if (!Number.isSafeInteger(step) || step < 1) {
-            return null;
+            return undefined;
         }
         const rangePieces = rangePart.split("-");
         if (rangePieces.length > 2) {
-            return null;
+            return undefined;
         }
-        const [start, end] =
-            rangePart === "*"
-                ? [minimum, maximum]
-                : rangePart.includes("-")
-                  ? rangePieces.map(Number)
-                  : [
-                        Number(rangePart),
-                        stepPart === undefined ? Number(rangePart) : maximum,
-                    ];
+        let start: number;
+        let end: number;
+        if (rangePart === "*") {
+            start = minimum;
+            end = maximum;
+        } else if (rangePart.includes("-")) {
+            const [rawStart, rawEnd] = rangePieces;
+            if (
+                rawStart === undefined ||
+                rawStart === "" ||
+                rawEnd === undefined ||
+                rawEnd === ""
+            ) {
+                return undefined;
+            }
+            start = Number(rawStart);
+            end = Number(rawEnd);
+        } else {
+            if (rangePart === "") {
+                return undefined;
+            }
+            start = Number(rangePart);
+            end = stepPart === undefined ? Number(rangePart) : maximum;
+        }
         if (
             !Number.isSafeInteger(start) ||
             !Number.isSafeInteger(end) ||
@@ -244,7 +259,7 @@ function parseCronField(
             end > maximum ||
             start > end
         ) {
-            return null;
+            return undefined;
         }
         for (let value = start; value <= end; value += step) {
             values.add(value);
@@ -266,27 +281,38 @@ function isCronFieldWildcard(
     return true;
 }
 
-function parseCronExpression(expression: string): null | {
-    minutes: Set<number>;
-    hours: Set<number>;
-    daysOfMonth: Set<number>;
-    months: Set<number>;
-    daysOfWeek: Set<number>;
-    dayOfMonthWildcard: boolean;
-    dayOfWeekWildcard: boolean;
-} {
+function parseCronExpression(expression: string):
+    | undefined
+    | {
+          minutes: Set<number>;
+          hours: Set<number>;
+          daysOfMonth: Set<number>;
+          months: Set<number>;
+          daysOfWeek: Set<number>;
+          dayOfMonthWildcard: boolean;
+          dayOfWeekWildcard: boolean;
+      } {
     const fields = expression.trim().split(/\s+/u);
     if (fields.length !== 5) {
-        return null;
+        return undefined;
     }
     const [minute, hour, dayOfMonth, month, dayOfWeek] = fields;
+    if (
+        minute === undefined ||
+        hour === undefined ||
+        dayOfMonth === undefined ||
+        month === undefined ||
+        dayOfWeek === undefined
+    ) {
+        return undefined;
+    }
     const minutes = parseCronField(minute, 0, 59);
     const hours = parseCronField(hour, 0, 23);
     const daysOfMonth = parseCronField(dayOfMonth, 1, 31);
     const months = parseCronField(month, 1, 12);
     const daysOfWeek = parseCronField(dayOfWeek, 0, 7);
     if (!minutes || !hours || !daysOfMonth || !months || !daysOfWeek) {
-        return null;
+        return undefined;
     }
     if (daysOfWeek.has(7)) {
         daysOfWeek.add(0);
@@ -364,9 +390,9 @@ export function calculateNextRunAt(
     > &
         Pick<Partial<ScheduledJob>, "cronExpression">,
     from = new Date()
-): string | null {
+): string | undefined {
     if (!job.enabled) {
-        return null;
+        return undefined;
     }
     if (job.scheduleType === "daily" && job.timeOfDay) {
         return nextDailyRun(from, job.timeOfDay).toISOString();
@@ -377,9 +403,9 @@ export function calculateNextRunAt(
     return dateToISOString(new Date(from.getTime() + job.intervalSeconds * 1000));
 }
 
-function mapRun(row: ScheduledJobRunRow | undefined): ScheduledJobRun | null {
+function mapRun(row: ScheduledJobRunRow | undefined): ScheduledJobRun | undefined {
     if (!row) {
-        return null;
+        return undefined;
     }
     return {
         id: row.id,
@@ -387,8 +413,8 @@ function mapRun(row: ScheduledJobRunRow | undefined): ScheduledJobRun | null {
         status: row.status as ScheduledJobRunStatus,
         triggerType: row.trigger_type as ScheduledJobTriggerType,
         startedAt: row.started_at,
-        finishedAt: row.finished_at,
-        message: row.message,
+        finishedAt: fromSqlNullable(row.finished_at),
+        message: fromSqlNullable(row.message),
         output: parseJsonObject(row.output_json),
     };
 }
@@ -450,14 +476,14 @@ function mapJob(
         enabled: row.enabled === 1,
         scheduleType: row.schedule_type as ScheduledJobScheduleType,
         intervalSeconds: row.interval_seconds,
-        timeOfDay: row.time_of_day,
-        cronExpression: row.cron_expression,
+        timeOfDay: fromSqlNullable(row.time_of_day),
+        cronExpression: fromSqlNullable(row.cron_expression),
         actionKey: row.action_key,
         actionPayload: parseJsonObject(row.action_payload_json),
-        nextRunAt: row.next_run_at,
+        nextRunAt: fromSqlNullable(row.next_run_at),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
-        lastRun: latestRuns.get(row.id) ?? null,
+        lastRun: latestRuns.get(row.id) ?? undefined,
         isRunning: runningJobs.has(row.id),
     };
 }
@@ -501,11 +527,11 @@ export function upsertScheduledJob(definition: ScheduledJobDefinition): Schedule
         definition.intervalSeconds ?? existing?.intervalSeconds ?? 3600;
     const timeOfDay =
         definition.timeOfDay === undefined
-            ? (existing?.timeOfDay ?? null)
+            ? (existing?.timeOfDay ?? undefined)
             : definition.timeOfDay;
     const cronExpression =
         definition.cronExpression === undefined
-            ? (existing?.cronExpression ?? null)
+            ? (existing?.cronExpression ?? undefined)
             : definition.cronExpression;
     assertValidSchedule(scheduleType, intervalSeconds, timeOfDay, cronExpression);
 
@@ -549,11 +575,11 @@ export function upsertScheduledJob(definition: ScheduledJobDefinition): Schedule
             enabled ? 1 : 0,
             scheduleType,
             intervalSeconds,
-            timeOfDay,
-            cronExpression,
+            sqlNullable(timeOfDay),
+            sqlNullable(cronExpression),
             definition.actionKey,
             JSON.stringify(definition.actionPayload ?? {}),
-            nextRunAt,
+            sqlNullable(nextRunAt),
             existing?.createdAt ?? timestamp,
             timestamp
         );
@@ -568,11 +594,11 @@ export function listScheduledJobs(): ScheduledJob[] {
     return rows.map((row) => mapJob(row, latestRuns));
 }
 
-export function getScheduledJob(id: string): ScheduledJob | null {
+export function getScheduledJob(id: string): ScheduledJob | undefined {
     const row = database.prepare("SELECT * FROM scheduled_jobs WHERE id = ?").get(id) as
         | ScheduledJobRow
         | undefined;
-    return row ? mapJob(row) : null;
+    return row ? mapJob(row) : undefined;
 }
 
 export function listScheduledJobRuns(id: string, limit = 20): ScheduledJobRun[] {
@@ -591,7 +617,7 @@ export function listScheduledJobRuns(id: string, limit = 20): ScheduledJobRun[] 
             .all(id, normalizedLimit) as unknown as ScheduledJobRunRow[]
     )
         .map((row) => mapRun(row))
-        .filter((run): run is ScheduledJobRun => run !== null);
+        .filter((run): run is ScheduledJobRun => run !== undefined);
 }
 
 export function removeScheduledJobsNotInAction(
@@ -621,17 +647,23 @@ export function removeScheduledJobsNotInAction(
 export function updateScheduledJob(
     id: string,
     patch: ScheduledJobPatch
-): ScheduledJob | null {
+): ScheduledJob | undefined {
     const existing = getScheduledJob(id);
     if (!existing) {
-        return null;
+        return undefined;
     }
     const next = {
         enabled: patch.enabled ?? existing.enabled,
         scheduleType: patch.scheduleType ?? existing.scheduleType,
         intervalSeconds: patch.intervalSeconds ?? existing.intervalSeconds,
-        timeOfDay: patchValue(patch.timeOfDay, existing.timeOfDay),
-        cronExpression: patchValue(patch.cronExpression, existing.cronExpression),
+        timeOfDay:
+            patch.timeOfDay === undefined
+                ? existing.timeOfDay
+                : (patch.timeOfDay ?? undefined),
+        cronExpression:
+            patch.cronExpression === undefined
+                ? existing.cronExpression
+                : (patch.cronExpression ?? undefined),
     };
     assertValidSchedule(
         next.scheduleType,
@@ -660,9 +692,9 @@ export function updateScheduledJob(
             next.enabled ? 1 : 0,
             next.scheduleType,
             next.intervalSeconds,
-            next.timeOfDay,
-            next.cronExpression,
-            nextRunAt,
+            sqlNullable(next.timeOfDay),
+            sqlNullable(next.cronExpression),
+            sqlNullable(nextRunAt),
             timestamp,
             id
         );
@@ -684,8 +716,8 @@ function createRun(jobId: string, triggerType: ScheduledJobTriggerType): Schedul
         status: "running",
         triggerType,
         startedAt,
-        finishedAt: null,
-        message: null,
+        finishedAt: undefined,
+        message: undefined,
         output: {},
     };
 }
@@ -693,7 +725,7 @@ function createRun(jobId: string, triggerType: ScheduledJobTriggerType): Schedul
 function finishRun(
     run: ScheduledJobRun,
     status: Exclude<ScheduledJobRunStatus, "running">,
-    message: string | null,
+    message: string | undefined,
     output: Record<string, unknown>
 ): ScheduledJobRun {
     const finishedAt = nowIso();
@@ -703,15 +735,15 @@ function finishRun(
          SET status = ?, finished_at = ?, message = ?, output_json = ?
          WHERE id = ?`
         )
-        .run(status, finishedAt, message, JSON.stringify(output), run.id);
+        .run(status, finishedAt, sqlNullable(message), JSON.stringify(output), run.id);
     return { ...run, status, finishedAt, message, output };
 }
 
-function claimScheduledRun(job: ScheduledJob): ScheduledJobRun | null {
+function claimScheduledRun(job: ScheduledJob): ScheduledJobRun | undefined {
     const currentJob = getScheduledJob(job.id);
     const dueAt = nowIso();
     if (!currentJob?.enabled || !currentJob.nextRunAt || currentJob.nextRunAt > dueAt) {
-        return null;
+        return undefined;
     }
     const nextRunAt = calculateNextRunAt(currentJob);
     const startedAt = nowIso();
@@ -723,10 +755,10 @@ function claimScheduledRun(job: ScheduledJob): ScheduledJobRun | null {
                  SET next_run_at = ?, updated_at = ?
                  WHERE id = ? AND enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?`
             )
-            .run(nextRunAt, startedAt, currentJob.id, dueAt);
+            .run(sqlNullable(nextRunAt), startedAt, currentJob.id, dueAt);
         if (updateResult.changes === 0) {
             database.run("ROLLBACK");
-            return null;
+            return undefined;
         }
         const insertResult = database
             .prepare(
@@ -742,8 +774,8 @@ function claimScheduledRun(job: ScheduledJob): ScheduledJobRun | null {
             status: "running",
             triggerType: "schedule",
             startedAt,
-            finishedAt: null,
-            message: null,
+            finishedAt: undefined,
+            message: undefined,
             output: {},
         };
     } catch (error) {
@@ -775,7 +807,7 @@ function markAbandonedRunningRuns(): void {
 function persistedRunFallback(
     run: ScheduledJobRun,
     status: Exclude<ScheduledJobRunStatus, "running">,
-    message: string | null,
+    message: string | undefined,
     output: Record<string, unknown>
 ): ScheduledJobRun {
     return { ...run, status, finishedAt: nowIso(), message, output };
@@ -784,7 +816,7 @@ function persistedRunFallback(
 function finishRunOrReport(
     run: ScheduledJobRun,
     status: Exclude<ScheduledJobRunStatus, "running">,
-    message: string | null,
+    message: string | undefined,
     output: Record<string, unknown>
 ): ScheduledJobRun {
     try {
@@ -823,7 +855,7 @@ export function createManualScheduledJobRun(jobId: string): ScheduledJobRun {
 export function finishScheduledJobRun(
     run: ScheduledJobRun,
     status: Exclude<ScheduledJobRunStatus, "running">,
-    message: string | null,
+    message: string | undefined,
     output: Record<string, unknown>
 ): ScheduledJobRun {
     try {
@@ -891,7 +923,7 @@ export async function runScheduledJob(
                 {}
             );
         }
-        return finishRunOrReport(run, "success", null, output);
+        return finishRunOrReport(run, "success", undefined, output);
     } finally {
         runningJobs.delete(id);
     }
@@ -1056,5 +1088,5 @@ export function stopScheduledJobScheduler(): void {
         return;
     }
     clearInterval(scheduledJobRuntimeState.scheduler);
-    scheduledJobRuntimeState.scheduler = null;
+    scheduledJobRuntimeState.scheduler = undefined;
 }

@@ -30,10 +30,10 @@ export function formatDockerMemory(value: string | undefined): string {
     }
 
     /** Parses part. */
-    const parsePart = (part: string): number | null => {
+    const parsePart = (part: string): number | undefined => {
         const match = part.match(/^([0-9]+(?:\.[0-9]+)?)\s*([KMGTP]i?B|B)$/i);
         if (!match) {
-            return null;
+            return undefined;
         }
 
         const amount = Number(match[1]);
@@ -48,10 +48,15 @@ export function formatDockerMemory(value: string | undefined): string {
             TIB: 1024 ** 4,
             TB: 1024 ** 4,
         };
-        const unit = match[2].toUpperCase() as keyof typeof factors;
+        const unitValue = match[2];
+        if (!unitValue) {
+            return undefined;
+        }
+
+        const unit = unitValue.toUpperCase() as keyof typeof factors;
         const factor = factors[unit];
         if (!factor) {
-            return null;
+            return undefined;
         }
 
         return amount * factor;
@@ -60,7 +65,7 @@ export function formatDockerMemory(value: string | undefined): string {
     const usedBytes = parsePart(usedRaw);
     const totalBytes = parsePart(totalRaw);
 
-    if (usedBytes === null || totalBytes === null) {
+    if (usedBytes === undefined || totalBytes === undefined) {
         return value;
     }
 
@@ -68,7 +73,7 @@ export function formatDockerMemory(value: string | undefined): string {
 }
 
 /** Formats timestamp for display. */
-export function formatTimestamp(value: string | null | undefined): string {
+export function formatTimestamp(value: string | undefined): string {
     if (!value) {
         return "—";
     }
@@ -83,10 +88,10 @@ export function formatTimestamp(value: string | null | undefined): string {
 
 /** Formats updater transition for display. */
 export function formatUpdaterTransition(event: {
-    fromTag: string | null;
-    toTag: string | null;
-    fromDigest: string | null;
-    toDigest: string | null;
+    fromTag: string | undefined;
+    toTag: string | undefined;
+    fromDigest: string | undefined;
+    toDigest: string | undefined;
 }): string {
     const from = formatVersionDisplay(event.fromTag, event.fromDigest);
     const to = formatVersionDisplay(event.toTag, event.toDigest);
@@ -94,7 +99,10 @@ export function formatUpdaterTransition(event: {
 }
 
 /** Formats version display for display. */
-export function formatVersionDisplay(tag: string | null, digest: string | null): string {
+export function formatVersionDisplay(
+    tag: string | undefined,
+    digest: string | undefined
+): string {
     if (tag) {
         return tag;
     }
@@ -108,8 +116,8 @@ export function formatVersionDisplay(tag: string | null, digest: string | null):
 
 /** Formats full version display for display. */
 export function formatFullVersionDisplay(
-    tag: string | null,
-    digest: string | null
+    tag: string | undefined,
+    digest: string | undefined
 ): string {
     if (tag && digest) {
         return `${tag} (${digest})`;

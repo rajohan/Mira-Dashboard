@@ -19,20 +19,34 @@ export function ServiceActionsCard() {
     const startAction = useStartOpsAction();
     const refreshCache = useRefreshCacheEntry();
     const { data: systemHost } = useCacheEntry<{
-        version?: { current: string; latest: string | null; updateAvailable: boolean };
+        version?: {
+            current: string;
+            latest: string | undefined;
+            updateAvailable: boolean;
+        };
     }>("system.host", 60_000);
     const versionInfo = systemHost?.data.version;
+    const versionAlertText = versionInfo?.latest
+        ? `New OpenClaw version available (${versionInfo.current} -> ${versionInfo.latest}).`
+        : `New OpenClaw version available (${versionInfo?.current} -> not available).`;
 
-    const [pendingAction, setPendingAction] = useState<OpsActionDefinition | null>(null);
-    const [runningActionId, setRunningActionId] = useState<string | null>(null);
-    const [runningActionLabel, setRunningActionLabel] = useState<string | null>(null);
-    const [runningJobId, setRunningJobId] = useState<string | null>(null);
-    const [result, setResult] = useState<null | {
-        action: string;
-        response: ExecResponse;
-        ranAt: number;
-    }>(null);
-    const outputReference = useRef<HTMLPreElement | null>(null);
+    const [pendingAction, setPendingAction] = useState<OpsActionDefinition | undefined>(
+        undefined
+    );
+    const [runningActionId, setRunningActionId] = useState<string | undefined>(undefined);
+    const [runningActionLabel, setRunningActionLabel] = useState<string | undefined>(
+        undefined
+    );
+    const [runningJobId, setRunningJobId] = useState<string | undefined>(undefined);
+    const [result, setResult] = useState<
+        | undefined
+        | {
+              action: string;
+              response: ExecResponse;
+              ranAt: number;
+          }
+    >(undefined);
+    const outputReference = useRef<HTMLPreElement | undefined>(undefined);
     const [shouldAutoFollowOutput, setShouldAutoFollowOutput] = useState(true);
 
     const execJob = useExecJob(runningJobId);
@@ -54,9 +68,9 @@ export function ServiceActionsCard() {
             ranAt: execJob.data.endedAt || Date.now(),
         });
 
-        setRunningActionId(null);
-        setRunningActionLabel(null);
-        setRunningJobId(null);
+        setRunningActionId(undefined);
+        setRunningActionLabel(undefined);
+        setRunningJobId(undefined);
 
         if (completedActionId === "openclaw_update") {
             void (async () => {
@@ -76,7 +90,7 @@ export function ServiceActionsCard() {
         }
 
         const actionToRun = pendingAction;
-        setPendingAction(null);
+        setPendingAction(undefined);
         setRunningActionId(actionToRun.id);
         setRunningActionLabel(actionToRun.label);
 
@@ -84,15 +98,15 @@ export function ServiceActionsCard() {
             const started = await startAction.mutateAsync(actionToRun);
             setRunningJobId(started.jobId);
         } catch {
-            setRunningActionId(null);
-            setRunningActionLabel(null);
-            setRunningJobId(null);
+            setRunningActionId(undefined);
+            setRunningActionLabel(undefined);
+            setRunningJobId(undefined);
         }
     }
 
     const liveLogs = execJob.data
         ? [execJob.data.stdout, execJob.data.stderr].filter(Boolean).join("\n").trim()
-        : null;
+        : undefined;
 
     const finishedLogs = result
         ? [result.response.stdout, result.response.stderr]
@@ -107,7 +121,7 @@ export function ServiceActionsCard() {
         ? {
               action: runningActionLabel || "Running action",
               ranAt: execJob.data.startedAt,
-              code: execJob.data.status === "done" ? execJob.data.code : null,
+              ...(execJob.data.status === "done" && { code: execJob.data.code }),
               running: execJob.data.status === "running",
           }
         : result
@@ -117,7 +131,7 @@ export function ServiceActionsCard() {
                 code: result.response.code,
                 running: false,
             }
-          : null;
+          : undefined;
 
     const isAnyActionPending = startAction.isPending || Boolean(runningActionId);
 
@@ -148,11 +162,10 @@ export function ServiceActionsCard() {
                     <div className="border-primary-700 bg-primary-900/30 mb-3 rounded border px-3 py-2 text-xs text-amber-200">
                         <div className="flex items-center gap-2">
                             <AlertTriangle className="h-3.5 w-3.5" />
-                            New OpenClaw version available ({versionInfo.current} →{" "}
-                            {versionInfo.latest}).
+                            {versionAlertText}
                         </div>
                     </div>
-                ) : null}
+                ) : undefined}
 
                 <div className="grid grid-cols-1 gap-3">
                     {(["system", "openclaw"] as const).map((scope) => (
@@ -183,7 +196,7 @@ export function ServiceActionsCard() {
                                             </span>
                                             {action.danger ? (
                                                 <Badge variant="error">Caution</Badge>
-                                            ) : null}
+                                            ) : undefined}
                                         </div>
                                         <div className="text-primary-400 min-h-[2.5rem] text-xs">
                                             {action.description}
@@ -213,14 +226,16 @@ export function ServiceActionsCard() {
                             {outputMeta.action} · {formatDate(new Date(outputMeta.ranAt))}
                             {outputMeta.running
                                 ? " · in progress"
-                                : ` · exit code ${String(outputMeta.code)}`}
+                                : ` · exit code ${String(outputMeta.code ?? "not available")}`}
                         </div>
                         <div className="text-primary-300 mb-1 inline-flex items-center gap-1 text-xs">
                             <Terminal className="h-3.5 w-3.5" />
                             Output
                         </div>
                         <pre
-                            ref={outputReference}
+                            ref={(element) => {
+                                outputReference.current = element ?? undefined;
+                            }}
                             onScroll={(event) => {
                                 const element = event.currentTarget;
                                 const distanceFromBottom =
@@ -248,7 +263,7 @@ export function ServiceActionsCard() {
                 danger={pendingAction?.danger}
                 onCancel={() => {
                     if (!startAction.isPending) {
-                        setPendingAction(null);
+                        setPendingAction(undefined);
                     }
                 }}
                 onConfirm={() => {

@@ -68,12 +68,14 @@ interface MetricsResponse extends SystemMetricsResponse {
 
 const metricsRouteState: {
     networkSampleLock: Promise<void>;
-    previousNetworkSample: null | {
-        downloadBytes: number;
-        timestamp: number;
-        uploadBytes: number;
-    };
-} = { networkSampleLock: Promise.resolve(), previousNetworkSample: null };
+    previousNetworkSample:
+        | undefined
+        | {
+              downloadBytes: number;
+              timestamp: number;
+              uploadBytes: number;
+          };
+} = { networkSampleLock: Promise.resolve(), previousNetworkSample: undefined };
 
 async function withNetworkSampleLock<T>(callback: () => Promise<T> | T): Promise<T> {
     const previousLock = metricsRouteState.networkSampleLock;
@@ -89,8 +91,13 @@ async function withNetworkSampleLock<T>(callback: () => Promise<T> | T): Promise
 
 function safeErrorMessage(error: unknown): string {
     if (error instanceof Error) return error.message;
-    if (error == null) return "Unknown error";
+    if (error === undefined) return "Unknown error";
     return String(error);
+}
+
+function finiteNumber(value: unknown): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
 }
 
 async function getNetworkMetrics(): Promise<NetworkMetrics> {
@@ -195,18 +202,18 @@ async function getSystemMetrics(): Promise<SystemMetricsResponse> {
             ? ["-k", "/"]
             : ["-B1", "--output=size,used,pcent", "/"];
         const { code, stderr, stdout } = await runProcess("df", dfArguments, {
-            timeoutMs: 5_000,
+            timeoutMs: 5000,
         });
         if (code !== 0) throw new Error(stderr || `df exited ${code}`);
         const parts = (stdout.trim().split("\n").at(-1) ?? "").trim().split(/\s+/u);
         if (isDarwin && parts.length >= 5) {
-            diskTotal = Number(parts[1]) * 1024;
-            diskUsed = Number(parts[2]) * 1024;
-            diskPercent = Number(parts[4].replace(/%$/u, ""));
+            diskTotal = finiteNumber(parts[1]) * 1024;
+            diskUsed = finiteNumber(parts[2]) * 1024;
+            diskPercent = finiteNumber((parts[4] ?? "0").replace(/%$/u, ""));
         } else if (!isDarwin && parts.length >= 3) {
-            diskTotal = Number(parts[0]);
-            diskUsed = Number(parts[1]);
-            diskPercent = Number(parts[2].replace(/%$/u, ""));
+            diskTotal = finiteNumber(parts[0]);
+            diskUsed = finiteNumber(parts[1]);
+            diskPercent = finiteNumber((parts[2] ?? "0").replace(/%$/u, ""));
         }
     } catch (error) {
         console.error("[Metrics] df error:", safeErrorMessage(error));
@@ -216,7 +223,8 @@ async function getSystemMetrics(): Promise<SystemMetricsResponse> {
         cpu: {
             count: cpus.length,
             loadAvg: loadAvg.map((value) => Math.round(value * 100) / 100),
-            loadPercent: Math.round((loadAvg[0] / cpus.length) * 100),
+            loadPercent:
+                cpus.length > 0 ? Math.round(((loadAvg[0] ?? 0) / cpus.length) * 100) : 0,
             model: stringFallback(cpus[0]?.model, "Unknown"),
         },
         disk: {
@@ -247,11 +255,8 @@ async function getSystemMetrics(): Promise<SystemMetricsResponse> {
 function getTokenMetrics(): TokenMetrics {
     const sessions = gateway.getSessions();
     let totalTokens = 0;
-    const byModel: Record<string, number> = Object.create(null) as Record<string, number>;
-    const sessionsByModel: Record<string, number> = Object.create(null) as Record<
-        string,
-        number
-    >;
+    const byModel = Object.create(null) as Record<string, number>;
+    const sessionsByModel = Object.create(null) as Record<string, number>;
     const byAgent: Array<{ label: string; model: string; tokens: number; type: string }> =
         [];
 
@@ -277,7 +282,7 @@ function getTokenMetrics(): TokenMetrics {
     }
 
     return {
-        byAgent: byAgent.sort((a, b) => b.tokens - a.tokens).slice(0, 10),
+        byAgent: byAgent.toSorted((a, b) => b.tokens - a.tokens).slice(0, 10),
         byModel,
         sessionsByModel,
         total: totalTokens,

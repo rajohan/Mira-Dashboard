@@ -3,6 +3,6 @@
  * Uses the current origin so the dev server can proxy /ws.
  */
 export function getWebSocketUrl(): string {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return `${protocol}//${window.location.host}/ws`;
+    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    return `${protocol}//${location.host}/ws`;
 }

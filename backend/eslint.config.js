@@ -14,15 +14,6 @@ const eslintConfig = defineConfig(
     tsEslint.configs.recommended,
     unicorn.configs.recommended,
     {
-        files: ["test/setup-environment.js"],
-        languageOptions: {
-            globals: {
-                ...globals.node,
-                Bun: "readonly",
-            },
-        },
-    },
-    {
         files: ["**/*.ts"],
         languageOptions: {
             globals: {
@@ -34,23 +25,8 @@ const eslintConfig = defineConfig(
             "simple-import-sort": simpleImportSort,
         },
         rules: {
-            "arrow-body-style": ["error", "as-needed"],
             "simple-import-sort/imports": "error",
             "simple-import-sort/exports": "error",
-            "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
-            // Unicorn rules - relax aggressive defaults
-            "unicorn/prevent-abbreviations": "off",
-            "unicorn/no-null": "off",
-            "unicorn/prefer-global-this": "off",
-            "unicorn/prefer-at": "off",
-            "unicorn/no-array-callback-reference": "off",
-            "unicorn/consistent-function-scoping": "off",
-            "unicorn/no-array-sort": "off",
-            "unicorn/no-array-reverse": "off",
-            "unicorn/prefer-add-event-listener": "off",
-            "unicorn/switch-case-braces": "off",
-            "unicorn/numeric-separators-style": "off",
-            "unicorn/prefer-node-protocol": "off",
             "unicorn/filename-case": [
                 "error",
                 {

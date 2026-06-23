@@ -15,17 +15,18 @@ const elevatedLogRotationRunner: LogRotationRunner = runElevatedLogRotationServi
 
 function normalizeLastRunErrors(run: Record<string, unknown>): unknown[] {
     if (Array.isArray(run.errors)) return run.errors;
+    const result = run.result ?? undefined;
     const message =
         typeof run.message === "string" && run.message.trim()
             ? run.message.trim()
             : typeof run.stderr === "string" && run.stderr.trim()
               ? run.stderr.trim()
               : "";
-    if (!message && run.result === undefined) return [];
+    if (!message && result === undefined) return [];
     return [
         {
             message: message || "Log rotation failed",
-            result: run.result ?? null,
+            result,
             stderr: typeof run.stderr === "string" ? run.stderr : "",
         },
     ];
@@ -33,7 +34,7 @@ function normalizeLastRunErrors(run: Record<string, unknown>): unknown[] {
 
 function normalizeLastRun(value: unknown) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-        return null;
+        return;
     }
     const run = value as Record<string, unknown>;
     return {
@@ -50,7 +51,7 @@ function normalizeLastRun(value: unknown) {
             ? Number(run.deletedArchives)
             : 0,
         errors: normalizeLastRunErrors(run),
-        finishedAt: typeof run.finishedAt === "string" ? run.finishedAt : null,
+        finishedAt: typeof run.finishedAt === "string" ? run.finishedAt : undefined,
         groups: Array.isArray(run.groups) ? run.groups : [],
         isDryRun: run.isDryRun === true,
         isOk: run.isOk === true,
@@ -60,7 +61,7 @@ function normalizeLastRun(value: unknown) {
         skippedFiles: Number.isFinite(Number(run.skippedFiles))
             ? Number(run.skippedFiles)
             : 0,
-        startedAt: typeof run.startedAt === "string" ? run.startedAt : null,
+        startedAt: typeof run.startedAt === "string" ? run.startedAt : undefined,
         warnings: Array.isArray(run.warnings) ? run.warnings : [],
     };
 }
@@ -68,9 +69,9 @@ function normalizeLastRun(value: unknown) {
 async function readLogRotationStatus() {
     const row = database
         .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
-        .get(LOG_ROTATION_STATE_KEY) as undefined | { data_json?: string | null };
+        .get(LOG_ROTATION_STATE_KEY) as undefined | { data_json: string | null };
     const raw = row?.data_json ?? "";
-    let data: null | { lastRun?: unknown } = null;
+    let data: undefined | { lastRun?: unknown };
     if (raw) {
         try {
             data = JSON.parse(raw) as { lastRun?: unknown };

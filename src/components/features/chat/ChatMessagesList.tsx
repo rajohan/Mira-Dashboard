@@ -28,8 +28,8 @@ interface ChatMessagesListProperties {
     isLoadingHistory: boolean;
     isAtBottom: boolean;
     chatRows: ChatRow[];
-    messagesBottomReference: RefObject<HTMLDivElement | null>;
-    messagesContainerReference: RefObject<HTMLDivElement | null>;
+    messagesBottomReference: RefObject<HTMLDivElement | undefined>;
+    messagesContainerReference: RefObject<HTMLDivElement | undefined>;
     messagesVirtualizer: Virtualizer<HTMLDivElement, Element>;
     onDynamicContentLoad: () => void;
     onFollow: () => void;
@@ -67,9 +67,9 @@ export function base64ToText(base64: string): string | undefined {
 /** Builds preview data from an attachment. */
 export function previewFromAttachment(
     attachment: ChatAttachmentDisplay
-): ChatPreviewItem | null {
+): ChatPreviewItem | undefined {
     if (!attachment.dataUrl && !attachment.contentBase64) {
-        return null;
+        return undefined;
     }
 
     const mimeType = attachment.mimeType || "application/octet-stream";
@@ -98,7 +98,7 @@ function AttachmentList({
     onPreview: (preview: ChatPreviewItem) => void;
 }) {
     if (attachments.length === 0) {
-        return null;
+        return;
     }
 
     return (
@@ -113,7 +113,7 @@ function AttachmentList({
                             <span className="text-primary-400 shrink-0">
                                 {formatSize(attachment.sizeBytes)}
                             </span>
-                        ) : null}
+                        ) : undefined}
                     </>
                 );
 
@@ -176,12 +176,12 @@ function TtsButton({
 }: {
     text: string;
     messageKey: string;
-    playingMessageKey: string | null;
-    loadingMessageKey: string | null;
+    playingMessageKey: string | undefined;
+    loadingMessageKey: string | undefined;
     onSpeak: (messageKey: string, text: string) => void;
 }) {
     if (!text.trim()) {
-        return null;
+        return;
     }
 
     const isLoading = loadingMessageKey === messageKey;
@@ -233,19 +233,19 @@ function TypingIndicator({ text = "Thinking" }: { text?: string }) {
 
 /** Stops active TTS playback and releases the object URL. */
 function stopAudioPlayback(
-    audioReference: RefObject<HTMLAudioElement | null>,
-    audioUrlReference: RefObject<string | null>,
-    setPlayingMessageKey: (messageKey: string | null) => void
+    audioReference: RefObject<HTMLAudioElement | undefined>,
+    audioUrlReference: RefObject<string | undefined>,
+    setPlayingMessageKey: (messageKey: string | undefined) => void
 ) {
     audioReference.current?.pause();
-    audioReference.current = null;
+    audioReference.current = undefined;
 
     if (audioUrlReference.current) {
         URL.revokeObjectURL(audioUrlReference.current);
-        audioUrlReference.current = null;
+        audioUrlReference.current = undefined;
     }
 
-    setPlayingMessageKey(null);
+    setPlayingMessageKey(undefined);
 }
 
 /** Renders the chat messages list UI. */
@@ -264,28 +264,45 @@ export function ChatMessagesList({
     onTtsError,
     onDeleteMessage,
 }: ChatMessagesListProperties) {
-    const audioReference = useRef<HTMLAudioElement | null>(null);
-    const audioUrlReference = useRef<string | null>(null);
-    const [playingMessageKey, setPlayingMessageKey] = useState<string | null>(null);
-    const [loadingMessageKey, setLoadingMessageKey] = useState<string | null>(null);
+    const audioReference = useRef<HTMLAudioElement | undefined>(undefined);
+    const audioUrlReference = useRef<string | undefined>(undefined);
+    const speakRequestReference = useRef(0);
+    const ttsAbortControllerReference = useRef<AbortController | undefined>(undefined);
+    const [playingMessageKey, setPlayingMessageKey] = useState<string | undefined>(
+        undefined
+    );
+    const [loadingMessageKey, setLoadingMessageKey] = useState<string | undefined>(
+        undefined
+    );
 
     const stopAudio = () =>
         stopAudioPlayback(audioReference, audioUrlReference, setPlayingMessageKey);
 
     useEffect(
-        () => () =>
-            stopAudioPlayback(audioReference, audioUrlReference, setPlayingMessageKey),
+        () => () => {
+            ttsAbortControllerReference.current?.abort();
+            ttsAbortControllerReference.current = undefined;
+            stopAudioPlayback(audioReference, audioUrlReference, setPlayingMessageKey);
+        },
         []
     );
 
     /** Speaks or stops the selected chat message. */
     const speakMessage = async (messageKey: string, text: string) => {
         if (playingMessageKey === messageKey) {
+            speakRequestReference.current += 1;
             stopAudio();
             return;
         }
 
+        speakRequestReference.current += 1;
+        const requestToken = speakRequestReference.current;
+        const isLatestRequest = () => speakRequestReference.current === requestToken;
+
         stopAudio();
+        ttsAbortControllerReference.current?.abort();
+        const abortController = new AbortController();
+        ttsAbortControllerReference.current = abortController;
         setLoadingMessageKey(messageKey);
         onTtsError("");
 
@@ -294,6 +311,7 @@ export function ChatMessagesList({
                 method: "POST",
                 credentials: "include",
                 headers: { "Content-Type": "application/json" },
+                signal: abortController.signal,
                 body: JSON.stringify({ text }),
             });
 
@@ -307,14 +325,30 @@ export function ChatMessagesList({
                 throw new Error(error.error || `HTTP ${response.status}`);
             }
 
-            const audioUrl = URL.createObjectURL(await response.blob());
+            const audioBlob = await response.blob();
+            if (!isLatestRequest()) {
+                return;
+            }
+
+            const audioUrl = URL.createObjectURL(audioBlob);
             const audio = new Audio(audioUrl);
             audioReference.current = audio;
             audioUrlReference.current = audioUrl;
-            audio.addEventListener("ended", stopAudio, { once: true });
+            audio.addEventListener(
+                "ended",
+                () => {
+                    if (isLatestRequest()) {
+                        stopAudio();
+                    }
+                },
+                { once: true }
+            );
             audio.addEventListener(
                 "error",
                 () => {
+                    if (!isLatestRequest()) {
+                        return;
+                    }
                     onTtsError("Failed to play generated speech.");
                     stopAudio();
                 },
@@ -323,10 +357,18 @@ export function ChatMessagesList({
             setPlayingMessageKey(messageKey);
             await audio.play();
         } catch (error_) {
+            if (!isLatestRequest()) {
+                return;
+            }
             stopAudio();
             onTtsError(chatErrorMessage(error_, "Failed to read message aloud"));
         } finally {
-            setLoadingMessageKey(null);
+            if (isLatestRequest()) {
+                setLoadingMessageKey(undefined);
+                if (ttsAbortControllerReference.current === abortController) {
+                    ttsAbortControllerReference.current = undefined;
+                }
+            }
         }
     };
     const virtualItems = messagesVirtualizer.getVirtualItems();
@@ -339,7 +381,9 @@ export function ChatMessagesList({
 
     return (
         <div
-            ref={messagesContainerReference}
+            ref={(element) => {
+                messagesContainerReference.current = element ?? undefined;
+            }}
             onScroll={onScroll}
             className="mt-3 min-h-0 flex-1 overflow-y-auto pr-0 sm:mt-4 sm:pr-1"
             style={{ overflowAnchor: "none" }}
@@ -352,7 +396,7 @@ export function ChatMessagesList({
                 >
                     ↓ Follow
                 </button>
-            ) : null}
+            ) : undefined}
 
             {isLoadingHistory && chatRows.length === 0 ? (
                 <div className="text-primary-400 flex items-center justify-center gap-1.5 py-10">
@@ -363,7 +407,7 @@ export function ChatMessagesList({
                 <EmptyState message="No chat history yet. Send the first message to this session." />
             ) : (
                 <div className="w-full">
-                    {paddingTop > 0 ? <div style={{ height: paddingTop }} /> : null}
+                    {paddingTop > 0 ? <div style={{ height: paddingTop }} /> : undefined}
                     {virtualItems.map((virtualItem) => {
                         const row = chatRows[virtualItem.index];
 
@@ -433,7 +477,7 @@ export function ChatMessagesList({
                                                         messageKey={row.key}
                                                         onDelete={onDeleteMessage}
                                                     />
-                                                ) : null}
+                                                ) : undefined}
                                                 {canSpeakMessage ? (
                                                     <TtsButton
                                                         text={row.message.text}
@@ -446,7 +490,7 @@ export function ChatMessagesList({
                                                         }
                                                         onSpeak={speakMessage}
                                                     />
-                                                ) : null}
+                                                ) : undefined}
                                             </div>
                                         </div>
                                         {row.message.images &&
@@ -458,7 +502,7 @@ export function ChatMessagesList({
                                                             image.source?.data ||
                                                             image.data;
                                                         if (!imageData) {
-                                                            return null;
+                                                            return;
                                                         }
 
                                                         const imageMime =
@@ -501,7 +545,7 @@ export function ChatMessagesList({
                                                     }
                                                 )}
                                             </div>
-                                        ) : null}
+                                        ) : undefined}
                                         {row.message.attachments?.some(
                                             (attachment) =>
                                                 attachment.kind === "image" &&
@@ -540,10 +584,10 @@ export function ChatMessagesList({
                                                         </button>
                                                     ))}
                                             </div>
-                                        ) : null}
+                                        ) : undefined}
                                         {shouldRenderPrimaryText ? (
                                             <ChatMarkdown text={row.message.text} />
-                                        ) : null}
+                                        ) : undefined}
                                         <AttachmentList
                                             attachments={
                                                 row.message.attachments?.filter(
@@ -562,14 +606,21 @@ export function ChatMessagesList({
                                             <div className="mt-1.5 text-[11px] opacity-60">
                                                 {formatDate(row.message.timestamp)}
                                             </div>
-                                        ) : null}
+                                        ) : undefined}
                                     </div>
                                 </div>
                             </div>
                         );
                     })}
-                    {paddingBottom > 0 ? <div style={{ height: paddingBottom }} /> : null}
-                    <div ref={messagesBottomReference} aria-hidden="true" />
+                    {paddingBottom > 0 ? (
+                        <div style={{ height: paddingBottom }} />
+                    ) : undefined}
+                    <div
+                        ref={(element) => {
+                            messagesBottomReference.current = element ?? undefined;
+                        }}
+                        aria-hidden="true"
+                    />
                 </div>
             )}
         </div>

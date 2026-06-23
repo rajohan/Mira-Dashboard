@@ -4,7 +4,7 @@ import type { ChatPreviewItem } from "./chatTypes";
 
 /** Provides props for attachment preview modal. */
 interface AttachmentPreviewModalProperties {
-    previewItem: ChatPreviewItem | null;
+    previewItem: ChatPreviewItem | undefined;
     onClose: () => void;
 }
 
@@ -55,7 +55,7 @@ export function AttachmentPreviewModal({
                         </div>
                     )}
                 </div>
-            ) : null}
+            ) : undefined}
         </Modal>
     );
 }

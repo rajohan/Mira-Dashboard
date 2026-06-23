@@ -52,7 +52,7 @@ function shouldSendFromEnter(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
         return false;
     }
 
-    const coarsePointerQuery = window.matchMedia?.("(pointer: coarse)") ?? null;
+    const coarsePointerQuery = globalThis.matchMedia?.("(pointer: coarse)");
     return !coarsePointerQuery?.matches;
 }
 
@@ -61,7 +61,7 @@ interface ChatComposerProperties {
     attachments: ChatSendAttachment[];
     canSend: boolean;
     draft: string;
-    fileInputReference: RefObject<HTMLInputElement | null>;
+    fileInputReference: RefObject<HTMLInputElement | undefined>;
     isConnected: boolean;
     isRecording: boolean;
     isSending: boolean;
@@ -69,7 +69,7 @@ interface ChatComposerProperties {
     selectedSessionKey: string;
     slashCommandSuggestions: SlashCommandSuggestion[];
     onApplySlashSuggestion: (value: string) => void;
-    onAttachFiles: (files: FileList | null) => void;
+    onAttachFiles: (files: FileList | undefined) => void;
     onChangeDraft: (value: string) => void;
     onPreview: (isPreview: ChatPreviewItem) => void;
     onRemoveAttachment: (attachmentId: string) => void;
@@ -99,8 +99,8 @@ export function ChatComposer({
 }: ChatComposerProperties) {
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const [slashSuggestionsDismissed, setSlashSuggestionsDismissed] = useState(false);
-    const composerReference = useRef<HTMLDivElement | null>(null);
-    const textareaReference = useRef<HTMLTextAreaElement | null>(null);
+    const composerReference = useRef<HTMLDivElement | undefined>(undefined);
+    const textareaReference = useRef<HTMLTextAreaElement | undefined>(undefined);
     const visibleSlashCommandSuggestions = slashSuggestionsDismissed
         ? []
         : slashCommandSuggestions;
@@ -192,7 +192,7 @@ export function ChatComposer({
         onChangeDraft(nextDraft);
         setShowEmojiPicker(false);
 
-        window.setTimeout(() => {
+        setTimeout(() => {
             textarea?.focus();
             textarea?.setSelectionRange(nextCursor, nextCursor);
         }, 0);
@@ -200,7 +200,9 @@ export function ChatComposer({
 
     return (
         <div
-            ref={composerReference}
+            ref={(element) => {
+                composerReference.current = element ?? undefined;
+            }}
             className="border-primary-700 mt-3 border-t pt-3 sm:mt-4 sm:pt-4"
         >
             {attachments.length > 0 ? (
@@ -256,15 +258,17 @@ export function ChatComposer({
                         </div>
                     ))}
                 </div>
-            ) : null}
+            ) : undefined}
 
             <div className="flex flex-col gap-2 sm:gap-3 md:flex-row">
                 <input
-                    ref={fileInputReference}
+                    ref={(element) => {
+                        fileInputReference.current = element ?? undefined;
+                    }}
                     type="file"
                     multiple
                     className="hidden"
-                    onChange={(event) => onAttachFiles(event.target.files)}
+                    onChange={(event) => onAttachFiles(event.target.files ?? undefined)}
                 />
                 <div className="relative min-w-0 flex-1">
                     {visibleSlashCommandSuggestions.length > 0 ? (
@@ -294,7 +298,7 @@ export function ChatComposer({
                                 ))}
                             </div>
                         </div>
-                    ) : null}
+                    ) : undefined}
                     {showEmojiPicker ? (
                         <div className="border-primary-700 bg-primary-900 absolute right-0 bottom-full left-0 z-30 mb-2 rounded-xl border p-2 shadow-2xl sm:left-auto sm:w-80">
                             <div className="text-primary-400 mb-2 flex items-center justify-between px-1 text-xs font-medium tracking-wide uppercase">
@@ -322,9 +326,11 @@ export function ChatComposer({
                                 ))}
                             </div>
                         </div>
-                    ) : null}
+                    ) : undefined}
                     <Textarea
-                        ref={textareaReference}
+                        ref={(element) => {
+                            textareaReference.current = element ?? undefined;
+                        }}
                         value={draft}
                         onChange={(event) => {
                             setSlashSuggestionsDismissed(false);

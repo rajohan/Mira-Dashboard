@@ -17,8 +17,10 @@ interface BootstrapResponse {
 /** Renders the login UI. */
 export function Login() {
     const navigate = useNavigate();
-    const [bootstrapState, setBootstrapState] = useState<BootstrapResponse | null>(null);
-    const [error, setError] = useState<string | null>(null);
+    const [bootstrapState, setBootstrapState] = useState<BootstrapResponse | undefined>(
+        undefined
+    );
+    const [error, setError] = useState<string | undefined>(undefined);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
@@ -43,7 +45,7 @@ export function Login() {
         defaultValues: { username: "", password: "", gatewayToken: "" },
         onSubmit: async ({ value }) => {
             const isBootstrapRequired = bootstrapState?.isBootstrapRequired ?? false;
-            setError(null);
+            setError(undefined);
             setIsSubmitting(true);
 
             try {
@@ -119,7 +121,7 @@ export function Login() {
                     <Alert className="mb-2" variant="error">
                         {error}
                     </Alert>
-                ) : null}
+                ) : undefined}
 
                 <form
                     onSubmit={(event_) => {
@@ -177,7 +179,7 @@ export function Login() {
                                 />
                             )}
                         </form.Field>
-                    ) : null}
+                    ) : undefined}
 
                     <Button type="submit" className="w-full" disabled={isSubmitting}>
                         {isSubmitting

@@ -15,16 +15,14 @@ interface QuotaOverviewCardProperties {
 }
 
 /** Maps quota usage percentage to a visual severity level. */
-function getSeverity(
-    percent: number | null | undefined
-): "success" | "warning" | "error" {
+function getSeverity(percent: number | undefined): "success" | "warning" | "error" {
     if (!percent || percent < 80) return "success";
     if (percent < 95) return "warning";
     return "error";
 }
 
-/** Parses OpenAI reset timestamps and returns null when the value is unavailable or invalid. */
-function tryParseOpenAiReset(value: string): Date | null {
+/** Parses OpenAI reset timestamps and returns undefined when the value is unavailable or invalid. */
+function tryParseOpenAiReset(value: string): Date | undefined {
     const timeOnlyMatch = value.match(/^(\d{1,2}):(\d{2})$/);
     if (timeOnlyMatch) {
         const now = new Date();
@@ -52,9 +50,14 @@ function tryParseOpenAiReset(value: string): Date | null {
             dec: 11,
         };
 
-        const month = monthMap[withDayMonthMatch[4].toLowerCase()];
+        const monthName = withDayMonthMatch[4];
+        if (!monthName) {
+            return undefined;
+        }
+
+        const month = monthMap[monthName.toLowerCase()];
         if (month === undefined) {
-            return null;
+            return undefined;
         }
 
         const now = new Date();
@@ -70,17 +73,17 @@ function tryParseOpenAiReset(value: string): Date | null {
         );
 
         if (Number.isNaN(date.getTime())) {
-            return null;
+            return undefined;
         }
 
         return date;
     }
 
-    return null;
+    return undefined;
 }
 
 /** Formats quota reset metadata for display in the dashboard. */
-function formatResetValue(value: string | null | undefined): string {
+function formatResetValue(value: string | undefined): string {
     if (!value || value === "unknown") {
         return "unknown";
     }
@@ -99,7 +102,7 @@ function formatResetValue(value: string | null | undefined): string {
 }
 
 /** Formats short rolling-window reset times without repeating today's date. */
-function formatResetTime(value: string | null | undefined): string {
+function formatResetTime(value: string | undefined): string {
     if (!value || value === "unknown") {
         return "unknown";
     }
@@ -130,11 +133,8 @@ function normalizeSyntheticTickPercent(value: number): number {
 /** Formats the Synthetic.new weekly regeneration amount when data is available. */
 function formatSyntheticWeeklyRegenAmount(
     weeklyTokenLimit: SyntheticQuota["weeklyTokenLimit"]
-): string | null {
-    if (
-        weeklyTokenLimit.nextRegenPercent !== null &&
-        weeklyTokenLimit.nextRegenPercent !== undefined
-    ) {
+): string | undefined {
+    if (weeklyTokenLimit.nextRegenPercent !== undefined) {
         return `+${formatPercent(weeklyTokenLimit.nextRegenPercent)}%`;
     }
 
@@ -142,29 +142,26 @@ function formatSyntheticWeeklyRegenAmount(
         return `+${weeklyTokenLimit.nextRegenCredits}`;
     }
 
-    return null;
+    return undefined;
 }
 
 /** Formats the Synthetic.new 5h regeneration amount when data is available. */
 function formatSyntheticFiveHourRegenAmount(
     rollingFiveHourLimit: SyntheticQuota["rollingFiveHourLimit"]
-): string | null {
-    if (
-        rollingFiveHourLimit.tickPercent !== null &&
-        rollingFiveHourLimit.tickPercent !== undefined
-    ) {
+): string | undefined {
+    if (rollingFiveHourLimit.tickPercent !== undefined) {
         return `+${formatPercent(normalizeSyntheticTickPercent(rollingFiveHourLimit.tickPercent))}%`;
     }
 
-    return null;
+    return undefined;
 }
 
 /** Formats one Synthetic.new regeneration window segment. */
 function formatSyntheticRegenSegment(
     label: string,
-    resetAt: string | null | undefined,
-    amount: string | null,
-    formatReset: (value: string | null | undefined) => string = formatResetValue
+    resetAt: string | undefined,
+    amount: string | undefined,
+    formatReset: (value: string | undefined) => string = formatResetValue
 ): string {
     const amountSuffix = amount ? ` (${amount})` : "";
 
@@ -201,9 +198,9 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
                 : `$${quotas.openrouter.remaining.toFixed(2)} remaining`,
             percent:
                 !hasQuotaStatus(quotas.openrouter) &&
-                quotas.openrouter.percentUsed !== null
+                quotas.openrouter.percentUsed !== undefined
                     ? quotas.openrouter.percentUsed
-                    : null,
+                    : undefined,
         },
         {
             key: "elevenlabs",
@@ -217,9 +214,9 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
                 : `Reset ${formatResetValue(quotas.elevenlabs.resetAt)}`,
             percent:
                 !hasQuotaStatus(quotas.elevenlabs) &&
-                quotas.elevenlabs.percentUsed !== null
+                quotas.elevenlabs.percentUsed !== undefined
                     ? quotas.elevenlabs.percentUsed
-                    : null,
+                    : undefined,
         },
         {
             key: "synthetic",
@@ -232,7 +229,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
                 ? quotas.synthetic.note || ""
                 : `Regen: ${formatSyntheticRegenSegment("5h", quotas.synthetic.rollingFiveHourLimit.nextTickAt, formatSyntheticFiveHourRegenAmount(quotas.synthetic.rollingFiveHourLimit), formatResetTime)} · ${formatSyntheticRegenSegment("weekly", quotas.synthetic.weeklyTokenLimit.nextRegenAt, formatSyntheticWeeklyRegenAmount(quotas.synthetic.weeklyTokenLimit))}`,
             percent: hasQuotaStatus(quotas.synthetic)
-                ? null
+                ? undefined
                 : Math.round(
                       Math.max(
                           quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0,
@@ -250,7 +247,9 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
             line2: hasQuotaStatus(quotas.openai)
                 ? quotas.openai.note || ""
                 : `Resets: 5h ${formatResetTime(quotas.openai.fiveHourReset)} · weekly ${formatResetValue(quotas.openai.weeklyReset)}`,
-            percent: hasQuotaStatus(quotas.openai) ? null : quotas.openai.percentUsed,
+            percent: hasQuotaStatus(quotas.openai)
+                ? undefined
+                : quotas.openai.percentUsed,
         },
     ];
 
@@ -273,7 +272,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
                                 {provider.icon}
                                 <span className="truncate">{provider.label}</span>
                             </div>
-                            {provider.percent !== null && (
+                            {provider.percent !== undefined && (
                                 <Badge variant={getSeverity(provider.percent)}>
                                     {provider.percent}%
                                 </Badge>

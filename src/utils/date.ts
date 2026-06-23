@@ -86,10 +86,10 @@ export function isoStringFromDate(value: number | string | Date): string {
     return date.toISOString();
 }
 
-/** Returns milliseconds for a date string, or null when invalid. */
-export function timestampFromDateString(value: string): number | null {
+/** Returns milliseconds for a date string, or undefined when invalid. */
+export function timestampFromDateString(value: string): number | undefined {
     const timestamp = Date.parse(value);
-    return Number.isFinite(timestamp) ? timestamp : null;
+    return Number.isFinite(timestamp) ? timestamp : undefined;
 }
 
 /** Returns the current calendar year. */

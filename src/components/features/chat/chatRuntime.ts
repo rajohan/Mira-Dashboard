@@ -56,10 +56,12 @@ interface ParsedAgentSessionKey {
 }
 
 /** Parses agent session key. */
-export function parseAgentSessionKey(sessionKey: string): ParsedAgentSessionKey | null {
+export function parseAgentSessionKey(
+    sessionKey: string
+): ParsedAgentSessionKey | undefined {
     const match = sessionKey.match(/^agent:([^:]+):(.+)$/i);
     if (!match || !match[1] || !match[2]) {
-        return null;
+        return undefined;
     }
 
     return {

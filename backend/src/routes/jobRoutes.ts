@@ -21,7 +21,7 @@ const allowedPatchFields = new Set([
     "timeOfDay",
 ]);
 
-function invalidPatchField(patch: Record<string, unknown>): string | null {
+function invalidPatchField(patch: Record<string, unknown>): string | undefined {
     for (const key of Object.keys(patch)) {
         if (!allowedPatchFields.has(key)) return key;
     }
@@ -55,7 +55,7 @@ function invalidPatchField(patch: Record<string, unknown>): string | null {
     ) {
         return "timeOfDay";
     }
-    return null;
+    return undefined;
 }
 
 export const jobRoutes = {
@@ -114,7 +114,8 @@ export const jobRoutes = {
                 const job = updateScheduledJob(String(request.params.id), {
                     cronExpression:
                         typeof jobPatch.cronExpression === "string" ||
-                        jobPatch.cronExpression === null
+                        jobPatch.cronExpression === null ||
+                        jobPatch.cronExpression === undefined
                             ? jobPatch.cronExpression
                             : undefined,
                     enabled:
@@ -130,7 +131,8 @@ export const jobRoutes = {
                         | undefined,
                     timeOfDay:
                         typeof jobPatch.timeOfDay === "string" ||
-                        jobPatch.timeOfDay === null
+                        jobPatch.timeOfDay === null ||
+                        jobPatch.timeOfDay === undefined
                             ? jobPatch.timeOfDay
                             : undefined,
                 });

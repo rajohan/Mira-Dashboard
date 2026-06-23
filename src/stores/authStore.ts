@@ -8,7 +8,7 @@ export interface AuthUser {
 
 /** Represents auth state. */
 interface AuthState {
-    user: AuthUser | null;
+    user: AuthUser | undefined;
     isAuthenticated: boolean;
     isInitialized: boolean;
     isBootstrapRequired: boolean;
@@ -18,7 +18,7 @@ interface AuthState {
 interface SessionResponse {
     authenticated: boolean;
     isBootstrapRequired: boolean;
-    user: AuthUser | null;
+    user: AuthUser | undefined;
 }
 
 /** Represents auth actions. */
@@ -31,7 +31,7 @@ interface AuthActions {
 }
 
 const initialState: AuthState = {
-    user: null,
+    user: undefined,
     isAuthenticated: false,
     isInitialized: false,
     isBootstrapRequired: false,
@@ -40,8 +40,8 @@ const initialState: AuthState = {
 /** Defines auth store. */
 export const authStore = new Store<AuthState>(initialState);
 
-const authRuntimeState: { initializePromise: Promise<void> | null } = {
-    initializePromise: null,
+const authRuntimeState: { initializePromise: Promise<void> | undefined } = {
+    initializePromise: undefined,
 };
 
 /** Fetches session. */
@@ -70,7 +70,7 @@ export const authActions: AuthActions = {
                         isInitialized: true,
                     }));
                 } finally {
-                    authRuntimeState.initializePromise = null;
+                    authRuntimeState.initializePromise = undefined;
                 }
             })();
         }
@@ -123,6 +123,6 @@ export function useAuthStore(): AuthState & AuthActions {
 }
 
 /** Provides auth user. */
-export function useAuthUser(): AuthUser | null {
+export function useAuthUser(): AuthUser | undefined {
     return useSelector(authStore, (state) => state.user);
 }

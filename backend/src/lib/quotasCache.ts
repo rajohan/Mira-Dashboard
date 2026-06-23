@@ -6,7 +6,7 @@ export interface OpenRouterQuota {
     totalCredits: number;
     remaining: number;
     usageMonthly: number;
-    percentUsed: number | null;
+    percentUsed: number | undefined;
 }
 
 /** Represents eleven labs quota. */
@@ -15,20 +15,20 @@ export interface ElevenLabsQuota {
     total: number;
     remaining: number;
     tier: string;
-    percentUsed: number | null;
-    resetAt: string | null;
+    percentUsed: number | undefined;
+    resetAt: string | undefined;
 }
 
 /** Represents open ai quota. */
 export interface OpenAiQuota {
-    account: string | null;
-    model: string | null;
+    account: string | undefined;
+    model: string | undefined;
     fiveHourLeftPercent: number;
     weeklyLeftPercent: number;
-    fiveHourReset: string | null;
-    weeklyReset: string | null;
+    fiveHourReset: string | undefined;
+    weeklyReset: string | undefined;
     percentUsed: number;
-    resetAt: string | null;
+    resetAt: string | undefined;
 }
 
 /** Represents synthetic quota. */
@@ -37,31 +37,31 @@ export interface SyntheticQuota {
         limit: number;
         requests: number;
         remaining: number;
-        renewsAt: string | null;
-        percentUsed: number | null;
+        renewsAt: string | undefined;
+        percentUsed: number | undefined;
     };
     searchHourly: {
         limit: number;
         requests: number;
         remaining: number;
-        renewsAt: string | null;
-        percentUsed: number | null;
+        renewsAt: string | undefined;
+        percentUsed: number | undefined;
     };
     weeklyTokenLimit: {
         percentRemaining: number;
-        nextRegenAt: string | null;
-        maxCredits?: string | null;
-        remainingCredits?: string | null;
-        nextRegenCredits?: string | null;
-        nextRegenPercent?: number | null;
+        nextRegenAt: string | undefined;
+        maxCredits?: string | undefined;
+        remainingCredits?: string | undefined;
+        nextRegenCredits?: string | undefined;
+        nextRegenPercent?: number | undefined;
     };
     rollingFiveHourLimit: {
         remaining: number;
         max: number;
         limited: boolean;
-        nextTickAt: string | null;
+        nextTickAt: string | undefined;
         tickPercent?: number;
-        percentUsed: number | null;
+        percentUsed: number | undefined;
     };
 }
 

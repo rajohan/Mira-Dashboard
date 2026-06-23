@@ -24,9 +24,9 @@ const KOPIA_BACKUP_SCRIPT_PATTERN = "/opt/docker/apps/kopia/backup.sh";
 const WALG_BACKUP_SCRIPT_PATTERN = "/usr/local/bin/backup-push.sh";
 const CONTAINER_PGREP_NO_MATCH_MARKER = "__MIRA_CONTAINER_PGREP_NO_MATCH__";
 const backupAbortContainerWaitMs = 30_000;
-const backupAbortContainerPollMs = 1_000;
+const backupAbortContainerPollMs = 1000;
 const backupAbortContainerConfirmAttempts = 3;
-const backupAbortDockerExecTimeoutMs = 5_000;
+const backupAbortDockerExecTimeoutMs = 5000;
 
 interface BackupAbortConfig {
     container: string;
@@ -38,11 +38,11 @@ interface BackupJob {
     id: string;
     type: "kopia" | "walg";
     status: "running" | "done" | "needs_attention";
-    code: number | null;
+    code: number | undefined;
     stdout: string;
     stderr: string;
     startedAt: number;
-    endedAt: number | null;
+    endedAt: number | undefined;
     completed: Promise<BackupJob>;
     process?: BunProcess;
     statusRefreshed?: boolean;
@@ -51,11 +51,11 @@ interface BackupJob {
 
 const backupJobs = new Map<string, BackupJob>();
 const backupRouteState: {
-    activeKopiaJobId: string | null;
-    activeWalgJobId: string | null;
+    activeKopiaJobId: string | undefined;
+    activeWalgJobId: string | undefined;
 } = {
-    activeKopiaJobId: null,
-    activeWalgJobId: null,
+    activeKopiaJobId: undefined,
+    activeWalgJobId: undefined,
 };
 
 /** Performs trim output. */
@@ -67,14 +67,14 @@ function trimOutput(text: string): string {
 }
 
 /** Returns current job. */
-function getCurrentJob(activeJobId: string | null, clear: () => void) {
+function getCurrentJob(activeJobId: string | undefined, clear: () => void) {
     if (!activeJobId) {
-        return null;
+        return;
     }
-    const job = backupJobs.get(activeJobId) ?? null;
+    const job = backupJobs.get(activeJobId) ?? undefined;
     if (!job) {
         clear();
-        return null;
+        return;
     }
 
     if (job.status === "done") {
@@ -87,21 +87,21 @@ function getCurrentJob(activeJobId: string | null, clear: () => void) {
 /** Returns current kopia job. */
 function getCurrentKopiaJob() {
     return getCurrentJob(backupRouteState.activeKopiaJobId, () => {
-        backupRouteState.activeKopiaJobId = null;
+        backupRouteState.activeKopiaJobId = undefined;
     });
 }
 
 /** Returns current walg job. */
 function getCurrentWalgJob() {
     return getCurrentJob(backupRouteState.activeWalgJobId, () => {
-        backupRouteState.activeWalgJobId = null;
+        backupRouteState.activeWalgJobId = undefined;
     });
 }
 
 /** Performs map job. */
-export function mapBackupJob(job: BackupJob | null) {
+export function mapBackupJob(job: BackupJob | undefined) {
     if (!job) {
-        return null;
+        return;
     }
 
     return {
@@ -152,10 +152,10 @@ export async function clearNeedsAttentionBackupJob(type: BackupJob["type"]) {
     }
     backupJobs.delete(job.id);
     if (type === "kopia" && backupRouteState.activeKopiaJobId === job.id) {
-        backupRouteState.activeKopiaJobId = null;
+        backupRouteState.activeKopiaJobId = undefined;
     }
     if (type === "walg" && backupRouteState.activeWalgJobId === job.id) {
-        backupRouteState.activeWalgJobId = null;
+        backupRouteState.activeWalgJobId = undefined;
     }
     await refreshBackupStatus(type, job);
     return job;
@@ -214,11 +214,11 @@ function startBackupJob(
         id: jobId,
         type,
         status: "running",
-        code: null,
+        code: undefined,
         stdout: "",
         stderr: "",
         startedAt: Date.now(),
-        endedAt: null,
+        endedAt: undefined,
         completed: completed.promise,
     };
 
@@ -238,10 +238,10 @@ function startBackupJob(
     } catch (error) {
         backupJobs.delete(jobId);
         if (backupRouteState.activeKopiaJobId === jobId) {
-            backupRouteState.activeKopiaJobId = null;
+            backupRouteState.activeKopiaJobId = undefined;
         }
         if (backupRouteState.activeWalgJobId === jobId) {
-            backupRouteState.activeWalgJobId = null;
+            backupRouteState.activeWalgJobId = undefined;
         }
         throw error;
     }
@@ -250,15 +250,15 @@ function startBackupJob(
     let isFinalized = false;
     let isFinalizing = false;
     let isAbortRequested = false;
-    let hostAbortKillTimer: NodeJS.Timeout | null = null;
-    let containerAbortKillTimer: NodeJS.Timeout | null = null;
+    let hostAbortKillTimer: NodeJS.Timeout | undefined;
+    let containerAbortKillTimer: NodeJS.Timeout | undefined;
 
-    const finalizeJob = async (code: number, signalName: NodeJS.Signals | null) => {
+    const finalizeJob = async (code: number, signalName: NodeJS.Signals | undefined) => {
         if (isFinalized || isFinalizing) {
             return;
         }
         isFinalizing = true;
-        const interrupted = isAbortRequested || signalName !== null;
+        const interrupted = isAbortRequested || signalName !== undefined;
         let isNeedsAttention = false;
         if (interrupted && abortConfig) {
             try {
@@ -288,11 +288,11 @@ function startBackupJob(
         }
         if (hostAbortKillTimer) {
             clearTimeout(hostAbortKillTimer);
-            hostAbortKillTimer = null;
+            hostAbortKillTimer = undefined;
         }
         if (containerAbortKillTimer) {
             clearTimeout(containerAbortKillTimer);
-            containerAbortKillTimer = null;
+            containerAbortKillTimer = undefined;
         }
         const completedCode = interrupted ? 130 : code;
         job.status = isNeedsAttention ? "needs_attention" : "done";
@@ -311,11 +311,11 @@ function startBackupJob(
         isFinalizing = true;
         if (hostAbortKillTimer) {
             clearTimeout(hostAbortKillTimer);
-            hostAbortKillTimer = null;
+            hostAbortKillTimer = undefined;
         }
         if (containerAbortKillTimer) {
             clearTimeout(containerAbortKillTimer);
-            containerAbortKillTimer = null;
+            containerAbortKillTimer = undefined;
         }
         job.status = "needs_attention";
         job.code = 130;
@@ -382,7 +382,7 @@ function startBackupJob(
         return code;
     })()
         .then(async (code) => {
-            await finalizeJob(code, isAbortRequested ? "SIGTERM" : null);
+            await finalizeJob(code, isAbortRequested ? "SIGTERM" : undefined);
         })
         .catch(async (error: unknown) => {
             if (isFinalized || isFinalizing) {
@@ -391,11 +391,11 @@ function startBackupJob(
             isFinalizing = true;
             if (hostAbortKillTimer) {
                 clearTimeout(hostAbortKillTimer);
-                hostAbortKillTimer = null;
+                hostAbortKillTimer = undefined;
             }
             if (containerAbortKillTimer) {
                 clearTimeout(containerAbortKillTimer);
-                containerAbortKillTimer = null;
+                containerAbortKillTimer = undefined;
             }
             isFinalized = true;
             job.status = "done";
@@ -460,11 +460,11 @@ function isContainerPgrepNoMatch(result: { code: number; stdout: string }): bool
 async function assertNoContainerBackupInProgress(
     config: BackupAbortConfig,
     type: BackupJob["type"],
-    getCurrent: () => BackupJob | null
-): Promise<BackupJob | null> {
+    getCurrent: () => BackupJob | undefined
+): Promise<BackupJob | undefined> {
     const result = await runContainerPgrep(config);
     if (isContainerPgrepNoMatch(result)) {
-        return null;
+        return undefined;
     }
     if (result.code === 0) {
         const currentJob = getCurrent();
@@ -508,11 +508,11 @@ function runHostPgrep(
 async function assertNoHostBackupInProgress(
     type: BackupJob["type"],
     processPattern: string,
-    getCurrent: () => BackupJob | null
-): Promise<BackupJob | null> {
+    getCurrent: () => BackupJob | undefined
+): Promise<BackupJob | undefined> {
     const result = await runHostPgrep(processPattern);
     if (result.code === 1) {
-        return null;
+        return undefined;
     }
     if (result.code === 0) {
         const currentJob = getCurrent();
@@ -667,7 +667,7 @@ async function startKopiaBackupJob(signal?: AbortSignal) {
             statusCode: 409,
         });
     }
-    let hostJob: BackupJob | null;
+    let hostJob: BackupJob | undefined;
     try {
         hostJob = await assertNoHostBackupInProgress(
             "kopia",
@@ -709,7 +709,7 @@ async function startWalgBackupJob(signal?: AbortSignal) {
             statusCode: 409,
         });
     }
-    let containerJob: BackupJob | null;
+    let containerJob: BackupJob | undefined;
     try {
         containerJob = await assertNoContainerBackupInProgress(
             abortConfig,
@@ -779,7 +779,7 @@ function scheduledBackupJobId(type: BackupJob["type"]) {
 function createBackupManualScheduledRun(type: BackupJob["type"]) {
     const jobId = scheduledBackupJobId(type);
     if (!getScheduledJob(jobId)) {
-        return null;
+        return;
     }
     return createManualScheduledJobRun(jobId);
 }
@@ -789,7 +789,7 @@ function backupFailureMessage(job: BackupJob) {
         return `${job.type.toUpperCase()} backup needs attention`;
     }
     if (job.code === 0) {
-        return null;
+        return;
     }
     const details = job.stderr || job.stdout;
     return `${job.type.toUpperCase()} backup failed with code ${job.code ?? 1}${
@@ -826,7 +826,7 @@ async function finishManualScheduledRunWhenComplete(
         finishScheduledJobRun(
             run,
             isSuccess ? "success" : "failed",
-            isSuccess ? null : backupFailureMessage(completedJob),
+            isSuccess ? undefined : backupFailureMessage(completedJob),
             { backup: mapBackupJob(completedJob) }
         );
     } catch (error) {
@@ -834,7 +834,7 @@ async function finishManualScheduledRunWhenComplete(
     }
 }
 
-export function getCurrentBackupJob(type: BackupJob["type"]): BackupJob | null {
+export function getCurrentBackupJob(type: BackupJob["type"]): BackupJob | undefined {
     return (type === "kopia" ? getCurrentKopiaJob : getCurrentWalgJob)();
 }
 
@@ -938,7 +938,11 @@ export function registerBackupScheduledJobs(): void {
                 scheduleType: existing?.scheduleType ?? job.scheduleType,
                 intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
                 timeOfDay: existing?.timeOfDay ?? job.timeOfDay,
-                cronExpression: existing?.cronExpression ?? null,
+                cronExpression:
+                    existing?.cronExpression ??
+                    ("cronExpression" in job && typeof job.cronExpression === "string"
+                        ? job.cronExpression
+                        : undefined),
             });
         }
         database.run("COMMIT");

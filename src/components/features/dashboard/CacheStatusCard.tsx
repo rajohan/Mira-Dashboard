@@ -27,7 +27,7 @@ function getVariant(status?: string): "success" | "warning" | "error" | "default
     return "default";
 }
 
-function formatCacheUpdateTime(value?: string | null): string {
+function formatCacheUpdateTime(value?: string | undefined): string {
     if (!value) {
         return "Never";
     }
@@ -102,7 +102,7 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProperties) {
                                         >
                                             {entry.errorMessage}
                                         </div>
-                                    ) : null}
+                                    ) : undefined}
                                 </div>
                                 <button
                                     type="button"

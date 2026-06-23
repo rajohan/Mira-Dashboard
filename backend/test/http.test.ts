@@ -5,7 +5,7 @@ import { clearSessionCookie, sessionCookie } from "../src/http.ts";
 
 function serverWithAddress(address: string): Server<unknown> {
     return {
-        requestIP: () => ({ address, family: "IPv4", port: 12345 }),
+        requestIP: () => ({ address, family: "IPv4", port: 12_345 }),
     } as unknown as Server<unknown>;
 }
 

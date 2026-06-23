@@ -25,7 +25,7 @@ export interface OpsActionDefinition {
 
 /** Represents the exec API response. */
 export interface ExecResponse {
-    code: number | null;
+    code: number | undefined;
     stdout: string;
     stderr: string;
 }
@@ -35,7 +35,7 @@ export interface ExecJobResponse extends ExecResponse {
     jobId: string;
     status: "running" | "done";
     startedAt: number;
-    endedAt: number | null;
+    endedAt: number | undefined;
 }
 
 /** Defines ops actions. */
@@ -115,7 +115,7 @@ export function useStartOpsAction() {
 }
 
 /** Provides exec job. */
-export function useExecJob(jobId: string | null) {
+export function useExecJob(jobId: string | undefined) {
     return useQuery({
         queryKey: ["exec-job", jobId],
         queryFn: () =>

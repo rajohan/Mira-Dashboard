@@ -61,8 +61,8 @@ function getWeatherIcon(description?: string) {
 }
 
 /** Formats temp for display. */
-function formatTemporary(value: number | null | undefined): string {
-    if (value === null || value === undefined || Number.isNaN(value)) {
+function formatTemporary(value: number | undefined): string {
+    if (value === undefined || Number.isNaN(value)) {
         return "--";
     }
 

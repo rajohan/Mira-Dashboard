@@ -8,8 +8,8 @@ export interface NotificationItem {
     title: string;
     description: string;
     type: "info" | "warning" | "error" | "success";
-    source: string | null;
-    dedupeKey: string | null;
+    source: string | undefined;
+    dedupeKey: string | undefined;
     metadata: Record<string, unknown>;
     isRead: boolean;
     createdAt: string;
@@ -46,7 +46,7 @@ export function useNotifications(refreshInterval: number | false = false) {
         queryKey: ["notifications"],
         queryFn: fetchNotifications,
         refetchInterval: refreshInterval,
-        staleTime: 2_000,
+        staleTime: 2000,
     });
 }
 
@@ -56,7 +56,7 @@ export function useCreateNotification() {
 
     return useMutation({
         mutationFn: (payload: CreateNotificationInput) =>
-            apiPostRequired<{ isOk: boolean; id: number | null }>(
+            apiPostRequired<{ isOk: boolean; id: number | undefined }>(
                 "/notifications",
                 payload
             ),

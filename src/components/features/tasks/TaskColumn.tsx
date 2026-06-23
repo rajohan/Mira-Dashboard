@@ -18,7 +18,7 @@ export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnPropert
     const config: ColumnConfig | undefined = COLUMN_CONFIG.find((c) => c.id === id);
     const { setNodeRef } = useDroppable({ id });
 
-    if (!config) return null;
+    if (!config) return;
 
     return (
         <div className="flex min-w-0 flex-col lg:min-w-[280px] lg:flex-1">

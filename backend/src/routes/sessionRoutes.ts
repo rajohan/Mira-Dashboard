@@ -29,7 +29,7 @@ export const sessionRoutes = {
                             ? session.model.includes(model)
                             : false
                     );
-                sessions.sort((a, b) => b.tokenCount - a.tokenCount);
+                sessions = sessions.toSorted((a, b) => b.tokenCount - a.tokenCount);
                 return json({ sessions });
             } catch (error) {
                 return sessionRouteError(error);

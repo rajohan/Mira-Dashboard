@@ -16,10 +16,10 @@ export interface RunProcessResult {
 export type BunProcess = ReturnType<typeof Bun.spawn>;
 
 const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
-const DEFAULT_FORCE_KILL_GRACE_MS = 3_000;
+const DEFAULT_FORCE_KILL_GRACE_MS = 3000;
 
 async function readProcessText(
-    stream: ReadableStream<Uint8Array> | null | undefined,
+    stream: ReadableStream<Uint8Array> | undefined,
     maxBuffer: number
 ): Promise<string> {
     if (!stream) return "";
@@ -150,7 +150,7 @@ export async function runProcess(
 }
 
 export async function pipeProcessOutput(
-    stream: ReadableStream<Uint8Array> | null | undefined,
+    stream: ReadableStream<Uint8Array> | undefined,
     onChunk: (chunk: string) => void
 ): Promise<void> {
     if (!stream) return;

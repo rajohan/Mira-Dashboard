@@ -34,25 +34,29 @@ function formatSyntheticWeeklyRemaining(
 function getProviderPercent(
     provider: ProviderKey,
     quotas: Awaited<ReturnType<typeof fetchCachedQuotas>>
-): number | null {
+): number | undefined {
     if (provider === "openrouter") {
-        return hasQuotaStatus(quotas.openrouter) ? null : quotas.openrouter.percentUsed;
+        return hasQuotaStatus(quotas.openrouter)
+            ? undefined
+            : (quotas.openrouter.percentUsed ?? undefined);
     }
 
     if (provider === "elevenlabs") {
-        return hasQuotaStatus(quotas.elevenlabs) ? null : quotas.elevenlabs.percentUsed;
+        return hasQuotaStatus(quotas.elevenlabs)
+            ? undefined
+            : (quotas.elevenlabs.percentUsed ?? undefined);
     }
 
     if (provider === "synthetic") {
         return hasQuotaStatus(quotas.synthetic)
-            ? null
+            ? undefined
             : Math.max(
                   quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0,
                   100 - quotas.synthetic.weeklyTokenLimit.percentRemaining
               );
     }
 
-    return hasQuotaStatus(quotas.openai) ? null : quotas.openai.percentUsed;
+    return hasQuotaStatus(quotas.openai) ? undefined : quotas.openai.percentUsed;
 }
 
 /** Returns notification payload. */
@@ -88,7 +92,7 @@ function getNotificationPayload(
             description: `${quotas.openai.percentUsed}% used (5h ${quotas.openai.fiveHourLeftPercent}% left · weekly ${quotas.openai.weeklyLeftPercent}% left)`,
         };
     }
-    return null;
+    return;
 }
 
 /** Returns a notification payload or skips inconsistent quota snapshots. */
@@ -102,7 +106,7 @@ function getProviderNotificationPayload(
         console.warn(
             `[QuotaNotifications] Missing notification payload for ${provider} ${bucket}%`
         );
-        return null;
+        return;
     }
     return payload;
 }
@@ -235,7 +239,7 @@ export async function runQuotaNotificationCheck(): Promise<boolean> {
 
         for (const provider of providers) {
             const percent = getProviderPercent(provider, quotas);
-            if (percent === null) {
+            if (percent === undefined) {
                 continue;
             }
 
@@ -274,8 +278,8 @@ export function shouldRegisterQuotaNotificationScheduledJobs(): boolean {
             enabled: existing?.enabled ?? true,
             scheduleType: existing?.scheduleType ?? "interval",
             intervalSeconds: existing?.intervalSeconds ?? 15 * 60,
-            timeOfDay: existing?.timeOfDay ?? null,
-            cronExpression: existing?.cronExpression ?? null,
+            timeOfDay: existing?.timeOfDay ?? undefined,
+            cronExpression: existing?.cronExpression ?? undefined,
             actionKey: "notifications.quota",
             actionPayload: {},
         });

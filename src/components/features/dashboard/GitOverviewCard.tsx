@@ -10,8 +10,8 @@ const DEFAULT_BRANCH = "main";
 interface GitRepoSummary {
     key: string;
     name: string;
-    branch: string | null;
-    remote: string | null;
+    branch: string | undefined;
+    remote: string | undefined;
     dirty: boolean;
     statusSummary: {
         staged: number;
@@ -109,7 +109,7 @@ export function GitOverviewCard() {
                                     <div className="flex shrink-0 flex-wrap justify-end gap-1">
                                         {repo.branch && repo.branch !== DEFAULT_BRANCH ? (
                                             <Badge variant="warning">Off main</Badge>
-                                        ) : null}
+                                        ) : undefined}
                                         <Badge
                                             variant={repo.dirty ? "warning" : "success"}
                                         >

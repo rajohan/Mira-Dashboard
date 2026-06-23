@@ -7,11 +7,11 @@ export interface CacheEnvelope<T> {
     key: string;
     source: string;
     status: string;
-    updatedAt: string | null;
-    lastAttemptAt: string | null;
-    expiresAt: string | null;
-    errorCode: string | null;
-    errorMessage: string | null;
+    updatedAt: string | undefined;
+    lastAttemptAt: string | undefined;
+    expiresAt: string | undefined;
+    errorCode: string | undefined;
+    errorMessage: string | undefined;
     consecutiveFailures: number;
     data: T;
     meta: unknown;
@@ -37,7 +37,7 @@ export function useCacheHeartbeat(refreshInterval: number | false = false) {
         queryKey: cacheKeys.heartbeat(),
         queryFn: () => apiFetchRequired<CacheHeartbeatResponse>("/cache/heartbeat"),
         refetchInterval: refreshInterval,
-        staleTime: 2_000,
+        staleTime: 2000,
     });
 }
 
@@ -48,7 +48,7 @@ export function useCacheEntry<T>(key: string, refreshInterval: number | false = 
         queryFn: () =>
             apiFetchRequired<CacheEnvelope<T>>(`/cache/${encodeURIComponent(key)}`),
         refetchInterval: refreshInterval,
-        staleTime: 2_000,
+        staleTime: 2000,
     });
 }
 

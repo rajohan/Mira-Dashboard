@@ -2,11 +2,11 @@ import { getCacheEntry, parseJsonField } from "./cacheStore.ts";
 
 /** Represents moltbook announcement. */
 export interface MoltbookAnnouncement {
-    postId: string | null;
-    title: string | null;
-    authorName: string | null;
-    createdAt: string | null;
-    previewText: string | null;
+    postId: string | undefined;
+    title: string | undefined;
+    authorName: string | undefined;
+    createdAt: string | undefined;
+    previewText: string | undefined;
 }
 
 /** Represents moltbook home cache. */
@@ -15,16 +15,16 @@ export interface MoltbookHomeCache {
     unreadMessageCount: number;
     activityOnYourPostsCount: number;
     activityOnYourPosts: unknown[];
-    latestAnnouncement: MoltbookAnnouncement | null;
-    postsFromAccountsYouFollowCount: number | null;
-    exploreCount: number | null;
+    latestAnnouncement: MoltbookAnnouncement | undefined;
+    postsFromAccountsYouFollowCount: number | undefined;
+    exploreCount: number | undefined;
     nextActions: string[];
     fetchedAt: string;
 }
 
 /** Represents moltbook profile cache. */
 export interface MoltbookProfileCache {
-    agent: Record<string, unknown> | null;
+    agent: Record<string, unknown> | undefined;
 }
 
 /** Represents moltbook my content cache. */
@@ -36,24 +36,59 @@ export interface MoltbookMyContentCache {
 /** Represents moltbook feed cache. */
 export interface MoltbookFeedCache {
     posts: unknown[];
-    feedType: string | null;
-    feedFilter: string | null;
+    feedType: string | undefined;
+    feedFilter: string | undefined;
     hasMore: boolean;
-    tip: string | null;
+    tip: string | undefined;
 }
 
 /** Represents the moltbook cache API response. */
 export interface MoltbookCacheResponse<T> {
     source: string;
     status: string;
-    updatedAt: string | null;
-    lastAttemptAt: string | null;
-    expiresAt: string | null;
-    errorCode: string | null;
-    errorMessage: string | null;
+    updatedAt: string | undefined;
+    lastAttemptAt: string | undefined;
+    expiresAt: string | undefined;
+    errorCode: string | undefined;
+    errorMessage: string | undefined;
     consecutiveFailures: number;
     data: T;
     meta: Record<string, unknown>;
+}
+
+const CACHE_NULL_SENTINEL_FIELDS = new Set([
+    "agent",
+    "authorName",
+    "createdAt",
+    "exploreCount",
+    "feedFilter",
+    "feedType",
+    "latestAnnouncement",
+    "postId",
+    "postsFromAccountsYouFollowCount",
+    "previewText",
+    "tip",
+    "title",
+]);
+
+function normalizeCacheNulls(value: unknown): unknown {
+    if (value === null) {
+        return value;
+    }
+    if (Array.isArray(value)) {
+        return value;
+    }
+    if (typeof value === "object") {
+        return Object.fromEntries(
+            Object.entries(value).map(([key, entry]) => [
+                key,
+                entry === null && CACHE_NULL_SENTINEL_FIELDS.has(key)
+                    ? undefined
+                    : normalizeCacheNulls(entry),
+            ])
+        );
+    }
+    return value;
 }
 
 /** Fetches cached moltbook entry. */
@@ -65,19 +100,20 @@ async function fetchCachedMoltbookEntry<T>(
         throw new Error(`Moltbook cache entry not found or not fresh: ${key}`);
     }
 
-    const data = parseJsonField<T>(row.data);
-    if (!data) {
+    const parsedData = parseJsonField<T>(row.data);
+    if (parsedData === undefined) {
         throw new Error(`Moltbook cache payload is invalid: ${key}`);
     }
+    const data = normalizeCacheNulls(parsedData) as T;
 
     return {
         source: row.source,
         status: row.status,
-        updatedAt: row.updated_at || null,
-        lastAttemptAt: row.last_attempt_at || null,
-        expiresAt: row.expires_at || null,
-        errorCode: row.error_code || null,
-        errorMessage: row.error_message || null,
+        updatedAt: row.updated_at || undefined,
+        lastAttemptAt: row.last_attempt_at || undefined,
+        expiresAt: row.expires_at || undefined,
+        errorCode: row.error_code || undefined,
+        errorMessage: row.error_message || undefined,
         consecutiveFailures: Number(row.consecutive_failures),
         data,
         meta: parseJsonField<Record<string, unknown>>(row.meta) ?? {},

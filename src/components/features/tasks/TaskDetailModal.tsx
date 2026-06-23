@@ -29,13 +29,15 @@ import { Input } from "../../ui/Input";
 import { Modal } from "../../ui/Modal";
 import { Textarea } from "../../ui/Textarea";
 
+const CLEAR_TASK_AUTOMATION = JSON.parse("null") as null;
+
 /** Returns a stable task column for movement controls. */
-export function normalizeTaskDetailColumn(column?: ColumnId | null): ColumnId {
+export function normalizeTaskDetailColumn(column?: ColumnId | undefined): ColumnId {
     return column ?? "todo";
 }
 
 /** Formats the task status badge without coercing nullish columns. */
-export function formatTaskColumnBadge(column?: ColumnId | null): string {
+export function formatTaskColumnBadge(column?: ColumnId | undefined): string {
     return column?.toUpperCase() ?? "UNASSIGNED";
 }
 
@@ -63,7 +65,7 @@ function formatElapsedMs(value: number): string {
 
 /** Provides task data and callbacks used by the task detail modal. */
 interface TaskDetailModalProperties {
-    task: Task | null;
+    task: Task | undefined;
     onClose: () => void;
     onMove: (column: ColumnId) => Promise<void>;
     onAssign: (assignee: TaskAssigneeId) => Promise<void>;
@@ -72,10 +74,10 @@ interface TaskDetailModalProperties {
         title?: string;
         body?: string;
         labels?: string[];
-        automation?: Pick<
-            TaskAutomation,
-            "cronJobId" | "scheduleSummary" | "sessionTarget"
-        > | null;
+        automation?:
+            | Pick<TaskAutomation, "cronJobId" | "scheduleSummary" | "sessionTarget">
+            | null
+            | undefined;
     }) => Promise<Task>;
     updates: TaskUpdate[];
     onAddUpdate: (messageMd: string) => Promise<void>;
@@ -115,16 +117,18 @@ export function TaskDetailModal({
 
     const [progressMessage, setProgressMessage] = useState("");
 
-    const [editingUpdateId, setEditingUpdateId] = useState<number | null>(null);
+    const [editingUpdateId, setEditingUpdateId] = useState<number | undefined>(undefined);
     const [editingUpdateMessage, setEditingUpdateMessage] = useState("");
-    const previousTaskNumberReference = useRef<number | null>(task?.number ?? null);
+    const previousTaskNumberReference = useRef<number | undefined>(
+        task?.number ?? undefined
+    );
 
     useEffect(() => {
         if (!task) {
-            previousTaskNumberReference.current = null;
+            previousTaskNumberReference.current = undefined;
             setIsEditingTask(false);
             setProgressMessage("");
-            setEditingUpdateId(null);
+            setEditingUpdateId(undefined);
             setEditingUpdateMessage("");
             return;
         }
@@ -137,7 +141,7 @@ export function TaskDetailModal({
         if (isNewTask) {
             setIsEditingTask(false);
             setProgressMessage("");
-            setEditingUpdateId(null);
+            setEditingUpdateId(undefined);
             setEditingUpdateMessage("");
         }
 
@@ -152,7 +156,7 @@ export function TaskDetailModal({
     }, [isEditingTask, task]);
 
     if (!task) {
-        return null;
+        return;
     }
 
     const priority = getPriority(task.labels);
@@ -180,7 +184,7 @@ export function TaskDetailModal({
             ? TASK_ASSIGNEES.mira.githubUrl
             : assigneeLogin === TASK_ASSIGNEES.raymond.id
               ? TASK_ASSIGNEES.raymond.githubUrl
-              : null;
+              : undefined;
 
     /** Moves the task to the selected column. */
     const handleMove = async (column: ColumnId) => {
@@ -229,7 +233,7 @@ export function TaskDetailModal({
                       scheduleSummary,
                       sessionTarget,
                   }
-                : null,
+                : CLEAR_TASK_AUTOMATION,
         });
 
         setIsEditingTask(false);
@@ -259,7 +263,7 @@ export function TaskDetailModal({
 
         await onEditUpdate(editingUpdateId, editingUpdateMessage.trim());
 
-        setEditingUpdateId(null);
+        setEditingUpdateId(undefined);
         setEditingUpdateMessage("");
     };
 
@@ -597,7 +601,7 @@ export function TaskDetailModal({
                                                         size="sm"
                                                         variant="secondary"
                                                         onClick={() =>
-                                                            setEditingUpdateId(null)
+                                                            setEditingUpdateId(undefined)
                                                         }
                                                     >
                                                         <X size={14} />

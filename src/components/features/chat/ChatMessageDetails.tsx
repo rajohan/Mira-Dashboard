@@ -17,7 +17,7 @@ function formatToolArguments(toolCall: ChatToolCallDisplay): string {
     }
 
     try {
-        return JSON.stringify(toolCall.arguments, null, 2);
+        return JSON.stringify(toolCall.arguments, undefined, 2);
     } catch {
         return String(toolCall.arguments);
     }
@@ -67,7 +67,7 @@ export function ChatMessageDetails({
     const shouldShowToolResult = visibility.shouldShowTools && message.toolResult;
 
     if (!shouldShowThinking && !shouldShowToolCalls && !shouldShowToolResult) {
-        return null;
+        return;
     }
 
     return (
@@ -80,7 +80,7 @@ export function ChatMessageDetails({
                           </pre>
                       </DetailBlock>
                   ))
-                : null}
+                : undefined}
 
             {shouldShowToolCalls
                 ? message.toolCalls?.map((toolCall, index) => {
@@ -101,7 +101,7 @@ export function ChatMessageDetails({
                           </DetailBlock>
                       );
                   })
-                : null}
+                : undefined}
 
             {shouldShowToolResult ? (
                 <DetailBlock
@@ -116,7 +116,7 @@ export function ChatMessageDetails({
                         <span className="text-primary-300">No text output</span>
                     )}
                 </DetailBlock>
-            ) : null}
+            ) : undefined}
         </div>
     );
 }

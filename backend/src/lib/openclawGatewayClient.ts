@@ -11,9 +11,9 @@ const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const DEFAULT_TICK_INTERVAL_MS = 30_000;
-const MIN_TICK_INTERVAL_MS = 1_000;
+const MIN_TICK_INTERVAL_MS = 1000;
 const MAX_TICK_INTERVAL_MS = 5 * 60_000;
-const TICK_WATCH_POLL_INTERVAL_MS = 1_000;
+const TICK_WATCH_POLL_INTERVAL_MS = 1000;
 const DEFAULT_CONNECT_CHALLENGE_TIMEOUT_MS = 10_000;
 
 /** Defines device identity. */
@@ -45,7 +45,7 @@ export type GatewayEvent = {
 type GatewayResponse = {
     type?: string;
     id?: string;
-    isOk?: boolean | null;
+    isOk?: boolean | undefined | null;
     ok?: boolean;
     payload?: unknown;
     error?: {
@@ -156,7 +156,7 @@ function asError(error: unknown): Error {
 /** Performs sign device payload. */
 function signDevicePayload(privateKeyPem: string, payload: string): string {
     const key = createPrivateKey(privateKeyPem);
-    return base64UrlEncode(sign(null, Buffer.from(payload, "utf8"), key));
+    return base64UrlEncode(sign(undefined, Buffer.from(payload, "utf8"), key));
 }
 
 /** Performs generate IDentity. */
@@ -197,7 +197,7 @@ export function loadOrCreateDeviceIdentity(filePath: string): DeviceIdentity {
 
             fs.writeFileSync(
                 filePath,
-                `${JSON.stringify({ version: 1, ...identity }, null, 2)}\n`,
+                `${JSON.stringify({ version: 1, ...identity }, undefined, 2)}\n`,
                 { mode: 0o600 }
             );
 
@@ -214,7 +214,7 @@ export function loadOrCreateDeviceIdentity(filePath: string): DeviceIdentity {
     const identity = generateIdentity();
     fs.writeFileSync(
         filePath,
-        `${JSON.stringify({ version: 1, ...identity }, null, 2)}\n`,
+        `${JSON.stringify({ version: 1, ...identity }, undefined, 2)}\n`,
         {
             mode: 0o600,
         }
@@ -240,7 +240,7 @@ function buildDeviceAuthPayloadV3(parameters: {
     role: string;
     scopes: string[];
     signedAtMs: number;
-    token?: string | null;
+    token?: string | undefined;
     nonce: string;
     platform?: string;
     deviceFamily?: string;
@@ -264,14 +264,14 @@ function buildDeviceAuthPayloadV3(parameters: {
 export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
     private static readonly MAX_PENDING_REQUESTS = 1000;
     declare private readonly opts: OpenClawGatewayClientOptions;
-    declare private ws: WebSocket | null;
+    declare private ws: WebSocket | undefined;
     declare private requestId: number;
     declare private readonly pending: Map<string, PendingRequestEntry>;
     declare private closed: boolean;
-    declare private reconnectTimer: NodeJS.Timeout | null;
-    declare private connectChallengeTimer: NodeJS.Timeout | null;
+    declare private reconnectTimer: NodeJS.Timeout | undefined;
+    declare private connectChallengeTimer: NodeJS.Timeout | undefined;
     declare private backoffMs: number;
-    declare private tickTimer: NodeJS.Timeout | null;
+    declare private tickTimer: NodeJS.Timeout | undefined;
     declare private tickIntervalMs: number;
     declare private lastTickAt: number;
 
@@ -279,12 +279,12 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
     constructor(options: OpenClawGatewayClientOptions) {
         this.requestId = 0;
         this.pending = new Map();
-        this.ws = null;
+        this.ws = undefined;
         this.closed = false;
-        this.reconnectTimer = null;
-        this.connectChallengeTimer = null;
-        this.backoffMs = 1_000;
-        this.tickTimer = null;
+        this.reconnectTimer = undefined;
+        this.connectChallengeTimer = undefined;
+        this.backoffMs = 1000;
+        this.tickTimer = undefined;
         this.tickIntervalMs = DEFAULT_TICK_INTERVAL_MS;
         this.lastTickAt = 0;
         this.opts = {
@@ -319,7 +319,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         }
 
         clearTimeout(this.connectChallengeTimer);
-        this.connectChallengeTimer = null;
+        this.connectChallengeTimer = undefined;
     }
 
     private scheduleReconnect(): void {
@@ -329,7 +329,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         const delay = this.backoffMs;
         this.backoffMs = Math.min(this.backoffMs * 2, 30_000);
         this.reconnectTimer = setTimeout(() => {
-            this.reconnectTimer = null;
+            this.reconnectTimer = undefined;
             this.start();
         }, delay);
     }
@@ -357,7 +357,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         }
 
         clearInterval(this.tickTimer);
-        this.tickTimer = null;
+        this.tickTimer = undefined;
     }
 
     private rejectAllPending(error: Error): void {
@@ -436,7 +436,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
                     (payload as GatewayHelloOk).type || ""
                 )
             ) {
-                this.backoffMs = 1_000;
+                this.backoffMs = 1000;
                 this.lastTickAt = Date.now();
                 this.tickIntervalMs = sanitizeTimerDurationMs(
                     (payload as GatewayHelloOk).policy?.tickIntervalMs,
@@ -500,7 +500,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
                       role,
                       scopes,
                       signedAtMs,
-                      token: token || null,
+                      token: token || undefined,
                       nonce,
                       platform,
                       deviceFamily: this.opts.deviceFamily,
@@ -592,7 +592,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         ws.addEventListener("close", (event) => {
             const reason = event.reason;
             if (this.ws === ws) {
-                this.ws = null;
+                this.ws = undefined;
             }
             this.clearConnectChallengeTimeout();
             this.stopTickWatch();
@@ -620,11 +620,11 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         this.stopTickWatch();
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);
-            this.reconnectTimer = null;
+            this.reconnectTimer = undefined;
         }
         if (this.ws) {
             this.ws.close();
-            this.ws = null;
+            this.ws = undefined;
         }
         this.rejectAllPending(new Error("gateway client stopped"));
     }

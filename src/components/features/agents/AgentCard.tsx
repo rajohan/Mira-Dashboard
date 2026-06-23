@@ -18,10 +18,10 @@ export function AgentCard({
     id: string;
     status: keyof typeof agentStatusColors;
     model: string;
-    currentTask: string | null;
-    currentActivity: string | null;
-    lastActivity: string | null;
-    channel: string | null;
+    currentTask: string | undefined;
+    currentActivity: string | undefined;
+    lastActivity: string | undefined;
+    channel: string | undefined;
 }) {
     const colors = agentStatusColors[status];
     const modelShort = model.split("/").pop() || model;

@@ -20,7 +20,7 @@ interface PostgresDatabaseRow {
 
 /** Represents a grouped pg_stat_activity connection count by state. */
 interface ConnectionCountsRow {
-    state: string | null;
+    state: string | undefined;
     count: string;
 }
 
@@ -31,8 +31,8 @@ interface DeadTupleRow {
     n_live_tup: string;
     n_dead_tup: string;
     dead_pct: string;
-    last_autovacuum: string | null;
-    last_autoanalyze: string | null;
+    last_autovacuum: string | undefined;
+    last_autoanalyze: string | undefined;
 }
 
 /** Represents one pg_stat_statements row for the slowest/highest-cost queries. */
@@ -84,7 +84,11 @@ function parseTable<T extends object>(output: string): T[] {
         return [];
     }
 
-    const headers = lines[0].split("\t");
+    const headerLine = lines[0];
+    if (headerLine === undefined) {
+        return [];
+    }
+    const headers = headerLine.split("\t");
     return lines.slice(1).map((line) => {
         const cells = line.split("\t");
         return Object.fromEntries(
@@ -94,12 +98,12 @@ function parseTable<T extends object>(output: string): T[] {
 }
 
 /** Returns a string value or a fallback using the route's existing falsy-value behavior. */
-function stringWithDefault(value: string | null | undefined, fallback: string): string {
+function stringWithDefault(value: string | undefined, fallback: string): string {
     return value || fallback;
 }
 
 /** Converts psql numeric text to a number, preserving the existing falsy-to-zero behavior. */
-function numberFrom(value: string | null | undefined): number {
+function numberFrom(value: string | undefined): number {
     return Number(value || 0);
 }
 
@@ -262,11 +266,13 @@ async function queryAllUserDatabases<T extends object>(sql: string): Promise<T[]
 
 const TORRENT_COUNT_TTL = 60 * 60 * 1000; // 1 hour
 const databaseRouteState: {
-    torrentCountCache: null | {
-        data: { comet: number; bitmagnet: number };
-        timestamp: number;
-    };
-} = { torrentCountCache: null };
+    torrentCountCache:
+        | undefined
+        | {
+              data: { comet: number; bitmagnet: number };
+              timestamp: number;
+          };
+} = { torrentCountCache: undefined };
 
 /** Returns cached torrent counts for Comet and Bitmagnet, refreshing at most once per hour. */
 async function getTorrentCounts() {
@@ -369,7 +375,7 @@ export async function getDatabaseOverview() {
         LIMIT 25;
     `);
     const deadTupleRows = allDeadTupleRows
-        .sort((a, b) => numberFrom(b.n_dead_tup) - numberFrom(a.n_dead_tup))
+        .toSorted((a, b) => numberFrom(b.n_dead_tup) - numberFrom(a.n_dead_tup))
         .slice(0, 25);
 
     const pgStatStatementsResult = await queryPostgres(`

@@ -16,7 +16,6 @@ type DatabaseColumnDefinition<T extends object> =
     | ColumnDef<T, string>
     | ColumnDef<T, number>
     | ColumnDef<T, boolean>
-    | ColumnDef<T, null>
     | ColumnDef<T, undefined>;
 
 /** Represents props. */
@@ -98,7 +97,7 @@ export function DatabaseTableShell<T extends object>({
                                 </div>
                             ))}
                         </div>
-                    ) : null}
+                    ) : undefined}
 
                     <div
                         className={[
@@ -134,7 +133,7 @@ export function DatabaseTableShell<T extends object>({
                                                             ) : header.column.getIsSorted() ===
                                                               "desc" ? (
                                                                 <ChevronDown className="h-3 w-3 rotate-180" />
-                                                            ) : null}
+                                                            ) : undefined}
                                                         </span>
                                                     </button>
                                                 ) : (

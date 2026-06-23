@@ -50,7 +50,7 @@ export function ReadOnlyField({
         <div className="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             <span className="text-primary-400 text-sm">{label}</span>
             <span className="text-primary-100 font-mono text-sm break-all sm:text-right">
-                {value === undefined || value === null ? "—" : String(value)}
+                {value === undefined ? "—" : String(value)}
             </span>
         </div>
     );

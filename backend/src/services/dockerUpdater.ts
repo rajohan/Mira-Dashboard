@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { YAML } from "bun";
 
-import { database } from "../database.ts";
+import { database, sqlNullable } from "../database.ts";
 import { runProcess } from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 import type { ScheduledJob } from "./scheduledJobs.ts";
@@ -90,7 +90,7 @@ function getDockerAppsRoot(): string {
 type ComposeEnvironment = Record<string, string>;
 
 function stripEnvironmentComment(line: string): string {
-    let quote: string | null = null;
+    let quote: string | undefined;
     for (let index = 0; index < line.length; index += 1) {
         const character = line[index];
         if (character === '"' || character === "'") {
@@ -103,11 +103,15 @@ function stripEnvironmentComment(line: string): string {
                 backslashCount += 1;
             }
             if (backslashCount % 2 === 1) continue;
-            quote = quote === character ? null : (quote ?? character);
+            quote = quote === character ? undefined : (quote ?? character);
             continue;
         }
         // Compose treats inline comments as comments only when the # follows whitespace.
-        if (character === "#" && quote === null && /\s/u.test(line[index - 1] ?? "")) {
+        if (
+            character === "#" &&
+            quote === undefined &&
+            (index === 0 || /\s/u.test(line[index - 1] ?? ""))
+        ) {
             return line.slice(0, index).trimEnd();
         }
     }
@@ -312,7 +316,7 @@ function isProjectComposeIncludeCompose(
 ): boolean {
     const realProjectComposePath = fs.realpathSync(projectComposePath);
     const contextKey = JSON.stringify({
-        env: Object.entries(composeEnvironment).sort(([left], [right]) =>
+        env: Object.entries(composeEnvironment).toSorted(([left], [right]) =>
             left.localeCompare(right)
         ),
         path: realProjectComposePath,
@@ -351,7 +355,7 @@ function isProjectComposeIncludeCompose(
                           rawProjectDirectory,
                           entryComposeEnvironment
                       )
-                    : null;
+                    : undefined;
             for (const includePath of includePaths) {
                 if (
                     isIncludePathMatchCompose(
@@ -425,10 +429,10 @@ function isComposeFileDefineServiceImage(
 function composeFileServiceImageField(
     composePath: string,
     serviceName: string
-): string | null {
+): string | undefined {
     return isComposeFileDefineServiceImage(composePath, serviceName)
         ? `services.${serviceName}.image`
-        : null;
+        : undefined;
 }
 
 function isProjectComposeOrOverrideIncludeCompose(
@@ -444,7 +448,7 @@ function isProjectComposeOrOverrideIncludeCompose(
 function findIncludedComposeInDirectory(
     currentDirectory: string,
     configuredComposePath: string
-): string | null {
+): string | undefined {
     for (const filename of COMPOSE_FILENAMES) {
         const candidate = path.join(currentDirectory, filename);
         if (
@@ -455,7 +459,7 @@ function findIncludedComposeInDirectory(
             return candidate;
         }
     }
-    return null;
+    return undefined;
 }
 
 function findProjectComposePath(configuredComposePath: string): string {
@@ -585,19 +589,41 @@ interface ManagedServiceRow {
     service_name: string;
     compose_path: string;
     image_repo: string;
-    compose_image_ref: string | null;
-    compose_image_field: string | null;
-    current_tag: string | null;
-    current_digest: string | null;
-    latest_tag: string | null;
-    latest_digest: string | null;
+    compose_image_ref: string | undefined;
+    compose_image_field: string | undefined;
+    current_tag: string | undefined;
+    current_digest: string | undefined;
+    latest_tag: string | undefined;
+    latest_digest: string | undefined;
     policy: string;
     pin_mode: string;
     tag_match_type: string;
-    tag_match_pattern: string | null;
+    tag_match_pattern: string | undefined;
     enabled: number;
-    metadata_json?: string;
-    last_status: string | null;
+    metadata_json: string | undefined;
+    last_status: string | undefined;
+}
+
+function normalizeManagedServiceRow(
+    row: ManagedServiceRow | undefined
+): ManagedServiceRow | undefined {
+    if (!row) return undefined;
+    return {
+        ...row,
+        compose_image_field: row.compose_image_field ?? undefined,
+        compose_image_ref: row.compose_image_ref ?? undefined,
+        current_digest: row.current_digest ?? undefined,
+        current_tag: row.current_tag ?? undefined,
+        last_status: row.last_status ?? undefined,
+        latest_digest: row.latest_digest ?? undefined,
+        latest_tag: row.latest_tag ?? undefined,
+        metadata_json: row.metadata_json ?? undefined,
+        tag_match_pattern: row.tag_match_pattern ?? undefined,
+    };
+}
+
+function normalizeManagedServiceRows(rows: ManagedServiceRow[]): ManagedServiceRow[] {
+    return rows.map((row) => normalizeManagedServiceRow(row)!);
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -609,12 +635,12 @@ interface DiscoveredComposeService {
     imageRepo: string;
     composeImageRef: string;
     composeImageField: string;
-    currentTag: string | null;
-    currentDigest: string | null;
+    currentTag: string | undefined;
+    currentDigest: string | undefined;
     policy: "auto" | "notify";
     pinMode: "tag" | "digest";
     tagMatchType: "exact" | "regex";
-    tagMatchPattern: string | null;
+    tagMatchPattern: string | undefined;
     enabled: boolean;
     metadata: Record<string, unknown>;
 }
@@ -667,13 +693,13 @@ function parseImageReference(imageReference: string) {
     const digestIndex = imageReference.indexOf("@");
     const beforeDigest =
         digestIndex === -1 ? imageReference : imageReference.slice(0, digestIndex);
-    const digest = digestIndex === -1 ? null : imageReference.slice(digestIndex + 1);
+    const digest = digestIndex === -1 ? undefined : imageReference.slice(digestIndex + 1);
     const slashIndex = beforeDigest.lastIndexOf("/");
     const colonIndex = beforeDigest.lastIndexOf(":");
     const hasTag = colonIndex > slashIndex;
     return {
         repo: hasTag ? beforeDigest.slice(0, colonIndex) : beforeDigest,
-        tag: hasTag ? beforeDigest.slice(colonIndex + 1) : null,
+        tag: hasTag ? beforeDigest.slice(colonIndex + 1) : undefined,
         digest,
         pinMode: digest ? "digest" : "tag",
     };
@@ -700,23 +726,23 @@ function asRecord(value: unknown): JsonRecord {
         : {};
 }
 
-function trimEnvironment(name: string): string | null {
+function trimEnvironment(name: string): string | undefined {
     const value = process.env[name]?.trim();
-    return value || null;
+    return value || undefined;
 }
 
-function registryCredentials(registry: string): RegistryCredentials | null {
+function registryCredentials(registry: string): RegistryCredentials | undefined {
     if (["docker.io", "registry.docker.io", "registry-1.docker.io"].includes(registry)) {
         const username = trimEnvironment("DOCKER_LOGIN");
         const password = trimEnvironment("DOCKER_TOKEN");
-        return username && password ? { username, password } : null;
+        return username && password ? { username, password } : undefined;
     }
     if (registry === "ghcr.io" || registry === "lscr.io") {
         const username = trimEnvironment("MIRA_GITHUB_USERNAME");
         const password = trimEnvironment("MIRA_GITHUB_TOKEN");
-        return username && password ? { username, password } : null;
+        return username && password ? { username, password } : undefined;
     }
-    return null;
+    return undefined;
 }
 
 function registryHostFromUrl(url: string): string {
@@ -745,16 +771,21 @@ function basicAuthorization(credentials: RegistryCredentials): string {
     return `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toBase64()}`;
 }
 
-function parseBearerChallenge(header: string | null): Record<string, string> | null {
-    if (!header?.toLowerCase().startsWith("bearer ")) return null;
+function parseBearerChallenge(
+    header: string | undefined
+): Record<string, string> | undefined {
+    if (!header?.toLowerCase().startsWith("bearer ")) return undefined;
     const parameters = new Map<string, string>();
     for (const match of header
         .slice("bearer ".length)
         .matchAll(/([a-z_]+)="([^"]*)"/giu)) {
-        parameters.set(match[1].toLowerCase(), match[2]);
+        const [, key, value] = match;
+        if (key !== undefined && value !== undefined) {
+            parameters.set(key.toLowerCase(), value);
+        }
     }
     const realm = parameters.get("realm");
-    if (!realm) return null;
+    if (!realm) return undefined;
     return Object.fromEntries(parameters);
 }
 
@@ -785,7 +816,9 @@ async function fetchRegistryResponse(
         if (response.status !== 401) {
             return { response, clearTimer };
         }
-        const challenge = parseBearerChallenge(response.headers.get("www-authenticate"));
+        const challenge = parseBearerChallenge(
+            response.headers.get("www-authenticate") ?? undefined
+        );
         if (!challenge?.realm) {
             return { response, clearTimer };
         }
@@ -796,7 +829,7 @@ async function fetchRegistryResponse(
         const registry = registryHostFromUrl(url);
         const credentials = isTrustedTokenRealm(registry, tokenUrl)
             ? registryCredentials(registry)
-            : null;
+            : undefined;
         const tokenResponse = await fetch(tokenUrl, {
             headers: {
                 Accept: "application/json",
@@ -815,7 +848,7 @@ async function fetchRegistryResponse(
                 ? tokenBody.token
                 : typeof tokenBody.access_token === "string"
                   ? tokenBody.access_token
-                  : null;
+                  : undefined;
         if (!token) {
             return { response, clearTimer };
         }
@@ -833,8 +866,8 @@ async function fetchRegistryResponse(
     }
 }
 
-function parseNextLink(header: string | null, baseUrl?: string): string | null {
-    if (!header) return null;
+function parseNextLink(header: string | undefined, baseUrl?: string): string | undefined {
+    if (!header) return undefined;
     for (const part of header.split(",")) {
         const [rawUrl, ...parameters] = part.trim().split(";");
         if (
@@ -850,7 +883,7 @@ function parseNextLink(header: string | null, baseUrl?: string): string | null {
             return nextUrl.href;
         }
     }
-    return null;
+    return undefined;
 }
 
 async function fetchRegistryJsonWithHeaders(
@@ -916,12 +949,12 @@ function isTagMatch(service: ManagedServiceRow, tag: string): boolean {
 
 type SafeTagPatternPart = { kind: "digits" } | { kind: "literal"; value: string };
 
-function parseSafeTagRegexPattern(pattern: string): SafeTagPatternPart[] | null {
+function parseSafeTagRegexPattern(pattern: string): SafeTagPatternPart[] | undefined {
     if (pattern.length === 0 || pattern.length > 128) {
-        return null;
+        return undefined;
     }
     if (!pattern.startsWith("^") || !pattern.endsWith("$")) {
-        return null;
+        return undefined;
     }
 
     let body = pattern.slice(1);
@@ -929,25 +962,28 @@ function parseSafeTagRegexPattern(pattern: string): SafeTagPatternPart[] | null 
         body = body.slice(0, -1);
     }
     if (!body) {
-        return null;
+        return undefined;
     }
 
     const parts: SafeTagPatternPart[] = [];
     for (let index = 0; index < body.length; index += 1) {
         const character = body[index];
+        if (character === undefined) {
+            return undefined;
+        }
         if (character === "\\") {
             const escaped = body[index + 1];
             if (!escaped) {
-                return null;
+                return undefined;
             }
             if (escaped === "d" && body[index + 2] === "+") {
                 if (parts.at(-1)?.kind === "digits") {
-                    return null;
+                    return undefined;
                 }
                 parts.push({ kind: "digits" });
                 index += 2;
                 if (/^\d$/u.test(body[index + 1] ?? "")) {
-                    return null;
+                    return undefined;
                 }
                 continue;
             }
@@ -956,41 +992,41 @@ function parseSafeTagRegexPattern(pattern: string): SafeTagPatternPart[] | null 
                 index += 1;
                 continue;
             }
-            return null;
+            return undefined;
         }
         if (character === "[") {
             const closeIndex = body.indexOf("]", index + 1);
             if (closeIndex === -1 || body[closeIndex + 1] !== "+") {
-                return null;
+                return undefined;
             }
             const characterClass = body.slice(index + 1, closeIndex);
             if (characterClass !== "0-9" && characterClass !== String.raw`\d`) {
-                return null;
+                return undefined;
             }
             if (parts.at(-1)?.kind === "digits") {
-                return null;
+                return undefined;
             }
             parts.push({ kind: "digits" });
             index = closeIndex + 1;
             if (/^\d$/u.test(body[index + 1] ?? "")) {
-                return null;
+                return undefined;
             }
             continue;
         }
         if (/^[A-Za-z0-9_-]$/u.test(character)) {
             if (/^\d$/u.test(character) && parts.at(-1)?.kind === "digits") {
-                return null;
+                return undefined;
             }
             parts.push({ kind: "literal", value: character });
             continue;
         }
-        return null;
+        return undefined;
     }
     return parts;
 }
 
 export function isSafeTagRegexPattern(pattern: string): boolean {
-    return parseSafeTagRegexPattern(pattern) !== null;
+    return parseSafeTagRegexPattern(pattern) !== undefined;
 }
 
 export function isSafeTagPatternMatch(pattern: string, tag: string): boolean {
@@ -1010,7 +1046,7 @@ export function isSafeTagPatternMatch(pattern: string, tag: string): boolean {
         }
 
         const digitStart = offset;
-        while (offset < tag.length && /\d/u.test(tag[offset])) {
+        while (offset < tag.length && /\d/u.test(tag[offset] ?? "")) {
             offset += 1;
         }
         if (offset === digitStart) {
@@ -1056,21 +1092,24 @@ function isImageMatchPlatform(image: JsonRecord, platform: string): boolean {
     if (imageOs !== os || image.architecture !== architecture) return false;
     if (!variant) {
         return (
-            image.variant === null ||
             image.variant === undefined ||
+            image.variant === null ||
             (architecture === "arm64" && image.variant === "v8")
         );
     }
     return image.variant === variant;
 }
 
-function manifestDigestForPlatform(body: JsonRecord, platform: string): string | null {
+function manifestDigestForPlatform(
+    body: JsonRecord,
+    platform: string
+): string | undefined {
     const manifest = (Array.isArray(body.manifests) ? body.manifests : []).find(
         (candidate) =>
             isImageMatchPlatform(asRecord(asRecord(candidate).platform), platform)
     );
     const digest = asRecord(manifest).digest;
-    return typeof digest === "string" ? digest : null;
+    return typeof digest === "string" ? digest : undefined;
 }
 
 async function lookupRegistryV2(service: ManagedServiceRow) {
@@ -1086,7 +1125,7 @@ async function lookupRegistryV2(service: ManagedServiceRow) {
             : service.current_tag;
     if (shouldNeedFullTagScan(service)) {
         const tags: string[] = [];
-        let tagsUrl: string | null =
+        let tagsUrl: string | undefined =
             `https://${registryHost}/v2/${repo}/tags/list?n=${REGISTRY_TAG_PAGE_SIZE}`;
         let tagPageCount = 0;
         while (tagsUrl) {
@@ -1102,15 +1141,15 @@ async function lookupRegistryV2(service: ManagedServiceRow) {
                     ? body.tags.filter((item): item is string => typeof item === "string")
                     : [])
             );
-            tagsUrl = parseNextLink(headers.get("link"), tagsUrl);
+            tagsUrl = parseNextLink(headers.get("link") ?? undefined, tagsUrl);
         }
         const candidates = tags
             .filter((candidate) => candidate && isTagMatch(service, candidate))
-            .sort(compareTags);
+            .toSorted(compareTags);
         tag = candidates.at(-1) ?? tag;
     }
     if (!tag) {
-        return { latestTag: null, latestDigest: null };
+        return { latestTag: undefined, latestDigest: undefined };
     }
     const { body, headers } = await fetchRegistryJsonWithHeaders(
         `https://${registryHost}/v2/${repo}/manifests/${tag}`,
@@ -1124,7 +1163,7 @@ async function lookupRegistryV2(service: ManagedServiceRow) {
         latestDigest:
             manifestDigest ||
             headers.get("docker-content-digest") ||
-            (typeof body.digest === "string" ? body.digest : null),
+            (typeof body.digest === "string" ? body.digest : undefined),
     };
 }
 
@@ -1138,8 +1177,8 @@ async function lookupLatest(service: ManagedServiceRow) {
     const registry = imageRegistry(service.image_repo);
     if (!SUPPORTED_REGISTRIES.has(registry)) {
         return {
-            latestTag: null,
-            latestDigest: null,
+            latestTag: undefined,
+            latestDigest: undefined,
             unsupported: true,
         };
     }
@@ -1263,10 +1302,10 @@ function insertEvent(
             service.app_slug,
             service.service_name,
             eventType,
-            service.current_tag,
-            service.latest_tag,
-            service.current_digest,
-            service.latest_digest,
+            sqlNullable(service.current_tag),
+            sqlNullable(service.latest_tag),
+            sqlNullable(service.current_digest),
+            sqlNullable(service.latest_digest),
             message,
             JSON.stringify(details),
             nowIso()
@@ -1474,7 +1513,7 @@ async function applyComposeUpdateUnlocked(
         } catch {
             // The temp file may have already been atomically moved into place.
         }
-        for (const rollback of [...commandRollbacks].reverse()) {
+        for (const rollback of [...commandRollbacks].toReversed()) {
             try {
                 fs.unlinkSync(rollback.tempPath);
             } catch {
@@ -1541,7 +1580,7 @@ async function applyComposeUpdateUnlocked(
 }
 
 function isBooleanLabel(value: string | undefined, isFallback = false): boolean {
-    if (value == null || value === "") return isFallback;
+    if (value === undefined || value === "") return isFallback;
     return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
@@ -1617,12 +1656,12 @@ function servicesFromCompose(composePath: string):
                 .get("mira.updater.track")
                 ?.trim()
                 .toLowerCase();
-            const tagPattern = labels.get("mira.updater.tagPattern") || null;
+            const tagPattern = labels.get("mira.updater.tagPattern") || undefined;
             const isTagPatternIsRegex = isBooleanLabel(
                 labels.get("mira.updater.tagPatternIsRegex"),
                 true
             );
-            const currentTag = image.tag ?? (image.digest ? null : "latest");
+            const currentTag = image.tag ?? (image.digest ? undefined : "latest");
             const pinMode: "digest" | "tag" =
                 configuredPinMode === "digest" || configuredPinMode === "tag"
                     ? configuredPinMode
@@ -1669,9 +1708,11 @@ function servicesFromCompose(composePath: string):
                     containerName:
                         typeof service.container_name === "string"
                             ? service.container_name
-                            : null,
+                            : undefined,
                     platform:
-                        typeof service.platform === "string" ? service.platform : null,
+                        typeof service.platform === "string"
+                            ? service.platform
+                            : undefined,
                     labels: Object.fromEntries(labels),
                 },
             });
@@ -1730,7 +1771,9 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
             }),
         };
     }
-    const discoveries = composeFiles.map(servicesFromCompose);
+    const discoveries = composeFiles.map((composeFile) =>
+        servicesFromCompose(composeFile)
+    );
     const failedDiscoveries = discoveries.filter((discovery) => !discovery.isOk);
     const successfulOrPartialDiscoveries = discoveries.filter(
         (discovery) => discovery.isOk || discovery.services.length > 0
@@ -1815,12 +1858,12 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
                 service.imageRepo,
                 service.composeImageRef,
                 service.composeImageField,
-                service.currentTag,
-                service.currentDigest,
+                sqlNullable(service.currentTag),
+                sqlNullable(service.currentDigest),
                 service.policy,
                 service.pinMode,
                 service.tagMatchType,
-                service.tagMatchPattern,
+                sqlNullable(service.tagMatchPattern),
                 service.enabled ? 1 : 0,
                 JSON.stringify(service.metadata),
                 timestamp
@@ -1874,7 +1917,7 @@ export async function pollDockerUpdaterRegistries(
     serviceId?: number
 ): Promise<DockerUpdaterStepResult> {
     const timestamp = nowIso();
-    const services =
+    const services = normalizeManagedServiceRows(
         serviceId === undefined
             ? (database
                   .prepare(
@@ -1885,7 +1928,8 @@ export async function pollDockerUpdaterRegistries(
                   .prepare(
                       "SELECT * FROM docker_managed_services WHERE id = ? AND enabled = 1 ORDER BY app_slug, service_name"
                   )
-                  .all(serviceId) as unknown as ManagedServiceRow[]);
+                  .all(serviceId) as unknown as ManagedServiceRow[])
+    );
     const isChecked: string[] = [];
     const updates: string[] = [];
     const newUpdates: string[] = [];
@@ -1911,8 +1955,8 @@ export async function pollDockerUpdaterRegistries(
             }
             const updatedService = {
                 ...service,
-                latest_tag: latest.latestTag ?? null,
-                latest_digest: latest.latestDigest ?? null,
+                latest_tag: latest.latestTag ?? undefined,
+                latest_digest: latest.latestDigest ?? undefined,
             };
             const isUpdateAvailable = hasUpdate(updatedService);
             const isUpdateChanged =
@@ -1926,8 +1970,8 @@ export async function pollDockerUpdaterRegistries(
                  WHERE id = ?`
                 )
                 .run(
-                    latest.latestTag ?? null,
-                    latest.latestDigest ?? null,
+                    sqlNullable(latest.latestTag ?? undefined),
+                    sqlNullable(latest.latestDigest ?? undefined),
                     timestamp,
                     isUpdateAvailable ? "update_available" : "current",
                     service.id
@@ -1989,9 +2033,11 @@ async function applyServiceUpdate(
     eventPrefix: "auto" | "manual"
 ): Promise<DockerUpdaterStepResult> {
     return withComposeUpdateLock(service, async () => {
-        const lockedService = database
-            .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
-            .get(service.id) as ManagedServiceRow | undefined;
+        const lockedService = normalizeManagedServiceRow(
+            database
+                .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
+                .get(service.id) as ManagedServiceRow | undefined
+        );
         if (!lockedService || lockedService.enabled !== 1) {
             const code = lockedService ? "DISABLED" : "NOT_FOUND";
             return {
@@ -2034,7 +2080,7 @@ async function applyServiceUpdate(
                     targetComposeImageRef: target,
                 }
             );
-            const [os = "linux", architecture = null] =
+            const [os = "linux", architecture] =
                 servicePlatform(lockedService).split("/");
             createNotificationBestEffort(
                 `Docker ${eventPrefix} update failed`,
@@ -2069,9 +2115,9 @@ async function applyServiceUpdate(
                 )
                 .run(
                     target,
-                    lockedService.latest_tag,
-                    lockedService.latest_digest,
-                    lockedService.latest_tag,
+                    sqlNullable(lockedService.latest_tag),
+                    sqlNullable(lockedService.latest_digest),
+                    sqlNullable(lockedService.latest_tag),
                     nowIso(),
                     nowIso(),
                     lockedService.id
@@ -2103,7 +2149,7 @@ async function applyServiceUpdate(
                     targetComposeImageRef: target,
                 }
             );
-            const [os = "linux", architecture = null] =
+            const [os = "linux", architecture] =
                 servicePlatform(lockedService).split("/");
             createNotificationBestEffort(
                 `Docker ${eventPrefix} update needs reconciliation`,
@@ -2151,17 +2197,23 @@ export async function runDockerUpdaterService(
     const requestedService =
         serviceId === undefined
             ? undefined
-            : (database
-                  .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
-                  .get(serviceId) as ManagedServiceRow | undefined);
+            : normalizeManagedServiceRow(
+                  database
+                      .prepare(
+                          "SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1"
+                      )
+                      .get(serviceId) as ManagedServiceRow | undefined
+              );
     const register = await registerDockerUpdaterServices();
     if (serviceId === undefined && shouldBlockGlobalUpdateForDiscoveryFailure(register)) {
         return [register];
     }
     if (serviceId !== undefined) {
-        const service = database
-            .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
-            .get(serviceId) as ManagedServiceRow | undefined;
+        const service = normalizeManagedServiceRow(
+            database
+                .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
+                .get(serviceId) as ManagedServiceRow | undefined
+        );
         if (!service) {
             if (
                 requestedService &&
@@ -2224,9 +2276,11 @@ export async function runDockerUpdaterService(
                 (step): step is DockerUpdaterStepResult => step !== undefined
             );
         }
-        const refreshedService = database
-            .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
-            .get(serviceId) as ManagedServiceRow | undefined;
+        const refreshedService = normalizeManagedServiceRow(
+            database
+                .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
+                .get(serviceId) as ManagedServiceRow | undefined
+        );
         if (!refreshedService) {
             return [
                 register,
@@ -2287,11 +2341,13 @@ export async function runDockerUpdaterService(
     }
     const blockedAppSlugs = failedDiscoveryAppSlugs(register);
     const poll = await pollDockerUpdaterRegistries();
-    const autoServices = database
-        .prepare(
-            "SELECT * FROM docker_managed_services WHERE enabled = 1 AND policy = 'auto'"
-        )
-        .all() as unknown as ManagedServiceRow[];
+    const autoServices = normalizeManagedServiceRows(
+        database
+            .prepare(
+                "SELECT * FROM docker_managed_services WHERE enabled = 1 AND policy = 'auto'"
+            )
+            .all() as unknown as ManagedServiceRow[]
+    );
     const applyResults: DockerUpdaterStepResult[] = [];
     for (const service of autoServices) {
         if (
@@ -2310,9 +2366,9 @@ export async function runDockerUpdaterService(
 }
 
 function preservedTimeOfDay(
-    existing: ScheduledJob | null,
+    existing: ScheduledJob | undefined,
     fallback: string
-): string | null {
+): string | undefined {
     if (!existing) {
         return fallback;
     }
@@ -2356,7 +2412,7 @@ export function registerDockerUpdaterScheduledJobs(): void {
             scheduleType: existing?.scheduleType ?? job.scheduleType,
             intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
             timeOfDay: preservedTimeOfDay(existing, job.timeOfDay),
-            cronExpression: existing?.cronExpression ?? null,
+            cronExpression: existing?.cronExpression ?? undefined,
         });
         database.run("COMMIT");
     } catch (error) {

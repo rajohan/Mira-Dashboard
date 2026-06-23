@@ -132,6 +132,32 @@ describe("Mira Dashboard backend integration", () => {
             isBootstrapRequired: true,
             hasGatewayToken: false,
         });
+
+        const bootstrapSession = await api<{
+            authenticated: boolean;
+            isBootstrapRequired: boolean;
+            user?: { id: number; username: string };
+        }>("/api/auth/session");
+        expect(bootstrapSession.status).toBe(200);
+        expect(bootstrapSession.body).toEqual({
+            authenticated: false,
+            isBootstrapRequired: true,
+        });
+
+        const { createUser } = await import("../src/auth.ts");
+        createUser("session-test-user", "test-password");
+
+        const authenticatedSession = await api<{
+            authenticated: boolean;
+            isBootstrapRequired: boolean;
+            user?: { id: number; username: string };
+        }>("/api/auth/session");
+        expect(authenticatedSession.status).toBe(200);
+        expect(authenticatedSession.body).toEqual({
+            authenticated: true,
+            isBootstrapRequired: false,
+            user: { id: 0, username: "mira-local" },
+        });
     });
 
     it("serves the app shell only for app routes, not missing assets", async () => {

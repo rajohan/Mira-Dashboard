@@ -53,23 +53,24 @@ function getOpenClawPackageRoot(): string {
     return getDefaultOpenClawPackageRoot();
 }
 
-function resolveSafeAbsolutePath(candidate: string | undefined): string | null {
+function resolveSafeAbsolutePath(candidate: string | undefined): string | undefined {
     const rawPath = candidate?.trim();
     if (!rawPath || !path.isAbsolute(rawPath)) {
-        return null;
+        return undefined;
     }
     const resolvedPath = path.resolve(rawPath);
     if (resolvedPath === path.parse(resolvedPath).root) {
-        return null;
+        return undefined;
     }
     try {
-        return fs.realpathSync(resolvedPath);
+        const realPath = fs.realpathSync(resolvedPath);
+        return realPath === path.parse(realPath).root ? undefined : realPath;
     } catch {
         return resolvedPath;
     }
 }
 
-function resolveOpenClawHome(): string | null {
+function resolveOpenClawHome(): string | undefined {
     const configuredRoot =
         process.env.OPENCLAW_HOME?.trim() ||
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
@@ -159,7 +160,7 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
 
     const addSkill = (skillPath: string, source: SkillSource) => {
         const name = path.basename(skillPath);
-        const entry = objectFallback(entries[name] as object | null | undefined) as {
+        const entry = objectFallback(entries[name] as object | undefined) as {
             description?: string;
             enabled?: boolean;
         };
@@ -198,7 +199,7 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
 
     for (const [name, value] of Object.entries(entries)) {
         if (skillsByName.has(name)) continue;
-        const entry = objectFallback(value as object | null | undefined) as {
+        const entry = objectFallback(value as object | undefined) as {
             description?: string;
             enabled?: boolean;
         };
@@ -214,7 +215,9 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
     return skillsByName
         .values()
         .toArray()
-        .sort((a, b) => a.source.localeCompare(b.source) || a.name.localeCompare(b.name));
+        .toSorted(
+            (a, b) => a.source.localeCompare(b.source) || a.name.localeCompare(b.name)
+        );
 }
 
 function isValidSkillName(name: string): boolean {
@@ -336,10 +339,13 @@ export const openclawConfigRoutes = {
                 if (!isValidSkillName(name)) {
                     return json({ error: "Invalid skill name" }, { status: 400 });
                 }
-                const body = await readJson<{
-                    __hash?: unknown;
-                    enabled?: unknown;
-                } | null>(request);
+                const body = await readJson<
+                    | {
+                          __hash?: unknown;
+                          enabled?: unknown;
+                      }
+                    | undefined
+                >(request);
                 const enabled =
                     body && typeof body === "object" ? body.enabled : undefined;
                 if (typeof enabled !== "boolean") {

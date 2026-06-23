@@ -14,14 +14,14 @@ export const MAX_PREVIEW_SIZE = 100_000;
 export function useFileExplorerState() {
     const [files, setFiles] = useState<FileNode[]>([]);
     const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
-    const [selectedPath, setSelectedPath] = useState<string | null>(null);
+    const [selectedPath, setSelectedPath] = useState<string | undefined>(undefined);
     const [editedContent, setEditedContent] = useState<string>("");
     const [hasChanges, setHasChanges] = useState(false);
     const [largeFileWarning, setLargeFileWarning] = useState(false);
     const [markdownPreview, setMarkdownPreview] = useState(true);
     const [jsonPreview, setJsonPreview] = useState(true);
     const [codeEditMode, setCodeEditMode] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const [error, setError] = useState<string | undefined>(undefined);
 
     const queryClient = useQueryClient();
     const {
@@ -53,7 +53,7 @@ export function useFileExplorerState() {
         setMarkdownPreview(true);
         setJsonPreview(true);
         setCodeEditMode(false);
-        setError(null);
+        setError(undefined);
     }, [fileContent]);
 
     /** Responds to toggle events. */
@@ -117,7 +117,7 @@ export function useFileExplorerState() {
     const handleSelect = (path: string) => {
         setSelectedPath(path);
         setHasChanges(false);
-        setError(null);
+        setError(undefined);
     };
 
     /** Responds to content change events. */
@@ -138,7 +138,7 @@ export function useFileExplorerState() {
             : "json";
     const jsonValidation = isJsonEditing
         ? validateJsonString(editedContent, jsonValidationMode)
-        : { valid: true, error: null };
+        : { valid: true, error: undefined };
 
     /** Responds to save events. */
     const handleSave = async () => {

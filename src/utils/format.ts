@@ -112,12 +112,12 @@ function zonedDateTimeToUtcDate(
     return new Date(candidate);
 }
 
-function referenceDateParts(referenceDate?: Date | string | number | null) {
+function referenceDateParts(referenceDate?: Date | string | number) {
     const reference = new Date(referenceDate ?? Date.now());
     return appTimeZoneParts(Number.isNaN(reference.getTime()) ? new Date() : reference);
 }
 
-function referenceUtcDateParts(referenceDate?: Date | string | number | null) {
+function referenceUtcDateParts(referenceDate?: Date | string | number) {
     const reference = new Date(referenceDate ?? Date.now());
     const validReference = Number.isNaN(reference.getTime()) ? new Date() : reference;
     return {
@@ -129,8 +129,8 @@ function referenceUtcDateParts(referenceDate?: Date | string | number | null) {
 
 /** Converts a UTC HH:mm daily schedule value to app-timezone HH:mm. */
 export function formatUtcTimeOfDayInAppTimeZone(
-    timeOfDay: string | null | undefined,
-    referenceDate?: Date | string | number | null
+    timeOfDay: string | undefined,
+    referenceDate?: Date | string | number
 ): string {
     if (!timeOfDay || !/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(timeOfDay)) {
         return "--:--";
@@ -146,7 +146,7 @@ export function formatUtcTimeOfDayInAppTimeZone(
 /** Converts an app-timezone HH:mm daily schedule value to UTC HH:mm. */
 export function appTimeOfDayToUtcTimeOfDay(
     timeOfDay: string,
-    referenceDate?: Date | string | number | null
+    referenceDate?: Date | string | number
 ): string {
     if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(timeOfDay)) {
         return timeOfDay;
@@ -166,8 +166,8 @@ export function appTimeOfDayToUtcTimeOfDay(
 }
 
 /** Formats milliseconds as a compact duration string. */
-export function formatDuration(updatedAt: number | null | undefined): string {
-    if (updatedAt === null || updatedAt === undefined) return "Unknown";
+export function formatDuration(updatedAt: number | undefined): string {
+    if (updatedAt === undefined) return "Unknown";
     try {
         return formatDistanceToNow(new Date(updatedAt), {
             addSuffix: true,
@@ -230,7 +230,7 @@ export function formatTokenCount(tokens: number): string {
 }
 
 /** Calculates token usage percentage from used and limit values. */
-export function getTokenPercent(current: number | undefined | null, max: number): number {
-    if (current === undefined || current === null || max <= 0) return 0;
+export function getTokenPercent(current: number | undefined, max: number): number {
+    if (current === undefined || max <= 0) return 0;
     return Math.min(Math.round((current / max) * 100), 100);
 }

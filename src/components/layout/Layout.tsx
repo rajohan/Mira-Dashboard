@@ -115,7 +115,7 @@ export function Layout({ children }: LayoutProperties) {
                                 >
                                     {openPullRequestCount}
                                 </span>
-                            ) : null}
+                            ) : undefined}
                         </Link>
                     );
                 })}

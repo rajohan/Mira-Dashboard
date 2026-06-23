@@ -32,7 +32,7 @@ function isToolEnabled(agent: AgentConfig, toolId: string): boolean {
 /** Performs update tool. */
 function updateTool(agent: AgentConfig, toolId: string, isEnabled: boolean): AgentConfig {
     const deny = new Set(agent.tools?.deny || []);
-    const allow = agent.tools?.allow ? new Set(agent.tools.allow) : null;
+    const allow = agent.tools?.allow ? new Set(agent.tools.allow) : undefined;
 
     if (isEnabled) {
         deny.delete(toolId);
@@ -48,9 +48,9 @@ function updateTool(agent: AgentConfig, toolId: string, isEnabled: boolean): Age
         tools: {
             ...agent.tools,
             allow: allow
-                ? [...allow].sort((left, right) => left.localeCompare(right))
+                ? [...allow].toSorted((left, right) => left.localeCompare(right))
                 : agent.tools?.allow,
-            deny: [...deny].sort((left, right) => left.localeCompare(right)),
+            deny: [...deny].toSorted((left, right) => left.localeCompare(right)),
         },
     };
 }
@@ -159,7 +159,7 @@ export function AgentAccessSection({
                                     (tool) => tool.risk === risk
                                 );
                                 if (riskTools.length === 0) {
-                                    return null;
+                                    return;
                                 }
 
                                 const enabledCount = riskTools.filter((tool) =>
@@ -230,7 +230,7 @@ export function AgentAccessSection({
                             })}
                         </div>
                     </div>
-                ) : null}
+                ) : undefined}
 
                 <div className="flex justify-end">
                     <Button

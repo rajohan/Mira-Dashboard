@@ -27,7 +27,7 @@ export interface ExecRequest {
 }
 
 export interface ExecResponse {
-    code: number | null;
+    code: number | undefined;
     stderr: string;
     stdout: string;
 }
@@ -37,8 +37,8 @@ export interface ExecStartResponse {
 }
 
 export interface ExecJobResponse {
-    code: number | null;
-    endedAt: number | null;
+    code: number | undefined;
+    endedAt: number | undefined;
     jobId: string;
     startedAt: number;
     status: "running" | "signaled" | "done";
@@ -55,8 +55,8 @@ class ExecValidationError extends Error {
 
 interface ExecJob {
     closePending?: boolean;
-    code: number | null;
-    endedAt: number | null;
+    code: number | undefined;
+    endedAt: number | undefined;
     id: string;
     process?: BunProcess;
     startedAt: number;
@@ -176,7 +176,7 @@ export function execErrorResponse(error: unknown): { error: string; status: numb
     if (error instanceof ExecValidationError) {
         return { error: error.message, status: 400 };
     }
-    if (error != null) {
+    if (error !== undefined && error !== null) {
         const statusCode = Number((error as { statusCode?: unknown }).statusCode);
         if (Number.isSafeInteger(statusCode) && statusCode >= 400 && statusCode < 600) {
             return { error: errorMessage(error, "request failed"), status: statusCode };
@@ -185,7 +185,7 @@ export function execErrorResponse(error: unknown): { error: string; status: numb
     const message =
         error instanceof Error
             ? error.message
-            : error == null
+            : error === undefined || error === null
               ? "Unknown error"
               : String(error);
     console.error("[Exec] Route error:", message);
@@ -293,7 +293,7 @@ function cleanupJobs(): void {
     const entries = jobs
         .values()
         .toArray()
-        .sort((a, b) => a.startedAt - b.startedAt);
+        .toSorted((a, b) => a.startedAt - b.startedAt);
     let overflow = entries.length - (MAX_JOBS - 1);
     for (const job of entries) {
         if (overflow <= 0) break;
@@ -380,8 +380,8 @@ export function startExecJob(payload: unknown): ExecStartResponse {
     const jobId = Bun.randomUUIDv7();
     jobs.set(jobId, {
         closePending: false,
-        code: null,
-        endedAt: null,
+        code: undefined,
+        endedAt: undefined,
         id: jobId,
         startedAt: Date.now(),
         status: "running",

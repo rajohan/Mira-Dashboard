@@ -63,17 +63,22 @@ export function Tasks() {
 
     const [search, setSearch] = useState("");
     const [filter, setFilter] = useState<"all" | TaskAssigneeId>("all");
-    const [activeId, setActiveId] = useState<string | null>(null);
-    const [overId, setOverId] = useState<ColumnId | null>(null);
-    const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+    const [activeId, setActiveId] = useState<string | undefined>(undefined);
+    const [overId, setOverId] = useState<ColumnId | undefined>(undefined);
+    const [selectedTask, setSelectedTask] = useState<Task | undefined>(undefined);
     const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
-    const [pendingDeleteTaskId, setPendingDeleteTaskId] = useState<number | null>(null);
-    const [pendingDeleteUpdate, setPendingDeleteUpdate] = useState<null | {
-        taskId: number;
-        updateId: number;
-    }>(null);
+    const [pendingDeleteTaskId, setPendingDeleteTaskId] = useState<number | undefined>(
+        undefined
+    );
+    const [pendingDeleteUpdate, setPendingDeleteUpdate] = useState<
+        | undefined
+        | {
+              taskId: number;
+              updateId: number;
+          }
+    >(undefined);
 
-    const { data: taskUpdates = [] } = useTaskUpdates(selectedTask?.number ?? null);
+    const { data: taskUpdates = [] } = useTaskUpdates(selectedTask?.number ?? undefined);
 
     const filteredTasks = tasks.filter((task) => {
         const matchesFilter =
@@ -93,8 +98,8 @@ export function Tasks() {
 
     for (const col of COLUMN_CONFIG) {
         tasksByColumn[col.id] = filteredTasks
-            .filter((task) => col.filter(task))
-            .sort((a, b) => {
+            .filter((taskItem) => col.acceptsTask(taskItem))
+            .toSorted((a, b) => {
                 const updatedDiff = getTaskUpdatedAtMs(b) - getTaskUpdatedAtMs(a);
 
                 if (col.id === "done") {
@@ -118,7 +123,7 @@ export function Tasks() {
     };
 
     /** Performs resolve column from over ID. */
-    const resolveColumnFromOverId = (overIdValue: string): ColumnId | null => {
+    const resolveColumnFromOverId = (overIdValue: string): ColumnId | undefined => {
         const directColumn = getColumnId(overIdValue);
         if (directColumn) {
             return directColumn;
@@ -126,7 +131,7 @@ export function Tasks() {
 
         const overTask = tasks.find((task) => String(task.number) === overIdValue);
         if (!overTask) {
-            return null;
+            return undefined;
         }
 
         return getColumnId(overTask);
@@ -148,8 +153,8 @@ export function Tasks() {
     /** Responds to drag end events. */
     const handleDragEnd = async (event: DragEndEvent) => {
         const { active, over } = event;
-        setActiveId(null);
-        setOverId(null);
+        setActiveId(undefined);
+        setOverId(undefined);
 
         if (!over) return;
 
@@ -207,8 +212,8 @@ export function Tasks() {
     const confirmDeleteTask = async (taskId: number) => {
         try {
             await deleteTask.mutateAsync({ number: taskId });
-            setPendingDeleteTaskId(null);
-            setSelectedTask(null);
+            setPendingDeleteTaskId(undefined);
+            setSelectedTask(undefined);
         } catch (error_) {
             console.error("Failed to delete task:", error_);
         }
@@ -221,10 +226,10 @@ export function Tasks() {
             title?: string;
             body?: string;
             labels?: string[];
-            automation?: Pick<
-                TaskAutomation,
-                "cronJobId" | "scheduleSummary" | "sessionTarget"
-            > | null;
+            automation?:
+                | Pick<TaskAutomation, "cronJobId" | "scheduleSummary" | "sessionTarget">
+                | null
+                | undefined;
         }
     ) => {
         const updated = await updateTask.mutateAsync({
@@ -273,7 +278,7 @@ export function Tasks() {
                 taskId: pendingDelete.taskId,
                 updateId: pendingDelete.updateId,
             });
-            setPendingDeleteUpdate(null);
+            setPendingDeleteUpdate(undefined);
         } catch (error_) {
             console.error("Failed to delete task update:", error_);
         }
@@ -281,13 +286,13 @@ export function Tasks() {
 
     const activeTask = activeId
         ? tasks.find((t) => t.number.toString() === activeId)
-        : null;
+        : undefined;
 
     return (
         <PageState
             isLoading={isLoading}
             loading={<LoadingState size="lg" />}
-            error={error?.message ?? null}
+            error={error?.message ?? undefined}
             errorView={
                 <div className="flex h-full min-h-0 flex-col items-center justify-center gap-4 p-6">
                     <p className="text-red-400">{error?.message}</p>
@@ -380,7 +385,7 @@ export function Tasks() {
                     {selectedTask && (
                         <TaskDetailModal
                             task={selectedTask}
-                            onClose={() => setSelectedTask(null)}
+                            onClose={() => setSelectedTask(undefined)}
                             onMove={(column) => handleMoveTask(selectedTask, column)}
                             onAssign={(assignee) =>
                                 handleAssignTask(selectedTask, assignee)
@@ -431,14 +436,14 @@ export function Tasks() {
                         {activeTask && <TaskOverlay task={activeTask} />}
                     </DragOverlay>
 
-                    {pendingDeleteTaskId !== null && (
+                    {pendingDeleteTaskId !== undefined && (
                         <ConfirmModal
                             isOpen
                             title="Delete task"
                             message={`Are you sure you want to delete task #${pendingDeleteTaskId}?`}
                             confirmLabel="Delete"
                             danger
-                            onCancel={() => setPendingDeleteTaskId(null)}
+                            onCancel={() => setPendingDeleteTaskId(undefined)}
                             onConfirm={() => {
                                 void confirmDeleteTask(pendingDeleteTaskId);
                             }}
@@ -452,7 +457,7 @@ export function Tasks() {
                             message="Are you sure you want to delete this progress update?"
                             confirmLabel="Delete"
                             danger
-                            onCancel={() => setPendingDeleteUpdate(null)}
+                            onCancel={() => setPendingDeleteUpdate(undefined)}
                             onConfirm={() => {
                                 void confirmDeleteTaskUpdate(pendingDeleteUpdate);
                             }}

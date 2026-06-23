@@ -15,18 +15,19 @@ function parseJsonFieldOrValue(value: string) {
 }
 
 function mapCacheRowForResponse(row: CacheEntryRow) {
+    const missingValue = JSON.parse("null") as null;
     return {
-        consecutiveFailures: Number(row.consecutive_failures) || 0,
+        consecutiveFailures: Number(row.consecutive_failures ?? 0),
         data: parseJsonFieldOrValue(row.data),
-        errorCode: row.error_code || null,
-        errorMessage: row.error_message || null,
-        expiresAt: row.expires_at || null,
+        errorCode: row.error_code ?? missingValue,
+        errorMessage: row.error_message ?? missingValue,
+        expiresAt: row.expires_at ?? missingValue,
         key: row.key,
-        lastAttemptAt: row.last_attempt_at || null,
+        lastAttemptAt: row.last_attempt_at ?? missingValue,
         meta: parseJsonField<unknown>(row.meta) ?? {},
         source: row.source,
         status: row.status,
-        updatedAt: row.updated_at || null,
+        updatedAt: row.updated_at ?? missingValue,
     };
 }
 
@@ -60,7 +61,7 @@ export const cacheRoutes = {
     "/api/cache/heartbeat": {
         GET: async () => {
             const rows = await getAllCacheEntries();
-            const entries = rows.map(mapCacheRowForResponse);
+            const entries = rows.map((row) => mapCacheRowForResponse(row));
             return json({
                 count: entries.length,
                 entries,

@@ -30,7 +30,7 @@ function shortenPath(path: string): string {
 }
 
 /** Returns whether terminal output is currently scrolled near the bottom. */
-export function isTerminalOutputAtBottom(output: TerminalOutputElement | null) {
+export function isTerminalOutputAtBottom(output: TerminalOutputElement | undefined) {
     if (!output) {
         return false;
     }
@@ -39,7 +39,7 @@ export function isTerminalOutputAtBottom(output: TerminalOutputElement | null) {
 }
 
 /** Scrolls terminal output to the bottom when present. */
-export function scrollTerminalOutputToBottom(output: TerminalOutputElement | null) {
+export function scrollTerminalOutputToBottom(output: TerminalOutputElement | undefined) {
     if (!output) {
         return false;
     }
@@ -50,7 +50,7 @@ export function scrollTerminalOutputToBottom(output: TerminalOutputElement | nul
 
 /** Scrolls terminal output and reports whether scrolling happened. */
 export function scrollTerminalOutputToBottomAndReport(
-    output: TerminalOutputElement | null,
+    output: TerminalOutputElement | undefined,
     onScrolled: () => void
 ) {
     if (!scrollTerminalOutputToBottom(output)) {
@@ -65,11 +65,11 @@ export function scrollTerminalOutputToBottomAndReport(
 export function Terminal() {
     const [command, setCommand] = useState("");
     const [historyIndex, setHistoryIndex] = useState(-1);
-    const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+    const [currentJobId, setCurrentJobId] = useState<string | undefined>(undefined);
     const [cwd, setCwd] = useState(HOME_DIR);
     const [isAtBottom, setIsAtBottom] = useState(true);
-    const outputReference = useRef<HTMLDivElement>(null);
-    const inputReference = useRef<HTMLInputElement>(null);
+    const outputReference = useRef<HTMLDivElement | undefined>(undefined);
+    const inputReference = useRef<HTMLInputElement | undefined>(undefined);
 
     const startCommand = useStartTerminalCommand();
     const { data: jobData } = useTerminalJob(currentJobId);
@@ -78,7 +78,7 @@ export function Terminal() {
     // Stop polling when component unmounts
     useEffect(() => {
         return () => {
-            setCurrentJobId(null);
+            setCurrentJobId(undefined);
         };
     }, []);
 
@@ -155,7 +155,10 @@ export function Terminal() {
 
             if (result.completions.length === 1) {
                 // Single match - complete fully
-                setCommand(result.completions[0].completion);
+                const [completion] = result.completions;
+                if (completion) {
+                    setCommand(completion.completion);
+                }
             } else if (result.completions.length > 1 && result.commonPrefix) {
                 // Multiple matches - complete to common prefix
                 setCommand(result.commonPrefix);
@@ -185,7 +188,7 @@ export function Terminal() {
                     addCommand({
                         command: trimmedCommand,
                         cwd: shortenPath(cwd),
-                        jobId: null,
+                        jobId: undefined,
                         status: "done",
                         code: 0,
                         stdout: "",
@@ -198,7 +201,7 @@ export function Terminal() {
                     addCommand({
                         command: trimmedCommand,
                         cwd: shortenPath(cwd),
-                        jobId: null,
+                        jobId: undefined,
                         status: "done",
                         code: 1,
                         stdout: "",
@@ -211,7 +214,7 @@ export function Terminal() {
                 addCommand({
                     command: trimmedCommand,
                     cwd: shortenPath(cwd),
-                    jobId: null,
+                    jobId: undefined,
                     status: "error",
                     code: 1,
                     stdout: "",
@@ -232,7 +235,7 @@ export function Terminal() {
             addCommand({
                 command: trimmedCommand,
                 cwd: shortenPath(cwd),
-                jobId: null,
+                jobId: undefined,
                 status: "done",
                 code: 0,
                 stdout: cwd,
@@ -251,13 +254,13 @@ export function Terminal() {
             const entryId = addCommand({
                 command: trimmedCommand,
                 cwd: shortenPath(cwd),
-                jobId: null,
+                jobId: undefined,
                 status: "pending",
-                code: null,
+                code: undefined,
                 stdout: "",
                 stderr: "",
                 startedAt: Date.now(),
-                endedAt: null,
+                endedAt: undefined,
             });
 
             setCommand("");
@@ -279,7 +282,7 @@ export function Terminal() {
             const entryId = addCommand({
                 command: trimmedCommand,
                 cwd: shortenPath(cwd),
-                jobId: null,
+                jobId: undefined,
                 status: "error",
                 code: 1,
                 stdout: "",
@@ -305,7 +308,7 @@ export function Terminal() {
         // Handle command history navigation
         if (event.key === "ArrowUp") {
             event.preventDefault();
-            const commands = history.map((h) => h.command).reverse();
+            const commands = history.map((h) => h.command).toReversed();
             if (commands.length > 0) {
                 const newIndex = Math.min(historyIndex + 1, commands.length - 1);
                 setHistoryIndex(newIndex);
@@ -315,7 +318,7 @@ export function Terminal() {
         }
         if (event.key === "ArrowDown") {
             event.preventDefault();
-            const commands = history.map((h) => h.command).reverse();
+            const commands = history.map((h) => h.command).toReversed();
             const newIndex = Math.max(historyIndex - 1, -1);
             setHistoryIndex(newIndex);
             setCommand(newIndex >= 0 ? commands[newIndex] || "" : "");
@@ -328,7 +331,9 @@ export function Terminal() {
             <Card className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
                 {/* Terminal Output */}
                 <div
-                    ref={outputReference}
+                    ref={(element) => {
+                        outputReference.current = element ?? undefined;
+                    }}
                     role="log"
                     aria-label="Terminal output"
                     onScroll={handleScroll}
@@ -407,7 +412,9 @@ export function Terminal() {
                     >
                         <div className="min-w-0 flex-1">
                             <Input
-                                ref={inputReference}
+                                ref={(element) => {
+                                    inputReference.current = element ?? undefined;
+                                }}
                                 type="text"
                                 value={command}
                                 onChange={(event_) => setCommand(event_.target.value)}

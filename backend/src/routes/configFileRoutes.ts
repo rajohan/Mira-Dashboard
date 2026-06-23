@@ -17,7 +17,7 @@ const MAX_CONFIG_WRITE_SIZE = 2 * 1024 * 1024;
 const CONFIG_WRITE_BODY_LIMIT = MAX_CONFIG_WRITE_SIZE * 2;
 const ALLOWED_CONFIG_FILES = new Set(["openclaw.json", "hooks/transforms/agentmail.ts"]);
 
-function openclawRoot(): string | null {
+function openclawRoot(): string | undefined {
     const configured =
         process.env.OPENCLAW_HOME?.trim() ||
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
@@ -28,14 +28,23 @@ function openclawRoot(): string | null {
         !configured &&
         (!home || !path.isAbsolute(home) || home === path.parse(home).root)
     ) {
-        return null;
+        return undefined;
     }
-    const root = path.resolve(configured || path.join(home, ".openclaw"));
+    if (configured && !path.isAbsolute(configured)) {
+        return undefined;
+    }
+    const root = configured
+        ? path.resolve(configured)
+        : path.resolve(path.join(home, ".openclaw"));
     if (!path.isAbsolute(root) || root === path.parse(root).root) {
-        return null;
+        return undefined;
     }
     try {
-        return fs.realpathSync(root);
+        const resolvedRoot = fs.realpathSync(root);
+        return path.isAbsolute(resolvedRoot) &&
+            resolvedRoot !== path.parse(resolvedRoot).root
+            ? resolvedRoot
+            : undefined;
     } catch {
         return root;
     }
@@ -48,12 +57,12 @@ function isBinaryContent(content: string): boolean {
     return false;
 }
 
-function configPathFromRequest(request: Request): string | null {
+function configPathFromRequest(request: Request): string | undefined {
     try {
         const pathname = new URL(request.url).pathname;
         return decodeURIComponent(pathname.slice("/api/config-files/".length));
     } catch {
-        return null;
+        return undefined;
     }
 }
 
@@ -97,8 +106,8 @@ function listConfigFiles(root: string) {
     return files;
 }
 
-function configTarget(relativePath: string, root: string): string | null {
-    if (!ALLOWED_CONFIG_FILES.has(relativePath)) return null;
+function configTarget(relativePath: string, root: string): string | undefined {
+    if (!ALLOWED_CONFIG_FILES.has(relativePath)) return undefined;
     return safePathWithinRoot(relativePath, root);
 }
 
@@ -112,15 +121,15 @@ async function validateOpenFileWithinRoot(
     file: fs.promises.FileHandle,
     root: string,
     fallbackPath: string
-): Promise<fs.Stats | null> {
+): Promise<fs.Stats | undefined> {
     const stat = await file.stat();
     if (!stat.isFile() || stat.nlink > 1) {
-        return null;
+        return undefined;
     }
     const realPath = realPathFromOpenFile(file, fallbackPath);
     const relativeRealPath = path.relative(root, realPath);
     if (relativeRealPath.startsWith("..") || path.isAbsolute(relativeRealPath)) {
-        return null;
+        return undefined;
     }
     return stat;
 }
@@ -156,7 +165,7 @@ export const configFileRoutes = {
     "/api/config-files/*": {
         GET: async (request: Request) => {
             const relativePath = configPathFromRequest(request);
-            if (relativePath === null) {
+            if (relativePath === undefined) {
                 return json({ error: "Malformed config file path" }, { status: 400 });
             }
             const root = openclawRoot();
@@ -228,7 +237,7 @@ export const configFileRoutes = {
 
         PUT: async (request: Request) => {
             const relativePath = configPathFromRequest(request);
-            if (relativePath === null) {
+            if (relativePath === undefined) {
                 return json({ error: "Malformed config file path" }, { status: 400 });
             }
             if (!ALLOWED_CONFIG_FILES.has(relativePath)) {

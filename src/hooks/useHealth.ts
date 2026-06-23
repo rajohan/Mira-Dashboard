@@ -21,6 +21,6 @@ export function useHealth() {
         queryKey: ["health"],
         queryFn: fetchHealth,
         refetchInterval: 10_000,
-        staleTime: 5_000,
+        staleTime: 5000,
     });
 }

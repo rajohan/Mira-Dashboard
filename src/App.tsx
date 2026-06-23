@@ -21,9 +21,9 @@ export default function App() {
             void router.navigate({ to: "/login" });
         };
 
-        window.addEventListener("openclaw:unauthorized", onUnauthorized);
+        addEventListener("openclaw:unauthorized", onUnauthorized);
         return () => {
-            window.removeEventListener("openclaw:unauthorized", onUnauthorized);
+            removeEventListener("openclaw:unauthorized", onUnauthorized);
         };
     }, []);
 
@@ -33,7 +33,7 @@ export default function App() {
                 <OpenClawSocketProvider>
                     <RouterProvider router={router} />
                     {DashboardDevtools ? (
-                        <Suspense fallback={null}>
+                        <Suspense fallback={undefined}>
                             <DashboardDevtools />
                         </Suspense>
                     ) : undefined}

@@ -91,7 +91,7 @@ describe("Mira Dashboard frontend behavior", () => {
             user: { id: 1, username: "raymond" },
         });
         const unauthorizedEvents: Event[] = [];
-        window.addEventListener("openclaw:unauthorized", (event) => {
+        addEventListener("openclaw:unauthorized", (event) => {
             unauthorizedEvents.push(event);
         });
         Object.defineProperty(globalThis, "fetch", {

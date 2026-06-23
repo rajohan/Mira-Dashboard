@@ -38,7 +38,7 @@ function mimeTypeFromPath(filePath: string): string {
     return MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream";
 }
 
-function resolveOpenclawRoot(): string | null {
+function resolveOpenclawRoot(): string | undefined {
     const configuredRoot =
         process.env.OPENCLAW_HOME?.trim() ||
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
@@ -49,7 +49,7 @@ function resolveOpenclawRoot(): string | null {
             !path.isAbsolute(homeDirectory) ||
             homeDirectory === path.parse(homeDirectory).root)
     ) {
-        return null;
+        return undefined;
     }
     const openclawRoot = configuredRoot || path.join(homeDirectory, ".openclaw");
     const resolvedRoot = path.resolve(openclawRoot);
@@ -58,7 +58,7 @@ function resolveOpenclawRoot(): string | null {
         !path.isAbsolute(openclawRoot) ||
         resolvedRoot === path.parse(resolvedRoot).root
     ) {
-        return null;
+        return undefined;
     }
     if (
         mediaRouteState.cachedOpenclawRoot === resolvedRoot &&
@@ -77,12 +77,12 @@ function resolveOpenclawRoot(): string | null {
     }
 }
 
-function getMediaRoot(): string | null {
+function getMediaRoot(): string | undefined {
     const openclawRoot = resolveOpenclawRoot();
-    return openclawRoot ? path.join(openclawRoot, "media") : null;
+    return openclawRoot ? path.join(openclawRoot, "media") : undefined;
 }
 
-function getRealMediaRoot(mediaRoot: string): string | null {
+function getRealMediaRoot(mediaRoot: string): string | undefined {
     if (mediaRouteState.cachedMediaRoot !== mediaRoot) {
         mediaRouteState.cachedMediaRoot = mediaRoot;
         mediaRouteState.cachedRealMediaRoot = undefined;
@@ -98,7 +98,7 @@ function getRealMediaRoot(mediaRoot: string): string | null {
         if (code !== "ENOENT" && code !== "ENOTDIR") {
             throw error;
         }
-        return null;
+        return undefined;
     }
 }
 

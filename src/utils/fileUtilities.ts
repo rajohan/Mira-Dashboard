@@ -3,7 +3,7 @@ export { formatSize } from "./format";
 /** Returns file extension. */
 export function getFileExtension(filename: string): string {
     const parts = filename.split(".");
-    return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : "";
+    return parts.length > 1 ? (parts.at(-1)?.toLowerCase() ?? "") : "";
 }
 
 /** Returns whether markdown file. */
