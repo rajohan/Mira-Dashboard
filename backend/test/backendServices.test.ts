@@ -1171,6 +1171,14 @@ describe("backend service behavior", () => {
     });
 
     it("normalizes cron and session route contracts through a patched gateway", async () => {
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        const routeRoot = createTemporaryRoot("mira-gateway-route-contracts-");
+        process.env.OPENCLAW_HOME = path.join(routeRoot, "openclaw-home");
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = path.join(
+            routeRoot,
+            "dashboard-openclaw-home"
+        );
         const gatewayModule = await import("../src/gateway.ts");
         const gateway = gatewayModule.default;
         const originalRequest = gateway.request;

@@ -1646,7 +1646,7 @@ describe("shared component helpers", () => {
         const onJsonPreviewChange = jest.fn();
         const onCodePreviewChange = jest.fn();
 
-        const { rerender } = renderWithQueryClient(
+        const { queryClient, rerender } = renderWithQueryClient(
             <>
                 <TaskHistorySidebar />
                 <ChannelSection
@@ -1761,7 +1761,7 @@ describe("shared component helpers", () => {
         );
 
         rerender(
-            <QueryClientProvider client={createQueryClient()}>
+            <QueryClientProvider client={queryClient}>
                 <FileEditorPanel
                     selectedPath="config:openclaw.json"
                     fileContent={{
@@ -1795,7 +1795,7 @@ describe("shared component helpers", () => {
         expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
 
         rerender(
-            <QueryClientProvider client={createQueryClient()}>
+            <QueryClientProvider client={queryClient}>
                 <FileEditorPanel
                     selectedPath="src/readme.md"
                     fileContent={{
@@ -1828,6 +1828,7 @@ describe("shared component helpers", () => {
         await user.click(screen.getByRole("button", { name: "Preview" }));
         expect(onMarkdownPreviewChange).toHaveBeenCalledWith(true);
         expect(screen.getByRole("button", { name: /saving/i })).toBeDisabled();
+        queryClient.clear();
     });
 
     it("drives sessions table row actions and empty state", async () => {

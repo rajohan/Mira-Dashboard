@@ -2,9 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import { database } from "../src/database.ts";
+import * as processModule from "../src/lib/processes.ts";
 import {
     type DockerUpdaterStepResult,
     isNonblockingRegistrationFailure,
@@ -255,6 +256,10 @@ describe("Docker updater tag patterns", () => {
         );
         process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
         process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY = "1";
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockResolvedValue({ code: 0, stderr: "", stdout: "" });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
 
         const registered = await registerDockerUpdaterServices();
         expect(registered.isOk).toBe(true);
@@ -296,5 +301,6 @@ describe("Docker updater tag patterns", () => {
                 stdout: "No update available after registry poll",
             })
         );
+        expect(runProcessSpy).not.toHaveBeenCalled();
     });
 });
