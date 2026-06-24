@@ -11,6 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, jest } from "bun:test";
 import type { ReactNode, RefObject } from "react";
 
+import { TaskHistorySidebar } from "./components/features/agents/TaskHistorySidebar";
 import { AttachmentPreviewModal } from "./components/features/chat/AttachmentPreviewModal";
 import { ChatComposer } from "./components/features/chat/ChatComposer";
 import { ChatHeader } from "./components/features/chat/ChatHeader";
@@ -41,6 +42,9 @@ import { useChatSlashCommands } from "./components/features/chat/useChatSlashCom
 import { CronJobDetails } from "./components/features/cron/CronJobDetails";
 import { CronJobList } from "./components/features/cron/CronJobList";
 import { BackupOverviewCard } from "./components/features/dashboard/BackupOverviewCard";
+import { CronOverviewCard } from "./components/features/dashboard/CronOverviewCard";
+import { LogRotationCard } from "./components/features/dashboard/LogRotationCard";
+import { QuotaOverviewCard } from "./components/features/dashboard/QuotaOverviewCard";
 import { ServiceActionsCard } from "./components/features/dashboard/ServiceActionsCard";
 import { AutovacuumHealthTable } from "./components/features/database/AutovacuumHealthTable";
 import { DatabaseTableShell } from "./components/features/database/DatabaseTableShell";
@@ -56,7 +60,10 @@ import {
 } from "./components/features/docker/dockerFormatters";
 import { DockerImagesTable } from "./components/features/docker/DockerImagesTable";
 import { DockerVolumesTable } from "./components/features/docker/DockerVolumesTable";
+import { ConfigSection } from "./components/features/files/ConfigSection";
 import { FileContentViewer } from "./components/features/files/FileContentViewer";
+import { FileEditorPanel } from "./components/features/files/FileEditorPanel";
+import { FileTreeItem } from "./components/features/files/FileTreeItem";
 import { PreviewToggle } from "./components/features/files/PreviewToggle";
 import { LogLine } from "./components/features/logs/LogLine";
 import { MyCommentCard } from "./components/features/moltbook/MyCommentCard";
@@ -64,13 +71,17 @@ import { MyPostCard } from "./components/features/moltbook/MyPostCard";
 import { ProfileCard } from "./components/features/moltbook/ProfileCard";
 import { SessionActionsDropdown } from "./components/features/sessions/SessionActionsDropdown";
 import { SessionsTable } from "./components/features/sessions/SessionsTable";
+import { AgentAccessSection } from "./components/features/settings/AgentAccessSection";
+import { ChannelSection } from "./components/features/settings/ChannelSection";
 import { HeartbeatSection } from "./components/features/settings/HeartbeatSection";
 import { ModelSection } from "./components/features/settings/ModelSection";
 import { SessionSection } from "./components/features/settings/SessionSection";
+import { SkillsSection } from "./components/features/settings/SkillsSection";
 import { ToolSection } from "./components/features/settings/ToolSection";
 import { Alert } from "./components/ui/Alert";
 import { getProgressColor, ProgressBar } from "./components/ui/ProgressBar";
 import { useFileExplorerState } from "./hooks/useFileExplorerState";
+import { useSessionActions } from "./hooks/useSessionActions";
 
 function textToBase64(text: string): string {
     return new TextEncoder().encode(text).toBase64();
@@ -1034,6 +1045,517 @@ describe("shared component helpers", () => {
         expect(result.current.hasChanges).toBe(false);
         unmount();
         queryClient.clear();
+    });
+
+    it("drives dashboard cards, file tree/config branches, and session action hook", async () => {
+        const user = userEvent.setup();
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+
+                if (url === "/api/sessions/agent%3Amain%3Amain/action") {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        action: expect.stringMatching(/^(compact|reset|stop)$/),
+                    });
+                    return new Response("", { status: 204 });
+                }
+
+                const method = init?.method ?? "GET";
+                if (url === "/api/sessions/agent%3Amain%3Amain" && method === "DELETE") {
+                    return new Response("", { status: 204 });
+                }
+
+                if (url === "/api/ops/log-rotation/status") {
+                    return Response.json({
+                        isSuccess: true,
+                        lastRun: {
+                            checkedFiles: 3,
+                            checkedGroups: 1,
+                            compressedFiles: 1,
+                            deletedArchives: 0,
+                            errors: [],
+                            finishedAt: "2026-06-24T10:00:00.000Z",
+                            groups: [],
+                            isDryRun: false,
+                            isOk: true,
+                            rotatedFiles: 2,
+                            skippedFiles: 0,
+                            startedAt: "2026-06-24T09:59:00.000Z",
+                            warnings: [],
+                        },
+                    });
+                }
+
+                if (url === "/api/jobs") {
+                    return Response.json({
+                        jobs: [
+                            {
+                                actionKey: "ops.logRotation",
+                                actionPayload: {},
+                                createdAt: "2026-06-24T08:00:00.000Z",
+                                description: "Rotate logs",
+                                enabled: true,
+                                id: "ops.log-rotation",
+                                intervalSeconds: 86_400,
+                                isRunning: false,
+                                name: "Log rotation",
+                                nextRunAt: "2026-06-24T22:30:00.000Z",
+                                scheduleType: "cron",
+                                cronExpression: "30 22 * * *",
+                                updatedAt: "2026-06-24T08:00:00.000Z",
+                            },
+                        ],
+                    });
+                }
+
+                if (url === "/api/cron/jobs") {
+                    return Response.json({
+                        jobs: [
+                            {
+                                enabled: true,
+                                id: "heartbeat",
+                                name: "Heartbeat",
+                                state: {
+                                    lastRunAtMs: 1_719_216_000_000,
+                                    lastRunStatus: "success",
+                                    nextRunAtMs: 1_719_219_600_000,
+                                },
+                            },
+                            {
+                                enabled: false,
+                                id: "cleanup",
+                                name: "Cleanup",
+                                state: {},
+                            },
+                        ],
+                    });
+                }
+
+                if (
+                    url === "/api/ops/log-rotation/dry-run" ||
+                    url === "/api/ops/log-rotation/run"
+                ) {
+                    return Response.json({
+                        isSuccess: true,
+                        result: {
+                            checkedFiles: 1,
+                            checkedGroups: 1,
+                            compressedFiles: 0,
+                            deletedArchives: 0,
+                            errors: [],
+                            finishedAt: "2026-06-24T10:01:00.000Z",
+                            groups: [],
+                            isDryRun: url.endsWith("dry-run"),
+                            isOk: true,
+                            rotatedFiles: 0,
+                            skippedFiles: 0,
+                            startedAt: "2026-06-24T10:00:00.000Z",
+                            warnings: [],
+                        },
+                        stderr: "",
+                    });
+                }
+
+                throw new Error(`Unexpected dashboard card fetch: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const queryClient = createQueryClient();
+        const wrapper = ({ children }: { children: ReactNode }) => (
+            <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        );
+        const { result, unmount } = renderHook(() => useSessionActions(), {
+            wrapper,
+        });
+
+        act(() => {
+            result.current.stop("agent:main:main");
+            result.current.compact("agent:main:main");
+            result.current.reset("agent:main:main");
+        });
+        await act(async () => {
+            await result.current.remove("agent:main:main");
+        });
+
+        const onConfigSelect = jest.fn();
+        const onTreeSelect = jest.fn();
+        const onTreeToggle = jest.fn();
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <LogRotationCard />
+                <CronOverviewCard />
+                <QuotaOverviewCard
+                    quotas={{
+                        cacheAgeMs: 0,
+                        checkedAt: 1_719_216_000_000,
+                        elevenlabs: {
+                            percentUsed: 96,
+                            remaining: 4,
+                            resetAt: "13:45 on 25 Jun",
+                            tier: "creator",
+                            total: 100,
+                            used: 96,
+                        },
+                        openai: {
+                            account: "raymond",
+                            fiveHourLeftPercent: 12,
+                            fiveHourReset: "13:45",
+                            model: "codex",
+                            percentUsed: 88,
+                            resetAt: "13:45",
+                            weeklyLeftPercent: 30,
+                            weeklyReset: "2026-06-25T10:00:00.000Z",
+                        },
+                        openrouter: {
+                            percentUsed: 40,
+                            remaining: 6,
+                            totalCredits: 10,
+                            usage: 4,
+                            usageMonthly: 4,
+                        },
+                        synthetic: {
+                            rollingFiveHourLimit: {
+                                limited: false,
+                                max: 100,
+                                nextTickAt: "2026-06-24T11:00:00.000Z",
+                                percentUsed: 97,
+                                remaining: 3,
+                                tickPercent: 0.25,
+                            },
+                            searchHourly: {
+                                limit: 100,
+                                percentUsed: 10,
+                                remaining: 90,
+                                renewsAt: "2026-06-24T11:00:00.000Z",
+                                requests: 10,
+                            },
+                            subscription: {
+                                limit: 100,
+                                percentUsed: 10,
+                                remaining: 90,
+                                renewsAt: "2026-06-25T10:00:00.000Z",
+                                requests: 10,
+                            },
+                            weeklyTokenLimit: {
+                                nextRegenAt: "bad-date",
+                                nextRegenCredits: "50",
+                                percentRemaining: 10,
+                            },
+                        },
+                    }}
+                />
+                <QuotaOverviewCard
+                    quotas={{
+                        cacheAgeMs: 0,
+                        checkedAt: 1_719_216_000_000,
+                        elevenlabs: { note: "usage unavailable", status: "error" },
+                        openai: { note: "not signed in", status: "not_configured" },
+                        openrouter: { note: "offline", status: "error" },
+                        synthetic: { note: "unknown", status: "error" },
+                    }}
+                />
+                <ConfigSection
+                    selectedPath="config:openclaw.json"
+                    onSelect={onConfigSelect}
+                />
+                <FileTreeItem
+                    node={{
+                        children: [
+                            {
+                                name: "b.ts",
+                                path: "src/b.ts",
+                                size: 1,
+                                type: "file",
+                            },
+                            {
+                                children: [],
+                                loaded: true,
+                                name: "nested",
+                                path: "src/nested",
+                                type: "directory",
+                            },
+                            {
+                                name: "image.png",
+                                path: "src/image.png",
+                                size: 1,
+                                type: "file",
+                            },
+                        ],
+                        loaded: true,
+                        name: "src",
+                        path: "src",
+                        type: "directory",
+                    }}
+                    selectedPath="src/b.ts"
+                    expandedPaths={new Set(["src"])}
+                    onSelect={onTreeSelect}
+                    onToggle={onTreeToggle}
+                />
+                <FileTreeItem
+                    node={{
+                        children: [],
+                        loaded: false,
+                        name: "loading",
+                        path: "loading",
+                        type: "directory",
+                    }}
+                    selectedPath={undefined}
+                    expandedPaths={new Set(["loading"])}
+                    onSelect={onTreeSelect}
+                    onToggle={onTreeToggle}
+                />
+            </QueryClientProvider>
+        );
+
+        await waitFor(() => {
+            expect(screen.getByText("Log rotation")).toBeInTheDocument();
+            expect(screen.getByText("Cron jobs")).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: "hooks" }));
+        await user.click(screen.getByRole("button", { name: "agentmail.ts" }));
+        await user.click(screen.getByRole("button", { name: "openclaw.json" }));
+        await user.click(screen.getByRole("button", { name: "src" }));
+        await user.click(screen.getByRole("button", { name: "b.ts" }));
+        await user.click(screen.getByRole("button", { name: "Run dry-run now" }));
+        await user.click(screen.getByRole("button", { name: "Run real now" }));
+
+        await waitFor(() => {
+            expect(onConfigSelect).toHaveBeenCalledWith(
+                "config:hooks/transforms/agentmail.ts"
+            );
+            expect(onConfigSelect).toHaveBeenCalledWith("config:openclaw.json");
+            expect(onTreeToggle).toHaveBeenCalledWith("src");
+            expect(onTreeSelect).toHaveBeenCalledWith("src/b.ts");
+            expect(
+                screen.getAllByText(/unavailable|rate limited|unknown/).length
+            ).toBeGreaterThan(0);
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/ops/log-rotation/run",
+                expect.objectContaining({ method: "POST" })
+            );
+        });
+
+        unmount();
+        queryClient.clear();
+    });
+
+    it("drives settings lists, task history, and file editor panel states", async () => {
+        const user = userEvent.setup();
+        const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
+            const url = String(input);
+            if (url === "/api/agents/tasks/history?limit=7") {
+                return Response.json({
+                    tasks: [
+                        {
+                            agentId: "mira-2026",
+                            completedAt: "2026-06-24T11:00:00.000Z",
+                            id: 1,
+                            status: "done",
+                            task: "Expand tests",
+                        },
+                    ],
+                });
+            }
+
+            throw new Error(`Unexpected settings component fetch: ${url}`);
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const onSaveChannels = jest.fn(async () => {});
+        const onSaveAgents = jest.fn(async () => {});
+        const onToggleSkill = jest.fn();
+        const onSaveFile = jest.fn();
+        const onContentChange = jest.fn();
+        const onMarkdownPreviewChange = jest.fn();
+        const onJsonPreviewChange = jest.fn();
+        const onCodePreviewChange = jest.fn();
+
+        const { rerender } = renderWithQueryClient(
+            <>
+                <TaskHistorySidebar />
+                <ChannelSection
+                    channels={[
+                        {
+                            details: "direct",
+                            enabled: true,
+                            id: "webchat",
+                            policy: "trusted",
+                        },
+                        { enabled: false, id: "discord" },
+                    ]}
+                    onSave={onSaveChannels}
+                    saving={false}
+                />
+                <SkillsSection
+                    skills={[
+                        {
+                            description: "Workspace skill",
+                            enabled: true,
+                            name: "dashboard",
+                            source: "workspace",
+                        },
+                        {
+                            description: "Built in skill",
+                            enabled: false,
+                            name: "browser",
+                            source: "builtin",
+                        },
+                        {
+                            enabled: false,
+                            name: "extra-tool",
+                            source: "extra",
+                        },
+                    ]}
+                    onToggle={onToggleSkill}
+                />
+                <AgentAccessSection
+                    agents={[
+                        {
+                            id: "mira-2026",
+                            name: "Mira",
+                            tools: { deny: ["web_search"] },
+                        },
+                        {
+                            id: "researcher",
+                            name: "Researcher",
+                            tools: { allow: ["web_search"] },
+                        },
+                    ]}
+                    onSave={onSaveAgents}
+                    saving={false}
+                />
+                <FileEditorPanel
+                    selectedPath={undefined}
+                    contentLoading={false}
+                    isEditable={false}
+                    hasChanges={false}
+                    savePending={false}
+                    editedContent=""
+                    largeFileWarning={false}
+                    markdownPreview={false}
+                    jsonPreview={false}
+                    codeEditMode={false}
+                    syntaxClass=""
+                    isJsonEditing={false}
+                    jsonValidation={{ error: undefined, valid: true }}
+                    onSave={onSaveFile}
+                    onContentChange={onContentChange}
+                    onMarkdownPreviewChange={onMarkdownPreviewChange}
+                    onJsonPreviewChange={onJsonPreviewChange}
+                    onCodePreviewChange={onCodePreviewChange}
+                />
+            </>
+        );
+
+        await waitFor(() => {
+            expect(screen.getByText("Expand tests")).toBeInTheDocument();
+        });
+        expect(screen.getByText("Select a file to view")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Channels" }));
+        await user.click(screen.getByLabelText("discord"));
+        await user.click(screen.getByRole("button", { name: "Save channels" }));
+        expect(onSaveChannels).toHaveBeenCalledWith(
+            expect.arrayContaining([
+                expect.objectContaining({ enabled: true, id: "discord" }),
+            ])
+        );
+
+        await user.click(screen.getByRole("button", { name: "Skills" }));
+        await user.type(screen.getByPlaceholderText("Search skills..."), "browser");
+        await user.click(screen.getByRole("button", { name: "disabled" }));
+        await user.click(screen.getByRole("button", { name: "Built-in 1 skills" }));
+        await user.click(screen.getAllByRole("switch").at(-1)!);
+        expect(onToggleSkill).toHaveBeenCalledWith("browser", true);
+
+        await user.click(screen.getByRole("button", { name: "Agent access control" }));
+        await user.type(screen.getByPlaceholderText("Filter tools..."), "web search");
+        await user.click(screen.getByText("Researcher"));
+        await user.click(screen.getAllByRole("switch").at(-1)!);
+        await user.click(screen.getByRole("button", { name: "Save access control" }));
+        expect(onSaveAgents).toHaveBeenCalledWith(
+            expect.arrayContaining([expect.objectContaining({ id: "researcher" })])
+        );
+
+        rerender(
+            <QueryClientProvider client={createQueryClient()}>
+                <FileEditorPanel
+                    selectedPath="config:openclaw.json"
+                    fileContent={{
+                        content: "{bad json",
+                        isBinary: false,
+                        modified: "",
+                        path: "config:openclaw.json",
+                        size: 9,
+                    }}
+                    contentLoading={false}
+                    isEditable={true}
+                    hasChanges={true}
+                    savePending={false}
+                    editedContent="{bad json"
+                    largeFileWarning={false}
+                    markdownPreview={false}
+                    jsonPreview={false}
+                    codeEditMode={false}
+                    syntaxClass="syntax-test"
+                    isJsonEditing={true}
+                    jsonValidation={{ error: "Expected brace", valid: false }}
+                    onSave={onSaveFile}
+                    onContentChange={onContentChange}
+                    onMarkdownPreviewChange={onMarkdownPreviewChange}
+                    onJsonPreviewChange={onJsonPreviewChange}
+                    onCodePreviewChange={onCodePreviewChange}
+                />
+            </QueryClientProvider>
+        );
+        expect(screen.getByText("Invalid JSON")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
+
+        rerender(
+            <QueryClientProvider client={createQueryClient()}>
+                <FileEditorPanel
+                    selectedPath="src/readme.md"
+                    fileContent={{
+                        content: "# Hello",
+                        isBinary: false,
+                        modified: "2026-06-24T11:00:00.000Z",
+                        path: "src/readme.md",
+                        size: 7,
+                    }}
+                    contentLoading={false}
+                    isEditable={true}
+                    hasChanges={true}
+                    savePending={true}
+                    editedContent="# Hello"
+                    largeFileWarning={false}
+                    markdownPreview={false}
+                    jsonPreview={false}
+                    codeEditMode={false}
+                    syntaxClass=""
+                    isJsonEditing={false}
+                    jsonValidation={{ error: undefined, valid: true }}
+                    onSave={onSaveFile}
+                    onContentChange={onContentChange}
+                    onMarkdownPreviewChange={onMarkdownPreviewChange}
+                    onJsonPreviewChange={onJsonPreviewChange}
+                    onCodePreviewChange={onCodePreviewChange}
+                />
+            </QueryClientProvider>
+        );
+        await user.click(screen.getByRole("button", { name: "Preview" }));
+        expect(onMarkdownPreviewChange).toHaveBeenCalledWith(true);
+        expect(screen.getByRole("button", { name: /saving/i })).toBeDisabled();
     });
 
     it("drives sessions table row actions and empty state", async () => {
