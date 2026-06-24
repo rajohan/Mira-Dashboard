@@ -4,12 +4,12 @@ import path from "node:path";
 import type { DashboardSocket } from "../dashboardSocket.ts";
 import { errorMessage } from "../lib/errors.ts";
 import { guardedPath, openReadNoFollowNonblockingGuarded } from "../lib/guardedOps.ts";
+import { resolveRealLogsDirectory } from "../lib/logRoots.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
 }
 
-const logsDirectory = "/tmp/openclaw";
 const logsRouteState: {
     logWatcher: NodeJS.Timeout | undefined;
     isLogPollInFlight: boolean;
@@ -29,14 +29,17 @@ const MIN_LOG_TAIL_BYTES = 64 * 1024;
 const LOG_BYTES_PER_REQUESTED_LINE = 1024;
 const LOG_TAIL_READ_CHUNK_BYTES = 64 * 1024;
 const MAX_LOG_TAIL_BYTES = 8 * 1024 * 1024;
+const LOG_ROOT_RESOLUTION_ERROR_CODES = new Set([
+    "ELOOP",
+    "ENOENT",
+    "ENOTDIR",
+    "ERR_INVALID_ARG_VALUE",
+]);
 
-function resolveRealLogsDirectory(): string {
-    if (fs.lstatSync(logsDirectory).isSymbolicLink()) {
-        throw Object.assign(new Error("Log directory must not be a symlink"), {
-            code: "ELOOP",
-        });
-    }
-    return fs.realpathSync(logsDirectory);
+function isLogRootResolutionError(error: unknown): boolean {
+    return LOG_ROOT_RESOLUTION_ERROR_CODES.has(
+        (error as NodeJS.ErrnoException).code ?? ""
+    );
 }
 
 /** Returns today log file. */
@@ -101,7 +104,7 @@ async function pollLogFile(): Promise<void> {
     try {
         logFile = getTodayLogFile();
     } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        if (isLogRootResolutionError(error)) return;
         throw error;
     }
 

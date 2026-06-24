@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { Database, type SQLQueryBindings } from "bun:sqlite";
@@ -16,6 +17,74 @@ const configuredDatabasePath = process.env.MIRA_DASHBOARD_DB_PATH?.trim();
 export const miraDatabasePath = configuredDatabasePath
     ? path.resolve(configuredDatabasePath)
     : path.join(process.cwd(), "data", "mira-dashboard.db");
+
+function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
+    const relativePath = path.relative(rootPath, candidatePath);
+    return (
+        relativePath === "" ||
+        (!relativePath.startsWith("..") && !path.isAbsolute(relativePath))
+    );
+}
+
+function findExistingParent(directoryPath: string): string {
+    let currentPath = directoryPath;
+    while (!fs.existsSync(currentPath)) {
+        const parentPath = path.dirname(currentPath);
+        if (parentPath === currentPath) {
+            return currentPath;
+        }
+        currentPath = parentPath;
+    }
+    return currentPath;
+}
+
+function assertTestDatabasePath(databasePath: string): void {
+    if (process.env.NODE_ENV !== "test") {
+        return;
+    }
+    const configuredTemporaryRoot = path.resolve(os.tmpdir());
+    const realTemporaryRoot = fs.realpathSync(configuredTemporaryRoot);
+    const databaseParent = path.dirname(databasePath);
+    if (
+        !configuredDatabasePath ||
+        (!isPathWithinRoot(databasePath, configuredTemporaryRoot) &&
+            !isPathWithinRoot(databasePath, realTemporaryRoot))
+    ) {
+        throw new Error(
+            `Refusing to open non-temporary Dashboard test database: ${databasePath}`
+        );
+    }
+    const existingDatabaseParent = findExistingParent(databaseParent);
+    if (fs.lstatSync(existingDatabaseParent).isSymbolicLink()) {
+        throw new Error(
+            `Refusing to open symlinked Dashboard test database: ${databasePath}`
+        );
+    }
+    const realExistingDatabaseParent = fs.realpathSync(existingDatabaseParent);
+    if (!isPathWithinRoot(realExistingDatabaseParent, realTemporaryRoot)) {
+        throw new Error(
+            `Refusing to open symlinked Dashboard test database: ${databasePath}`
+        );
+    }
+    fs.mkdirSync(databaseParent, { recursive: true });
+    const realDatabaseParent = fs.realpathSync(databaseParent);
+    let existingDatabaseStat: fs.Stats | undefined;
+    try {
+        existingDatabaseStat = fs.lstatSync(databasePath);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            throw error;
+        }
+    }
+    if (
+        !isPathWithinRoot(realDatabaseParent, realTemporaryRoot) ||
+        existingDatabaseStat?.isSymbolicLink() === true
+    ) {
+        throw new Error(
+            `Refusing to open symlinked Dashboard test database: ${databasePath}`
+        );
+    }
+}
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -249,6 +318,7 @@ function runSchemaSql(databaseConnection: DatabaseSync, schemaSql: string): void
 }
 
 function initializeDatabase(): DatabaseSync {
+    assertTestDatabasePath(miraDatabasePath);
     const dataDirectory = path.dirname(miraDatabasePath);
     fs.mkdirSync(dataDirectory, { recursive: true });
 
