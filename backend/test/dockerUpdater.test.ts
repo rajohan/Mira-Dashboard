@@ -66,6 +66,9 @@ describe("Docker updater tag patterns", () => {
                 failed: [{ appSlug: "postgres", blocking: true }],
             }),
         });
+        const malformedRegistrationFailure = dockerUpdaterStep({
+            stderr: '{"failed":',
+        });
         const wrongStepFailure = dockerUpdaterStep({
             step: "poll-registries",
             stderr: "",
@@ -75,6 +78,9 @@ describe("Docker updater tag patterns", () => {
         expect(isNonblockingRegistrationFailure(warningOnlyFailure)).toBe(true);
         expect(isNonblockingRegistrationFailure(nonblockingAppFailure)).toBe(true);
         expect(isNonblockingRegistrationFailure(blockingAppFailure)).toBe(false);
+        expect(isNonblockingRegistrationFailure(malformedRegistrationFailure)).toBe(
+            false
+        );
         expect(isNonblockingRegistrationFailure(wrongStepFailure)).toBe(false);
         expect(isNonblockingRegistrationFailure(successfulStep)).toBe(false);
     });

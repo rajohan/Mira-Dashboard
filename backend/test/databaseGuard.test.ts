@@ -1,10 +1,20 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "bun:test";
+
+const realTemporaryRoot = realpathSync(path.resolve(tmpdir()));
+const realHomeRoot = realpathSync(path.resolve(homedir()));
+const nonTemporaryRelativePath = path.relative(realTemporaryRoot, realHomeRoot);
+const nonTemporaryTest =
+    nonTemporaryRelativePath === "" ||
+    (!nonTemporaryRelativePath.startsWith("..") &&
+        !path.isAbsolute(nonTemporaryRelativePath))
+        ? it.skip
+        : it;
 
 async function readText(stream: ReadableStream<Uint8Array>): Promise<string> {
     return new Response(stream).text();
@@ -55,24 +65,26 @@ describe("database test safety guard", () => {
         }
     });
 
-    it("refuses to open a non-temporary database while running tests", async () => {
-        const root = await mkdtemp(
-            path.join(import.meta.dirname, ".mira-db-guard-test-")
-        );
-        const unsafeDatabasePath = path.join(root, "mira-dashboard.db");
+    nonTemporaryTest(
+        "refuses to open a non-temporary database while running tests",
+        async () => {
+            const root = await mkdtemp(path.join(realHomeRoot, ".mira-db-guard-test-"));
+            const unsafeDatabasePath = path.join(root, "mira-dashboard.db");
 
-        try {
-            const { exitCode, stderr } = await importDatabaseInChild(unsafeDatabasePath);
+            try {
+                const { exitCode, stderr } =
+                    await importDatabaseInChild(unsafeDatabasePath);
 
-            expect(exitCode).not.toBe(0);
-            expect(stderr).toContain(
-                "Refusing to open non-temporary Dashboard test database"
-            );
-            expect(existsSync(unsafeDatabasePath)).toBe(false);
-        } finally {
-            await rm(root, { force: true, recursive: true });
+                expect(exitCode).not.toBe(0);
+                expect(stderr).toContain(
+                    "Refusing to open non-temporary Dashboard test database"
+                );
+                expect(existsSync(unsafeDatabasePath)).toBe(false);
+            } finally {
+                await rm(root, { force: true, recursive: true });
+            }
         }
-    });
+    );
 
     it("refuses symlinked temporary database paths", async () => {
         const outsideRoot = await mkdtemp(

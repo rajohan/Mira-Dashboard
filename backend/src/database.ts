@@ -26,6 +26,18 @@ function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
     );
 }
 
+function findExistingParent(directoryPath: string): string {
+    let currentPath = directoryPath;
+    while (!fs.existsSync(currentPath)) {
+        const parentPath = path.dirname(currentPath);
+        if (parentPath === currentPath) {
+            return currentPath;
+        }
+        currentPath = parentPath;
+    }
+    return currentPath;
+}
+
 function assertTestDatabasePath(databasePath: string): void {
     if (process.env.NODE_ENV !== "test") {
         return;
@@ -40,6 +52,18 @@ function assertTestDatabasePath(databasePath: string): void {
     ) {
         throw new Error(
             `Refusing to open non-temporary Dashboard test database: ${databasePath}`
+        );
+    }
+    const existingDatabaseParent = findExistingParent(databaseParent);
+    if (fs.lstatSync(existingDatabaseParent).isSymbolicLink()) {
+        throw new Error(
+            `Refusing to open symlinked Dashboard test database: ${databasePath}`
+        );
+    }
+    const realExistingDatabaseParent = fs.realpathSync(existingDatabaseParent);
+    if (!isPathWithinRoot(realExistingDatabaseParent, realTemporaryRoot)) {
+        throw new Error(
+            `Refusing to open symlinked Dashboard test database: ${databasePath}`
         );
     }
     fs.mkdirSync(databaseParent, { recursive: true });
