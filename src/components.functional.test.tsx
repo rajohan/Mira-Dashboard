@@ -1,5 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+    act,
+    fireEvent,
+    render,
+    renderHook,
+    screen,
+    waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, jest } from "bun:test";
 import type { ReactNode, RefObject } from "react";
@@ -63,18 +70,14 @@ import { SessionSection } from "./components/features/settings/SessionSection";
 import { ToolSection } from "./components/features/settings/ToolSection";
 import { Alert } from "./components/ui/Alert";
 import { getProgressColor, ProgressBar } from "./components/ui/ProgressBar";
+import { useFileExplorerState } from "./hooks/useFileExplorerState";
 
 function textToBase64(text: string): string {
     return new TextEncoder().encode(text).toBase64();
 }
 
 function renderWithQueryClient(children: ReactNode) {
-    const queryClient = new QueryClient({
-        defaultOptions: {
-            mutations: { retry: false },
-            queries: { retry: false, staleTime: Infinity },
-        },
-    });
+    const queryClient = createQueryClient();
 
     return {
         ...render(
@@ -82,6 +85,15 @@ function renderWithQueryClient(children: ReactNode) {
         ),
         queryClient,
     };
+}
+
+function createQueryClient() {
+    return new QueryClient({
+        defaultOptions: {
+            mutations: { retry: false },
+            queries: { retry: false, staleTime: Infinity },
+        },
+    });
 }
 
 describe("shared component helpers", () => {
@@ -896,6 +908,132 @@ describe("shared component helpers", () => {
             target: { value: "const ok = false;" },
         });
         expect(onContentChange).toHaveBeenCalledWith("const ok = false;");
+    });
+
+    it("drives file explorer hook directory loading, JSON validation, and saves", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/files" && method === "GET") {
+                    return Response.json({
+                        files: [
+                            {
+                                children: [],
+                                loaded: false,
+                                name: "src",
+                                path: "src",
+                                type: "directory",
+                            },
+                            {
+                                name: "config.json5",
+                                path: "src/config.json5",
+                                size: 10,
+                                type: "file",
+                            },
+                        ],
+                    });
+                }
+
+                if (url === "/api/files?path=src" && method === "GET") {
+                    return Response.json({
+                        files: [
+                            {
+                                name: "config.json5",
+                                path: "src/config.json5",
+                                size: 10,
+                                type: "file",
+                            },
+                        ],
+                    });
+                }
+
+                if (url === "/api/files/src%2Fconfig.json5" && method === "GET") {
+                    return Response.json({
+                        content: "{foo: 1}",
+                        isBinary: false,
+                        path: "src/config.json5",
+                        size: 10,
+                    });
+                }
+
+                if (url === "/api/files/src%2Fconfig.json5" && method === "PUT") {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        content: "{foo: 2}",
+                    });
+                    return new Response("", { status: 204 });
+                }
+
+                throw new Error(`Unexpected file explorer test fetch: ${method} ${url}`);
+            }
+        );
+
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const queryClient = createQueryClient();
+        const wrapper = ({ children }: { children: ReactNode }) => (
+            <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        );
+        const { result, unmount } = renderHook(() => useFileExplorerState(), {
+            wrapper,
+        });
+
+        await waitFor(() => {
+            expect(result.current.files).toHaveLength(2);
+        });
+
+        await act(async () => {
+            await result.current.handleToggle("src");
+        });
+        expect(result.current.expandedPaths.has("src")).toBe(true);
+        expect(result.current.files[0]?.children).toHaveLength(1);
+
+        await act(async () => {
+            await result.current.handleToggle("src");
+        });
+        expect(result.current.expandedPaths.has("src")).toBe(false);
+
+        act(() => {
+            result.current.handleSelect("src/config.json5");
+        });
+        await waitFor(() => {
+            expect(result.current.fileContent?.content).toBe("{foo: 1}");
+        });
+
+        act(() => {
+            result.current.setJsonPreview(false);
+            result.current.handleContentChange("{bad json");
+        });
+        expect(result.current.isJsonEditing).toBe(true);
+        expect(result.current.jsonValidation.valid).toBe(false);
+
+        await act(async () => {
+            await result.current.handleSave();
+        });
+        expect(result.current.error).toMatch(/Invalid JSON/);
+
+        act(() => {
+            result.current.handleContentChange("{foo: 2}");
+        });
+        await act(async () => {
+            await result.current.handleSave();
+        });
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/files/src%2Fconfig.json5",
+            expect.objectContaining({ method: "PUT" })
+        );
+
+        act(() => {
+            result.current.handleRefresh();
+        });
+        expect(result.current.hasChanges).toBe(false);
+        unmount();
+        queryClient.clear();
     });
 
     it("drives sessions table row actions and empty state", async () => {
