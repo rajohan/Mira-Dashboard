@@ -57,6 +57,10 @@ import { MyPostCard } from "./components/features/moltbook/MyPostCard";
 import { ProfileCard } from "./components/features/moltbook/ProfileCard";
 import { SessionActionsDropdown } from "./components/features/sessions/SessionActionsDropdown";
 import { SessionsTable } from "./components/features/sessions/SessionsTable";
+import { HeartbeatSection } from "./components/features/settings/HeartbeatSection";
+import { ModelSection } from "./components/features/settings/ModelSection";
+import { SessionSection } from "./components/features/settings/SessionSection";
+import { ToolSection } from "./components/features/settings/ToolSection";
 import { Alert } from "./components/ui/Alert";
 import { getProgressColor, ProgressBar } from "./components/ui/ProgressBar";
 
@@ -1418,6 +1422,119 @@ describe("shared component helpers", () => {
 
         view.unmount();
         view.queryClient.clear();
+    });
+
+    it("drives settings section forms, switches, and selectors", async () => {
+        const user = userEvent.setup();
+        const onSaveModel = jest.fn(async () => {});
+        const onSaveTools = jest.fn(async () => {});
+        const onSaveHeartbeat = jest.fn(async () => {});
+        const onSaveSession = jest.fn(async () => {});
+
+        render(
+            <>
+                <ModelSection
+                    defaultModel="codex"
+                    fallbacks={["glm51", "kimi"]}
+                    imageModel={undefined}
+                    imageGenerationModel="gpt-image"
+                    onSave={onSaveModel}
+                    saving={false}
+                />
+                <ToolSection
+                    profile="full"
+                    webSearchEnabled={true}
+                    webSearchProvider="brave"
+                    webFetchEnabled={false}
+                    execSecurity="allowlist"
+                    execAsk="on-miss"
+                    elevatedEnabled={false}
+                    agentToAgentEnabled={true}
+                    sessionsVisibility="all"
+                    onSave={onSaveTools}
+                    saving={false}
+                />
+                <HeartbeatSection
+                    every={1800}
+                    target="main"
+                    onSave={onSaveHeartbeat}
+                    saving={false}
+                />
+                <SessionSection idleMinutes={60} onSave={onSaveSession} saving={false} />
+                <ModelSection
+                    defaultModel=""
+                    fallbacks={[]}
+                    onSave={jest.fn(async () => {})}
+                    saving={true}
+                />
+                <ToolSection
+                    webSearchEnabled={false}
+                    webSearchProvider=""
+                    webFetchEnabled={false}
+                    execSecurity="deny"
+                    execAsk="off"
+                    elevatedEnabled={false}
+                    agentToAgentEnabled={false}
+                    onSave={jest.fn(async () => {})}
+                    saving={true}
+                />
+            </>
+        );
+
+        for (const name of ["Model Configuration", "Tools", "Heartbeat", "Session"]) {
+            await user.click(screen.getAllByRole("button", { name })[0]!);
+        }
+
+        await user.clear(screen.getByLabelText("Default model"));
+        await user.type(screen.getByLabelText("Default model"), " gpt-5 ");
+        await user.clear(screen.getByLabelText("Fallback models"));
+        await user.type(screen.getByLabelText("Fallback models"), "glm51, kimi, codex");
+        await user.click(screen.getByRole("button", { name: /save model settings/i }));
+        expect(onSaveModel).toHaveBeenCalledWith({
+            fallbacks: ["glm51", "kimi", "codex"],
+            primary: "gpt-5",
+        });
+        expect(screen.getByText("Not set")).toBeInTheDocument();
+        expect(screen.getByText("gpt-image")).toBeInTheDocument();
+
+        await user.clear(screen.getByLabelText("Tool profile"));
+        await user.type(screen.getByLabelText("Tool profile"), "restricted");
+        await user.click(screen.getByRole("button", { name: /exec security/i }));
+        await user.click(screen.getByRole("menuitem", { name: "Full" }));
+        await user.click(screen.getByRole("button", { name: /exec approval/i }));
+        await user.click(screen.getByRole("menuitem", { name: "Always" }));
+        await user.click(screen.getByRole("switch", { name: /web search/i }));
+        await user.click(screen.getByRole("switch", { name: /web fetch/i }));
+        await user.click(screen.getByRole("switch", { name: /elevated tools/i }));
+        await user.click(screen.getByRole("switch", { name: /agent-to-agent/i }));
+        await user.clear(screen.getByLabelText("Web search provider"));
+        await user.type(screen.getByLabelText("Web search provider"), "kagi");
+        await user.clear(screen.getByLabelText("Sessions visibility"));
+        await user.type(screen.getByLabelText("Sessions visibility"), "owned");
+        await user.click(screen.getByRole("button", { name: /save tool settings/i }));
+        expect(onSaveTools).toHaveBeenCalledWith({
+            agentToAgentEnabled: false,
+            elevatedEnabled: true,
+            execAsk: "always",
+            execSecurity: "full",
+            profile: "restricted",
+            sessionsVisibility: "owned",
+            webFetchEnabled: true,
+            webSearchEnabled: false,
+            webSearchProvider: "kagi",
+        });
+
+        await user.clear(screen.getByLabelText("Interval (seconds)"));
+        await user.type(screen.getByLabelText("Interval (seconds)"), "900");
+        await user.clear(screen.getByLabelText("Target Channel"));
+        await user.type(screen.getByLabelText("Target Channel"), "ops");
+        await user.click(screen.getAllByRole("button", { name: /^save$/i })[0]!);
+        expect(onSaveHeartbeat).toHaveBeenCalledWith(900, "ops");
+
+        await user.clear(screen.getByLabelText("Idle Timeout (minutes)"));
+        await user.type(screen.getByLabelText("Idle Timeout (minutes)"), "45");
+        await user.click(screen.getAllByRole("button", { name: /^save$/i })[1]!);
+        expect(onSaveSession).toHaveBeenCalledWith(45);
     });
 
     it("drives docker image and volume table actions", async () => {
