@@ -1170,6 +1170,207 @@ describe("backend service behavior", () => {
         await expect(restartResponse.json()).resolves.toEqual({ isOk: true });
     });
 
+    it("normalizes cron and session route contracts through a patched gateway", async () => {
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const originalRequest = gateway.request;
+        const originalGetSessions = gateway.getSessions;
+        const originalAbortSessionRun = gateway.abortSessionRun;
+        const originalSendSessionMessage = gateway.sendSessionMessage;
+        const originalDeleteSession = gateway.deleteSession;
+        const gatewayCalls: Array<{
+            method: string;
+            parameters: Record<string, unknown>;
+        }> = [];
+
+        cleanupCallbacks.push(() => {
+            gateway.request = originalRequest;
+            gateway.getSessions = originalGetSessions;
+            gateway.abortSessionRun = originalAbortSessionRun;
+            gateway.sendSessionMessage = originalSendSessionMessage;
+            gateway.deleteSession = originalDeleteSession;
+        });
+
+        gateway.request = async (method, parameters) => {
+            gatewayCalls.push({ method, parameters });
+            if (method === "cron.list") {
+                return {
+                    items: [{ enabled: true, id: "heartbeat", name: "Heartbeat" }],
+                };
+            }
+            if (method === "cron.remove" || method === "cron.run") {
+                return { method, parameters };
+            }
+            if (method === "cron.update") {
+                return { isOk: true };
+            }
+            throw new Error(`unexpected gateway method: ${method}`);
+        };
+        gateway.getSessions = () => [
+            {
+                agentType: "codex",
+                channel: "webchat",
+                createdAt: "2026-06-24T10:00:00.000Z",
+                displayLabel: "Main",
+                displayName: "Main",
+                hookName: "",
+                id: "agent:main:main",
+                key: "agent:main:main",
+                label: "Main",
+                maxTokens: 200,
+                model: "codex",
+                tokenCount: 100,
+                type: "agent",
+                updatedAt: Date.now(),
+            },
+            {
+                agentType: "codex",
+                channel: "webchat",
+                createdAt: "2026-06-24T09:00:00.000Z",
+                displayLabel: "Researcher",
+                displayName: "Researcher",
+                hookName: "",
+                id: "agent:researcher:1",
+                key: "agent:researcher:1",
+                label: "Researcher",
+                maxTokens: 100,
+                model: "glm",
+                tokenCount: 25,
+                type: "agent",
+                updatedAt: 0,
+            },
+        ];
+        gateway.abortSessionRun = async (sessionKey) => {
+            gatewayCalls.push({ method: "chat.abort", parameters: { sessionKey } });
+        };
+        gateway.sendSessionMessage = async (sessionKey, message) => {
+            gatewayCalls.push({
+                method: "chat.send",
+                parameters: { message, sessionKey },
+            });
+        };
+        gateway.deleteSession = async (sessionKey) => {
+            gatewayCalls.push({ method: "sessions.delete", parameters: { sessionKey } });
+            return { deleted: sessionKey };
+        };
+
+        const [{ cronRoutes }, { sessionRoutes }] = await Promise.all([
+            import("../src/routes/cronRoutes.ts"),
+            import("../src/routes/sessionRoutes.ts"),
+        ]);
+
+        const cronList = await cronRoutes["/api/cron/jobs"].GET();
+        await expect(cronList.json()).resolves.toEqual({
+            jobs: [{ enabled: true, id: "heartbeat", name: "Heartbeat" }],
+        });
+
+        const cronDeleteRequest = {
+            params: { id: "heartbeat" },
+        } as Request & { params: { id: string } };
+        const cronDelete =
+            await cronRoutes["/api/cron/jobs/:id/delete"].POST(cronDeleteRequest);
+        await expect(cronDelete.json()).resolves.toMatchObject({ isOk: true });
+
+        const badToggleRequest = new Request(
+            "https://dashboard.test/api/cron/jobs/heartbeat/toggle",
+            {
+                body: JSON.stringify({ enabled: "yes" }),
+                method: "POST",
+            }
+        );
+        const badToggle = await cronRoutes["/api/cron/jobs/:id/toggle"].POST(
+            Object.assign(badToggleRequest, { params: { id: "heartbeat" } })
+        );
+        expect(badToggle.status).toBe(400);
+        await expect(badToggle.json()).resolves.toEqual({
+            error: "enabled must be a boolean",
+        });
+
+        const validToggleRequest = new Request(
+            "https://dashboard.test/api/cron/jobs/heartbeat/toggle",
+            {
+                body: JSON.stringify({ enabled: false }),
+                method: "POST",
+            }
+        );
+        const validToggle = await cronRoutes["/api/cron/jobs/:id/toggle"].POST(
+            Object.assign(validToggleRequest, { params: { id: "heartbeat" } })
+        );
+        await expect(validToggle.json()).resolves.toEqual({ isOk: true });
+
+        const badUpdateRequest = new Request(
+            "https://dashboard.test/api/cron/jobs/heartbeat/update",
+            {
+                body: JSON.stringify({ patch: [] }),
+                method: "POST",
+            }
+        );
+        const badUpdate = await cronRoutes["/api/cron/jobs/:id/update"].POST(
+            Object.assign(badUpdateRequest, { params: { id: "heartbeat" } })
+        );
+        expect(badUpdate.status).toBe(400);
+        await expect(badUpdate.json()).resolves.toEqual({
+            error: "patch must be an object",
+        });
+
+        const sessionListRequest = new Request(
+            "https://dashboard.test/api/sessions/list?model=codex"
+        );
+        const sessionList =
+            await sessionRoutes["/api/sessions/list"].GET(sessionListRequest);
+        await expect(sessionList.json()).resolves.toMatchObject({
+            sessions: [expect.objectContaining({ key: "agent:main:main" })],
+        });
+
+        const stats = await sessionRoutes["/api/sessions/stats"].GET();
+        await expect(stats.json()).resolves.toMatchObject({
+            activeInLastHour: 1,
+            byModel: { codex: 1, glm: 1 },
+            total: 2,
+            totalTokens: 125,
+        });
+
+        const compactRequest = new Request("https://dashboard.test/api/sessions/action", {
+            body: JSON.stringify({ action: "compact" }),
+            method: "POST",
+        });
+        const compact = await sessionRoutes["/api/sessions/:id/action"].POST(
+            Object.assign(compactRequest, { params: { id: "agent:main:main" } })
+        );
+        await expect(compact.json()).resolves.toEqual({
+            action: "compact",
+            isSuccess: true,
+        });
+
+        const unsupportedRequest = new Request(
+            "https://dashboard.test/api/sessions/action",
+            {
+                body: JSON.stringify({ action: "sleep" }),
+                method: "POST",
+            }
+        );
+        const unsupported = await sessionRoutes["/api/sessions/:id/action"].POST(
+            Object.assign(unsupportedRequest, { params: { id: "agent:main:main" } })
+        );
+        expect(unsupported.status).toBe(400);
+        await expect(unsupported.json()).resolves.toEqual({
+            error: "Unsupported action: sleep",
+        });
+
+        const deleteRequest = {
+            params: { id: "agent:main:main" },
+        } as Request & { params: { id: string } };
+        const deleted = await sessionRoutes["/api/sessions/:id"].DELETE(deleteRequest);
+        await expect(deleted.json()).resolves.toEqual({
+            isSuccess: true,
+            result: { deleted: "agent:main:main" },
+        });
+        expect(gatewayCalls).toContainEqual({
+            method: "chat.send",
+            parameters: { message: "/compact", sessionKey: "agent:main:main" },
+        });
+    });
+
     it("validates Docker route input and maps updater rows without running Docker", async () => {
         const { dockerRoutes } = await import("../src/routes/dockerRoutes.ts");
         const invalidContainerRequest = Object.assign(
