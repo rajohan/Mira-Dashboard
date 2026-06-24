@@ -4,10 +4,19 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
 
-import { agentsCollection, writeAgentsFromWebSocket } from "./collections/agents";
-import { logsCollection, writeLogFromWebSocket } from "./collections/logs";
+import {
+    agentsCollection,
+    preloadAgentsCollection,
+    writeAgentsFromWebSocket,
+} from "./collections/agents";
+import {
+    logsCollection,
+    preloadLogsCollection,
+    writeLogFromWebSocket,
+} from "./collections/logs";
 import {
     deleteSessionFromCollection,
+    preloadSessionsCollection,
     replaceSessionsFromWebSocket,
     sessionsCollection,
 } from "./collections/sessions";
@@ -827,6 +836,10 @@ describe("Mira Dashboard frontend behavior", () => {
     });
 
     it("writes live agent, log, and session updates into ready collections", () => {
+        preloadAgentsCollection();
+        preloadLogsCollection();
+        preloadSessionsCollection();
+
         const agentUpserts: Array<Partial<Record<string, unknown>>> = [];
         const restoreAgents = patchWritableCollection(agentsCollection, [], {
             writeUpsert: (item) => {
@@ -855,12 +868,13 @@ describe("Mira Dashboard frontend behavior", () => {
                 '{"_meta":{"logLevelName":"INFO","date":"2026-06-23T08:00:00.000Z"},"0":"[gateway] connected"}'
             );
             writeLogFromWebSocket("");
+            writeLogFromWebSocket("{bad json");
             expect(logUpserts[0]).toMatchObject({
                 level: "info",
                 subsystem: "gateway",
                 msg: "connected",
             });
-            expect(logUpserts).toHaveLength(1);
+            expect(logUpserts).toHaveLength(2);
         } finally {
             restoreLogs();
         }
