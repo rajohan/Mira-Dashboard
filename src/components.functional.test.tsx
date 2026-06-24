@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, jest } from "bun:test";
-import type { RefObject } from "react";
+import type { ReactNode, RefObject } from "react";
 
 import { AttachmentPreviewModal } from "./components/features/chat/AttachmentPreviewModal";
 import { ChatComposer } from "./components/features/chat/ChatComposer";
@@ -32,6 +33,7 @@ import {
 import { useChatSlashCommands } from "./components/features/chat/useChatSlashCommands";
 import { CronJobDetails } from "./components/features/cron/CronJobDetails";
 import { CronJobList } from "./components/features/cron/CronJobList";
+import { BackupOverviewCard } from "./components/features/dashboard/BackupOverviewCard";
 import { AutovacuumHealthTable } from "./components/features/database/AutovacuumHealthTable";
 import { DatabaseTableShell } from "./components/features/database/DatabaseTableShell";
 import { TopQueriesTable } from "./components/features/database/TopQueriesTable";
@@ -59,6 +61,22 @@ import { getProgressColor, ProgressBar } from "./components/ui/ProgressBar";
 
 function textToBase64(text: string): string {
     return new TextEncoder().encode(text).toBase64();
+}
+
+function renderWithQueryClient(children: ReactNode) {
+    const queryClient = new QueryClient({
+        defaultOptions: {
+            mutations: { retry: false },
+            queries: { retry: false, staleTime: Infinity },
+        },
+    });
+
+    return {
+        ...render(
+            <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        ),
+        queryClient,
+    };
 }
 
 describe("shared component helpers", () => {
@@ -1122,6 +1140,183 @@ describe("shared component helpers", () => {
         expect(
             await screen.findByRole("button", { name: /copied/i })
         ).toBeInTheDocument();
+    });
+
+    it("drives backup overview attention, clear, and run actions", async () => {
+        const user = userEvent.setup();
+        let mode: "attention" | "idle" = "attention";
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (method === "POST") {
+                    return Response.json({
+                        cleared: { id: "cleared", status: "done" },
+                        isOk: true,
+                        job: { id: "started", status: "running" },
+                    });
+                }
+
+                if (url === "/api/backups/kopia" || url === "/api/backups/walg") {
+                    const type = url.endsWith("walg") ? "walg" : "kopia";
+                    return Response.json({
+                        job:
+                            mode === "attention"
+                                ? {
+                                      code: 1,
+                                      endedAt: 1_719_216_010_000,
+                                      id: `${type}-attention`,
+                                      startedAt: 1_719_216_000_000,
+                                      status: "needs_attention",
+                                      stderr: `${type} stderr`,
+                                      stdout: "",
+                                      type,
+                                  }
+                                : {
+                                      code: 0,
+                                      endedAt: 1_719_216_010_000,
+                                      id: `${type}-done`,
+                                      startedAt: 1_719_216_000_000,
+                                      status: "done",
+                                      stderr: "",
+                                      stdout: "",
+                                      type,
+                                  },
+                    });
+                }
+
+                if (url === "/api/cache/backup.kopia.status") {
+                    return Response.json({
+                        consecutiveFailures: 0,
+                        data: {
+                            isOk: mode === "idle",
+                            snapshotsByPath: [
+                                {
+                                    latest: undefined,
+                                    path: "/source/docker",
+                                    snapshotCount: 2,
+                                    snapshots: [
+                                        {
+                                            description: "Daily Docker backup",
+                                            endTime: "2026-06-24T08:00:00.000Z",
+                                            errorCount: 0,
+                                            fileCount: 12,
+                                            id: "snap-1",
+                                            ignoredErrorCount: 0,
+                                            path: "/source/docker",
+                                            retentionReason: ["daily"],
+                                            startTime: "2026-06-24T07:59:00.000Z",
+                                            totalSize: 2048,
+                                        },
+                                        {
+                                            description: undefined,
+                                            endTime: undefined,
+                                            errorCount: undefined,
+                                            fileCount: undefined,
+                                            id: undefined,
+                                            ignoredErrorCount: undefined,
+                                            path: "/source/projects",
+                                            retentionReason: [],
+                                            startTime: undefined,
+                                            totalSize: undefined,
+                                        },
+                                    ],
+                                },
+                            ],
+                            stale: [{ path: "/source/docker" }],
+                        },
+                        errorCode: undefined,
+                        errorMessage: undefined,
+                        expiresAt: undefined,
+                        key: "backup.kopia.status",
+                        lastAttemptAt: undefined,
+                        meta: {},
+                        source: "backup",
+                        status: mode === "idle" ? "fresh" : "warning",
+                        updatedAt: "2026-06-24T08:00:00.000Z",
+                    });
+                }
+
+                if (url === "/api/cache/backup.walg.status") {
+                    return Response.json({
+                        consecutiveFailures: 0,
+                        data: {
+                            backupCount: 3,
+                            isOk: mode === "idle",
+                            latest: {
+                                backupName: "base_0001",
+                                modified: "2026-06-24T08:00:00.000Z",
+                                walFileName: "000000010000000000000001",
+                            },
+                        },
+                        errorCode: undefined,
+                        errorMessage: undefined,
+                        expiresAt: undefined,
+                        key: "backup.walg.status",
+                        lastAttemptAt: undefined,
+                        meta: {},
+                        source: "backup",
+                        status: mode === "idle" ? "fresh" : "warning",
+                        updatedAt: "2026-06-24T08:00:00.000Z",
+                    });
+                }
+
+                throw new Error(`Unexpected backup test fetch: ${method} ${url}`);
+            }
+        );
+
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const attentionView = renderWithQueryClient(<BackupOverviewCard />);
+        expect(await screen.findByText("Backup needs attention")).toBeInTheDocument();
+        expect(screen.getByText("Postgres backup needs attention")).toBeInTheDocument();
+        expect(screen.getByText("Daily Docker backup")).toBeInTheDocument();
+        expect(screen.getByText("Stale")).toBeInTheDocument();
+        expect(screen.getByText("2.0 KB")).toBeInTheDocument();
+
+        const clearButtons = screen.getAllByRole("button", {
+            name: /clear attention/i,
+        });
+        await user.click(clearButtons[0]!);
+        await user.click(clearButtons[1]!);
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/backups/walg/clear-needs-attention",
+            expect.objectContaining({ method: "POST" })
+        );
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/backups/kopia/clear-needs-attention",
+            expect.objectContaining({ method: "POST" })
+        );
+        attentionView.unmount();
+        attentionView.queryClient.clear();
+
+        mode = "idle";
+        const idleView = renderWithQueryClient(<BackupOverviewCard />);
+        expect(await screen.findByText("base_0001")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: /run postgres backup/i }));
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/backups/walg/run",
+                expect.objectContaining({ method: "POST" })
+            );
+        });
+
+        await user.click(screen.getByRole("button", { name: /run filesystem backup/i }));
+        expect(screen.getByText("Run backup now")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: /^run backup$/i }));
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/backups/kopia/run",
+                expect.objectContaining({ method: "POST" })
+            );
+        });
+        idleView.unmount();
+        idleView.queryClient.clear();
     });
 
     it("drives docker image and volume table actions", async () => {
