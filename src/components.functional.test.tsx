@@ -35,6 +35,15 @@ import { CronJobList } from "./components/features/cron/CronJobList";
 import { AutovacuumHealthTable } from "./components/features/database/AutovacuumHealthTable";
 import { DatabaseTableShell } from "./components/features/database/DatabaseTableShell";
 import { TopQueriesTable } from "./components/features/database/TopQueriesTable";
+import { DockerContainersTable } from "./components/features/docker/DockerContainersTable";
+import {
+    formatBytes,
+    formatDockerMemory,
+    formatFullVersionDisplay,
+    formatTimestamp,
+    formatUpdaterTransition,
+    formatVersionDisplay,
+} from "./components/features/docker/dockerFormatters";
 import { DockerImagesTable } from "./components/features/docker/DockerImagesTable";
 import { DockerVolumesTable } from "./components/features/docker/DockerVolumesTable";
 import { FileContentViewer } from "./components/features/files/FileContentViewer";
@@ -1215,5 +1224,167 @@ describe("shared component helpers", () => {
         expect(onPruneVolumes).toHaveBeenCalledTimes(1);
         expect(onDeleteVolume).toHaveBeenCalledWith(longVolume);
         expect(screen.getAllByText("Used").length).toBeGreaterThan(0);
+    });
+
+    it("drives docker container table sorting, mobile actions, and formatters", async () => {
+        const user = userEvent.setup();
+        const onDetails = jest.fn();
+        const onLogs = jest.fn();
+        const onConsole = jest.fn();
+        const onRestart = jest.fn();
+        const onRestartStack = jest.fn();
+
+        expect(formatBytes(NaN)).toBe("0 B");
+        expect(formatBytes(1536)).toBe("1.5 KB");
+        expect(formatDockerMemory(undefined)).toBe("—");
+        expect(formatDockerMemory("bad")).toBe("bad");
+        expect(formatDockerMemory("512 MiB / 1 GiB")).toBe("512 MB / 1.0 GB");
+        expect(formatTimestamp(undefined)).toBe("—");
+        expect(formatTimestamp("not-a-date")).toBe("not-a-date");
+        expect(formatVersionDisplay(undefined, "sha256:abcdef1234567890")).toBe(
+            "sha256:abcde"
+        );
+        expect(formatVersionDisplay(undefined, undefined)).toBe("—");
+        expect(formatFullVersionDisplay("v1", "digest")).toBe("v1 (digest)");
+        expect(formatFullVersionDisplay(undefined, "digest")).toBe("digest");
+        expect(
+            formatUpdaterTransition({
+                fromDigest: "from-digest",
+                fromTag: undefined,
+                toDigest: undefined,
+                toTag: "latest",
+            })
+        ).toBe("from-digest → latest");
+
+        const { rerender } = render(
+            <DockerContainersTable
+                containers={[]}
+                onConsole={onConsole}
+                onDetails={onDetails}
+                onLogs={onLogs}
+                onRestart={onRestart}
+                onRestartStack={onRestartStack}
+            />
+        );
+        expect(screen.getByText("No containers found.")).toBeInTheDocument();
+
+        rerender(
+            <DockerContainersTable
+                containers={[
+                    {
+                        command: "node server.js",
+                        createdAt: "2026-06-24T08:00:00.000Z",
+                        finishedAt: undefined,
+                        health: "healthy",
+                        id: "running",
+                        image: "local/running:latest",
+                        imageId: "image-running",
+                        ipAddresses: {},
+                        mounts: [],
+                        name: "running-api",
+                        ports: ["3100/tcp"],
+                        project: "mira",
+                        restartCount: 1,
+                        runningFor: "2 hours",
+                        service: "api",
+                        startedAt: "2026-06-24T08:00:00.000Z",
+                        state: "running",
+                        stats: {
+                            blockIO: "0 B / 0 B",
+                            cpu: "12.5%",
+                            memory: "256 MiB / 1 GiB",
+                            memoryPercent: "25%",
+                            netIO: "1 KB / 2 KB",
+                            pids: "12",
+                        },
+                        status: "Up",
+                    },
+                    {
+                        command: "sleep 1",
+                        createdAt: "2026-06-24T07:00:00.000Z",
+                        finishedAt: "2026-06-24T07:01:00.000Z",
+                        health: "unhealthy",
+                        id: "exited",
+                        image: "local/exited:latest",
+                        imageId: "image-exited",
+                        ipAddresses: {},
+                        mounts: [],
+                        name: "exited-worker",
+                        ports: [],
+                        project: undefined,
+                        restartCount: 3,
+                        runningFor: "",
+                        service: undefined,
+                        startedAt: undefined,
+                        state: "exited",
+                        stats: {
+                            blockIO: "0 B / 0 B",
+                            cpu: "bad cpu",
+                            memory: "bad memory",
+                            memoryPercent: "bad percent",
+                            netIO: "0 B / 0 B",
+                            pids: "0",
+                        },
+                        status: "Exited",
+                    },
+                    {
+                        command: "worker",
+                        createdAt: "2026-06-24T06:00:00.000Z",
+                        finishedAt: undefined,
+                        health: "unknown",
+                        id: "created",
+                        image: "local/created:latest",
+                        imageId: "image-created",
+                        ipAddresses: {},
+                        mounts: [],
+                        name: "created-worker",
+                        ports: [],
+                        project: undefined,
+                        restartCount: 0,
+                        runningFor: "",
+                        service: undefined,
+                        startedAt: undefined,
+                        state: "created",
+                        stats: undefined,
+                        status: "Created",
+                    },
+                ]}
+                onConsole={onConsole}
+                onDetails={onDetails}
+                onLogs={onLogs}
+                onRestart={onRestart}
+                onRestartStack={onRestartStack}
+            />
+        );
+
+        await user.click(screen.getByRole("button", { name: /restart stack/i }));
+        expect(onRestartStack).toHaveBeenCalledTimes(1);
+
+        await user.click(screen.getByRole("button", { name: "State" }));
+        await user.click(screen.getByRole("button", { name: "Health" }));
+        await user.click(screen.getByRole("button", { name: "CPU" }));
+        await user.click(screen.getByRole("button", { name: "Memory" }));
+
+        await user.click(screen.getAllByLabelText(/show logs for running-api/i)[0]!);
+        await user.click(screen.getAllByLabelText(/open console for running-api/i)[0]!);
+        await user.click(screen.getAllByLabelText(/restart running-api/i)[0]!);
+        expect(onLogs).toHaveBeenCalledWith("running");
+        expect(onConsole).toHaveBeenCalledWith("running");
+        expect(onRestart).toHaveBeenCalledWith("running");
+
+        await user.click(screen.getAllByText("running-api")[0]!);
+        expect(onDetails).toHaveBeenCalledWith("running");
+
+        fireEvent.keyDown(screen.getByLabelText(/open details for exited-worker/i), {
+            key: "Escape",
+        });
+        fireEvent.keyDown(screen.getByLabelText(/open details for exited-worker/i), {
+            key: "Enter",
+        });
+        fireEvent.keyDown(screen.getByLabelText(/open details for created-worker/i), {
+            key: " ",
+        });
+        expect(onDetails).toHaveBeenCalledWith("exited");
+        expect(onDetails).toHaveBeenCalledWith("created");
     });
 });

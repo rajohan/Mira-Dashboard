@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
 
@@ -83,6 +84,57 @@ class FakeWebSocket {
 }
 
 function apiResponse(url: string, method: string) {
+    if (method === "POST" && url.includes("/api/docker/containers/")) {
+        return Response.json({ output: "container action output" });
+    }
+
+    if (method === "POST" && url === "/api/docker/stack/action") {
+        return Response.json({ output: "stack restarted" });
+    }
+
+    if (method === "POST" && url === "/api/docker/prune") {
+        return Response.json({ isSuccess: true, output: "pruned" });
+    }
+
+    if (method === "POST" && url === "/api/docker/updater/run") {
+        return Response.json({
+            isSuccess: true,
+            steps: [{ isOk: true, stderr: "", stdout: "ok", step: "scan" }],
+        });
+    }
+
+    if (method === "POST" && url === "/api/docker/updater/services/1/update") {
+        return Response.json({
+            isSuccess: true,
+            result: {
+                failed: [],
+                isOk: true,
+                mode: "manual",
+                summary: { eligible: 1, failed: 0, updated: 1 },
+                updated: [],
+                workflow: "docker",
+            },
+            service: {},
+            stderr: "manual stderr",
+        });
+    }
+
+    if (method === "POST" && url === "/api/docker/exec/start") {
+        return Response.json({ jobId: "job-1" });
+    }
+
+    if (method === "POST" && url === "/api/docker/exec/job-1/stop") {
+        return Response.json({ isSuccess: true });
+    }
+
+    if (method === "DELETE" && url.includes("/api/docker/images/")) {
+        return Response.json({ isSuccess: true });
+    }
+
+    if (method === "DELETE" && url.includes("/api/docker/volumes/")) {
+        return Response.json({ isSuccess: true });
+    }
+
     if (method !== "GET") {
         return Response.json({ isOk: true, jobId: "job-1" });
     }
@@ -344,32 +396,118 @@ function apiResponse(url: string, method: string) {
         return Response.json({
             containers: [
                 {
+                    command: "node server.js",
+                    createdAt: "2026-06-24T08:00:00.000Z",
+                    finishedAt: undefined,
+                    health: "healthy",
                     id: "abc123",
-                    name: "dashboard",
                     image: "mira-dashboard:latest",
-                    state: "running",
-                    status: "Up",
-                    created: "2026-06-24T08:00:00.000Z",
-                    ports: [],
+                    imageId: "sha256:image",
+                    ipAddresses: { mira: "172.20.0.2" },
                     mounts: [],
-                    networks: ["mira"],
-                    labels: {},
+                    name: "dashboard",
+                    ports: ["3100/tcp"],
+                    project: "mira",
                     restartCount: 0,
+                    runningFor: "2 hours",
+                    service: "dashboard",
+                    startedAt: "2026-06-24T08:00:00.000Z",
+                    state: "running",
+                    stats: {
+                        blockIO: "0 B / 0 B",
+                        cpu: "3.5%",
+                        memory: "128 MiB / 1 GiB",
+                        memoryPercent: "12%",
+                        netIO: "1 KB / 2 KB",
+                        pids: "8",
+                    },
+                    status: "Up",
                 },
             ],
         });
+    }
+
+    if (url === "/api/docker/containers/abc123") {
+        return Response.json({
+            command: "node server.js",
+            createdAt: "2026-06-24T08:00:00.000Z",
+            env: ["NODE_ENV=production"],
+            finishedAt: undefined,
+            health: "healthy",
+            id: "abc123",
+            image: "mira-dashboard:latest",
+            imageId: "sha256:image",
+            ipAddresses: { mira: "172.20.0.2" },
+            labels: { "com.docker.compose.service": "dashboard" },
+            mounts: [
+                {
+                    destination: "/data",
+                    mode: "rw",
+                    readOnly: false,
+                    source: "/var/lib/dashboard",
+                    type: "bind",
+                },
+            ],
+            name: "dashboard",
+            networks: [
+                {
+                    gateway: "172.20.0.1",
+                    ipAddress: "172.20.0.2",
+                    macAddress: "02:42:ac:14:00:02",
+                    name: "mira",
+                },
+            ],
+            ports: ["3100/tcp"],
+            project: "mira",
+            restartCount: 0,
+            runningFor: "2 hours",
+            service: "dashboard",
+            startedAt: "2026-06-24T08:00:00.000Z",
+            state: "running",
+            stats: {
+                blockIO: "0 B / 0 B",
+                cpu: "3.5%",
+                memory: "128 MiB / 1 GiB",
+                memoryPercent: "12%",
+                netIO: "1 KB / 2 KB",
+                pids: "8",
+            },
+            status: "Up",
+        });
+    }
+
+    if (url === "/api/docker/containers/abc123/logs?tail=200") {
+        return Response.json({ content: "dashboard log line" });
+    }
+
+    if (url === "/api/docker/containers/abc123/logs?tail=500") {
+        return Response.json({ content: "more dashboard log lines" });
     }
 
     if (url === "/api/docker/images") {
         return Response.json({
             images: [
                 {
+                    containerName: "dashboard",
+                    createdAt: "2026-06-24T08:00:00.000Z",
                     id: "img1",
-                    repository: "mira-dashboard",
-                    tag: "latest",
-                    size: 1,
-                    created: "2026-06-24T08:00:00.000Z",
                     inUseBy: ["dashboard"],
+                    lastTagTime: "2026-06-24T08:00:00.000Z",
+                    platform: "linux/amd64",
+                    repository: "mira-dashboard",
+                    size: 1024,
+                    tag: "latest",
+                },
+                {
+                    containerName: "",
+                    createdAt: "2026-06-24T08:00:00.000Z",
+                    id: "img-unused",
+                    inUseBy: [],
+                    lastTagTime: "2026-06-24T08:00:00.000Z",
+                    platform: "linux/amd64",
+                    repository: "unused",
+                    size: 2048,
+                    tag: "",
                 },
             ],
         });
@@ -384,8 +522,17 @@ function apiResponse(url: string, method: string) {
                     mountpoint: "/var/lib/docker/volumes/dashboard-data",
                     labels: {},
                     scope: "local",
-                    size: 1024,
+                    size: "1 KiB",
                     usedBy: ["dashboard"],
+                },
+                {
+                    name: "unused-volume",
+                    driver: "local",
+                    mountpoint: "/var/lib/docker/volumes/unused-volume",
+                    labels: {},
+                    scope: "local",
+                    size: "2 KiB",
+                    usedBy: [],
                 },
             ],
         });
@@ -396,19 +543,67 @@ function apiResponse(url: string, method: string) {
             services: [
                 {
                     id: 1,
+                    appSlug: "dashboard",
+                    composeImageRef: "mira-dashboard:latest",
+                    currentDigest: "sha256:old",
+                    currentTag: "1.0.0",
+                    enabled: true,
+                    imageRepo: "mira-dashboard",
+                    lastCheckedAt: "2026-06-24T08:00:00.000Z",
+                    lastStatus: "update_available",
+                    lastUpdatedAt: undefined,
+                    latestDigest: "sha256:new",
+                    latestTag: "1.0.1",
+                    metadata: {},
+                    pinMode: "tag",
+                    policy: "notify",
                     serviceName: "dashboard",
-                    composeProject: "mira",
-                    image: "mira-dashboard:latest",
-                    currentVersion: "1.0.0",
-                    latestVersion: "1.0.1",
-                    status: "update_available",
+                    updateAvailable: true,
+                },
+            ],
+            summary: {
+                autoPolicy: 0,
+                enabled: 1,
+                failed: 0,
+                notifyPolicy: 1,
+                total: 1,
+                updateAvailable: 1,
+            },
+        });
+    }
+
+    if (url === "/api/docker/updater/events?limit=25") {
+        return Response.json({
+            events: [
+                {
+                    appSlug: "dashboard",
+                    createdAt: "2026-06-24T08:10:00.000Z",
+                    details: {},
+                    eventType: "update_available",
+                    fromDigest: "sha256:old",
+                    fromTag: "1.0.0",
+                    id: 1,
+                    managedServiceId: 1,
+                    message: "update available",
+                    serviceName: "dashboard",
+                    toDigest: "sha256:new",
+                    toTag: "1.0.1",
                 },
             ],
         });
     }
 
-    if (url === "/api/docker/updater/events?limit=25") {
-        return Response.json({ events: [] });
+    if (url === "/api/docker/exec/job-1") {
+        return Response.json({
+            code: undefined,
+            containerId: "abc123",
+            endedAt: undefined,
+            jobId: "job-1",
+            startedAt: 1_719_216_000_000,
+            status: "running",
+            stderr: "warn",
+            stdout: "hello",
+        });
     }
 
     if (url === "/api/files") {
@@ -639,7 +834,15 @@ describe("Mira Dashboard pages", () => {
                 value: FakeWebSocket,
                 writable: true,
             },
+            requestAnimationFrame: {
+                configurable: true,
+                value: (callback: FrameRequestCallback) => {
+                    return setTimeout(() => callback(performance.now()), 0);
+                },
+                writable: true,
+            },
         });
+        Element.prototype.scrollIntoView = jest.fn();
     });
 
     afterEach(() => {
@@ -678,6 +881,112 @@ describe("Mira Dashboard pages", () => {
         await waitFor(() => {
             expect(screen.getByText("Connecting to OpenClaw...")).toBeInTheDocument();
         });
+    });
+
+    it("drives docker page container, updater, prune, delete, and console flows", async () => {
+        const user = userEvent.setup();
+        const fetchMock = fetch as unknown as ReturnType<typeof jest.fn>;
+
+        renderPage(createElement(Docker));
+
+        await waitFor(() => {
+            expect(screen.getByText("Updater overview")).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: /run updater now/i }));
+        await waitFor(() => {
+            expect(screen.getByText(/"isSuccess": true/i)).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: /update now/i }));
+        expect(screen.getByText("Run manual update")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: /^update now$/i }));
+        await waitFor(() => {
+            expect(
+                screen.getByText(/Manual updater run finished\. updated=1 failed=0/i)
+            ).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: /dismiss/i }));
+        expect(
+            screen.queryByText(/Manual updater run finished/i)
+        ).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: /restart stack/i }));
+        await waitFor(() => {
+            expect(screen.getByText("stack restarted")).toBeInTheDocument();
+        });
+
+        await user.click(screen.getAllByLabelText(/restart dashboard/i)[0]!);
+        await waitFor(() => {
+            expect(screen.getByText("container action output")).toBeInTheDocument();
+        });
+
+        await user.click(screen.getAllByLabelText(/show logs for dashboard/i)[0]!);
+        expect(await screen.findByText("dashboard log line")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "200 lines" }));
+        await user.click(screen.getByRole("menuitem", { name: "500 lines" }));
+        await waitFor(() => {
+            expect(screen.getByText("more dashboard log lines")).toBeInTheDocument();
+        });
+        await user.click(screen.getByLabelText(/close dashboard logs/i));
+        await waitFor(() => {
+            expect(screen.queryByRole("dialog", { name: /dashboard logs/i })).toBeNull();
+        });
+
+        await user.click(screen.getAllByLabelText(/open console for dashboard/i)[0]!);
+        await user.type(
+            screen.getByPlaceholderText(/command to run inside container/i),
+            "echo hello"
+        );
+        await user.click(screen.getByRole("button", { name: /^run$/i }));
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/docker/exec/start",
+                expect.objectContaining({ method: "POST" })
+            );
+        });
+        await user.click(screen.getByLabelText(/close dashboard console/i));
+        await waitFor(() => {
+            expect(
+                screen.queryByRole("dialog", { name: /dashboard console/i })
+            ).toBeNull();
+        });
+
+        await user.click(screen.getByLabelText(/open details for dashboard/i));
+        expect(await screen.findByText("Networks")).toBeInTheDocument();
+        expect(screen.getByText("MAC: 02:42:ac:14:00:02")).toBeInTheDocument();
+        await user.click(screen.getByLabelText(/close dashboard/i));
+
+        await user.click(screen.getAllByRole("button", { name: /remove unused/i })[0]!);
+        await waitFor(() => {
+            expect(screen.getByText("pruned")).toBeInTheDocument();
+        });
+
+        await user.click(
+            screen.getAllByRole("button", { name: /delete unused:<none>/i })[0]!
+        );
+        expect(screen.getByText("Delete image")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: /^delete$/i }));
+        await waitFor(() => {
+            expect(screen.getByText(/Deleted Docker image/i)).toBeInTheDocument();
+        });
+
+        await user.click(
+            screen.getAllByRole("button", { name: /delete unused-volume/i })[0]!
+        );
+        expect(screen.getByText("Delete volume")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: /^delete$/i }));
+        await waitFor(() => {
+            expect(
+                screen.getByText(/Deleted Docker volume unused-volume/i)
+            ).toBeInTheDocument();
+        });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/docker/exec/start",
+            expect.objectContaining({ method: "POST" })
+        );
     });
 
     it("keeps chat page storage and history helpers deterministic", () => {
