@@ -22,6 +22,11 @@ import {
 import { useChatSlashCommands } from "./components/features/chat/useChatSlashCommands";
 import { CronJobDetails } from "./components/features/cron/CronJobDetails";
 import { CronJobList } from "./components/features/cron/CronJobList";
+import { AutovacuumHealthTable } from "./components/features/database/AutovacuumHealthTable";
+import { DatabaseTableShell } from "./components/features/database/DatabaseTableShell";
+import { TopQueriesTable } from "./components/features/database/TopQueriesTable";
+import { DockerImagesTable } from "./components/features/docker/DockerImagesTable";
+import { DockerVolumesTable } from "./components/features/docker/DockerVolumesTable";
 import { FileContentViewer } from "./components/features/files/FileContentViewer";
 import { PreviewToggle } from "./components/features/files/PreviewToggle";
 import { LogLine } from "./components/features/logs/LogLine";
@@ -965,5 +970,176 @@ describe("shared component helpers", () => {
         expect(screen.getByText("Invalid JSON: bad")).toBeInTheDocument();
         expect(screen.getByText("Save failed")).toBeInTheDocument();
         expect(screen.getByText("Running job...")).toBeInTheDocument();
+    });
+
+    it("drives database table shells, autovacuum cards, and top query modal copy", async () => {
+        const user = userEvent.setup();
+        const onRowClick = jest.fn();
+        const writeText = jest.fn(async () => {});
+        Object.defineProperty(navigator, "clipboard", {
+            configurable: true,
+            value: { writeText },
+        });
+
+        const { rerender } = render(
+            <DatabaseTableShell
+                data={[]}
+                columns={[]}
+                emptyMessage="Nothing here"
+                onRowClick={onRowClick}
+            />
+        );
+        expect(screen.getByText("Nothing here")).toBeInTheDocument();
+
+        rerender(
+            <AutovacuumHealthTable
+                data={[
+                    {
+                        dead_pct: "12.5",
+                        last_autoanalyze: "",
+                        last_autovacuum: "",
+                        n_dead_tup: "42",
+                        n_live_tup: "100",
+                        relname: "tasks",
+                        schemaname: "public",
+                    },
+                ]}
+            />
+        );
+        expect(screen.getAllByText("public.tasks").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("12.5%").length).toBeGreaterThan(0);
+
+        rerender(<TopQueriesTable enabled={false} data={[]} />);
+        expect(
+            screen.getByText("pg_stat_statements is not enabled.")
+        ).toBeInTheDocument();
+
+        const query = "select * from task_history where agent_id = 'mira-2026'";
+        rerender(
+            <TopQueriesTable
+                enabled={true}
+                data={[
+                    {
+                        calls: "7",
+                        mean_exec_time: "2.5",
+                        query,
+                        rows: "3",
+                        shared_blks_hit: "10",
+                        shared_blks_read: "1",
+                        total_exec_time: "17.5",
+                    },
+                ]}
+            />
+        );
+
+        await user.click(screen.getAllByText(/select \*/i)[0]!);
+        expect(screen.getByText("Query details")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: /copy query/i }));
+        expect(writeText).toHaveBeenCalledWith(query);
+        expect(
+            await screen.findByRole("button", { name: /copied/i })
+        ).toBeInTheDocument();
+    });
+
+    it("drives docker image and volume table actions", async () => {
+        const user = userEvent.setup();
+        const onDeleteImage = jest.fn();
+        const onPruneImages = jest.fn();
+        const onDeleteVolume = jest.fn();
+        const onPruneVolumes = jest.fn();
+
+        const { rerender } = render(
+            <DockerImagesTable
+                images={[]}
+                onDelete={onDeleteImage}
+                onPruneUnused={onPruneImages}
+            />
+        );
+        expect(screen.getByText("No images found.")).toBeInTheDocument();
+
+        rerender(
+            <DockerImagesTable
+                images={[
+                    {
+                        containerName: "",
+                        createdAt: "2026-06-24T10:00:00.000Z",
+                        id: "img-unused",
+                        inUseBy: [],
+                        lastTagTime: "2026-06-24T10:00:00.000Z",
+                        platform: "linux/amd64",
+                        repository: "local/app",
+                        size: 1024,
+                        tag: "",
+                    },
+                    {
+                        containerName: "api",
+                        createdAt: "2026-06-24T10:00:00.000Z",
+                        id: "img-used",
+                        inUseBy: ["api"],
+                        lastTagTime: "2026-06-24T10:00:00.000Z",
+                        platform: "linux/amd64",
+                        repository: "local/api",
+                        size: 2048,
+                        tag: "latest",
+                    },
+                ]}
+                onDelete={onDeleteImage}
+                onPruneUnused={onPruneImages}
+            />
+        );
+        await user.click(screen.getByRole("button", { name: /remove unused/i }));
+        await user.click(
+            screen.getAllByRole("button", { name: /delete local\/app/i })[0]!
+        );
+        expect(onPruneImages).toHaveBeenCalledTimes(1);
+        expect(onDeleteImage).toHaveBeenCalledWith("img-unused", "local/app:<none>");
+
+        rerender(
+            <DockerVolumesTable
+                volumes={[]}
+                onDelete={onDeleteVolume}
+                onPruneUnused={onPruneVolumes}
+            />
+        );
+        expect(screen.getByText("No volumes found.")).toBeInTheDocument();
+
+        const longVolume =
+            "dashboard_data_volume_with_a_very_long_name_for_middle_truncation";
+        rerender(
+            <DockerVolumesTable
+                volumes={[
+                    {
+                        driver: "local",
+                        labels: {},
+                        mountpoint:
+                            "/var/lib/docker/volumes/dashboard_data_volume_with_a_very_long_name/_data",
+                        name: longVolume,
+                        scope: "local",
+                        size: "1 KiB",
+                        usedBy: [],
+                    },
+                    {
+                        driver: "local",
+                        labels: {},
+                        mountpoint: "/var/lib/docker/volumes/api/_data",
+                        name: "api-data",
+                        scope: "local",
+                        size: "2 KiB",
+                        usedBy: ["api"],
+                    },
+                ]}
+                onDelete={onDeleteVolume}
+                onPruneUnused={onPruneVolumes}
+            />
+        );
+        await user.click(screen.getByRole("button", { name: /remove unused/i }));
+        await user.click(
+            screen.getAllByRole("button", {
+                name: new RegExp(`delete ${longVolume}`, "i"),
+            })[0]!
+        );
+        expect(onPruneVolumes).toHaveBeenCalledTimes(1);
+        expect(onDeleteVolume).toHaveBeenCalledWith(longVolume);
+        expect(screen.getAllByText("Used").length).toBeGreaterThan(0);
     });
 });
