@@ -19,6 +19,16 @@ import {
     ChatMessagesList,
     previewFromAttachment,
 } from "./components/features/chat/ChatMessagesList";
+import {
+    compactStatusText,
+    detailFromArguments,
+    formatToolName,
+    isNewRunForStream,
+    isRuntimeWorkEvent,
+    normalizeRuntimeStream,
+    runtimeProgressText,
+    stringValue,
+} from "./components/features/chat/useChatRuntimeEvents";
 import { useChatSlashCommands } from "./components/features/chat/useChatSlashCommands";
 import { CronJobDetails } from "./components/features/cron/CronJobDetails";
 import { CronJobList } from "./components/features/cron/CronJobList";
@@ -569,6 +579,70 @@ describe("shared component helpers", () => {
         });
         await expect(blocked("/stop")).resolves.toBe(true);
         expect(setSendError).toHaveBeenCalledWith("/stop cannot include attachments.");
+    });
+
+    it("normalizes chat runtime event helper output", () => {
+        expect(compactStatusText("  hello   world  ")).toBe("hello world");
+        expect(compactStatusText("x".repeat(140))).toHaveLength(120);
+        expect(stringValue(" value ")).toBe("value");
+        expect(stringValue(" ")).toBeUndefined();
+        expect(formatToolName("functions.exec_command")).toBe("Exec command");
+        expect(detailFromArguments({ command: "bun test" })).toBe("bun test");
+        expect(detailFromArguments("raw detail")).toBe("raw detail");
+        expect(detailFromArguments({ unknown: true })).toBeUndefined();
+        expect(normalizeRuntimeStream("command_output")).toBe("command-output");
+        expect(normalizeRuntimeStream(42)).toBe("");
+
+        expect(
+            runtimeProgressText("session.tool", "tool", "start", {
+                args: { query: "coverage" },
+                name: "functions.web_search",
+            })
+        ).toBe("Web search: coverage");
+        expect(
+            runtimeProgressText("session.tool", "tool", "start", {
+                name: "message",
+            })
+        ).toBeUndefined();
+        expect(
+            runtimeProgressText("session.event", "item", "start", {
+                itemKind: "todo",
+                summary: "write tests",
+            })
+        ).toBe("Todo: write tests");
+        expect(
+            runtimeProgressText("session.event", "plan", "start", {
+                explanation: "Update plan",
+            })
+        ).toBe("Update plan");
+        expect(runtimeProgressText("session.event", "approval", "start", {})).toBe(
+            "Waiting for approval"
+        );
+        expect(runtimeProgressText("session.event", "patch", "start", {})).toBe(
+            "Applying patch"
+        );
+        expect(
+            runtimeProgressText("session.event", "command-output", "end", {
+                exitCode: 1,
+                name: "exec",
+                title: "lint",
+            })
+        ).toBe("Exec: exit 1: lint");
+        expect(runtimeProgressText("session.event", "compaction", "start", {})).toBe(
+            "Compacting context"
+        );
+        expect(runtimeProgressText("session.event", "lifecycle", "start", {})).toBe(
+            "Thinking"
+        );
+        expect(
+            runtimeProgressText("session.event", "unknown", "start", {})
+        ).toBeUndefined();
+
+        expect(isNewRunForStream({ aliases: [], runId: "old" }, "new")).toBe(true);
+        expect(isNewRunForStream({ aliases: ["new"], runId: "old" }, "new")).toBe(false);
+        expect(isRuntimeWorkEvent("session.tool", "tool", "start", "Tool")).toBe(true);
+        expect(isRuntimeWorkEvent("session.tool", "tool", "start")).toBe(false);
+        expect(isRuntimeWorkEvent("session.event", "lifecycle", "start")).toBe(true);
     });
 
     it("renders chat messages list helpers and primary row actions", async () => {
