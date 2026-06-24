@@ -1,9 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
-import { act } from "react";
 
 import {
     createChatVisibility,
@@ -79,6 +78,9 @@ class FakeWebSocket {
     }
 
     emit(type: string, event: { data?: string } = {}) {
+        if (type === "open") {
+            this.readyState = FakeWebSocket.OPEN;
+        }
         const listeners = this.listeners.get(type) || [];
         for (const listener of listeners) {
             listener(event);
@@ -1005,7 +1007,9 @@ function renderPage(children: ReactNode, options: { withSocket?: boolean } = {})
 }
 
 function clickElement(element: Element) {
-    fireEvent.click(element);
+    act(() => {
+        fireEvent.click(element);
+    });
 }
 
 describe("Mira Dashboard pages", () => {
@@ -1031,7 +1035,15 @@ describe("Mira Dashboard pages", () => {
             },
             requestAnimationFrame: {
                 configurable: true,
-                value: () => 0,
+                value: (callback: FrameRequestCallback) =>
+                    setTimeout(() => {
+                        act(() => callback(performance.now()));
+                    }, 0),
+                writable: true,
+            },
+            cancelAnimationFrame: {
+                configurable: true,
+                value: (handle: number) => clearTimeout(handle),
                 writable: true,
             },
         });

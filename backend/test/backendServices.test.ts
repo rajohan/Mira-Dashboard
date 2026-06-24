@@ -1263,6 +1263,10 @@ describe("backend service behavior", () => {
         await expect(cronList.json()).resolves.toEqual({
             jobs: [{ enabled: true, id: "heartbeat", name: "Heartbeat" }],
         });
+        expect(gatewayCalls).toContainEqual({
+            method: "cron.list",
+            parameters: { includeDisabled: true },
+        });
 
         const cronDeleteRequest = {
             params: { id: "heartbeat" },
@@ -1270,6 +1274,10 @@ describe("backend service behavior", () => {
         const cronDelete =
             await cronRoutes["/api/cron/jobs/:id/delete"].POST(cronDeleteRequest);
         await expect(cronDelete.json()).resolves.toMatchObject({ isOk: true });
+        expect(gatewayCalls).toContainEqual({
+            method: "cron.remove",
+            parameters: { jobId: "heartbeat" },
+        });
 
         const badToggleRequest = new Request(
             "https://dashboard.test/api/cron/jobs/heartbeat/toggle",
@@ -1315,6 +1323,28 @@ describe("backend service behavior", () => {
         expect(badUpdate.status).toBe(400);
         await expect(badUpdate.json()).resolves.toEqual({
             error: "patch must be an object",
+        });
+
+        const validUpdateRequest = new Request(
+            "https://dashboard.test/api/cron/jobs/heartbeat/update",
+            {
+                body: JSON.stringify({
+                    patch: { name: "Heartbeat every minute", schedule: "*/1 * * * *" },
+                }),
+                method: "POST",
+            }
+        );
+        const validUpdate = await cronRoutes["/api/cron/jobs/:id/update"].POST(
+            Object.assign(validUpdateRequest, { params: { id: "heartbeat" } })
+        );
+        expect(validUpdate.status).toBe(200);
+        await expect(validUpdate.json()).resolves.toEqual({ isOk: true });
+        expect(gatewayCalls).toContainEqual({
+            method: "cron.update",
+            parameters: {
+                jobId: "heartbeat",
+                patch: { name: "Heartbeat every minute", schedule: "*/1 * * * *" },
+            },
         });
 
         const sessionListRequest = new Request(
