@@ -928,6 +928,7 @@ describe("backend service behavior", () => {
     it("validates exec requests and maps route errors without starting unsafe commands", async () => {
         const { execErrorResponse, getExecJob, runExecOnce, startExecJob } =
             await import("../src/services/execJobs.ts");
+        const { execRoutes } = await import("../src/routes/execRoutes.ts");
 
         await expect(runExecOnce(undefined)).rejects.toThrow(
             "request body must be a JSON object"
@@ -951,6 +952,45 @@ describe("backend service behavior", () => {
             "args are required unless shell mode is enabled"
         );
         expect(() => getExecJob("missing-job")).toThrow("Exec job not found");
+
+        const invalidPost = await execRoutes["/api/exec"].POST(
+            new Request("https://test.local/api/exec", {
+                body: JSON.stringify({ command: "node" }),
+                method: "POST",
+            })
+        );
+        expect(invalidPost.status).toBe(400);
+        await expect(invalidPost.json()).resolves.toEqual({
+            error: "args are required unless shell mode is enabled",
+        });
+
+        const malformedStart = await execRoutes["/api/exec/start"].POST(
+            new Request("https://test.local/api/exec/start", {
+                body: "{bad json",
+                method: "POST",
+            })
+        );
+        expect(malformedStart.status).toBe(400);
+        await expect(malformedStart.json()).resolves.toEqual({
+            error: "Invalid JSON",
+        });
+
+        const missingJobRequest = Object.assign(
+            new Request("https://test.local/api/exec/missing-job"),
+            { params: { jobId: "missing-job" } }
+        );
+        const missingJob = await execRoutes["/api/exec/:jobId"].GET(missingJobRequest);
+        expect(missingJob.status).toBe(404);
+        await expect(missingJob.json()).resolves.toEqual({
+            error: "Exec job not found",
+        });
+
+        const stopMissingJob =
+            await execRoutes["/api/exec/:jobId/stop"].POST(missingJobRequest);
+        expect(stopMissingJob.status).toBe(404);
+        await expect(stopMissingJob.json()).resolves.toEqual({
+            error: "Exec job not found",
+        });
     });
 
     it("serves OpenClaw config, skill, backup, and restart route contracts with fakes", async () => {
