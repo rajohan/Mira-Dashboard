@@ -31,7 +31,36 @@ async function importDatabaseInChild(databasePath: string): Promise<{
         cmd: [
             process.execPath,
             "--eval",
-            `await import(${JSON.stringify(databaseModuleUrl)});`,
+            `const { database } = await import(${JSON.stringify(databaseModuleUrl)}); database.prepare("SELECT 1").get();`,
+        ],
+        env: {
+            ...process.env,
+            MIRA_DASHBOARD_DB_PATH: databasePath,
+            NODE_ENV: "test",
+        },
+        stderr: "pipe",
+        stdout: "pipe",
+    });
+    const [exitCode, stderr] = await Promise.all([
+        child.exited,
+        readText(child.stderr),
+        readText(child.stdout),
+    ]);
+    return { exitCode, stderr };
+}
+
+async function closeAndReuseDatabaseInChild(databasePath: string): Promise<{
+    exitCode: number;
+    stderr: string;
+}> {
+    const databaseModuleUrl = pathToFileURL(
+        path.resolve(import.meta.dirname, "../src/database.ts")
+    ).href;
+    const child = Bun.spawn({
+        cmd: [
+            process.execPath,
+            "--eval",
+            `const { database } = await import(${JSON.stringify(databaseModuleUrl)}); database.prepare("SELECT 1").get(); database.close(); database.prepare("SELECT 1").get();`,
         ],
         env: {
             ...process.env,
@@ -112,6 +141,34 @@ describe("database test safety guard", () => {
         }
     });
 
+    it("refuses symlinked temporary database parent directories", async () => {
+        const outsideRoot = await mkdtemp(
+            path.join(import.meta.dirname, ".mira-db-guard-parent-target-")
+        );
+        const temporaryRoot = await mkdtemp(path.join(tmpdir(), "mira-db-guard-parent-"));
+        const symlinkedDirectoryPath = path.join(temporaryRoot, "db-link");
+        const symlinkedDatabasePath = path.join(
+            symlinkedDirectoryPath,
+            "nested",
+            "dashboard.db"
+        );
+
+        try {
+            await symlink(outsideRoot, symlinkedDirectoryPath);
+            const { exitCode, stderr } =
+                await importDatabaseInChild(symlinkedDatabasePath);
+
+            expect(exitCode).not.toBe(0);
+            expect(stderr).toContain(
+                "Refusing to open symlinked Dashboard test database"
+            );
+            expect(existsSync(path.join(outsideRoot, "nested"))).toBe(false);
+        } finally {
+            await rm(temporaryRoot, { force: true, recursive: true });
+            await rm(outsideRoot, { force: true, recursive: true });
+        }
+    });
+
     it("refuses dangling symlinked temporary database paths", async () => {
         const outsideRoot = await mkdtemp(
             path.join(import.meta.dirname, ".mira-db-guard-dangling-target-")
@@ -136,6 +193,20 @@ describe("database test safety guard", () => {
         } finally {
             await rm(temporaryRoot, { force: true, recursive: true });
             await rm(outsideRoot, { force: true, recursive: true });
+        }
+    });
+
+    it("reopens the active database after database.close()", async () => {
+        const temporaryRoot = await mkdtemp(path.join(tmpdir(), "mira-db-close-"));
+        const databasePath = path.join(temporaryRoot, "dashboard.db");
+
+        try {
+            const { exitCode, stderr } = await closeAndReuseDatabaseInChild(databasePath);
+
+            expect(exitCode).toBe(0);
+            expect(stderr).toBe("");
+        } finally {
+            await rm(temporaryRoot, { force: true, recursive: true });
         }
     });
 });
