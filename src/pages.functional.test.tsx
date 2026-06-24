@@ -64,6 +64,37 @@ const originalGlobals = {
     WebSocket,
 };
 
+const animationFrameState = {
+    id: 0,
+    frames: new Map<number, FrameRequestCallback>(),
+};
+
+function requestAnimationFrameForTest(callback: FrameRequestCallback): number {
+    const id = ++animationFrameState.id;
+    animationFrameState.frames.set(id, callback);
+    return id;
+}
+
+function cancelAnimationFrameForTest(handle: number): void {
+    animationFrameState.frames.delete(handle);
+}
+
+function flushAnimationFrames(limit = 20): void {
+    act(() => {
+        for (
+            let count = 0;
+            count < limit && animationFrameState.frames.size > 0;
+            count += 1
+        ) {
+            const frames = animationFrameState.frames.entries().toArray();
+            animationFrameState.frames.clear();
+            for (const [, callback] of frames) {
+                callback(performance.now());
+            }
+        }
+    });
+}
+
 class FakeWebSocket {
     static readonly CONNECTING = 0;
     static readonly OPEN = 1;
@@ -97,6 +128,18 @@ class FakeWebSocket {
 
     send(data: string) {
         this.sent.push(data);
+    }
+
+    respondToLastRequest(payload: unknown = {}) {
+        const request = JSON.parse(this.sent.at(-1) || "{}") as { id?: string };
+        this.emit("message", {
+            data: JSON.stringify({
+                type: "response",
+                id: request.id,
+                isOk: true,
+                payload,
+            }),
+        });
     }
 
     close() {
@@ -480,7 +523,12 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                 tool: "walg",
                 isOk: true,
                 backupCount: 1,
-                latest: { backupName: "base_0001", time: "2026-06-24T08:00:00.000Z" },
+                latest: {
+                    backupName: "base_0001",
+                    modified: "2026-06-24T08:00:00.000Z",
+                    time: "2026-06-24T08:00:00.000Z",
+                    walFileName: "000000010000000000000001",
+                },
                 stale: false,
             },
             meta: {},
@@ -491,6 +539,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
         return Response.json({
             jobs: [
                 {
+                    id: "heartbeat",
                     name: "heartbeat",
                     command: "openclaw heartbeat",
                     schedule: "*/30 * * * *",
@@ -900,7 +949,19 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
             status: "fresh",
             source: "moltbook",
             consecutiveFailures: 0,
-            data: { agent: { username: "mira", display_name: "Mira" } },
+            data: {
+                agent: {
+                    name: "mira",
+                    display_name: "Mira",
+                    description: "Dashboard operator",
+                    karma: 42,
+                    follower_count: 7,
+                    following_count: 3,
+                    posts_count: 5,
+                    comments_count: 9,
+                    avatar_url: undefined,
+                },
+            },
             meta: {},
         });
     }
@@ -1018,6 +1079,7 @@ function clickElement(element: Element) {
     act(() => {
         fireEvent.click(element);
     });
+    flushAnimationFrames();
 }
 
 describe("Mira Dashboard pages", () => {
@@ -1043,15 +1105,12 @@ describe("Mira Dashboard pages", () => {
             },
             requestAnimationFrame: {
                 configurable: true,
-                value: (callback: FrameRequestCallback) =>
-                    setTimeout(() => {
-                        act(() => callback(performance.now()));
-                    }, 0),
+                value: requestAnimationFrameForTest,
                 writable: true,
             },
             cancelAnimationFrame: {
                 configurable: true,
-                value: (handle: number) => clearTimeout(handle),
+                value: cancelAnimationFrameForTest,
                 writable: true,
             },
         });
@@ -1062,6 +1121,7 @@ describe("Mira Dashboard pages", () => {
         cleanup();
         authActions.clearSession();
         localStorage.clear();
+        animationFrameState.frames.clear();
         Object.defineProperties(globalThis, {
             fetch: {
                 configurable: true,
@@ -1122,6 +1182,7 @@ describe("Mira Dashboard pages", () => {
         await act(async () => {
             FakeWebSocket.instances[0]?.emit("open");
         });
+        FakeWebSocket.instances[0]?.respondToLastRequest({ sessions: [] });
         await waitFor(() =>
             expect(
                 screen.queryByText("Connecting to OpenClaw...")

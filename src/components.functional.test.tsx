@@ -8,7 +8,7 @@ import {
     waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, jest } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import type { ReactNode, RefObject } from "react";
 
 import { TaskHistorySidebar } from "./components/features/agents/TaskHistorySidebar";
@@ -83,6 +83,63 @@ import { Alert } from "./components/ui/Alert";
 import { getProgressColor, ProgressBar } from "./components/ui/ProgressBar";
 import { useFileExplorerState } from "./hooks/useFileExplorerState";
 import { useSessionActions } from "./hooks/useSessionActions";
+
+const originalFetch = fetch;
+const originalAnimationFrame = {
+    cancelAnimationFrame,
+    requestAnimationFrame,
+};
+
+const animationFrameState = {
+    id: 0,
+    frames: new Map<number, FrameRequestCallback>(),
+};
+
+function requestAnimationFrameForTest(callback: FrameRequestCallback): number {
+    const id = ++animationFrameState.id;
+    animationFrameState.frames.set(id, callback);
+    return id;
+}
+
+function cancelAnimationFrameForTest(handle: number): void {
+    animationFrameState.frames.delete(handle);
+}
+
+beforeEach(() => {
+    Object.defineProperties(globalThis, {
+        requestAnimationFrame: {
+            configurable: true,
+            value: requestAnimationFrameForTest,
+            writable: true,
+        },
+        cancelAnimationFrame: {
+            configurable: true,
+            value: cancelAnimationFrameForTest,
+            writable: true,
+        },
+    });
+});
+
+afterEach(() => {
+    Object.defineProperties(globalThis, {
+        fetch: {
+            configurable: true,
+            value: originalFetch,
+            writable: true,
+        },
+        requestAnimationFrame: {
+            configurable: true,
+            value: originalAnimationFrame.requestAnimationFrame,
+            writable: true,
+        },
+        cancelAnimationFrame: {
+            configurable: true,
+            value: originalAnimationFrame.cancelAnimationFrame,
+            writable: true,
+        },
+    });
+    animationFrameState.frames.clear();
+});
 
 function textToBase64(text: string): string {
     return new TextEncoder().encode(text).toBase64();
@@ -1692,7 +1749,10 @@ describe("shared component helpers", () => {
         await user.click(screen.getByText("Researcher"));
         await user.click(screen.getAllByRole("switch").at(-1)!);
         await user.click(screen.getByRole("button", { name: "Save access control" }));
-        const savedAgents = onSaveAgents.mock.calls.at(-1)?.[0] ?? [];
+        const latestSaveCall = onSaveAgents.mock.calls.at(-1) as
+            | [Array<{ id: string; tools?: { allow?: string[] } }>]
+            | undefined;
+        const savedAgents = latestSaveCall?.[0] ?? [];
         expect(savedAgents).toContainEqual(
             expect.objectContaining({
                 id: "researcher",
