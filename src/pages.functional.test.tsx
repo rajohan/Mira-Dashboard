@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
+import { act } from "react";
 
 import {
     createChatVisibility,
@@ -77,12 +78,20 @@ class FakeWebSocket {
         this.listeners.set(type, [...(this.listeners.get(type) || []), listener]);
     }
 
+    emit(type: string, event: { data?: string } = {}) {
+        const listeners = this.listeners.get(type) || [];
+        for (const listener of listeners) {
+            listener(event);
+        }
+    }
+
     send(data: string) {
         this.sent.push(data);
     }
 
     close() {
         this.readyState = FakeWebSocket.CLOSED;
+        this.emit("close");
     }
 }
 
@@ -97,6 +106,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     }
 
     if (method === "POST" && url === "/api/docker/stack/action") {
+        expect(parseRequestBody(init)).toEqual({ action: "restart" });
         return Response.json({ output: "stack restarted" });
     }
 
@@ -1066,6 +1076,20 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getByText("Connecting to OpenClaw...")).toBeInTheDocument();
             expect(FakeWebSocket.instances).toHaveLength(1);
         });
+        await act(async () => {
+            FakeWebSocket.instances[0]?.emit("open");
+        });
+        await waitFor(() =>
+            expect(
+                screen.queryByText("Connecting to OpenClaw...")
+            ).not.toBeInTheDocument()
+        );
+        await act(async () => {
+            FakeWebSocket.instances[0]?.close();
+        });
+        await waitFor(() =>
+            expect(screen.getByText("Connecting to OpenClaw...")).toBeInTheDocument()
+        );
         view.unmount();
         view.queryClient.clear();
     });

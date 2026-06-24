@@ -875,6 +875,13 @@ describe("Mira Dashboard frontend behavior", () => {
                 msg: "connected",
             });
             expect(logUpserts).toHaveLength(2);
+            expect(logUpserts[1]).toMatchObject({
+                id: expect.stringContaining("{bad json"),
+                dedupeKey: "|||{bad json",
+                subsystem: "",
+                msg: "{bad json",
+                raw: "{bad json",
+            });
         } finally {
             restoreLogs();
         }

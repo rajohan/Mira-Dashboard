@@ -17,9 +17,16 @@ Object.defineProperty(Element.prototype, "getAnimations", {
     value: () => [],
 });
 
-Object.defineProperty(globalThis, "requestAnimationFrame", {
-    configurable: true,
-    value: () => 0,
+Object.defineProperties(globalThis, {
+    requestAnimationFrame: {
+        configurable: true,
+        value: (callback: FrameRequestCallback) =>
+            setTimeout(() => callback(performance.now()), 0),
+    },
+    cancelAnimationFrame: {
+        configurable: true,
+        value: (handle: number) => clearTimeout(handle),
+    },
 });
 
 const { cleanup } = await import("@testing-library/react");
