@@ -37,6 +37,7 @@ import {
     normalizeRuntimeStream,
     runtimeProgressText,
     stringValue,
+    useChatRuntimeEvents,
 } from "./components/features/chat/useChatRuntimeEvents";
 import { useChatSlashCommands } from "./components/features/chat/useChatSlashCommands";
 import { CronJobDetails } from "./components/features/cron/CronJobDetails";
@@ -698,6 +699,184 @@ describe("shared component helpers", () => {
         expect(isRuntimeWorkEvent("session.tool", "tool", "start", "Tool")).toBe(true);
         expect(isRuntimeWorkEvent("session.tool", "tool", "start")).toBe(false);
         expect(isRuntimeWorkEvent("session.event", "lifecycle", "start")).toBe(true);
+    });
+
+    it("drives chat runtime event subscription, stream buffering, and refreshes", async () => {
+        let listener: ((data: unknown) => void) | undefined;
+        const unsubscribe = jest.fn();
+        const subscribe = jest.fn((nextListener: (data: unknown) => void) => {
+            listener = nextListener;
+            return unsubscribe;
+        });
+        const requestCalls: Array<[string, Record<string, unknown> | undefined]> = [];
+        const request = async <T,>(
+            method: string,
+            parameters?: Record<string, unknown>
+        ): Promise<T> => {
+            requestCalls.push([method, parameters]);
+            if (method === "chat.history") {
+                return {
+                    messages: [
+                        {
+                            role: "assistant",
+                            text: "history answer",
+                            timestamp: "2026-06-24T10:00:00.000Z",
+                        },
+                    ],
+                } as T;
+            }
+            return {} as T;
+        };
+        let activeStreams = {};
+        const activeStreamsReference = { current: activeStreams };
+        const liveHistoryRefreshTimerReference = { current: undefined };
+        const shouldStickToBottomReference = { current: true };
+        let messages: unknown[] = [];
+        let sendError: string | undefined;
+        let isAtBottom = false;
+        let historyLoadVersion = 0;
+        const updateActiveStreams = jest.fn((updater) => {
+            activeStreams = updater(activeStreams);
+            activeStreamsReference.current = activeStreams;
+        });
+        const setMessages = jest.fn((updater) => {
+            messages = typeof updater === "function" ? updater(messages) : updater;
+        });
+        const setSendError = jest.fn((updater) => {
+            sendError = typeof updater === "function" ? updater(sendError) : updater;
+        });
+        const setIsAtBottom = jest.fn((updater) => {
+            isAtBottom = typeof updater === "function" ? updater(isAtBottom) : updater;
+        });
+        const setHistoryLoadVersion = jest.fn((updater) => {
+            historyLoadVersion =
+                typeof updater === "function" ? updater(historyLoadVersion) : updater;
+        });
+
+        const { unmount } = renderHook(() =>
+            useChatRuntimeEvents({
+                activeStreamsReference,
+                connectionId: 1,
+                isConnected: true,
+                liveHistoryRefreshTimerReference,
+                request,
+                selectedSessionKey: "agent:main:main",
+                setHistoryLoadVersion,
+                setIsAtBottom,
+                setMessages,
+                setSendError,
+                shouldStickToBottomReference,
+                showThinkingOutput: true,
+                showToolOutput: true,
+                subscribe,
+                updateActiveStreams,
+            })
+        );
+
+        await waitFor(() => {
+            expect(subscribe).toHaveBeenCalledTimes(1);
+        });
+
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "Hello",
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+
+        await waitFor(() => {
+            expect(activeStreamsReference.current).toHaveProperty("agent:main:main");
+        });
+
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "bun test" },
+                        name: "functions.exec_command",
+                        phase: "end",
+                        result: { ok: true },
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "tool" &&
+                    "text" in message &&
+                    typeof message.text === "string" &&
+                    message.text.includes("ok")
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: { role: "assistant", text: "final answer" },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "text" in message &&
+                    message.text === "final answer"
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    errorMessage: "failed",
+                    runId: "run-2",
+                    sessionKey: "agent:main:main",
+                    state: "error",
+                },
+                type: "event",
+            });
+        });
+        expect(sendError).toBe("failed");
+
+        await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 550));
+        });
+        expect(requestCalls).toContainEqual([
+            "chat.history",
+            {
+                limit: expect.any(Number),
+                sessionKey: "agent:main:main",
+            },
+        ]);
+        expect(isAtBottom).toBe(true);
+        expect(historyLoadVersion).toBeGreaterThan(0);
+
+        unmount();
+        expect(unsubscribe).toHaveBeenCalledTimes(1);
     });
 
     it("renders chat messages list helpers and primary row actions", async () => {
