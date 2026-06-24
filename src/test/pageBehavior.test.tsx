@@ -19,9 +19,9 @@ import {
     shouldShowStreamRow,
     uniqueStrings,
     visibleHistoryMessages,
-} from "./components/features/chat/chatRuntime";
-import { OpenClawSocketProvider } from "./hooks/useOpenClawSocket";
-import { Agents } from "./pages/Agents";
+} from "../components/features/chat/chatRuntime";
+import { OpenClawSocketProvider } from "../hooks/useOpenClawSocket";
+import { Agents } from "../pages/Agents";
 import {
     hasNewerAssistantMessageInHistory,
     nextHistoryBottomState,
@@ -30,29 +30,29 @@ import {
     scheduleBottomFollowWhenNeeded,
     sessionTimestampMs,
     writeDeletedMessageKeys,
-} from "./pages/Chat";
-import { Dashboard } from "./pages/Dashboard";
-import { Database } from "./pages/Database";
-import { Docker } from "./pages/Docker";
-import { Files } from "./pages/Files";
-import { Jobs } from "./pages/Jobs";
-import { Logs } from "./pages/Logs";
-import { Moltbook } from "./pages/Moltbook";
-import { PullRequests } from "./pages/PullRequests";
-import { Sessions } from "./pages/Sessions";
+} from "../pages/Chat";
+import { Dashboard } from "../pages/Dashboard";
+import { Database } from "../pages/Database";
+import { Docker } from "../pages/Docker";
+import { Files } from "../pages/Files";
+import { Jobs } from "../pages/Jobs";
+import { Logs } from "../pages/Logs";
+import { Moltbook } from "../pages/Moltbook";
+import { PullRequests } from "../pages/PullRequests";
+import { Sessions } from "../pages/Sessions";
 import {
     errorMessage,
     numberFromDuration,
     optionalFormValue,
     Settings,
-} from "./pages/Settings";
+} from "../pages/Settings";
 import {
     isTerminalOutputAtBottom,
     scrollTerminalOutputToBottom,
     scrollTerminalOutputToBottomAndReport,
     Terminal,
-} from "./pages/Terminal";
-import { authActions } from "./stores/authStore";
+} from "../pages/Terminal";
+import { authActions } from "../stores/authStore";
 
 type FakeWebSocketListener = (event?: { data?: string }) => void;
 

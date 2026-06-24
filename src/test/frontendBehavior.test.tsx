@@ -8,19 +8,19 @@ import {
     agentsCollection,
     preloadAgentsCollection,
     writeAgentsFromWebSocket,
-} from "./collections/agents";
+} from "../collections/agents";
 import {
     logsCollection,
     preloadLogsCollection,
     writeLogFromWebSocket,
-} from "./collections/logs";
+} from "../collections/logs";
 import {
     deleteSessionFromCollection,
     preloadSessionsCollection,
     replaceSessionsFromWebSocket,
     sessionsCollection,
-} from "./collections/sessions";
-import type { ChatHistoryMessage } from "./components/features/chat/chatTypes";
+} from "../collections/sessions";
+import type { ChatHistoryMessage } from "../components/features/chat/chatTypes";
 import {
     attachmentKind,
     extractImages,
@@ -31,7 +31,7 @@ import {
     normalizeText,
     normalizeVisibleChatHistoryMessages,
     optimisticAttachmentDisplay,
-} from "./components/features/chat/chatTypes";
+} from "../components/features/chat/chatTypes";
 import {
     base64ToText,
     chatErrorMessage,
@@ -43,16 +43,16 @@ import {
     messageDeleteKey,
     messageIdentity,
     readFileAsDataUrl,
-} from "./components/features/chat/chatUtilities";
+} from "../components/features/chat/chatUtilities";
 import {
     buildSlashCommandSuggestions,
     slashCommandCanonicalName,
-} from "./components/features/chat/slashCommands";
+} from "../components/features/chat/slashCommands";
 import {
     formatBytes as formatDatabaseBytes,
     formatNumber as formatDatabaseNumber,
     truncateQuery,
-} from "./components/features/database/databaseUtilities";
+} from "../components/features/database/databaseUtilities";
 import {
     formatBytes as formatDockerBytes,
     formatDockerMemory,
@@ -60,15 +60,15 @@ import {
     formatTimestamp,
     formatUpdaterTransition,
     formatVersionDisplay,
-} from "./components/features/docker/dockerFormatters";
-import { TaskDetailModal } from "./components/features/tasks/TaskDetailModal";
-import { TaskOverlay } from "./components/features/tasks/TaskOverlay";
-import { NotificationBell } from "./components/layout/NotificationBell";
-import { Badge, getSessionTypeVariant } from "./components/ui/Badge";
-import { ConfirmModal } from "./components/ui/ConfirmModal";
-import { Dropdown } from "./components/ui/Dropdown";
-import { SearchInput } from "./components/ui/SearchInput";
-import { apiFetch, UnauthorizedError } from "./hooks/useApi";
+} from "../components/features/docker/dockerFormatters";
+import { TaskDetailModal } from "../components/features/tasks/TaskDetailModal";
+import { TaskOverlay } from "../components/features/tasks/TaskOverlay";
+import { NotificationBell } from "../components/layout/NotificationBell";
+import { Badge, getSessionTypeVariant } from "../components/ui/Badge";
+import { ConfirmModal } from "../components/ui/ConfirmModal";
+import { Dropdown } from "../components/ui/Dropdown";
+import { SearchInput } from "../components/ui/SearchInput";
+import { apiFetch, UnauthorizedError } from "../hooks/useApi";
 import {
     useClearKopiaBackupAttention,
     useClearWalgBackupAttention,
@@ -76,8 +76,12 @@ import {
     useRunKopiaBackup,
     useRunWalgBackup,
     useWalgBackup,
-} from "./hooks/useBackups";
-import { useCacheEntry, useCacheHeartbeat, useRefreshCacheEntry } from "./hooks/useCache";
+} from "../hooks/useBackups";
+import {
+    useCacheEntry,
+    useCacheHeartbeat,
+    useRefreshCacheEntry,
+} from "../hooks/useCache";
 import {
     useConfig,
     useCreateBackup,
@@ -85,27 +89,27 @@ import {
     useSkills,
     useToggleSkill,
     useUpdateConfig,
-} from "./hooks/useConfig";
+} from "../hooks/useConfig";
 import {
     useCronJobs,
     useDeleteCronJob,
     useRunCronJobNow,
     useToggleCronJob,
     useUpdateCronJob,
-} from "./hooks/useCron";
-import { useDatabaseOverview } from "./hooks/useDatabase";
-import { useFileContent, useFiles, useSaveFile } from "./hooks/useFiles";
-import { useHealth } from "./hooks/useHealth";
-import { useLogContent, useLogFiles } from "./hooks/useLogs";
-import { useMetrics } from "./hooks/useMetrics";
-import { useMoltbookData } from "./hooks/useMoltbook";
-import type { NotificationItem } from "./hooks/useNotifications";
+} from "../hooks/useCron";
+import { useDatabaseOverview } from "../hooks/useDatabase";
+import { useFileContent, useFiles, useSaveFile } from "../hooks/useFiles";
+import { useHealth } from "../hooks/useHealth";
+import { useLogContent, useLogFiles } from "../hooks/useLogs";
+import { useMetrics } from "../hooks/useMetrics";
+import { useMoltbookData } from "../hooks/useMoltbook";
+import type { NotificationItem } from "../hooks/useNotifications";
 import {
     useCreateNotification,
     useMarkAllNotificationsRead,
-} from "./hooks/useNotifications";
-import { OpenClawSocketProvider, useOpenClawSocket } from "./hooks/useOpenClawSocket";
-import { OPS_ACTIONS, useExecJob, useStartOpsAction } from "./hooks/useOpsActions";
+} from "../hooks/useNotifications";
+import { OpenClawSocketProvider, useOpenClawSocket } from "../hooks/useOpenClawSocket";
+import { OPS_ACTIONS, useExecJob, useStartOpsAction } from "../hooks/useOpsActions";
 import {
     useApprovePullRequest,
     useApprovePullRequestReview,
@@ -115,15 +119,15 @@ import {
     usePullRequests,
     useRejectPullRequest,
     useUpdatePullRequestBranch,
-} from "./hooks/usePullRequests";
-import { hasQuotaStatus, useQuotas } from "./hooks/useQuotas";
+} from "../hooks/usePullRequests";
+import { hasQuotaStatus, useQuotas } from "../hooks/useQuotas";
 import {
     useRunScheduledJobNow,
     useScheduledJobRuns,
     useScheduledJobs,
     useUpdateScheduledJob,
-} from "./hooks/useScheduledJobs";
-import { useDeleteSession, useSessionAction } from "./hooks/useSessions";
+} from "../hooks/useScheduledJobs";
+import { useDeleteSession, useSessionAction } from "../hooks/useSessions";
 import {
     taskKeys,
     useAssignTask,
@@ -134,7 +138,7 @@ import {
     useTaskUpdates,
     useUpdateTask,
     useUpdateTaskUpdate,
-} from "./hooks/useTasks";
+} from "../hooks/useTasks";
 import {
     changeDirectory,
     getCompletions,
@@ -142,13 +146,13 @@ import {
     useStartTerminalCommand,
     useTerminalHistory,
     useTerminalJob,
-} from "./hooks/useTerminal";
-import { useWeather } from "./hooks/useWeather";
-import { createSocketClient } from "./lib/socket/socketClient";
-import { handleSocketMessage } from "./lib/socket/socketMessageRouter";
-import { Tasks } from "./pages/Tasks";
-import { authActions, authStore } from "./stores/authStore";
-import type { Task } from "./types/task";
+} from "../hooks/useTerminal";
+import { useWeather } from "../hooks/useWeather";
+import { createSocketClient } from "../lib/socket/socketClient";
+import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
+import { Tasks } from "../pages/Tasks";
+import { authActions, authStore } from "../stores/authStore";
+import type { Task } from "../types/task";
 import {
     formatCronLastStatus,
     formatCronTimestamp,
@@ -158,7 +162,7 @@ import {
     getCronStatusVariant,
     isCronExpressionValid,
     sortCronJobs,
-} from "./utils/cronUtilities";
+} from "../utils/cronUtilities";
 import {
     APP_TIME_ZONE,
     appTimeZoneParts,
@@ -169,7 +173,7 @@ import {
     currentYear,
     isoStringFromDate,
     timestampFromDateString,
-} from "./utils/date";
+} from "../utils/date";
 import {
     getFileExtension,
     getLanguage,
@@ -179,7 +183,7 @@ import {
     isImageFile,
     isJsonFile,
     isMarkdownFile,
-} from "./utils/fileUtilities";
+} from "../utils/fileUtilities";
 import {
     appTimeOfDayToUtcTimeOfDay,
     formatDate,
@@ -196,19 +200,19 @@ import {
     formatUtcTimeOfDayInAppTimeZone,
     formatWeekdayShort,
     getTokenPercent,
-} from "./utils/format";
+} from "../utils/format";
 import {
     formatLogTime,
     getLevelColor,
     getSubsystemColor,
     parseLogLine,
-} from "./utils/logUtilities";
+} from "../utils/logUtilities";
 import {
     formatSessionType,
     getTypeSortOrder,
     sortSessionsByTypeAndActivity,
-} from "./utils/sessionUtilities";
-import { getColumnId, getPriority, isTaskMatchSearch } from "./utils/taskUtilities";
+} from "../utils/sessionUtilities";
+import { getColumnId, getPriority, isTaskMatchSearch } from "../utils/taskUtilities";
 
 function task(overrides: Partial<Task> & Pick<Task, "number" | "title">): Task {
     return {
@@ -511,6 +515,60 @@ describe("Mira Dashboard frontend behavior", () => {
 
     afterEach(() => {
         authActions.clearSession();
+    });
+
+    it("loads the app shell, router, login route, and local devtools modules", async () => {
+        const [{ default: App }, { router }, { Login }, { default: DashboardDevtools }] =
+            await Promise.all([
+                import("../App"),
+                import("../router"),
+                import("../pages/Login"),
+                import("../components/devtools/DashboardDevtools"),
+            ]);
+
+        expect(App).toBeTypeOf("function");
+        expect(Login).toBeTypeOf("function");
+        expect(DashboardDevtools).toBeTypeOf("function");
+        expect(router.navigate).toBeTypeOf("function");
+
+        const originalFetch = fetch;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: async (input: Parameters<typeof fetch>[0]) => {
+                const url = String(input);
+                if (url === "/api/auth/session") {
+                    return Response.json({
+                        authenticated: false,
+                        isBootstrapRequired: true,
+                        user: undefined,
+                    });
+                }
+                if (url === "/api/auth/bootstrap") {
+                    return Response.json({
+                        hasGatewayToken: false,
+                        isBootstrapRequired: true,
+                    });
+                }
+                throw new Error(`Unexpected app shell fetch: ${url}`);
+            },
+            writable: true,
+        });
+
+        try {
+            await router.navigate({ to: "/login" });
+            const view = render(createElement(App));
+            await waitFor(() => {
+                expect(screen.getByText("Create first user")).toBeInTheDocument();
+            });
+            expect(screen.getByLabelText("Gateway Token")).toBeInTheDocument();
+            view.unmount();
+        } finally {
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: originalFetch,
+                writable: true,
+            });
+        }
     });
 
     it("handles API authorization failures through the shared auth boundary", async () => {
