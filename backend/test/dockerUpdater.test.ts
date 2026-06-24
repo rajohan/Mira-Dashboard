@@ -2,9 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import { database } from "../src/database.ts";
+import * as processModule from "../src/lib/processes.ts";
 import {
     type DockerUpdaterStepResult,
     isNonblockingRegistrationFailure,
@@ -230,5 +231,76 @@ describe("Docker updater tag patterns", () => {
                 )
                 .get()
         ).toEqual({ enabled: 1, time_of_day: "04:10" });
+    });
+
+    it("reports manual update guard states without touching Docker", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-guards-");
+        const appRoot = path.join(appsRoot, "unit-guard-app");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            path.join(appRoot, "compose.yaml"),
+            [
+                "services:",
+                "  web:",
+                "    image: ghcr.io/unit/web:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "  worker:",
+                "    image: ghcr.io/unit/worker:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'false'",
+                "",
+            ].join("\n")
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY = "1";
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockResolvedValue({ code: 0, stderr: "", stdout: "" });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        const registered = await registerDockerUpdaterServices();
+        expect(registered.isOk).toBe(true);
+        const rows = database
+            .prepare(
+                `SELECT id, service_name, enabled
+                 FROM docker_managed_services
+                 WHERE app_slug = 'unit-guard-app'
+                 ORDER BY service_name`
+            )
+            .all() as Array<{ enabled: number; id: number; service_name: string }>;
+        expect(rows.map((row) => row.service_name)).toEqual(["web", "worker"]);
+
+        await expect(runDockerUpdaterService(99_999_999)).resolves.toContainEqual(
+            expect.objectContaining({
+                code: "NOT_FOUND",
+                isOk: false,
+                step: "manual-update",
+            })
+        );
+
+        await expect(
+            runDockerUpdaterService(rows.find((row) => row.service_name === "worker")?.id)
+        ).resolves.toContainEqual(
+            expect.objectContaining({
+                code: "DISABLED",
+                isOk: false,
+                step: "manual-update:unit-guard-app/worker",
+            })
+        );
+
+        await expect(
+            runDockerUpdaterService(rows.find((row) => row.service_name === "web")?.id)
+        ).resolves.toContainEqual(
+            expect.objectContaining({
+                code: "CONFLICT",
+                isOk: false,
+                step: "manual-update-skipped:unit-guard-app/web",
+                stdout: "No update available after registry poll",
+            })
+        );
+        expect(runProcessSpy).not.toHaveBeenCalled();
     });
 });

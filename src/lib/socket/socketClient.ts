@@ -4,6 +4,7 @@ import type { SocketEnvelope } from "../../types/socket";
 interface PendingRequest {
     resolve: (value: unknown) => void;
     reject: (reason: unknown) => void;
+    timeout: ReturnType<typeof setTimeout>;
 }
 
 /** Represents socket client options. */
@@ -57,6 +58,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                     const pending = pendingRequests.get(data.id);
                     if (pending) {
                         pendingRequests.delete(data.id);
+                        clearTimeout(pending.timeout);
                         if (data.isOk) {
                             pending.resolve(data.payload);
                         } else {
@@ -94,6 +96,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         ws = undefined;
 
         for (const pending of pendingRequests.values()) {
+            clearTimeout(pending.timeout);
             pending.reject(new Error("WebSocket disconnected"));
         }
         pendingRequests.clear();
@@ -111,9 +114,18 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             }
 
             const id = String(++requestId);
+            const timeout = setTimeout(() => {
+                if (!pendingRequests.has(id)) {
+                    return;
+                }
+
+                pendingRequests.delete(id);
+                reject(new Error("Request timeout"));
+            }, 30_000);
             pendingRequests.set(id, {
                 resolve: resolve as (value: unknown) => void,
                 reject,
+                timeout,
             });
 
             ws.send(
@@ -124,15 +136,6 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                     params: parameters,
                 })
             );
-
-            setTimeout(() => {
-                if (!pendingRequests.has(id)) {
-                    return;
-                }
-
-                pendingRequests.delete(id);
-                reject(new Error("Request timeout"));
-            }, 30_000);
         });
     };
 
