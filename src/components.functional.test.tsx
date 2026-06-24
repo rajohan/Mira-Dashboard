@@ -34,6 +34,7 @@ import { useChatSlashCommands } from "./components/features/chat/useChatSlashCom
 import { CronJobDetails } from "./components/features/cron/CronJobDetails";
 import { CronJobList } from "./components/features/cron/CronJobList";
 import { BackupOverviewCard } from "./components/features/dashboard/BackupOverviewCard";
+import { ServiceActionsCard } from "./components/features/dashboard/ServiceActionsCard";
 import { AutovacuumHealthTable } from "./components/features/database/AutovacuumHealthTable";
 import { DatabaseTableShell } from "./components/features/database/DatabaseTableShell";
 import { TopQueriesTable } from "./components/features/database/TopQueriesTable";
@@ -1317,6 +1318,106 @@ describe("shared component helpers", () => {
         });
         idleView.unmount();
         idleView.queryClient.clear();
+    });
+
+    it("drives service action confirmation, exec polling, and cache refresh", async () => {
+        const user = userEvent.setup();
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/cache/system.host" && method === "GET") {
+                    return Response.json({
+                        consecutiveFailures: 0,
+                        data: {
+                            version: {
+                                current: "2026.6.1",
+                                latest: "2026.6.2",
+                                updateAvailable: true,
+                            },
+                        },
+                        errorCode: undefined,
+                        errorMessage: undefined,
+                        expiresAt: undefined,
+                        key: "system.host",
+                        lastAttemptAt: undefined,
+                        meta: {},
+                        source: "system",
+                        status: "fresh",
+                        updatedAt: "2026-06-24T08:00:00.000Z",
+                    });
+                }
+
+                if (url === "/api/exec/start" && method === "POST") {
+                    expect(JSON.parse(String(init?.body))).toMatchObject({
+                        shell: true,
+                    });
+                    return Response.json({ jobId: "ops-job-1" });
+                }
+
+                if (url === "/api/exec/ops-job-1" && method === "GET") {
+                    return Response.json({
+                        code: 0,
+                        endedAt: 1_719_216_030_000,
+                        jobId: "ops-job-1",
+                        startedAt: 1_719_216_000_000,
+                        status: "done",
+                        stderr: "",
+                        stdout: "updated openclaw",
+                    });
+                }
+
+                if (url === "/api/cache/system.host/refresh" && method === "POST") {
+                    return Response.json({
+                        entry: {
+                            data: {
+                                version: {
+                                    current: "2026.6.2",
+                                    latest: "2026.6.2",
+                                    updateAvailable: false,
+                                },
+                            },
+                            key: "system.host",
+                        },
+                        isOk: true,
+                    });
+                }
+
+                throw new Error(`Unexpected service action test fetch: ${method} ${url}`);
+            }
+        );
+
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const view = renderWithQueryClient(<ServiceActionsCard />);
+        expect(
+            await screen.findByText(
+                "New OpenClaw version available (2026.6.1 -> 2026.6.2)."
+            )
+        ).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: /update openclaw/i }));
+        expect(
+            screen.getByText("Update OpenClaw to latest version now?")
+        ).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: /^update openclaw$/i }));
+
+        expect(await screen.findByText("updated openclaw")).toBeInTheDocument();
+        expect(screen.getByText(/Last run: Update OpenClaw/i)).toBeInTheDocument();
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/cache/system.host/refresh",
+                expect.objectContaining({ method: "POST" })
+            );
+        });
+
+        view.unmount();
+        view.queryClient.clear();
     });
 
     it("drives docker image and volume table actions", async () => {
