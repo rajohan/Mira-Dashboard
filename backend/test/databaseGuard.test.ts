@@ -112,6 +112,34 @@ describe("database test safety guard", () => {
         }
     });
 
+    it("refuses symlinked temporary database parent directories", async () => {
+        const outsideRoot = await mkdtemp(
+            path.join(import.meta.dirname, ".mira-db-guard-parent-target-")
+        );
+        const temporaryRoot = await mkdtemp(path.join(tmpdir(), "mira-db-guard-parent-"));
+        const symlinkedDirectoryPath = path.join(temporaryRoot, "db-link");
+        const symlinkedDatabasePath = path.join(
+            symlinkedDirectoryPath,
+            "nested",
+            "dashboard.db"
+        );
+
+        try {
+            await symlink(outsideRoot, symlinkedDirectoryPath);
+            const { exitCode, stderr } =
+                await importDatabaseInChild(symlinkedDatabasePath);
+
+            expect(exitCode).not.toBe(0);
+            expect(stderr).toContain(
+                "Refusing to open symlinked Dashboard test database"
+            );
+            expect(existsSync(path.join(outsideRoot, "nested"))).toBe(false);
+        } finally {
+            await rm(temporaryRoot, { force: true, recursive: true });
+            await rm(outsideRoot, { force: true, recursive: true });
+        }
+    });
+
     it("refuses dangling symlinked temporary database paths", async () => {
         const outsideRoot = await mkdtemp(
             path.join(import.meta.dirname, ".mira-db-guard-dangling-target-")
