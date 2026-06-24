@@ -1,11 +1,59 @@
-import { describe, expect, it } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
+import { afterEach, describe, expect, it } from "bun:test";
+
+import { database } from "../src/database.ts";
 import {
     type DockerUpdaterStepResult,
     isNonblockingRegistrationFailure,
     isSafeTagPatternMatch,
     isSafeTagRegexPattern,
+    pollDockerUpdaterRegistries,
+    registerDockerUpdaterScheduledJobs,
+    registerDockerUpdaterServices,
+    runDockerUpdaterService,
 } from "../src/services/dockerUpdater.ts";
+
+const cleanupCallbacks: Array<() => void> = [];
+
+function rememberEnvironment(key: string): void {
+    const originalValue = process.env[key];
+    cleanupCallbacks.push(() => {
+        if (originalValue === undefined) {
+            delete process.env[key];
+        } else {
+            process.env[key] = originalValue;
+        }
+    });
+}
+
+function createTemporaryRoot(prefix: string): string {
+    const root = mkdtempSync(path.join(tmpdir(), prefix));
+    cleanupCallbacks.push(() => {
+        rmSync(root, { force: true, recursive: true });
+    });
+    return root;
+}
+
+afterEach(() => {
+    database
+        .prepare(
+            "DELETE FROM docker_update_events WHERE app_slug LIKE 'unit-%' OR managed_service_id NOT IN (SELECT id FROM docker_managed_services)"
+        )
+        .run();
+    database
+        .prepare("DELETE FROM docker_managed_services WHERE app_slug LIKE 'unit-%'")
+        .run();
+    database
+        .prepare("DELETE FROM scheduled_job_runs WHERE job_id = 'docker.updater'")
+        .run();
+    database.prepare("DELETE FROM scheduled_jobs WHERE id = 'docker.updater'").run();
+    while (cleanupCallbacks.length > 0) {
+        cleanupCallbacks.pop()?.();
+    }
+});
 
 function dockerUpdaterStep(
     overrides: Partial<DockerUpdaterStepResult>
@@ -83,5 +131,103 @@ describe("Docker updater tag patterns", () => {
         );
         expect(isNonblockingRegistrationFailure(wrongStepFailure)).toBe(false);
         expect(isNonblockingRegistrationFailure(successfulStep)).toBe(false);
+    });
+
+    it("discovers managed Compose services and skips unsupported registries", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-apps-");
+        const appRoot = path.join(appsRoot, "unit-compose-app");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            path.join(appRoot, "compose.yaml"),
+            [
+                "services:",
+                "  web:",
+                "    image: example.com/unit/web:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'false'",
+                "      mira.updater.track: tag",
+                String.raw`      mira.updater.tagPattern: '^\d+\.\d+\.\d+$'`,
+                "      mira.updater.tagPatternIsRegex: 'true'",
+                "",
+            ].join("\n")
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+
+        const registered = await registerDockerUpdaterServices();
+        expect(registered).toMatchObject({
+            isOk: true,
+            step: "register-services",
+            stderr: "",
+        });
+        expect(JSON.parse(registered.stdout)).toMatchObject({
+            summary: {
+                composeFiles: 1,
+                registeredServices: 1,
+            },
+        });
+        const row = database
+            .prepare(
+                `SELECT id, app_slug, service_name, image_repo, current_tag, policy, pin_mode, tag_match_type, tag_match_pattern, enabled
+                 FROM docker_managed_services
+                 WHERE app_slug = 'unit-compose-app' AND service_name = 'web'`
+            )
+            .get() as {
+            app_slug: string;
+            current_tag: string;
+            enabled: number;
+            id: number;
+            image_repo: string;
+            pin_mode: string;
+            policy: string;
+            service_name: string;
+            tag_match_pattern: string;
+            tag_match_type: string;
+        };
+        expect(row).toMatchObject({
+            app_slug: "unit-compose-app",
+            current_tag: "1.0.0",
+            enabled: 1,
+            image_repo: "example.com/unit/web",
+            pin_mode: "tag",
+            policy: "notify",
+            service_name: "web",
+            tag_match_type: "regex",
+        });
+
+        const polled = await pollDockerUpdaterRegistries(row.id);
+        expect(polled).toMatchObject({ isOk: true, step: "poll", stderr: "" });
+        expect(JSON.parse(polled.stdout)).toMatchObject({
+            skipped: [
+                {
+                    reason: "Unsupported image registry: example.com",
+                    service: "unit-compose-app/web",
+                },
+            ],
+        });
+        expect(
+            database
+                .prepare("SELECT last_status FROM docker_managed_services WHERE id = ?")
+                .get(row.id)
+        ).toEqual({ last_status: "unsupported_registry" });
+
+        const steps = await runDockerUpdaterService(row.id);
+        expect(steps).toContainEqual(
+            expect.objectContaining({
+                code: "UNSUPPORTED_REGISTRY",
+                isOk: false,
+                step: "manual-update:unit-compose-app/web",
+            })
+        );
+
+        registerDockerUpdaterScheduledJobs();
+        expect(
+            database
+                .prepare(
+                    "SELECT enabled, time_of_day FROM scheduled_jobs WHERE id = 'docker.updater'"
+                )
+                .get()
+        ).toEqual({ enabled: 1, time_of_day: "04:10" });
     });
 });
