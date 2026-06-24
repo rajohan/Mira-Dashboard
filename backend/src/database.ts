@@ -26,7 +26,11 @@ function resolveDatabasePath(): {
     };
 }
 
-export const miraDatabasePath = resolveDatabasePath().databasePath;
+export function getMiraDatabasePath(): string {
+    return resolveDatabasePath().databasePath;
+}
+
+export const miraDatabasePath = getMiraDatabasePath();
 
 function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
     const relativePath = path.relative(rootPath, candidatePath);
@@ -353,6 +357,9 @@ const activeDatabaseState: {
 };
 
 function currentDatabase(): DatabaseSync {
+    if (process.env.NODE_ENV !== "test" && activeDatabaseState.database !== undefined) {
+        return activeDatabaseState.database;
+    }
     const { databasePath } = resolveDatabasePath();
     if (
         activeDatabaseState.database !== undefined &&
@@ -360,8 +367,9 @@ function currentDatabase(): DatabaseSync {
     ) {
         return activeDatabaseState.database;
     }
+    const nextDatabase = initializeDatabase(databasePath);
     activeDatabaseState.database?.close();
-    activeDatabaseState.database = initializeDatabase(databasePath);
+    activeDatabaseState.database = nextDatabase;
     activeDatabaseState.path = databasePath;
     return activeDatabaseState.database;
 }

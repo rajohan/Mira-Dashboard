@@ -65,7 +65,7 @@ function writeFakeGh(binaryPath: string): void {
         binaryPath,
         String.raw`#!/usr/bin/env bash
 set -euo pipefail
-if [[ "$1 $2" == "api graphql" ]]; then
+if [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* && "$*" == *"-F owner=rajohan"* && "$*" == *"-F name=Mira-Dashboard"* && "$*" == *"-f query="* && "$*" == *"--jq"* ]]; then
   printf '%s\n' '{"number":1,"title":"Ready PR","body":"","url":"https://github.test/pr/1","headRefName":"ready","headRefOid":"head1","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T08:00:00.000Z","updatedAt":"2026-06-24T09:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"latestOpinionatedReviews":{"nodes":[{"state":"APPROVED","submittedAt":"2026-06-24T08:30:00.000Z","author":{"login":"rajohan"}}]},"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T08:45:00.000Z"}]}'
   printf '%s\n' '{"number":2,"title":"Blocked cached PR","body":"","url":"https://github.test/pr/2","headRefName":"blocked","headRefOid":"head2","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","reviewDecision":"APPROVED","latestOpinionatedReviews":{"nodes":[]},"additions":2,"deletions":1,"changedFiles":2,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T10:45:00.000Z"}]}'
 elif [[ "$1 $2 $3" == "pr view 2" ]]; then
@@ -249,6 +249,28 @@ describe("backend service behavior", () => {
         }
     });
 
+    it("keeps the active test database usable after a rejected rebind", () => {
+        rememberEnvironment("MIRA_DASHBOARD_DB_PATH");
+        const originalDatabasePath = process.env.MIRA_DASHBOARD_DB_PATH;
+        expect(database.prepare("SELECT 1 AS value").get()).toEqual({ value: 1 });
+
+        process.env.MIRA_DASHBOARD_DB_PATH = path.join(
+            process.cwd(),
+            "data",
+            `unsafe-${Bun.randomUUIDv7()}.db`
+        );
+        expect(() => database.prepare("SELECT 1").get()).toThrow(
+            "Refusing to open non-temporary Dashboard test database"
+        );
+
+        if (originalDatabasePath === undefined) {
+            delete process.env.MIRA_DASHBOARD_DB_PATH;
+        } else {
+            process.env.MIRA_DASHBOARD_DB_PATH = originalDatabasePath;
+        }
+        expect(database.prepare("SELECT 1 AS value").get()).toEqual({ value: 1 });
+    });
+
     it("sends log history to subscribers from the configured isolated log root", async () => {
         rememberEnvironment("MIRA_DASHBOARD_LOGS_ROOT");
         const logsRoot = createTemporaryRoot("mira-log-streams-test-");
@@ -328,41 +350,43 @@ describe("backend service behavior", () => {
         const key = `test.cache.${Bun.randomUUIDv7()}`;
         const { writeCacheFailure } = await import("../src/services/cacheRefresh.ts");
 
-        writeCacheFailure({
-            key,
-            source: "test",
-            ttl: 5,
-            ttlUnit: "minutes",
-            error: new Error("provider unavailable"),
-            metadata: { provider: "unit-test" },
-        });
+        try {
+            writeCacheFailure({
+                key,
+                source: "test",
+                ttl: 5,
+                ttlUnit: "minutes",
+                error: new Error("provider unavailable"),
+                metadata: { provider: "unit-test" },
+            });
 
-        const row = database
-            .prepare(
-                `SELECT updated_at, last_attempt_at, status, error_message, consecutive_failures, metadata_json
-                 FROM cache_entries
-                 WHERE key = ?`
-            )
-            .get(key) as {
-            updated_at: string | null;
-            last_attempt_at: string;
-            status: string;
-            error_message: string;
-            consecutive_failures: number;
-            metadata_json: string;
-        };
+            const row = database
+                .prepare(
+                    `SELECT updated_at, last_attempt_at, status, error_message, consecutive_failures, metadata_json
+                     FROM cache_entries
+                     WHERE key = ?`
+                )
+                .get(key) as {
+                updated_at: string | null;
+                last_attempt_at: string;
+                status: string;
+                error_message: string;
+                consecutive_failures: number;
+                metadata_json: string;
+            };
 
-        expect(row.updated_at).toBeNull();
-        expect(row.last_attempt_at).toBeTruthy();
-        expect(row.status).toBe("error");
-        expect(row.error_message).toBe("provider unavailable");
-        expect(row.consecutive_failures).toBe(1);
-        expect(JSON.parse(row.metadata_json)).toMatchObject({
-            provider: "unit-test",
-            lastFailureAt: row.last_attempt_at,
-        });
-
-        database.prepare("DELETE FROM cache_entries WHERE key = ?").run(key);
+            expect(row.updated_at).toBeNull();
+            expect(row.last_attempt_at).toBeTruthy();
+            expect(row.status).toBe("error");
+            expect(row.error_message).toBe("provider unavailable");
+            expect(row.consecutive_failures).toBe(1);
+            expect(JSON.parse(row.metadata_json)).toMatchObject({
+                provider: "unit-test",
+                lastFailureAt: row.last_attempt_at,
+            });
+        } finally {
+            database.prepare("DELETE FROM cache_entries WHERE key = ?").run(key);
+        }
     });
 
     it("writes successful cache entries and preserves existing data when requested", async () => {

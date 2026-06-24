@@ -1,7 +1,7 @@
 import { rm } from "node:fs/promises";
 import path from "node:path";
 
-import { database, miraDatabasePath, sqlNullable } from "../database.ts";
+import { database, getMiraDatabasePath, sqlNullable } from "../database.ts";
 import { errorMessage } from "../lib/errors.ts";
 import {
     killProcessGroup,
@@ -1259,7 +1259,7 @@ try {
 }
 `;
     return [
-        `MIRA_DEPLOYMENT_DB=${shellQuote(miraDatabasePath)}`,
+        `MIRA_DEPLOYMENT_DB=${shellQuote(getMiraDatabasePath())}`,
         `MIRA_DEPLOYMENT_JOB=${shellQuote(JSON.stringify(job))}`,
         shellQuote(resolveBunExecutable()),
         "-e",
