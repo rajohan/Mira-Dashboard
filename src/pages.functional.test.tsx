@@ -3,6 +3,22 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
 
+import {
+    createChatVisibility,
+    createLocalSystemMessage,
+    finalMessageFromPayload,
+    hasRecoveredStreamHistory,
+    isCommandMessagePayload,
+    isRecord,
+    isSameSessionKey,
+    mergeStreamMessage,
+    mergeStreamText,
+    normalizeAssistantPayload,
+    parseAgentSessionKey,
+    shouldShowStreamRow,
+    uniqueStrings,
+    visibleHistoryMessages,
+} from "./components/features/chat/chatRuntime";
 import { OpenClawSocketProvider } from "./hooks/useOpenClawSocket";
 import { Agents } from "./pages/Agents";
 import {
@@ -187,6 +203,56 @@ function apiResponse(url: string, method: string) {
                     meta: {},
                 },
             ],
+        });
+    }
+
+    if (url === "/api/cache/git.workspace") {
+        return Response.json({
+            key: "git.workspace",
+            status: "fresh",
+            source: "git",
+            consecutiveFailures: 0,
+            data: {
+                repos: [
+                    {
+                        key: "dashboard",
+                        name: "Mira Dashboard",
+                        branch: "test/broaden-fullstack-coverage",
+                        remote: "origin",
+                        dirty: true,
+                        statusSummary: {
+                            staged: 0,
+                            modified: 1,
+                            deleted: 0,
+                            untracked: 0,
+                            renamed: 0,
+                            conflicted: 0,
+                            total: 1,
+                        },
+                    },
+                    {
+                        key: "workspace",
+                        name: "Workspace",
+                        branch: "main",
+                        remote: "origin",
+                        dirty: false,
+                        statusSummary: {
+                            staged: 0,
+                            modified: 0,
+                            deleted: 0,
+                            untracked: 0,
+                            renamed: 0,
+                            conflicted: 0,
+                            total: 0,
+                        },
+                    },
+                ],
+                dirtyRepos: ["dashboard"],
+                dirtyCount: 1,
+                missingRepos: [],
+                checkedAt: "2026-06-24T08:00:00.000Z",
+            },
+            meta: {},
         });
     }
 
@@ -650,6 +716,114 @@ describe("Mira Dashboard pages", () => {
             scheduled.push("skipped");
         });
         expect(scheduled).toEqual(["bottom"]);
+    });
+
+    it("keeps chat runtime stream helpers aligned with page behavior", () => {
+        expect(mergeStreamText("", "hello")).toBe("hello");
+        expect(mergeStreamText("hello", "hello world")).toBe("hello world");
+        expect(mergeStreamText("hello", "lo")).toBe("hello");
+        expect(mergeStreamText("hello", " world")).toBe("hello world");
+        expect(mergeStreamText("hello", " ".repeat(3))).toBe("hello");
+
+        expect(uniqueStrings(["a", undefined, "a", "b"])).toEqual(["a", "b"]);
+        expect(parseAgentSessionKey("agent:Main:Session")).toEqual({
+            agentId: "main",
+            rest: "session",
+        });
+        expect(parseAgentSessionKey("session-only")).toBeUndefined();
+        expect(isSameSessionKey("agent:main:main", "main")).toBe(true);
+        expect(isSameSessionKey("agent:main:main", "agent:MAIN:main")).toBe(true);
+        expect(isSameSessionKey("", "agent:main:main")).toBe(false);
+
+        expect(normalizeAssistantPayload("hi")).toMatchObject({
+            role: "assistant",
+            text: "hi",
+        });
+        expect(normalizeAssistantPayload({ role: "user", content: "hi" })).toMatchObject({
+            role: "user",
+            text: "hi",
+        });
+        expect(finalMessageFromPayload({ runId: "run-1", text: "done" })).toMatchObject({
+            role: "assistant",
+            runId: "run-1",
+            text: "done",
+        });
+
+        const merged = mergeStreamMessage(
+            {
+                role: "assistant",
+                content: "old",
+                text: "old",
+                images: [{ data: "a", type: "image" }],
+                attachments: [
+                    {
+                        fileName: "old.txt",
+                        id: "old",
+                        kind: "text",
+                        mimeType: "text/plain",
+                    },
+                ],
+            },
+            {
+                role: "assistant",
+                content: "new",
+                text: "new",
+                toolResult: { content: "tool" },
+            },
+            "new",
+            "run-2"
+        );
+        expect(merged).toMatchObject({
+            role: "assistant",
+            text: "new",
+            runId: "run-2",
+            images: [{ data: "a", type: "image" }],
+            attachments: [
+                {
+                    fileName: "old.txt",
+                    id: "old",
+                    kind: "text",
+                    mimeType: "text/plain",
+                },
+            ],
+            toolResult: { content: "tool" },
+        });
+
+        expect(isRecord({ ok: true })).toBe(true);
+        expect(isRecord([])).toBe(false);
+        expect(isCommandMessagePayload({ command: true })).toBe(true);
+        expect(isCommandMessagePayload({ command: false })).toBe(false);
+        expect(createLocalSystemMessage("local")).toMatchObject({
+            role: "system",
+            text: "local",
+            local: true,
+        });
+        expect(
+            hasRecoveredStreamHistory(
+                [{ role: "assistant", content: "hello world", text: "hello world" }],
+                "hello"
+            )
+        ).toBe(true);
+
+        const visibility = createChatVisibility(false, false);
+        expect(
+            visibleHistoryMessages(
+                [
+                    { role: "assistant", content: "visible" },
+                    { role: "tool", content: "hidden" },
+                ],
+                visibility
+            )
+        ).toHaveLength(1);
+        expect(shouldShowStreamRow("", undefined, visibility)).toBe(false);
+        expect(shouldShowStreamRow("typing", undefined, visibility)).toBe(true);
+        expect(
+            shouldShowStreamRow(
+                "",
+                { role: "assistant", content: "visible", text: "visible" },
+                visibility
+            )
+        ).toBe(true);
     });
 
     it("keeps settings and terminal page helpers stable", () => {
