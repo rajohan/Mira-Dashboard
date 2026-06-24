@@ -969,6 +969,187 @@ describe("backend service behavior", () => {
         await expect(restartResponse.json()).resolves.toEqual({ isOk: true });
     });
 
+    it("validates Docker route input and maps updater rows without running Docker", async () => {
+        const { dockerRoutes } = await import("../src/routes/dockerRoutes.ts");
+        const invalidContainerRequest = Object.assign(
+            new Request("https://dashboard.test/api/docker/containers/--bad"),
+            { params: { containerId: "--bad" } }
+        );
+        const invalidImageRequest = Object.assign(
+            new Request("https://dashboard.test/api/docker/images/--bad", {
+                method: "DELETE",
+            }),
+            { params: { imageId: "--bad" } }
+        );
+        const invalidVolumeRequest = Object.assign(
+            new Request("https://dashboard.test/api/docker/volumes/--bad", {
+                method: "DELETE",
+            }),
+            { params: { volumeName: "--bad" } }
+        );
+        const invalidServiceRequest = Object.assign(
+            new Request(
+                "https://dashboard.test/api/docker/updater/services/nope/update",
+                {
+                    method: "POST",
+                }
+            ),
+            { params: { serviceId: "nope" } }
+        );
+
+        const invalidContainerResponse = await dockerRoutes[
+            "/api/docker/containers/:containerId"
+        ].GET(invalidContainerRequest);
+        await expect(invalidContainerResponse.json()).resolves.toEqual({
+            error: "Invalid containerId",
+        });
+        expect(
+            await dockerRoutes["/api/docker/images/:imageId"].DELETE(invalidImageRequest)
+        ).toMatchObject({ status: 400 });
+        expect(
+            await dockerRoutes["/api/docker/volumes/:volumeName"].DELETE(
+                invalidVolumeRequest
+            )
+        ).toMatchObject({ status: 400 });
+        expect(
+            await dockerRoutes["/api/docker/updater/services/:serviceId/update"].POST(
+                invalidServiceRequest
+            )
+        ).toMatchObject({ status: 400 });
+
+        const missingExec = dockerRoutes["/api/docker/exec/:jobId"].GET(
+            Object.assign(new Request("https://dashboard.test/api/docker/exec/missing"), {
+                params: { jobId: "missing" },
+            })
+        );
+        expect(missingExec.status).toBe(404);
+        const invalidPrune = await dockerRoutes["/api/docker/prune"].POST(
+            new Request("https://dashboard.test/api/docker/prune", {
+                body: JSON.stringify({ target: "everything" }),
+                method: "POST",
+            })
+        );
+        expect(invalidPrune.status).toBe(400);
+        const invalidStackAction = await dockerRoutes["/api/docker/stack/action"].POST(
+            new Request("https://dashboard.test/api/docker/stack/action", {
+                body: JSON.stringify({ action: "remove" }),
+                method: "POST",
+            })
+        );
+        expect(invalidStackAction.status).toBe(400);
+
+        const appSlug = `unit-route-${Bun.randomUUIDv7()}`;
+        try {
+            const service = database
+                .prepare(
+                    `INSERT INTO docker_managed_services (
+                        app_slug, service_name, compose_path, image_repo,
+                        compose_image_ref, current_tag, current_digest, latest_tag,
+                        latest_digest, policy, pin_mode, enabled, metadata_json,
+                        last_checked_at, last_updated_at, last_status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    RETURNING id`
+                )
+                .get(
+                    appSlug,
+                    "web",
+                    "/tmp/compose.yaml",
+                    "example.com/unit/web",
+                    "example.com/unit/web:1.0.0",
+                    "1.0.0",
+                    "sha256:old",
+                    "1.1.0",
+                    "sha256:new",
+                    "notify",
+                    "tag",
+                    0,
+                    JSON.stringify({ source: "test" }),
+                    "2026-06-24T10:00:00.000Z",
+                    "2026-06-24T11:00:00.000Z",
+                    "disabled"
+                ) as { id: number };
+            database
+                .prepare(
+                    `INSERT INTO docker_update_events (
+                        managed_service_id, app_slug, service_name, event_type,
+                        from_tag, to_tag, from_digest, to_digest, message,
+                        details_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                )
+                .run(
+                    service.id,
+                    appSlug,
+                    "web",
+                    "update_available",
+                    "1.0.0",
+                    "1.1.0",
+                    "sha256:old",
+                    "sha256:new",
+                    "ready",
+                    "{}",
+                    "2026-06-24T12:00:00.000Z"
+                );
+
+            const servicesResponse =
+                await dockerRoutes["/api/docker/updater/services"].GET();
+            const servicesBody = (await servicesResponse.json()) as {
+                services: Array<{
+                    appSlug: string;
+                    enabled: boolean;
+                    metadata: Record<string, unknown>;
+                    updateAvailable: boolean;
+                }>;
+                summary: { enabled: number; total: number; updateAvailable: number };
+            };
+            expect(servicesBody.services).toContainEqual(
+                expect.objectContaining({
+                    appSlug,
+                    enabled: false,
+                    metadata: { source: "test" },
+                    updateAvailable: true,
+                })
+            );
+            expect(servicesBody.summary.total).toBeGreaterThanOrEqual(1);
+            expect(servicesBody.summary.updateAvailable).toBeGreaterThanOrEqual(1);
+
+            const eventsResponse = await dockerRoutes["/api/docker/updater/events"].GET(
+                new Request("https://dashboard.test/api/docker/updater/events?limit=1")
+            );
+            const eventsBody = (await eventsResponse.json()) as {
+                events: Array<{ appSlug: string; managedServiceId?: number }>;
+            };
+            expect(eventsBody.events).toContainEqual(
+                expect.objectContaining({
+                    appSlug,
+                    managedServiceId: service.id,
+                })
+            );
+
+            const disabledServiceRequest = Object.assign(
+                new Request(
+                    `https://dashboard.test/api/docker/updater/services/${service.id}/update`,
+                    { method: "POST" }
+                ),
+                { params: { serviceId: String(service.id) } }
+            );
+            const disabledServiceResponse =
+                await dockerRoutes["/api/docker/updater/services/:serviceId/update"].POST(
+                    disabledServiceRequest
+                );
+            expect(disabledServiceResponse.status).toBe(400);
+            await expect(disabledServiceResponse.json()).resolves.toEqual({
+                error: "Updater service is disabled",
+            });
+        } finally {
+            database
+                .prepare("DELETE FROM docker_update_events WHERE app_slug = ?")
+                .run(appSlug);
+            database
+                .prepare("DELETE FROM docker_managed_services WHERE app_slug = ?")
+                .run(appSlug);
+        }
+    });
+
     it("persists, updates, runs, and prunes scheduled jobs", async () => {
         const actionKey = `test-action-${Bun.randomUUIDv7()}`;
         const keepId = `test-job-keep-${Bun.randomUUIDv7()}`;
