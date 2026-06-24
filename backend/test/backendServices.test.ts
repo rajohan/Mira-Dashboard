@@ -1297,6 +1297,10 @@ describe("backend service behavior", () => {
             Object.assign(validToggleRequest, { params: { id: "heartbeat" } })
         );
         await expect(validToggle.json()).resolves.toEqual({ isOk: true });
+        expect(gatewayCalls).toContainEqual({
+            method: "cron.update",
+            parameters: { jobId: "heartbeat", patch: { enabled: false } },
+        });
 
         const badUpdateRequest = new Request(
             "https://dashboard.test/api/cron/jobs/heartbeat/update",

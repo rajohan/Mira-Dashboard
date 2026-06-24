@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
@@ -61,10 +61,17 @@ class FakeWebSocket {
     static readonly OPEN = 1;
     static readonly CLOSING = 2;
     static readonly CLOSED = 3;
+    static instances: FakeWebSocket[] = [];
 
     private readonly listeners = new Map<string, FakeWebSocketListener[]>();
     readonly sent: string[] = [];
+    readonly url: string;
     readyState = FakeWebSocket.CONNECTING;
+
+    constructor(url: string) {
+        this.url = url;
+        FakeWebSocket.instances.push(this);
+    }
 
     addEventListener(type: string, listener: FakeWebSocketListener) {
         this.listeners.set(type, [...(this.listeners.get(type) || []), listener]);
@@ -76,15 +83,16 @@ class FakeWebSocket {
 
     close() {
         this.readyState = FakeWebSocket.CLOSED;
-        const closeListeners = this.listeners.get("close") || [];
-        for (const listener of closeListeners) {
-            listener();
-        }
     }
 }
 
-function apiResponse(url: string, method: string) {
-    if (method === "POST" && url.includes("/api/docker/containers/")) {
+function parseRequestBody(init: RequestInit | undefined) {
+    return JSON.parse(String(init?.body || "{}")) as Record<string, unknown>;
+}
+
+function apiResponse(url: string, method: string, init?: RequestInit) {
+    if (method === "POST" && url === "/api/docker/containers/abc123/action") {
+        expect(parseRequestBody(init)).toEqual({ action: "restart" });
         return Response.json({ output: "container action output" });
     }
 
@@ -93,6 +101,10 @@ function apiResponse(url: string, method: string) {
     }
 
     if (method === "POST" && url === "/api/docker/prune") {
+        const body = parseRequestBody(init);
+        if (body.target !== "images" && body.target !== "volumes") {
+            throw new Error(`Unexpected Docker prune target: ${String(body.target)}`);
+        }
         return Response.json({ isSuccess: true, output: "pruned" });
     }
 
@@ -120,6 +132,10 @@ function apiResponse(url: string, method: string) {
     }
 
     if (method === "POST" && url === "/api/docker/exec/start") {
+        expect(parseRequestBody(init)).toMatchObject({
+            command: "echo hello",
+            containerId: "abc123",
+        });
         return Response.json({ jobId: "job-1" });
     }
 
@@ -127,16 +143,12 @@ function apiResponse(url: string, method: string) {
         return Response.json({ isSuccess: true });
     }
 
-    if (method === "DELETE" && url.includes("/api/docker/images/")) {
+    if (method === "DELETE" && url === "/api/docker/images/img-unused") {
         return Response.json({ isSuccess: true });
     }
 
-    if (method === "DELETE" && url.includes("/api/docker/volumes/")) {
+    if (method === "DELETE" && url === "/api/docker/volumes/unused-volume") {
         return Response.json({ isSuccess: true });
-    }
-
-    if (method !== "GET") {
-        return Response.json({ isOk: true, jobId: "job-1" });
     }
 
     if (url === "/api/agents/status") {
@@ -161,25 +173,40 @@ function apiResponse(url: string, method: string) {
         });
     }
 
-    if (url === "/api/agents/task-history?limit=8") {
+    if (url === "/api/agents/tasks/history?limit=7") {
         return Response.json({
-            items: [
+            tasks: [
                 {
                     id: 1,
                     agentId: "mira-2026",
                     task: "Testing pages",
-                    startedAt: "2026-06-24T08:00:00.000Z",
-                    endedAt: "2026-06-24T08:05:00.000Z",
+                    status: "done",
+                    completedAt: "2026-06-24T08:05:00.000Z",
                 },
             ],
+            timestamp: 1_719_216_000_000,
         });
     }
 
     if (url === "/api/metrics") {
         return Response.json({
             cpu: { count: 4, loadAvg: [0.1, 0.2, 0.3], loadPercent: 5 },
-            memory: { total: 100, used: 40, free: 60, percent: 40 },
-            disk: { total: 1000, used: 250, free: 750, percent: 25 },
+            memory: {
+                total: 100,
+                totalGB: 100,
+                used: 40,
+                usedGB: 40,
+                free: 60,
+                percent: 40,
+            },
+            disk: {
+                total: 1000,
+                totalGB: 1000,
+                used: 250,
+                usedGB: 250,
+                free: 750,
+                percent: 25,
+            },
             network: { downloadMbps: 1, uploadMbps: 2 },
             system: { uptime: 120, hostname: "dashboard-test", platform: "linux" },
             tokens: {
@@ -206,8 +233,18 @@ function apiResponse(url: string, method: string) {
                 windKph: 8,
                 description: "Clear",
                 forecast: [
-                    { date: "2026-06-24", temperatureMaxC: 22, description: "Clear" },
-                    { date: "2026-06-25", temperatureMaxC: 19, description: "Rain" },
+                    {
+                        date: "2026-06-24",
+                        maxTempC: 22,
+                        minTempC: 12,
+                        description: "Clear",
+                    },
+                    {
+                        date: "2026-06-25",
+                        maxTempC: 19,
+                        minTempC: 10,
+                        description: "Rain",
+                    },
                 ],
             },
             meta: {},
@@ -222,7 +259,16 @@ function apiResponse(url: string, method: string) {
             consecutiveFailures: 0,
             data: {
                 checkedAt: 1_719_216_000_000,
-                openai: { fiveHourLeftPercent: 90, weeklyLeftPercent: 80 },
+                openai: {
+                    account: "raymond",
+                    model: "codex",
+                    fiveHourLeftPercent: 90,
+                    weeklyLeftPercent: 80,
+                    fiveHourReset: "13:45",
+                    weeklyReset: "2026-06-25T10:00:00.000Z",
+                    percentUsed: 10,
+                    resetAt: "13:45",
+                },
                 openrouter: {
                     usage: 1,
                     usageMonthly: 1,
@@ -230,10 +276,40 @@ function apiResponse(url: string, method: string) {
                     totalCredits: 10,
                     percentUsed: 10,
                 },
-                elevenlabs: { status: "ok", remainingCharacters: 1000 },
+                elevenlabs: {
+                    used: 100,
+                    total: 1000,
+                    remaining: 900,
+                    tier: "creator",
+                    percentUsed: 10,
+                    resetAt: "2026-06-25T10:00:00.000Z",
+                },
                 synthetic: {
-                    rollingFiveHourLimit: { percentUsed: 10 },
-                    weeklyTokenLimit: { percentUsed: 20 },
+                    subscription: {
+                        limit: 100,
+                        requests: 10,
+                        remaining: 90,
+                        renewsAt: "2026-06-25T10:00:00.000Z",
+                        percentUsed: 10,
+                    },
+                    searchHourly: {
+                        limit: 100,
+                        requests: 5,
+                        remaining: 95,
+                        renewsAt: "2026-06-24T09:00:00.000Z",
+                        percentUsed: 5,
+                    },
+                    rollingFiveHourLimit: {
+                        remaining: 90,
+                        max: 100,
+                        limited: false,
+                        nextTickAt: "2026-06-24T09:00:00.000Z",
+                        percentUsed: 10,
+                    },
+                    weeklyTokenLimit: {
+                        percentRemaining: 80,
+                        nextRegenAt: "2026-06-25T10:00:00.000Z",
+                    },
                 },
             },
             meta: {},
@@ -243,11 +319,47 @@ function apiResponse(url: string, method: string) {
     if (url === "/api/cache/heartbeat") {
         return Response.json({
             generatedAt: "2026-06-24T08:00:00.000Z",
-            count: 1,
+            count: 5,
             entries: [
                 {
                     key: "weather.spydeberg",
                     source: "weather",
+                    status: "fresh",
+                    updatedAt: "2026-06-24T08:00:00.000Z",
+                    consecutiveFailures: 0,
+                    data: {},
+                    meta: {},
+                },
+                {
+                    key: "quotas.summary",
+                    source: "quota",
+                    status: "fresh",
+                    updatedAt: "2026-06-24T08:00:00.000Z",
+                    consecutiveFailures: 0,
+                    data: {},
+                    meta: {},
+                },
+                {
+                    key: "moltbook.home",
+                    source: "moltbook",
+                    status: "fresh",
+                    updatedAt: "2026-06-24T08:00:00.000Z",
+                    consecutiveFailures: 0,
+                    data: {},
+                    meta: {},
+                },
+                {
+                    key: "git.workspace",
+                    source: "git",
+                    status: "fresh",
+                    updatedAt: "2026-06-24T08:00:00.000Z",
+                    consecutiveFailures: 0,
+                    data: {},
+                    meta: {},
+                },
+                {
+                    key: "system.host",
+                    source: "system",
                     status: "fresh",
                     updatedAt: "2026-06-24T08:00:00.000Z",
                     consecutiveFailures: 0,
@@ -320,6 +432,41 @@ function apiResponse(url: string, method: string) {
         });
     }
 
+    if (url === "/api/cache/backup.kopia.status") {
+        return Response.json({
+            key: "backup.kopia.status",
+            status: "fresh",
+            source: "backup",
+            consecutiveFailures: 0,
+            data: {
+                checkedAt: "2026-06-24T08:00:00.000Z",
+                tool: "kopia",
+                isOk: true,
+                snapshotsByPath: [],
+                stale: [],
+            },
+            meta: {},
+        });
+    }
+
+    if (url === "/api/cache/backup.walg.status") {
+        return Response.json({
+            key: "backup.walg.status",
+            status: "fresh",
+            source: "backup",
+            consecutiveFailures: 0,
+            data: {
+                checkedAt: "2026-06-24T08:00:00.000Z",
+                tool: "walg",
+                isOk: true,
+                backupCount: 1,
+                latest: { backupName: "base_0001", time: "2026-06-24T08:00:00.000Z" },
+                stale: false,
+            },
+            meta: {},
+        });
+    }
+
     if (url === "/api/cron/jobs") {
         return Response.json({
             jobs: [
@@ -328,8 +475,11 @@ function apiResponse(url: string, method: string) {
                     command: "openclaw heartbeat",
                     schedule: "*/30 * * * *",
                     enabled: true,
-                    lastRun: "2026-06-24T08:00:00.000Z",
-                    lastStatus: "success",
+                    state: {
+                        lastRunAtMs: 1_719_216_000_000,
+                        nextRunAtMs: 1_719_217_800_000,
+                        lastRunStatus: "success",
+                    },
                 },
             ],
         });
@@ -337,10 +487,22 @@ function apiResponse(url: string, method: string) {
 
     if (url === "/api/ops/log-rotation/status") {
         return Response.json({
-            status: "ok",
-            checkedAt: "2026-06-24T08:00:00.000Z",
-            policies: [],
-            runs: [],
+            isSuccess: true,
+            lastRun: {
+                checkedFiles: 1,
+                checkedGroups: 1,
+                compressedFiles: 0,
+                deletedArchives: 0,
+                errors: [],
+                finishedAt: "2026-06-24T08:01:00.000Z",
+                groups: [],
+                isDryRun: false,
+                isOk: true,
+                rotatedFiles: 0,
+                skippedFiles: 0,
+                startedAt: "2026-06-24T08:00:00.000Z",
+                warnings: [],
+            },
         });
     }
 
@@ -350,7 +512,7 @@ function apiResponse(url: string, method: string) {
                 totalDatabaseSizeBytes: 1024,
                 totalBackends: 2,
                 averageCacheHitRatio: 99,
-                connections: { n8n: 2 },
+                connections: { active: 1, idle: 1 },
                 pgStatStatementsEnabled: true,
                 torrentCounts: { comet: 1, bitmagnet: 1 },
                 pgbouncer: {
@@ -645,7 +807,15 @@ function apiResponse(url: string, method: string) {
     if (url === "/api/jobs/heartbeat/runs") {
         return Response.json({
             runs: [
-                { id: 1, jobId: "heartbeat", status: "success", triggerType: "manual" },
+                {
+                    id: 1,
+                    jobId: "heartbeat",
+                    status: "success",
+                    triggerType: "manual",
+                    startedAt: "2026-06-24T08:00:00.000Z",
+                    finishedAt: "2026-06-24T08:01:00.000Z",
+                    output: { message: "ok" },
+                },
             ],
         });
     }
@@ -654,7 +824,7 @@ function apiResponse(url: string, method: string) {
         return Response.json({ logs: [{ name: "openclaw.log", size: 100 }] });
     }
 
-    if (url === "/api/logs/content?file=openclaw.log&lines=200") {
+    if (url === "/api/logs/content?file=openclaw.log&lines=100") {
         return Response.json({
             content: "2026-06-24T08:00:00.000Z info dashboard ready",
         });
@@ -710,7 +880,7 @@ function apiResponse(url: string, method: string) {
             status: "fresh",
             source: "moltbook",
             consecutiveFailures: 0,
-            data: { profile: { username: "mira", display_name: "Mira" } },
+            data: { agent: { username: "mira", display_name: "Mira" } },
             meta: {},
         });
     }
@@ -741,6 +911,7 @@ function apiResponse(url: string, method: string) {
                     isDraft: false,
                     reviewDecision: "APPROVED",
                     mergeStateStatus: "CLEAN",
+                    statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }],
                 },
             ],
         });
@@ -768,6 +939,7 @@ function apiResponse(url: string, method: string) {
 
     if (url === "/api/config") {
         return Response.json({
+            __hash: "config-hash-1",
             agents: { list: [{ id: "ops", heartbeat: { every: "30m" } }] },
             session: { reset: { idleMinutes: 60 } },
             models: {},
@@ -794,7 +966,11 @@ function apiResponse(url: string, method: string) {
 
     if (url === "/api/exec/job-1") {
         return Response.json({
-            job: { id: "job-1", status: "done", stdout: "ok", stderr: "", code: 0 },
+            jobId: "job-1",
+            status: "done",
+            stdout: "ok",
+            stderr: "",
+            code: 0,
         });
     }
 
@@ -818,14 +994,23 @@ function renderPage(children: ReactNode, options: { withSocket?: boolean } = {})
     };
 }
 
+function clickElement(element: Element) {
+    fireEvent.click(element);
+}
+
 describe("Mira Dashboard pages", () => {
     beforeEach(() => {
-        authActions.clearSession();
+        FakeWebSocket.instances = [];
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            user: { id: 1, username: "mira" },
+        });
         Object.defineProperties(globalThis, {
             fetch: {
                 configurable: true,
                 value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
-                    apiResponse(String(input), init?.method ?? "GET")
+                    apiResponse(String(input), init?.method ?? "GET", init)
                 ),
                 writable: true,
             },
@@ -836,9 +1021,7 @@ describe("Mira Dashboard pages", () => {
             },
             requestAnimationFrame: {
                 configurable: true,
-                value: (callback: FrameRequestCallback) => {
-                    return setTimeout(() => callback(performance.now()), 0);
-                },
+                value: () => 0,
                 writable: true,
             },
         });
@@ -846,6 +1029,7 @@ describe("Mira Dashboard pages", () => {
     });
 
     afterEach(() => {
+        cleanup();
         authActions.clearSession();
         localStorage.clear();
     });
@@ -876,107 +1060,110 @@ describe("Mira Dashboard pages", () => {
     });
 
     it("renders sessions page connection state with a socket provider", async () => {
-        renderPage(createElement(Sessions), { withSocket: true });
+        const view = renderPage(createElement(Sessions), { withSocket: true });
 
         await waitFor(() => {
             expect(screen.getByText("Connecting to OpenClaw...")).toBeInTheDocument();
+            expect(FakeWebSocket.instances).toHaveLength(1);
         });
+        view.unmount();
+        view.queryClient.clear();
     });
 
     it("drives docker page container, updater, prune, delete, and console flows", async () => {
         const user = userEvent.setup();
         const fetchMock = fetch as unknown as ReturnType<typeof jest.fn>;
 
-        renderPage(createElement(Docker));
+        const view = renderPage(createElement(Docker));
 
         await waitFor(() => {
             expect(screen.getByText("Updater overview")).toBeInTheDocument();
         });
 
-        await user.click(screen.getByRole("button", { name: /run updater now/i }));
+        clickElement(screen.getByRole("button", { name: /run updater now/i }));
         await waitFor(() => {
             expect(screen.getByText(/"isSuccess": true/i)).toBeInTheDocument();
         });
 
-        await user.click(screen.getByRole("button", { name: /update now/i }));
+        clickElement(screen.getByRole("button", { name: /update now/i }));
         expect(screen.getByText("Run manual update")).toBeInTheDocument();
-        await user.click(screen.getByRole("button", { name: /^update now$/i }));
+        clickElement(screen.getByRole("button", { name: /^update now$/i }));
         await waitFor(() => {
             expect(
                 screen.getByText(/Manual updater run finished\. updated=1 failed=0/i)
             ).toBeInTheDocument();
         });
 
-        await user.click(screen.getByRole("button", { name: /dismiss/i }));
+        clickElement(screen.getByRole("button", { name: /dismiss/i }));
         expect(
             screen.queryByText(/Manual updater run finished/i)
         ).not.toBeInTheDocument();
 
-        await user.click(screen.getByRole("button", { name: /restart stack/i }));
+        clickElement(screen.getByRole("button", { name: /restart stack/i }));
         await waitFor(() => {
             expect(screen.getByText("stack restarted")).toBeInTheDocument();
         });
 
-        await user.click(screen.getAllByLabelText(/restart dashboard/i)[0]!);
+        clickElement(screen.getAllByLabelText(/restart dashboard/i)[0]!);
         await waitFor(() => {
             expect(screen.getByText("container action output")).toBeInTheDocument();
         });
 
-        await user.click(screen.getAllByLabelText(/show logs for dashboard/i)[0]!);
+        clickElement(screen.getAllByLabelText(/show logs for dashboard/i)[0]!);
         expect(await screen.findByText("dashboard log line")).toBeInTheDocument();
-        await user.click(screen.getByRole("button", { name: "200 lines" }));
-        await user.click(screen.getByRole("menuitem", { name: "500 lines" }));
+        clickElement(screen.getByRole("button", { name: "200 lines" }));
+        clickElement(screen.getByRole("menuitem", { name: "500 lines" }));
         await waitFor(() => {
             expect(screen.getByText("more dashboard log lines")).toBeInTheDocument();
         });
-        await user.click(screen.getByLabelText(/close dashboard logs/i));
+        clickElement(screen.getByLabelText(/close dashboard logs/i));
         await waitFor(() => {
             expect(screen.queryByRole("dialog", { name: /dashboard logs/i })).toBeNull();
         });
 
-        await user.click(screen.getAllByLabelText(/open console for dashboard/i)[0]!);
+        clickElement(screen.getAllByLabelText(/open console for dashboard/i)[0]!);
         await user.type(
             screen.getByPlaceholderText(/command to run inside container/i),
             "echo hello"
         );
-        await user.click(screen.getByRole("button", { name: /^run$/i }));
+        clickElement(screen.getByRole("button", { name: /^run$/i }));
         await waitFor(() => {
             expect(fetchMock).toHaveBeenCalledWith(
                 "/api/docker/exec/start",
                 expect.objectContaining({ method: "POST" })
             );
         });
-        await user.click(screen.getByLabelText(/close dashboard console/i));
+        clickElement(screen.getByLabelText(/close dashboard console/i));
         await waitFor(() => {
             expect(
                 screen.queryByRole("dialog", { name: /dashboard console/i })
             ).toBeNull();
         });
 
-        await user.click(screen.getByLabelText(/open details for dashboard/i));
+        clickElement(screen.getByLabelText(/open details for dashboard/i));
         expect(await screen.findByText("Networks")).toBeInTheDocument();
         expect(screen.getByText("MAC: 02:42:ac:14:00:02")).toBeInTheDocument();
-        await user.click(screen.getByLabelText(/close dashboard/i));
+        clickElement(screen.getByLabelText(/close dashboard/i));
 
-        await user.click(screen.getAllByRole("button", { name: /remove unused/i })[0]!);
+        clickElement(screen.getAllByRole("button", { name: /remove unused/i })[0]!);
         await waitFor(() => {
             expect(screen.getByText("pruned")).toBeInTheDocument();
         });
 
-        await user.click(
+        clickElement(
             screen.getAllByRole("button", { name: /delete unused:<none>/i })[0]!
         );
         expect(screen.getByText("Delete image")).toBeInTheDocument();
-        await user.click(screen.getByRole("button", { name: /^delete$/i }));
+        clickElement(screen.getByRole("button", { name: /^delete$/i }));
         await waitFor(() => {
             expect(screen.getByText(/Deleted Docker image/i)).toBeInTheDocument();
         });
 
-        await user.click(
+        clickElement(
             screen.getAllByRole("button", { name: /delete unused-volume/i })[0]!
         );
         expect(screen.getByText("Delete volume")).toBeInTheDocument();
-        await user.click(screen.getByRole("button", { name: /^delete$/i }));
+        clickElement(screen.getByRole("button", { name: /^delete$/i }));
         await waitFor(() => {
             expect(
                 screen.getByText(/Deleted Docker volume unused-volume/i)
@@ -987,7 +1174,9 @@ describe("Mira Dashboard pages", () => {
             "/api/docker/exec/start",
             expect.objectContaining({ method: "POST" })
         );
-    });
+        view.unmount();
+        view.queryClient.clear();
+    }, 10_000);
 
     it("keeps chat page storage and history helpers deterministic", () => {
         expect(readDeletedMessageKeys("agent:main:main")).toEqual(new Set());
