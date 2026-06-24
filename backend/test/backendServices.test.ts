@@ -60,6 +60,25 @@ fi
     chmodSync(binaryPath, 0o755);
 }
 
+function writeFakeGh(binaryPath: string): void {
+    writeFileSync(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1 $2" == "api graphql" ]]; then
+  printf '%s\n' '{"number":1,"title":"Ready PR","body":"","url":"https://github.test/pr/1","headRefName":"ready","headRefOid":"head1","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T08:00:00.000Z","updatedAt":"2026-06-24T09:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"latestOpinionatedReviews":{"nodes":[{"state":"APPROVED","submittedAt":"2026-06-24T08:30:00.000Z","author":{"login":"rajohan"}}]},"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T08:45:00.000Z"}]}'
+  printf '%s\n' '{"number":2,"title":"Blocked cached PR","body":"","url":"https://github.test/pr/2","headRefName":"blocked","headRefOid":"head2","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","reviewDecision":"APPROVED","latestOpinionatedReviews":{"nodes":[]},"additions":2,"deletions":1,"changedFiles":2,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T10:45:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr view 2" ]]; then
+  printf '%s\n' '{"number":2,"title":"Blocked refreshed PR","body":"","url":"https://github.test/pr/2","headRefName":"blocked","headRefOid":"head2b","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:30:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"APPROVED","reviews":[],"additions":3,"deletions":1,"changedFiles":2,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:15:00.000Z"}]}'
+else
+  echo "unexpected gh args: $*" >&2
+  exit 2
+fi
+`
+    );
+    chmodSync(binaryPath, 0o755);
+}
+
 function writeFakeDocker(binaryPath: string): void {
     writeFileSync(
         binaryPath,
@@ -497,6 +516,111 @@ describe("backend service behavior", () => {
             isSafeForDeploy: true,
         });
         await expect(ensureProductionReadyForDeploy()).resolves.toBeUndefined();
+    });
+
+    it("lists pull requests from GitHub JSON lines and refreshes blocked merge state", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("RAJOHAN_GITHUB_USERNAME");
+        const fakeRoot = createTemporaryRoot("mira-pr-list-root-");
+        const fakeBin = createTemporaryRoot("mira-pr-list-bin-");
+        writeFakeGh(path.join(fakeBin, "gh"));
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+        process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
+
+        const { listDashboardPullRequests, validatePrNumber } =
+            await import("../src/services/pullRequests.ts");
+
+        const pullRequests = await listDashboardPullRequests();
+        expect(pullRequests.map((pullRequest) => pullRequest.number)).toEqual([2, 1]);
+        expect(pullRequests[0]).toMatchObject({
+            number: 2,
+            title: "Blocked refreshed PR",
+            headRefOid: "head2b",
+            reviewerApproved: true,
+            canReviewerApprove: false,
+        });
+        expect(pullRequests[1]).toMatchObject({
+            number: 1,
+            reviewerApproved: true,
+            canReviewerApprove: false,
+        });
+        expect(validatePrNumber("42")).toBe(42);
+        for (const value of ["0", "-1", "1.5", "abc", 1]) {
+            expect(() => validatePrNumber(value)).toThrow("Invalid pull request number");
+        }
+    });
+
+    it("refreshes weather cache through the Open-Meteo fallback when wttr fails", async () => {
+        const originalFetch = fetch;
+        const calls: string[] = [];
+        cleanupCallbacks.push(() => {
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: originalFetch,
+                writable: true,
+            });
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'weather.spydeberg'")
+                .run();
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: async (input: Parameters<typeof fetch>[0]) => {
+                const url = String(input);
+                calls.push(url);
+                if (url.includes("wttr.in")) {
+                    return new Response("unavailable", { status: 503 });
+                }
+                return Response.json({
+                    current: {
+                        apparent_temperature: -2,
+                        relative_humidity_2m: 80,
+                        temperature_2m: 1,
+                        weather_code: 61,
+                        wind_speed_10m: 12,
+                    },
+                    daily: {
+                        time: ["2026-06-24", "2026-06-25"],
+                        temperature_2m_max: [4, 5],
+                        temperature_2m_min: [-1, 0],
+                        weather_code: [61, 0],
+                    },
+                });
+            },
+            writable: true,
+        });
+
+        const { refreshWeatherCache } = await import("../src/services/cacheRefresh.ts");
+        await expect(refreshWeatherCache()).resolves.toEqual({
+            refreshed: ["weather.spydeberg"],
+        });
+
+        expect(calls.some((url) => url.includes("wttr.in"))).toBe(true);
+        expect(calls.some((url) => url.includes("api.open-meteo.com"))).toBe(true);
+        const row = database
+            .prepare(
+                "SELECT data_json, source, metadata_json, status FROM cache_entries WHERE key = 'weather.spydeberg'"
+            )
+            .get() as
+            | {
+                  data_json: string;
+                  metadata_json: string;
+                  source: string;
+                  status: string;
+              }
+            | undefined;
+        expect(row).toMatchObject({ source: "open-meteo", status: "fresh" });
+        expect(JSON.parse(row!.data_json)).toMatchObject({
+            description: "Rain",
+            location: "Spydeberg",
+            temperatureC: 1,
+        });
+        expect(JSON.parse(row!.metadata_json)).toMatchObject({
+            fallbackUsed: true,
+            providerPriority: ["wttr.in", "open-meteo"],
+        });
     });
 
     it("drives OpenClaw Gateway client connect and request lifecycle with a fake socket", async () => {
