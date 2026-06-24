@@ -2014,69 +2014,85 @@ describe("shared component helpers", () => {
         const user = userEvent.setup();
         const onRowClick = jest.fn();
         const writeText = jest.fn(async () => {});
+        const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(
+            navigator,
+            "clipboard"
+        );
         Object.defineProperty(navigator, "clipboard", {
             configurable: true,
             value: { writeText },
         });
 
-        const { rerender } = render(
-            <DatabaseTableShell
-                data={[]}
-                columns={[]}
-                emptyMessage="Nothing here"
-                onRowClick={onRowClick}
-            />
-        );
-        expect(screen.getByText("Nothing here")).toBeInTheDocument();
+        try {
+            const { rerender } = render(
+                <DatabaseTableShell
+                    data={[]}
+                    columns={[]}
+                    emptyMessage="Nothing here"
+                    onRowClick={onRowClick}
+                />
+            );
+            expect(screen.getByText("Nothing here")).toBeInTheDocument();
 
-        rerender(
-            <AutovacuumHealthTable
-                data={[
-                    {
-                        dead_pct: "12.5",
-                        last_autoanalyze: "",
-                        last_autovacuum: "",
-                        n_dead_tup: "42",
-                        n_live_tup: "100",
-                        relname: "tasks",
-                        schemaname: "public",
-                    },
-                ]}
-            />
-        );
-        expect(screen.getAllByText("public.tasks").length).toBeGreaterThan(0);
-        expect(screen.getAllByText("12.5%").length).toBeGreaterThan(0);
+            rerender(
+                <AutovacuumHealthTable
+                    data={[
+                        {
+                            dead_pct: "12.5",
+                            last_autoanalyze: "",
+                            last_autovacuum: "",
+                            n_dead_tup: "42",
+                            n_live_tup: "100",
+                            relname: "tasks",
+                            schemaname: "public",
+                        },
+                    ]}
+                />
+            );
+            expect(screen.getAllByText("public.tasks").length).toBeGreaterThan(0);
+            expect(screen.getAllByText("12.5%").length).toBeGreaterThan(0);
 
-        rerender(<TopQueriesTable enabled={false} data={[]} />);
-        expect(
-            screen.getByText("pg_stat_statements is not enabled.")
-        ).toBeInTheDocument();
+            rerender(<TopQueriesTable enabled={false} data={[]} />);
+            expect(
+                screen.getByText("pg_stat_statements is not enabled.")
+            ).toBeInTheDocument();
 
-        const query = "select * from task_history where agent_id = 'mira-2026'";
-        rerender(
-            <TopQueriesTable
-                enabled={true}
-                data={[
-                    {
-                        calls: "7",
-                        mean_exec_time: "2.5",
-                        query,
-                        rows: "3",
-                        shared_blks_hit: "10",
-                        shared_blks_read: "1",
-                        total_exec_time: "17.5",
-                    },
-                ]}
-            />
-        );
+            const query = "select * from task_history where agent_id = 'mira-2026'";
+            rerender(
+                <TopQueriesTable
+                    enabled={true}
+                    data={[
+                        {
+                            calls: "7",
+                            mean_exec_time: "2.5",
+                            query,
+                            rows: "3",
+                            shared_blks_hit: "10",
+                            shared_blks_read: "1",
+                            total_exec_time: "17.5",
+                        },
+                    ]}
+                />
+            );
 
-        await user.click(screen.getAllByText(/select \*/i)[0]!);
-        expect(screen.getByText("Query details")).toBeInTheDocument();
-        await user.click(screen.getByRole("button", { name: /copy query/i }));
-        expect(writeText).toHaveBeenCalledWith(query);
-        expect(
-            await screen.findByRole("button", { name: /copied/i })
-        ).toBeInTheDocument();
+            await user.click(screen.getAllByText(/select \*/i)[0]!);
+            expect(screen.getByText("Query details")).toBeInTheDocument();
+            await user.click(screen.getByRole("button", { name: /copy query/i }));
+            expect(writeText).toHaveBeenCalledWith(query);
+            expect(
+                await screen.findByRole("button", { name: /copied/i })
+            ).toBeInTheDocument();
+        } finally {
+            if (originalClipboardDescriptor) {
+                Object.defineProperty(
+                    navigator,
+                    "clipboard",
+                    originalClipboardDescriptor
+                );
+            } else {
+                delete (navigator as { clipboard?: Clipboard }).clipboard;
+            }
+        }
     });
 
     it("drives backup overview attention, clear, and run actions", async () => {

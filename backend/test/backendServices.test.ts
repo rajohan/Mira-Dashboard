@@ -885,13 +885,13 @@ describe("backend service behavior", () => {
     });
 
     it("updates agent metadata and rolls active task history forward", async () => {
-        const { updateAgentCurrentTask, getLatestCompletedTasks } =
-            await import("../src/services/agents.ts");
         rememberEnvironment("OPENCLAW_HOME");
         rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
         const openclawRoot = createTemporaryRoot("mira-agent-service-test-");
         process.env.OPENCLAW_HOME = openclawRoot;
         delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        const { updateAgentCurrentTask, getLatestCompletedTasks } =
+            await import("../src/services/agents.ts");
 
         const agentId = `agent-${Bun.randomUUIDv7()}`;
 
