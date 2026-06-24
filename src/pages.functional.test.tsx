@@ -56,6 +56,14 @@ import { authActions } from "./stores/authStore";
 
 type FakeWebSocketListener = (event?: { data?: string }) => void;
 
+const originalGlobals = {
+    cancelAnimationFrame,
+    fetch,
+    requestAnimationFrame,
+    scrollIntoView: Element.prototype.scrollIntoView,
+    WebSocket,
+};
+
 class FakeWebSocket {
     static readonly CONNECTING = 0;
     static readonly OPEN = 1;
@@ -1054,6 +1062,29 @@ describe("Mira Dashboard pages", () => {
         cleanup();
         authActions.clearSession();
         localStorage.clear();
+        Object.defineProperties(globalThis, {
+            fetch: {
+                configurable: true,
+                value: originalGlobals.fetch,
+                writable: true,
+            },
+            WebSocket: {
+                configurable: true,
+                value: originalGlobals.WebSocket,
+                writable: true,
+            },
+            requestAnimationFrame: {
+                configurable: true,
+                value: originalGlobals.requestAnimationFrame,
+                writable: true,
+            },
+            cancelAnimationFrame: {
+                configurable: true,
+                value: originalGlobals.cancelAnimationFrame,
+                writable: true,
+            },
+        });
+        Element.prototype.scrollIntoView = originalGlobals.scrollIntoView;
     });
 
     it("renders the main data pages from their API contracts", async () => {

@@ -1692,8 +1692,12 @@ describe("shared component helpers", () => {
         await user.click(screen.getByText("Researcher"));
         await user.click(screen.getAllByRole("switch").at(-1)!);
         await user.click(screen.getByRole("button", { name: "Save access control" }));
-        expect(onSaveAgents).toHaveBeenCalledWith(
-            expect.arrayContaining([expect.objectContaining({ id: "researcher" })])
+        const savedAgents = onSaveAgents.mock.calls.at(-1)?.[0] ?? [];
+        expect(savedAgents).toContainEqual(
+            expect.objectContaining({
+                id: "researcher",
+                tools: expect.objectContaining({ allow: [] }),
+            })
         );
 
         rerender(
@@ -2596,6 +2600,12 @@ describe("shared component helpers", () => {
         await user.click(screen.getByRole("button", { name: "Health" }));
         await user.click(screen.getByRole("button", { name: "CPU" }));
         await user.click(screen.getByRole("button", { name: "Memory" }));
+        const sortedDesktopRows = screen.getAllByRole("row").slice(1);
+        expect(sortedDesktopRows.map((row) => row.textContent || "")).toEqual([
+            expect.stringContaining("running-api"),
+            expect.stringContaining("exited-worker"),
+            expect.stringContaining("created-worker"),
+        ]);
 
         await user.click(screen.getAllByLabelText(/show logs for running-api/i)[0]!);
         await user.click(screen.getAllByLabelText(/open console for running-api/i)[0]!);
