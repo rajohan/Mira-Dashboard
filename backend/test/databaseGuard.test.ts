@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -40,6 +40,21 @@ async function importDatabaseInChild(databasePath: string): Promise<{
 }
 
 describe("database test safety guard", () => {
+    it("allows fresh database paths inside new temporary subdirectories", async () => {
+        const temporaryRoot = await mkdtemp(path.join(tmpdir(), "mira-db-guard-fresh-"));
+        const databasePath = path.join(temporaryRoot, "nested", "dashboard.db");
+
+        try {
+            const { exitCode, stderr } = await importDatabaseInChild(databasePath);
+
+            expect(exitCode).toBe(0);
+            expect(stderr).toBe("");
+            expect(existsSync(databasePath)).toBe(true);
+        } finally {
+            await rm(temporaryRoot, { force: true, recursive: true });
+        }
+    });
+
     it("refuses to open a non-temporary database while running tests", async () => {
         const root = await mkdtemp(
             path.join(import.meta.dirname, ".mira-db-guard-test-")
@@ -79,6 +94,33 @@ describe("database test safety guard", () => {
             expect(stderr).toContain(
                 "Refusing to open symlinked Dashboard test database"
             );
+        } finally {
+            await rm(temporaryRoot, { force: true, recursive: true });
+            await rm(outsideRoot, { force: true, recursive: true });
+        }
+    });
+
+    it("refuses dangling symlinked temporary database paths", async () => {
+        const outsideRoot = await mkdtemp(
+            path.join(import.meta.dirname, ".mira-db-guard-dangling-target-")
+        );
+        const temporaryRoot = await mkdtemp(
+            path.join(tmpdir(), "mira-db-guard-dangling-")
+        );
+        const missingOutsideDatabasePath = path.join(outsideRoot, "missing.db");
+        const symlinkedDatabasePath = path.join(temporaryRoot, "dashboard.db");
+
+        try {
+            await mkdir(outsideRoot, { recursive: true });
+            await symlink(missingOutsideDatabasePath, symlinkedDatabasePath);
+            const { exitCode, stderr } =
+                await importDatabaseInChild(symlinkedDatabasePath);
+
+            expect(exitCode).not.toBe(0);
+            expect(stderr).toContain(
+                "Refusing to open symlinked Dashboard test database"
+            );
+            expect(existsSync(missingOutsideDatabasePath)).toBe(false);
         } finally {
             await rm(temporaryRoot, { force: true, recursive: true });
             await rm(outsideRoot, { force: true, recursive: true });

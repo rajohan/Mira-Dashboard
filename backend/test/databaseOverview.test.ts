@@ -4,6 +4,13 @@ import path from "node:path";
 
 import { describe, expect, it } from "bun:test";
 
+const DATABASE_OVERVIEW_ENV_KEYS = [
+    "DATABASE_HOST",
+    "DATABASE_PORT",
+    "PGBOUNCER_HOST",
+    "PGBOUNCER_PORT",
+] as const;
+
 function table(headers: string[], rows: string[][]): string {
     return [headers.join("\t"), ...rows.map((row) => row.join("\t"))].join("\n");
 }
@@ -128,12 +135,19 @@ process.stdout.write(outputs[key] ?? "");
 describe("database overview service", () => {
     it("summarizes Postgres, PgBouncer, and torrent metrics from command output", async () => {
         const originalPath = process.env.PATH;
+        const originalEnvironment = Object.fromEntries(
+            DATABASE_OVERVIEW_ENV_KEYS.map((key) => [key, process.env[key]])
+        );
         const temporaryRoot = mkdtempSync(path.join(tmpdir(), "mira-fake-docker-"));
         try {
             writeFakeDocker(path.join(temporaryRoot, "docker"));
             const { getDatabaseOverview } =
                 await import("../src/services/databaseOverview.ts");
             process.env.PATH = `${temporaryRoot}${path.delimiter}${originalPath ?? ""}`;
+            process.env.DATABASE_HOST = "postgres";
+            process.env.DATABASE_PORT = "5432";
+            process.env.PGBOUNCER_HOST = "pgbouncer";
+            process.env.PGBOUNCER_PORT = "6432";
             const overview = await getDatabaseOverview();
 
             expect(overview.overview).toMatchObject({
@@ -166,6 +180,14 @@ describe("database overview service", () => {
                 delete process.env.PATH;
             } else {
                 process.env.PATH = originalPath;
+            }
+            for (const key of DATABASE_OVERVIEW_ENV_KEYS) {
+                const value = originalEnvironment[key];
+                if (value === undefined) {
+                    delete process.env[key];
+                } else {
+                    process.env[key] = value;
+                }
             }
             rmSync(temporaryRoot, { force: true, recursive: true });
         }

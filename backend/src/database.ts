@@ -30,19 +30,30 @@ function assertTestDatabasePath(databasePath: string): void {
     if (process.env.NODE_ENV !== "test") {
         return;
     }
-    const temporaryRoot = path.resolve(os.tmpdir());
+    const configuredTemporaryRoot = path.resolve(os.tmpdir());
+    const realTemporaryRoot = fs.realpathSync(configuredTemporaryRoot);
     const databaseParent = path.dirname(databasePath);
-    const realDatabaseParent = fs.realpathSync(databaseParent);
-    const existingDatabaseStat = fs.existsSync(databasePath)
-        ? fs.lstatSync(databasePath)
-        : undefined;
-    if (!configuredDatabasePath || !isPathWithinRoot(databasePath, temporaryRoot)) {
+    if (
+        !configuredDatabasePath ||
+        (!isPathWithinRoot(databasePath, configuredTemporaryRoot) &&
+            !isPathWithinRoot(databasePath, realTemporaryRoot))
+    ) {
         throw new Error(
             `Refusing to open non-temporary Dashboard test database: ${databasePath}`
         );
     }
+    fs.mkdirSync(databaseParent, { recursive: true });
+    const realDatabaseParent = fs.realpathSync(databaseParent);
+    let existingDatabaseStat: fs.Stats | undefined;
+    try {
+        existingDatabaseStat = fs.lstatSync(databasePath);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            throw error;
+        }
+    }
     if (
-        !isPathWithinRoot(realDatabaseParent, temporaryRoot) ||
+        !isPathWithinRoot(realDatabaseParent, realTemporaryRoot) ||
         existingDatabaseStat?.isSymbolicLink() === true
     ) {
         throw new Error(
