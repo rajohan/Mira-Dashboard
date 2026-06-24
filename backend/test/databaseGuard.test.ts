@@ -31,7 +31,7 @@ async function importDatabaseInChild(databasePath: string): Promise<{
         cmd: [
             process.execPath,
             "--eval",
-            `await import(${JSON.stringify(databaseModuleUrl)});`,
+            `const { database } = await import(${JSON.stringify(databaseModuleUrl)}); database.prepare("SELECT 1").get();`,
         ],
         env: {
             ...process.env,

@@ -138,8 +138,13 @@ function waitFor(isReady: () => boolean, timeoutMilliseconds = 1000): Promise<vo
     const deadline = Date.now() + timeoutMilliseconds;
     return new Promise((resolve, reject) => {
         const tick = () => {
-            if (isReady()) {
-                resolve();
+            try {
+                if (isReady()) {
+                    resolve();
+                    return;
+                }
+            } catch (error) {
+                reject(error);
                 return;
             }
             if (Date.now() > deadline) {
@@ -153,8 +158,16 @@ function waitFor(isReady: () => boolean, timeoutMilliseconds = 1000): Promise<vo
 }
 
 afterEach(() => {
+    const errors: unknown[] = [];
     while (cleanupCallbacks.length > 0) {
-        cleanupCallbacks.pop()?.();
+        try {
+            cleanupCallbacks.pop()?.();
+        } catch (error) {
+            errors.push(error);
+        }
+    }
+    if (errors.length > 0) {
+        throw new AggregateError(errors, "Test cleanup failed");
     }
 });
 

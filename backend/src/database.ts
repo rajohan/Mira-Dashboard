@@ -13,10 +13,20 @@ export function sqlNullable(value: SQLQueryBindings | undefined): SQLQueryBindin
     return value === undefined ? SQLITE_NULL : value;
 }
 
-const configuredDatabasePath = process.env.MIRA_DASHBOARD_DB_PATH?.trim();
-export const miraDatabasePath = configuredDatabasePath
-    ? path.resolve(configuredDatabasePath)
-    : path.join(process.cwd(), "data", "mira-dashboard.db");
+function resolveDatabasePath(): {
+    configuredDatabasePath: string | undefined;
+    databasePath: string;
+} {
+    const configuredDatabasePath = process.env.MIRA_DASHBOARD_DB_PATH?.trim();
+    return {
+        configuredDatabasePath,
+        databasePath: configuredDatabasePath
+            ? path.resolve(configuredDatabasePath)
+            : path.join(process.cwd(), "data", "mira-dashboard.db"),
+    };
+}
+
+export const miraDatabasePath = resolveDatabasePath().databasePath;
 
 function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
     const relativePath = path.relative(rootPath, candidatePath);
@@ -38,7 +48,10 @@ function findExistingParent(directoryPath: string): string {
     return currentPath;
 }
 
-function assertTestDatabasePath(databasePath: string): void {
+function assertTestDatabasePath(
+    databasePath: string,
+    configuredDatabasePath: string | undefined
+): void {
     if (process.env.NODE_ENV !== "test") {
         return;
     }
@@ -317,12 +330,13 @@ function runSchemaSql(databaseConnection: DatabaseSync, schemaSql: string): void
     }
 }
 
-function initializeDatabase(): DatabaseSync {
-    assertTestDatabasePath(miraDatabasePath);
-    const dataDirectory = path.dirname(miraDatabasePath);
+function initializeDatabase(databasePath: string): DatabaseSync {
+    const { configuredDatabasePath } = resolveDatabasePath();
+    assertTestDatabasePath(databasePath, configuredDatabasePath);
+    const dataDirectory = path.dirname(databasePath);
     fs.mkdirSync(dataDirectory, { recursive: true });
 
-    const initializedDatabase = new Database(miraDatabasePath);
+    const initializedDatabase = new Database(databasePath);
     initializedDatabase.run("PRAGMA foreign_keys = ON");
     initializedDatabase.run("PRAGMA busy_timeout = 5000");
     runSchemaSql(initializedDatabase, SCHEMA_SQL);
@@ -330,5 +344,42 @@ function initializeDatabase(): DatabaseSync {
     return initializedDatabase;
 }
 
+const activeDatabaseState: {
+    database: DatabaseSync | undefined;
+    path: string | undefined;
+} = {
+    database: undefined,
+    path: undefined,
+};
+
+function currentDatabase(): DatabaseSync {
+    const { databasePath } = resolveDatabasePath();
+    if (
+        activeDatabaseState.database !== undefined &&
+        activeDatabaseState.path === databasePath
+    ) {
+        return activeDatabaseState.database;
+    }
+    activeDatabaseState.database?.close();
+    activeDatabaseState.database = initializeDatabase(databasePath);
+    activeDatabaseState.path = databasePath;
+    return activeDatabaseState.database;
+}
+
+export function closeDatabaseForTests(): void {
+    if (process.env.NODE_ENV !== "test") {
+        throw new Error("closeDatabaseForTests can only be used in test");
+    }
+    activeDatabaseState.database?.close();
+    activeDatabaseState.database = undefined;
+    activeDatabaseState.path = undefined;
+}
+
 /** Defines database. */
-export const database = initializeDatabase();
+export const database = new Proxy({} as DatabaseSync, {
+    get(_target, property) {
+        const active = currentDatabase();
+        const value = Reflect.get(active, property, active);
+        return typeof value === "function" ? value.bind(active) : value;
+    },
+});

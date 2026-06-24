@@ -193,6 +193,7 @@ describe("Docker updater tag patterns", () => {
             pin_mode: "tag",
             policy: "notify",
             service_name: "web",
+            tag_match_pattern: String.raw`^\d+\.\d+\.\d+$`,
             tag_match_type: "regex",
         });
 

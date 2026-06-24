@@ -253,6 +253,8 @@ describe("Mira Dashboard backend integration", () => {
     afterAll(async () => {
         const server = testState.server;
         await server?.stop(true);
+        const { closeDatabaseForTests } = await import("../src/database.ts");
+        closeDatabaseForTests();
         for (const key of TEST_ENV_KEYS) {
             const originalValue = testState.originalEnv[key];
             if (originalValue === undefined) {
