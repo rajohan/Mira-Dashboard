@@ -374,18 +374,25 @@ function currentDatabase(): DatabaseSync {
     return activeDatabaseState.database;
 }
 
-export function closeDatabaseForTests(): void {
-    if (process.env.NODE_ENV !== "test") {
-        throw new Error("closeDatabaseForTests can only be used in test");
-    }
+function closeActiveDatabase(): void {
     activeDatabaseState.database?.close();
     activeDatabaseState.database = undefined;
     activeDatabaseState.path = undefined;
 }
 
+export function closeDatabaseForTests(): void {
+    if (process.env.NODE_ENV !== "test") {
+        throw new Error("closeDatabaseForTests can only be used in test");
+    }
+    closeActiveDatabase();
+}
+
 /** Defines database. */
 export const database = new Proxy({} as DatabaseSync, {
     get(_target, property) {
+        if (property === "close") {
+            return closeActiveDatabase;
+        }
         const active = currentDatabase();
         const value = Reflect.get(active, property, active);
         return typeof value === "function" ? value.bind(active) : value;
