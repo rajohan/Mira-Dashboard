@@ -23,6 +23,7 @@ import {
 import { OpenClawSocketProvider } from "../hooks/useOpenClawSocket";
 import { Agents } from "../pages/Agents";
 import {
+    Chat,
     hasNewerAssistantMessageInHistory,
     nextHistoryBottomState,
     nextHistoryLoadSendError,
@@ -149,6 +150,46 @@ class FakeWebSocket {
         this.readyState = FakeWebSocket.CLOSED;
         this.emit("close");
     }
+}
+
+async function respondToSocketRequest(
+    socket: FakeWebSocket,
+    method: string,
+    payload: unknown = {},
+    isOk = true
+) {
+    const request = findSocketRequest(socket, method);
+
+    if (!request?.id) {
+        throw new Error(`No socket request found for ${method}`);
+    }
+
+    await act(async () => {
+        socket.emit("message", {
+            data: JSON.stringify({
+                type: "response",
+                id: request.id,
+                isOk,
+                payload,
+            }),
+        });
+        await Promise.resolve();
+    });
+}
+
+function findSocketRequest(socket: FakeWebSocket, method: string) {
+    return socket.sent
+        .toReversed()
+        .map(
+            (entry) =>
+                JSON.parse(entry) as {
+                    id?: string;
+                    method?: string;
+                    params?: unknown;
+                    type?: string;
+                }
+        )
+        .find((entry) => entry.type === "req" && entry.method === method);
 }
 
 function parseRequestBody(init: RequestInit | undefined) {
@@ -1521,6 +1562,131 @@ describe("Mira Dashboard pages", () => {
         await user.click(screen.getByRole("button", { name: "Clear" }));
         await waitFor(() => {
             expect(screen.getByText("Waiting for logs...")).toBeInTheDocument();
+        });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("drives chat page session sync, history loading, diagnostics, and send ack", async () => {
+        const user = userEvent.setup();
+        const view = renderPage(createElement(Chat), { withSocket: true });
+
+        await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+        const socket = FakeWebSocket.instances[0]!;
+
+        await act(async () => {
+            socket.emit("open");
+            await Promise.resolve();
+        });
+
+        await waitFor(() => {
+            expect(
+                socket.sent.some((entry) => entry.includes('"method":"sessions.list"'))
+            ).toBe(true);
+        });
+        await respondToSocketRequest(socket, "sessions.list", {
+            sessions: [
+                {
+                    id: "session-main",
+                    key: "agent:main:main",
+                    type: "main",
+                    agentType: "main",
+                    displayLabel: "Main chat",
+                    model: "codex",
+                    thinkingLevel: "medium",
+                    verboseLevel: "compact",
+                    updatedAt: "2026-06-24T08:00:00.000Z",
+                },
+            ],
+        });
+        await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(
+                socket.sent.some((entry) => entry.includes('"method":"models.list"'))
+            ).toBe(true);
+        });
+        await respondToSocketRequest(socket, "models.list", {
+            models: [{ id: "codex", label: "Codex" }],
+        });
+        await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(
+                socket.sent.some((entry) => entry.includes('"method":"chat.history"'))
+            ).toBe(true);
+        });
+        expect(findSocketRequest(socket, "chat.history")?.params).toMatchObject({
+            sessionKey: "agent:main:main",
+        });
+        await respondToSocketRequest(socket, "chat.history", {
+            messages: [
+                {
+                    role: "user",
+                    content: "Previous question",
+                    timestamp: "2026-06-24T08:00:00.000Z",
+                },
+                {
+                    role: "assistant",
+                    content: "Previous answer",
+                    timestamp: "2026-06-24T08:00:01.000Z",
+                },
+            ],
+        });
+        await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(
+                screen.getByText(/MAIN · codex · Thinking: medium/)
+            ).toBeInTheDocument();
+        });
+
+        const thinkingToggle = screen.getByRole("button", { name: "Thinking" });
+        const toolsToggle = screen.getByRole("button", { name: "Tools" });
+        await user.click(thinkingToggle);
+        await user.click(toolsToggle);
+        expect(thinkingToggle).toHaveAttribute("aria-pressed", "true");
+        expect(toolsToggle).toHaveAttribute("aria-pressed", "true");
+
+        await user.type(
+            screen.getByPlaceholderText(
+                "Message, attach files, or use / commands (try /help)"
+            ),
+            "Ship it"
+        );
+        await user.click(screen.getByRole("button", { name: "Send" }));
+
+        await waitFor(() => {
+            expect(
+                socket.sent.some((entry) => entry.includes('"method":"sessions.patch"'))
+            ).toBe(true);
+        });
+        await respondToSocketRequest(socket, "sessions.patch", {});
+        await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(
+                socket.sent.some((entry) => entry.includes('"method":"chat.send"'))
+            ).toBe(true);
+        });
+        const chatSendRequest = socket.sent
+            .map((entry) => JSON.parse(entry) as { method?: string; params?: unknown })
+            .find((entry) => entry.method === "chat.send");
+        expect(chatSendRequest?.params).toMatchObject({
+            sessionKey: "agent:main:main",
+            sessionId: "session-main",
+            message: "Ship it",
+        });
+        await respondToSocketRequest(socket, "chat.send", { runId: "run-123" });
+        await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(
+                screen.getByPlaceholderText(
+                    "Message, attach files, or use / commands (try /help)"
+                )
+            ).toHaveValue("");
         });
 
         view.unmount();

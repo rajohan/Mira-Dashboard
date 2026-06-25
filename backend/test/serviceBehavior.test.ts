@@ -240,6 +240,26 @@ exit 2
     chmodSync(binaryPath, 0o755);
 }
 
+function writeRunningWalgPreflightDocker(binaryPath: string): void {
+    writeFileSync(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"pgrep -f"* ]]; then
+  printf '23456\n'
+  exit 0
+fi
+if [[ "$*" == "exec walg wal-g backup-list --detail --json" ]]; then
+  printf '[]\n'
+  exit 0
+fi
+echo "unexpected docker args: $*" >&2
+exit 2
+`
+    );
+    chmodSync(binaryPath, 0o755);
+}
+
 function writeFakeOpenClaw(binaryPath: string): void {
     writeFileSync(
         binaryPath,
@@ -1738,6 +1758,56 @@ fi
                     row?.status === "failed" &&
                     row.message?.includes("pgrep failed") === true
                 );
+            });
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("records and clears WAL-G needs-attention state when container preflight detects a running process", async () => {
+        rememberEnvironment("PATH");
+        const fakeBin = createTemporaryRoot("mira-backup-walg-running-bin-");
+        writeRunningWalgPreflightDocker(path.join(fakeBin, "docker"));
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        const {
+            clearNeedsAttentionBackupJob,
+            getCurrentBackupJob,
+            mapBackupJob,
+            registerBackupScheduledJobs,
+            startManualBackup,
+        } = await import("../src/services/backups.ts");
+
+        try {
+            registerBackupScheduledJobs();
+            await expect(startManualBackup("walg")).rejects.toMatchObject({
+                statusCode: 409,
+            });
+            expect(mapBackupJob(getCurrentBackupJob("walg"))).toMatchObject({
+                code: 130,
+                status: "needs_attention",
+                stderr: expect.stringContaining("backup process is still running"),
+                type: "walg",
+            });
+            await expect(startManualBackup("walg")).rejects.toThrow(
+                "WALG backup needs attention"
+            );
+
+            const clearedJob = await clearNeedsAttentionBackupJob("walg");
+            expect(mapBackupJob(clearedJob)).toMatchObject({
+                status: "needs_attention",
+                type: "walg",
+            });
+            expect(getCurrentBackupJob("walg")).toBeUndefined();
+            await waitFor(() => {
+                const row = database
+                    .prepare(
+                        "SELECT status FROM scheduled_job_runs WHERE job_id = 'backup.walg' ORDER BY id DESC LIMIT 1"
+                    )
+                    .get() as { status?: string } | undefined;
+                return row?.status === "failed";
             });
         } finally {
             database
