@@ -5,18 +5,18 @@ coverage:
     status:
         project:
             backend:
-                target: auto
-                threshold: 100%
-                informational: true
+                target: 80%
+                threshold: 0%
+                informational: false
                 if_ci_failed: error
                 flags:
                     - backend
                 paths:
                     - backend/src/
             frontend:
-                target: auto
-                threshold: 100%
-                informational: true
+                target: 80%
+                threshold: 0%
+                informational: false
                 if_ci_failed: error
                 flags:
                     - frontend
@@ -24,18 +24,18 @@ coverage:
                     - src/
         patch:
             backend:
-                target: auto
-                threshold: 100%
-                informational: true
+                target: 80%
+                threshold: 0%
+                informational: false
                 if_ci_failed: error
                 flags:
                     - backend
                 paths:
                     - backend/src/
             frontend:
-                target: auto
-                threshold: 100%
-                informational: true
+                target: 80%
+                threshold: 0%
+                informational: false
                 if_ci_failed: error
                 flags:
                     - frontend

@@ -1507,6 +1507,219 @@ fi
         });
     });
 
+    it("refreshes weather through the Open-Meteo fallback when wttr.in fails", async () => {
+        cleanupCallbacks.push(() => {
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'weather.spydeberg'")
+                .run();
+        });
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.startsWith("https://wttr.in/Spydeberg")) {
+                return new Response("upstream unavailable", { status: 503 });
+            }
+            if (url.startsWith("https://api.open-meteo.com/")) {
+                return Response.json({
+                    current: {
+                        apparent_temperature: 12.5,
+                        relative_humidity_2m: 94,
+                        temperature_2m: 13,
+                        weather_code: 61,
+                        wind_speed_10m: 5,
+                    },
+                    daily: {
+                        temperature_2m_max: [21, 22, 20],
+                        temperature_2m_min: [14, 15, 13],
+                        time: ["2026-06-26", "2026-06-27", "2026-06-28"],
+                        weather_code: [0, 95, "bad"],
+                    },
+                });
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+
+        await expect(
+            refreshCacheProducer("weather.spydeberg", undefined, { force: true })
+        ).resolves.toEqual({ refreshed: ["weather.spydeberg"] });
+
+        const row = database
+            .prepare(
+                "SELECT data_json, metadata_json, status FROM cache_entries WHERE key = 'weather.spydeberg'"
+            )
+            .get() as { data_json: string; metadata_json: string; status: string };
+        expect(row.status).toBe("fresh");
+        const data = JSON.parse(row.data_json);
+        expect(data).toMatchObject({
+            description: "Rain",
+            forecast: [
+                { date: "2026-06-26", description: "Clear" },
+                { date: "2026-06-27", description: "Thunderstorm" },
+                { date: "2026-06-28", description: "Unknown" },
+            ],
+            humidityPercent: 94,
+            location: "Spydeberg",
+            temperatureC: 13,
+        });
+        expect(JSON.parse(row.metadata_json)).toMatchObject({
+            fallbackReason: expect.stringContaining("HTTP 503"),
+            fallbackUsed: true,
+            providerPriority: ["wttr.in", "open-meteo"],
+        });
+    });
+
+    it("records Moltbook sub-request failures without discarding successful cache writes", async () => {
+        rememberEnvironment("MOLTBOOK_API_KEY");
+        process.env.MOLTBOOK_API_KEY = "moltbook-key";
+        cleanupCallbacks.push(() => {
+            database
+                .prepare("DELETE FROM cache_entries WHERE key LIKE 'moltbook.%'")
+                .run();
+        });
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.endsWith("/home")) {
+                return Response.json({
+                    activity_on_your_posts: [{ id: "activity-1" }],
+                    latest_moltbook_announcement: {
+                        author_name: "OpenClaw",
+                        created_at: "2026-06-25T10:00:00.000Z",
+                        post_id: "post-1",
+                        preview: "Hello",
+                        title: "Announcement",
+                    },
+                    posts_from_accounts_you_follow: [{ id: "followed-1" }],
+                    what_to_do_next: [{ label: "reply" }],
+                    your_direct_messages: {
+                        pending_request_count: "2",
+                        unread_message_count: "3",
+                    },
+                });
+            }
+            if (url.endsWith("/feed?sort=hot&limit=25")) {
+                return Response.json({
+                    feed_filter: "all",
+                    feed_type: "hot",
+                    has_more: true,
+                    posts: [{ id: "hot-1" }],
+                    tip: "keep going",
+                });
+            }
+            if (url.endsWith("/feed?sort=new&limit=25")) {
+                return new Response("feed failed", { status: 502 });
+            }
+            if (url.endsWith("/agents/profile?name=mira_2026")) {
+                return Response.json({
+                    agent: { name: "mira_2026" },
+                    recentComments: [{ id: "comment-1" }],
+                    recentPosts: [{ id: "post-2" }],
+                });
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+
+        await expect(
+            refreshCacheProducer("moltbook", undefined, { force: true })
+        ).rejects.toThrow("Moltbook refresh had sub-request failures");
+
+        const rows = database
+            .prepare(
+                "SELECT key, data_json, error_message, status FROM cache_entries WHERE key LIKE 'moltbook.%' ORDER BY key"
+            )
+            .all() as Array<{
+            data_json: string | null;
+            error_message: string | null;
+            key: string;
+            status: string;
+        }>;
+        expect(rows.map((row) => [row.key, row.status])).toEqual([
+            ["moltbook.feed.hot", "fresh"],
+            ["moltbook.feed.new", "error"],
+            ["moltbook.home", "fresh"],
+            ["moltbook.my-content", "fresh"],
+            ["moltbook.profile", "fresh"],
+        ]);
+        expect(
+            JSON.parse(rows.find((row) => row.key === "moltbook.home")?.data_json ?? "{}")
+        ).toMatchObject({
+            activityOnYourPostsCount: 1,
+            pendingRequestCount: 2,
+            unreadMessageCount: 3,
+        });
+        expect(
+            rows.find((row) => row.key === "moltbook.feed.new")?.error_message
+        ).toContain("Moltbook refresh had sub-request failures");
+    });
+
+    it("coordinates cache refresh in-flight sharing and abort handling", async () => {
+        cleanupCallbacks.push(() => {
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'weather.spydeberg'")
+                .run();
+        });
+        let weatherResponses = 0;
+        let releaseWeather: (() => void) | undefined;
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.startsWith("https://wttr.in/Spydeberg")) {
+                weatherResponses += 1;
+                const gate = Promise.withResolvers<void>();
+                releaseWeather = gate.resolve;
+                await gate.promise;
+                return Response.json({
+                    current_condition: [
+                        {
+                            FeelsLikeC: "13",
+                            humidity: "80",
+                            temp_C: "14",
+                            weatherDesc: [{ value: "Clear" }],
+                            windspeedKmph: "5",
+                        },
+                    ],
+                    weather: [
+                        {
+                            date: "2026-06-26",
+                            hourly: [{ weatherDesc: [{ value: "Clear" }] }],
+                            maxtempC: "21",
+                            mintempC: "14",
+                        },
+                    ],
+                });
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+        const firstRefresh = refreshCacheProducer("weather.spydeberg", undefined, {
+            force: true,
+        });
+        await waitFor(() => weatherResponses === 1);
+        const secondRefresh = refreshCacheProducer("weather.spydeberg");
+        const abortController = new AbortController();
+        abortController.abort();
+        await expect(
+            refreshCacheProducer("weather.spydeberg", abortController.signal)
+        ).rejects.toThrow("Cache refresh aborted");
+        releaseWeather?.();
+
+        await expect(firstRefresh).resolves.toEqual({
+            refreshed: ["weather.spydeberg"],
+        });
+        await expect(secondRefresh).resolves.toEqual({
+            refreshed: ["weather.spydeberg"],
+        });
+        expect(weatherResponses).toBe(1);
+    });
+
     it("drives OpenClaw Gateway client connect and request lifecycle with a fake socket", async () => {
         const originalWebSocket = WebSocket;
         cleanupCallbacks.push(() => {

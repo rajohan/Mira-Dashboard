@@ -921,21 +921,75 @@ describe("backend route and service behavior", () => {
         const [
             { backupRoutes },
             { cacheRoutes },
+            { cronRoutes },
             { dockerRoutes },
+            gatewayModule,
+            { moltbookRoutes },
             { pullRequestRoutes },
             { terminalRoutes },
         ] = await Promise.all([
             import("../src/routes/backupRoutes.ts"),
             import("../src/routes/cacheRoutes.ts"),
+            import("../src/routes/cronRoutes.ts"),
             import("../src/routes/dockerRoutes.ts"),
+            import("../src/gateway.ts"),
+            import("../src/routes/moltbookRoutes.ts"),
             import("../src/routes/pullRequestRoutes.ts"),
             import("../src/routes/terminalRoutes.ts"),
         ]);
+
+        const gateway = gatewayModule.default;
+        const gatewayRequestSpy = jest
+            .spyOn(gateway, "request")
+            .mockImplementation(async (method) => {
+                if (method === "cron.list") {
+                    return { items: [{ enabled: true, id: "item-cron" }] };
+                }
+                throw Object.assign(new Error(`gateway failed for ${method}`), {
+                    statusCode: 502,
+                });
+            });
+        cleanupCallbacks.push(() => gatewayRequestSpy.mockRestore());
+
+        database
+            .prepare(
+                "INSERT INTO cache_entries (key, data_json, source, updated_at, last_attempt_at, expires_at, status, consecutive_failures, metadata_json) VALUES ('route.string', 'raw-value', 'test', ?, ?, ?, 'fresh', 2, '{bad-json') ON CONFLICT(key) DO UPDATE SET data_json = excluded.data_json, metadata_json = excluded.metadata_json, updated_at = excluded.updated_at, last_attempt_at = excluded.last_attempt_at, expires_at = excluded.expires_at"
+            )
+            .run(Date.now(), Date.now(), Date.now() + 60_000);
+        cleanupCallbacks.push(() => {
+            database
+                .prepare(
+                    "DELETE FROM cache_entries WHERE key = 'route.string' OR key LIKE 'moltbook.%'"
+                )
+                .run();
+        });
+
+        const cacheHeartbeat = await cacheRoutes["/api/cache/heartbeat"].GET();
+        await expect(cacheHeartbeat.json()).resolves.toMatchObject({
+            count: expect.any(Number),
+            entries: expect.arrayContaining([
+                expect.objectContaining({
+                    consecutiveFailures: 2,
+                    data: "raw-value",
+                    key: "route.string",
+                    meta: {},
+                }),
+            ]),
+        });
 
         const missingCache = await cacheRoutes["/api/cache/:key"].GET(
             requestWithParameters("/api/cache/", { key: "" })
         );
         expect(missingCache.status).toBe(400);
+
+        const stringCache = await cacheRoutes["/api/cache/:key"].GET(
+            requestWithParameters("/api/cache/route.string", { key: "route.string" })
+        );
+        await expect(stringCache.json()).resolves.toMatchObject({
+            data: "raw-value",
+            key: "route.string",
+            meta: {},
+        });
 
         const unknownCache = await cacheRoutes["/api/cache/:key"].GET(
             requestWithParameters("/api/cache/nope", { key: "nope" })
@@ -1053,6 +1107,74 @@ describe("backend route and service behavior", () => {
             })
         );
         expect(invalidUpdater.status).toBe(400);
+
+        const cronList = await cronRoutes["/api/cron/jobs"].GET();
+        await expect(cronList.json()).resolves.toEqual({
+            jobs: [{ enabled: true, id: "item-cron" }],
+        });
+
+        const badCronToggleBody = await cronRoutes["/api/cron/jobs/:id/toggle"].POST(
+            requestWithParameters(
+                "/api/cron/jobs/item-cron/toggle",
+                { id: "item-cron" },
+                { body: "null", method: "POST" }
+            )
+        );
+        expect(badCronToggleBody.status).toBe(400);
+
+        const badCronToggleValue = await cronRoutes["/api/cron/jobs/:id/toggle"].POST(
+            requestWithParameters(
+                "/api/cron/jobs/item-cron/toggle",
+                { id: "item-cron" },
+                { body: JSON.stringify({ enabled: "yes" }), method: "POST" }
+            )
+        );
+        expect(badCronToggleValue.status).toBe(400);
+
+        const failedCronRun = await cronRoutes["/api/cron/jobs/:id/run"].POST(
+            requestWithParameters("/api/cron/jobs/item-cron/run", { id: "item-cron" })
+        );
+        expect(failedCronRun.status).toBe(502);
+        await expect(failedCronRun.json()).resolves.toEqual({
+            error: "gateway failed for cron.run",
+        });
+
+        const badCronUpdateBody = await cronRoutes["/api/cron/jobs/:id/update"].POST(
+            requestWithParameters(
+                "/api/cron/jobs/item-cron/update",
+                { id: "item-cron" },
+                { body: JSON.stringify([]), method: "POST" }
+            )
+        );
+        expect(badCronUpdateBody.status).toBe(400);
+
+        const badCronUpdatePatch = await cronRoutes["/api/cron/jobs/:id/update"].POST(
+            requestWithParameters(
+                "/api/cron/jobs/item-cron/update",
+                { id: "item-cron" },
+                { body: JSON.stringify({}), method: "POST" }
+            )
+        );
+        expect(badCronUpdatePatch.status).toBe(400);
+
+        for (const [route, handler] of [
+            ["/api/moltbook/home", moltbookRoutes["/api/moltbook/home"].GET],
+            [
+                "/api/moltbook/feed?sort=new",
+                (request?: Request) =>
+                    moltbookRoutes["/api/moltbook/feed"].GET(
+                        request ?? new Request("https://test.local/api/moltbook/feed")
+                    ),
+            ],
+            ["/api/moltbook/profile", moltbookRoutes["/api/moltbook/profile"].GET],
+            ["/api/moltbook/my-posts", moltbookRoutes["/api/moltbook/my-posts"].GET],
+        ] as const) {
+            const response = await handler(new Request(`https://test.local${route}`));
+            expect(response.status).toBe(503);
+            await expect(response.json()).resolves.toEqual({
+                error: expect.any(String),
+            });
+        }
 
         for (const [route, handler] of [
             [
