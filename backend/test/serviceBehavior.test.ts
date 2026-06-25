@@ -218,6 +218,26 @@ exit 1
     chmodSync(binaryPath, 0o755);
 }
 
+function writeFailingWalgPreflightDocker(binaryPath: string): void {
+    writeFileSync(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"pgrep -f"* ]]; then
+  printf '%s\n' "pgrep failed" >&2
+  exit 2
+fi
+if [[ "$*" == "exec walg wal-g backup-list --detail --json" ]]; then
+  printf '[]\n'
+  exit 0
+fi
+echo "unexpected docker args: $*" >&2
+exit 2
+`
+    );
+    chmodSync(binaryPath, 0o755);
+}
+
 function writeFakeOpenClaw(binaryPath: string): void {
     writeFileSync(
         binaryPath,
@@ -1428,6 +1448,39 @@ fi
                     )
                     .get()
             ).toEqual({ status: "success" });
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("reports WAL-G preflight failures without starting a backup job", async () => {
+        rememberEnvironment("PATH");
+        const fakeBin = createTemporaryRoot("mira-backup-preflight-bin-");
+        writeFailingWalgPreflightDocker(path.join(fakeBin, "docker"));
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
+            await import("../src/services/backups.ts");
+
+        try {
+            registerBackupScheduledJobs();
+            await expect(startManualBackup("walg")).rejects.toMatchObject({
+                statusCode: 503,
+            });
+            expect(getCurrentBackupJob("walg")).toBeUndefined();
+            await waitFor(() => {
+                const row = database
+                    .prepare(
+                        "SELECT status, message FROM scheduled_job_runs WHERE job_id = 'backup.walg' ORDER BY id DESC LIMIT 1"
+                    )
+                    .get() as { message?: string; status?: string } | undefined;
+                return (
+                    row?.status === "failed" &&
+                    row.message?.includes("pgrep failed") === true
+                );
+            });
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")

@@ -2839,7 +2839,13 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(formatWeekdayShort(new Date("bad"))).toBe("---");
         expect(formatDuration(undefined)).toBe("Unknown");
         expect(formatUtcTimeOfDayInAppTimeZone("bad")).toBe("--:--");
+        expect(formatUtcTimeOfDayInAppTimeZone("12:30", "2026-01-15T00:00:00.000Z")).toBe(
+            "13:30"
+        );
         expect(appTimeOfDayToUtcTimeOfDay("bad")).toBe("bad");
+        expect(appTimeOfDayToUtcTimeOfDay("13:30", "2026-01-15T00:00:00.000Z")).toBe(
+            "12:30"
+        );
     });
 
     it("keeps chat utility behavior stable for slash commands, diagnostics, and optimistic messages", async () => {
