@@ -5,8 +5,22 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
 import {
+    copyGuarded,
+    copyNoFollowGuarded,
     guardedPath,
+    lstatGuarded,
+    mkdirGuarded,
+    openReadNoFollowNonblockingGuarded,
+    readdirGuarded,
+    readdirGuardedAsync,
+    readJson5Guarded,
+    readTextGuarded,
+    readTextNoFollowGuarded,
+    statGuarded,
+    statGuardedAsync,
+    writeTextGuarded,
     writeTextNoFollowAnchoredGuarded,
+    writeTextNoFollowExclusiveGuarded,
     writeTextNoFollowGuarded,
 } from "../src/lib/guardedOps.ts";
 
@@ -114,5 +128,75 @@ describe("guarded writes", () => {
         await expect(fs.readFile(anchoredFile, "utf8")).resolves.toBe("new");
         expect(await modeOf(directFile)).toBe(0o640);
         expect(await modeOf(anchoredFile)).toBe(0o600);
+    });
+
+    it("covers guarded read, copy, and exclusive-create helpers on regular files", async () => {
+        const nestedRoot = path.join(testState.temporaryRoot, "nested");
+        mkdirGuarded(guardedPath(nestedRoot), { recursive: true });
+        const source = path.join(nestedRoot, "source.txt");
+        const copied = path.join(nestedRoot, "copied.txt");
+        const copiedNoFollow = path.join(nestedRoot, "copied-no-follow.txt");
+        const exclusive = path.join(nestedRoot, "exclusive.txt");
+        const json5 = path.join(nestedRoot, "config.json5");
+
+        await fs.writeFile(source, "hello guarded ops");
+        await fs.chmod(source, 0o640);
+        await fs.writeFile(json5, "{ answer: 42, label: 'mira' }\n");
+
+        expect(readTextGuarded(guardedPath(source))).toBe("hello guarded ops");
+        expect(readJson5Guarded(guardedPath(json5))).toEqual({
+            answer: 42,
+            label: "mira",
+        });
+        expect(
+            readdirGuarded(guardedPath(nestedRoot), { withFileTypes: true }).map(
+                (entry) => entry.name
+            )
+        ).toContain("source.txt");
+        const asyncEntries = await readdirGuardedAsync(guardedPath(nestedRoot), {
+            withFileTypes: true,
+        });
+        expect(asyncEntries.map((entry) => entry.name)).toContain("config.json5");
+        expect(statGuarded(guardedPath(source)).isFile()).toBe(true);
+        expect(lstatGuarded(guardedPath(source)).isFile()).toBe(true);
+        await expect(statGuardedAsync(guardedPath(source))).resolves.toMatchObject({
+            size: "hello guarded ops".length,
+        });
+        await expect(readTextNoFollowGuarded(guardedPath(source))).resolves.toBe(
+            "hello guarded ops"
+        );
+
+        const file = await openReadNoFollowNonblockingGuarded(guardedPath(source));
+        try {
+            await expect(file.readFile("utf8")).resolves.toBe("hello guarded ops");
+        } finally {
+            await file.close();
+        }
+
+        copyGuarded(guardedPath(source), guardedPath(copied));
+        expect(readTextGuarded(guardedPath(copied))).toBe("hello guarded ops");
+
+        await copyNoFollowGuarded(guardedPath(source), guardedPath(copiedNoFollow));
+        await expect(fs.readFile(copiedNoFollow, "utf8")).resolves.toBe(
+            "hello guarded ops"
+        );
+        expect(await modeOf(copiedNoFollow)).toBe(0o640);
+        await expect(
+            copyNoFollowGuarded(guardedPath(source), guardedPath(source))
+        ).rejects.toMatchObject({ code: "EINVAL" });
+
+        await writeTextGuarded(guardedPath(copied), "rewritten");
+        await expect(fs.readFile(copied, "utf8")).resolves.toBe("rewritten");
+
+        await writeTextNoFollowExclusiveGuarded(
+            guardedPath(exclusive),
+            "exclusive",
+            0o600
+        );
+        await expect(fs.readFile(exclusive, "utf8")).resolves.toBe("exclusive");
+        expect(await modeOf(exclusive)).toBe(0o600);
+        await expect(
+            writeTextNoFollowExclusiveGuarded(guardedPath(exclusive), "again")
+        ).rejects.toMatchObject({ code: "EEXIST" });
     });
 });
