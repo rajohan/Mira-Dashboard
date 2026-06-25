@@ -36,6 +36,16 @@ function createTemporaryRoot(prefix: string): string {
     return root;
 }
 
+function routeRequest<T extends string>(
+    route: string,
+    parameters: Record<T, string>,
+    init?: RequestInit
+): Request & { params: Record<T, string> } {
+    return Object.assign(new Request(`https://test.local${route}`, init), {
+        params: parameters,
+    });
+}
+
 function writeFakeGit(binaryPath: string, repoRoot: string): void {
     writeFileSync(
         binaryPath,
@@ -734,6 +744,7 @@ fi
 
         const { approvePullRequestReview, rejectPullRequest, updatePullRequestBranch } =
             await import("../src/services/pullRequests.ts");
+        const { pullRequestRoutes } = await import("../src/routes/pullRequestRoutes.ts");
 
         await expect(approvePullRequestReview(3)).resolves.toMatchObject({
             isOk: true,
@@ -754,6 +765,40 @@ fi
                 branch: "close-branch",
                 status: "skipped",
             },
+            isOk: true,
+            message: "PR #5 closed",
+        });
+
+        const reviewRoute = await pullRequestRoutes[
+            "/api/pull-requests/:number/review-approval"
+        ].POST(routeRequest("/api/pull-requests/3/review-approval", { number: "3" }));
+        await expect(reviewRoute.json()).resolves.toMatchObject({
+            isOk: true,
+            message: "PR #3 review approved",
+        });
+
+        const updateRoute = await pullRequestRoutes[
+            "/api/pull-requests/:number/update-branch"
+        ].POST(routeRequest("/api/pull-requests/4/update-branch", { number: "4" }));
+        await expect(updateRoute.json()).resolves.toMatchObject({
+            isOk: true,
+            message: "PR #4 branch update started",
+        });
+
+        const rejectRoute = await pullRequestRoutes[
+            "/api/pull-requests/:number/reject"
+        ].POST(
+            routeRequest(
+                "/api/pull-requests/5/reject",
+                { number: "5" },
+                {
+                    body: JSON.stringify({ comment: "Not ready" }),
+                    headers: { "Content-Type": "application/json" },
+                    method: "POST",
+                }
+            )
+        );
+        await expect(rejectRoute.json()).resolves.toMatchObject({
             isOk: true,
             message: "PR #5 closed",
         });
