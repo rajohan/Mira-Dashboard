@@ -1001,7 +1001,18 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
 
     if (url === "/api/logs/content?file=openclaw.log&lines=100") {
         return Response.json({
-            content: "2026-06-24T08:00:00.000Z info dashboard ready",
+            content: [
+                JSON.stringify({
+                    level: "info",
+                    time: "2026-06-24T08:00:00.000Z",
+                    msg: "dashboard ready",
+                }),
+                JSON.stringify({
+                    level: "error",
+                    time: "2026-06-24T08:01:00.000Z",
+                    msg: "failed backup",
+                }),
+            ].join("\n"),
         });
     }
 
@@ -1099,13 +1110,49 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     reviewDecision: "APPROVED",
                     mergeStateStatus: "CLEAN",
                     statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }],
+                    additions: 12,
+                    deletions: 3,
+                    changedFiles: 2,
+                    reviewerApproved: true,
+                    body: String.raw`## Summary\nCoverage body`,
+                },
+                {
+                    number: 191,
+                    title: "Bump dashboard dependency",
+                    url: "https://github.com/rajohan/Mira-Dashboard/pull/191",
+                    headRefName: "dependabot/npm-and-yarn/pkg",
+                    baseRefName: "main",
+                    author: { login: "app/dependabot" },
+                    createdAt: "2026-06-24T09:00:00.000Z",
+                    updatedAt: "2026-06-24T09:05:00.000Z",
+                    isDraft: false,
+                    reviewDecision: "REVIEW_REQUIRED",
+                    mergeStateStatus: "BEHIND",
+                    mergeable: "MERGEABLE",
+                    statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }],
+                    additions: 4,
+                    deletions: 1,
+                    changedFiles: 1,
+                    canReviewerApprove: true,
+                    body: "Dependency update",
                 },
             ],
         });
     }
 
     if (url === "/api/pull-requests/deployments") {
-        return Response.json({ deployments: [] });
+        return Response.json({
+            deployments: [
+                {
+                    id: "deploy-1",
+                    commit: "abc123",
+                    commitTitle: "Deploy dashboard",
+                    status: "isOk",
+                    updatedAt: "2026-06-24T08:10:00.000Z",
+                    note: "deployed",
+                },
+            ],
+        });
     }
 
     if (url === "/api/pull-requests/production-checkout") {
@@ -1120,6 +1167,44 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                 isClean: true,
                 isProductionRoot: true,
                 isSafeForDeploy: true,
+            },
+        });
+    }
+
+    if (method === "POST" && url === "/api/pull-requests/190/approve") {
+        expect(parseRequestBody(init)).toEqual({ deploy: false });
+        return Response.json({
+            isOk: true,
+            message: "Merged PR #190",
+            cleanup: { isOk: true, message: "Cleaned worktree" },
+        });
+    }
+
+    if (method === "POST" && url === "/api/pull-requests/190/reject") {
+        expect(parseRequestBody(init)).toEqual({});
+        return Response.json({
+            isOk: true,
+            message: "Rejected PR #190",
+        });
+    }
+
+    if (method === "POST" && url === "/api/pull-requests/191/review-approval") {
+        return Response.json({ isOk: true, message: "Approved PR #191" });
+    }
+
+    if (method === "POST" && url === "/api/pull-requests/191/update-branch") {
+        return Response.json({ isOk: true, message: "Branch update queued" });
+    }
+
+    if (method === "POST" && url === "/api/pull-requests/deploy") {
+        return Response.json({
+            isOk: true,
+            deployment: {
+                id: "deploy-2",
+                commit: "def456",
+                status: "restart-scheduled",
+                updatedAt: "2026-06-24T08:15:00.000Z",
+                note: "Deploy scheduled",
             },
         });
     }
@@ -1337,6 +1422,105 @@ describe("Mira Dashboard pages", () => {
         await user.click(screen.getByRole("button", { name: /^delete cron job$/i }));
         await waitFor(() => {
             expect(screen.queryByText("Delete cron job")).not.toBeInTheDocument();
+        });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("drives pull request review, branch update, deploy, merge, and reject flows", async () => {
+        const user = userEvent.setup();
+        const view = renderPage(createElement(PullRequests));
+
+        await waitFor(() => {
+            expect(screen.getByText("Expand backend coverage")).toBeInTheDocument();
+            expect(screen.getByText("Bump dashboard dependency")).toBeInTheDocument();
+            expect(screen.getByText("Deploy dashboard")).toBeInTheDocument();
+        });
+        expect(screen.getByText("Coverage body")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Approve PR" }));
+        expect(screen.getByRole("heading", { name: "Approve PR" })).toBeInTheDocument();
+        await user.click(screen.getAllByRole("button", { name: "Approve PR" }).at(-1)!);
+        await waitFor(() => {
+            expect(screen.getByText("Approved PR #191")).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: "Update branch" }));
+        await waitFor(() => {
+            expect(screen.getByText("Branch update queued")).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: "Deploy latest main" }));
+        expect(
+            screen.getByRole("heading", { name: "Deploy latest main" })
+        ).toBeInTheDocument();
+        await user.click(
+            screen.getAllByRole("button", { name: "Deploy latest main" }).at(-1)!
+        );
+        await waitFor(() => {
+            expect(screen.getByText("Deploy scheduled")).toBeInTheDocument();
+        });
+
+        await user.click(screen.getAllByRole("button", { name: "Merge only" })[0]!);
+        expect(screen.getByRole("heading", { name: "Merge PR" })).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Merge PR" }));
+        await waitFor(() => {
+            expect(screen.getByText(/Merged PR #190/)).toBeInTheDocument();
+            expect(screen.getByText(/Cleaned worktree/)).toBeInTheDocument();
+        });
+
+        await user.click(screen.getAllByRole("button", { name: "Reject" })[0]!);
+        expect(screen.getByRole("heading", { name: "Reject PR" })).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Reject PR" }));
+        await waitFor(() => {
+            expect(screen.getByText("Rejected PR #190")).toBeInTheDocument();
+        });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("drives logs page loading, searching, level filtering, and clearing", async () => {
+        const user = userEvent.setup();
+        const view = renderPage(createElement(Logs), { withSocket: true });
+
+        await waitFor(() => {
+            expect(screen.getByText("openclaw.log")).toBeInTheDocument();
+            expect(screen.getByText(/2 of 2 entries/)).toBeInTheDocument();
+        });
+
+        await user.type(screen.getByPlaceholderText("Search logs..."), "failed");
+        await waitFor(() => {
+            expect(screen.getByText(/1 of 2 entries/)).toBeInTheDocument();
+        });
+
+        const searchInput = screen.getByPlaceholderText("Search logs...");
+
+        await user.clear(searchInput);
+        await user.type(searchInput, "missing");
+        await waitFor(() => {
+            expect(screen.getByText("No logs match your filter.")).toBeInTheDocument();
+        });
+
+        await user.clear(searchInput);
+        await waitFor(() => {
+            expect(screen.getByText(/2 of 2 entries/)).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: "error" }));
+        await waitFor(() => {
+            expect(screen.getByText(/1 of 2 entries/)).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: "error" }));
+        await waitFor(() => {
+            expect(screen.getByText(/2 of 2 entries/)).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: "Clear" }));
+        await waitFor(() => {
+            expect(screen.getByText("Waiting for logs...")).toBeInTheDocument();
         });
 
         view.unmount();
