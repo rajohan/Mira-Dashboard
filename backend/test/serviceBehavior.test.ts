@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import type { DashboardSocket } from "../src/dashboardSocket.ts";
 import { database, sqlNullable } from "../src/database.ts";
@@ -2460,6 +2460,28 @@ fi
             expect(
                 calculateNextRunAt(
                     {
+                        enabled: false,
+                        intervalSeconds: 90,
+                        scheduleType: "interval",
+                        timeOfDay: undefined,
+                    },
+                    new Date("2026-06-24T10:00:00.000Z")
+                )
+            ).toBeUndefined();
+            expect(
+                calculateNextRunAt(
+                    {
+                        enabled: true,
+                        intervalSeconds: 60,
+                        scheduleType: "daily",
+                        timeOfDay: "12:30",
+                    },
+                    new Date("2026-06-24T10:00:00.000Z")
+                )
+            ).toBe("2026-06-24T12:30:00.000Z");
+            expect(
+                calculateNextRunAt(
+                    {
                         enabled: true,
                         intervalSeconds: 60,
                         scheduleType: "daily",
@@ -2480,6 +2502,30 @@ fi
                     new Date("2026-06-24T10:07:30.000Z")
                 )
             ).toBe("2026-06-24T10:15:00.000Z");
+            expect(
+                calculateNextRunAt(
+                    {
+                        cronExpression: "0 9 * * 7",
+                        enabled: true,
+                        intervalSeconds: 60,
+                        scheduleType: "cron",
+                        timeOfDay: undefined,
+                    },
+                    new Date("2026-06-24T10:07:30.000Z")
+                )
+            ).toBe("2026-06-28T09:00:00.000Z");
+            expect(() =>
+                calculateNextRunAt(
+                    {
+                        cronExpression: "bad cron",
+                        enabled: true,
+                        intervalSeconds: 60,
+                        scheduleType: "cron",
+                        timeOfDay: undefined,
+                    },
+                    new Date("2026-06-24T10:07:30.000Z")
+                )
+            ).toThrow("Cron jobs require a valid cronExpression");
             expect(() =>
                 upsertScheduledJob({
                     actionKey,
@@ -2490,6 +2536,26 @@ fi
                     scheduleType: "interval",
                 })
             ).toThrow("Job id is invalid");
+            expect(() =>
+                upsertScheduledJob({
+                    actionKey,
+                    enabled: true,
+                    id: `test-job-invalid-daily-${Bun.randomUUIDv7()}`,
+                    intervalSeconds: 120,
+                    name: "Invalid daily job",
+                    scheduleType: "daily",
+                    timeOfDay: "25:00",
+                })
+            ).toThrow("Daily jobs require HH:MM timeOfDay");
+            expect(() =>
+                registerScheduledJobAction(
+                    `bad-timeout-${Bun.randomUUIDv7()}`,
+                    () => ({}),
+                    {
+                        timeoutMs: 0,
+                    }
+                )
+            ).toThrow("Scheduled job action timeout must be an integer");
 
             registerScheduledJobAction(actionKey, (job) => ({
                 jobId: job.id,
@@ -2560,6 +2626,56 @@ fi
                     expect.stringContaining("No scheduled job action registered")
                 );
             }
+
+            const timeoutActionKey = `test-timeout-action-${Bun.randomUUIDv7()}`;
+            const timeoutJobId = `test-job-timeout-${Bun.randomUUIDv7()}`;
+            registerScheduledJobAction(
+                timeoutActionKey,
+                async () => {
+                    await Bun.sleep(50);
+                    return { late: true };
+                },
+                { timeoutMs: 1 }
+            );
+            upsertScheduledJob({
+                actionKey: timeoutActionKey,
+                id: timeoutJobId,
+                intervalSeconds: 120,
+                name: "Timeout job",
+                scheduleType: "interval",
+            });
+            const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+            try {
+                await expect(runScheduledJob(timeoutJobId)).resolves.toMatchObject({
+                    jobId: timeoutJobId,
+                    message: "Scheduled job timed out",
+                    output: {},
+                    status: "failed",
+                });
+            } finally {
+                warnSpy.mockRestore();
+            }
+
+            const abortActionKey = `test-abort-action-${Bun.randomUUIDv7()}`;
+            const abortJobId = `test-job-abort-${Bun.randomUUIDv7()}`;
+            registerScheduledJobAction(abortActionKey, () => ({ reached: true }));
+            upsertScheduledJob({
+                actionKey: abortActionKey,
+                id: abortJobId,
+                intervalSeconds: 120,
+                name: "Abort job",
+                scheduleType: "interval",
+            });
+            const controller = new AbortController();
+            controller.abort();
+            await expect(
+                runScheduledJob(abortJobId, "manual", controller.signal)
+            ).resolves.toMatchObject({
+                jobId: abortJobId,
+                message: "Scheduled job aborted",
+                output: {},
+                status: "failed",
+            });
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'test-job-%'")
