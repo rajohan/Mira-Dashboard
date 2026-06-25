@@ -6,6 +6,7 @@ import {
     readdirSync,
     readFileSync,
     rmSync,
+    utimesSync,
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1375,6 +1376,47 @@ describe("backend route and service behavior", () => {
         const archivePath = path.join(root, archiveName ?? "");
         expect(existsSync(archivePath)).toBe(true);
         expect(readFileSync(archivePath, "utf8")).toBe("rotated bytes\n");
+
+        const archiveOnlyOld = path.join(root, "old.archive");
+        const archiveOnlyNew = path.join(root, "new.archive");
+        writeFileSync(archiveOnlyOld, "old archive\n");
+        writeFileSync(archiveOnlyNew, "new archive\n");
+        const oldDate = new Date(Date.now() - 60_000);
+        const newDate = new Date();
+        utimesSync(archiveOnlyOld, oldDate, oldDate);
+        utimesSync(archiveOnlyNew, newDate, newDate);
+        const archiveOnlyConfig = path.join(root, "archive-only-log-rotation.json");
+        writeFileSync(
+            archiveOnlyConfig,
+            JSON.stringify({
+                version: 1,
+                approvedRoots: [root],
+                groups: [
+                    {
+                        archiveOnly: true,
+                        archivePaths: [path.join(root, "*.archive")],
+                        keep: 1,
+                        name: "archives",
+                        shouldCompress: true,
+                    },
+                ],
+            })
+        );
+
+        const archiveOnlySummary = await runLogRotationService({
+            config: archiveOnlyConfig,
+            isDryRun: true,
+        });
+        expect(archiveOnlySummary).toMatchObject({
+            checkedFiles: 2,
+            compressedFiles: 1,
+            deletedArchives: 1,
+            isDryRun: true,
+            isOk: true,
+        });
+        expect(archiveOnlySummary.warnings).toEqual([]);
+        expect(existsSync(archiveOnlyOld)).toBe(true);
+        expect(existsSync(archiveOnlyNew)).toBe(true);
     });
 
     it("cached quota/system readers and notification checks", async () => {
