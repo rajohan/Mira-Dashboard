@@ -1682,6 +1682,11 @@ describe("Mira Dashboard backend integration", () => {
         const agentsRoot = path.join(testState.openclawRoot, "agents");
         const agentSessions = path.join(agentsRoot, "mira-2026", "sessions");
         await fs.mkdir(agentSessions, { recursive: true });
+
+        const missingConfig = await api<{ error: string }>("/api/agents/config");
+        expect(missingConfig.status).toBe(404);
+        expect(missingConfig.body.error).toBe("Agent configuration not found");
+
         await fs.writeFile(
             path.join(testState.openclawRoot, "openclaw.json"),
             JSON.stringify({
@@ -1724,6 +1729,13 @@ describe("Mira Dashboard backend integration", () => {
             expect.objectContaining({ id: "mira-2026" })
         );
 
+        const invalidMetadataBody = await api<{ error: string }>(
+            "/api/agents/mira-2026/metadata",
+            json("PUT", {})
+        );
+        expect(invalidMetadataBody.status).toBe(400);
+        expect(invalidMetadataBody.body.error).toBe("Provide currentTask");
+
         const metadata = await api<{ currentTask: string; updatedAt: string }>(
             "/api/agents/mira-2026/metadata",
             json("PUT", { currentTask: "Cover agent dashboard behavior" })
@@ -1750,6 +1762,10 @@ describe("Mira Dashboard backend integration", () => {
             })
         );
 
+        const unknownAgent = await api<{ error: string }>("/api/agents/unknown/status");
+        expect(unknownAgent.status).toBe(404);
+        expect(unknownAgent.body.error).toBe("Agent 'unknown' not found");
+
         const singleStatus = await api<{ currentTask?: string; id: string }>(
             "/api/agents/mira-2026/status"
         );
@@ -1771,6 +1787,17 @@ describe("Mira Dashboard backend integration", () => {
             expect.objectContaining({
                 agentId: "mira-2026",
                 status: "completed",
+                task: "Cover agent dashboard behavior",
+            })
+        );
+
+        const defaultHistory = await api<{
+            tasks: Array<{ agentId: string; task: string }>;
+        }>("/api/agents/tasks/history?limit=not-a-number");
+        expect(defaultHistory.status).toBe(200);
+        expect(defaultHistory.body.tasks).toContainEqual(
+            expect.objectContaining({
+                agentId: "mira-2026",
                 task: "Cover agent dashboard behavior",
             })
         );
