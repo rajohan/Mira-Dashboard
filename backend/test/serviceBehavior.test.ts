@@ -1747,6 +1747,45 @@ fi
         }
     });
 
+    it("reports Kopia host pgrep failures without recording needs-attention state", async () => {
+        rememberEnvironment("PATH");
+        const fakeBin = createTemporaryRoot("mira-backup-host-pgrep-error-bin-");
+        writeFakeDocker(path.join(fakeBin, "docker"));
+        const fakePgrep = path.join(fakeBin, "pgrep");
+        writeFileSync(
+            fakePgrep,
+            "#!/usr/bin/env bash\nprintf 'pgrep unavailable\\n' >&2\nexit 2\n"
+        );
+        chmodSync(fakePgrep, 0o755);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
+            await import("../src/services/backups.ts");
+
+        try {
+            registerBackupScheduledJobs();
+            await expect(startManualBackup("kopia")).rejects.toMatchObject({
+                statusCode: 503,
+            });
+            expect(getCurrentBackupJob("kopia")).toBeUndefined();
+            await waitFor(() => {
+                const row = database
+                    .prepare(
+                        "SELECT status, message FROM scheduled_job_runs WHERE job_id = 'backup.kopia' ORDER BY id DESC LIMIT 1"
+                    )
+                    .get() as { message?: string; status?: string } | undefined;
+                return (
+                    row?.status === "failed" &&
+                    row.message?.includes("pgrep unavailable") === true
+                );
+            });
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
     it("records and clears Kopia needs-attention state when host preflight detects a running process", async () => {
         rememberEnvironment("PATH");
         const fakeBin = createTemporaryRoot("mira-backup-pgrep-bin-");
@@ -2476,6 +2515,94 @@ fi
         await expect(stopMissingJob.json()).resolves.toEqual({
             error: "Exec job not found",
         });
+    });
+
+    it("starts, stops, and reports exec jobs through the service lifecycle", async () => {
+        const { getExecJob, startExecJob, stopExecJob } =
+            await import("../src/services/execJobs.ts");
+
+        const { jobId } = startExecJob({
+            command: "__mira_dashboard_shell_smoke_test__",
+            shell: true,
+        });
+        expect(getExecJob(jobId)).toMatchObject({
+            jobId,
+            status: "running",
+        });
+        expect(stopExecJob(jobId)).toEqual({
+            isSuccess: true,
+            message: "Stop signal sent",
+        });
+        expect(getExecJob(jobId)).toMatchObject({
+            jobId,
+            status: "signaled",
+        });
+        expect(() => stopExecJob(jobId)).toThrow("Job is not running");
+    });
+
+    it("validates scheduled job action and schedule boundaries", async () => {
+        const {
+            calculateNextRunAt,
+            listScheduledJobRuns,
+            registerScheduledJobAction,
+            updateScheduledJob,
+            upsertScheduledJob,
+        } = await import("../src/services/scheduledJobs.ts");
+        const jobId = `test-job-validation-${Bun.randomUUIDv7()}`;
+
+        try {
+            expect(() => registerScheduledJobAction("Bad.Action", () => {})).toThrow(
+                "Job action key is invalid"
+            );
+            expect(() =>
+                registerScheduledJobAction("test.timeout", () => {}, { timeoutMs: 0 })
+            ).toThrow(
+                "Scheduled job action timeout must be an integer between 1 and 2147483647"
+            );
+            expect(() =>
+                upsertScheduledJob({
+                    actionKey: "test.validation",
+                    enabled: true,
+                    id: jobId,
+                    intervalSeconds: 30,
+                    name: "Coverage validation job",
+                    scheduleType: "interval",
+                })
+            ).toThrow("Interval must be at least 60 seconds");
+            expect(() =>
+                calculateNextRunAt({
+                    cronExpression: "61 * * * *",
+                    enabled: true,
+                    intervalSeconds: 3600,
+                    scheduleType: "cron",
+                    timeOfDay: undefined,
+                })
+            ).toThrow("Cron jobs require a valid cronExpression");
+
+            const job = upsertScheduledJob({
+                actionKey: "test.validation",
+                enabled: true,
+                id: jobId,
+                intervalSeconds: 3600,
+                name: "Coverage validation job",
+                scheduleType: "daily",
+                timeOfDay: "23:59",
+            });
+            expect(job.nextRunAt).toEqual(expect.any(String));
+            expect(updateScheduledJob("missing-job", { enabled: false })).toBeUndefined();
+            expect(() =>
+                updateScheduledJob(jobId, {
+                    cronExpression: "not cron",
+                    scheduleType: "cron",
+                })
+            ).toThrow("Cron jobs require a valid cronExpression");
+            expect(listScheduledJobRuns(jobId, -20)).toEqual([]);
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id = ?")
+                .run(jobId);
+            database.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run(jobId);
+        }
     });
 
     it("serves OpenClaw config, skill, backup, and restart route contracts with fakes", async () => {

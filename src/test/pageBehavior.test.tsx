@@ -580,7 +580,9 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     id: "heartbeat",
                     name: "heartbeat",
                     command: "openclaw heartbeat",
-                    schedule: "*/30 * * * *",
+                    schedule: { kind: "cron", expression: "*/30 * * * *" },
+                    payload: { kind: "heartbeat" },
+                    delivery: { mode: "session" },
                     enabled: true,
                     state: {
                         lastRunAtMs: 1_719_216_000_000,
@@ -927,6 +929,72 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
         });
     }
 
+    if (method === "PATCH" && url === "/api/jobs/heartbeat") {
+        const body = parseRequestBody(init);
+        const clearedScheduleValue = JSON.parse("null") as null;
+        expect(body).toEqual({
+            patch: {
+                cronExpression: clearedScheduleValue,
+                intervalSeconds: 3600,
+                scheduleType: "interval",
+                timeOfDay: clearedScheduleValue,
+            },
+        });
+        return Response.json({
+            isOk: true,
+            job: {
+                id: "heartbeat",
+                name: "Heartbeat",
+                enabled: true,
+                scheduleType: "interval",
+                intervalSeconds: 3600,
+                actionKey: "heartbeat",
+                actionPayload: {},
+                createdAt: "2026-06-24T08:00:00.000Z",
+                updatedAt: "2026-06-24T08:05:00.000Z",
+                isRunning: false,
+            },
+        });
+    }
+
+    if (method === "POST" && url === "/api/jobs/heartbeat/run") {
+        return Response.json({
+            isOk: true,
+            run: {
+                id: 2,
+                jobId: "heartbeat",
+                status: "success",
+                triggerType: "manual",
+                startedAt: "2026-06-24T08:05:00.000Z",
+                finishedAt: "2026-06-24T08:06:00.000Z",
+                output: { message: "manual ok" },
+            },
+        });
+    }
+
+    if (method === "POST" && url === "/api/cron/jobs/heartbeat/run") {
+        return Response.json({ isOk: true });
+    }
+
+    if (method === "POST" && url === "/api/cron/jobs/heartbeat/toggle") {
+        expect(parseRequestBody(init)).toEqual({ enabled: false });
+        return Response.json({ isOk: true });
+    }
+
+    if (method === "POST" && url === "/api/cron/jobs/heartbeat/update") {
+        expect(parseRequestBody(init)).toMatchObject({
+            patch: {
+                name: "heartbeat",
+                schedule: { kind: "cron", expression: "*/30 * * * *" },
+            },
+        });
+        return Response.json({ isOk: true });
+    }
+
+    if (method === "POST" && url === "/api/cron/jobs/heartbeat/delete") {
+        return Response.json({ isOk: true });
+    }
+
     if (url === "/api/logs/info") {
         return Response.json({ logs: [{ name: "openclaw.log", size: 100 }] });
     }
@@ -1215,6 +1283,64 @@ describe("Mira Dashboard pages", () => {
             view.unmount();
             view.queryClient.clear();
         }
+    });
+
+    it("edits and runs Dashboard jobs plus OpenClaw cron jobs", async () => {
+        const user = userEvent.setup();
+        const view = renderPage(createElement(Jobs));
+
+        await waitFor(() => {
+            expect(screen.queryAllByText("Heartbeat").length).toBeGreaterThan(0);
+            expect(screen.getByText("Run logs")).toBeInTheDocument();
+        });
+
+        await user.clear(screen.getByLabelText("Interval seconds"));
+        await user.type(screen.getByLabelText("Interval seconds"), "3600");
+        await user.click(screen.getByRole("button", { name: /save schedule/i }));
+        await waitFor(() => {
+            expect(
+                screen.queryByText("Scheduled job update failed")
+            ).not.toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: /run now/i }));
+        await waitFor(() => {
+            expect(
+                screen.queryByText("Failed to run scheduled job")
+            ).not.toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: /openclaw cron/i }));
+        await waitFor(() => {
+            expect(screen.queryAllByText("heartbeat").length).toBeGreaterThan(0);
+            expect(screen.getByText("Job config")).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: /trigger now/i }));
+        await waitFor(() => {
+            expect(screen.getByText(/Triggered/)).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByLabelText("Enabled"));
+        await user.click(screen.getByRole("button", { name: /^edit$/i }));
+        await user.click(screen.getByRole("button", { name: /save edits/i }));
+        await waitFor(() => {
+            expect(
+                screen.queryByText("Invalid JSON in edit fields")
+            ).not.toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: /^delete$/i }));
+        expect(
+            screen.getByRole("heading", { name: "Delete cron job" })
+        ).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: /^delete cron job$/i }));
+        await waitFor(() => {
+            expect(screen.queryByText("Delete cron job")).not.toBeInTheDocument();
+        });
+
+        view.unmount();
+        view.queryClient.clear();
     });
 
     it("renders sessions page connection state with a socket provider", async () => {

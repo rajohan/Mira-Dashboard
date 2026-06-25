@@ -6,6 +6,7 @@ import {
     readdirSync,
     readFileSync,
     rmSync,
+    symlinkSync,
     utimesSync,
     writeFileSync,
 } from "node:fs";
@@ -689,6 +690,32 @@ describe("backend route and service behavior", () => {
         );
         expect(hidden.status).toBe(403);
 
+        const hiddenDirectoryList = await fileRoutes["/api/files"].GET(
+            new Request("https://test.local/api/files?path=notes/.secret")
+        );
+        expect(hiddenDirectoryList.status).toBe(403);
+        await expect(hiddenDirectoryList.json()).resolves.toEqual({
+            error: "Access denied: path outside workspace",
+        });
+
+        const malformedPath = await fileRoutes["/api/files/*"].GET(
+            new Request("https://test.local/api/files/%E0%A4%A")
+        );
+        expect(malformedPath.status).toBe(400);
+        await expect(malformedPath.json()).resolves.toEqual({
+            error: "Malformed file path",
+        });
+
+        const traversal = await fileRoutes["/api/files/*"].GET(
+            new Request("https://test.local/api/files/..%2Foutside.txt")
+        );
+        expect(traversal.status).toBe(403);
+
+        const missingFile = await fileRoutes["/api/files/*"].GET(
+            new Request("https://test.local/api/files/missing.txt")
+        );
+        expect(missingFile.status).toBe(404);
+
         const directory = await fileRoutes["/api/files/*"].GET(
             new Request("https://test.local/api/files/notes")
         );
@@ -731,6 +758,22 @@ describe("backend route and service behavior", () => {
             })
         );
         expect(directoryWrite.status).toBe(400);
+
+        const hiddenWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/notes/.secret", {
+                body: JSON.stringify({ content: "hidden" }),
+                method: "PUT",
+            })
+        );
+        expect(hiddenWrite.status).toBe(403);
+
+        const invalidWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/notes/readme.txt", {
+                body: JSON.stringify({ content: 42 }),
+                method: "PUT",
+            })
+        );
+        expect(invalidWrite.status).toBe(400);
     });
 
     it("config file route allowlist, reads, writes, and backups", async () => {
@@ -1027,6 +1070,56 @@ describe("backend route and service behavior", () => {
             )
         );
         expect(missingContentRoot.status).toBe(404);
+    });
+
+    it("serves media from isolated OpenClaw roots while rejecting unsafe paths", async () => {
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        const openclawRoot = createTemporaryRoot("mira-media-route-");
+        const outsideRoot = createTemporaryRoot("mira-media-outside-");
+        const mediaRoot = path.join(openclawRoot, "media");
+        mkdirSync(path.join(mediaRoot, "images"), { recursive: true });
+        mkdirSync(path.join(mediaRoot, "folder"), { recursive: true });
+        writeFileSync(path.join(mediaRoot, "images", "dashboard.txt"), "media ok");
+        writeFileSync(
+            path.join(outsideRoot, "secret.txt"),
+            "outside media should not be served"
+        );
+        symlinkSync(
+            path.join(outsideRoot, "secret.txt"),
+            path.join(mediaRoot, "images", "outside-link.txt")
+        );
+        process.env.OPENCLAW_HOME = openclawRoot;
+        delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        const { mediaRoutes } = await import("../src/routes/mediaRoutes.ts");
+
+        const missingPath = await mediaRoutes["/api/media"].GET(
+            new Request("https://test.local/api/media")
+        );
+        expect(missingPath.status).toBe(403);
+
+        const invalidPath = await mediaRoutes["/api/media"].GET(
+            new Request("https://test.local/api/media?path=bad%00path")
+        );
+        expect(invalidPath.status).toBe(400);
+
+        const directory = await mediaRoutes["/api/media"].GET(
+            new Request("https://test.local/api/media?path=folder")
+        );
+        expect(directory.status).toBe(400);
+
+        const outside = await mediaRoutes["/api/media"].GET(
+            new Request("https://test.local/api/media?path=images/outside-link.txt")
+        );
+        expect(outside.status).toBe(403);
+
+        const served = await mediaRoutes["/api/media"].GET(
+            new Request("https://test.local/api/media?path=images/dashboard.txt")
+        );
+        expect(served.status).toBe(200);
+        expect(served.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
+        expect(served.headers.get("X-Content-Type-Options")).toBe("nosniff");
+        await expect(served.text()).resolves.toBe("media ok");
     });
 
     it("starts manual WAL-G backups through the backup route using fake Docker", async () => {
