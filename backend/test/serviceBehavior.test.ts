@@ -4,6 +4,7 @@ import {
     existsSync,
     mkdirSync,
     mkdtempSync,
+    readdirSync,
     readFileSync,
     rmSync,
     symlinkSync,
@@ -1980,6 +1981,59 @@ fi
         }
     });
 
+    it("cleans backup route state when backup process spawn fails", async () => {
+        rememberEnvironment("PATH");
+        const fakeBin = createTemporaryRoot("mira-backup-spawn-fail-bin-");
+        writeFakeDocker(path.join(fakeBin, "docker"));
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        const processModule = await import("../src/lib/processes.ts");
+        const spawnSpy = jest
+            .spyOn(processModule, "spawnProcess")
+            .mockImplementation(() => {
+                throw new Error("spawn unavailable");
+            });
+        const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+        const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
+            await import("../src/services/backups.ts");
+
+        try {
+            registerBackupScheduledJobs();
+            await expect(startManualBackup("walg")).rejects.toThrow("spawn unavailable");
+            expect(getCurrentBackupJob("walg")).toBeUndefined();
+        } finally {
+            spawnSpy.mockRestore();
+            warnSpy.mockRestore();
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("marks aborted scheduled backups failed before preflight starts", async () => {
+        const { getCurrentBackupJob, registerBackupScheduledJobs } =
+            await import("../src/services/backups.ts");
+        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const controller = new AbortController();
+        controller.abort();
+
+        try {
+            registerBackupScheduledJobs();
+            const run = await runScheduledJob("backup.walg", "manual", controller.signal);
+            expect(run).toMatchObject({
+                jobId: "backup.walg",
+                message: "Scheduled job aborted",
+                status: "failed",
+            });
+            expect(getCurrentBackupJob("walg")).toBeUndefined();
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
     it("records and clears WAL-G needs-attention state when container preflight detects a running process", async () => {
         rememberEnvironment("PATH");
         const fakeBin = createTemporaryRoot("mira-backup-walg-running-bin-");
@@ -2227,6 +2281,86 @@ fi
         expect(readFileSync(logFile, "utf8")).toBe("do not rotate\n");
     });
 
+    it("rotates logs with rename strategy and applies archive-only retention", async () => {
+        const rotationRoot = createTemporaryRoot("mira-log-rotation-rename-test-");
+        const logFile = path.join(rotationRoot, "rename.log");
+        const archiveRoot = path.join(rotationRoot, "archives");
+        const configFile = path.join(rotationRoot, "log-rotation.json");
+        mkdirSync(archiveRoot, { recursive: true });
+        writeFileSync(logFile, "rename me\n");
+        const oldArchive = path.join(archiveRoot, "app.1.log");
+        const retainedArchive = path.join(archiveRoot, "app.2.log");
+        writeFileSync(oldArchive, "old archive\n");
+        writeFileSync(retainedArchive, "new archive\n");
+        const oldTime = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+        const retainedTime = new Date(Date.now() - 5 * 60 * 1000);
+        utimesSync(oldArchive, oldTime, oldTime);
+        utimesSync(retainedArchive, retainedTime, retainedTime);
+        writeFileSync(
+            configFile,
+            JSON.stringify({
+                approvedRoots: [rotationRoot],
+                defaults: {
+                    keep: 1,
+                    maxSizeMb: 0.000001,
+                    missingOk: false,
+                    skipEmpty: false,
+                },
+                groups: [
+                    {
+                        compress: true,
+                        name: "rename",
+                        paths: [logFile],
+                        strategy: "rename",
+                    },
+                    {
+                        archiveOnly: true,
+                        archivePaths: [path.join(archiveRoot, "*.log")],
+                        archiveRetentionScope: "directory",
+                        keep: 1,
+                        keepDays: 1,
+                        name: "archives",
+                        shouldCompress: false,
+                    },
+                ],
+                version: 1,
+            })
+        );
+        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+
+        const summary = await runLogRotationService({
+            config: configFile,
+            isDryRun: false,
+            verbose: true,
+        });
+
+        expect(summary).toMatchObject({
+            checkedGroups: 2,
+            checkedFiles: 3,
+            compressedFiles: 1,
+            deletedArchives: 1,
+            isDryRun: false,
+            isOk: true,
+            rotatedFiles: 1,
+        });
+        expect(readFileSync(logFile, "utf8")).toBe("");
+        expect(existsSync(oldArchive)).toBe(false);
+        expect(existsSync(retainedArchive)).toBe(true);
+        expect(readdirSync(rotationRoot).some((name) => name.endsWith(".gz"))).toBe(true);
+
+        const row = database
+            .prepare(
+                "SELECT data_json FROM cache_entries WHERE key = 'log_rotation.state'"
+            )
+            .get() as { data_json?: string } | undefined;
+        const state = JSON.parse(row?.data_json ?? "{}") as {
+            files?: Record<string, { lastArchive?: string }>;
+            lastRun?: { isOk?: boolean };
+        };
+        expect(state.lastRun?.isOk).toBe(true);
+        expect(state.files?.[logFile]?.lastArchive?.endsWith(".gz")).toBe(true);
+    });
+
     it("normalizes elevated log rotation command output and failures", async () => {
         const { runElevatedLogRotationService } =
             await import("../src/services/logRotation.ts");
@@ -2283,6 +2417,56 @@ fi
             },
             stderr: expect.stringContaining("bad json stderr"),
         });
+    });
+
+    it("records scheduled log-rotation failures in cache state", async () => {
+        const { registerLogRotationScheduledJobs } =
+            await import("../src/services/logRotation.ts");
+        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const runProcessSpy = jest.spyOn(processModule, "runProcess").mockResolvedValue({
+            code: 1,
+            stderr: "sudo denied",
+            stdout: JSON.stringify({
+                errors: [{ message: "policy denied" }],
+                groups: [{ name: "docker" }],
+                isOk: false,
+                warnings: [{ message: "warn" }],
+            }),
+        });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        try {
+            registerLogRotationScheduledJobs();
+            const run = await runScheduledJob("ops.log-rotation");
+
+            expect(run.status).toBe("failed");
+            expect(run.message).toContain("sudo denied");
+            const row = database
+                .prepare(
+                    "SELECT data_json FROM cache_entries WHERE key = 'log_rotation.state'"
+                )
+                .get() as { data_json?: string } | undefined;
+            const state = JSON.parse(row?.data_json ?? "{}") as {
+                lastRun?: { isDryRun?: boolean; isOk?: boolean; stderr?: string };
+            };
+            expect(state.lastRun).toMatchObject({
+                isDryRun: false,
+                isOk: false,
+                stderr: "sudo denied",
+            });
+        } finally {
+            database
+                .prepare(
+                    "DELETE FROM scheduled_job_runs WHERE job_id = 'ops.log-rotation'"
+                )
+                .run();
+            database
+                .prepare("DELETE FROM scheduled_jobs WHERE id = 'ops.log-rotation'")
+                .run();
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'log_rotation.state'")
+                .run();
+        }
     });
 
     it("updates agent metadata and rolls active task history forward", async () => {
@@ -2743,9 +2927,44 @@ fi
         await expect(
             runExecOnce({ args: [], command: "node", shell: true })
         ).rejects.toThrow("args cannot be combined with shell mode");
+        await expect(runExecOnce({ args: [], command: "node/child" })).rejects.toThrow(
+            "command must be an approved executable name"
+        );
         await expect(runExecOnce({ args: [], command: "node" })).rejects.toThrow(
             "command executable is not approved"
         );
+        await expect(runExecOnce({ args: "not-array", command: "node" })).rejects.toThrow(
+            "command executable is not approved"
+        );
+        await expect(runExecOnce({ args: [42], command: "node" })).rejects.toThrow(
+            "command executable is not approved"
+        );
+        await expect(
+            runExecOnce({ args: ["bad\0arg"], command: "node" })
+        ).rejects.toThrow("command executable is not approved");
+        await expect(
+            runExecOnce({
+                command: "__mira_dashboard_shell_smoke_test__",
+                cwd: 42,
+                shell: true,
+            })
+        ).rejects.toThrow("cwd must be a string");
+        await expect(
+            runExecOnce({
+                command: "__mira_dashboard_shell_smoke_test__",
+                cwd: "relative",
+                shell: true,
+            })
+        ).rejects.toThrow("cwd must be an absolute path");
+        const execFileCwd = path.join(createTemporaryRoot("mira-exec-cwd-"), "file");
+        writeFileSync(execFileCwd, "not a directory");
+        await expect(
+            runExecOnce({
+                command: "__mira_dashboard_shell_smoke_test__",
+                cwd: execFileCwd,
+                shell: true,
+            })
+        ).rejects.toThrow("cwd must be a directory");
         const notFoundError = Object.assign(new Error("missing"), { statusCode: 404 });
         expect(execErrorResponse(notFoundError)).toEqual({
             error: "missing",

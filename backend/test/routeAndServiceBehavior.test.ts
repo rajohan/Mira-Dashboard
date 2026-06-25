@@ -1052,6 +1052,44 @@ describe("backend route and service behavior", () => {
         );
         expect(invalidTerminalComplete.status).toBe(400);
 
+        const malformedTerminalComplete = await terminalRoutes[
+            "/api/terminal/complete"
+        ].POST(
+            new Request("https://test.local/api/terminal/complete", {
+                body: "{",
+                method: "POST",
+            })
+        );
+        expect(malformedTerminalComplete.status).toBe(400);
+
+        const missingTerminalCompleteBody = await terminalRoutes[
+            "/api/terminal/complete"
+        ].POST(jsonRequest("/api/terminal/complete", []));
+        expect(missingTerminalCompleteBody.status).toBe(400);
+
+        const invalidTerminalPartial = await terminalRoutes[
+            "/api/terminal/complete"
+        ].POST(
+            jsonRequest("/api/terminal/complete", {
+                cwd: terminalRoot,
+                partial: "bad\0partial",
+            })
+        );
+        expect(invalidTerminalPartial.status).toBe(400);
+
+        const missingDirectoryCompletion = await terminalRoutes[
+            "/api/terminal/complete"
+        ].POST(
+            jsonRequest("/api/terminal/complete", {
+                cwd: terminalRoot,
+                partial: "missing/",
+            })
+        );
+        await expect(missingDirectoryCompletion.json()).resolves.toEqual({
+            commonPrefix: "",
+            completions: [],
+        });
+
         const terminalCdFile = await terminalRoutes["/api/terminal/cd"].POST(
             jsonRequest("/api/terminal/cd", {
                 cwd: terminalRoot,
@@ -1063,6 +1101,52 @@ describe("backend route and service behavior", () => {
             isSuccess: false,
             newCwd: terminalRoot,
         });
+
+        const terminalCdHome = await terminalRoutes["/api/terminal/cd"].POST(
+            jsonRequest("/api/terminal/cd", {
+                cwd: terminalRoot,
+                path: "~",
+            })
+        );
+        await expect(terminalCdHome.json()).resolves.toMatchObject({
+            isSuccess: true,
+            newCwd: expect.any(String),
+        });
+
+        const terminalCdNormalized = await terminalRoutes["/api/terminal/cd"].POST(
+            jsonRequest("/api/terminal/cd", {
+                cwd: terminalDirectory,
+                path: "../work dir/.",
+            })
+        );
+        await expect(terminalCdNormalized.json()).resolves.toEqual({
+            isSuccess: true,
+            newCwd: terminalDirectory,
+        });
+
+        const malformedTerminalCd = await terminalRoutes["/api/terminal/cd"].POST(
+            new Request("https://test.local/api/terminal/cd", {
+                body: "{",
+                method: "POST",
+            })
+        );
+        expect(malformedTerminalCd.status).toBe(400);
+
+        const invalidTerminalCd = await terminalRoutes["/api/terminal/cd"].POST(
+            jsonRequest("/api/terminal/cd", {
+                cwd: "relative",
+                path: "work dir",
+            })
+        );
+        expect(invalidTerminalCd.status).toBe(400);
+
+        const missingTerminalCd = await terminalRoutes["/api/terminal/cd"].POST(
+            jsonRequest("/api/terminal/cd", {
+                cwd: terminalRoot,
+                path: "missing",
+            })
+        );
+        expect(missingTerminalCd.status).toBe(400);
 
         const invalidContainer = await dockerRoutes[
             "/api/docker/containers/:containerId"
@@ -1107,6 +1191,141 @@ describe("backend route and service behavior", () => {
             })
         );
         expect(invalidUpdater.status).toBe(400);
+
+        database
+            .prepare(
+                `INSERT INTO docker_managed_services (
+                    app_slug,
+                    service_name,
+                    compose_path,
+                    image_repo,
+                    compose_image_ref,
+                    current_tag,
+                    current_digest,
+                    latest_tag,
+                    latest_digest,
+                    policy,
+                    pin_mode,
+                    enabled,
+                    metadata_json,
+                    last_checked_at,
+                    last_updated_at,
+                    last_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            )
+            .run(
+                "coverage-app",
+                "api",
+                "/tmp/compose.yml",
+                "example/api",
+                "example/api:1.0",
+                "1.0",
+                "sha256:old",
+                "1.1",
+                "sha256:new",
+                "notify",
+                "tag",
+                1,
+                '{"source":"test"}',
+                "2026-06-25T10:00:00.000Z",
+                "2026-06-25T11:00:00.000Z",
+                "auto_update_failed"
+            );
+        const updaterServiceId = Number(
+            (
+                database
+                    .prepare(
+                        "SELECT id FROM docker_managed_services WHERE app_slug = 'coverage-app' AND service_name = 'api'"
+                    )
+                    .get() as { id: number }
+            ).id
+        );
+        database
+            .prepare(
+                `INSERT INTO docker_update_events (
+                    managed_service_id,
+                    app_slug,
+                    service_name,
+                    event_type,
+                    from_tag,
+                    to_tag,
+                    from_digest,
+                    to_digest,
+                    message,
+                    details_json,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            )
+            .run(
+                updaterServiceId,
+                "",
+                "",
+                "update_available",
+                "1.0",
+                "1.1",
+                "sha256:old",
+                "sha256:new",
+                "candidate found",
+                "{}",
+                "2026-06-25T12:00:00.000Z"
+            );
+        cleanupCallbacks.push(() => {
+            database
+                .prepare(
+                    "DELETE FROM docker_update_events WHERE managed_service_id = ? OR app_slug = 'coverage-app'"
+                )
+                .run(updaterServiceId);
+            database
+                .prepare(
+                    "DELETE FROM docker_managed_services WHERE app_slug = 'coverage-app'"
+                )
+                .run();
+        });
+
+        const updaterServices = await dockerRoutes["/api/docker/updater/services"].GET();
+        await expect(updaterServices.json()).resolves.toMatchObject({
+            services: [
+                expect.objectContaining({
+                    appSlug: "coverage-app",
+                    enabled: true,
+                    metadata: { source: "test" },
+                    serviceName: "api",
+                    updateAvailable: true,
+                }),
+            ],
+            summary: expect.objectContaining({
+                enabled: 1,
+                failed: 1,
+                notifyPolicy: 1,
+                total: 1,
+                updateAvailable: 1,
+            }),
+        });
+
+        const updaterEvents = await dockerRoutes["/api/docker/updater/events"].GET(
+            new Request("https://test.local/api/docker/updater/events?limit=500")
+        );
+        await expect(updaterEvents.json()).resolves.toMatchObject({
+            events: [
+                expect.objectContaining({
+                    appSlug: "coverage-app",
+                    eventType: "update_available",
+                    fromTag: "1.0",
+                    managedServiceId: updaterServiceId,
+                    serviceName: "api",
+                    toTag: "1.1",
+                }),
+            ],
+        });
+
+        const missingUpdaterService = await dockerRoutes[
+            "/api/docker/updater/services/:serviceId/update"
+        ].POST(
+            requestWithParameters("/api/docker/updater/services/999999/update", {
+                serviceId: "999999",
+            })
+        );
+        expect(missingUpdaterService.status).toBe(404);
 
         const cronList = await cronRoutes["/api/cron/jobs"].GET();
         await expect(cronList.json()).resolves.toEqual({
@@ -2431,6 +2650,11 @@ fi
         );
 
         const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+        database
+            .prepare(
+                "DELETE FROM cache_entries WHERE key IN ('backup.kopia.status', 'backup.walg.status', 'log_rotation.state')"
+            )
+            .run();
         async function refreshWithFakeDocker(key: string) {
             let lastError: unknown;
             for (let attempt = 0; attempt < 3; attempt += 1) {
