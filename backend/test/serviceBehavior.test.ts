@@ -660,6 +660,128 @@ describe("backend service behavior", () => {
         }
     });
 
+    it("runs deploy latest build flow against an isolated checkout", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
+        const fakeRoot = createTemporaryRoot("mira-pr-deploy-root-");
+        const fakeBin = createTemporaryRoot("mira-pr-deploy-bin-");
+        const gitLog = path.join(fakeRoot, "git.log");
+        const bunLog = path.join(fakeRoot, "bun.log");
+        const systemdLog = path.join(fakeRoot, "systemd.log");
+        mkdirSync(path.join(fakeRoot, "backend", "node_modules"), { recursive: true });
+        mkdirSync(path.join(fakeRoot, "node_modules"), { recursive: true });
+        writeFileSync(
+            path.join(fakeBin, "git"),
+            String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(gitLog)}
+if [[ "$*" == "rev-parse --show-toplevel" ]]; then
+  printf '%s\n' ${JSON.stringify(fakeRoot)}
+elif [[ "$*" == "rev-parse --abbrev-ref HEAD" ]]; then
+  printf 'main\n'
+elif [[ "$*" == "rev-parse --short HEAD" ]]; then
+  printf 'def5678\n'
+elif [[ "$*" == "rev-parse --abbrev-ref --symbolic-full-name ${"@{u}"}" ]]; then
+  printf 'origin/main\n'
+elif [[ "$*" == "status --short" ]]; then
+  printf ''
+elif [[ "$*" == "fetch --prune origin" || "$*" == "checkout main" || "$*" == "pull --ff-only origin main" ]]; then
+  printf ''
+elif [[ "$*" == "log -1 --pretty=%s" ]]; then
+  printf 'Deployable dashboard commit\n'
+else
+  echo "unexpected git args: $*" >&2
+  exit 2
+fi
+`
+        );
+        writeFileSync(
+            path.join(fakeBin, "bun"),
+            String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s|%s\n' "$PWD" "$*" >> ${JSON.stringify(bunLog)}
+if [[ "$*" == "install --frozen-lockfile" || "$*" == "run build" ]]; then
+  printf 'ok\n'
+else
+  echo "unexpected bun args: $*" >&2
+  exit 2
+fi
+`
+        );
+        writeFileSync(
+            path.join(fakeBin, "systemd-run"),
+            String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(systemdLog)}
+printf 'scheduled\n'
+`
+        );
+        chmodSync(path.join(fakeBin, "git"), 0o755);
+        chmodSync(path.join(fakeBin, "bun"), 0o755);
+        chmodSync(path.join(fakeBin, "systemd-run"), 0o755);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(fakeRoot, "worktrees");
+
+        const { startDeployLatest } = await import("../src/services/pullRequests.ts");
+        const job = startDeployLatest();
+
+        try {
+            await waitFor(() => {
+                const row = database
+                    .prepare(
+                        "SELECT status, commit_sha, commit_title, note FROM deployment_jobs WHERE id = ?"
+                    )
+                    .get(job.id) as
+                    | {
+                          commit_sha: string | null;
+                          commit_title: string | null;
+                          note: string | null;
+                          status: string;
+                      }
+                    | undefined;
+                return row?.status === "restart-scheduled";
+            });
+
+            const row = database
+                .prepare(
+                    "SELECT status, commit_sha, commit_title, note FROM deployment_jobs WHERE id = ?"
+                )
+                .get(job.id) as {
+                commit_sha: string | null;
+                commit_title: string | null;
+                note: string | null;
+                status: string;
+            };
+            expect(row).toEqual({
+                commit_sha: "def5678",
+                commit_title: "Deployable dashboard commit",
+                note: "Build passed; restart + health check scheduled",
+                status: "restart-scheduled",
+            });
+            await expect(Bun.file(gitLog).text()).resolves.toContain(
+                "pull --ff-only origin main"
+            );
+            await expect(Bun.file(bunLog).text()).resolves.toContain(
+                `${fakeRoot}|install --frozen-lockfile`
+            );
+            await expect(Bun.file(bunLog).text()).resolves.toContain(
+                `${path.join(fakeRoot, "backend")}|run build`
+            );
+            await expect(Bun.file(systemdLog).text()).resolves.toContain(
+                `mira-dashboard-deploy-${job.id}`
+            );
+            expect(existsSync(path.join(fakeRoot, "node_modules"))).toBe(false);
+            expect(existsSync(path.join(fakeRoot, "backend", "node_modules"))).toBe(
+                false
+            );
+        } finally {
+            database.prepare("DELETE FROM deployment_lock WHERE job_id = ?").run(job.id);
+            database.prepare("DELETE FROM deployment_jobs WHERE id = ?").run(job.id);
+        }
+    });
+
     it("reports production checkout readiness through git command output", async () => {
         rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DASHBOARD_ROOT");
