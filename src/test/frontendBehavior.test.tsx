@@ -1,4 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+    createMemoryHistory,
+    createRootRoute,
+    createRoute,
+    createRouter,
+    Outlet,
+    RouterProvider,
+} from "@tanstack/react-router";
 import { act, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
@@ -8,19 +16,19 @@ import {
     agentsCollection,
     preloadAgentsCollection,
     writeAgentsFromWebSocket,
-} from "./collections/agents";
+} from "../collections/agents";
 import {
     logsCollection,
     preloadLogsCollection,
     writeLogFromWebSocket,
-} from "./collections/logs";
+} from "../collections/logs";
 import {
     deleteSessionFromCollection,
     preloadSessionsCollection,
     replaceSessionsFromWebSocket,
     sessionsCollection,
-} from "./collections/sessions";
-import type { ChatHistoryMessage } from "./components/features/chat/chatTypes";
+} from "../collections/sessions";
+import type { ChatHistoryMessage } from "../components/features/chat/chatTypes";
 import {
     attachmentKind,
     extractImages,
@@ -31,7 +39,7 @@ import {
     normalizeText,
     normalizeVisibleChatHistoryMessages,
     optimisticAttachmentDisplay,
-} from "./components/features/chat/chatTypes";
+} from "../components/features/chat/chatTypes";
 import {
     base64ToText,
     chatErrorMessage,
@@ -43,16 +51,16 @@ import {
     messageDeleteKey,
     messageIdentity,
     readFileAsDataUrl,
-} from "./components/features/chat/chatUtilities";
+} from "../components/features/chat/chatUtilities";
 import {
     buildSlashCommandSuggestions,
     slashCommandCanonicalName,
-} from "./components/features/chat/slashCommands";
+} from "../components/features/chat/slashCommands";
 import {
     formatBytes as formatDatabaseBytes,
     formatNumber as formatDatabaseNumber,
     truncateQuery,
-} from "./components/features/database/databaseUtilities";
+} from "../components/features/database/databaseUtilities";
 import {
     formatBytes as formatDockerBytes,
     formatDockerMemory,
@@ -60,15 +68,16 @@ import {
     formatTimestamp,
     formatUpdaterTransition,
     formatVersionDisplay,
-} from "./components/features/docker/dockerFormatters";
-import { TaskDetailModal } from "./components/features/tasks/TaskDetailModal";
-import { TaskOverlay } from "./components/features/tasks/TaskOverlay";
-import { NotificationBell } from "./components/layout/NotificationBell";
-import { Badge, getSessionTypeVariant } from "./components/ui/Badge";
-import { ConfirmModal } from "./components/ui/ConfirmModal";
-import { Dropdown } from "./components/ui/Dropdown";
-import { SearchInput } from "./components/ui/SearchInput";
-import { apiFetch, UnauthorizedError } from "./hooks/useApi";
+} from "../components/features/docker/dockerFormatters";
+import { TaskDetailModal } from "../components/features/tasks/TaskDetailModal";
+import { TaskOverlay } from "../components/features/tasks/TaskOverlay";
+import { Layout } from "../components/layout/Layout";
+import { NotificationBell } from "../components/layout/NotificationBell";
+import { Badge, getSessionTypeVariant } from "../components/ui/Badge";
+import { ConfirmModal } from "../components/ui/ConfirmModal";
+import { Dropdown } from "../components/ui/Dropdown";
+import { SearchInput } from "../components/ui/SearchInput";
+import { apiFetch, UnauthorizedError } from "../hooks/useApi";
 import {
     useClearKopiaBackupAttention,
     useClearWalgBackupAttention,
@@ -76,8 +85,12 @@ import {
     useRunKopiaBackup,
     useRunWalgBackup,
     useWalgBackup,
-} from "./hooks/useBackups";
-import { useCacheEntry, useCacheHeartbeat, useRefreshCacheEntry } from "./hooks/useCache";
+} from "../hooks/useBackups";
+import {
+    useCacheEntry,
+    useCacheHeartbeat,
+    useRefreshCacheEntry,
+} from "../hooks/useCache";
 import {
     useConfig,
     useCreateBackup,
@@ -85,27 +98,27 @@ import {
     useSkills,
     useToggleSkill,
     useUpdateConfig,
-} from "./hooks/useConfig";
+} from "../hooks/useConfig";
 import {
     useCronJobs,
     useDeleteCronJob,
     useRunCronJobNow,
     useToggleCronJob,
     useUpdateCronJob,
-} from "./hooks/useCron";
-import { useDatabaseOverview } from "./hooks/useDatabase";
-import { useFileContent, useFiles, useSaveFile } from "./hooks/useFiles";
-import { useHealth } from "./hooks/useHealth";
-import { useLogContent, useLogFiles } from "./hooks/useLogs";
-import { useMetrics } from "./hooks/useMetrics";
-import { useMoltbookData } from "./hooks/useMoltbook";
-import type { NotificationItem } from "./hooks/useNotifications";
+} from "../hooks/useCron";
+import { useDatabaseOverview } from "../hooks/useDatabase";
+import { useFileContent, useFiles, useSaveFile } from "../hooks/useFiles";
+import { useHealth } from "../hooks/useHealth";
+import { useLogContent, useLogFiles } from "../hooks/useLogs";
+import { useMetrics } from "../hooks/useMetrics";
+import { useMoltbookData } from "../hooks/useMoltbook";
+import type { NotificationItem } from "../hooks/useNotifications";
 import {
     useCreateNotification,
     useMarkAllNotificationsRead,
-} from "./hooks/useNotifications";
-import { OpenClawSocketProvider, useOpenClawSocket } from "./hooks/useOpenClawSocket";
-import { OPS_ACTIONS, useExecJob, useStartOpsAction } from "./hooks/useOpsActions";
+} from "../hooks/useNotifications";
+import { OpenClawSocketProvider, useOpenClawSocket } from "../hooks/useOpenClawSocket";
+import { OPS_ACTIONS, useExecJob, useStartOpsAction } from "../hooks/useOpsActions";
 import {
     useApprovePullRequest,
     useApprovePullRequestReview,
@@ -115,15 +128,15 @@ import {
     usePullRequests,
     useRejectPullRequest,
     useUpdatePullRequestBranch,
-} from "./hooks/usePullRequests";
-import { hasQuotaStatus, useQuotas } from "./hooks/useQuotas";
+} from "../hooks/usePullRequests";
+import { hasQuotaStatus, useQuotas } from "../hooks/useQuotas";
 import {
     useRunScheduledJobNow,
     useScheduledJobRuns,
     useScheduledJobs,
     useUpdateScheduledJob,
-} from "./hooks/useScheduledJobs";
-import { useDeleteSession, useSessionAction } from "./hooks/useSessions";
+} from "../hooks/useScheduledJobs";
+import { useDeleteSession, useSessionAction } from "../hooks/useSessions";
 import {
     taskKeys,
     useAssignTask,
@@ -134,7 +147,7 @@ import {
     useTaskUpdates,
     useUpdateTask,
     useUpdateTaskUpdate,
-} from "./hooks/useTasks";
+} from "../hooks/useTasks";
 import {
     changeDirectory,
     getCompletions,
@@ -142,13 +155,13 @@ import {
     useStartTerminalCommand,
     useTerminalHistory,
     useTerminalJob,
-} from "./hooks/useTerminal";
-import { useWeather } from "./hooks/useWeather";
-import { createSocketClient } from "./lib/socket/socketClient";
-import { handleSocketMessage } from "./lib/socket/socketMessageRouter";
-import { Tasks } from "./pages/Tasks";
-import { authActions, authStore } from "./stores/authStore";
-import type { Task } from "./types/task";
+} from "../hooks/useTerminal";
+import { useWeather } from "../hooks/useWeather";
+import { createSocketClient } from "../lib/socket/socketClient";
+import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
+import { Tasks } from "../pages/Tasks";
+import { authActions, authStore } from "../stores/authStore";
+import type { Task } from "../types/task";
 import {
     formatCronLastStatus,
     formatCronTimestamp,
@@ -158,7 +171,7 @@ import {
     getCronStatusVariant,
     isCronExpressionValid,
     sortCronJobs,
-} from "./utils/cronUtilities";
+} from "../utils/cronUtilities";
 import {
     APP_TIME_ZONE,
     appTimeZoneParts,
@@ -169,7 +182,7 @@ import {
     currentYear,
     isoStringFromDate,
     timestampFromDateString,
-} from "./utils/date";
+} from "../utils/date";
 import {
     getFileExtension,
     getLanguage,
@@ -179,7 +192,7 @@ import {
     isImageFile,
     isJsonFile,
     isMarkdownFile,
-} from "./utils/fileUtilities";
+} from "../utils/fileUtilities";
 import {
     appTimeOfDayToUtcTimeOfDay,
     formatDate,
@@ -196,19 +209,19 @@ import {
     formatUtcTimeOfDayInAppTimeZone,
     formatWeekdayShort,
     getTokenPercent,
-} from "./utils/format";
+} from "../utils/format";
 import {
     formatLogTime,
     getLevelColor,
     getSubsystemColor,
     parseLogLine,
-} from "./utils/logUtilities";
+} from "../utils/logUtilities";
 import {
     formatSessionType,
     getTypeSortOrder,
     sortSessionsByTypeAndActivity,
-} from "./utils/sessionUtilities";
-import { getColumnId, getPriority, isTaskMatchSearch } from "./utils/taskUtilities";
+} from "../utils/sessionUtilities";
+import { getColumnId, getPriority, isTaskMatchSearch } from "../utils/taskUtilities";
 
 function task(overrides: Partial<Task> & Pick<Task, "number" | "title">): Task {
     return {
@@ -511,6 +524,353 @@ describe("Mira Dashboard frontend behavior", () => {
 
     afterEach(() => {
         authActions.clearSession();
+    });
+
+    it("loads the app shell, router, login route, and local devtools modules", async () => {
+        const [{ default: App }, { router }, { Login }, { default: DashboardDevtools }] =
+            await Promise.all([
+                import("../App"),
+                import("../router"),
+                import("../pages/Login"),
+                import("../components/devtools/DashboardDevtools"),
+            ]);
+
+        expect(App).toBeTypeOf("function");
+        expect(Login).toBeTypeOf("function");
+        expect(DashboardDevtools).toBeTypeOf("function");
+        expect(router.navigate).toBeTypeOf("function");
+
+        const originalFetch = fetch;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: async (input: Parameters<typeof fetch>[0]) => {
+                const url = String(input);
+                if (url === "/api/auth/session") {
+                    return Response.json({
+                        authenticated: false,
+                        isBootstrapRequired: true,
+                        user: undefined,
+                    });
+                }
+                if (url === "/api/auth/bootstrap") {
+                    return Response.json({
+                        hasGatewayToken: false,
+                        isBootstrapRequired: true,
+                    });
+                }
+                throw new Error(`Unexpected app shell fetch: ${url}`);
+            },
+            writable: true,
+        });
+
+        try {
+            await router.navigate({ to: "/login" });
+            const view = render(createElement(App));
+            await waitFor(() => {
+                expect(screen.getByText("Create first user")).toBeInTheDocument();
+            });
+            expect(screen.getByLabelText("Gateway Token")).toBeInTheDocument();
+            view.unmount();
+
+            const devtoolsView = render(createElement(DashboardDevtools));
+            expect(devtoolsView.container.firstChild).toBeTruthy();
+            devtoolsView.unmount();
+        } finally {
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: originalFetch,
+                writable: true,
+            });
+        }
+    });
+
+    it("renders the authenticated layout shell with navigation status and logout", async () => {
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            user: { id: 1, username: "raymond" },
+        });
+        const originalFetch = fetch;
+        const originalWebSocket = WebSocket;
+        const apiCalls: string[] = [];
+        class LayoutWebSocket {
+            static readonly CONNECTING = 0;
+            static readonly OPEN = 1;
+            static readonly CLOSING = 2;
+            static readonly CLOSED = 3;
+            private readonly listeners = new Map<string, Array<() => void>>();
+            readyState = LayoutWebSocket.CONNECTING;
+            readonly sent: string[] = [];
+
+            addEventListener(type: string, listener: () => void) {
+                this.listeners.set(type, [...(this.listeners.get(type) || []), listener]);
+            }
+
+            send(data: string) {
+                this.sent.push(data);
+            }
+
+            close() {
+                this.readyState = LayoutWebSocket.CLOSED;
+            }
+        }
+        const fetchForLayoutShell = async (
+            input: Parameters<typeof fetch>[0],
+            init?: RequestInit
+        ) => {
+            const url = String(input);
+            apiCalls.push(`${init?.method ?? "GET"} ${url}`);
+            if (url === "/api/health") {
+                return Response.json({
+                    backendCommit: "backend-sha",
+                    gatewayConnected: true,
+                    sessionCount: 1,
+                    status: "isOk",
+                });
+            }
+            if (url === "/api/cache/system.host") {
+                return Response.json({
+                    consecutiveFailures: 0,
+                    data: { version: { current: "2026.6.9" } },
+                    errorCode: undefined,
+                    errorMessage: undefined,
+                    expiresAt: undefined,
+                    key: "system.host",
+                    lastAttemptAt: "2026-06-25T00:00:00.000Z",
+                    meta: {},
+                    source: "system",
+                    status: "fresh",
+                    updatedAt: "2026-06-25T00:00:00.000Z",
+                });
+            }
+            if (url === "/api/pull-requests") {
+                return Response.json({
+                    pullRequests: [
+                        {
+                            author: { login: "mira-2026" },
+                            baseRefName: "main",
+                            createdAt: "2026-06-25T00:00:00.000Z",
+                            headRefName: "test/layout",
+                            isDraft: false,
+                            number: 192,
+                            title: "Expand coverage",
+                            updatedAt: "2026-06-25T00:00:00.000Z",
+                            url: "https://github.test/pr/192",
+                        },
+                    ],
+                });
+            }
+            if (url === "/api/notifications") {
+                return Response.json({ items: [], readCount: 0, unreadCount: 0 });
+            }
+            if (url === "/api/auth/logout" && init?.method === "POST") {
+                return Response.json({ isOk: true });
+            }
+            if (url === "/api/auth/session") {
+                return Response.json({
+                    authenticated: false,
+                    isBootstrapRequired: false,
+                    user: undefined,
+                });
+            }
+            throw new Error(
+                `Unexpected layout shell fetch: ${init?.method ?? "GET"} ${url}`
+            );
+        };
+        Object.defineProperties(globalThis, {
+            fetch: {
+                configurable: true,
+                value: fetchForLayoutShell,
+                writable: true,
+            },
+            WebSocket: {
+                configurable: true,
+                value: LayoutWebSocket,
+                writable: true,
+            },
+        });
+
+        const rootRoute = createRootRoute({
+            component: () => createElement(Outlet),
+        });
+        const authenticatedRoute = createRoute({
+            getParentRoute: () => rootRoute,
+            id: "authenticated",
+            component: () =>
+                createElement(
+                    Layout,
+                    undefined,
+                    createElement("section", undefined, "Layout child content")
+                ),
+        });
+        const indexRoute = createRoute({
+            getParentRoute: () => authenticatedRoute,
+            path: "/",
+            component: () => createElement("div", undefined, "Index child"),
+        });
+        const loginRoute = createRoute({
+            getParentRoute: () => rootRoute,
+            path: "/login",
+            component: () => createElement("div", undefined, "Login route"),
+        });
+        const testRouter = createRouter({
+            history: createMemoryHistory({ initialEntries: ["/"] }),
+            routeTree: rootRoute.addChildren([
+                loginRoute,
+                authenticatedRoute.addChildren([indexRoute]),
+            ]),
+        });
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                mutations: { retry: false },
+                queries: { retry: false, staleTime: Infinity },
+            },
+        });
+        const routedShell = createElement(
+            OpenClawSocketProvider,
+            undefined,
+            createElement(RouterProvider, { router: testRouter })
+        );
+
+        try {
+            const view = render(
+                createElement(QueryClientProvider, { client: queryClient }, routedShell)
+            );
+            await waitFor(() => {
+                expect(screen.getByText("Mira Dashboard")).toBeInTheDocument();
+                expect(screen.getByText("Layout child content")).toBeInTheDocument();
+                expect(screen.getByLabelText("1 open pull requests")).toBeInTheDocument();
+            });
+
+            expect(screen.getByTitle("Backend connected")).toBeInTheDocument();
+            expect(screen.getByText("v2026.6.9")).toBeInTheDocument();
+            await userEvent.click(screen.getByLabelText("Open navigation menu"));
+            expect(
+                screen.getAllByLabelText("Close navigation menu").length
+            ).toBeGreaterThan(1);
+
+            await userEvent.click(screen.getByText("Log out"));
+            await waitFor(() => {
+                expect(apiCalls).toContain("POST /api/auth/logout");
+            });
+            act(() => {
+                view.unmount();
+            });
+        } finally {
+            queryClient.clear();
+            Object.defineProperties(globalThis, {
+                fetch: {
+                    configurable: true,
+                    value: originalFetch,
+                    writable: true,
+                },
+                WebSocket: {
+                    configurable: true,
+                    value: originalWebSocket,
+                    writable: true,
+                },
+            });
+        }
+    });
+
+    it("drives login page bootstrap, failed login, successful login, and navigation", async () => {
+        const { Login } = await import("../pages/Login");
+        const originalFetch = fetch;
+        const calls: string[] = [];
+        let loginAttempts = 0;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+                const url = String(input);
+                calls.push(`${init?.method ?? "GET"} ${url}`);
+                if (url === "/api/auth/bootstrap") {
+                    return Response.json({
+                        hasGatewayToken: true,
+                        isBootstrapRequired: false,
+                    });
+                }
+                if (url === "/api/auth/login" && init?.method === "POST") {
+                    const body = JSON.parse(String(init.body || "{}")) as {
+                        password?: string;
+                        username?: string;
+                    };
+                    expect(body.username).toBe("raymond");
+                    loginAttempts += 1;
+                    if (body.password !== "correct-password") {
+                        return Response.json(
+                            { error: "Invalid credentials" },
+                            { status: 401 }
+                        );
+                    }
+                    return Response.json({ isOk: true });
+                }
+                if (url === "/api/auth/session") {
+                    return Response.json({
+                        authenticated: loginAttempts > 1,
+                        isBootstrapRequired: false,
+                        user:
+                            loginAttempts > 1
+                                ? { id: 1, username: "raymond" }
+                                : undefined,
+                    });
+                }
+                throw new Error(
+                    `Unexpected login fetch: ${init?.method ?? "GET"} ${url}`
+                );
+            },
+            writable: true,
+        });
+
+        const rootRoute = createRootRoute({
+            component: () => createElement(Outlet),
+        });
+        const indexRoute = createRoute({
+            getParentRoute: () => rootRoute,
+            path: "/",
+            component: () => createElement("div", undefined, "Logged in"),
+        });
+        const loginRoute = createRoute({
+            getParentRoute: () => rootRoute,
+            path: "/login",
+            component: Login,
+        });
+        const testRouter = createRouter({
+            history: createMemoryHistory({ initialEntries: ["/login"] }),
+            routeTree: rootRoute.addChildren([indexRoute, loginRoute]),
+        });
+
+        try {
+            const view = render(createElement(RouterProvider, { router: testRouter }));
+            await waitFor(() => {
+                expect(screen.getByText("Log in")).toBeInTheDocument();
+                expect(screen.queryByLabelText("Gateway Token")).not.toBeInTheDocument();
+            });
+
+            await userEvent.type(screen.getByLabelText("Username"), " raymond ");
+            await userEvent.type(screen.getByLabelText("Password"), "wrong");
+            await userEvent.click(screen.getByRole("button", { name: "Log in" }));
+            await waitFor(() => {
+                expect(screen.getByText("Invalid credentials")).toBeInTheDocument();
+                expect(calls).toContain("GET /api/auth/bootstrap");
+            });
+
+            const passwordInput = screen.getByLabelText("Password");
+            await userEvent.clear(passwordInput);
+            await userEvent.type(passwordInput, "correct-password");
+            await userEvent.click(screen.getByRole("button", { name: "Log in" }));
+            await waitFor(() => {
+                expect(screen.getByText("Logged in")).toBeInTheDocument();
+            });
+            expect(calls).toContain("POST /api/auth/login");
+
+            view.unmount();
+        } finally {
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: originalFetch,
+                writable: true,
+            });
+        }
     });
 
     it("handles API authorization failures through the shared auth boundary", async () => {

@@ -17,13 +17,17 @@ interface DashboardSocketData {
     userId: number;
 }
 
-const frontendPath =
-    process.env.MIRA_DASHBOARD_FRONTEND_PATH ||
-    path.join(import.meta.dirname, "..", "..", "dist");
 const SERVER_IDLE_TIMEOUT_SECONDS = 240;
 
 function hasHiddenStaticSegment(relativePath: string): boolean {
     return relativePath.split(path.sep).some((segment) => segment.startsWith("."));
+}
+
+function resolveFrontendPath(): string {
+    return (
+        process.env.MIRA_DASHBOARD_FRONTEND_PATH ||
+        path.join(import.meta.dirname, "..", "..", "dist")
+    );
 }
 
 export function resolveListenPort(value = process.env.PORT): number {
@@ -134,6 +138,7 @@ async function staticResponse(pathname: string): Promise<Response> {
         return Response.json({ error: "Not found" }, { status: 404 });
     }
 
+    const frontendPath = resolveFrontendPath();
     const indexPath = path.join(frontendPath, "index.html");
     if (!fs.existsSync(indexPath)) {
         return new Response(

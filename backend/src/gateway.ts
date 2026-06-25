@@ -33,22 +33,11 @@ const DEFAULT_DASHBOARD_OPENCLAW_HOME = Path.join(
     "data",
     "openclaw-client"
 );
-const DASHBOARD_OPENCLAW_HOME = validateOpenClawRoot(
-    nonEmptyEnvironmentFallback(
-        "MIRA_DASHBOARD_OPENCLAW_HOME",
-        DEFAULT_DASHBOARD_OPENCLAW_HOME
-    ).trim(),
-    "MIRA_DASHBOARD_OPENCLAW_HOME"
-);
-const OPENCLAW_HOME = validateOpenClawRoot(
-    nonEmptyEnvironmentFallback("OPENCLAW_HOME", defaultOpenClawHome()).trim(),
-    "OPENCLAW_HOME"
-);
 
 /** Performs load or create dashboard device IDentity. */
 function loadOrCreateDashboardDeviceIdentity(
     identityPath = Path.join(
-        DASHBOARD_OPENCLAW_HOME,
+        gatewayRuntime.dashboardOpenClawHome,
         ".openclaw",
         "identity",
         "device.json"
@@ -184,7 +173,50 @@ const pendingRequests = new Map<string, PendingRequest>();
 type GatewayClientConstructor = new (
     options: OpenClawGatewayClientOptions
 ) => OpenClawGatewayClientInstance;
-const GatewayClientCtor: GatewayClientConstructor = OpenClawGatewayClient;
+const gatewayRuntime = {
+    clientConstructor: OpenClawGatewayClient as GatewayClientConstructor,
+    dashboardOpenClawHome: validateOpenClawRoot(
+        nonEmptyEnvironmentFallback(
+            "MIRA_DASHBOARD_OPENCLAW_HOME",
+            DEFAULT_DASHBOARD_OPENCLAW_HOME
+        ).trim(),
+        "MIRA_DASHBOARD_OPENCLAW_HOME"
+    ),
+    openClawHome: validateOpenClawRoot(
+        nonEmptyEnvironmentFallback("OPENCLAW_HOME", defaultOpenClawHome()).trim(),
+        "OPENCLAW_HOME"
+    ),
+};
+
+export function setGatewayClientConstructorForTests(
+    constructor: GatewayClientConstructor
+): () => void {
+    const previousConstructor = gatewayRuntime.clientConstructor;
+    gatewayRuntime.clientConstructor = constructor;
+    return () => {
+        gatewayRuntime.clientConstructor = previousConstructor;
+    };
+}
+
+export function setGatewayRootsForTests(roots: {
+    dashboardOpenClawHome: string;
+    openClawHome: string;
+}): () => void {
+    const previousDashboardOpenClawHome = gatewayRuntime.dashboardOpenClawHome;
+    const previousOpenClawHome = gatewayRuntime.openClawHome;
+    gatewayRuntime.dashboardOpenClawHome = validateOpenClawRoot(
+        roots.dashboardOpenClawHome,
+        "MIRA_DASHBOARD_OPENCLAW_HOME"
+    );
+    gatewayRuntime.openClawHome = validateOpenClawRoot(
+        roots.openClawHome,
+        "OPENCLAW_HOME"
+    );
+    return () => {
+        gatewayRuntime.dashboardOpenClawHome = previousDashboardOpenClawHome;
+        gatewayRuntime.openClawHome = previousOpenClawHome;
+    };
+}
 
 function sendPendingRequestError(pending: PendingRequest, error: string): void {
     try {
@@ -450,7 +482,7 @@ function getTranscriptPath(sessionKey: string, sessionId?: string): string | und
         return undefined;
     }
 
-    const openClawRoot = Path.resolve(OPENCLAW_HOME);
+    const openClawRoot = Path.resolve(gatewayRuntime.openClawHome);
     const agentDirectory = Path.resolve(openClawRoot, "agents", agentId);
     const agentsSessionsRoot = Path.resolve(agentDirectory, "sessions");
     const transcriptPath = Path.resolve(agentsSessionsRoot, `${sessionId}.jsonl`);
@@ -819,7 +851,7 @@ function init(token: string): void {
         failPendingRequests("Gateway disconnected");
         broadcast({ type: "disconnected", gatewayConnected: false });
     }
-    const thisGatewayClient = new GatewayClientCtor({
+    const thisGatewayClient = new gatewayRuntime.clientConstructor({
         url: process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789",
         token,
         role: "operator",

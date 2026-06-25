@@ -19,9 +19,9 @@ import {
     shouldShowStreamRow,
     uniqueStrings,
     visibleHistoryMessages,
-} from "./components/features/chat/chatRuntime";
-import { OpenClawSocketProvider } from "./hooks/useOpenClawSocket";
-import { Agents } from "./pages/Agents";
+} from "../components/features/chat/chatRuntime";
+import { OpenClawSocketProvider } from "../hooks/useOpenClawSocket";
+import { Agents } from "../pages/Agents";
 import {
     hasNewerAssistantMessageInHistory,
     nextHistoryBottomState,
@@ -30,29 +30,29 @@ import {
     scheduleBottomFollowWhenNeeded,
     sessionTimestampMs,
     writeDeletedMessageKeys,
-} from "./pages/Chat";
-import { Dashboard } from "./pages/Dashboard";
-import { Database } from "./pages/Database";
-import { Docker } from "./pages/Docker";
-import { Files } from "./pages/Files";
-import { Jobs } from "./pages/Jobs";
-import { Logs } from "./pages/Logs";
-import { Moltbook } from "./pages/Moltbook";
-import { PullRequests } from "./pages/PullRequests";
-import { Sessions } from "./pages/Sessions";
+} from "../pages/Chat";
+import { Dashboard } from "../pages/Dashboard";
+import { Database } from "../pages/Database";
+import { Docker } from "../pages/Docker";
+import { Files } from "../pages/Files";
+import { Jobs } from "../pages/Jobs";
+import { Logs } from "../pages/Logs";
+import { Moltbook } from "../pages/Moltbook";
+import { PullRequests } from "../pages/PullRequests";
+import { Sessions } from "../pages/Sessions";
 import {
     errorMessage,
     numberFromDuration,
     optionalFormValue,
     Settings,
-} from "./pages/Settings";
+} from "../pages/Settings";
 import {
     isTerminalOutputAtBottom,
     scrollTerminalOutputToBottom,
     scrollTerminalOutputToBottomAndReport,
     Terminal,
-} from "./pages/Terminal";
-import { authActions } from "./stores/authStore";
+} from "../pages/Terminal";
+import { authActions } from "../stores/authStore";
 
 type FakeWebSocketListener = (event?: { data?: string }) => void;
 
@@ -67,6 +67,9 @@ const originalGlobals = {
 const animationFrameState = {
     id: 0,
     frames: new Map<number, FrameRequestCallback>(),
+};
+const terminalApiState = {
+    wasJobStopped: false,
 };
 
 function requestAnimationFrameForTest(callback: FrameRequestCallback): number {
@@ -203,6 +206,41 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     }
 
     if (method === "POST" && url === "/api/docker/exec/job-1/stop") {
+        return Response.json({ isSuccess: true });
+    }
+
+    if (method === "POST" && url === "/api/terminal/cd") {
+        const body = parseRequestBody(init);
+        if (body.path === "/tmp") {
+            return Response.json({ isSuccess: true, newCwd: "/tmp" });
+        }
+        return Response.json({
+            isSuccess: false,
+            newCwd: String(body.cwd || "/home/ubuntu"),
+            error: "Not a directory",
+        });
+    }
+
+    if (method === "POST" && url === "/api/terminal/complete") {
+        expect(parseRequestBody(init)).toMatchObject({ partial: "ec" });
+        return Response.json({
+            commonPrefix: "echo ",
+            completions: [
+                { completion: "echo ", display: "echo", type: "executable" },
+                { completion: "echown ", display: "echown", type: "executable" },
+            ],
+        });
+    }
+
+    if (method === "POST" && url === "/api/exec/start") {
+        const body = parseRequestBody(init);
+        expect(body.command).toBe("echo hello");
+        expect(body.cwd).toBe("/tmp");
+        return Response.json({ jobId: "job-1" });
+    }
+
+    if (method === "POST" && url === "/api/exec/job-1/stop") {
+        terminalApiState.wasJobStopped = true;
         return Response.json({ isSuccess: true });
     }
 
@@ -1048,10 +1086,10 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     if (url === "/api/exec/job-1") {
         return Response.json({
             jobId: "job-1",
-            status: "done",
-            stdout: "ok",
+            status: terminalApiState.wasJobStopped ? "done" : "running",
+            stdout: terminalApiState.wasJobStopped ? "ok" : "",
             stderr: "",
-            code: 0,
+            code: terminalApiState.wasJobStopped ? 0 : undefined,
         });
     }
 
@@ -1082,9 +1120,16 @@ function clickElement(element: Element) {
     flushAnimationFrames();
 }
 
+async function flushQueuedTimers() {
+    await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+}
+
 describe("Mira Dashboard pages", () => {
     beforeEach(() => {
         FakeWebSocket.instances = [];
+        terminalApiState.wasJobStopped = false;
         authActions.setSession({
             authenticated: true,
             isBootstrapRequired: false,
@@ -1194,6 +1239,73 @@ describe("Mira Dashboard pages", () => {
         await waitFor(() =>
             expect(screen.getByText("Connecting to OpenClaw...")).toBeInTheDocument()
         );
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("drives terminal page command history, cwd changes, completions, stop, and clear", async () => {
+        const user = userEvent.setup();
+        const view = renderPage(createElement(Terminal));
+
+        await waitFor(() => {
+            expect(screen.getByRole("log")).toHaveTextContent(
+                "Welcome to Mira Dashboard Terminal."
+            );
+        });
+
+        const commandInput = screen.getByRole("textbox", {
+            name: /terminal command/i,
+        });
+
+        await user.type(commandInput, "pwd");
+        await user.keyboard("{Enter}");
+        await flushQueuedTimers();
+        await waitFor(() => {
+            expect(screen.getByText("/home/ubuntu")).toBeInTheDocument();
+        });
+
+        await user.type(commandInput, "cd /missing");
+        await user.keyboard("{Enter}");
+        await flushQueuedTimers();
+        await waitFor(() => {
+            expect(screen.getByText("Not a directory")).toBeInTheDocument();
+        });
+
+        await user.type(commandInput, "cd /tmp");
+        await user.keyboard("{Enter}");
+        await flushQueuedTimers();
+        await waitFor(() => {
+            expect(screen.getByText("/tmp")).toBeInTheDocument();
+        });
+
+        await user.type(commandInput, "ec");
+        await user.keyboard("{Tab}");
+        await waitFor(() => {
+            expect(commandInput).toHaveValue("echo ");
+        });
+        await user.type(commandInput, "hello");
+        await user.keyboard("{Enter}");
+        await flushQueuedTimers();
+
+        const stopButton = await screen.findByRole("button", { name: /stop/i });
+        clickElement(stopButton);
+        await waitFor(() => {
+            expect(screen.getByText("ok")).toBeInTheDocument();
+            expect(screen.getByRole("log")).toHaveTextContent("Exit code: 0");
+        });
+
+        await user.keyboard("{ArrowUp}");
+        expect(commandInput).toHaveValue("echo hello");
+        await user.keyboard("{ArrowDown}");
+        expect(commandInput).toHaveValue("");
+
+        clickElement(screen.getByRole("button", { name: /clear/i }));
+        await waitFor(() => {
+            expect(screen.getByRole("log")).toHaveTextContent(
+                "Welcome to Mira Dashboard Terminal."
+            );
+        });
+
         view.unmount();
         view.queryClient.clear();
     });

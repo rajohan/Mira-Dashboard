@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -231,6 +231,385 @@ describe("Docker updater tag patterns", () => {
                 )
                 .get()
         ).toEqual({ enabled: 1, time_of_day: "04:10" });
+    });
+
+    it("blocks global updater runs when service discovery cannot read the apps root", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        const missingAppsRoot = path.join(
+            createTemporaryRoot("mira-docker-updater-missing-root-"),
+            "missing"
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = missingAppsRoot;
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockResolvedValue({ code: 0, stderr: "", stdout: "" });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        const registered = await registerDockerUpdaterServices();
+        expect(registered).toMatchObject({
+            isOk: false,
+            step: "register-services",
+            stdout: "",
+        });
+        expect(JSON.parse(registered.stderr)).toMatchObject({
+            failed: [
+                {
+                    appSlug: "*",
+                    error: expect.stringContaining("Compose apps root not found"),
+                },
+            ],
+            registered: 0,
+        });
+
+        await expect(runDockerUpdaterService()).resolves.toEqual([registered]);
+        expect(runProcessSpy).not.toHaveBeenCalled();
+    });
+
+    it("applies a manual update to an isolated Compose file without invoking real Docker", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_PLATFORM");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-apply-");
+        const appRoot = path.join(appsRoot, "unit-apply-app");
+        const composePath = path.join(appRoot, "compose.yaml");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            composePath,
+            [
+                "services:",
+                "  web:",
+                "    image: ghcr.io/unit/web:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'false'",
+                "      mira.updater.track: tag",
+                String.raw`      mira.updater.tagPattern: '^\d+\.\d+\.\d+$'`,
+                "      mira.updater.tagPatternIsRegex: 'true'",
+                "",
+            ].join("\n")
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        process.env.MIRA_DOCKER_COMPOSE_WRAPPER = path.join(appsRoot, "compose-wrapper");
+        process.env.MIRA_DOCKER_UPDATER_PLATFORM = "linux/amd64";
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.endsWith("/v2/unit/web/tags/list?n=1000")) {
+                return Response.json({ tags: ["1.0.0", "1.0.1"] });
+            }
+            if (url.endsWith("/v2/unit/web/manifests/1.0.1")) {
+                return Response.json({
+                    manifests: [
+                        {
+                            digest: "sha256:newdigest",
+                            platform: { architecture: "amd64", os: "linux" },
+                        },
+                    ],
+                });
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockResolvedValue({ code: 0, stderr: "", stdout: "compose ok" });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        const registered = await registerDockerUpdaterServices();
+        expect(registered.isOk).toBe(true);
+        const service = database
+            .prepare(
+                `SELECT id
+                 FROM docker_managed_services
+                 WHERE app_slug = 'unit-apply-app' AND service_name = 'web'`
+            )
+            .get() as { id: number };
+
+        const steps = await runDockerUpdaterService(service.id);
+        expect(steps).toContainEqual(
+            expect.objectContaining({
+                isOk: true,
+                step: "manual-update:unit-apply-app/web",
+                stdout: "compose ok",
+            })
+        );
+        expect(readFileSync(composePath, "utf8")).toContain(
+            "image: ghcr.io/unit/web:1.0.1"
+        );
+        expect(
+            database
+                .prepare(
+                    "SELECT current_tag, current_digest, last_status FROM docker_managed_services WHERE id = ?"
+                )
+                .get(service.id)
+        ).toEqual({
+            current_digest: "sha256:newdigest",
+            current_tag: "1.0.1",
+            last_status: "updated",
+        });
+        expect(
+            database
+                .prepare(
+                    "SELECT event_type FROM docker_update_events WHERE managed_service_id = ? ORDER BY id"
+                )
+                .all(service.id)
+        ).toEqual([
+            { event_type: "update_available" },
+            { event_type: "manual_update_succeeded" },
+        ]);
+        expect(runProcessSpy).toHaveBeenCalledWith(
+            process.env.MIRA_DOCKER_COMPOSE_WRAPPER,
+            ["-f", composePath, "up", "-d", "--pull", "always", "web"],
+            {
+                cwd: appRoot,
+                env: process.env,
+                maxBuffer: 10 * 1024 * 1024,
+                timeoutMs: 180_000,
+            }
+        );
+        expect(runProcessSpy).toHaveBeenCalledWith(
+            "docker",
+            ["image", "prune", "-f"],
+            expect.objectContaining({ timeoutMs: 120_000 })
+        );
+    });
+
+    it("polls Docker Hub tags through bearer auth and paginated tag results", async () => {
+        rememberEnvironment("DOCKER_LOGIN");
+        rememberEnvironment("DOCKER_TOKEN");
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-dockerhub-");
+        const appRoot = path.join(appsRoot, "unit-dockerhub-app");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            path.join(appRoot, "compose.yaml"),
+            [
+                "services:",
+                "  web:",
+                "    image: nginx:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'false'",
+                "      mira.updater.track: tag",
+                String.raw`      mira.updater.tagPattern: '^\d+\.\d+\.\d+$'`,
+                "      mira.updater.tagPatternIsRegex: 'true'",
+                "",
+            ].join("\n")
+        );
+        process.env.DOCKER_LOGIN = "docker-user";
+        process.env.DOCKER_TOKEN = "docker-token";
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+
+        const requests: Array<{ authorization?: string; url: string }> = [];
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL,
+            init?: RequestInit
+        ) => {
+            const url = String(input);
+            const headers = new Headers(init?.headers);
+            requests.push({
+                authorization: headers.get("authorization") ?? undefined,
+                url,
+            });
+            if (url.endsWith("/v2/library/nginx/tags/list?n=1000")) {
+                if (!headers.get("authorization")) {
+                    return new Response("auth required", {
+                        status: 401,
+                        headers: {
+                            "www-authenticate":
+                                'Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:library/nginx:pull"',
+                        },
+                    });
+                }
+                expect(headers.get("authorization")).toBe("Bearer registry-token");
+                return Response.json(
+                    { tags: ["1.0.0", "1.1.0"] },
+                    {
+                        headers: {
+                            link: '<https://REGISTRY-1.DOCKER.IO:443/v2/library/nginx/tags/list?n=1000&page=2>; rel="next"',
+                        },
+                    }
+                );
+            }
+            if (
+                url ===
+                "https://auth.docker.io/token?service=registry.docker.io&scope=repository%3Alibrary%2Fnginx%3Apull"
+            ) {
+                expect(headers.get("authorization")).toBe(
+                    `Basic ${Buffer.from("docker-user:docker-token").toBase64()}`
+                );
+                return Response.json({ token: "registry-token" });
+            }
+            if (url.endsWith("/v2/library/nginx/tags/list?n=1000&page=2")) {
+                expect(headers.get("authorization")).toBe("Bearer registry-token");
+                return Response.json({ tags: ["1.2.0", "not-semver"] });
+            }
+            if (url.endsWith("/v2/library/nginx/manifests/1.2.0")) {
+                if (!headers.get("authorization")) {
+                    return new Response("auth required", {
+                        status: 401,
+                        headers: {
+                            "www-authenticate":
+                                'Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:library/nginx:pull"',
+                        },
+                    });
+                }
+                expect(headers.get("authorization")).toBe("Bearer registry-token");
+                return Response.json(
+                    { digest: "sha256:bodydigest" },
+                    { headers: { "docker-content-digest": "sha256:headerdigest" } }
+                );
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+
+        const registered = await registerDockerUpdaterServices();
+        expect(registered.isOk).toBe(true);
+        const service = database
+            .prepare(
+                `SELECT id
+                 FROM docker_managed_services
+                 WHERE app_slug = 'unit-dockerhub-app' AND service_name = 'web'`
+            )
+            .get() as { id: number };
+
+        const polled = await pollDockerUpdaterRegistries(service.id);
+        expect(polled).toMatchObject({ isOk: true, step: "poll", stderr: "" });
+        expect(JSON.parse(polled.stdout)).toMatchObject({
+            isChecked: ["unit-dockerhub-app/web"],
+            updates: ["unit-dockerhub-app/web"],
+        });
+        expect(
+            database
+                .prepare(
+                    "SELECT latest_tag, latest_digest, last_status FROM docker_managed_services WHERE id = ?"
+                )
+                .get(service.id)
+        ).toEqual({
+            latest_digest: "sha256:headerdigest",
+            latest_tag: "1.2.0",
+            last_status: "update_available",
+        });
+        expect(requests.map((request) => request.url)).toContain(
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository%3Alibrary%2Fnginx%3Apull"
+        );
+        expect(
+            requests.filter((request) =>
+                request.url.endsWith("/v2/library/nginx/tags/list?n=1000")
+            )
+        ).toContainEqual({
+            authorization: "Bearer registry-token",
+            url: "https://registry-1.docker.io/v2/library/nginx/tags/list?n=1000",
+        });
+        expect(
+            requests.find((request) =>
+                request.url.endsWith("/v2/library/nginx/tags/list?n=1000&page=2")
+            )
+        ).toEqual({
+            authorization: "Bearer registry-token",
+            url: "https://registry-1.docker.io/v2/library/nginx/tags/list?n=1000&page=2",
+        });
+    });
+
+    it("rejects untrusted registry pagination before reusing bearer auth", async () => {
+        rememberEnvironment("DOCKER_LOGIN");
+        rememberEnvironment("DOCKER_TOKEN");
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-pagination-origin-");
+        const appRoot = path.join(appsRoot, "unit-pagination-origin-app");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            path.join(appRoot, "compose.yaml"),
+            [
+                "services:",
+                "  web:",
+                "    image: nginx:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'false'",
+                "      mira.updater.track: tag",
+                String.raw`      mira.updater.tagPattern: '^\d+\.\d+\.\d+$'`,
+                "      mira.updater.tagPatternIsRegex: 'true'",
+                "",
+            ].join("\n")
+        );
+        process.env.DOCKER_LOGIN = "docker-user";
+        process.env.DOCKER_TOKEN = "docker-token";
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+
+        const requests: Array<{ authorization?: string; url: string }> = [];
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL,
+            init?: RequestInit
+        ) => {
+            const url = String(input);
+            const headers = new Headers(init?.headers);
+            requests.push({
+                authorization: headers.get("authorization") ?? undefined,
+                url,
+            });
+            if (url.endsWith("/v2/library/nginx/tags/list?n=1000")) {
+                if (!headers.get("authorization")) {
+                    return new Response("auth required", {
+                        status: 401,
+                        headers: {
+                            "www-authenticate":
+                                'Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:library/nginx:pull"',
+                        },
+                    });
+                }
+                expect(headers.get("authorization")).toBe("Bearer registry-token");
+                return Response.json(
+                    { tags: ["1.0.0", "1.1.0"] },
+                    {
+                        headers: {
+                            link: '<https://registry-1.docker.io/v2/library/redis/tags/list?n=1000&page=2>; rel="next"',
+                        },
+                    }
+                );
+            }
+            if (
+                url ===
+                "https://auth.docker.io/token?service=registry.docker.io&scope=repository%3Alibrary%2Fnginx%3Apull"
+            ) {
+                return Response.json({ token: "registry-token" });
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+
+        const registered = await registerDockerUpdaterServices();
+        expect(registered.isOk).toBe(true);
+        const service = database
+            .prepare(
+                `SELECT id
+                 FROM docker_managed_services
+                 WHERE app_slug = 'unit-pagination-origin-app' AND service_name = 'web'`
+            )
+            .get() as { id: number };
+
+        const polled = await pollDockerUpdaterRegistries(service.id);
+        expect(polled).toMatchObject({ isOk: false, step: "poll" });
+        expect(polled.stderr).toContain(
+            "docker.io tag pagination redirected to untrusted registry URL"
+        );
+        const updated = database
+            .prepare(
+                "SELECT latest_tag, latest_digest, last_status FROM docker_managed_services WHERE id = ?"
+            )
+            .get(service.id) as {
+            latest_digest: string | undefined;
+            latest_tag: string | undefined;
+            last_status: string;
+        };
+        expect(updated.latest_digest).toBeNull();
+        expect(updated.latest_tag).toBeNull();
+        expect(updated.last_status).toBe("registry_check_failed");
+        expect(
+            requests.some((request) => request.url.includes("/v2/library/redis/"))
+        ).toBe(false);
     });
 
     it("reports manual update guard states without touching Docker", async () => {

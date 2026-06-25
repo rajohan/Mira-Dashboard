@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, jest } from "bun:test";
 
 const DATABASE_OVERVIEW_ENV_KEYS = [
     "DATABASE_HOST",
@@ -149,6 +149,9 @@ describe("database overview service", () => {
             process.env.PGBOUNCER_HOST = "pgbouncer";
             process.env.PGBOUNCER_PORT = "6432";
             const overview = await getDatabaseOverview();
+            const { databaseRoutes } = await import("../src/routes/databaseRoutes.ts");
+            const routeResponse = await databaseRoutes["/api/database/overview"].GET();
+            const routeOverview = (await routeResponse.json()) as typeof overview;
 
             expect(overview.overview).toMatchObject({
                 totalDatabaseSizeBytes: 15_728_640,
@@ -175,6 +178,14 @@ describe("database overview service", () => {
                 query: "SELECT 1",
                 calls: "4",
             });
+            expect(routeOverview.overview).toMatchObject({
+                totalDatabaseSizeBytes: 15_728_640,
+                totalBackends: 3,
+            });
+            expect(routeOverview.overview.pgbouncer).toMatchObject({
+                clientConnections: 3,
+                serverConnections: 6,
+            });
         } finally {
             if (originalPath === undefined) {
                 delete process.env.PATH;
@@ -190,6 +201,37 @@ describe("database overview service", () => {
                 }
             }
             rmSync(temporaryRoot, { force: true, recursive: true });
+        }
+    });
+
+    it("maps database overview service failures to a generic route error", async () => {
+        const serviceModule = await import("../src/services/databaseOverview.ts");
+        const databaseError = new Error("connection failed") as Error & {
+            code?: string;
+        };
+        databaseError.code = "ECONNREFUSED";
+        const overviewSpy = jest
+            .spyOn(serviceModule, "getDatabaseOverview")
+            .mockRejectedValue(databaseError);
+        const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            const { databaseRoutes } = await import("../src/routes/databaseRoutes.ts");
+            const response = await databaseRoutes["/api/database/overview"].GET();
+
+            expect(response.status).toBe(500);
+            expect(await response.json()).toEqual({
+                error: "Failed to load database overview",
+            });
+            expect(consoleSpy).toHaveBeenCalledWith(
+                "[databaseRoutes] Failed to load database overview",
+                {
+                    code: "ECONNREFUSED",
+                    name: "Error",
+                }
+            );
+        } finally {
+            overviewSpy.mockRestore();
+            consoleSpy.mockRestore();
         }
     });
 });

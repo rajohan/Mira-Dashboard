@@ -284,6 +284,14 @@ describe("backend service utilities", () => {
             })
         ).rejects.toThrow("Process output exceeded maxBuffer");
 
+        const timedOut = await runProcess(
+            process.execPath,
+            ["--eval", "setTimeout(() => {}, 1000);"],
+            { timeoutMs: 1 }
+        );
+        expect(timedOut).toMatchObject({ stderr: "", stdout: "" });
+        expect(timedOut.code).not.toBe(0);
+
         const chunks: string[] = [];
         const stream = new ReadableStream<Uint8Array>({
             start(controller) {
@@ -296,6 +304,7 @@ describe("backend service utilities", () => {
             chunks.push(chunk);
         });
         expect(chunks.join("")).toBe("onetwo");
+        await expect(pipeProcessOutput(undefined, () => {})).resolves.toBeUndefined();
     });
 
     it("parses valid JSON request bodies", async () => {

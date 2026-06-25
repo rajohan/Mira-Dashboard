@@ -1,7 +1,10 @@
 import {
+    appendFileSync,
     chmodSync,
+    existsSync,
     mkdirSync,
     mkdtempSync,
+    readFileSync,
     rmSync,
     symlinkSync,
     writeFileSync,
@@ -9,10 +12,10 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import type { DashboardSocket } from "../src/dashboardSocket.ts";
-import { database } from "../src/database.ts";
+import { database, sqlNullable } from "../src/database.ts";
 
 const cleanupCallbacks: Array<() => void> = [];
 
@@ -33,6 +36,16 @@ function createTemporaryRoot(prefix: string): string {
         rmSync(root, { force: true, recursive: true });
     });
     return root;
+}
+
+function routeRequest<T extends string>(
+    route: string,
+    parameters: Record<T, string>,
+    init?: RequestInit
+): Request & { params: Record<T, string> } {
+    return Object.assign(new Request(`https://test.local${route}`, init), {
+        params: parameters,
+    });
 }
 
 function writeFakeGit(binaryPath: string, repoRoot: string): void {
@@ -79,6 +92,76 @@ fi
     chmodSync(binaryPath, 0o755);
 }
 
+function writeFakeGhForPullRequestActions(binaryPath: string, logPath: string): void {
+    writeFileSync(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
+if [[ "$1 $2 $3" == "pr view 3" ]]; then
+  printf '%s\n' '{"number":3,"title":"Needs review","body":"","url":"https://github.test/pr/3","headRefName":"review-branch","headRefOid":"head3","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr view 4" ]]; then
+  printf '%s\n' '{"number":4,"title":"Behind branch","body":"","url":"https://github.test/pr/4","headRefName":"behind-branch","headRefOid":"head4","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"BEHIND","reviewDecision":"APPROVED","reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr view 5" ]]; then
+  printf '%s\n' '{"number":5,"title":"Close me","body":"","url":"https://github.test/pr/5","headRefName":"close-branch","headRefOid":"head5","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr review 3" ]]; then
+  printf 'review ok\n'
+elif [[ "$1 $2" == "api -X" && "$*" == *"repos/rajohan/Mira-Dashboard/pulls/4/update-branch"* ]]; then
+  printf '{}\n'
+elif [[ "$1 $2 $3" == "pr close 5" ]]; then
+  printf 'closed\n'
+else
+  echo "unexpected gh args: $*" >&2
+  exit 2
+fi
+`
+    );
+    chmodSync(binaryPath, 0o755);
+}
+
+function writeFakeGhForPullRequestValidation(binaryPath: string): void {
+    writeFileSync(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1 $2 $3" == "pr view 6" ]]; then
+  printf '%s\n' '{"number":6,"title":"Draft","body":"","url":"https://github.test/pr/6","headRefName":"draft-branch","headRefOid":"head6","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":true,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr view 7" ]]; then
+  printf '%s\n' '{"number":7,"title":"Wrong base","body":"","url":"https://github.test/pr/7","headRefName":"feature","headRefOid":"head7","baseRefName":"develop","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"APPROVED","reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr view 8" ]]; then
+  printf '%s\n' '{"number":8,"title":"Not behind","body":"","url":"https://github.test/pr/8","headRefName":"current","headRefOid":"head8","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"APPROVED","reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr view 9" ]]; then
+  printf '%s\n' '{"number":9,"title":"Conflict","body":"","url":"https://github.test/pr/9","headRefName":"conflict","headRefOid":"head9","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"DIRTY","mergeStateStatus":"BEHIND","reviewDecision":"APPROVED","reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr view 10" ]]; then
+  printf '%s\n' '{"number":10,"title":"Own PR","body":"","url":"https://github.test/pr/10","headRefName":"own","headRefOid":"head10","baseRefName":"main","author":{"login":"rajohan"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+else
+  echo "unexpected gh args: $*" >&2
+  exit 2
+fi
+`
+    );
+    chmodSync(binaryPath, 0o755);
+}
+
+function writeFakeGhForPullRequestMerge(binaryPath: string, logPath: string): void {
+    writeFileSync(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
+if [[ "$1 $2 $3" == "pr view 11" ]]; then
+  printf '%s\n' '{"number":11,"title":"Merge me","body":"","url":"https://github.test/pr/11","headRefName":"merge-branch","headRefOid":"head11","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"APPROVED","reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr merge 11" ]]; then
+  printf 'merged\n'
+else
+  echo "unexpected gh args: $*" >&2
+  exit 2
+fi
+`
+    );
+    chmodSync(binaryPath, 0o755);
+}
+
 function writeFakeDocker(binaryPath: string): void {
     writeFileSync(
         binaryPath,
@@ -88,12 +171,48 @@ if [[ "$*" == *"pgrep -f"* ]]; then
   printf '%s\n' "__MIRA_CONTAINER_PGREP_NO_MATCH__"
   exit 1
 fi
+if [[ "$*" == "exec kopia kopia snapshot list --all --json-verbose --json" ]]; then
+  now="$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")"
+  cat <<JSON
+[
+  {"id":"snap-docker","source":{"path":"/source/docker"},"stats":{"fileCount":2,"totalSize":200,"errorCount":0,"ignoredErrorCount":0},"startTime":"$now","endTime":"$now","retentionReason":["latest"]},
+  {"id":"snap-openclaw","source":{"path":"/source/openclaw"},"stats":{"fileCount":3,"totalSize":300,"errorCount":0,"ignoredErrorCount":0},"startTime":"$now","endTime":"$now","retentionReason":["latest"]},
+  {"id":"snap-projects","source":{"path":"/source/projects"},"stats":{"fileCount":4,"totalSize":400,"errorCount":0,"ignoredErrorCount":0},"startTime":"$now","endTime":"$now","retentionReason":["latest"]}
+]
+JSON
+  exit 0
+fi
+if [[ "$*" == "exec walg wal-g backup-list --detail --json" ]]; then
+  now="$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")"
+  cat <<JSON
+[
+  {"backup_name":"base_0001","finish_time":"$now","start_time":"$now","wal_file_name":"000000010000000000000001","storage_name":"default"}
+]
+JSON
+  exit 0
+fi
 if [[ "$*" == "exec walg /bin/sh /usr/local/bin/backup-push.sh" ]]; then
   printf '%s\n' "backup ok"
   exit 0
 fi
 echo "unexpected docker args: $*" >&2
 exit 2
+`
+    );
+    chmodSync(binaryPath, 0o755);
+}
+
+function writeFakePgrep(binaryPath: string, logPath: string): void {
+    writeFileSync(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
+if [[ "$*" == "-f /opt/docker/apps/kopia/backup.sh" ]]; then
+  printf '12345\n'
+  exit 0
+fi
+exit 1
 `
     );
     chmodSync(binaryPath, 0o755);
@@ -255,8 +374,8 @@ describe("backend service behavior", () => {
         expect(database.prepare("SELECT 1 AS value").get()).toEqual({ value: 1 });
 
         process.env.MIRA_DASHBOARD_DB_PATH = path.join(
-            process.cwd(),
-            "data",
+            path.parse(tmpdir()).root,
+            "mira-dashboard-non-temporary-test",
             `unsafe-${Bun.randomUUIDv7()}.db`
         );
         expect(() => database.prepare("SELECT 1").get()).toThrow(
@@ -277,10 +396,8 @@ describe("backend service behavior", () => {
         process.env.MIRA_DASHBOARD_LOGS_ROOT = logsRoot;
 
         const today = new Date().toISOString().split("T", 1)[0];
-        writeFileSync(
-            path.join(logsRoot, `openclaw-${today}.log`),
-            "first line\nsecond line\n"
-        );
+        const logFile = path.join(logsRoot, `openclaw-${today}.log`);
+        writeFileSync(logFile, "first line\nsecond line\n");
 
         const messages: unknown[] = [];
         const socket = {
@@ -308,6 +425,16 @@ describe("backend service behavior", () => {
                 type: "log_history_complete",
                 count: 2,
             });
+
+            appendFileSync(logFile, "third line\n");
+            await waitFor(
+                () =>
+                    messages.some((message) =>
+                        JSON.stringify(message).includes("third line")
+                    ),
+                2500
+            );
+            expect(messages).toContainEqual({ type: "log", line: "third line" });
         } finally {
             unsubscribeFromLogs(socket);
         }
@@ -513,6 +640,168 @@ describe("backend service behavior", () => {
         }
     });
 
+    it("rejects active deployment locks before starting deploy work", async () => {
+        const jobId = `test-deploy-active-${Bun.randomUUIDv7()}`;
+        const staleOwner = `test-deploy-stale-owner-${Bun.randomUUIDv7()}`;
+        database
+            .prepare(
+                `INSERT INTO deployment_jobs
+                 (id, status, started_at, updated_at, commit_sha, commit_title, note, stdout, stderr)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            )
+            .run(
+                jobId,
+                "building",
+                new Date().toISOString(),
+                new Date().toISOString(),
+                sqlNullable(undefined),
+                sqlNullable(undefined),
+                "active",
+                "",
+                ""
+            );
+        database
+            .prepare(
+                "INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)"
+            )
+            .run(jobId, new Date().toISOString());
+
+        try {
+            const { startDeployLatest } = await import("../src/services/pullRequests.ts");
+            expect(() => startDeployLatest()).toThrow(
+                `Dashboard deploy already in progress (${jobId})`
+            );
+            expect(() => startDeployLatest(staleOwner)).toThrow(
+                "Dashboard deploy lock handoff failed"
+            );
+        } finally {
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            database.prepare("DELETE FROM deployment_jobs WHERE id = ?").run(jobId);
+        }
+    });
+
+    it("runs deploy latest build flow against an isolated checkout", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
+        const fakeRoot = createTemporaryRoot("mira-pr-deploy-root-");
+        const fakeBin = createTemporaryRoot("mira-pr-deploy-bin-");
+        const gitLog = path.join(fakeRoot, "git.log");
+        const bunLog = path.join(fakeRoot, "bun.log");
+        const systemdLog = path.join(fakeRoot, "systemd.log");
+        mkdirSync(path.join(fakeRoot, "backend", "node_modules"), { recursive: true });
+        mkdirSync(path.join(fakeRoot, "node_modules"), { recursive: true });
+        writeFileSync(
+            path.join(fakeBin, "git"),
+            String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(gitLog)}
+if [[ "$*" == "rev-parse --show-toplevel" ]]; then
+  printf '%s\n' ${JSON.stringify(fakeRoot)}
+elif [[ "$*" == "rev-parse --abbrev-ref HEAD" ]]; then
+  printf 'main\n'
+elif [[ "$*" == "rev-parse --short HEAD" ]]; then
+  printf 'def5678\n'
+elif [[ "$*" == "rev-parse --abbrev-ref --symbolic-full-name ${"@{u}"}" ]]; then
+  printf 'origin/main\n'
+elif [[ "$*" == "status --short" ]]; then
+  printf ''
+elif [[ "$*" == "fetch --prune origin" || "$*" == "checkout main" || "$*" == "pull --ff-only origin main" ]]; then
+  printf ''
+elif [[ "$*" == "log -1 --pretty=%s" ]]; then
+  printf 'Deployable dashboard commit\n'
+else
+  echo "unexpected git args: $*" >&2
+  exit 2
+fi
+`
+        );
+        writeFileSync(
+            path.join(fakeBin, "bun"),
+            String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s|%s\n' "$PWD" "$*" >> ${JSON.stringify(bunLog)}
+if [[ "$*" == "install --frozen-lockfile" || "$*" == "run build" ]]; then
+  printf 'ok\n'
+else
+  echo "unexpected bun args: $*" >&2
+  exit 2
+fi
+`
+        );
+        writeFileSync(
+            path.join(fakeBin, "systemd-run"),
+            String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(systemdLog)}
+printf 'scheduled\n'
+`
+        );
+        chmodSync(path.join(fakeBin, "git"), 0o755);
+        chmodSync(path.join(fakeBin, "bun"), 0o755);
+        chmodSync(path.join(fakeBin, "systemd-run"), 0o755);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(fakeRoot, "worktrees");
+
+        const { startDeployLatest } = await import("../src/services/pullRequests.ts");
+        const job = startDeployLatest();
+
+        try {
+            await waitFor(() => {
+                const row = database
+                    .prepare(
+                        "SELECT status, commit_sha, commit_title, note FROM deployment_jobs WHERE id = ?"
+                    )
+                    .get(job.id) as
+                    | {
+                          commit_sha: string | null;
+                          commit_title: string | null;
+                          note: string | null;
+                          status: string;
+                      }
+                    | undefined;
+                return row?.status === "restart-scheduled" && existsSync(systemdLog);
+            });
+
+            const row = database
+                .prepare(
+                    "SELECT status, commit_sha, commit_title, note FROM deployment_jobs WHERE id = ?"
+                )
+                .get(job.id) as {
+                commit_sha: string | null;
+                commit_title: string | null;
+                note: string | null;
+                status: string;
+            };
+            expect(row).toEqual({
+                commit_sha: "def5678",
+                commit_title: "Deployable dashboard commit",
+                note: "Build passed; restart + health check scheduled",
+                status: "restart-scheduled",
+            });
+            await expect(Bun.file(gitLog).text()).resolves.toContain(
+                "pull --ff-only origin main"
+            );
+            await expect(Bun.file(bunLog).text()).resolves.toContain(
+                `${fakeRoot}|install --frozen-lockfile`
+            );
+            await expect(Bun.file(bunLog).text()).resolves.toContain(
+                `${path.join(fakeRoot, "backend")}|run build`
+            );
+            await expect(Bun.file(systemdLog).text()).resolves.toContain(
+                `mira-dashboard-deploy-${job.id}`
+            );
+            expect(existsSync(path.join(fakeRoot, "node_modules"))).toBe(false);
+            expect(existsSync(path.join(fakeRoot, "backend", "node_modules"))).toBe(
+                false
+            );
+        } finally {
+            database.prepare("DELETE FROM deployment_lock WHERE job_id = ?").run(job.id);
+            database.prepare("DELETE FROM deployment_jobs WHERE id = ?").run(job.id);
+        }
+    });
+
     it("reports production checkout readiness through git command output", async () => {
         rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DASHBOARD_ROOT");
@@ -540,6 +829,65 @@ describe("backend service behavior", () => {
             isSafeForDeploy: true,
         });
         await expect(ensureProductionReadyForDeploy()).resolves.toBeUndefined();
+    });
+
+    it("rejects unsafe production checkout states before deploy work starts", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
+        const fakeRoot = createTemporaryRoot("mira-pr-unsafe-root-");
+        const actualRoot = path.join(fakeRoot, "actual");
+        const expectedRoot = path.join(fakeRoot, "expected");
+        const worktreeRoot = path.join(fakeRoot, "worktrees");
+        const fakeBin = createTemporaryRoot("mira-pr-unsafe-bin-");
+        mkdirSync(expectedRoot, { recursive: true });
+        mkdirSync(worktreeRoot, { recursive: true });
+        writeFileSync(
+            path.join(fakeBin, "git"),
+            String.raw`#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == "rev-parse --show-toplevel" ]]; then
+  printf '%s\n' ${JSON.stringify(actualRoot)}
+elif [[ "$*" == "rev-parse --abbrev-ref HEAD" ]]; then
+  printf 'feature\n'
+elif [[ "$*" == "rev-parse --short HEAD" ]]; then
+  printf 'badc0de\n'
+elif [[ "$*" == "rev-parse --abbrev-ref --symbolic-full-name ${"@{u}"}" ]]; then
+  exit 1
+elif [[ "$1" == "status" ]]; then
+  printf ' M backend/src/server.ts\n'
+else
+  echo "unexpected git args: $*" >&2
+  exit 2
+fi
+`
+        );
+        chmodSync(path.join(fakeBin, "git"), 0o755);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = expectedRoot;
+        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
+
+        const {
+            ensureProductionCheckout,
+            ensureProductionReadyForDeploy,
+            getProductionCheckoutStatus,
+        } = await import("../src/services/pullRequests.ts");
+
+        await expect(getProductionCheckoutStatus()).resolves.toMatchObject({
+            branch: "feature",
+            isClean: false,
+            isProductionRoot: false,
+            isSafeForDeploy: false,
+            root: actualRoot,
+            statusShort: "M backend/src/server.ts",
+            upstream: undefined,
+        });
+        await expect(ensureProductionCheckout()).rejects.toThrow(
+            "Expected production checkout"
+        );
+        await expect(ensureProductionReadyForDeploy()).rejects.toThrow(
+            "Production checkout must be clean main before deploy"
+        );
     });
 
     it("lists pull requests from GitHub JSON lines and refreshes blocked merge state", async () => {
@@ -574,6 +922,220 @@ describe("backend service behavior", () => {
         for (const value of ["0", "-1", "1.5", "abc", 1]) {
             expect(() => validatePrNumber(value)).toThrow("Invalid pull request number");
         }
+    });
+
+    it("drives pull request review, branch update, and reject actions through fake GitHub CLI", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
+        rememberEnvironment("RAJOHAN_GITHUB_TOKEN");
+        rememberEnvironment("RAJOHAN_GITHUB_USERNAME");
+        const fakeRoot = createTemporaryRoot("mira-pr-actions-root-");
+        const fakeBin = createTemporaryRoot("mira-pr-actions-bin-");
+        const ghLog = path.join(fakeRoot, "gh.log");
+        writeFakeGhForPullRequestActions(path.join(fakeBin, "gh"), ghLog);
+        writeFileSync(
+            path.join(fakeBin, "git"),
+            `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == "worktree list --porcelain" ]]; then
+  printf ''
+else
+  echo "unexpected git args: $*" >&2
+  exit 2
+fi
+`
+        );
+        chmodSync(path.join(fakeBin, "git"), 0o755);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(fakeRoot, "worktrees");
+        process.env.RAJOHAN_GITHUB_TOKEN = "review-token";
+        process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
+
+        const { approvePullRequestReview, rejectPullRequest, updatePullRequestBranch } =
+            await import("../src/services/pullRequests.ts");
+        const { pullRequestRoutes } = await import("../src/routes/pullRequestRoutes.ts");
+
+        await expect(approvePullRequestReview(3)).resolves.toMatchObject({
+            isOk: true,
+            message: "PR #3 review approved",
+            pullRequest: {
+                canReviewerApprove: true,
+                number: 3,
+                reviewerApproved: false,
+            },
+        });
+        await expect(updatePullRequestBranch(4)).resolves.toMatchObject({
+            isOk: true,
+            message: "PR #4 branch update started",
+            pullRequest: { number: 4 },
+        });
+        await expect(rejectPullRequest(5, "Not ready")).resolves.toMatchObject({
+            cleanup: {
+                branch: "close-branch",
+                status: "skipped",
+            },
+            isOk: true,
+            message: "PR #5 closed",
+        });
+
+        const reviewRoute = await pullRequestRoutes[
+            "/api/pull-requests/:number/review-approval"
+        ].POST(routeRequest("/api/pull-requests/3/review-approval", { number: "3" }));
+        await expect(reviewRoute.json()).resolves.toMatchObject({
+            isOk: true,
+            message: "PR #3 review approved",
+        });
+
+        const updateRoute = await pullRequestRoutes[
+            "/api/pull-requests/:number/update-branch"
+        ].POST(routeRequest("/api/pull-requests/4/update-branch", { number: "4" }));
+        await expect(updateRoute.json()).resolves.toMatchObject({
+            isOk: true,
+            message: "PR #4 branch update started",
+        });
+
+        const rejectRoute = await pullRequestRoutes[
+            "/api/pull-requests/:number/reject"
+        ].POST(
+            routeRequest(
+                "/api/pull-requests/5/reject",
+                { number: "5" },
+                {
+                    body: JSON.stringify({ comment: "Not ready" }),
+                    headers: { "Content-Type": "application/json" },
+                    method: "POST",
+                }
+            )
+        );
+        await expect(rejectRoute.json()).resolves.toMatchObject({
+            isOk: true,
+            message: "PR #5 closed",
+        });
+
+        await expect(Bun.file(ghLog).text()).resolves.toContain("pr review 3");
+        await expect(Bun.file(ghLog).text()).resolves.toContain(
+            "repos/rajohan/Mira-Dashboard/pulls/4/update-branch"
+        );
+        await expect(Bun.file(ghLog).text()).resolves.toContain("pr close 5");
+    });
+
+    it("merges an approved pull request and removes its clean local worktree safely", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
+        rememberEnvironment("RAJOHAN_GITHUB_USERNAME");
+        const fakeRoot = createTemporaryRoot("mira-pr-merge-root-");
+        const worktreeRoot = path.join(fakeRoot, "worktrees");
+        const localWorktree = path.join(worktreeRoot, "merge-branch");
+        const fakeBin = createTemporaryRoot("mira-pr-merge-bin-");
+        const ghLog = path.join(fakeRoot, "gh.log");
+        const gitLog = path.join(fakeRoot, "git.log");
+        mkdirSync(localWorktree, { recursive: true });
+        writeFakeGhForPullRequestMerge(path.join(fakeBin, "gh"), ghLog);
+        writeFileSync(
+            path.join(fakeBin, "git"),
+            String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(gitLog)}
+if [[ "$*" == "rev-parse --show-toplevel" ]]; then
+  printf '%s\n' ${JSON.stringify(fakeRoot)}
+elif [[ "$*" == "rev-parse --abbrev-ref HEAD" ]]; then
+  printf 'main\n'
+elif [[ "$*" == "rev-parse --short HEAD" ]]; then
+  printf 'abc1234\n'
+elif [[ "$*" == "rev-parse --abbrev-ref --symbolic-full-name ${"@{u}"}" ]]; then
+  printf 'origin/main\n'
+elif [[ "$*" == "status --short" ]]; then
+  printf ''
+elif [[ "$*" == "worktree list --porcelain" ]]; then
+  printf 'worktree %s\nHEAD abc1234\nbranch refs/heads/merge-branch\n\n' ${JSON.stringify(localWorktree)}
+elif [[ "$*" == "-C ${localWorktree} status --short" ]]; then
+  printf ''
+elif [[ "$*" == "worktree remove ${localWorktree}" ]]; then
+  rm -rf ${JSON.stringify(localWorktree)}
+elif [[ "$*" == "fetch --prune origin" || "$*" == "checkout main" || "$*" == "pull --ff-only origin main" ]]; then
+  printf ''
+else
+  echo "unexpected git args: $*" >&2
+  exit 2
+fi
+`
+        );
+        chmodSync(path.join(fakeBin, "git"), 0o755);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
+        process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
+
+        try {
+            const { approvePullRequest } =
+                await import("../src/services/pullRequests.ts");
+            const result = await approvePullRequest(11, false);
+
+            expect(result).toMatchObject({
+                cleanup: {
+                    branch: "merge-branch",
+                    message: "Removed local worktree for merge-branch",
+                    status: "removed",
+                },
+                isOk: true,
+                message: "PR #11 merged",
+                syncError: undefined,
+            });
+            await expect(Bun.file(ghLog).text()).resolves.toContain("pr merge 11");
+            await expect(Bun.file(gitLog).text()).resolves.toContain("worktree remove");
+            expect(existsSync(localWorktree)).toBe(false);
+        } finally {
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            database
+                .prepare("DELETE FROM deployment_jobs WHERE id LIKE 'approve-%'")
+                .run();
+        }
+    });
+
+    it("rejects unsafe pull request actions before invoking mutating GitHub commands", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
+        rememberEnvironment("RAJOHAN_GITHUB_TOKEN");
+        rememberEnvironment("RAJOHAN_GITHUB_USERNAME");
+        const fakeRoot = createTemporaryRoot("mira-pr-validation-root-");
+        const fakeBin = createTemporaryRoot("mira-pr-validation-bin-");
+        writeFakeGhForPullRequestValidation(path.join(fakeBin, "gh"));
+        writeFakeGit(path.join(fakeBin, "git"), fakeRoot);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(fakeRoot, "worktrees");
+        process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
+        delete process.env.RAJOHAN_GITHUB_TOKEN;
+
+        const {
+            approvePullRequest,
+            approvePullRequestReview,
+            rejectPullRequest,
+            updatePullRequestBranch,
+        } = await import("../src/services/pullRequests.ts");
+
+        await expect(approvePullRequest(6, false)).rejects.toThrow(
+            "Draft pull requests cannot be approved from the dashboard"
+        );
+        await expect(rejectPullRequest(7, "Wrong base")).rejects.toThrow(
+            "Only main-targeted pull requests can be managed here"
+        );
+        await expect(updatePullRequestBranch(8)).rejects.toThrow(
+            "Pull request branch is not behind the base branch"
+        );
+        await expect(updatePullRequestBranch(9)).rejects.toThrow(
+            "Pull request branch has merge conflicts"
+        );
+        await expect(approvePullRequestReview(10)).rejects.toThrow(
+            "Rajohan cannot approve his own pull request"
+        );
+        await expect(approvePullRequestReview(6)).rejects.toThrow(
+            "Draft pull requests cannot be approved from the dashboard"
+        );
     });
 
     it("refreshes weather cache through the Open-Meteo fallback when wttr fails", async () => {
@@ -749,6 +1311,29 @@ describe("backend service behavior", () => {
         expect(socket?.closeCode).toBe(1000);
     });
 
+    it("reports disconnected gateway state without starting a Gateway client", async () => {
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+
+        gateway.shutdown();
+
+        expect(gateway.isConnected()).toBe(false);
+        expect(gateway.getStatus()).toEqual({ gateway: "disconnected", sessions: 0 });
+        expect(gateway.getGatewayWs()).toBeUndefined();
+        await expect(gateway.request("sessions.list", {})).rejects.toThrow(
+            "Gateway not connected"
+        );
+        await expect(
+            gateway.sendSessionMessage("agent:main:main", "hello")
+        ).rejects.toThrow("Gateway not connected");
+        await expect(gateway.abortSessionRun("agent:main:main")).rejects.toThrow(
+            "Gateway not connected"
+        );
+        await expect(gateway.deleteSession("agent:main:main")).rejects.toThrow(
+            "Gateway not connected"
+        );
+    });
+
     it("returns conflict/not-found errors for clearing inactive backup jobs", async () => {
         const { clearNeedsAttentionBackupJob, mapBackupJob } =
             await import("../src/services/backups.ts");
@@ -791,9 +1376,32 @@ describe("backend service behavior", () => {
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
         const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
             await import("../src/services/backups.ts");
+        const { getScheduledJob, runScheduledJob, upsertScheduledJob } =
+            await import("../src/services/scheduledJobs.ts");
 
         try {
             registerBackupScheduledJobs();
+            expect(getScheduledJob("backup.walg")).toMatchObject({
+                actionKey: "backup.run",
+                enabled: true,
+                scheduleType: "daily",
+                timeOfDay: "03:20",
+            });
+            upsertScheduledJob({
+                id: "backup.invalid",
+                name: "Invalid backup",
+                enabled: false,
+                scheduleType: "interval",
+                intervalSeconds: 3600,
+                actionKey: "backup.run",
+                actionPayload: { type: "invalid" },
+            });
+            const invalidRun = await runScheduledJob("backup.invalid");
+            expect(invalidRun).toMatchObject({
+                jobId: "backup.invalid",
+                status: "failed",
+            });
+
             const job = await startManualBackup("walg");
             const completed = await job.completed;
 
@@ -820,6 +1428,61 @@ describe("backend service behavior", () => {
                     )
                     .get()
             ).toEqual({ status: "success" });
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("records and clears Kopia needs-attention state when host preflight detects a running process", async () => {
+        rememberEnvironment("PATH");
+        const fakeBin = createTemporaryRoot("mira-backup-pgrep-bin-");
+        const pgrepLog = path.join(fakeBin, "pgrep.log");
+        writeFakeDocker(path.join(fakeBin, "docker"));
+        writeFakePgrep(path.join(fakeBin, "pgrep"), pgrepLog);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        const {
+            clearNeedsAttentionBackupJob,
+            getCurrentBackupJob,
+            mapBackupJob,
+            registerBackupScheduledJobs,
+            startManualBackup,
+        } = await import("../src/services/backups.ts");
+
+        try {
+            registerBackupScheduledJobs();
+            await expect(startManualBackup("kopia")).rejects.toMatchObject({
+                statusCode: 409,
+            });
+            expect(mapBackupJob(getCurrentBackupJob("kopia"))).toMatchObject({
+                code: 130,
+                status: "needs_attention",
+                stderr: expect.stringContaining("backup process is still running"),
+                type: "kopia",
+            });
+            await expect(startManualBackup("kopia")).rejects.toThrow(
+                "KOPIA backup needs attention"
+            );
+
+            const clearedJob = await clearNeedsAttentionBackupJob("kopia");
+            expect(mapBackupJob(clearedJob)).toMatchObject({
+                status: "needs_attention",
+                type: "kopia",
+            });
+            expect(getCurrentBackupJob("kopia")).toBeUndefined();
+            expect(readFileSync(pgrepLog, "utf8")).toContain(
+                "-f /opt/docker/apps/kopia/backup.sh"
+            );
+            await waitFor(() => {
+                const row = database
+                    .prepare(
+                        "SELECT status FROM scheduled_job_runs WHERE job_id = 'backup.kopia' ORDER BY id DESC LIMIT 1"
+                    )
+                    .get() as { status?: string } | undefined;
+                return row?.status === "failed";
+            });
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
@@ -884,6 +1547,53 @@ describe("backend service behavior", () => {
         ).rejects.toThrow();
     });
 
+    it("reports an active log rotation lock without touching configured log files", async () => {
+        const rotationRoot = createTemporaryRoot("mira-log-rotation-lock-test-");
+        const logFile = path.join(rotationRoot, "locked.log");
+        const configFile = path.join(rotationRoot, "log-rotation.json");
+        const lockFile = path.join(process.cwd(), "data", "log-rotation.lock");
+        mkdirSync(path.dirname(lockFile), { recursive: true });
+        writeFileSync(lockFile, `${process.pid}\n`);
+        cleanupCallbacks.push(() => {
+            rmSync(lockFile, { force: true });
+            rmSync(`${lockFile}.reclaim`, { force: true, recursive: true });
+        });
+        writeFileSync(logFile, "do not rotate\n");
+        writeFileSync(
+            configFile,
+            JSON.stringify({
+                approvedRoots: [rotationRoot],
+                defaults: {
+                    compress: false,
+                    keep: 1,
+                    maxSizeMb: 0.000001,
+                    missingOk: false,
+                    skipEmpty: false,
+                    strategy: "copytruncate",
+                },
+                groups: [{ name: "locked", paths: [logFile] }],
+                version: 1,
+            })
+        );
+        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+
+        const summary = await runLogRotationService({
+            config: configFile,
+            isDryRun: false,
+        });
+
+        expect(summary).toMatchObject({
+            checkedFiles: 0,
+            isDryRun: false,
+            isOk: false,
+            rotatedFiles: 0,
+        });
+        expect(summary.errors).toContainEqual({
+            message: "Log rotation is already running",
+        });
+        expect(readFileSync(logFile, "utf8")).toBe("do not rotate\n");
+    });
+
     it("updates agent metadata and rolls active task history forward", async () => {
         rememberEnvironment("OPENCLAW_HOME");
         rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
@@ -922,6 +1632,149 @@ describe("backend service behavior", () => {
             database
                 .prepare("DELETE FROM agent_task_history WHERE agent_id = ?")
                 .run(agentId);
+        }
+    });
+
+    it("parses agent config and builds statuses from temp metadata plus fake gateway sessions", async () => {
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        const openclawRoot = createTemporaryRoot("mira-agent-status-test-");
+        const agentsRoot = path.join(openclawRoot, "agents");
+        const miraSessions = path.join(agentsRoot, "mira-2026", "sessions");
+        const coderSessions = path.join(agentsRoot, "coder", "sessions");
+        mkdirSync(miraSessions, { recursive: true });
+        mkdirSync(coderSessions, { recursive: true });
+        process.env.OPENCLAW_HOME = openclawRoot;
+        delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        writeFileSync(
+            path.join(openclawRoot, "openclaw.json"),
+            JSON.stringify({
+                agents: {
+                    defaults: {
+                        model: { primary: "codex" },
+                        models: {
+                            "openai/gpt-5.5": { alias: "codex" },
+                        },
+                    },
+                    list: [
+                        { default: true, id: "mira-2026" },
+                        { id: "coder", model: { primary: "openai/gpt-4.1" } },
+                    ],
+                },
+            })
+        );
+        writeFileSync(
+            path.join(miraSessions, "metadata.json"),
+            JSON.stringify({ currentTask: "Temp agent task" })
+        );
+        writeFileSync(
+            path.join(miraSessions, "sessions.json"),
+            JSON.stringify([
+                {
+                    channel: "main",
+                    key: "agent:mira-2026:main",
+                    sessionId: "session-main",
+                    updatedAt: Date.now(),
+                },
+                { key: 123, updatedAt: "bad" },
+            ])
+        );
+
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const originalGetSessions = gateway.getSessions;
+        const originalRequest = gateway.request;
+        cleanupCallbacks.push(() => {
+            gateway.getSessions = originalGetSessions;
+            gateway.request = originalRequest;
+        });
+        gateway.getSessions = () => [
+            {
+                agentType: "coder",
+                channel: "main",
+                createdAt: undefined,
+                displayLabel: "Coder",
+                displayName: "Coder",
+                hookName: "",
+                id: "cached",
+                key: "agent:coder:main",
+                label: "",
+                maxTokens: 200_000,
+                model: "unknown",
+                tokenCount: 0,
+                type: "MAIN",
+                updatedAt: Date.now(),
+            },
+        ];
+        gateway.request = async (method) => {
+            if (method === "sessions.list") {
+                return {
+                    sessions: [
+                        {
+                            isRunning: true,
+                            key: "agent:mira-2026:main",
+                            model: "openai/gpt-5.5",
+                            status: "running",
+                            updatedAt: Date.now(),
+                        },
+                        {
+                            endedAt: Date.now(),
+                            key: "agent:coder:main",
+                            model: "openai/gpt-4.1",
+                            status: "exited",
+                            updatedAt: Date.now() - 120_000,
+                        },
+                        { key: "", model: "ignored" },
+                    ],
+                };
+            }
+            throw new Error(`unexpected gateway method: ${method}`);
+        };
+
+        const { buildAgentStatuses, buildSingleAgentStatus, parseAgentsConfig } =
+            await import("../src/services/agents.ts");
+
+        expect(parseAgentsConfig()).toMatchObject({
+            defaults: { model: { primary: "codex" } },
+            list: [{ id: "mira-2026" }, { id: "coder" }],
+        });
+        const statuses = await buildAgentStatuses(parseAgentsConfig()!);
+        expect(statuses).toContainEqual(
+            expect.objectContaining({
+                currentTask: "Temp agent task",
+                id: "mira-2026",
+                model: "gpt-5.5",
+                sessionKey: "agent:mira-2026:main",
+                status: "thinking",
+            })
+        );
+        expect(statuses).toContainEqual(
+            expect.objectContaining({
+                id: "coder",
+                model: "gpt-4.1",
+                sessionKey: "agent:coder:main",
+            })
+        );
+        await expect(
+            buildSingleAgentStatus("missing", parseAgentsConfig()!)
+        ).resolves.toBe(undefined);
+        await expect(
+            buildSingleAgentStatus("coder", parseAgentsConfig()!)
+        ).resolves.toMatchObject({
+            id: "coder",
+            model: "gpt-4.1",
+        });
+
+        const originalConsoleError = console.error;
+        console.error = () => {};
+        cleanupCallbacks.push(() => {
+            console.error = originalConsoleError;
+        });
+        writeFileSync(path.join(openclawRoot, "openclaw.json"), "{");
+        try {
+            expect(parseAgentsConfig()).toBeUndefined();
+        } finally {
+            console.error = originalConsoleError;
         }
     });
 
@@ -1627,6 +2480,28 @@ describe("backend service behavior", () => {
             expect(
                 calculateNextRunAt(
                     {
+                        enabled: false,
+                        intervalSeconds: 90,
+                        scheduleType: "interval",
+                        timeOfDay: undefined,
+                    },
+                    new Date("2026-06-24T10:00:00.000Z")
+                )
+            ).toBeUndefined();
+            expect(
+                calculateNextRunAt(
+                    {
+                        enabled: true,
+                        intervalSeconds: 60,
+                        scheduleType: "daily",
+                        timeOfDay: "12:30",
+                    },
+                    new Date("2026-06-24T10:00:00.000Z")
+                )
+            ).toBe("2026-06-24T12:30:00.000Z");
+            expect(
+                calculateNextRunAt(
+                    {
                         enabled: true,
                         intervalSeconds: 60,
                         scheduleType: "daily",
@@ -1647,6 +2522,30 @@ describe("backend service behavior", () => {
                     new Date("2026-06-24T10:07:30.000Z")
                 )
             ).toBe("2026-06-24T10:15:00.000Z");
+            expect(
+                calculateNextRunAt(
+                    {
+                        cronExpression: "0 9 * * 7",
+                        enabled: true,
+                        intervalSeconds: 60,
+                        scheduleType: "cron",
+                        timeOfDay: undefined,
+                    },
+                    new Date("2026-06-24T10:07:30.000Z")
+                )
+            ).toBe("2026-06-28T09:00:00.000Z");
+            expect(() =>
+                calculateNextRunAt(
+                    {
+                        cronExpression: "bad cron",
+                        enabled: true,
+                        intervalSeconds: 60,
+                        scheduleType: "cron",
+                        timeOfDay: undefined,
+                    },
+                    new Date("2026-06-24T10:07:30.000Z")
+                )
+            ).toThrow("Cron jobs require a valid cronExpression");
             expect(() =>
                 upsertScheduledJob({
                     actionKey,
@@ -1657,6 +2556,28 @@ describe("backend service behavior", () => {
                     scheduleType: "interval",
                 })
             ).toThrow("Job id is invalid");
+            expect(() =>
+                upsertScheduledJob({
+                    actionKey,
+                    enabled: true,
+                    id: `test-job-invalid-daily-${Bun.randomUUIDv7()}`,
+                    intervalSeconds: 120,
+                    name: "Invalid daily job",
+                    scheduleType: "daily",
+                    timeOfDay: "25:00",
+                })
+            ).toThrow("Daily jobs require HH:MM timeOfDay");
+            expect(() =>
+                registerScheduledJobAction(
+                    `bad-timeout-${Bun.randomUUIDv7()}`,
+                    () => ({}),
+                    {
+                        timeoutMs: 0,
+                    }
+                )
+            ).toThrow(
+                "Scheduled job action timeout must be an integer between 1 and 2147483647"
+            );
 
             registerScheduledJobAction(actionKey, (job) => ({
                 jobId: job.id,
@@ -1727,6 +2648,56 @@ describe("backend service behavior", () => {
                     expect.stringContaining("No scheduled job action registered")
                 );
             }
+
+            const timeoutActionKey = `test-timeout-action-${Bun.randomUUIDv7()}`;
+            const timeoutJobId = `test-job-timeout-${Bun.randomUUIDv7()}`;
+            registerScheduledJobAction(
+                timeoutActionKey,
+                async () => {
+                    await Bun.sleep(50);
+                    return { late: true };
+                },
+                { timeoutMs: 1 }
+            );
+            upsertScheduledJob({
+                actionKey: timeoutActionKey,
+                id: timeoutJobId,
+                intervalSeconds: 120,
+                name: "Timeout job",
+                scheduleType: "interval",
+            });
+            const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+            try {
+                await expect(runScheduledJob(timeoutJobId)).resolves.toMatchObject({
+                    jobId: timeoutJobId,
+                    message: "Scheduled job timed out",
+                    output: {},
+                    status: "failed",
+                });
+            } finally {
+                warnSpy.mockRestore();
+            }
+
+            const abortActionKey = `test-abort-action-${Bun.randomUUIDv7()}`;
+            const abortJobId = `test-job-abort-${Bun.randomUUIDv7()}`;
+            registerScheduledJobAction(abortActionKey, () => ({ reached: true }));
+            upsertScheduledJob({
+                actionKey: abortActionKey,
+                id: abortJobId,
+                intervalSeconds: 120,
+                name: "Abort job",
+                scheduleType: "interval",
+            });
+            const controller = new AbortController();
+            controller.abort();
+            await expect(
+                runScheduledJob(abortJobId, "manual", controller.signal)
+            ).resolves.toMatchObject({
+                jobId: abortJobId,
+                message: "Scheduled job aborted",
+                output: {},
+                status: "failed",
+            });
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'test-job-%'")

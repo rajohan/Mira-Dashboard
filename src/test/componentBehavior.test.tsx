@@ -11,23 +11,23 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import type { ReactNode, RefObject } from "react";
 
-import { TaskHistorySidebar } from "./components/features/agents/TaskHistorySidebar";
-import { AttachmentPreviewModal } from "./components/features/chat/AttachmentPreviewModal";
-import { ChatComposer } from "./components/features/chat/ChatComposer";
-import { ChatHeader } from "./components/features/chat/ChatHeader";
+import { TaskHistorySidebar } from "../components/features/agents/TaskHistorySidebar";
+import { AttachmentPreviewModal } from "../components/features/chat/AttachmentPreviewModal";
+import { ChatComposer } from "../components/features/chat/ChatComposer";
+import { ChatHeader } from "../components/features/chat/ChatHeader";
 import {
     ChatMarkdown,
     childrenToText,
     getPreCodeBlock,
     markdownComponents,
-} from "./components/features/chat/ChatMarkdown";
-import { ChatMessageDetails } from "./components/features/chat/ChatMessageDetails";
+} from "../components/features/chat/ChatMarkdown";
+import { ChatMessageDetails } from "../components/features/chat/ChatMessageDetails";
 import {
     AttachmentIcon,
     base64ToText as messageListBase64ToText,
     ChatMessagesList,
     previewFromAttachment,
-} from "./components/features/chat/ChatMessagesList";
+} from "../components/features/chat/ChatMessagesList";
 import {
     compactStatusText,
     detailFromArguments,
@@ -38,19 +38,21 @@ import {
     runtimeProgressText,
     stringValue,
     useChatRuntimeEvents,
-} from "./components/features/chat/useChatRuntimeEvents";
-import { useChatSlashCommands } from "./components/features/chat/useChatSlashCommands";
-import { CronJobDetails } from "./components/features/cron/CronJobDetails";
-import { CronJobList } from "./components/features/cron/CronJobList";
-import { BackupOverviewCard } from "./components/features/dashboard/BackupOverviewCard";
-import { CronOverviewCard } from "./components/features/dashboard/CronOverviewCard";
-import { LogRotationCard } from "./components/features/dashboard/LogRotationCard";
-import { QuotaOverviewCard } from "./components/features/dashboard/QuotaOverviewCard";
-import { ServiceActionsCard } from "./components/features/dashboard/ServiceActionsCard";
-import { AutovacuumHealthTable } from "./components/features/database/AutovacuumHealthTable";
-import { DatabaseTableShell } from "./components/features/database/DatabaseTableShell";
-import { TopQueriesTable } from "./components/features/database/TopQueriesTable";
-import { DockerContainersTable } from "./components/features/docker/DockerContainersTable";
+} from "../components/features/chat/useChatRuntimeEvents";
+import { useChatSlashCommands } from "../components/features/chat/useChatSlashCommands";
+import { CronJobDetails } from "../components/features/cron/CronJobDetails";
+import { CronJobList } from "../components/features/cron/CronJobList";
+import { BackupOverviewCard } from "../components/features/dashboard/BackupOverviewCard";
+import { CronOverviewCard } from "../components/features/dashboard/CronOverviewCard";
+import { LogRotationCard } from "../components/features/dashboard/LogRotationCard";
+import { QuotaOverviewCard } from "../components/features/dashboard/QuotaOverviewCard";
+import { ServiceActionsCard } from "../components/features/dashboard/ServiceActionsCard";
+import { AutovacuumHealthTable } from "../components/features/database/AutovacuumHealthTable";
+import { DatabaseTableShell } from "../components/features/database/DatabaseTableShell";
+import { PgBouncerPoolsTable } from "../components/features/database/PgBouncerPoolsTable";
+import { PgBouncerStatsTable } from "../components/features/database/PgBouncerStatsTable";
+import { TopQueriesTable } from "../components/features/database/TopQueriesTable";
+import { DockerContainersTable } from "../components/features/docker/DockerContainersTable";
 import {
     formatBytes,
     formatDockerMemory,
@@ -58,31 +60,39 @@ import {
     formatTimestamp,
     formatUpdaterTransition,
     formatVersionDisplay,
-} from "./components/features/docker/dockerFormatters";
-import { DockerImagesTable } from "./components/features/docker/DockerImagesTable";
-import { DockerVolumesTable } from "./components/features/docker/DockerVolumesTable";
-import { ConfigSection } from "./components/features/files/ConfigSection";
-import { FileContentViewer } from "./components/features/files/FileContentViewer";
-import { FileEditorPanel } from "./components/features/files/FileEditorPanel";
-import { FileTreeItem } from "./components/features/files/FileTreeItem";
-import { PreviewToggle } from "./components/features/files/PreviewToggle";
-import { LogLine } from "./components/features/logs/LogLine";
-import { MyCommentCard } from "./components/features/moltbook/MyCommentCard";
-import { MyPostCard } from "./components/features/moltbook/MyPostCard";
-import { ProfileCard } from "./components/features/moltbook/ProfileCard";
-import { SessionActionsDropdown } from "./components/features/sessions/SessionActionsDropdown";
-import { SessionsTable } from "./components/features/sessions/SessionsTable";
-import { AgentAccessSection } from "./components/features/settings/AgentAccessSection";
-import { ChannelSection } from "./components/features/settings/ChannelSection";
-import { HeartbeatSection } from "./components/features/settings/HeartbeatSection";
-import { ModelSection } from "./components/features/settings/ModelSection";
-import { SessionSection } from "./components/features/settings/SessionSection";
-import { SkillsSection } from "./components/features/settings/SkillsSection";
-import { ToolSection } from "./components/features/settings/ToolSection";
-import { Alert } from "./components/ui/Alert";
-import { getProgressColor, ProgressBar } from "./components/ui/ProgressBar";
-import { useFileExplorerState } from "./hooks/useFileExplorerState";
-import { useSessionActions } from "./hooks/useSessionActions";
+} from "../components/features/docker/dockerFormatters";
+import { DockerImagesTable } from "../components/features/docker/DockerImagesTable";
+import { DockerVolumesTable } from "../components/features/docker/DockerVolumesTable";
+import { ConfigSection } from "../components/features/files/ConfigSection";
+import { FileContentViewer } from "../components/features/files/FileContentViewer";
+import { FileEditorPanel } from "../components/features/files/FileEditorPanel";
+import { FileTreeItem } from "../components/features/files/FileTreeItem";
+import { PreviewToggle } from "../components/features/files/PreviewToggle";
+import { CodePreview } from "../components/features/files/viewers/CodePreview";
+import { JsonPreview } from "../components/features/files/viewers/JsonPreview";
+import { MarkdownPreview } from "../components/features/files/viewers/MarkdownPreview";
+import { LogLine } from "../components/features/logs/LogLine";
+import { MyCommentCard } from "../components/features/moltbook/MyCommentCard";
+import { MyPostCard } from "../components/features/moltbook/MyPostCard";
+import { ProfileCard } from "../components/features/moltbook/ProfileCard";
+import { SessionActionsDropdown } from "../components/features/sessions/SessionActionsDropdown";
+import { SessionsTable } from "../components/features/sessions/SessionsTable";
+import { AgentAccessSection } from "../components/features/settings/AgentAccessSection";
+import { ChannelSection } from "../components/features/settings/ChannelSection";
+import { HeartbeatSection } from "../components/features/settings/HeartbeatSection";
+import { ModelSection } from "../components/features/settings/ModelSection";
+import { SessionSection } from "../components/features/settings/SessionSection";
+import { SkillsSection } from "../components/features/settings/SkillsSection";
+import { ToolSection } from "../components/features/settings/ToolSection";
+import { Alert } from "../components/ui/Alert";
+import { AppErrorFallback } from "../components/ui/AppErrorFallback";
+import { Badge, getSessionTypeVariant } from "../components/ui/Badge";
+import { Checkbox } from "../components/ui/Checkbox";
+import { ConnectionStatus } from "../components/ui/ConnectionStatus";
+import { ExpandableCard, ReadOnlyField } from "../components/ui/ExpandableCard";
+import { getProgressColor, ProgressBar } from "../components/ui/ProgressBar";
+import { useFileExplorerState } from "../hooks/useFileExplorerState";
+import { useSessionActions } from "../hooks/useSessionActions";
 
 const originalFetch = fetch;
 const originalAnimationFrame = {
@@ -94,6 +104,14 @@ const animationFrameState = {
     id: 0,
     frames: new Map<number, FrameRequestCallback>(),
 };
+
+function TestIcon({ size, className }: { className?: string; size?: number }) {
+    return (
+        <span className={className} data-size={size}>
+            I
+        </span>
+    );
+}
 
 function requestAnimationFrameForTest(callback: FrameRequestCallback): number {
     const id = ++animationFrameState.id;
@@ -265,6 +283,53 @@ describe("shared component helpers", () => {
         expect(document.querySelector(".bg-purple-500")).toHaveStyle({
             width: "100%",
         });
+    });
+
+    it("renders standalone UI primitives and fallback states", async () => {
+        const user = userEvent.setup();
+        const onCheck = jest.fn();
+        const onReset = jest.fn();
+
+        render(
+            <>
+                <Badge variant="main">Main session</Badge>
+                <Badge variant={getSessionTypeVariant("subagent")}>Worker</Badge>
+                <Checkbox
+                    isChecked={false}
+                    onChange={onCheck}
+                    label="Enable option"
+                    description="Toggle this option"
+                />
+                <ConnectionStatus isConnected={true} connectedText="Online" />
+                <ConnectionStatus isConnected={false} disconnectedText="Offline" />
+                <ExpandableCard
+                    title="Expanded panel"
+                    icon={TestIcon}
+                    defaultExpanded={true}
+                >
+                    <ReadOnlyField label="Current value" value={undefined} />
+                    <ReadOnlyField label="Boolean value" value={true} />
+                </ExpandableCard>
+                <AppErrorFallback
+                    error={new Error("Rendered failure")}
+                    resetErrorBoundary={onReset}
+                />
+            </>
+        );
+
+        expect(screen.getByText("Main session")).toBeInTheDocument();
+        expect(screen.getByText("Worker")).toBeInTheDocument();
+        expect(screen.getByText("Online")).toBeInTheDocument();
+        expect(screen.getByText("Offline")).toBeInTheDocument();
+        expect(screen.getByText("Expanded panel")).toBeInTheDocument();
+        expect(screen.getByText("Current value")).toBeInTheDocument();
+        expect(screen.getByText("Boolean value")).toBeInTheDocument();
+        expect(screen.getByText("Rendered failure")).toBeInTheDocument();
+
+        await user.click(screen.getByText("Enable option"));
+        expect(onCheck).toHaveBeenCalledWith(true);
+        await user.click(screen.getByRole("button", { name: /try again/i }));
+        expect(onReset).toHaveBeenCalled();
     });
 
     it("renders file preview, log, session, cron, and Moltbook cards", async () => {
@@ -1155,6 +1220,22 @@ describe("shared component helpers", () => {
             target: { value: "const ok = false;" },
         });
         expect(onContentChange).toHaveBeenCalledWith("const ok = false;");
+
+        rerender(<MarkdownPreview content={"# Notes\n\n- one"} />);
+        expect(screen.getByRole("heading", { name: "Notes" })).toBeInTheDocument();
+
+        rerender(<JsonPreview content="{foo: 'bar'}" />);
+        expect(screen.getByText("foo")).toBeInTheDocument();
+
+        rerender(<JsonPreview content={"{not json"} />);
+        expect(
+            screen.getAllByText((_content, element) =>
+                Boolean(element?.textContent?.includes("Failed to parse JSON"))
+            ).length
+        ).toBeGreaterThan(0);
+
+        rerender(<CodePreview language="ts" content="const covered = true;" />);
+        expect(screen.getByText(/covered/)).toBeInTheDocument();
     });
 
     it("drives file explorer hook directory loading, JSON validation, and saves", async () => {
@@ -1831,6 +1912,106 @@ describe("shared component helpers", () => {
         queryClient.clear();
     });
 
+    it("drives settings form sections through expanded save controls", async () => {
+        const user = userEvent.setup();
+        const onSaveHeartbeat = jest.fn(async () => {});
+        const onSaveModel = jest.fn(async () => {});
+        const onSaveSession = jest.fn(async () => {});
+        const onSaveTools = jest.fn(async () => {});
+
+        const heartbeatView = render(
+            <HeartbeatSection
+                every={300}
+                target="webchat"
+                onSave={onSaveHeartbeat}
+                saving={false}
+            />
+        );
+        fireEvent.click(screen.getByRole("button", { name: /heartbeat/i }));
+        fireEvent.change(screen.getByLabelText("Interval (seconds)"), {
+            target: { value: "600" },
+        });
+        fireEvent.change(screen.getByLabelText("Target Channel"), {
+            target: { value: "discord" },
+        });
+        await user.click(screen.getByRole("button", { name: /^save$/i }));
+        expect(onSaveHeartbeat).toHaveBeenCalledWith(600, "discord");
+        heartbeatView.unmount();
+
+        const modelView = render(
+            <ModelSection
+                defaultModel="codex"
+                fallbacks={["glm51"]}
+                imageModel={undefined}
+                imageGenerationModel="gpt-image"
+                onSave={onSaveModel}
+                saving={false}
+            />
+        );
+        fireEvent.click(screen.getByRole("button", { name: /model configuration/i }));
+        fireEvent.change(screen.getByLabelText("Default model"), {
+            target: { value: "openai/gpt-5.5" },
+        });
+        fireEvent.change(screen.getByLabelText("Fallback models"), {
+            target: { value: "glm51, kimi, codex-mini" },
+        });
+        await user.click(screen.getByRole("button", { name: /save model settings/i }));
+        expect(onSaveModel).toHaveBeenCalledWith({
+            primary: "openai/gpt-5.5",
+            fallbacks: ["glm51", "kimi", "codex-mini"],
+        });
+        modelView.unmount();
+
+        const sessionView = render(
+            <SessionSection idleMinutes={60} onSave={onSaveSession} saving={false} />
+        );
+        fireEvent.click(screen.getByRole("button", { name: /^session$/i }));
+        fireEvent.change(screen.getByLabelText(/idle timeout/i), {
+            target: { value: "90" },
+        });
+        await user.click(screen.getByRole("button", { name: /^save$/i }));
+        expect(onSaveSession).toHaveBeenCalledWith(90);
+        sessionView.unmount();
+
+        render(
+            <ToolSection
+                profile="safe"
+                webSearchEnabled={false}
+                webSearchProvider="brave"
+                webFetchEnabled={true}
+                execSecurity="allowlist"
+                execAsk="on-miss"
+                elevatedEnabled={false}
+                agentToAgentEnabled={true}
+                sessionsVisibility="owned"
+                onSave={onSaveTools}
+                saving={false}
+            />
+        );
+        fireEvent.click(screen.getByRole("button", { name: /^tools$/i }));
+        fireEvent.change(screen.getByLabelText("Tool profile"), {
+            target: { value: "full" },
+        });
+        fireEvent.change(screen.getByLabelText("Web search provider"), {
+            target: { value: "brave-search" },
+        });
+        fireEvent.change(screen.getByLabelText("Sessions visibility"), {
+            target: { value: "all" },
+        });
+        await user.click(screen.getByRole("switch", { name: "Web search" }));
+        await user.click(screen.getByRole("switch", { name: "Elevated tools" }));
+        await user.click(screen.getByRole("button", { name: /save tool settings/i }));
+        expect(onSaveTools).toHaveBeenCalledWith(
+            expect.objectContaining({
+                elevatedEnabled: true,
+                profile: "full",
+                sessionsVisibility: "all",
+                webSearchEnabled: true,
+                webSearchProvider: "brave-search",
+            })
+        );
+    });
+
     it("drives sessions table row actions and empty state", async () => {
         const user = userEvent.setup();
         const onCompact = jest.fn();
@@ -2052,6 +2233,46 @@ describe("shared component helpers", () => {
             );
             expect(screen.getAllByText("public.tasks").length).toBeGreaterThan(0);
             expect(screen.getAllByText("12.5%").length).toBeGreaterThan(0);
+
+            rerender(
+                <PgBouncerPoolsTable
+                    data={[
+                        {
+                            cl_active: "2",
+                            cl_waiting: "1",
+                            database: "mira",
+                            maxwait: "0",
+                            pool_mode: "transaction",
+                            sv_active: "1",
+                            sv_idle: "2",
+                            sv_used: "3",
+                            user: "dashboard",
+                        },
+                    ]}
+                />
+            );
+            expect(screen.getAllByText("dashboard").length).toBeGreaterThan(0);
+            expect(screen.getAllByText("6").length).toBeGreaterThan(0);
+
+            rerender(
+                <PgBouncerStatsTable
+                    data={[
+                        {
+                            avg_query_time: "1.2",
+                            avg_xact_time: "3.4",
+                            database: "mira",
+                            total_query_time: "50",
+                            total_query_count: "42",
+                            total_received: "100",
+                            total_sent: "200",
+                            total_xact_count: "21",
+                            total_xact_time: "30",
+                        },
+                    ]}
+                />
+            );
+            expect(screen.getAllByText("Avg query").length).toBeGreaterThan(0);
+            expect(screen.getAllByText("42").length).toBeGreaterThan(0);
 
             rerender(<TopQueriesTable enabled={false} data={[]} />);
             expect(

@@ -353,7 +353,7 @@ describe("Mira Dashboard backend integration", () => {
         const builtChunk = builtAssets.find((file) => /^index-.+\.js$/u.test(file));
         expect(builtChunk).toBeDefined();
 
-        const rootChunk = await fetch(`${testState.baseUrl}/${builtChunk}`);
+        const rootChunk = await fetch(`${testState.baseUrl}/assets/${builtChunk}`);
         expect(rootChunk.status).toBe(200);
         expect(rootChunk.headers.get("cache-control")).toBe("no-store");
 
@@ -362,6 +362,49 @@ describe("Mira Dashboard backend integration", () => {
         );
         expect(missingChunk.status).toBe(404);
         expect(missingChunk.headers.get("content-type")).not.toContain("text/html");
+    });
+
+    it("applies static and websocket guard branches without leaving the test root", async () => {
+        const apiMiss = await fetch(`${testState.baseUrl}/api/not-a-route`);
+        expect(apiMiss.status).toBe(404);
+        expect(await apiMiss.json()).toEqual({ error: "Not found" });
+
+        const badEncoding = await fetch(`${testState.baseUrl}/%E0%A4%A`);
+        expect(badEncoding.status).toBe(400);
+
+        await fs.writeFile(
+            path.join(testState.temporaryRoot, "frontend", ".hidden.js"),
+            "export const hidden = true;\n"
+        );
+        const hiddenAsset = await fetch(`${testState.baseUrl}/.hidden.js`);
+        expect(hiddenAsset.status).toBe(404);
+
+        const forbiddenSocket = await fetch(`${testState.baseUrl}/ws`, {
+            headers: { origin: "https://evil.example" },
+        });
+        expect(forbiddenSocket.status).toBe(403);
+
+        const unauthenticatedSocket = await fetch(`${testState.baseUrl}/ws`, {
+            headers: { "x-real-ip": "10.0.0.25" },
+        });
+        expect(unauthenticatedSocket.status).toBe(401);
+
+        const originalFrontendPath = process.env.MIRA_DASHBOARD_FRONTEND_PATH;
+        process.env.MIRA_DASHBOARD_FRONTEND_PATH = path.join(
+            testState.temporaryRoot,
+            "missing-frontend"
+        );
+        try {
+            const missingBuild = await fetch(`${testState.baseUrl}/`);
+            expect(missingBuild.status).toBe(503);
+            expect(await missingBuild.text()).toContain("Frontend Not Built");
+        } finally {
+            if (originalFrontendPath === undefined) {
+                delete process.env.MIRA_DASHBOARD_FRONTEND_PATH;
+            } else {
+                process.env.MIRA_DASHBOARD_FRONTEND_PATH = originalFrontendPath;
+            }
+        }
     });
 
     it("creates, moves, updates, and deletes tasks through the API", async () => {
@@ -1639,6 +1682,11 @@ describe("Mira Dashboard backend integration", () => {
         const agentsRoot = path.join(testState.openclawRoot, "agents");
         const agentSessions = path.join(agentsRoot, "mira-2026", "sessions");
         await fs.mkdir(agentSessions, { recursive: true });
+
+        const missingConfig = await api<{ error: string }>("/api/agents/config");
+        expect(missingConfig.status).toBe(404);
+        expect(missingConfig.body.error).toBe("Agent configuration not found");
+
         await fs.writeFile(
             path.join(testState.openclawRoot, "openclaw.json"),
             JSON.stringify({
@@ -1681,6 +1729,13 @@ describe("Mira Dashboard backend integration", () => {
             expect.objectContaining({ id: "mira-2026" })
         );
 
+        const invalidMetadataBody = await api<{ error: string }>(
+            "/api/agents/mira-2026/metadata",
+            json("PUT", {})
+        );
+        expect(invalidMetadataBody.status).toBe(400);
+        expect(invalidMetadataBody.body.error).toBe("Provide currentTask");
+
         const metadata = await api<{ currentTask: string; updatedAt: string }>(
             "/api/agents/mira-2026/metadata",
             json("PUT", { currentTask: "Cover agent dashboard behavior" })
@@ -1707,6 +1762,10 @@ describe("Mira Dashboard backend integration", () => {
             })
         );
 
+        const unknownAgent = await api<{ error: string }>("/api/agents/unknown/status");
+        expect(unknownAgent.status).toBe(404);
+        expect(unknownAgent.body.error).toBe("Agent 'unknown' not found");
+
         const singleStatus = await api<{ currentTask?: string; id: string }>(
             "/api/agents/mira-2026/status"
         );
@@ -1728,6 +1787,17 @@ describe("Mira Dashboard backend integration", () => {
             expect.objectContaining({
                 agentId: "mira-2026",
                 status: "completed",
+                task: "Cover agent dashboard behavior",
+            })
+        );
+
+        const defaultHistory = await api<{
+            tasks: Array<{ agentId: string; task: string }>;
+        }>("/api/agents/tasks/history?limit=not-a-number");
+        expect(defaultHistory.status).toBe(200);
+        expect(defaultHistory.body.tasks).toContainEqual(
+            expect.objectContaining({
+                agentId: "mira-2026",
                 task: "Cover agent dashboard behavior",
             })
         );
