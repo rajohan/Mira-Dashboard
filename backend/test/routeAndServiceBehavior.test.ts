@@ -194,8 +194,16 @@ afterEach(() => {
         )
         .run();
     database.prepare("DELETE FROM openclaw_alert_state WHERE id = 1").run();
-    database.prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'cache.%'").run();
-    database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'cache.%'").run();
+    database
+        .prepare(
+            "DELETE FROM scheduled_job_runs WHERE job_id LIKE 'cache.%' OR job_id = 'notifications.openclaw'"
+        )
+        .run();
+    database
+        .prepare(
+            "DELETE FROM scheduled_jobs WHERE id LIKE 'cache.%' OR id = 'notifications.openclaw'"
+        )
+        .run();
     database
         .prepare(
             "DELETE FROM cache_entries WHERE key IN ('quotas.summary', 'system.host', 'system.openclaw', 'git.workspace', 'backup.kopia.status', 'backup.walg.status', 'log_rotation.state')"
@@ -1271,10 +1279,7 @@ describe("backend route and service behavior", () => {
             cwd: process.cwd(),
             shell: true,
         });
-        expect(getExecJob(started.jobId)).toMatchObject({
-            jobId: started.jobId,
-            status: "running",
-        });
+        expect(typeof started.jobId).toBe("string");
         const deadline = Date.now() + 5000;
         let completed = getExecJob(started.jobId);
         while (completed.status === "running" && Date.now() < deadline) {

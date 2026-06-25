@@ -892,10 +892,18 @@ function parseNextLink(header: string | undefined, baseUrl?: string): string | u
     return undefined;
 }
 
-function isTrustedRegistryPaginationUrl(url: string, registryHost: string): boolean {
+function isTrustedRegistryPaginationUrl(
+    url: string,
+    registryHost: string,
+    repo: string
+): boolean {
     const parsed = new URL(url);
-    const expected = new URL(`https://${registryHost}`);
-    return parsed.protocol === "https:" && parsed.origin === expected.origin;
+    const expected = new URL(`https://${registryHost}/v2/${repo}/tags/list`);
+    return (
+        parsed.protocol === "https:" &&
+        parsed.origin === expected.origin &&
+        parsed.pathname === expected.pathname
+    );
 }
 
 async function fetchRegistryJsonWithHeaders(
@@ -908,8 +916,11 @@ async function fetchRegistryJsonWithHeaders(
             options
         );
         if (!response.ok) {
-            await drainResponseBody(response);
-            clearTimer();
+            try {
+                await drainResponseBody(response);
+            } finally {
+                clearTimer();
+            }
             throw new Error(`HTTP ${response.status} for ${url}`);
         }
         try {
@@ -1164,10 +1175,10 @@ async function lookupRegistryV2(service: ManagedServiceRow) {
             const nextTagsUrl = parseNextLink(headers.get("link") ?? undefined, tagsUrl);
             if (
                 nextTagsUrl &&
-                !isTrustedRegistryPaginationUrl(nextTagsUrl, registryHost)
+                !isTrustedRegistryPaginationUrl(nextTagsUrl, registryHost, repo)
             ) {
                 throw new Error(
-                    `${registry} tag pagination redirected to untrusted registry origin for ${repo}`
+                    `${registry} tag pagination redirected to untrusted registry URL for ${repo}`
                 );
             }
             tagsUrl = nextTagsUrl;

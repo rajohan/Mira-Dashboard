@@ -513,7 +513,7 @@ describe("Docker updater tag patterns", () => {
         });
     });
 
-    it("rejects cross-origin registry pagination before reusing bearer auth", async () => {
+    it("rejects untrusted registry pagination before reusing bearer auth", async () => {
         rememberEnvironment("DOCKER_LOGIN");
         rememberEnvironment("DOCKER_TOKEN");
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
@@ -565,7 +565,7 @@ describe("Docker updater tag patterns", () => {
                     { tags: ["1.0.0", "1.1.0"] },
                     {
                         headers: {
-                            link: '<https://evil.example/v2/library/nginx/tags/list?n=1000&page=2>; rel="next"',
+                            link: '<https://registry-1.docker.io/v2/library/redis/tags/list?n=1000&page=2>; rel="next"',
                         },
                     }
                 );
@@ -593,7 +593,7 @@ describe("Docker updater tag patterns", () => {
         const polled = await pollDockerUpdaterRegistries(service.id);
         expect(polled).toMatchObject({ isOk: false, step: "poll" });
         expect(polled.stderr).toContain(
-            "docker.io tag pagination redirected to untrusted registry origin"
+            "docker.io tag pagination redirected to untrusted registry URL"
         );
         const updated = database
             .prepare(
@@ -608,7 +608,7 @@ describe("Docker updater tag patterns", () => {
         expect(updated.latest_tag).toBeNull();
         expect(updated.last_status).toBe("registry_check_failed");
         expect(
-            requests.some((request) => request.url.startsWith("https://evil.example/"))
+            requests.some((request) => request.url.includes("/v2/library/redis/"))
         ).toBe(false);
     });
 
