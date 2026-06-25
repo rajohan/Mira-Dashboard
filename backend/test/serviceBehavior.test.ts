@@ -741,7 +741,7 @@ printf 'scheduled\n'
                           status: string;
                       }
                     | undefined;
-                return row?.status === "restart-scheduled";
+                return row?.status === "restart-scheduled" && existsSync(systemdLog);
             });
 
             const row = database

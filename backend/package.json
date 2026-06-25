@@ -13,8 +13,8 @@
         "lint:fix": "eslint . --fix",
         "format": "prettier --write '**/*.{ts,js}'",
         "format:check": "prettier --check '**/*.{ts,js}'",
-        "test": "bun test --isolate",
-        "test:coverage": "bun test --isolate --coverage"
+        "test": "bun test",
+        "test:coverage": "bun test --coverage"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
