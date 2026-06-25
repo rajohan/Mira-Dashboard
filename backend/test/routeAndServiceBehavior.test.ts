@@ -1,4 +1,5 @@
 import {
+    chmodSync,
     existsSync,
     mkdirSync,
     mkdtempSync,
@@ -32,6 +33,11 @@ function createTemporaryRoot(prefix: string): string {
     const root = mkdtempSync(path.join(tmpdir(), prefix));
     cleanupCallbacks.push(() => rmSync(root, { force: true, recursive: true }));
     return root;
+}
+
+function writeExecutable(filePath: string, content: string): void {
+    writeFileSync(filePath, content);
+    chmodSync(filePath, 0o755);
 }
 
 function isolateOpenClawEnvironment(prefix: string): void {
@@ -97,7 +103,7 @@ afterEach(() => {
     database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'cache.%'").run();
     database
         .prepare(
-            "DELETE FROM cache_entries WHERE key IN ('quotas.summary', 'system.host')"
+            "DELETE FROM cache_entries WHERE key IN ('quotas.summary', 'system.host', 'system.openclaw', 'git.workspace', 'backup.kopia.status', 'backup.walg.status', 'log_rotation.state')"
         )
         .run();
     database.prepare("DELETE FROM cache_entries WHERE key LIKE 'moltbook.%'").run();
@@ -1066,6 +1072,201 @@ describe("backend route and service behavior", () => {
             rows.find((row) => row.key === "moltbook.profile")?.data_json ?? "{}"
         ) as Record<string, unknown>;
         expect(profile).toEqual({ agent: { name: "mira_2026" } });
+    });
+
+    it("refreshes backup and log-rotation cache producers through fake CLI output", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DOCKER_BIN");
+        const binRoot = createTemporaryRoot("mira-cache-cli-");
+        const now = new Date().toISOString();
+        const dockerBin = path.join(binRoot, "docker");
+        writeExecutable(
+            dockerBin,
+            `#!/usr/bin/env bash
+set -euo pipefail
+args="$*"
+if [[ "$args" == "exec kopia kopia snapshot list --all --json-verbose --json" ]]; then
+  cat <<'JSON'
+[
+  {"id":"snap-docker","source":{"path":"/source/docker"},"stats":{"fileCount":2,"totalSize":200,"errorCount":0,"ignoredErrorCount":0},"startTime":"${now}","endTime":"${now}","retentionReason":["latest"]},
+  {"id":"snap-openclaw","source":{"path":"/source/openclaw"},"stats":{"fileCount":3,"totalSize":300,"errorCount":0,"ignoredErrorCount":0},"startTime":"${now}","endTime":"${now}","retentionReason":["latest"]},
+  {"id":"snap-projects","source":{"path":"/source/projects"},"stats":{"fileCount":4,"totalSize":400,"errorCount":0,"ignoredErrorCount":0},"startTime":"${now}","endTime":"${now}","retentionReason":["latest"]}
+]
+JSON
+elif [[ "$args" == "exec walg wal-g backup-list --detail --json" ]]; then
+  cat <<'JSON'
+[
+  {"backup_name":"base_0001","finish_time":"${now}","start_time":"${now}","wal_file_name":"000000010000000000000001","storage_name":"default"}
+]
+JSON
+else
+  echo "unexpected docker args: $*" >&2
+  exit 2
+fi
+`
+        );
+        process.env.MIRA_DOCKER_BIN = dockerBin;
+        process.env.PATH = `${binRoot}:${process.env.PATH ?? ""}`;
+
+        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+        await expect(refreshCacheProducer("backup.kopia.status")).resolves.toEqual({
+            refreshed: ["backup.kopia.status"],
+        });
+        await expect(refreshCacheProducer("backup.walg.status")).resolves.toEqual({
+            refreshed: ["backup.walg.status"],
+        });
+        await expect(refreshCacheProducer("log_rotation.state")).resolves.toEqual({
+            refreshed: ["log_rotation.state"],
+        });
+
+        const rows = database
+            .prepare(
+                "SELECT key, data_json, status FROM cache_entries WHERE key IN ('backup.kopia.status', 'backup.walg.status', 'log_rotation.state') ORDER BY key"
+            )
+            .all() as Array<{ data_json: string; key: string; status: string }>;
+        expect(rows.map((row) => [row.key, row.status])).toEqual([
+            ["backup.kopia.status", "fresh"],
+            ["backup.walg.status", "fresh"],
+            ["log_rotation.state", "fresh"],
+        ]);
+        const kopia = JSON.parse(
+            rows.find((row) => row.key === "backup.kopia.status")?.data_json ?? "{}"
+        ) as { isOk?: boolean; latest?: unknown[]; stale?: unknown[] };
+        expect(kopia).toMatchObject({
+            isOk: true,
+            latest: expect.arrayContaining([
+                expect.objectContaining({ path: "/source/docker" }),
+                expect.objectContaining({ path: "/source/openclaw" }),
+                expect.objectContaining({ path: "/source/projects" }),
+            ]),
+            stale: [],
+        });
+        const walg = JSON.parse(
+            rows.find((row) => row.key === "backup.walg.status")?.data_json ?? "{}"
+        ) as { backupCount?: number; isOk?: boolean; latest?: { backupName?: string } };
+        expect(walg).toMatchObject({
+            backupCount: 1,
+            isOk: true,
+            latest: { backupName: "base_0001" },
+        });
+    });
+
+    it("refreshes quota cache with isolated missing-provider state", async () => {
+        for (const key of [
+            "OPENROUTER_API_KEY",
+            "ELEVENLABS_API_KEY",
+            "SYNTHETIC_API_KEY",
+            "CODEX_BIN",
+            "QUOTAS_CODEX_HOME",
+        ]) {
+            rememberEnvironment(key);
+            delete process.env[key];
+        }
+        const codexHome = createTemporaryRoot("mira-quota-codex-home-");
+        process.env.CODEX_BIN = path.join(codexHome, "missing-codex");
+        process.env.QUOTAS_CODEX_HOME = codexHome;
+
+        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+        await expect(refreshCacheProducer("quotas.summary")).resolves.toEqual({
+            refreshed: ["quotas.summary"],
+        });
+
+        const row = database
+            .prepare(
+                "SELECT data_json, metadata_json, status FROM cache_entries WHERE key = 'quotas.summary' LIMIT 1"
+            )
+            .get() as
+            | { data_json: string; metadata_json: string; status: string }
+            | undefined;
+        expect(row?.status).toBe("fresh");
+        const data = JSON.parse(row?.data_json ?? "{}") as Record<
+            string,
+            Record<string, unknown>
+        >;
+        expect(data.openrouter).toEqual({ status: "not_configured" });
+        expect(data.elevenlabs).toEqual({ status: "not_configured" });
+        expect(data.synthetic).toEqual({ status: "not_configured" });
+        expect(["not_configured", "error"]).toContain(String(data.openai?.status));
+        const metadata = JSON.parse(row?.metadata_json ?? "{}") as {
+            missing?: string[];
+        };
+        expect(metadata.missing).toEqual(
+            expect.arrayContaining(["openrouter", "elevenlabs", "synthetic"])
+        );
+    });
+
+    it("refreshes system cache through a fake OpenClaw binary", async () => {
+        rememberEnvironment("OPENCLAW_BIN");
+        const binRoot = createTemporaryRoot("mira-system-cache-bin-");
+        const openclawBin = path.join(binRoot, "openclaw");
+        writeExecutable(
+            openclawBin,
+            `#!/usr/bin/env bash
+set -euo pipefail
+case "$*" in
+  "status --json")
+    cat <<'JSON'
+{"runtimeVersion":"1.0.0","gateway":{"status":"ok"},"gatewayService":{"active":true},"nodeService":{"active":false},"heartbeat":{"ok":true},"tasks":{"queued":1},"taskAudit":{"stale":0}}
+JSON
+    ;;
+  "update status --json")
+    cat <<'JSON'
+{"availability":{"latestVersion":"1.1.0"},"update":{"registry":{"latestVersion":"1.1.0"}}}
+JSON
+    ;;
+  "doctor")
+    printf '%s' "- WARNING: Gateway clients: informational"
+    ;;
+  "security audit --json")
+    cat <<'JSON'
+{"findings":[],"isOk":true}
+JSON
+    ;;
+  *)
+    echo "unexpected openclaw args: $*" >&2
+    exit 2
+    ;;
+esac
+`
+        );
+        process.env.OPENCLAW_BIN = openclawBin;
+
+        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+        await expect(refreshCacheProducer("system.host")).resolves.toEqual({
+            refreshed: ["system.openclaw", "system.host"],
+        });
+
+        const rows = database
+            .prepare(
+                "SELECT key, data_json, status FROM cache_entries WHERE key IN ('system.openclaw', 'system.host') ORDER BY key"
+            )
+            .all() as Array<{ data_json: string; key: string; status: string }>;
+        expect(rows.map((row) => [row.key, row.status])).toEqual([
+            ["system.host", "fresh"],
+            ["system.openclaw", "fresh"],
+        ]);
+        const openclaw = JSON.parse(
+            rows.find((row) => row.key === "system.openclaw")?.data_json ?? "{}"
+        ) as {
+            doctorWarnings?: string[];
+            security?: { isOk?: boolean };
+            version?: { latest?: string; updateAvailable?: boolean };
+        };
+        expect(openclaw).toMatchObject({
+            doctorWarnings: ["Gateway clients: informational"],
+            security: { isOk: true },
+            version: { latest: "1.1.0", updateAvailable: true },
+        });
+        const host = JSON.parse(
+            rows.find((row) => row.key === "system.host")?.data_json ?? "{}"
+        ) as {
+            version?: { current?: string; latest?: string; updateAvailable?: boolean };
+        };
+        expect(host.version).toMatchObject({
+            current: "1.0.0",
+            latest: "1.1.0",
+            updateAvailable: true,
+        });
     });
 
     it("cache refresh scheduled job registration preserves disabled jobs", async () => {

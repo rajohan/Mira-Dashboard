@@ -2,6 +2,7 @@ import {
     chmodSync,
     mkdirSync,
     mkdtempSync,
+    readFileSync,
     rmSync,
     symlinkSync,
     writeFileSync,
@@ -79,6 +80,33 @@ fi
     chmodSync(binaryPath, 0o755);
 }
 
+function writeFakeGhForPullRequestActions(binaryPath: string, logPath: string): void {
+    writeFileSync(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
+if [[ "$1 $2 $3" == "pr view 3" ]]; then
+  printf '%s\n' '{"number":3,"title":"Needs review","body":"","url":"https://github.test/pr/3","headRefName":"review-branch","headRefOid":"head3","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr view 4" ]]; then
+  printf '%s\n' '{"number":4,"title":"Behind branch","body":"","url":"https://github.test/pr/4","headRefName":"behind-branch","headRefOid":"head4","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"BEHIND","reviewDecision":"APPROVED","reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr view 5" ]]; then
+  printf '%s\n' '{"number":5,"title":"Close me","body":"","url":"https://github.test/pr/5","headRefName":"close-branch","headRefOid":"head5","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr review 3" ]]; then
+  printf 'review ok\n'
+elif [[ "$1 $2" == "api -X" && "$*" == *"repos/rajohan/Mira-Dashboard/pulls/4/update-branch"* ]]; then
+  printf '{}\n'
+elif [[ "$1 $2 $3" == "pr close 5" ]]; then
+  printf 'closed\n'
+else
+  echo "unexpected gh args: $*" >&2
+  exit 2
+fi
+`
+    );
+    chmodSync(binaryPath, 0o755);
+}
+
 function writeFakeDocker(binaryPath: string): void {
     writeFileSync(
         binaryPath,
@@ -94,6 +122,22 @@ if [[ "$*" == "exec walg /bin/sh /usr/local/bin/backup-push.sh" ]]; then
 fi
 echo "unexpected docker args: $*" >&2
 exit 2
+`
+    );
+    chmodSync(binaryPath, 0o755);
+}
+
+function writeFakePgrep(binaryPath: string, logPath: string): void {
+    writeFileSync(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
+if [[ "$*" == "-f /opt/docker/apps/kopia/backup.sh" ]]; then
+  printf '12345\n'
+  exit 0
+fi
+exit 1
 `
     );
     chmodSync(binaryPath, 0o755);
@@ -576,6 +620,68 @@ describe("backend service behavior", () => {
         }
     });
 
+    it("drives pull request review, branch update, and reject actions through fake GitHub CLI", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
+        rememberEnvironment("RAJOHAN_GITHUB_TOKEN");
+        rememberEnvironment("RAJOHAN_GITHUB_USERNAME");
+        const fakeRoot = createTemporaryRoot("mira-pr-actions-root-");
+        const fakeBin = createTemporaryRoot("mira-pr-actions-bin-");
+        const ghLog = path.join(fakeRoot, "gh.log");
+        writeFakeGhForPullRequestActions(path.join(fakeBin, "gh"), ghLog);
+        writeFileSync(
+            path.join(fakeBin, "git"),
+            `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == "worktree list --porcelain" ]]; then
+  printf ''
+else
+  echo "unexpected git args: $*" >&2
+  exit 2
+fi
+`
+        );
+        chmodSync(path.join(fakeBin, "git"), 0o755);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(fakeRoot, "worktrees");
+        process.env.RAJOHAN_GITHUB_TOKEN = "review-token";
+        process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
+
+        const { approvePullRequestReview, rejectPullRequest, updatePullRequestBranch } =
+            await import("../src/services/pullRequests.ts");
+
+        await expect(approvePullRequestReview(3)).resolves.toMatchObject({
+            isOk: true,
+            message: "PR #3 review approved",
+            pullRequest: {
+                canReviewerApprove: true,
+                number: 3,
+                reviewerApproved: false,
+            },
+        });
+        await expect(updatePullRequestBranch(4)).resolves.toMatchObject({
+            isOk: true,
+            message: "PR #4 branch update started",
+            pullRequest: { number: 4 },
+        });
+        await expect(rejectPullRequest(5, "Not ready")).resolves.toMatchObject({
+            cleanup: {
+                branch: "close-branch",
+                status: "skipped",
+            },
+            isOk: true,
+            message: "PR #5 closed",
+        });
+
+        await expect(Bun.file(ghLog).text()).resolves.toContain("pr review 3");
+        await expect(Bun.file(ghLog).text()).resolves.toContain(
+            "repos/rajohan/Mira-Dashboard/pulls/4/update-branch"
+        );
+        await expect(Bun.file(ghLog).text()).resolves.toContain("pr close 5");
+    });
+
     it("refreshes weather cache through the Open-Meteo fallback when wttr fails", async () => {
         const originalFetch = fetch;
         const calls: string[] = [];
@@ -820,6 +926,61 @@ describe("backend service behavior", () => {
                     )
                     .get()
             ).toEqual({ status: "success" });
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("records and clears Kopia needs-attention state when host preflight detects a running process", async () => {
+        rememberEnvironment("PATH");
+        const fakeBin = createTemporaryRoot("mira-backup-pgrep-bin-");
+        const pgrepLog = path.join(fakeBin, "pgrep.log");
+        writeFakeDocker(path.join(fakeBin, "docker"));
+        writeFakePgrep(path.join(fakeBin, "pgrep"), pgrepLog);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        const {
+            clearNeedsAttentionBackupJob,
+            getCurrentBackupJob,
+            mapBackupJob,
+            registerBackupScheduledJobs,
+            startManualBackup,
+        } = await import("../src/services/backups.ts");
+
+        try {
+            registerBackupScheduledJobs();
+            await expect(startManualBackup("kopia")).rejects.toMatchObject({
+                statusCode: 409,
+            });
+            expect(mapBackupJob(getCurrentBackupJob("kopia"))).toMatchObject({
+                code: 130,
+                status: "needs_attention",
+                stderr: expect.stringContaining("backup process is still running"),
+                type: "kopia",
+            });
+            await expect(startManualBackup("kopia")).rejects.toThrow(
+                "KOPIA backup needs attention"
+            );
+
+            const clearedJob = await clearNeedsAttentionBackupJob("kopia");
+            expect(mapBackupJob(clearedJob)).toMatchObject({
+                status: "needs_attention",
+                type: "kopia",
+            });
+            expect(getCurrentBackupJob("kopia")).toBeUndefined();
+            expect(readFileSync(pgrepLog, "utf8")).toContain(
+                "-f /opt/docker/apps/kopia/backup.sh"
+            );
+            await waitFor(() => {
+                const row = database
+                    .prepare(
+                        "SELECT status FROM scheduled_job_runs WHERE job_id = 'backup.kopia' ORDER BY id DESC LIMIT 1"
+                    )
+                    .get() as { status?: string } | undefined;
+                return row?.status === "failed";
+            });
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")

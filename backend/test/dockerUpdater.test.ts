@@ -233,6 +233,38 @@ describe("Docker updater tag patterns", () => {
         ).toEqual({ enabled: 1, time_of_day: "04:10" });
     });
 
+    it("blocks global updater runs when service discovery cannot read the apps root", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        const missingAppsRoot = path.join(
+            createTemporaryRoot("mira-docker-updater-missing-root-"),
+            "missing"
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = missingAppsRoot;
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockResolvedValue({ code: 0, stderr: "", stdout: "" });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        const registered = await registerDockerUpdaterServices();
+        expect(registered).toMatchObject({
+            isOk: false,
+            step: "register-services",
+            stdout: "",
+        });
+        expect(JSON.parse(registered.stderr)).toMatchObject({
+            failed: [
+                {
+                    appSlug: "*",
+                    error: expect.stringContaining("Compose apps root not found"),
+                },
+            ],
+            registered: 0,
+        });
+
+        await expect(runDockerUpdaterService()).resolves.toEqual([registered]);
+        expect(runProcessSpy).not.toHaveBeenCalled();
+    });
+
     it("reports manual update guard states without touching Docker", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
         rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
