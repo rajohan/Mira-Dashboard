@@ -746,6 +746,22 @@ describe("backend route and service behavior", () => {
         );
         expect(unknownCache.status).toBe(404);
 
+        const missingCacheRefresh = await cacheRoutes["/api/cache/:key/refresh"].POST(
+            requestWithParameters("/api/cache//refresh", { key: "" })
+        );
+        await expect(missingCacheRefresh.json()).resolves.toEqual({
+            error: "Missing cache key",
+        });
+        expect(missingCacheRefresh.status).toBe(400);
+
+        const unknownCacheRefresh = await cacheRoutes["/api/cache/:key/refresh"].POST(
+            requestWithParameters("/api/cache/nope/refresh", { key: "nope" })
+        );
+        await expect(unknownCacheRefresh.json()).resolves.toEqual({
+            error: "No backend refresh producer configured for cache key: nope",
+        });
+        expect(unknownCacheRefresh.status).toBe(400);
+
         const backupStatus = backupRoutes["/api/backups/kopia"].GET();
         await expect(backupStatus.json()).resolves.toEqual({ job: undefined });
 

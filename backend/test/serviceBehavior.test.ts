@@ -1100,9 +1100,32 @@ fi
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
         const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
             await import("../src/services/backups.ts");
+        const { getScheduledJob, runScheduledJob, upsertScheduledJob } =
+            await import("../src/services/scheduledJobs.ts");
 
         try {
             registerBackupScheduledJobs();
+            expect(getScheduledJob("backup.walg")).toMatchObject({
+                actionKey: "backup.run",
+                enabled: true,
+                scheduleType: "daily",
+                timeOfDay: "03:20",
+            });
+            upsertScheduledJob({
+                id: "backup.invalid",
+                name: "Invalid backup",
+                enabled: false,
+                scheduleType: "interval",
+                intervalSeconds: 3600,
+                actionKey: "backup.run",
+                actionPayload: { type: "invalid" },
+            });
+            const invalidRun = await runScheduledJob("backup.invalid");
+            expect(invalidRun).toMatchObject({
+                jobId: "backup.invalid",
+                status: "failed",
+            });
+
             const job = await startManualBackup("walg");
             const completed = await job.completed;
 
