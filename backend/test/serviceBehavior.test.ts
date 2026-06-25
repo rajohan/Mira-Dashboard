@@ -1,6 +1,7 @@
 import {
     appendFileSync,
     chmodSync,
+    existsSync,
     mkdirSync,
     mkdtempSync,
     readFileSync,
@@ -14,7 +15,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "bun:test";
 
 import type { DashboardSocket } from "../src/dashboardSocket.ts";
-import { database } from "../src/database.ts";
+import { database, sqlNullable } from "../src/database.ts";
 
 const cleanupCallbacks: Array<() => void> = [];
 
@@ -133,6 +134,25 @@ elif [[ "$1 $2 $3" == "pr view 9" ]]; then
   printf '%s\n' '{"number":9,"title":"Conflict","body":"","url":"https://github.test/pr/9","headRefName":"conflict","headRefOid":"head9","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"DIRTY","mergeStateStatus":"BEHIND","reviewDecision":"APPROVED","reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
 elif [[ "$1 $2 $3" == "pr view 10" ]]; then
   printf '%s\n' '{"number":10,"title":"Own PR","body":"","url":"https://github.test/pr/10","headRefName":"own","headRefOid":"head10","baseRefName":"main","author":{"login":"rajohan"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+else
+  echo "unexpected gh args: $*" >&2
+  exit 2
+fi
+`
+    );
+    chmodSync(binaryPath, 0o755);
+}
+
+function writeFakeGhForPullRequestMerge(binaryPath: string, logPath: string): void {
+    writeFileSync(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
+if [[ "$1 $2 $3" == "pr view 11" ]]; then
+  printf '%s\n' '{"number":11,"title":"Merge me","body":"","url":"https://github.test/pr/11","headRefName":"merge-branch","headRefOid":"head11","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"APPROVED","reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr merge 11" ]]; then
+  printf 'merged\n'
 else
   echo "unexpected gh args: $*" >&2
   exit 2
@@ -600,6 +620,46 @@ describe("backend service behavior", () => {
         }
     });
 
+    it("rejects active deployment locks before starting deploy work", async () => {
+        const jobId = `test-deploy-active-${Bun.randomUUIDv7()}`;
+        const staleOwner = `test-deploy-stale-owner-${Bun.randomUUIDv7()}`;
+        database
+            .prepare(
+                `INSERT INTO deployment_jobs
+                 (id, status, started_at, updated_at, commit_sha, commit_title, note, stdout, stderr)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            )
+            .run(
+                jobId,
+                "building",
+                new Date().toISOString(),
+                new Date().toISOString(),
+                sqlNullable(undefined),
+                sqlNullable(undefined),
+                "active",
+                "",
+                ""
+            );
+        database
+            .prepare(
+                "INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)"
+            )
+            .run(jobId, new Date().toISOString());
+
+        try {
+            const { startDeployLatest } = await import("../src/services/pullRequests.ts");
+            expect(() => startDeployLatest()).toThrow(
+                `Dashboard deploy already in progress (${jobId})`
+            );
+            expect(() => startDeployLatest(staleOwner)).toThrow(
+                "Dashboard deploy lock handoff failed"
+            );
+        } finally {
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            database.prepare("DELETE FROM deployment_jobs WHERE id = ?").run(jobId);
+        }
+    });
+
     it("reports production checkout readiness through git command output", async () => {
         rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DASHBOARD_ROOT");
@@ -817,6 +877,80 @@ fi
             "repos/rajohan/Mira-Dashboard/pulls/4/update-branch"
         );
         await expect(Bun.file(ghLog).text()).resolves.toContain("pr close 5");
+    });
+
+    it("merges an approved pull request and removes its clean local worktree safely", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
+        rememberEnvironment("RAJOHAN_GITHUB_USERNAME");
+        const fakeRoot = createTemporaryRoot("mira-pr-merge-root-");
+        const worktreeRoot = path.join(fakeRoot, "worktrees");
+        const localWorktree = path.join(worktreeRoot, "merge-branch");
+        const fakeBin = createTemporaryRoot("mira-pr-merge-bin-");
+        const ghLog = path.join(fakeRoot, "gh.log");
+        const gitLog = path.join(fakeRoot, "git.log");
+        mkdirSync(localWorktree, { recursive: true });
+        writeFakeGhForPullRequestMerge(path.join(fakeBin, "gh"), ghLog);
+        writeFileSync(
+            path.join(fakeBin, "git"),
+            String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(gitLog)}
+if [[ "$*" == "rev-parse --show-toplevel" ]]; then
+  printf '%s\n' ${JSON.stringify(fakeRoot)}
+elif [[ "$*" == "rev-parse --abbrev-ref HEAD" ]]; then
+  printf 'main\n'
+elif [[ "$*" == "rev-parse --short HEAD" ]]; then
+  printf 'abc1234\n'
+elif [[ "$*" == "rev-parse --abbrev-ref --symbolic-full-name ${"@{u}"}" ]]; then
+  printf 'origin/main\n'
+elif [[ "$*" == "status --short" ]]; then
+  printf ''
+elif [[ "$*" == "worktree list --porcelain" ]]; then
+  printf 'worktree %s\nHEAD abc1234\nbranch refs/heads/merge-branch\n\n' ${JSON.stringify(localWorktree)}
+elif [[ "$*" == "-C ${localWorktree} status --short" ]]; then
+  printf ''
+elif [[ "$*" == "worktree remove ${localWorktree}" ]]; then
+  rm -rf ${JSON.stringify(localWorktree)}
+elif [[ "$*" == "fetch --prune origin" || "$*" == "checkout main" || "$*" == "pull --ff-only origin main" ]]; then
+  printf ''
+else
+  echo "unexpected git args: $*" >&2
+  exit 2
+fi
+`
+        );
+        chmodSync(path.join(fakeBin, "git"), 0o755);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
+        process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
+
+        try {
+            const { approvePullRequest } =
+                await import("../src/services/pullRequests.ts");
+            const result = await approvePullRequest(11, false);
+
+            expect(result).toMatchObject({
+                cleanup: {
+                    branch: "merge-branch",
+                    message: "Removed local worktree for merge-branch",
+                    status: "removed",
+                },
+                isOk: true,
+                message: "PR #11 merged",
+                syncError: undefined,
+            });
+            await expect(Bun.file(ghLog).text()).resolves.toContain("pr merge 11");
+            await expect(Bun.file(gitLog).text()).resolves.toContain("worktree remove");
+            expect(existsSync(localWorktree)).toBe(false);
+        } finally {
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            database
+                .prepare("DELETE FROM deployment_jobs WHERE id LIKE 'approve-%'")
+                .run();
+        }
     });
 
     it("rejects unsafe pull request actions before invoking mutating GitHub commands", async () => {
