@@ -187,7 +187,7 @@ describe("backend service utilities", () => {
                 path.resolve(
                     prepareSafeWriteTargetWithinRoot(missingRootTarget, missingRoot)!
                 )
-            ).toBe(path.resolve(missingRootTarget));
+            ).toBe(canonicalPath(missingRootTarget));
             expect(
                 prepareSafeWriteTargetWithinRoot(path.join(root, "bad\0name"), root)
             ).toBeUndefined();

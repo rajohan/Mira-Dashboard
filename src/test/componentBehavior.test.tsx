@@ -1243,7 +1243,7 @@ describe("shared component helpers", () => {
         rerender(
             <FileContentViewer
                 fileContent={{ ...baseFile, path: "/tmp/config.json" }}
-                editedContent="{foo: 'viewer'}"
+                editedContent='{"foo":"viewer"}'
                 onContentChange={onContentChange}
                 largeFileWarning={false}
                 isEditable={true}

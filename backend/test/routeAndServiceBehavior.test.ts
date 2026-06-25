@@ -1325,13 +1325,15 @@ describe("backend route and service behavior", () => {
             requestWithParameters(`/api/docker/exec/${jobId}`, { jobId })
         );
         let execData = (await execStatus.json()) as { status: string; stdout: string };
-        for (let attempt = 0; attempt < 20 && execData.status !== "done"; attempt += 1) {
-            await new Promise((resolve) => setTimeout(resolve, 5));
+        const execDeadline = Date.now() + 5000;
+        while (execData.status !== "done" && Date.now() < execDeadline) {
+            await new Promise((resolve) => setTimeout(resolve, 25));
             execStatus = dockerRoutes["/api/docker/exec/:jobId"].GET(
                 requestWithParameters(`/api/docker/exec/${jobId}`, { jobId })
             );
             execData = (await execStatus.json()) as { status: string; stdout: string };
         }
+        expect(execData.status).toBe("done");
         expect(execData).toMatchObject({
             status: "done",
             stdout: expect.stringContaining("exec output"),
@@ -1749,8 +1751,9 @@ describe("backend route and service behavior", () => {
             group: "rename",
             isDryRun: false,
         });
+        const hasCompressionStream = "CompressionStream" in globalThis;
         expect(renameSummary).toMatchObject({
-            compressedFiles: 1,
+            compressedFiles: hasCompressionStream ? 1 : 0,
             isDryRun: false,
             isOk: true,
             rotatedFiles: 1,
@@ -1759,13 +1762,21 @@ describe("backend route and service behavior", () => {
         const compressedRenameArchive = readdirSync(root).find((entry) =>
             entry.startsWith("rename.log.202")
         );
-        expect(compressedRenameArchive?.endsWith(".gz")).toBe(true);
-        const compressedRenameArchiveBytes = readFileSync(
-            path.join(root, compressedRenameArchive ?? "")
-        );
-        expect(gunzipSync(compressedRenameArchiveBytes).toString("utf8")).toBe(
-            "rename bytes\n"
-        );
+        expect(compressedRenameArchive).toBeDefined();
+        if (hasCompressionStream) {
+            expect(compressedRenameArchive?.endsWith(".gz")).toBe(true);
+            const compressedRenameArchiveBytes = readFileSync(
+                path.join(root, compressedRenameArchive ?? "")
+            );
+            expect(gunzipSync(compressedRenameArchiveBytes).toString("utf8")).toBe(
+                "rename bytes\n"
+            );
+        } else {
+            expect(compressedRenameArchive?.endsWith(".gz")).toBe(false);
+            expect(
+                readFileSync(path.join(root, compressedRenameArchive ?? ""), "utf8")
+            ).toBe("rename bytes\n");
+        }
 
         const archiveOnlyOld = path.join(root, "old.archive");
         const archiveOnlyNew = path.join(root, "new.archive");

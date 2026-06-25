@@ -377,6 +377,7 @@ describe("Docker updater tag patterns", () => {
 
     it("updates services through parent compose includes and default overrides", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
         rememberEnvironment("MIRA_DOCKER_ROOT");
         const appsRoot = createTemporaryRoot("mira-docker-updater-parent-compose-");
         const dockerRoot = createTemporaryRoot("mira-docker-updater-root-");
@@ -423,6 +424,7 @@ describe("Docker updater tag patterns", () => {
             ].join("\n")
         );
         process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        delete process.env.MIRA_DOCKER_COMPOSE_WRAPPER;
         process.env.MIRA_DOCKER_ROOT = dockerRoot;
         const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
             input: Request | string | URL
