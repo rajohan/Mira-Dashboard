@@ -1255,8 +1255,12 @@ describe("backend route and service behavior", () => {
             jobId: started.jobId,
             status: "running",
         });
-        await Bun.sleep(50);
-        const completed = getExecJob(started.jobId);
+        const deadline = Date.now() + 5000;
+        let completed = getExecJob(started.jobId);
+        while (completed.status === "running" && Date.now() < deadline) {
+            await Bun.sleep(10);
+            completed = getExecJob(started.jobId);
+        }
         expect(completed.status).toBe("done");
         expect(completed.code).not.toBe(0);
         expect(completed.stderr).toContain("__mira_dashboard_shell_smoke_test__");

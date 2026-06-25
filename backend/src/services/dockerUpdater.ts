@@ -647,6 +647,7 @@ interface DiscoveredComposeService {
 
 interface RegistryFetchOptions {
     accept?: string;
+    authorization?: string;
 }
 
 interface RegistryCredentials {
@@ -803,24 +804,25 @@ async function drainResponseBody(response: Response): Promise<void> {
 async function fetchRegistryResponse(
     url: string,
     options: RegistryFetchOptions = {}
-): Promise<{ response: Response; clearTimer: () => void }> {
+): Promise<{ authorization?: string; response: Response; clearTimer: () => void }> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
     const clearTimer = () => clearTimeout(timeout);
     const headers = {
         Accept: options.accept || "application/json",
+        ...(options.authorization && { Authorization: options.authorization }),
         "User-Agent": "mira-dashboard-docker-updater/1.0",
     };
     try {
         const response = await fetch(url, { headers, signal: controller.signal });
         if (response.status !== 401) {
-            return { response, clearTimer };
+            return { authorization: options.authorization, response, clearTimer };
         }
         const challenge = parseBearerChallenge(
             response.headers.get("www-authenticate") ?? undefined
         );
         if (!challenge?.realm) {
-            return { response, clearTimer };
+            return { authorization: options.authorization, response, clearTimer };
         }
         await drainResponseBody(response);
         const tokenUrl = new URL(challenge.realm);
@@ -840,7 +842,7 @@ async function fetchRegistryResponse(
         });
         if (!tokenResponse.ok) {
             await drainResponseBody(tokenResponse);
-            return { response, clearTimer };
+            return { authorization: options.authorization, response, clearTimer };
         }
         const tokenBody = asRecord(await tokenResponse.json());
         const token =
@@ -859,7 +861,11 @@ async function fetchRegistryResponse(
             },
             signal: controller.signal,
         });
-        return { response: authenticated, clearTimer };
+        return {
+            authorization: `Bearer ${token}`,
+            response: authenticated,
+            clearTimer,
+        };
     } catch (error) {
         clearTimer();
         throw error;
@@ -889,9 +895,12 @@ function parseNextLink(header: string | undefined, baseUrl?: string): string | u
 async function fetchRegistryJsonWithHeaders(
     url: string,
     options: RegistryFetchOptions = {}
-): Promise<{ body: JsonRecord; headers: Headers }> {
+): Promise<{ authorization?: string; body: JsonRecord; headers: Headers }> {
     try {
-        const { response, clearTimer } = await fetchRegistryResponse(url, options);
+        const { authorization, response, clearTimer } = await fetchRegistryResponse(
+            url,
+            options
+        );
         if (!response.ok) {
             await drainResponseBody(response);
             clearTimer();
@@ -899,7 +908,7 @@ async function fetchRegistryJsonWithHeaders(
         }
         try {
             const body = asRecord(await response.json());
-            return { body, headers: response.headers };
+            return { authorization, body, headers: response.headers };
         } finally {
             clearTimer();
         }
@@ -1127,6 +1136,7 @@ async function lookupRegistryV2(service: ManagedServiceRow) {
         const tags: string[] = [];
         let tagsUrl: string | undefined =
             `https://${registryHost}/v2/${repo}/tags/list?n=${REGISTRY_TAG_PAGE_SIZE}`;
+        let tagListAuthorization: string | undefined;
         let tagPageCount = 0;
         while (tagsUrl) {
             tagPageCount += 1;
@@ -1135,7 +1145,11 @@ async function lookupRegistryV2(service: ManagedServiceRow) {
                     `${registry} tag pagination exceeded ${MAX_REGISTRY_TAG_PAGES} pages for ${repo}`
                 );
             }
-            const { body, headers } = await fetchRegistryJsonWithHeaders(tagsUrl);
+            const { authorization, body, headers } = await fetchRegistryJsonWithHeaders(
+                tagsUrl,
+                { authorization: tagListAuthorization }
+            );
+            tagListAuthorization = authorization;
             tags.push(
                 ...(Array.isArray(body.tags)
                     ? body.tags.filter((item): item is string => typeof item === "string")

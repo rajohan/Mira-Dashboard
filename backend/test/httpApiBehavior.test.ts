@@ -399,7 +399,11 @@ describe("Mira Dashboard backend integration", () => {
             expect(missingBuild.status).toBe(503);
             expect(await missingBuild.text()).toContain("Frontend Not Built");
         } finally {
-            process.env.MIRA_DASHBOARD_FRONTEND_PATH = originalFrontendPath;
+            if (originalFrontendPath === undefined) {
+                delete process.env.MIRA_DASHBOARD_FRONTEND_PATH;
+            } else {
+                process.env.MIRA_DASHBOARD_FRONTEND_PATH = originalFrontendPath;
+            }
         }
     });
 

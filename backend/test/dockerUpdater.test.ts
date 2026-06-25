@@ -360,8 +360,8 @@ describe("Docker updater tag patterns", () => {
         ]);
         expect(runProcessSpy).toHaveBeenCalledWith(
             process.env.MIRA_DOCKER_COMPOSE_WRAPPER,
-            expect.arrayContaining(["up", "-d", "--pull", "always", "web"]),
-            expect.objectContaining({ cwd: appRoot })
+            ["-f", composePath, "up", "-d", "--pull", "always", "web"],
+            expect.objectContaining({ cwd: appRoot, timeoutMs: 180_000 })
         );
         expect(runProcessSpy).toHaveBeenCalledWith(
             "docker",
@@ -436,6 +436,7 @@ describe("Docker updater tag patterns", () => {
                 return Response.json({ token: "registry-token" });
             }
             if (url.endsWith("/v2/library/nginx/tags/list?n=1000&page=2")) {
+                expect(headers.get("authorization")).toBe("Bearer registry-token");
                 return Response.json({ tags: ["1.2.0", "not-semver"] });
             }
             if (url.endsWith("/v2/library/nginx/manifests/1.2.0")) {
@@ -488,6 +489,22 @@ describe("Docker updater tag patterns", () => {
         expect(requests.map((request) => request.url)).toContain(
             "https://auth.docker.io/token?service=registry.docker.io&scope=repository%3Alibrary%2Fnginx%3Apull"
         );
+        expect(
+            requests.filter((request) =>
+                request.url.endsWith("/v2/library/nginx/tags/list?n=1000")
+            )
+        ).toContainEqual({
+            authorization: "Bearer registry-token",
+            url: "https://registry-1.docker.io/v2/library/nginx/tags/list?n=1000",
+        });
+        expect(
+            requests.find((request) =>
+                request.url.endsWith("/v2/library/nginx/tags/list?n=1000&page=2")
+            )
+        ).toEqual({
+            authorization: "Bearer registry-token",
+            url: "https://registry-1.docker.io/v2/library/nginx/tags/list?n=1000&page=2",
+        });
     });
 
     it("reports manual update guard states without touching Docker", async () => {
