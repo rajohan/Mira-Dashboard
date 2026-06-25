@@ -892,6 +892,11 @@ function parseNextLink(header: string | undefined, baseUrl?: string): string | u
     return undefined;
 }
 
+function isTrustedRegistryPaginationUrl(url: string, registryHost: string): boolean {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.host === registryHost;
+}
+
 async function fetchRegistryJsonWithHeaders(
     url: string,
     options: RegistryFetchOptions = {}
@@ -1155,7 +1160,16 @@ async function lookupRegistryV2(service: ManagedServiceRow) {
                     ? body.tags.filter((item): item is string => typeof item === "string")
                     : [])
             );
-            tagsUrl = parseNextLink(headers.get("link") ?? undefined, tagsUrl);
+            const nextTagsUrl = parseNextLink(headers.get("link") ?? undefined, tagsUrl);
+            if (
+                nextTagsUrl &&
+                !isTrustedRegistryPaginationUrl(nextTagsUrl, registryHost)
+            ) {
+                throw new Error(
+                    `${registry} tag pagination redirected to untrusted registry origin for ${repo}`
+                );
+            }
+            tagsUrl = nextTagsUrl;
         }
         const candidates = tags
             .filter((candidate) => candidate && isTagMatch(service, candidate))

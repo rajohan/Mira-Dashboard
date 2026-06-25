@@ -507,6 +507,105 @@ describe("Docker updater tag patterns", () => {
         });
     });
 
+    it("rejects cross-origin registry pagination before reusing bearer auth", async () => {
+        rememberEnvironment("DOCKER_LOGIN");
+        rememberEnvironment("DOCKER_TOKEN");
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-pagination-origin-");
+        const appRoot = path.join(appsRoot, "unit-pagination-origin-app");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            path.join(appRoot, "compose.yaml"),
+            [
+                "services:",
+                "  web:",
+                "    image: nginx:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'false'",
+                "      mira.updater.track: tag",
+                String.raw`      mira.updater.tagPattern: '^\d+\.\d+\.\d+$'`,
+                "      mira.updater.tagPatternIsRegex: 'true'",
+                "",
+            ].join("\n")
+        );
+        process.env.DOCKER_LOGIN = "docker-user";
+        process.env.DOCKER_TOKEN = "docker-token";
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+
+        const requests: Array<{ authorization?: string; url: string }> = [];
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL,
+            init?: RequestInit
+        ) => {
+            const url = String(input);
+            const headers = new Headers(init?.headers);
+            requests.push({
+                authorization: headers.get("authorization") ?? undefined,
+                url,
+            });
+            if (url.endsWith("/v2/library/nginx/tags/list?n=1000")) {
+                if (!headers.get("authorization")) {
+                    return new Response("auth required", {
+                        status: 401,
+                        headers: {
+                            "www-authenticate":
+                                'Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:library/nginx:pull"',
+                        },
+                    });
+                }
+                expect(headers.get("authorization")).toBe("Bearer registry-token");
+                return Response.json(
+                    { tags: ["1.0.0", "1.1.0"] },
+                    {
+                        headers: {
+                            link: '<https://evil.example/v2/library/nginx/tags/list?n=1000&page=2>; rel="next"',
+                        },
+                    }
+                );
+            }
+            if (
+                url ===
+                "https://auth.docker.io/token?service=registry.docker.io&scope=repository%3Alibrary%2Fnginx%3Apull"
+            ) {
+                return Response.json({ token: "registry-token" });
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+
+        const registered = await registerDockerUpdaterServices();
+        expect(registered.isOk).toBe(true);
+        const service = database
+            .prepare(
+                `SELECT id
+                 FROM docker_managed_services
+                 WHERE app_slug = 'unit-pagination-origin-app' AND service_name = 'web'`
+            )
+            .get() as { id: number };
+
+        const polled = await pollDockerUpdaterRegistries(service.id);
+        expect(polled).toMatchObject({ isOk: false, step: "poll" });
+        expect(polled.stderr).toContain(
+            "docker.io tag pagination redirected to untrusted registry origin"
+        );
+        const updated = database
+            .prepare(
+                "SELECT latest_tag, latest_digest, last_status FROM docker_managed_services WHERE id = ?"
+            )
+            .get(service.id) as {
+            latest_digest: string | undefined;
+            latest_tag: string | undefined;
+            last_status: string;
+        };
+        expect(updated.latest_digest).toBeNull();
+        expect(updated.latest_tag).toBeNull();
+        expect(updated.last_status).toBe("registry_check_failed");
+        expect(
+            requests.some((request) => request.url.startsWith("https://evil.example/"))
+        ).toBe(false);
+    });
+
     it("reports manual update guard states without touching Docker", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
         rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
