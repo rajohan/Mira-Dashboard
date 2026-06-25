@@ -104,5 +104,4 @@ describe("server start scheduler policy", () => {
             rmSync(temporaryRoot, { force: true, recursive: true });
         }
     });
-
 });
