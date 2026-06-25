@@ -427,7 +427,7 @@ describe("Docker updater tag patterns", () => {
                     { tags: ["1.0.0", "1.1.0"] },
                     {
                         headers: {
-                            link: '</v2/library/nginx/tags/list?n=1000&page=2>; rel="next"',
+                            link: '<https://REGISTRY-1.DOCKER.IO:443/v2/library/nginx/tags/list?n=1000&page=2>; rel="next"',
                         },
                     }
                 );

@@ -894,7 +894,8 @@ function parseNextLink(header: string | undefined, baseUrl?: string): string | u
 
 function isTrustedRegistryPaginationUrl(url: string, registryHost: string): boolean {
     const parsed = new URL(url);
-    return parsed.protocol === "https:" && parsed.host === registryHost;
+    const expected = new URL(`https://${registryHost}`);
+    return parsed.protocol === "https:" && parsed.origin === expected.origin;
 }
 
 async function fetchRegistryJsonWithHeaders(

@@ -2575,7 +2575,9 @@ fi
                         timeoutMs: 0,
                     }
                 )
-            ).toThrow("Scheduled job action timeout must be an integer");
+            ).toThrow(
+                "Scheduled job action timeout must be an integer between 1 and 2147483647"
+            );
 
             registerScheduledJobAction(actionKey, (job) => ({
                 jobId: job.id,
