@@ -1561,6 +1561,11 @@ describe("backend route and service behavior", () => {
         mkdirSync(path.join(mediaRoot, "images"), { recursive: true });
         mkdirSync(path.join(mediaRoot, "folder"), { recursive: true });
         writeFileSync(path.join(mediaRoot, "images", "dashboard.txt"), "media ok");
+        writeFileSync(path.join(mediaRoot, "images", "linked.txt"), "linked media");
+        linkSync(
+            path.join(mediaRoot, "images", "linked.txt"),
+            path.join(mediaRoot, "images", "linked-hardlink.txt")
+        );
         writeFileSync(
             path.join(outsideRoot, "secret.txt"),
             "outside media should not be served"
@@ -1593,6 +1598,11 @@ describe("backend route and service behavior", () => {
         );
         expect(outside.status).toBe(403);
 
+        const hardlink = await mediaRoutes["/api/media"].GET(
+            new Request("https://test.local/api/media?path=images/linked-hardlink.txt")
+        );
+        expect(hardlink.status).toBe(403);
+
         const served = await mediaRoutes["/api/media"].GET(
             new Request("https://test.local/api/media?path=images/dashboard.txt")
         );
@@ -1600,6 +1610,12 @@ describe("backend route and service behavior", () => {
         expect(served.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
         expect(served.headers.get("X-Content-Type-Options")).toBe("nosniff");
         await expect(served.text()).resolves.toBe("media ok");
+
+        process.env.OPENCLAW_HOME = createTemporaryRoot("mira-media-empty-root-");
+        const missingMediaRoot = await mediaRoutes["/api/media"].GET(
+            new Request("https://test.local/api/media?path=images/dashboard.txt")
+        );
+        expect(missingMediaRoot.status).toBe(404);
     });
 
     it("starts manual WAL-G backups through the backup route using fake Docker", async () => {

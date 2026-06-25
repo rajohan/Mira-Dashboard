@@ -41,6 +41,15 @@ function createTemporaryRoot(prefix: string): string {
     return root;
 }
 
+function readableUtf8Stream(value: string): ReadableStream<Uint8Array> {
+    return new ReadableStream<Uint8Array>({
+        start(controller) {
+            controller.enqueue(new TextEncoder().encode(value));
+            controller.close();
+        },
+    });
+}
+
 function routeRequest<T extends string>(
     route: string,
     parameters: Record<T, string>,
@@ -2010,6 +2019,68 @@ fi
         }
     });
 
+    it("reuses an already running WAL-G backup job instead of spawning another", async () => {
+        const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
+            await import("../src/services/backups.ts");
+        const exit = Promise.withResolvers<number>();
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (_command, arguments_) => {
+                const joined = arguments_.join(" ");
+                if (joined.includes("pgrep -f")) {
+                    return {
+                        code: 1,
+                        stderr: "",
+                        stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
+                    };
+                }
+                if (joined.includes("wal-g backup-list")) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: "[]",
+                    };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            });
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: exit.promise,
+                    kill: () => {},
+                    pid: 789,
+                    stderr: readableUtf8Stream(""),
+                    stdout: readableUtf8Stream("backup still running\n"),
+                }) as unknown as processModule.BunProcess
+        );
+
+        try {
+            registerBackupScheduledJobs();
+            const first = await startManualBackup("walg");
+            const second = await startManualBackup("walg");
+            expect(second.id).toBe(first.id);
+            expect(spawnSpy).toHaveBeenCalledTimes(1);
+
+            exit.resolve(0);
+            await expect(first.completed).resolves.toMatchObject({
+                code: 0,
+                status: "done",
+            });
+            expect(getCurrentBackupJob("walg")).toMatchObject({
+                id: first.id,
+                status: "done",
+            });
+            expect(getCurrentBackupJob("walg")).toBeUndefined();
+        } finally {
+            runProcessSpy.mockRestore();
+            spawnSpy.mockRestore();
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
     it("marks aborted scheduled backups failed before preflight starts", async () => {
         const { getCurrentBackupJob, registerBackupScheduledJobs } =
             await import("../src/services/backups.ts");
@@ -3040,6 +3111,66 @@ fi
             status: "signaled",
         });
         expect(() => stopExecJob(jobId)).toThrow("Job is not running");
+    });
+
+    it("records exec process failures and trims oversized output", async () => {
+        const { getExecJob, runExecOnce, startExecJob } =
+            await import("../src/services/execJobs.ts");
+        const longOutput = `${"x".repeat(101_000)}tail`;
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: Promise.resolve(0),
+                    kill: () => {},
+                    pid: 123,
+                    stderr: readableUtf8Stream(""),
+                    stdout: readableUtf8Stream(longOutput),
+                }) as unknown as processModule.BunProcess
+        );
+
+        try {
+            const once = await runExecOnce({
+                command: "__mira_dashboard_shell_smoke_test__",
+                shell: true,
+            });
+            expect(once.code).toBe(0);
+            expect(once.stdout).toHaveLength(10_000);
+            expect(once.stdout.endsWith("tail")).toBe(true);
+        } finally {
+            spawnSpy.mockRestore();
+        }
+
+        const failingSpawnSpy = jest
+            .spyOn(processModule, "spawnProcess")
+            .mockImplementation(
+                () =>
+                    ({
+                        exited: Promise.reject(new Error("spawn exit failed")),
+                        kill: () => {},
+                        pid: 456,
+                        stderr: readableUtf8Stream("before failure"),
+                        stdout: readableUtf8Stream(""),
+                    }) as unknown as processModule.BunProcess
+            );
+        try {
+            const started = startExecJob({
+                command: "__mira_dashboard_shell_smoke_test__",
+                shell: true,
+            });
+            const deadline = Date.now() + 2000;
+            let job = getExecJob(started.jobId);
+            while (job.status === "running" && Date.now() < deadline) {
+                await Bun.sleep(10);
+                job = getExecJob(started.jobId);
+            }
+            expect(job).toMatchObject({
+                code: 1,
+                status: "done",
+            });
+            expect(job.stderr).toContain("spawn exit failed");
+        } finally {
+            failingSpawnSpy.mockRestore();
+        }
     });
 
     it("validates scheduled job action and schedule boundaries", async () => {
