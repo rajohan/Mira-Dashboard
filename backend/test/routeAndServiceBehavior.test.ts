@@ -1,6 +1,7 @@
 import {
     chmodSync,
     existsSync,
+    linkSync,
     mkdirSync,
     mkdtempSync,
     readdirSync,
@@ -750,6 +751,12 @@ describe("backend route and service behavior", () => {
             isSuccess: true,
             path: "notes/readme.txt",
         });
+        expect(
+            readFileSync(path.join(workspaceRoot, "notes", "readme.txt"), "utf8")
+        ).toBe("updated");
+        expect(
+            readFileSync(path.join(workspaceRoot, "notes", "readme.txt.bak"), "utf8")
+        ).toBe("hello");
 
         const directoryWrite = await fileRoutes["/api/files/*"].PUT(
             new Request("https://test.local/api/files/notes", {
@@ -774,6 +781,70 @@ describe("backend route and service behavior", () => {
             })
         );
         expect(invalidWrite.status).toBe(400);
+
+        const arrayWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/notes/readme.txt", {
+                body: JSON.stringify(["not", "an", "object"]),
+                method: "PUT",
+            })
+        );
+        expect(arrayWrite.status).toBe(400);
+        await expect(arrayWrite.json()).resolves.toEqual({
+            error: "Request body must be an object",
+        });
+
+        const malformedWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/notes/readme.txt", {
+                body: "{",
+                method: "PUT",
+            })
+        );
+        expect(malformedWrite.status).toBe(400);
+
+        const fileParentWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/notes/readme.txt/child.txt", {
+                body: JSON.stringify({ content: "new" }),
+                method: "PUT",
+            })
+        );
+        expect(fileParentWrite.status).toBe(403);
+        await expect(fileParentWrite.json()).resolves.toEqual({
+            error: "Access denied: path outside workspace",
+        });
+
+        const tooLargeContent = "x".repeat(1024 * 1024 + 1);
+        const largeWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/notes/large.txt", {
+                body: JSON.stringify({ content: tooLargeContent }),
+                method: "PUT",
+            })
+        );
+        expect(largeWrite.status).toBe(413);
+
+        const largeImagePath = path.join(workspaceRoot, "large.png");
+        writeFileSync(largeImagePath, Buffer.alloc(1024 * 1024 + 1));
+        const largeImage = await fileRoutes["/api/files/*"].GET(
+            new Request("https://test.local/api/files/large.png")
+        );
+        expect(largeImage.status).toBe(413);
+
+        const hardLinkedPath = path.join(workspaceRoot, "notes", "hardlinked.txt");
+        writeFileSync(hardLinkedPath, "linked");
+        linkSync(
+            hardLinkedPath,
+            path.join(workspaceRoot, "notes", "hardlinked-copy.txt")
+        );
+        const hardLinkedRead = await fileRoutes["/api/files/*"].GET(
+            new Request("https://test.local/api/files/notes/hardlinked.txt")
+        );
+        expect(hardLinkedRead.status).toBe(403);
+        const hardLinkedWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/notes/hardlinked.txt", {
+                body: JSON.stringify({ content: "updated" }),
+                method: "PUT",
+            })
+        );
+        expect(hardLinkedWrite.status).toBe(403);
     });
 
     it("config file route allowlist, reads, writes, and backups", async () => {
@@ -1006,6 +1077,74 @@ describe("backend route and service behavior", () => {
             );
             expect(response.status).toBe(400);
         }
+    });
+
+    it("aggregates metrics tokens by model, display label, and session type", async () => {
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const getSessionsSpy = jest.spyOn(gateway, "getSessions").mockReturnValue([
+            {
+                displayLabel: "Main chat",
+                label: "main",
+                model: "openai/gpt-5.5",
+                tokenCount: 120,
+                type: "chat",
+            },
+            {
+                displayLabel: "",
+                label: "coder",
+                model: "anthropic/claude-sonnet",
+                tokenCount: 80,
+                type: "agent",
+            },
+            {
+                displayLabel: "Untyped",
+                label: "fallback",
+                model: "",
+                tokenCount: 5,
+                type: "",
+            },
+        ] as ReturnType<typeof gateway.getSessions>);
+        cleanupCallbacks.push(() => getSessionsSpy.mockRestore());
+
+        const { metricsRoutes } = await import("../src/routes/metricsRoutes.ts");
+        const response = await metricsRoutes["/api/metrics"].GET();
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toMatchObject({
+            tokens: {
+                byAgent: [
+                    {
+                        label: "Main chat",
+                        model: "openai/gpt-5.5",
+                        tokens: 120,
+                        type: "chat",
+                    },
+                    {
+                        label: "coder",
+                        model: "anthropic/claude-sonnet",
+                        tokens: 80,
+                        type: "agent",
+                    },
+                    {
+                        label: "Untyped",
+                        model: "unknown",
+                        tokens: 5,
+                        type: "Unknown",
+                    },
+                ],
+                byModel: {
+                    "anthropic/claude-sonnet": 80,
+                    "openai/gpt-5.5": 120,
+                    unknown: 5,
+                },
+                sessionsByModel: {
+                    "claude-sonnet": 1,
+                    "gpt-5.5": 1,
+                    unknown: 1,
+                },
+                total: 205,
+            },
+        });
     });
 
     it("serves log route listing and guarded tail reads from an isolated log root", async () => {

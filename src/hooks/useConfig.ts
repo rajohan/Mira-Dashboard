@@ -206,7 +206,10 @@ export function useUpdateConfig() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (config: OpenClawConfig) => updateConfig(config, config.__hash),
+        mutationFn: (config: OpenClawConfig) => {
+            const current = queryClient.getQueryData<OpenClawConfig>(configKeys.config());
+            return updateConfig(config, config.__hash ?? current?.__hash);
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: configKeys.config() });
         },

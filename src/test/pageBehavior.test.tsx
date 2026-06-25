@@ -1251,19 +1251,64 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     }
 
     if (url === "/api/config") {
+        if (method === "PUT") {
+            const body = parseRequestBody(init);
+            expect(body.__hash).toBe("config-hash-1");
+            return Response.json({ isOk: true });
+        }
         return Response.json({
             __hash: "config-hash-1",
             agents: { list: [{ id: "ops", heartbeat: { every: "30m" } }] },
             session: { reset: { idleMinutes: 60 } },
+            channels: {
+                webchat: { enabled: true, dmPolicy: "allow" },
+            },
+            auth: { profiles: { owner: {} } },
+            commands: { ownerAllowFrom: ["rajohan"], restart: true },
+            logging: { redactSensitive: "strict" },
+            meta: {
+                lastTouchedAt: "2026-06-25T18:00:00.000Z",
+                lastTouchedVersion: "2026.6.10",
+            },
             models: {},
-            tools: {},
+            tools: {
+                exec: { ask: "always", security: "deny" },
+                web: { fetch: { enabled: true }, search: { enabled: true } },
+            },
         });
+    }
+
+    if (method === "POST" && url === "/api/skills/task-tracking") {
+        expect(parseRequestBody(init)).toEqual({
+            __hash: "config-hash-1",
+            enabled: false,
+        });
+        return Response.json({ isOk: true });
     }
 
     if (url === "/api/skills") {
         return Response.json({
-            skills: [{ name: "task-tracking", description: "Tasks", enabled: true }],
+            skills: [
+                {
+                    name: "task-tracking",
+                    description: "Tasks",
+                    enabled: true,
+                    source: "workspace",
+                },
+            ],
         });
+    }
+
+    if (method === "POST" && url === "/api/backup") {
+        return Response.json({
+            createdAt: "2026-06-25T18:30:00.000Z",
+            hash: "backup-hash",
+            config: { model: "codex" },
+        });
+    }
+
+    if (method === "POST" && url === "/api/restart") {
+        return new Response(undefined, { status: 204 });
     }
 
     if (url === "/api/cache/system.host") {
@@ -1408,6 +1453,134 @@ describe("Mira Dashboard pages", () => {
             });
             view.unmount();
             view.queryClient.clear();
+        }
+    });
+
+    it("drives settings backup, restart, skill toggle, and save flows", async () => {
+        const user = userEvent.setup();
+        const createObjectUrl = jest.fn(() => "blob:settings-backup");
+        const revokeObjectUrl = jest.fn();
+        const originalCreateObjectUrl = URL.createObjectURL;
+        const originalRevokeObjectUrl = URL.revokeObjectURL;
+        const anchorClick = jest
+            .spyOn(HTMLAnchorElement.prototype, "click")
+            .mockImplementation(() => {});
+        Object.defineProperties(URL, {
+            createObjectURL: {
+                configurable: true,
+                value: createObjectUrl,
+                writable: true,
+            },
+            revokeObjectURL: {
+                configurable: true,
+                value: revokeObjectUrl,
+                writable: true,
+            },
+        });
+
+        try {
+            renderPage(createElement(Settings));
+            expect(await screen.findByText("Model Configuration")).toBeInTheDocument();
+
+            await user.click(screen.getByRole("button", { name: /^backup$/i }));
+            await waitFor(() => expect(createObjectUrl).toHaveBeenCalled());
+            expect(anchorClick).toHaveBeenCalled();
+            expect(revokeObjectUrl).toHaveBeenCalledWith("blob:settings-backup");
+
+            await user.click(screen.getByRole("button", { name: /^session$/i }));
+            await user.clear(screen.getByLabelText(/idle timeout/i));
+            await user.type(screen.getByLabelText(/idle timeout/i), "45");
+            await user.click(screen.getAllByRole("button", { name: /^save$/i }).at(-1)!);
+            expect(await screen.findByText("Session settings saved")).toBeInTheDocument();
+
+            await user.click(screen.getByRole("button", { name: /^heartbeat$/i }));
+            await user.clear(screen.getByLabelText("Interval (seconds)"));
+            await user.type(screen.getByLabelText("Interval (seconds)"), "120");
+            await user.clear(screen.getByLabelText("Target Channel"));
+            await user.type(screen.getByLabelText("Target Channel"), "ops-room");
+            await user.click(screen.getAllByRole("button", { name: /^save$/i }).at(-1)!);
+            expect(
+                await screen.findByText("Heartbeat settings saved")
+            ).toBeInTheDocument();
+
+            await user.click(screen.getByRole("button", { name: /^skills$/i }));
+            await user.click(screen.getAllByRole("switch")[0]!);
+
+            await user.click(screen.getByRole("button", { name: /^restart$/i }));
+            const restartDialog = screen.getByRole("dialog", {
+                name: "Restart Gateway",
+            });
+            const restartDialogButtons = [...restartDialog.querySelectorAll("button")];
+            await user.click(restartDialogButtons.at(-1)!);
+            await waitFor(() =>
+                expect(
+                    (
+                        fetch as unknown as {
+                            mock: { calls: Array<[string, RequestInit | undefined]> };
+                        }
+                    ).mock.calls.some(
+                        ([url, init]) =>
+                            url === "/api/restart" &&
+                            (init as RequestInit | undefined)?.method === "POST"
+                    )
+                ).toBe(true)
+            );
+
+            const fetchCalls = (
+                fetch as unknown as {
+                    mock: { calls: Array<[string, RequestInit | undefined]> };
+                }
+            ).mock.calls;
+            const configWrites = fetchCalls
+                .filter(
+                    ([url, init]) =>
+                        url === "/api/config" && init?.method === "PUT" && init.body
+                )
+                .map(([, init]) => parseRequestBody(init));
+            expect(configWrites).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        __hash: "config-hash-1",
+                        session: { reset: { idleMinutes: 45 } },
+                    }),
+                    expect.objectContaining({
+                        __hash: "config-hash-1",
+                        agents: {
+                            list: [
+                                {
+                                    heartbeat: {
+                                        every: "2m",
+                                        target: "ops-room",
+                                    },
+                                    id: "ops",
+                                },
+                            ],
+                        },
+                    }),
+                ])
+            );
+            expect(fetchCalls).toEqual(
+                expect.arrayContaining([
+                    [
+                        "/api/skills/task-tracking",
+                        expect.objectContaining({ method: "POST" }),
+                    ],
+                ])
+            );
+        } finally {
+            anchorClick.mockRestore();
+            Object.defineProperties(URL, {
+                createObjectURL: {
+                    configurable: true,
+                    value: originalCreateObjectUrl,
+                    writable: true,
+                },
+                revokeObjectURL: {
+                    configurable: true,
+                    value: originalRevokeObjectUrl,
+                    writable: true,
+                },
+            });
         }
     });
 
