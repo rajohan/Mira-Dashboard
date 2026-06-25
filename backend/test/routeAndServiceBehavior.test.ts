@@ -1328,9 +1328,14 @@ esac
     });
 
     it("cache refresh scheduled job registration preserves disabled jobs", async () => {
-        const { registerCacheRefreshScheduledJobs, waitForLocalCacheSeed } =
-            await import("../src/services/cacheRefresh.ts");
-        const { upsertScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const {
+            registerCacheRefreshScheduledJobs,
+            seedMissingLocalCacheEntry,
+            waitForLocalCacheSeed,
+        } = await import("../src/services/cacheRefresh.ts");
+        const { writeCacheSuccess } = await import("../src/services/cacheEntryWriter.ts");
+        const { runScheduledJob, upsertScheduledJob } =
+            await import("../src/services/scheduledJobs.ts");
         const jobs = [
             ["cache.weather", "weather.spydeberg"],
             ["cache.quotas", "quotas.summary"],
@@ -1369,5 +1374,43 @@ esac
         expect(rows.every((row) => row.enabled === 0)).toBe(true);
         expect(rows.every((row) => row.interval_seconds === 123)).toBe(true);
         await expect(waitForLocalCacheSeed("weather.spydeberg")).resolves.toBeUndefined();
+
+        const freshKey = `test.cache.fresh.${Bun.randomUUIDv7()}`;
+        try {
+            writeCacheSuccess({
+                data: { isFresh: true },
+                key: freshKey,
+                metadata: { source: "coverage" },
+                source: "unit",
+                ttl: 10,
+                ttlUnit: "minutes",
+            });
+            seedMissingLocalCacheEntry(freshKey);
+            await expect(waitForLocalCacheSeed(freshKey)).resolves.toBeUndefined();
+            expect(
+                database
+                    .prepare("SELECT status FROM cache_entries WHERE key = ?")
+                    .get(freshKey)
+            ).toEqual({ status: "fresh" });
+        } finally {
+            database.prepare("DELETE FROM cache_entries WHERE key = ?").run(freshKey);
+        }
+
+        upsertScheduledJob({
+            id: "cache.invalid-payload",
+            name: "Invalid cache refresh payload",
+            description: "Coverage for cache.refresh payload validation.",
+            enabled: false,
+            scheduleType: "interval",
+            intervalSeconds: 3600,
+            actionKey: "cache.refresh",
+            actionPayload: {},
+        });
+        await expect(runScheduledJob("cache.invalid-payload")).resolves.toMatchObject({
+            jobId: "cache.invalid-payload",
+            message:
+                "Scheduled cache job cache.invalid-payload is missing actionPayload.key",
+            status: "failed",
+        });
     });
 });
