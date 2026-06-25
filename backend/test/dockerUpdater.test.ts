@@ -375,6 +375,266 @@ describe("Docker updater tag patterns", () => {
         );
     });
 
+    it("updates services through parent compose includes and default overrides", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_ROOT");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-parent-compose-");
+        const dockerRoot = createTemporaryRoot("mira-docker-updater-root-");
+        const appRoot = path.join(appsRoot, "unit-parent-compose-app");
+        const composePath = path.join(appRoot, "compose.yml");
+        const parentComposePath = path.join(appRoot, "docker-compose.yaml");
+        const overrideComposePath = path.join(appRoot, "docker-compose.override.yaml");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            composePath,
+            [
+                "services:",
+                "  api.worker:",
+                "    image: ghcr.io/unit/worker:1.0.0",
+                "    labels:",
+                "      - mira.updater.enabled=true",
+                "      - mira.updater.autoUpdate=false",
+                "      - mira.updater.track=tag",
+                "      - mira.updater.tagPattern=1.1.0",
+                "      - mira.updater.tagPatternIsRegex=false",
+                "",
+            ].join("\n")
+        );
+        writeFileSync(
+            parentComposePath,
+            [
+                "include:",
+                "  - path: ${CHILD_COMPOSE:-compose.yml}",
+                "    env_file: include.env",
+                "services:",
+                "  api.worker:",
+                "    image: ghcr.io/unit/worker:1.0.0",
+                "",
+            ].join("\n")
+        );
+        writeFileSync(path.join(appRoot, "include.env"), "CHILD_COMPOSE=compose.yml\n");
+        writeFileSync(
+            overrideComposePath,
+            [
+                "services:",
+                "  api.worker:",
+                "    image: ghcr.io/unit/worker:1.0.0",
+                "",
+            ].join("\n")
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        process.env.MIRA_DOCKER_ROOT = dockerRoot;
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.endsWith("/v2/unit/worker/manifests/1.1.0")) {
+                return Response.json(
+                    { digest: "sha256:worker11" },
+                    { headers: { "docker-content-digest": "sha256:worker11" } }
+                );
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockResolvedValue({ code: 0, stderr: "", stdout: "compose parent ok" });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        const registered = await registerDockerUpdaterServices();
+        expect(registered.isOk).toBe(true);
+        const service = database
+            .prepare(
+                `SELECT id
+                 FROM docker_managed_services
+                 WHERE app_slug = 'unit-parent-compose-app' AND service_name = 'api.worker'`
+            )
+            .get() as { id: number };
+
+        const steps = await runDockerUpdaterService(service.id);
+        expect(steps).toContainEqual(
+            expect.objectContaining({
+                isOk: true,
+                step: "manual-update:unit-parent-compose-app/api.worker",
+                stdout: "compose parent ok",
+            })
+        );
+        for (const updatedPath of [composePath, parentComposePath, overrideComposePath]) {
+            expect(readFileSync(updatedPath, "utf8")).toContain(
+                "image: ghcr.io/unit/worker:1.1.0"
+            );
+        }
+        expect(runProcessSpy).toHaveBeenCalledWith(
+            "docker",
+            [
+                "compose",
+                "-f",
+                parentComposePath,
+                "-f",
+                overrideComposePath,
+                "up",
+                "-d",
+                "--pull",
+                "always",
+                "api.worker",
+            ],
+            {
+                cwd: appRoot,
+                env: process.env,
+                maxBuffer: 10 * 1024 * 1024,
+                timeoutMs: 180_000,
+            }
+        );
+    });
+
+    it("auto-applies eligible updates and treats image prune as best effort", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-auto-");
+        const appRoot = path.join(appsRoot, "unit-auto-app");
+        const composePath = path.join(appRoot, "compose.yaml");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            composePath,
+            [
+                "services:",
+                "  web:",
+                "    image: ghcr.io/unit/auto:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'true'",
+                "      mira.updater.track: tag",
+                "      mira.updater.tagPattern: '1.1.0'",
+                "      mira.updater.tagPatternIsRegex: 'false'",
+                "",
+            ].join("\n")
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.endsWith("/v2/unit/auto/manifests/1.1.0")) {
+                return Response.json(
+                    { digest: "sha256:auto11" },
+                    { headers: { "docker-content-digest": "sha256:auto11" } }
+                );
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (_file, arguments_) => {
+                if (arguments_[0] === "image") {
+                    return { code: 1, stderr: "prune failed", stdout: "" };
+                }
+                return { code: 0, stderr: "", stdout: "auto compose ok" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        const steps = await runDockerUpdaterService();
+
+        expect(steps).toContainEqual(
+            expect.objectContaining({
+                isOk: true,
+                step: "auto-update:unit-auto-app/web",
+                stdout: "auto compose ok",
+            })
+        );
+        expect(readFileSync(composePath, "utf8")).toContain(
+            "image: ghcr.io/unit/auto:1.1.0"
+        );
+        const service = database
+            .prepare(
+                "SELECT id, current_tag, latest_digest, last_status FROM docker_managed_services WHERE app_slug = 'unit-auto-app'"
+            )
+            .get() as {
+            current_tag: string;
+            id: number;
+            last_status: string;
+            latest_digest: string;
+        };
+        expect(service).toMatchObject({
+            current_tag: "1.1.0",
+            latest_digest: "sha256:auto11",
+            last_status: "updated",
+        });
+        expect(
+            database
+                .prepare(
+                    "SELECT event_type FROM docker_update_events WHERE managed_service_id = ? ORDER BY id"
+                )
+                .all(service.id)
+        ).toEqual([
+            { event_type: "update_available" },
+            { event_type: "auto_update_succeeded" },
+        ]);
+    });
+
+    it("rolls back compose files when an update command fails", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-rollback-");
+        const appRoot = path.join(appsRoot, "unit-rollback-app");
+        const composePath = path.join(appRoot, "compose.yaml");
+        mkdirSync(appRoot, { recursive: true });
+        const originalCompose = [
+            "services:",
+            "  web:",
+            "    image: ghcr.io/unit/rollback:1.0.0",
+            "    labels:",
+            "      mira.updater.enabled: 'true'",
+            "      mira.updater.autoUpdate: 'false'",
+            "      mira.updater.track: tag",
+            "      mira.updater.tagPattern: '1.1.0'",
+            "      mira.updater.tagPatternIsRegex: 'false'",
+            "",
+        ].join("\n");
+        writeFileSync(composePath, originalCompose);
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.endsWith("/v2/unit/rollback/manifests/1.1.0")) {
+                return Response.json(
+                    { digest: "sha256:rollback11" },
+                    { headers: { "docker-content-digest": "sha256:rollback11" } }
+                );
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockResolvedValue({ code: 1, stderr: "compose failed", stdout: "" });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        const registered = await registerDockerUpdaterServices();
+        expect(registered.isOk).toBe(true);
+        const service = database
+            .prepare(
+                "SELECT id FROM docker_managed_services WHERE app_slug = 'unit-rollback-app'"
+            )
+            .get() as { id: number };
+
+        const steps = await runDockerUpdaterService(service.id);
+
+        expect(steps).toContainEqual(
+            expect.objectContaining({
+                isOk: false,
+                step: "manual-update:unit-rollback-app/web",
+                stderr: expect.stringContaining("compose failed"),
+            })
+        );
+        expect(readFileSync(composePath, "utf8")).toBe(originalCompose);
+        expect(
+            database
+                .prepare("SELECT last_status FROM docker_managed_services WHERE id = ?")
+                .get(service.id)
+        ).toEqual({ last_status: "manual_update_failed" });
+    });
+
     it("polls Docker Hub tags through bearer auth and paginated tag results", async () => {
         rememberEnvironment("DOCKER_LOGIN");
         rememberEnvironment("DOCKER_TOKEN");

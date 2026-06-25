@@ -7,6 +7,7 @@ import {
     readFileSync,
     rmSync,
     symlinkSync,
+    utimesSync,
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,6 +17,7 @@ import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import type { DashboardSocket } from "../src/dashboardSocket.ts";
 import { database, sqlNullable } from "../src/database.ts";
+import * as processModule from "../src/lib/processes.ts";
 
 const cleanupCallbacks: Array<() => void> = [];
 
@@ -1229,6 +1231,262 @@ fi
         });
     });
 
+    it("refreshes git cache from sanitized command output", async () => {
+        cleanupCallbacks.push(() => {
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'git.workspace'")
+                .run();
+        });
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (file, arguments_) => {
+                expect(file).toBe("git");
+                const gitArguments = [...arguments_];
+                let repo = "";
+                let commandArguments = gitArguments;
+                if (gitArguments[0] === "-C") {
+                    repo = String(gitArguments[1]);
+                    commandArguments = gitArguments.slice(2);
+                }
+                const command = commandArguments.join(" ");
+                if (command === "rev-parse --is-inside-work-tree") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout:
+                            repo === "/home/ubuntu/projects/n8n" ? "false\n" : "true\n",
+                    };
+                }
+                if (command === "branch --show-current") {
+                    return { code: 0, stderr: "", stdout: "main\n" };
+                }
+                if (command === "rev-parse HEAD") {
+                    return { code: 0, stderr: "", stdout: "abcdef1234567890\n" };
+                }
+                if (command === "remote -v") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: [
+                            `origin\thttps://token@example.com/${path.basename(repo)}.git (fetch)`,
+                            `origin\tgit@example.com:${path.basename(repo)}.git (push)`,
+                            "",
+                        ].join("\n"),
+                    };
+                }
+                if (command === "status --short") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: [
+                            " M modified.txt",
+                            "A  staged.txt",
+                            "D  deleted.txt",
+                            "R  old.txt -> new.txt",
+                            "?? untracked.txt",
+                            "UU conflicted.txt",
+                            "",
+                        ].join("\n"),
+                    };
+                }
+                return {
+                    code: 2,
+                    stderr: `unexpected git args for ${repo}: ${command}`,
+                    stdout: "",
+                };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+        const { refreshGitCache } = await import("../src/services/cacheRefresh.ts");
+
+        const result = await refreshGitCache();
+
+        expect(result).toEqual({ refreshed: ["git.workspace"] });
+        const row = database
+            .prepare(
+                "SELECT data_json, metadata_json, status FROM cache_entries WHERE key = 'git.workspace'"
+            )
+            .get() as { data_json: string; metadata_json: string; status: string };
+        expect(row.status).toBe("fresh");
+        const data = JSON.parse(row.data_json) as {
+            dirtyCount: number;
+            dirtyRepos: string[];
+            missingRepos: string[];
+            repos: Array<{
+                branch?: string;
+                dirty: boolean;
+                exists: boolean;
+                key: string;
+                remote?: string;
+                statusSummary: Record<string, number>;
+                statusTruncated?: boolean;
+            }>;
+        };
+        expect(data.dirtyRepos).toEqual(["openclaw", "mira-dashboard", "docker"]);
+        expect(data.missingRepos).toEqual(["n8n"]);
+        expect(data.dirtyCount).toBe(3);
+        expect(data.repos.find((repo) => repo.key === "mira-dashboard")).toMatchObject({
+            branch: "main",
+            dirty: true,
+            exists: true,
+            remote: "https://example.com/mira-dashboard.git",
+            statusSummary: {
+                conflicted: 1,
+                deleted: 1,
+                modified: 1,
+                renamed: 1,
+                staged: 3,
+                total: 6,
+                untracked: 1,
+            },
+            statusTruncated: false,
+        });
+        expect(JSON.parse(row.metadata_json)).toMatchObject({
+            summary: {
+                dirtyCount: 3,
+                dirtyRepos: ["openclaw", "mira-dashboard", "docker"],
+                missingRepos: ["n8n"],
+                repoCount: 4,
+            },
+        });
+    });
+
+    it("refreshes quota cache from provider and Codex status output", async () => {
+        for (const key of [
+            "OPENROUTER_API_KEY",
+            "ELEVENLABS_API_KEY",
+            "SYNTHETIC_API_KEY",
+            "QUOTAS_CODEX_HOME",
+            "CODEX_BIN",
+        ]) {
+            rememberEnvironment(key);
+        }
+        const codexHome = createTemporaryRoot("mira-quota-codex-home-");
+        process.env.OPENROUTER_API_KEY = "openrouter-key";
+        process.env.ELEVENLABS_API_KEY = "elevenlabs-key";
+        process.env.SYNTHETIC_API_KEY = "synthetic-key";
+        process.env.QUOTAS_CODEX_HOME = codexHome;
+        process.env.CODEX_BIN = "/usr/local/bin/codex";
+        cleanupCallbacks.push(() => {
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'quotas.summary'")
+                .run();
+        });
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url === "https://openrouter.ai/api/v1/key") {
+                return Response.json({
+                    data: { usage: 2, usage_monthly: 7 },
+                });
+            }
+            if (url === "https://openrouter.ai/api/v1/credits") {
+                return Response.json({
+                    data: { total_credits: 10 },
+                });
+            }
+            if (url === "https://api.elevenlabs.io/v1/user") {
+                return Response.json({
+                    subscription: {
+                        character_count: 250,
+                        character_limit: 1000,
+                        next_character_count_reset_unix: 1_800_000_000,
+                        tier: "creator",
+                    },
+                });
+            }
+            if (url === "https://api.synthetic.new/v2/quotas") {
+                return Response.json({
+                    rollingFiveHourLimit: {
+                        limited: false,
+                        max: 100,
+                        nextTickAt: "soon",
+                        remaining: 75,
+                        tickPercent: 10,
+                    },
+                    search: {
+                        hourly: {
+                            limit: 20,
+                            renewsAt: "later",
+                            requests: 5,
+                        },
+                    },
+                    subscription: {
+                        limit: 50,
+                        renewsAt: "tomorrow",
+                        requests: 10,
+                    },
+                    weeklyTokenLimit: {
+                        maxCredits: "$100.00",
+                        nextRegenAt: "weekly",
+                        nextRegenCredits: "$20.00",
+                        remainingCredits: "$40.00",
+                    },
+                });
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const runProcessSpy = jest.spyOn(processModule, "runProcess").mockResolvedValue({
+            code: 0,
+            stderr: "",
+            stdout: [
+                "Account: raymond@example.com",
+                "Model: gpt-5.5 (high)",
+                "5h limit: 80% left (resets 13:00)",
+                "Weekly limit: 65% left (resets Monday)",
+                "",
+            ].join("\n"),
+        });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+
+        await expect(
+            refreshCacheProducer("quotas.summary", undefined, { force: true })
+        ).resolves.toEqual({ refreshed: ["quotas.summary"] });
+
+        const row = database
+            .prepare(
+                "SELECT data_json, metadata_json, status FROM cache_entries WHERE key = 'quotas.summary'"
+            )
+            .get() as { data_json: string; metadata_json: string; status: string };
+        expect(row.status).toBe("fresh");
+        const data = JSON.parse(row.data_json);
+        expect(data.openrouter).toMatchObject({
+            percentUsed: 20,
+            remaining: 8,
+            totalCredits: 10,
+            usage: 2,
+            usageMonthly: 7,
+        });
+        expect(data.elevenlabs).toMatchObject({
+            percentUsed: 25,
+            remaining: 750,
+            tier: "creator",
+            total: 1000,
+            used: 250,
+        });
+        expect(data.synthetic).toMatchObject({
+            rollingFiveHourLimit: { percentUsed: 25, remaining: 75 },
+            searchHourly: { percentUsed: 25, remaining: 15 },
+            subscription: { percentUsed: 20, remaining: 40 },
+            weeklyTokenLimit: {
+                nextRegenPercent: 20,
+                percentRemaining: 40,
+            },
+        });
+        expect(data.openai).toMatchObject({
+            fiveHourLeftPercent: 80,
+            percentUsed: 35,
+            weeklyLeftPercent: 65,
+        });
+        expect(data.openai.account).toBeUndefined();
+        expect(JSON.parse(row.metadata_json)).toMatchObject({
+            missing: [],
+            producers: ["openrouter", "elevenlabs", "synthetic", "openai"],
+        });
+    });
+
     it("drives OpenClaw Gateway client connect and request lifecycle with a fake socket", async () => {
         const originalWebSocket = WebSocket;
         cleanupCallbacks.push(() => {
@@ -1647,6 +1905,64 @@ fi
         expect(readFileSync(logFile, "utf8")).toBe("do not rotate\n");
     });
 
+    it("normalizes elevated log rotation command output and failures", async () => {
+        const { runElevatedLogRotationService } =
+            await import("../src/services/logRotation.ts");
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockResolvedValueOnce({
+                code: 0,
+                stderr: "sudo notice",
+                stdout: 'banner before json\n{"isOk":true,"checkedFiles":2}\n',
+            })
+            .mockResolvedValueOnce({
+                code: 0,
+                stderr: "",
+                stdout: "",
+            })
+            .mockResolvedValueOnce({
+                code: 1,
+                stderr: "sudo failed",
+                stdout: '{"isOk":false,"error":"policy denied","stdout":"details"}\n',
+            })
+            .mockResolvedValueOnce({
+                code: 0,
+                stderr: "bad json stderr",
+                stdout: "not json",
+            });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        await expect(runElevatedLogRotationService({ isDryRun: true })).resolves.toEqual({
+            result: { checkedFiles: 2, isOk: true },
+            stderr: "sudo notice",
+        });
+        await expect(
+            runElevatedLogRotationService({ isDryRun: false })
+        ).resolves.toMatchObject({
+            result: {
+                error: "Elevated log rotation returned empty JSON output",
+                isOk: false,
+            },
+            stderr: "Elevated log rotation returned empty JSON output",
+        });
+        await expect(runElevatedLogRotationService({ isDryRun: false })).resolves.toEqual(
+            {
+                result: { error: "policy denied", isOk: false, stdout: "details" },
+                stderr: "sudo failed",
+            }
+        );
+        await expect(
+            runElevatedLogRotationService({ isDryRun: false })
+        ).resolves.toMatchObject({
+            result: {
+                error: "Failed to parse elevated log rotation JSON",
+                isOk: false,
+                stdout: "not json",
+            },
+            stderr: expect.stringContaining("bad json stderr"),
+        });
+    });
+
     it("updates agent metadata and rolls active task history forward", async () => {
         rememberEnvironment("OPENCLAW_HOME");
         rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
@@ -1695,8 +2011,55 @@ fi
         const agentsRoot = path.join(openclawRoot, "agents");
         const miraSessions = path.join(agentsRoot, "mira-2026", "sessions");
         const coderSessions = path.join(agentsRoot, "coder", "sessions");
+        const researcherSessions = path.join(
+            agentsRoot,
+            "researcher",
+            "agent",
+            "codex-home",
+            "sessions",
+            "2026",
+            "06"
+        );
+        const auditorSessions = path.join(agentsRoot, "auditor", "sessions");
+        const writerSessions = path.join(agentsRoot, "writer", "sessions");
+        const browserSessions = path.join(agentsRoot, "browser", "sessions");
+        const staleSessions = path.join(agentsRoot, "stale", "sessions");
+        const responseItemAgents = [
+            {
+                activity: "edit files",
+                id: "patcher",
+                input: "await tools.apply_patch({})",
+                task: "Patch files",
+            },
+            {
+                activity: "session_status",
+                id: "session-checker",
+                input: "await tools.openclaw_session_status({})",
+                task: "Check session",
+            },
+            {
+                activity: "terminal output",
+                id: "terminal-reader",
+                input: "await tools.write_stdin({session_id:1})",
+                task: "Read terminal",
+            },
+            {
+                activity: "memory_search",
+                id: "memory-agent",
+                input: 'await tools.memory_search({"query":"dashboard coverage"})',
+                task: "Search memory",
+            },
+        ];
         mkdirSync(miraSessions, { recursive: true });
         mkdirSync(coderSessions, { recursive: true });
+        mkdirSync(researcherSessions, { recursive: true });
+        mkdirSync(auditorSessions, { recursive: true });
+        mkdirSync(writerSessions, { recursive: true });
+        mkdirSync(browserSessions, { recursive: true });
+        mkdirSync(staleSessions, { recursive: true });
+        for (const agent of responseItemAgents) {
+            mkdirSync(path.join(agentsRoot, agent.id, "sessions"), { recursive: true });
+        }
         process.env.OPENCLAW_HOME = openclawRoot;
         delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
         writeFileSync(
@@ -1712,6 +2075,12 @@ fi
                     list: [
                         { default: true, id: "mira-2026" },
                         { id: "coder", model: { primary: "openai/gpt-4.1" } },
+                        { id: "researcher" },
+                        { id: "auditor" },
+                        { id: "writer" },
+                        { id: "browser" },
+                        { id: "stale" },
+                        ...responseItemAgents.map((agent) => ({ id: agent.id })),
                     ],
                 },
             })
@@ -1731,6 +2100,156 @@ fi
                 },
                 { key: 123, updatedAt: "bad" },
             ])
+        );
+        writeFileSync(
+            path.join(researcherSessions, "researcher.trajectory.jsonl"),
+            [
+                {
+                    data: {
+                        prompt: [
+                            "Research coverage gaps",
+                            "[media attached: ignored]",
+                            "Conversation info: ignored",
+                        ].join("\n"),
+                    },
+                    runId: "research-run",
+                    type: "prompt.submitted",
+                },
+                {
+                    data: {
+                        arguments: { path: "/tmp/coverage.ts" },
+                        name: "read",
+                        turnId: "research-turn",
+                    },
+                    runId: "research-run",
+                    type: "tool.call",
+                },
+            ]
+                .map((entry) => JSON.stringify(entry))
+                .join("\n")
+        );
+        writeFileSync(
+            path.join(writerSessions, "session.jsonl"),
+            [
+                "{malformed",
+                JSON.stringify({
+                    message: {
+                        content: "Write task from session file",
+                        role: "user",
+                    },
+                    runId: "writer-run",
+                }),
+                JSON.stringify({
+                    message: {
+                        content: [
+                            {
+                                partialJson: '{"file_path":"/tmp/output.md"}',
+                                type: "toolCall",
+                                name: "write",
+                            },
+                        ],
+                        role: "assistant",
+                    },
+                    runId: "writer-run",
+                }),
+            ].join("\n")
+        );
+        writeFileSync(
+            path.join(browserSessions, "session.jsonl"),
+            [
+                {
+                    data: {
+                        args: {
+                            parameters: {
+                                action: "navigate",
+                                url: "https://dashboard.test",
+                            },
+                        },
+                        name: "browser",
+                        prompt: "Browse dashboard",
+                    },
+                    runId: "browser-run",
+                    type: "prompt.submitted",
+                },
+                {
+                    data: {
+                        args: {
+                            parameters: {
+                                action: "navigate",
+                                url: "https://dashboard.test",
+                            },
+                        },
+                        name: "browser",
+                    },
+                    runId: "browser-run",
+                    type: "tool.result",
+                },
+            ]
+                .map((entry) => JSON.stringify(entry))
+                .join("\n")
+        );
+        const staleFile = path.join(staleSessions, "session.jsonl");
+        writeFileSync(
+            staleFile,
+            JSON.stringify({
+                message: {
+                    content: "Old task should not be active",
+                    role: "user",
+                },
+                runId: "stale-run",
+            })
+        );
+        const staleDate = new Date(Date.now() - 10 * 60_000);
+        await Bun.write(staleFile, await Bun.file(staleFile).text());
+        utimesSync(staleFile, staleDate, staleDate);
+        for (const agent of responseItemAgents) {
+            writeFileSync(
+                path.join(agentsRoot, agent.id, "sessions", "session.jsonl"),
+                [
+                    {
+                        message: { content: agent.task, role: "user" },
+                        runId: `${agent.id}-run`,
+                    },
+                    {
+                        payload: {
+                            input: agent.input,
+                            name: "exec",
+                            type: "custom_tool_call",
+                        },
+                        runId: `${agent.id}-run`,
+                        type: "response_item",
+                    },
+                ]
+                    .map((entry) => JSON.stringify(entry))
+                    .join("\n")
+            );
+        }
+        writeFileSync(
+            path.join(auditorSessions, "session.jsonl"),
+            [
+                {
+                    message: {
+                        __openclaw: { mirrorIdentity: "audit-turn:user" },
+                        content: [
+                            { text: "Audit backend coverage", type: "text" },
+                            { text: '```json\n{"ignore":true}\n```', type: "text" },
+                        ],
+                        role: "user",
+                    },
+                    runId: "audit-run",
+                },
+                {
+                    payload: {
+                        input: 'await tools.exec_command({"cmd":"git status --short"})',
+                        name: "exec",
+                        type: "custom_tool_call",
+                    },
+                    runId: "audit-run",
+                    type: "response_item",
+                },
+            ]
+                .map((entry) => JSON.stringify(entry))
+                .join("\n")
         );
 
         const gatewayModule = await import("../src/gateway.ts");
@@ -1789,7 +2308,16 @@ fi
 
         expect(parseAgentsConfig()).toMatchObject({
             defaults: { model: { primary: "codex" } },
-            list: [{ id: "mira-2026" }, { id: "coder" }],
+            list: [
+                { id: "mira-2026" },
+                { id: "coder" },
+                { id: "researcher" },
+                { id: "auditor" },
+                { id: "writer" },
+                { id: "browser" },
+                { id: "stale" },
+                ...responseItemAgents.map((agent) => ({ id: agent.id })),
+            ],
         });
         const statuses = await buildAgentStatuses(parseAgentsConfig()!);
         expect(statuses).toContainEqual(
@@ -1808,6 +2336,57 @@ fi
                 sessionKey: "agent:coder:main",
             })
         );
+        expect(statuses).toContainEqual(
+            expect.objectContaining({
+                currentActivity: "read /tmp/coverage.ts",
+                currentTask: "Research coverage gaps",
+                id: "researcher",
+                model: "gpt-5.5",
+                status: "active",
+            })
+        );
+        expect(statuses).toContainEqual(
+            expect.objectContaining({
+                currentActivity: "exec git status --short",
+                currentTask: "Audit backend coverage",
+                id: "auditor",
+                status: "active",
+            })
+        );
+        expect(statuses).toContainEqual(
+            expect.objectContaining({
+                currentActivity: "write /tmp/output.md",
+                currentTask: "Write task from session file",
+                id: "writer",
+                status: "active",
+            })
+        );
+        expect(statuses).toContainEqual(
+            expect.objectContaining({
+                currentActivity: "browser navigate https://dashboard.test",
+                currentTask: "Browse dashboard",
+                id: "browser",
+                status: "active",
+            })
+        );
+        expect(statuses).toContainEqual(
+            expect.objectContaining({
+                currentActivity: undefined,
+                currentTask: undefined,
+                id: "stale",
+                status: "idle",
+            })
+        );
+        for (const agent of responseItemAgents) {
+            expect(statuses).toContainEqual(
+                expect.objectContaining({
+                    currentActivity: agent.activity,
+                    currentTask: agent.task,
+                    id: agent.id,
+                    status: "active",
+                })
+            );
+        }
         await expect(
             buildSingleAgentStatus("missing", parseAgentsConfig()!)
         ).resolves.toBe(undefined);

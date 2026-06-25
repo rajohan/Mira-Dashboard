@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { gunzipSync } from "node:zlib";
 
 import type { Server } from "bun";
 import { afterEach, describe, expect, it, jest } from "bun:test";
@@ -110,6 +111,13 @@ JSON
     ;;
   'logs --tail 50 abc123def456'|'logs --tail 200 abc123def456'|'logs --tail 5000 abc123def456')
     printf '%s\n' 'container log line'
+    ;;
+  'logs --tail 200 missing')
+    echo 'no such container' >&2
+    exit 1
+    ;;
+  exec\ -e\ MIRA_DASHBOARD_EXEC_COMMAND=*\ abc123def4567890\ sh\ -lc*)
+    printf '%s\n' '__MIRA_DOCKER_EXEC_PID_fake:123' 'exec output'
     ;;
   'start abc123def4567890'|'stop abc123def4567890'|'restart abc123def4567890'|'start abc123def456'|'stop abc123def456'|'restart abc123def456'|'image rm image123'|'volume rm data'|'image prune -a -f'|'volume prune -f')
     printf '%s\n' "ok: $args"
@@ -1022,11 +1030,17 @@ describe("backend route and service behavior", () => {
 
     it("serves Docker inventory and safe mutations through a fake Docker CLI", async () => {
         rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
         rememberEnvironment("MIRA_DOCKER_ROOT");
         const fakeBin = createTemporaryRoot("mira-docker-route-bin-");
         const dockerRoot = createTemporaryRoot("mira-docker-route-root-");
         writeFakeDockerCli(path.join(fakeBin, "docker"));
+        writeExecutable(
+            path.join(fakeBin, "compose"),
+            "#!/usr/bin/env bash\nprintf 'compose:%s\\n' \"$*\"\n"
+        );
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DOCKER_COMPOSE_WRAPPER = path.join(fakeBin, "compose");
         process.env.MIRA_DOCKER_ROOT = dockerRoot;
         const { dockerRoutes } = await import("../src/routes/dockerRoutes.ts");
 
@@ -1065,6 +1079,14 @@ describe("backend route and service behavior", () => {
         await expect(logs.json()).resolves.toEqual({
             content: "container log line",
         });
+
+        await expect(
+            dockerRoutes["/api/docker/containers/:containerId/logs"].GET(
+                requestWithParameters("/api/docker/containers/missing/logs?tail=abc", {
+                    containerId: "missing",
+                })
+            )
+        ).rejects.toThrow("docker logs failed with exit code 1: no such container");
 
         const restart = await dockerRoutes[
             "/api/docker/containers/:containerId/action"
@@ -1125,6 +1147,56 @@ describe("backend route and service behavior", () => {
         await expect(pruneVolumes.json()).resolves.toMatchObject({
             isSuccess: true,
             output: expect.stringContaining("volume prune"),
+        });
+
+        const stackAction = await dockerRoutes["/api/docker/stack/action"].POST(
+            jsonRequest("/api/docker/stack/action", { action: "stop" })
+        );
+        await expect(stackAction.json()).resolves.toEqual({
+            output: "compose:stop",
+        });
+
+        const missingAction = await dockerRoutes[
+            "/api/docker/containers/:containerId/action"
+        ].POST(
+            requestWithParameters(
+                "/api/docker/containers/unknown/action",
+                { containerId: "unknown" },
+                {
+                    body: JSON.stringify({ action: "start" }),
+                    headers: { "Content-Type": "application/json" },
+                    method: "POST",
+                }
+            )
+        );
+        expect(missingAction.status).toBe(404);
+        await expect(missingAction.json()).resolves.toEqual({
+            error: "Container not found",
+        });
+
+        const execStart = await dockerRoutes["/api/docker/exec/start"].POST(
+            jsonRequest("/api/docker/exec/start", {
+                command: "printf ok",
+                containerId: "demo",
+            })
+        );
+        const { jobId } = (await execStart.json()) as { jobId: string };
+        expect(jobId).toEqual(expect.any(String));
+
+        let execStatus = dockerRoutes["/api/docker/exec/:jobId"].GET(
+            requestWithParameters(`/api/docker/exec/${jobId}`, { jobId })
+        );
+        let execData = (await execStatus.json()) as { status: string; stdout: string };
+        for (let attempt = 0; attempt < 20 && execData.status !== "done"; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            execStatus = dockerRoutes["/api/docker/exec/:jobId"].GET(
+                requestWithParameters(`/api/docker/exec/${jobId}`, { jobId })
+            );
+            execData = (await execStatus.json()) as { status: string; stdout: string };
+        }
+        expect(execData).toMatchObject({
+            status: "done",
+            stdout: expect.stringContaining("exec output"),
         });
     });
 
@@ -1406,6 +1478,49 @@ describe("backend route and service behavior", () => {
         expect(existsSync(archivePath)).toBe(true);
         expect(readFileSync(archivePath, "utf8")).toBe("rotated bytes\n");
 
+        const renameLogFile = path.join(root, "rename.log");
+        writeFileSync(renameLogFile, "rename bytes\n");
+        const renameConfig = path.join(root, "rename-log-rotation.json");
+        writeFileSync(
+            renameConfig,
+            JSON.stringify({
+                version: 1,
+                approvedRoots: [root],
+                defaults: {
+                    keep: 1,
+                    maxSizeMb: 0.000001,
+                    missingOk: false,
+                    shouldCompress: true,
+                    skipEmpty: false,
+                    strategy: "rename",
+                },
+                groups: [{ name: "rename", paths: [renameLogFile] }],
+            })
+        );
+
+        const renameSummary = await runLogRotationService({
+            config: renameConfig,
+            group: "rename",
+            isDryRun: false,
+        });
+        expect(renameSummary).toMatchObject({
+            compressedFiles: 1,
+            isDryRun: false,
+            isOk: true,
+            rotatedFiles: 1,
+        });
+        expect(readFileSync(renameLogFile, "utf8")).toBe("");
+        const compressedRenameArchive = readdirSync(root).find((entry) =>
+            entry.startsWith("rename.log.202")
+        );
+        expect(compressedRenameArchive?.endsWith(".gz")).toBe(true);
+        const compressedRenameArchiveBytes = readFileSync(
+            path.join(root, compressedRenameArchive ?? "")
+        );
+        expect(gunzipSync(compressedRenameArchiveBytes).toString("utf8")).toBe(
+            "rename bytes\n"
+        );
+
         const archiveOnlyOld = path.join(root, "old.archive");
         const archiveOnlyNew = path.join(root, "new.archive");
         writeFileSync(archiveOnlyOld, "old archive\n");
@@ -1446,6 +1561,23 @@ describe("backend route and service behavior", () => {
         expect(archiveOnlySummary.warnings).toEqual([]);
         expect(existsSync(archiveOnlyOld)).toBe(true);
         expect(existsSync(archiveOnlyNew)).toBe(true);
+
+        const archiveOnlyLiveSummary = await runLogRotationService({
+            config: archiveOnlyConfig,
+            isDryRun: false,
+        });
+        expect(archiveOnlyLiveSummary).toMatchObject({
+            checkedFiles: 2,
+            compressedFiles: 1,
+            deletedArchives: 1,
+            isDryRun: false,
+            isOk: true,
+        });
+        expect(existsSync(archiveOnlyOld)).toBe(false);
+        expect(existsSync(archiveOnlyNew)).toBe(false);
+        expect(gunzipSync(readFileSync(`${archiveOnlyNew}.gz`)).toString("utf8")).toBe(
+            "new archive\n"
+        );
     });
 
     it("cached quota/system readers and notification checks", async () => {
