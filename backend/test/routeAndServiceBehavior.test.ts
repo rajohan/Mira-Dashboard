@@ -40,6 +40,64 @@ function writeExecutable(filePath: string, content: string): void {
     chmodSync(filePath, 0o755);
 }
 
+function writeFakeBackupDocker(binaryPath: string): void {
+    writeExecutable(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"pgrep -f"* ]]; then
+  printf '%s\n' "__MIRA_CONTAINER_PGREP_NO_MATCH__"
+  exit 1
+fi
+if [[ "$*" == "exec walg /bin/sh /usr/local/bin/backup-push.sh" ]]; then
+  printf '%s\n' "backup ok"
+  exit 0
+fi
+echo "unexpected docker args: $*" >&2
+exit 2
+`
+    );
+}
+
+function writeFakeDockerCli(binaryPath: string): void {
+    writeExecutable(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+args="$*"
+case "$args" in
+  'ps -a --format {{json .}}')
+    printf '%s\n' '{"ID":"abc123def456","Names":"demo","Image":"repo/app:1.0","Command":"run","CreatedAt":"2026-06-25 00:00:00 +0000 UTC","Labels":"com.docker.compose.project=stack,com.docker.compose.service=web","Mounts":"data","Networks":"bridge","Ports":"80/tcp","RunningFor":"1 hour","State":"running","Status":"Up 1 hour"}'
+    ;;
+  'stats --no-stream --format {{json .}}')
+    printf '%s\n' '{"ID":"abc123def456","CPUPerc":"1.00%","MemPerc":"2.00%","MemUsage":"10MiB / 1GiB","NetIO":"1kB / 2kB","BlockIO":"3kB / 4kB","PIDs":"5"}'
+    ;;
+  'inspect abc123def456'|'inspect abc123def456 abc123def456')
+    cat <<'JSON'
+[{"Id":"abc123def4567890","Created":"2026-06-25T00:00:00Z","Image":"sha256:image123","RestartCount":2,"Config":{"Env":["PUBLIC=value","API_TOKEN=secret","URL=https://user:pass@example.test"],"Labels":{"com.docker.compose.project":"stack","com.docker.compose.service":"web","secret.url":"https://user:pass@example.test"}},"Mounts":[{"Type":"volume","Name":"data","Source":"/var/lib/docker/volumes/data","Destination":"/data","Mode":"rw","RW":true}],"NetworkSettings":{"Networks":{"bridge":{"Gateway":"172.17.0.1","IPAddress":"172.17.0.2","MacAddress":"aa:bb"}}},"State":{"StartedAt":"2026-06-25T00:00:01Z","FinishedAt":"","Health":{"Status":"healthy"}}}]
+JSON
+    ;;
+  'image ls --format {{json .}} --no-trunc')
+    printf '%s\n' '{"ID":"sha256:image123","Repository":"repo/app","Tag":"1.0","Size":"12.5MB","CreatedAt":"2026-06-25","Platform":"linux/amd64"}'
+    ;;
+  'volume ls --format {{json .}}')
+    printf '%s\n' '{"Name":"data","Driver":"local","Mountpoint":"/tmp/data","Scope":"local","Labels":"owner=test","Size":"1MB"}'
+    ;;
+  'logs --tail 50 abc123def456'|'logs --tail 200 abc123def456'|'logs --tail 5000 abc123def456')
+    printf '%s\n' 'container log line'
+    ;;
+  'start abc123def4567890'|'stop abc123def4567890'|'restart abc123def4567890'|'start abc123def456'|'stop abc123def456'|'restart abc123def456'|'image rm image123'|'volume rm data'|'image prune -a -f'|'volume prune -f')
+    printf '%s\n' "ok: $args"
+    ;;
+  *)
+    echo "unexpected docker args: $args" >&2
+    exit 2
+    ;;
+esac
+`
+    );
+}
+
 function isolateOpenClawEnvironment(prefix: string): void {
     rememberEnvironment("OPENCLAW_HOME");
     rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
@@ -672,6 +730,290 @@ describe("backend route and service behavior", () => {
             );
             expect(response.status).toBe(400);
         }
+    });
+
+    it("serves log route listing and guarded tail reads from an isolated log root", async () => {
+        rememberEnvironment("MIRA_DASHBOARD_LOGS_ROOT");
+        const logsRoot = createTemporaryRoot("mira-log-route-coverage-");
+        const currentLog = path.join(logsRoot, "openclaw-2026-06-25.log");
+        const olderLog = path.join(logsRoot, "openclaw-2026-06-24.log");
+        const ignoredLog = path.join(logsRoot, "other.log");
+        writeFileSync(currentLog, "line 1\nline 2\nline 3\n");
+        writeFileSync(olderLog, "older\n");
+        writeFileSync(ignoredLog, "ignore\n");
+        process.env.MIRA_DASHBOARD_LOGS_ROOT = logsRoot;
+
+        const { logRoutes } = await import("../src/routes/logRoutes.ts");
+
+        const info = await logRoutes["/api/logs/info"].GET();
+        await expect(info.json()).resolves.toMatchObject({
+            logs: expect.arrayContaining([
+                expect.objectContaining({ name: "openclaw-2026-06-25.log" }),
+                expect.objectContaining({ name: "openclaw-2026-06-24.log" }),
+            ]),
+        });
+
+        const explicitTail = await logRoutes["/api/logs/content"].GET(
+            new Request(
+                "https://test.local/api/logs/content?file=openclaw-2026-06-25.log&lines=2"
+            )
+        );
+        await expect(explicitTail.json()).resolves.toEqual({
+            content: "line 2\nline 3",
+            file: "openclaw-2026-06-25.log",
+        });
+
+        const invalidLines = await logRoutes["/api/logs/content"].GET(
+            new Request(
+                "https://test.local/api/logs/content?file=openclaw-2026-06-25.log&lines=abc"
+            )
+        );
+        expect(invalidLines.status).toBe(400);
+
+        const pathTraversal = await logRoutes["/api/logs/content"].GET(
+            new Request(
+                "https://test.local/api/logs/content?file=../openclaw-2026-06-25.log"
+            )
+        );
+        expect(pathTraversal.status).toBe(404);
+
+        rmSync(currentLog);
+        const missingLog = await logRoutes["/api/logs/content"].GET(
+            new Request(
+                "https://test.local/api/logs/content?file=openclaw-2026-06-25.log"
+            )
+        );
+        expect(missingLog.status).toBe(404);
+
+        rmSync(logsRoot, { force: true, recursive: true });
+        const missingInfoRoot = await logRoutes["/api/logs/info"].GET();
+        await expect(missingInfoRoot.json()).resolves.toEqual({ logs: [] });
+        const missingContentRoot = await logRoutes["/api/logs/content"].GET(
+            new Request(
+                "https://test.local/api/logs/content?file=openclaw-2026-06-25.log"
+            )
+        );
+        expect(missingContentRoot.status).toBe(404);
+    });
+
+    it("starts manual WAL-G backups through the backup route using fake Docker", async () => {
+        rememberEnvironment("PATH");
+        const fakeBin = createTemporaryRoot("mira-backup-route-docker-bin-");
+        writeFakeBackupDocker(path.join(fakeBin, "docker"));
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        const { backupRoutes } = await import("../src/routes/backupRoutes.ts");
+        const { getCurrentBackupJob, registerBackupScheduledJobs } =
+            await import("../src/services/backups.ts");
+
+        try {
+            registerBackupScheduledJobs();
+            const response = await backupRoutes["/api/backups/walg/run"].POST();
+            expect(response.status).toBe(200);
+            const body = (await response.json()) as {
+                isOk?: boolean;
+                job?: { id?: string; status?: string; type?: string };
+            };
+            expect(body).toMatchObject({
+                isOk: true,
+                job: { status: "running", type: "walg" },
+            });
+
+            const completed = await getCurrentBackupJob("walg")?.completed;
+            expect(completed).toMatchObject({
+                code: 0,
+                status: "done",
+                stdout: expect.stringContaining("backup ok"),
+                type: "walg",
+            });
+
+            const status = backupRoutes["/api/backups/walg"].GET();
+            await expect(status.json()).resolves.toMatchObject({
+                job: { code: 0, status: "done", type: "walg" },
+            });
+            const clearedStatus = backupRoutes["/api/backups/walg"].GET();
+            await expect(clearedStatus.json()).resolves.toEqual({ job: undefined });
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("serves Docker inventory and safe mutations through a fake Docker CLI", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DOCKER_ROOT");
+        const fakeBin = createTemporaryRoot("mira-docker-route-bin-");
+        const dockerRoot = createTemporaryRoot("mira-docker-route-root-");
+        writeFakeDockerCli(path.join(fakeBin, "docker"));
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DOCKER_ROOT = dockerRoot;
+        const { dockerRoutes } = await import("../src/routes/dockerRoutes.ts");
+
+        const containers = await dockerRoutes["/api/docker/containers"].GET();
+        await expect(containers.json()).resolves.toMatchObject({
+            containers: [
+                {
+                    health: "healthy",
+                    id: "abc123def456",
+                    name: "demo",
+                    project: "stack",
+                    service: "web",
+                    stats: { cpu: "1.00%" },
+                },
+            ],
+        });
+
+        const details = await dockerRoutes["/api/docker/containers/:containerId"].GET(
+            requestWithParameters("/api/docker/containers/demo", { containerId: "demo" })
+        );
+        await expect(details.json()).resolves.toMatchObject({
+            env: ["PUBLIC=value", "API_TOKEN=***", "URL=***"],
+            id: "abc123def456",
+            labels: {
+                "com.docker.compose.project": "stack",
+                "secret.url": "***",
+            },
+            networks: [{ ipAddress: "172.17.0.2", name: "bridge" }],
+        });
+
+        const logs = await dockerRoutes["/api/docker/containers/:containerId/logs"].GET(
+            requestWithParameters("/api/docker/containers/abc123def456/logs?tail=10", {
+                containerId: "abc123def456",
+            })
+        );
+        await expect(logs.json()).resolves.toEqual({
+            content: "container log line",
+        });
+
+        const restart = await dockerRoutes[
+            "/api/docker/containers/:containerId/action"
+        ].POST(
+            requestWithParameters(
+                "/api/docker/containers/demo/action",
+                { containerId: "demo" },
+                {
+                    body: JSON.stringify({ action: "restart" }),
+                    headers: { "Content-Type": "application/json" },
+                    method: "POST",
+                }
+            )
+        );
+        await expect(restart.json()).resolves.toEqual({
+            output: "restart sent to demo",
+        });
+
+        const images = await dockerRoutes["/api/docker/images"].GET();
+        await expect(images.json()).resolves.toMatchObject({
+            images: [
+                {
+                    id: "sha256:image123",
+                    inUseBy: ["demo"],
+                    repository: "repo/app",
+                    size: 13_107_200,
+                    tag: "1.0",
+                },
+            ],
+        });
+
+        const removeImage = await dockerRoutes["/api/docker/images/:imageId"].DELETE(
+            requestWithParameters("/api/docker/images/image123", { imageId: "image123" })
+        );
+        await expect(removeImage.json()).resolves.toEqual({ isSuccess: true });
+
+        const volumes = await dockerRoutes["/api/docker/volumes"].GET();
+        await expect(volumes.json()).resolves.toMatchObject({
+            volumes: [{ name: "data", size: "1MB", usedBy: ["demo"] }],
+        });
+
+        const removeVolume = await dockerRoutes["/api/docker/volumes/:volumeName"].DELETE(
+            requestWithParameters("/api/docker/volumes/data", { volumeName: "data" })
+        );
+        await expect(removeVolume.json()).resolves.toEqual({ isSuccess: true });
+
+        const pruneImages = await dockerRoutes["/api/docker/prune"].POST(
+            jsonRequest("/api/docker/prune", { target: "images" })
+        );
+        await expect(pruneImages.json()).resolves.toMatchObject({
+            isSuccess: true,
+            output: expect.stringContaining("image prune"),
+        });
+
+        const pruneVolumes = await dockerRoutes["/api/docker/prune"].POST(
+            jsonRequest("/api/docker/prune", { target: "volumes" })
+        );
+        await expect(pruneVolumes.json()).resolves.toMatchObject({
+            isSuccess: true,
+            output: expect.stringContaining("volume prune"),
+        });
+    });
+
+    it("normalizes ops log-rotation status cache state", async () => {
+        const { opsRoutes } = await import("../src/routes/opsRoutes.ts");
+        const state = {
+            lastRun: {
+                checkedFiles: "3",
+                checkedGroups: "2",
+                compressedFiles: "1",
+                deletedArchives: "4",
+                finishedAt: "2026-06-25T00:01:00.000Z",
+                groups: [{ name: "openclaw" }],
+                isDryRun: true,
+                isOk: false,
+                message: "rotation failed",
+                result: { code: "LOCKED" },
+                rotatedFiles: "5",
+                skippedFiles: "6",
+                startedAt: "2026-06-25T00:00:00.000Z",
+                stderr: "stderr details",
+                warnings: ["warn"],
+            },
+        };
+        database
+            .prepare(
+                "INSERT INTO cache_entries (key, data_json, source, updated_at, last_attempt_at, expires_at, status, consecutive_failures, metadata_json) VALUES (?, ?, 'test', ?, ?, ?, 'fresh', 0, '{}') ON CONFLICT(key) DO UPDATE SET data_json = excluded.data_json, source = excluded.source, status = excluded.status, updated_at = excluded.updated_at, last_attempt_at = excluded.last_attempt_at, expires_at = excluded.expires_at"
+            )
+            .run(
+                "log_rotation.state",
+                JSON.stringify(state),
+                Date.now(),
+                Date.now(),
+                Date.now() + 60_000
+            );
+
+        const status = await opsRoutes["/api/ops/log-rotation/status"].GET();
+        await expect(status.json()).resolves.toMatchObject({
+            isSuccess: true,
+            lastRun: {
+                checkedFiles: 3,
+                checkedGroups: 2,
+                compressedFiles: 1,
+                deletedArchives: 4,
+                errors: [
+                    {
+                        message: "rotation failed",
+                        result: { code: "LOCKED" },
+                        stderr: "stderr details",
+                    },
+                ],
+                isDryRun: true,
+                isOk: false,
+                rotatedFiles: 5,
+                skippedFiles: 6,
+                warnings: ["warn"],
+            },
+        });
+
+        database
+            .prepare(
+                "UPDATE cache_entries SET data_json = ? WHERE key = 'log_rotation.state'"
+            )
+            .run("{not-json");
+        const malformed = await opsRoutes["/api/ops/log-rotation/status"].GET();
+        await expect(malformed.json()).resolves.toEqual({
+            isSuccess: true,
+            lastRun: undefined,
+        });
     });
 
     it("exec service validation and error normalization branches", async () => {

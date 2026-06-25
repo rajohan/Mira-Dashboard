@@ -176,6 +176,23 @@ class FakeDashboardSocket implements DashboardSocket {
     }
 }
 
+function sessionActionRequest(action: string): Request & { params: { id: string } } {
+    return Object.assign(
+        new Request("https://test.local/api/sessions/agent:main:main/action", {
+            body: JSON.stringify({ action }),
+            headers: { "Content-Type": "application/json" },
+            method: "POST",
+        }),
+        { params: { id: "agent:main:main" } }
+    );
+}
+
+function sessionDeleteRequest(): Request & { params: { id: string } } {
+    return Object.assign(new Request("https://test.local/api/sessions/agent:main:main"), {
+        params: { id: "agent:main:main" },
+    });
+}
+
 afterEach(() => {
     fakeClients.length = 0;
     const errors: unknown[] = [];
@@ -325,6 +342,68 @@ describe("gateway behavior", () => {
                 ],
             },
         });
+
+        const { sessionRoutes } = await import("../src/routes/sessionRoutes.ts");
+        const filteredSessions = await sessionRoutes["/api/sessions/list"].GET(
+            new Request("https://test.local/api/sessions/list?type=MAIN&model=gpt-test")
+        );
+        await expect(filteredSessions.json()).resolves.toEqual({
+            sessions: [
+                expect.objectContaining({
+                    key: "agent:main:main",
+                    model: "openai/gpt-test",
+                    type: "MAIN",
+                }),
+            ],
+        });
+
+        const stats = await sessionRoutes["/api/sessions/stats"].GET();
+        await expect(stats.json()).resolves.toMatchObject({
+            byModel: {
+                Unknown: 2,
+                "openai/gpt-test": 1,
+            },
+            byType: {
+                HOOK: 1,
+                MAIN: 1,
+                SUBAGENT: 1,
+            },
+            total: 3,
+            totalTokens: 42,
+        });
+
+        const compact = await sessionRoutes["/api/sessions/:id/action"].POST(
+            sessionActionRequest("compact")
+        );
+        await expect(compact.json()).resolves.toEqual({
+            action: "compact",
+            isSuccess: true,
+        });
+
+        const reset = await sessionRoutes["/api/sessions/:id/action"].POST(
+            sessionActionRequest("reset")
+        );
+        expect(reset.status).toBe(200);
+
+        const stop = await sessionRoutes["/api/sessions/:id/action"].POST(
+            sessionActionRequest("stop")
+        );
+        expect(stop.status).toBe(200);
+
+        const unsupported = await sessionRoutes["/api/sessions/:id/action"].POST(
+            sessionActionRequest("archive")
+        );
+        expect(unsupported.status).toBe(400);
+
+        const deleted =
+            await sessionRoutes["/api/sessions/:id"].DELETE(sessionDeleteRequest());
+        await expect(deleted.json()).resolves.toMatchObject({
+            isSuccess: true,
+            result: { echoed: { method: "sessions.delete" } },
+        });
+        expect(client?.requests.map((request) => request.method)).toEqual(
+            expect.arrayContaining(["chat.abort", "chat.send", "sessions.delete"])
+        );
 
         socket.emitMessage({
             id: "fail-1",
