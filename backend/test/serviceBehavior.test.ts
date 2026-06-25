@@ -3083,11 +3083,15 @@ fi
         const actionKey = `test-action-${Bun.randomUUIDv7()}`;
         const keepId = `test-job-keep-${Bun.randomUUIDv7()}`;
         const pruneId = `test-job-prune-${Bun.randomUUIDv7()}`;
+        const scheduledDueId = `test-job-scheduled-due-${Bun.randomUUIDv7()}`;
+        const scheduledFutureId = `test-job-scheduled-future-${Bun.randomUUIDv7()}`;
+        const scheduledDisabledId = `test-job-scheduled-disabled-${Bun.randomUUIDv7()}`;
         const {
             calculateNextRunAt,
             finishScheduledJobRun,
             getScheduledJob,
             isScheduledJobValidationError,
+            listScheduledJobs,
             listScheduledJobRuns,
             registerScheduledJobAction,
             removeScheduledJobsNotInAction,
@@ -3258,9 +3262,73 @@ fi
             });
             expect(listScheduledJobRuns(keepId, 2)).toHaveLength(2);
 
+            upsertScheduledJob({
+                actionKey,
+                actionPayload: { value: "scheduled" },
+                enabled: true,
+                id: scheduledDueId,
+                intervalSeconds: 120,
+                name: "Scheduled due job",
+                scheduleType: "interval",
+            });
+            database
+                .prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?")
+                .run("2026-01-01T00:00:00.000Z", scheduledDueId);
+            const scheduledRun = await runScheduledJob(scheduledDueId, "schedule");
+            expect(scheduledRun).toMatchObject({
+                jobId: scheduledDueId,
+                output: { jobId: scheduledDueId, payloadValue: "scheduled" },
+                status: "success",
+                triggerType: "schedule",
+            });
+            expect(getScheduledJob(scheduledDueId)?.nextRunAt).not.toBe(
+                "2026-01-01T00:00:00.000Z"
+            );
+
+            upsertScheduledJob({
+                actionKey,
+                actionPayload: { value: "future" },
+                enabled: true,
+                id: scheduledFutureId,
+                intervalSeconds: 120,
+                name: "Scheduled future job",
+                scheduleType: "interval",
+            });
+            await expect(
+                runScheduledJob(scheduledFutureId, "schedule")
+            ).rejects.toMatchObject({
+                statusCode: 409,
+            });
+
+            upsertScheduledJob({
+                actionKey,
+                actionPayload: { value: "disabled" },
+                enabled: false,
+                id: scheduledDisabledId,
+                intervalSeconds: 120,
+                name: "Scheduled disabled job",
+                scheduleType: "interval",
+            });
+            await expect(
+                runScheduledJob(scheduledDisabledId, "schedule")
+            ).rejects.toMatchObject({
+                statusCode: 409,
+            });
+
+            database
+                .prepare("UPDATE scheduled_job_runs SET output_json = ? WHERE job_id = ?")
+                .run("not json", keepId);
+            expect(listScheduledJobRuns(keepId, 0)).toHaveLength(2);
+            expect(listScheduledJobRuns(keepId, 1)).toHaveLength(1);
+            expect(getScheduledJob(keepId)?.lastRun?.output).toEqual({});
+            expect(
+                listScheduledJobs().find((job) => job.id === keepId)?.lastRun?.output
+            ).toEqual({});
+
             removeScheduledJobsNotInAction(actionKey, [keepId]);
             expect(getScheduledJob(keepId)).toBeDefined();
             expect(getScheduledJob(pruneId)).toBeUndefined();
+            expect(getScheduledJob(scheduledDueId)).toBeUndefined();
 
             const missingActionId = `test-job-missing-action-${Bun.randomUUIDv7()}`;
             upsertScheduledJob({

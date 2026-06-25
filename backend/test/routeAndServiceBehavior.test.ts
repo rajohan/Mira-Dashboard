@@ -426,6 +426,51 @@ describe("backend route and service behavior", () => {
         });
     });
 
+    it("rolls back first-user bootstrap when Gateway initialization fails", async () => {
+        isolateOpenClawEnvironment("mira-first-user-rollback-coverage-");
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const originalInit = gateway.init;
+        cleanupCallbacks.push(() => {
+            gateway.init = originalInit;
+            gateway.shutdown();
+        });
+        gateway.init = () => {
+            throw new Error("gateway unavailable");
+        };
+        const { authRoutes } = await import("../src/routes/authRoutes.ts");
+        const { findUserByUsername, getPersistedGatewayToken, persistGatewayToken } =
+            await import("../src/auth.ts");
+        const server = fakeServer();
+        const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
+
+        persistGatewayToken("previous-token");
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        cleanupCallbacks.push(() => errorSpy.mockRestore());
+        const response = await authRoutes["/api/auth/register-first-user"].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "new-token",
+                password: "correct-password",
+                username,
+            }),
+            server
+        );
+
+        expect(response.status).toBe(500);
+        await expect(response.json()).resolves.toEqual({
+            error: "Failed to complete first-user setup",
+        });
+        expect(findUserByUsername(username)).toBeUndefined();
+        expect(getPersistedGatewayToken()).toBe("previous-token");
+        expect(
+            database
+                .prepare(
+                    "SELECT COUNT(*) AS count FROM auth_sessions WHERE user_id IN (SELECT id FROM users WHERE username = ?)"
+                )
+                .get(username)
+        ).toEqual({ count: 0 });
+    });
+
     it("task route automation, validation, assignment, movement, updates, and deletion", async () => {
         isolateOpenClawEnvironment("mira-task-route-coverage-");
         const gatewayModule = await import("../src/gateway.ts");
@@ -1366,6 +1411,7 @@ describe("backend route and service behavior", () => {
 
     it("log rotation config validation and dry-run summaries", async () => {
         const { runLogRotationService } = await import("../src/services/logRotation.ts");
+        const { writeCacheSuccess } = await import("../src/services/cacheEntryWriter.ts");
         const root = createTemporaryRoot("mira-log-rotation-");
         const logFile = path.join(root, "service.log");
         const excludedFile = path.join(root, "excluded.log");
@@ -1436,6 +1482,113 @@ describe("backend route and service behavior", () => {
         await expect(
             runLogRotationService({ config: conflictingCadenceConfig, isDryRun: true })
         ).rejects.toThrow("cannot set both daily and weekly");
+
+        const invalidPolicyConfigs = [
+            {
+                config: {
+                    version: 1,
+                    approvedRoots: [],
+                    groups: [{ name: "app", paths: [logFile] }],
+                },
+                message: "approvedRoots must include at least one entry",
+                name: "empty-approved-roots.json",
+            },
+            {
+                config: {
+                    version: 1,
+                    groups: [{ enabled: "yes", name: "app", paths: [logFile] }],
+                },
+                message: "Group app.enabled must be a boolean",
+                name: "invalid-enabled.json",
+            },
+            {
+                config: {
+                    version: 1,
+                    groups: [{ keep: 0, name: "app", paths: [logFile] }],
+                },
+                message: "Group app.keep must be a positive integer",
+                name: "invalid-keep.json",
+            },
+            {
+                config: {
+                    version: 1,
+                    groups: [
+                        {
+                            archiveOnly: true,
+                            archiveRetentionScope: "global",
+                            archivePaths: [path.join(root, "*.archive")],
+                            name: "archives",
+                        },
+                    ],
+                },
+                message:
+                    "Group archives archiveRetentionScope must be directory, basename, or parent",
+                name: "invalid-archive-scope.json",
+            },
+            {
+                config: {
+                    version: 1,
+                    groups: [{ archiveOnly: true, name: "archives" }],
+                },
+                message:
+                    "Archive-only group archives needs at least one archivePaths pattern",
+                name: "archive-only-missing-paths.json",
+            },
+        ];
+        for (const invalid of invalidPolicyConfigs) {
+            const filePath = path.join(root, invalid.name);
+            writeFileSync(filePath, JSON.stringify(invalid.config));
+            await expect(
+                runLogRotationService({ config: filePath, isDryRun: true })
+            ).rejects.toThrow(invalid.message);
+        }
+
+        const emptyLogFile = path.join(root, "empty.log");
+        const dailyLogFile = path.join(root, "daily.log");
+        writeFileSync(emptyLogFile, "");
+        writeFileSync(dailyLogFile, "already rotated today\n");
+        writeCacheSuccess({
+            data: {
+                version: 1,
+                files: {
+                    [dailyLogFile]: { lastRotatedAt: new Date().toISOString() },
+                },
+            },
+            key: "log_rotation.state",
+            metadata: {},
+            source: "test",
+            ttl: 1,
+            ttlUnit: "hours",
+        });
+        const skipConfig = path.join(root, "skip-log-rotation.json");
+        writeFileSync(
+            skipConfig,
+            JSON.stringify({
+                version: 1,
+                approvedRoots: [root],
+                defaults: {
+                    keep: 1,
+                    maxSizeMb: 0.000001,
+                    missingOk: false,
+                    shouldCompress: false,
+                    strategy: "copytruncate",
+                },
+                groups: [
+                    { name: "empty", paths: [emptyLogFile], skipEmpty: true },
+                    { daily: true, maxSizeMb: 100, name: "daily", paths: [dailyLogFile] },
+                ],
+            })
+        );
+        const skipSummary = await runLogRotationService({
+            config: skipConfig,
+            isDryRun: true,
+        });
+        expect(skipSummary).toMatchObject({
+            checkedFiles: 2,
+            isOk: true,
+            rotatedFiles: 0,
+            skippedFiles: 2,
+        });
 
         const liveLogFile = path.join(root, "live.log");
         writeFileSync(liveLogFile, "rotated bytes\n");
