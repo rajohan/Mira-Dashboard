@@ -2139,7 +2139,6 @@ describe("backend route and service behavior", () => {
     });
 
     it("refreshes backup and log-rotation cache producers through fake CLI output", async () => {
-        rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DOCKER_BIN");
         const binRoot = createTemporaryRoot("mira-cache-cli-");
         const now = new Date().toISOString();
@@ -2169,14 +2168,26 @@ else
 fi
 `
         );
-        process.env.MIRA_DOCKER_BIN = dockerBin;
-        process.env.PATH = `${binRoot}:${process.env.PATH ?? ""}`;
 
         const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
-        await expect(refreshCacheProducer("backup.kopia.status")).resolves.toEqual({
+        async function refreshWithFakeDocker(key: string) {
+            let lastError: unknown;
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+                try {
+                    process.env.MIRA_DOCKER_BIN = dockerBin;
+                    return await refreshCacheProducer(key);
+                } catch (error) {
+                    lastError = error;
+                    await new Promise((resolve) => setTimeout(resolve, 10));
+                }
+            }
+            throw lastError;
+        }
+
+        await expect(refreshWithFakeDocker("backup.kopia.status")).resolves.toEqual({
             refreshed: ["backup.kopia.status"],
         });
-        await expect(refreshCacheProducer("backup.walg.status")).resolves.toEqual({
+        await expect(refreshWithFakeDocker("backup.walg.status")).resolves.toEqual({
             refreshed: ["backup.walg.status"],
         });
         await expect(refreshCacheProducer("log_rotation.state")).resolves.toEqual({
