@@ -522,16 +522,25 @@ describe("backend route and service behavior", () => {
 
     it("defensive route contracts for Docker, pull requests, cache, database, and backup APIs", async () => {
         isolateOpenClawEnvironment("mira-route-contract-coverage-");
+        const terminalRoot = createTemporaryRoot("mira-terminal-route-coverage-");
+        const terminalDirectory = path.join(terminalRoot, "work dir");
+        const terminalFile = path.join(terminalRoot, "work file.txt");
+        const terminalExecutable = path.join(terminalRoot, "work-bin");
+        mkdirSync(terminalDirectory);
+        writeFileSync(terminalFile, "text");
+        writeExecutable(terminalExecutable, "#!/usr/bin/env bash\nexit 0\n");
         const [
             { backupRoutes },
             { cacheRoutes },
             { dockerRoutes },
             { pullRequestRoutes },
+            { terminalRoutes },
         ] = await Promise.all([
             import("../src/routes/backupRoutes.ts"),
             import("../src/routes/cacheRoutes.ts"),
             import("../src/routes/dockerRoutes.ts"),
             import("../src/routes/pullRequestRoutes.ts"),
+            import("../src/routes/terminalRoutes.ts"),
         ]);
 
         const missingCache = await cacheRoutes["/api/cache/:key"].GET(
@@ -546,6 +555,55 @@ describe("backend route and service behavior", () => {
 
         const backupStatus = backupRoutes["/api/backups/kopia"].GET();
         await expect(backupStatus.json()).resolves.toEqual({ job: undefined });
+
+        const terminalComplete = await terminalRoutes["/api/terminal/complete"].POST(
+            jsonRequest("/api/terminal/complete", {
+                cwd: terminalRoot,
+                partial: "echo work",
+            })
+        );
+        await expect(terminalComplete.json()).resolves.toMatchObject({
+            commonPrefix: "echo work",
+            completions: [
+                {
+                    completion: String.raw`echo work\ dir`,
+                    display: "work dir/",
+                    type: "directory",
+                },
+                {
+                    completion: "echo work-bin",
+                    display: "work-bin",
+                    type: "executable",
+                },
+                {
+                    completion: String.raw`echo work\ file.txt`,
+                    display: "work file.txt",
+                    type: "file",
+                },
+            ],
+        });
+
+        const invalidTerminalComplete = await terminalRoutes[
+            "/api/terminal/complete"
+        ].POST(
+            jsonRequest("/api/terminal/complete", {
+                cwd: "relative",
+                partial: "work",
+            })
+        );
+        expect(invalidTerminalComplete.status).toBe(400);
+
+        const terminalCdFile = await terminalRoutes["/api/terminal/cd"].POST(
+            jsonRequest("/api/terminal/cd", {
+                cwd: terminalRoot,
+                path: "work file.txt",
+            })
+        );
+        await expect(terminalCdFile.json()).resolves.toMatchObject({
+            error: "Not a directory: work file.txt",
+            isSuccess: false,
+            newCwd: terminalRoot,
+        });
 
         const invalidContainer = await dockerRoutes[
             "/api/docker/containers/:containerId"
