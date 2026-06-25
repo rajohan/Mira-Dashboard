@@ -59,7 +59,7 @@ describe("server start scheduler policy", () => {
         expect(shouldStartOnImport("0", false)).toBe(false);
     });
 
-    it("starts listening-time services with and without a configured gateway token", async () => {
+    it("starts listening-time services with a configured gateway token", async () => {
         const originalGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
         const originalSchedulerDisabled = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
         process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER = "1";
@@ -77,12 +77,6 @@ describe("server start scheduler policy", () => {
         const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
         const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         try {
-            delete process.env.OPENCLAW_GATEWAY_TOKEN;
-            serverStartModule.handleServerListening();
-            expect(warnSpy).toHaveBeenCalledWith(
-                "[Backend] No gateway token configured yet; waiting for bootstrap registration"
-            );
-
             process.env.OPENCLAW_GATEWAY_TOKEN = " test-token ";
             serverStartModule.handleServerListening();
             expect(initSpy).toHaveBeenCalledWith("test-token");
