@@ -107,6 +107,30 @@ fi
     chmodSync(binaryPath, 0o755);
 }
 
+function writeFakeGhForPullRequestValidation(binaryPath: string): void {
+    writeFileSync(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1 $2 $3" == "pr view 6" ]]; then
+  printf '%s\n' '{"number":6,"title":"Draft","body":"","url":"https://github.test/pr/6","headRefName":"draft-branch","headRefOid":"head6","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":true,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr view 7" ]]; then
+  printf '%s\n' '{"number":7,"title":"Wrong base","body":"","url":"https://github.test/pr/7","headRefName":"feature","headRefOid":"head7","baseRefName":"develop","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"APPROVED","reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr view 8" ]]; then
+  printf '%s\n' '{"number":8,"title":"Not behind","body":"","url":"https://github.test/pr/8","headRefName":"current","headRefOid":"head8","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"APPROVED","reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr view 9" ]]; then
+  printf '%s\n' '{"number":9,"title":"Conflict","body":"","url":"https://github.test/pr/9","headRefName":"conflict","headRefOid":"head9","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"DIRTY","mergeStateStatus":"BEHIND","reviewDecision":"APPROVED","reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr view 10" ]]; then
+  printf '%s\n' '{"number":10,"title":"Own PR","body":"","url":"https://github.test/pr/10","headRefName":"own","headRefOid":"head10","baseRefName":"main","author":{"login":"rajohan"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"reviews":[],"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:00:00.000Z"}]}'
+else
+  echo "unexpected gh args: $*" >&2
+  exit 2
+fi
+`
+    );
+    chmodSync(binaryPath, 0o755);
+}
+
 function writeFakeDocker(binaryPath: string): void {
     writeFileSync(
         binaryPath,
@@ -586,6 +610,65 @@ describe("backend service behavior", () => {
         await expect(ensureProductionReadyForDeploy()).resolves.toBeUndefined();
     });
 
+    it("rejects unsafe production checkout states before deploy work starts", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
+        const fakeRoot = createTemporaryRoot("mira-pr-unsafe-root-");
+        const actualRoot = path.join(fakeRoot, "actual");
+        const expectedRoot = path.join(fakeRoot, "expected");
+        const worktreeRoot = path.join(fakeRoot, "worktrees");
+        const fakeBin = createTemporaryRoot("mira-pr-unsafe-bin-");
+        mkdirSync(expectedRoot, { recursive: true });
+        mkdirSync(worktreeRoot, { recursive: true });
+        writeFileSync(
+            path.join(fakeBin, "git"),
+            String.raw`#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == "rev-parse --show-toplevel" ]]; then
+  printf '%s\n' ${JSON.stringify(actualRoot)}
+elif [[ "$*" == "rev-parse --abbrev-ref HEAD" ]]; then
+  printf 'feature\n'
+elif [[ "$*" == "rev-parse --short HEAD" ]]; then
+  printf 'badc0de\n'
+elif [[ "$*" == "rev-parse --abbrev-ref --symbolic-full-name ${"@{u}"}" ]]; then
+  exit 1
+elif [[ "$1" == "status" ]]; then
+  printf ' M backend/src/server.ts\n'
+else
+  echo "unexpected git args: $*" >&2
+  exit 2
+fi
+`
+        );
+        chmodSync(path.join(fakeBin, "git"), 0o755);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = expectedRoot;
+        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
+
+        const {
+            ensureProductionCheckout,
+            ensureProductionReadyForDeploy,
+            getProductionCheckoutStatus,
+        } = await import("../src/services/pullRequests.ts");
+
+        await expect(getProductionCheckoutStatus()).resolves.toMatchObject({
+            branch: "feature",
+            isClean: false,
+            isProductionRoot: false,
+            isSafeForDeploy: false,
+            root: actualRoot,
+            statusShort: "M backend/src/server.ts",
+            upstream: undefined,
+        });
+        await expect(ensureProductionCheckout()).rejects.toThrow(
+            "Expected production checkout"
+        );
+        await expect(ensureProductionReadyForDeploy()).rejects.toThrow(
+            "Production checkout must be clean main before deploy"
+        );
+    });
+
     it("lists pull requests from GitHub JSON lines and refreshes blocked merge state", async () => {
         rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DASHBOARD_ROOT");
@@ -680,6 +763,49 @@ fi
             "repos/rajohan/Mira-Dashboard/pulls/4/update-branch"
         );
         await expect(Bun.file(ghLog).text()).resolves.toContain("pr close 5");
+    });
+
+    it("rejects unsafe pull request actions before invoking mutating GitHub commands", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
+        rememberEnvironment("RAJOHAN_GITHUB_TOKEN");
+        rememberEnvironment("RAJOHAN_GITHUB_USERNAME");
+        const fakeRoot = createTemporaryRoot("mira-pr-validation-root-");
+        const fakeBin = createTemporaryRoot("mira-pr-validation-bin-");
+        writeFakeGhForPullRequestValidation(path.join(fakeBin, "gh"));
+        writeFakeGit(path.join(fakeBin, "git"), fakeRoot);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(fakeRoot, "worktrees");
+        process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
+        delete process.env.RAJOHAN_GITHUB_TOKEN;
+
+        const {
+            approvePullRequest,
+            approvePullRequestReview,
+            rejectPullRequest,
+            updatePullRequestBranch,
+        } = await import("../src/services/pullRequests.ts");
+
+        await expect(approvePullRequest(6, false)).rejects.toThrow(
+            "Draft pull requests cannot be approved from the dashboard"
+        );
+        await expect(rejectPullRequest(7, "Wrong base")).rejects.toThrow(
+            "Only main-targeted pull requests can be managed here"
+        );
+        await expect(updatePullRequestBranch(8)).rejects.toThrow(
+            "Pull request branch is not behind the base branch"
+        );
+        await expect(updatePullRequestBranch(9)).rejects.toThrow(
+            "Pull request branch has merge conflicts"
+        );
+        await expect(approvePullRequestReview(10)).rejects.toThrow(
+            "Rajohan cannot approve his own pull request"
+        );
+        await expect(approvePullRequestReview(6)).rejects.toThrow(
+            "Draft pull requests cannot be approved from the dashboard"
+        );
     });
 
     it("refreshes weather cache through the Open-Meteo fallback when wttr fails", async () => {
@@ -1153,6 +1279,149 @@ fi
             database
                 .prepare("DELETE FROM agent_task_history WHERE agent_id = ?")
                 .run(agentId);
+        }
+    });
+
+    it("parses agent config and builds statuses from temp metadata plus fake gateway sessions", async () => {
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        const openclawRoot = createTemporaryRoot("mira-agent-status-test-");
+        const agentsRoot = path.join(openclawRoot, "agents");
+        const miraSessions = path.join(agentsRoot, "mira-2026", "sessions");
+        const coderSessions = path.join(agentsRoot, "coder", "sessions");
+        mkdirSync(miraSessions, { recursive: true });
+        mkdirSync(coderSessions, { recursive: true });
+        process.env.OPENCLAW_HOME = openclawRoot;
+        delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        writeFileSync(
+            path.join(openclawRoot, "openclaw.json"),
+            JSON.stringify({
+                agents: {
+                    defaults: {
+                        model: { primary: "codex" },
+                        models: {
+                            "openai/gpt-5.5": { alias: "codex" },
+                        },
+                    },
+                    list: [
+                        { default: true, id: "mira-2026" },
+                        { id: "coder", model: { primary: "openai/gpt-4.1" } },
+                    ],
+                },
+            })
+        );
+        writeFileSync(
+            path.join(miraSessions, "metadata.json"),
+            JSON.stringify({ currentTask: "Temp agent task" })
+        );
+        writeFileSync(
+            path.join(miraSessions, "sessions.json"),
+            JSON.stringify([
+                {
+                    channel: "main",
+                    key: "agent:mira-2026:main",
+                    sessionId: "session-main",
+                    updatedAt: Date.now(),
+                },
+                { key: 123, updatedAt: "bad" },
+            ])
+        );
+
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const originalGetSessions = gateway.getSessions;
+        const originalRequest = gateway.request;
+        cleanupCallbacks.push(() => {
+            gateway.getSessions = originalGetSessions;
+            gateway.request = originalRequest;
+        });
+        gateway.getSessions = () => [
+            {
+                agentType: "coder",
+                channel: "main",
+                createdAt: undefined,
+                displayLabel: "Coder",
+                displayName: "Coder",
+                hookName: "",
+                id: "cached",
+                key: "agent:coder:main",
+                label: "",
+                maxTokens: 200_000,
+                model: "unknown",
+                tokenCount: 0,
+                type: "MAIN",
+                updatedAt: Date.now(),
+            },
+        ];
+        gateway.request = async (method) => {
+            if (method === "sessions.list") {
+                return {
+                    sessions: [
+                        {
+                            isRunning: true,
+                            key: "agent:mira-2026:main",
+                            model: "openai/gpt-5.5",
+                            status: "running",
+                            updatedAt: Date.now(),
+                        },
+                        {
+                            endedAt: Date.now(),
+                            key: "agent:coder:main",
+                            model: "openai/gpt-4.1",
+                            status: "exited",
+                            updatedAt: Date.now() - 120_000,
+                        },
+                        { key: "", model: "ignored" },
+                    ],
+                };
+            }
+            throw new Error(`unexpected gateway method: ${method}`);
+        };
+
+        const { buildAgentStatuses, buildSingleAgentStatus, parseAgentsConfig } =
+            await import("../src/services/agents.ts");
+
+        expect(parseAgentsConfig()).toMatchObject({
+            defaults: { model: { primary: "codex" } },
+            list: [{ id: "mira-2026" }, { id: "coder" }],
+        });
+        const statuses = await buildAgentStatuses(parseAgentsConfig()!);
+        expect(statuses).toContainEqual(
+            expect.objectContaining({
+                currentTask: "Temp agent task",
+                id: "mira-2026",
+                model: "gpt-5.5",
+                sessionKey: "agent:mira-2026:main",
+                status: "thinking",
+            })
+        );
+        expect(statuses).toContainEqual(
+            expect.objectContaining({
+                id: "coder",
+                model: "gpt-4.1",
+                sessionKey: "agent:coder:main",
+            })
+        );
+        await expect(
+            buildSingleAgentStatus("missing", parseAgentsConfig()!)
+        ).resolves.toBe(undefined);
+        await expect(
+            buildSingleAgentStatus("coder", parseAgentsConfig()!)
+        ).resolves.toMatchObject({
+            id: "coder",
+            model: "gpt-4.1",
+        });
+
+        const originalConsoleError = console.error;
+        console.error = () => {};
+        cleanupCallbacks.push(() => {
+            console.error = originalConsoleError;
+        });
+        writeFileSync(path.join(openclawRoot, "openclaw.json"), "{");
+        try {
+            expect(parseAgentsConfig()).toBeUndefined();
+        } finally {
+            console.error = originalConsoleError;
         }
     });
 
