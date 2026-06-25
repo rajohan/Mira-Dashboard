@@ -12,9 +12,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { Server } from "bun";
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import { database } from "../src/database.ts";
+import type {
+    OpenClawGatewayClientInstance,
+    OpenClawGatewayClientOptions,
+} from "../src/lib/openclawGatewayClient.ts";
 
 const cleanupCallbacks: Array<() => void> = [];
 
@@ -130,6 +134,18 @@ function fakeServer(address = "127.0.0.1"): Server<unknown> {
     } as unknown as Server<unknown>;
 }
 
+class NoopGatewayClient implements OpenClawGatewayClientInstance {
+    constructor(readonly options: OpenClawGatewayClientOptions) {}
+
+    async request(method: string, parameters?: unknown): Promise<unknown> {
+        return { method, parameters };
+    }
+
+    start(): void {}
+
+    stop(): void {}
+}
+
 async function responseJson(response: Response): Promise<Record<string, unknown>> {
     return (await response.json()) as Record<string, unknown>;
 }
@@ -177,6 +193,11 @@ afterEach(() => {
 describe("backend route and service behavior", () => {
     it("auth route validation, login, session, and logout branches", async () => {
         isolateOpenClawEnvironment("mira-auth-route-coverage-");
+        const gatewayModule = await import("../src/gateway.ts");
+        cleanupCallbacks.push(
+            gatewayModule.setGatewayClientConstructorForTests(NoopGatewayClient),
+            () => gatewayModule.default.shutdown()
+        );
         const { authRoutes } = await import("../src/routes/authRoutes.ts");
         const { createUser } = await import("../src/auth.ts");
         const server = fakeServer();
@@ -198,6 +219,36 @@ describe("backend route and service behavior", () => {
             error: "Username must be 3-32 chars: letters, numbers, dot, dash, underscore",
         });
 
+        const invalidFirstUserPassword = await authRoutes[
+            "/api/auth/register-first-user"
+        ].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "token",
+                password: "short",
+                username,
+            }),
+            server
+        );
+        expect(invalidFirstUserPassword.status).toBe(400);
+        await expect(invalidFirstUserPassword.json()).resolves.toEqual({
+            error: "Password must be 8-256 characters",
+        });
+
+        const missingGatewayToken = await authRoutes[
+            "/api/auth/register-first-user"
+        ].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: " ",
+                password: "correct-password",
+                username,
+            }),
+            server
+        );
+        expect(missingGatewayToken.status).toBe(400);
+        await expect(missingGatewayToken.json()).resolves.toEqual({
+            error: "Gateway token is required for first-user setup",
+        });
+
         const bootstrapLogin = await authRoutes["/api/auth/login"].POST(
             jsonRequest("/api/auth/login", {
                 password: "correct-password",
@@ -216,6 +267,27 @@ describe("backend route and service behavior", () => {
             server
         );
         expect(invalidLogin.status).toBe(401);
+
+        const invalidLoginBody = await authRoutes["/api/auth/login"].POST(
+            jsonRequest("/api/auth/login", ["not", "an", "object"]),
+            server
+        );
+        expect(invalidLoginBody.status).toBe(400);
+        await expect(invalidLoginBody.json()).resolves.toEqual({
+            error: "Invalid request body",
+        });
+
+        const invalidLoginFields = await authRoutes["/api/auth/login"].POST(
+            jsonRequest("/api/auth/login", {
+                password: "short",
+                username: "x",
+            }),
+            server
+        );
+        expect(invalidLoginFields.status).toBe(400);
+        await expect(invalidLoginFields.json()).resolves.toEqual({
+            error: "Username and password are required",
+        });
 
         const login = await authRoutes["/api/auth/login"].POST(
             jsonRequest("/api/auth/login", {
@@ -243,6 +315,17 @@ describe("backend route and service behavior", () => {
             isBootstrapRequired: false,
         });
 
+        const anonymousSession = await authRoutes["/api/auth/session"].GET(
+            new Request("https://test.local/api/auth/session", {
+                headers: { "x-real-ip": "10.0.0.25" },
+            }),
+            server
+        );
+        await expect(anonymousSession.json()).resolves.toMatchObject({
+            authenticated: false,
+            isBootstrapRequired: false,
+        });
+
         const logout = authRoutes["/api/auth/logout"].POST(
             new Request("https://test.local/api/auth/logout", {
                 headers: { cookie },
@@ -252,6 +335,58 @@ describe("backend route and service behavior", () => {
         );
         expect(await responseJson(logout)).toEqual({ isOk: true });
         expect(logout.headers.get("set-cookie")).toContain("Max-Age=0");
+
+        const anonymousLogout = authRoutes["/api/auth/logout"].POST(
+            new Request("https://test.local/api/auth/logout", { method: "POST" }),
+            server
+        );
+        expect(await responseJson(anonymousLogout)).toEqual({ isOk: true });
+    });
+
+    it("registers the first user and initializes Gateway using isolated state", async () => {
+        isolateOpenClawEnvironment("mira-first-user-route-coverage-");
+        const gatewayModule = await import("../src/gateway.ts");
+        cleanupCallbacks.push(
+            gatewayModule.setGatewayClientConstructorForTests(NoopGatewayClient),
+            () => gatewayModule.default.shutdown()
+        );
+        const { authRoutes } = await import("../src/routes/authRoutes.ts");
+        const server = fakeServer();
+        const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
+
+        const response = await authRoutes["/api/auth/register-first-user"].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "test-gateway-token",
+                password: "correct-password",
+                username,
+            }),
+            server
+        );
+
+        expect(response.status).toBe(201);
+        expect(response.headers.get("set-cookie")).toContain("mira_dashboard_session=");
+        await expect(response.json()).resolves.toMatchObject({
+            authenticated: true,
+            user: { username },
+        });
+        const bootstrap = await authRoutes["/api/auth/bootstrap"].GET();
+        await expect(bootstrap.json()).resolves.toEqual({
+            hasGatewayToken: true,
+            isBootstrapRequired: false,
+        });
+
+        const secondResponse = await authRoutes["/api/auth/register-first-user"].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "test-gateway-token",
+                password: "correct-password",
+                username: `coverage-${Bun.randomUUIDv7().slice(-8)}`,
+            }),
+            server
+        );
+        expect(secondResponse.status).toBe(409);
+        await expect(secondResponse.json()).resolves.toEqual({
+            error: "Bootstrap registration is no longer available",
+        });
     });
 
     it("task route automation, validation, assignment, movement, updates, and deletion", async () => {
@@ -1235,8 +1370,12 @@ describe("backend route and service behavior", () => {
         const { fetchCachedSystemHost } = await import("../src/lib/systemCache.ts");
         const { runQuotaNotificationCheck } =
             await import("../src/services/quotaNotifications.ts");
-        const { runOpenClawNotificationCheck } =
-            await import("../src/services/openclawNotifications.ts");
+        const {
+            registerOpenClawNotificationScheduledJobs,
+            runOpenClawNotificationCheck,
+        } = await import("../src/services/openclawNotifications.ts");
+        const { getScheduledJob, runScheduledJob } =
+            await import("../src/services/scheduledJobs.ts");
 
         expect(TASK_ASSIGNEE_IDS).toContain(TASK_ASSIGNEES.mira.id);
         expect(hasQuotaStatus({ status: "not_configured" })).toBe(true);
@@ -1359,6 +1498,55 @@ describe("backend route and service behavior", () => {
             description: "Current 1.0.0 \u{2192} latest 1.1.0.",
             title: "OpenClaw update available",
         });
+
+        writeCacheSuccess({
+            key: "system.host",
+            data: {
+                checkedAt: "2026-06-25T11:00:00.000Z",
+                gateway: undefined,
+                version: {
+                    checkedAt,
+                    current: "1.1.0",
+                    latest: "1.1.0",
+                    updateAvailable: false,
+                },
+            },
+            metadata: { source: "test" },
+            source: "coverage",
+            ttl: 1,
+            ttlUnit: "hours",
+        });
+        expect(await runOpenClawNotificationCheck()).toBe(true);
+
+        registerOpenClawNotificationScheduledJobs();
+        expect(getScheduledJob("notifications.openclaw")).toMatchObject({
+            actionKey: "notifications.openclaw",
+            enabled: true,
+            intervalSeconds: 3600,
+        });
+        const notificationRun = await runScheduledJob("notifications.openclaw");
+        expect(notificationRun).toMatchObject({
+            jobId: "notifications.openclaw",
+            status: "success",
+        });
+
+        writeCacheSuccess({
+            key: "system.host",
+            data: {
+                checkedAt: "2026-06-25T12:00:00.000Z",
+                gateway: undefined,
+            },
+            metadata: { source: "test" },
+            source: "coverage",
+            ttl: 1,
+            ttlUnit: "hours",
+        });
+        const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            expect(await runOpenClawNotificationCheck()).toBe(false);
+        } finally {
+            consoleSpy.mockRestore();
+        }
     });
 
     it("refreshes Moltbook cache entries through normalized API responses", async () => {

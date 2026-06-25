@@ -1,4 +1,5 @@
 import {
+    appendFileSync,
     chmodSync,
     mkdirSync,
     mkdtempSync,
@@ -355,10 +356,8 @@ describe("backend service behavior", () => {
         process.env.MIRA_DASHBOARD_LOGS_ROOT = logsRoot;
 
         const today = new Date().toISOString().split("T", 1)[0];
-        writeFileSync(
-            path.join(logsRoot, `openclaw-${today}.log`),
-            "first line\nsecond line\n"
-        );
+        const logFile = path.join(logsRoot, `openclaw-${today}.log`);
+        writeFileSync(logFile, "first line\nsecond line\n");
 
         const messages: unknown[] = [];
         const socket = {
@@ -386,6 +385,16 @@ describe("backend service behavior", () => {
                 type: "log_history_complete",
                 count: 2,
             });
+
+            appendFileSync(logFile, "third line\n");
+            await waitFor(
+                () =>
+                    messages.some((message) =>
+                        JSON.stringify(message).includes("third line")
+                    ),
+                2500
+            );
+            expect(messages).toContainEqual({ type: "log", line: "third line" });
         } finally {
             unsubscribeFromLogs(socket);
         }
