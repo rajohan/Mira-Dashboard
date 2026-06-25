@@ -1504,7 +1504,7 @@ describe("Mira Dashboard pages", () => {
             ).toBeInTheDocument();
 
             await user.click(screen.getByRole("button", { name: /^skills$/i }));
-            await user.click(screen.getAllByRole("switch")[0]!);
+            await user.click(screen.getByRole("switch", { name: "task-tracking" }));
 
             await user.click(screen.getByRole("button", { name: /^restart$/i }));
             const restartDialog = screen.getByRole("dialog", {

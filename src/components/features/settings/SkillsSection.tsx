@@ -146,6 +146,7 @@ export function SkillsSection({ skills, onToggle }: SkillsSectionProperties) {
                                     )}
                                 </div>
                                 <Switch
+                                    label={skill.name}
                                     isChecked={skill.enabled}
                                     onChange={(isChecked) =>
                                         onToggle(skill.name, isChecked)
