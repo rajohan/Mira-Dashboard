@@ -361,7 +361,12 @@ describe("Docker updater tag patterns", () => {
         expect(runProcessSpy).toHaveBeenCalledWith(
             process.env.MIRA_DOCKER_COMPOSE_WRAPPER,
             ["-f", composePath, "up", "-d", "--pull", "always", "web"],
-            expect.objectContaining({ cwd: appRoot, timeoutMs: 180_000 })
+            {
+                cwd: appRoot,
+                env: process.env,
+                maxBuffer: 10 * 1024 * 1024,
+                timeoutMs: 180_000,
+            }
         );
         expect(runProcessSpy).toHaveBeenCalledWith(
             "docker",
@@ -417,6 +422,7 @@ describe("Docker updater tag patterns", () => {
                         },
                     });
                 }
+                expect(headers.get("authorization")).toBe("Bearer registry-token");
                 return Response.json(
                     { tags: ["1.0.0", "1.1.0"] },
                     {

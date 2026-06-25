@@ -171,6 +171,26 @@ if [[ "$*" == *"pgrep -f"* ]]; then
   printf '%s\n' "__MIRA_CONTAINER_PGREP_NO_MATCH__"
   exit 1
 fi
+if [[ "$*" == "exec kopia kopia snapshot list --all --json-verbose --json" ]]; then
+  now="$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")"
+  cat <<JSON
+[
+  {"id":"snap-docker","source":{"path":"/source/docker"},"stats":{"fileCount":2,"totalSize":200,"errorCount":0,"ignoredErrorCount":0},"startTime":"$now","endTime":"$now","retentionReason":["latest"]},
+  {"id":"snap-openclaw","source":{"path":"/source/openclaw"},"stats":{"fileCount":3,"totalSize":300,"errorCount":0,"ignoredErrorCount":0},"startTime":"$now","endTime":"$now","retentionReason":["latest"]},
+  {"id":"snap-projects","source":{"path":"/source/projects"},"stats":{"fileCount":4,"totalSize":400,"errorCount":0,"ignoredErrorCount":0},"startTime":"$now","endTime":"$now","retentionReason":["latest"]}
+]
+JSON
+  exit 0
+fi
+if [[ "$*" == "exec walg wal-g backup-list --detail --json" ]]; then
+  now="$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")"
+  cat <<JSON
+[
+  {"backup_name":"base_0001","finish_time":"$now","start_time":"$now","wal_file_name":"000000010000000000000001","storage_name":"default"}
+]
+JSON
+  exit 0
+fi
 if [[ "$*" == "exec walg /bin/sh /usr/local/bin/backup-push.sh" ]]; then
   printf '%s\n' "backup ok"
   exit 0
@@ -354,8 +374,8 @@ describe("backend service behavior", () => {
         expect(database.prepare("SELECT 1 AS value").get()).toEqual({ value: 1 });
 
         process.env.MIRA_DASHBOARD_DB_PATH = path.join(
-            process.cwd(),
-            "data",
+            path.parse(tmpdir()).root,
+            "mira-dashboard-non-temporary-test",
             `unsafe-${Bun.randomUUIDv7()}.db`
         );
         expect(() => database.prepare("SELECT 1").get()).toThrow(
