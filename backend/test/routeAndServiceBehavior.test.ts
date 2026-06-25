@@ -206,7 +206,7 @@ afterEach(() => {
         .run();
     database
         .prepare(
-            "DELETE FROM cache_entries WHERE key IN ('quotas.summary', 'system.host', 'system.openclaw', 'git.workspace', 'backup.kopia.status', 'backup.walg.status', 'log_rotation.state')"
+            "DELETE FROM cache_entries WHERE key IN ('quotas.summary', 'system.host', 'system.openclaw', 'git.workspace', 'backup.kopia.status', 'backup.walg.status', 'log_rotation.state', 'weather.spydeberg')"
         )
         .run();
     database.prepare("DELETE FROM cache_entries WHERE key LIKE 'moltbook.%'").run();
