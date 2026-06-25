@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -263,6 +263,111 @@ describe("Docker updater tag patterns", () => {
 
         await expect(runDockerUpdaterService()).resolves.toEqual([registered]);
         expect(runProcessSpy).not.toHaveBeenCalled();
+    });
+
+    it("applies a manual update to an isolated Compose file without invoking real Docker", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_PLATFORM");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-apply-");
+        const appRoot = path.join(appsRoot, "unit-apply-app");
+        const composePath = path.join(appRoot, "compose.yaml");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            composePath,
+            [
+                "services:",
+                "  web:",
+                "    image: ghcr.io/unit/web:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'false'",
+                "      mira.updater.track: tag",
+                String.raw`      mira.updater.tagPattern: '^\d+\.\d+\.\d+$'`,
+                "      mira.updater.tagPatternIsRegex: 'true'",
+                "",
+            ].join("\n")
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        process.env.MIRA_DOCKER_COMPOSE_WRAPPER = path.join(appsRoot, "compose-wrapper");
+        process.env.MIRA_DOCKER_UPDATER_PLATFORM = "linux/amd64";
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.endsWith("/v2/unit/web/tags/list?n=1000")) {
+                return Response.json({ tags: ["1.0.0", "1.0.1"] });
+            }
+            if (url.endsWith("/v2/unit/web/manifests/1.0.1")) {
+                return Response.json({
+                    manifests: [
+                        {
+                            digest: "sha256:newdigest",
+                            platform: { architecture: "amd64", os: "linux" },
+                        },
+                    ],
+                });
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockResolvedValue({ code: 0, stderr: "", stdout: "compose ok" });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        const registered = await registerDockerUpdaterServices();
+        expect(registered.isOk).toBe(true);
+        const service = database
+            .prepare(
+                `SELECT id
+                 FROM docker_managed_services
+                 WHERE app_slug = 'unit-apply-app' AND service_name = 'web'`
+            )
+            .get() as { id: number };
+
+        const steps = await runDockerUpdaterService(service.id);
+        expect(steps).toContainEqual(
+            expect.objectContaining({
+                isOk: true,
+                step: "manual-update:unit-apply-app/web",
+                stdout: "compose ok",
+            })
+        );
+        expect(readFileSync(composePath, "utf8")).toContain(
+            "image: ghcr.io/unit/web:1.0.1"
+        );
+        expect(
+            database
+                .prepare(
+                    "SELECT current_tag, current_digest, last_status FROM docker_managed_services WHERE id = ?"
+                )
+                .get(service.id)
+        ).toEqual({
+            current_digest: "sha256:newdigest",
+            current_tag: "1.0.1",
+            last_status: "updated",
+        });
+        expect(
+            database
+                .prepare(
+                    "SELECT event_type FROM docker_update_events WHERE managed_service_id = ? ORDER BY id"
+                )
+                .all(service.id)
+        ).toEqual([
+            { event_type: "update_available" },
+            { event_type: "manual_update_succeeded" },
+        ]);
+        expect(runProcessSpy).toHaveBeenCalledWith(
+            process.env.MIRA_DOCKER_COMPOSE_WRAPPER,
+            expect.arrayContaining(["up", "-d", "--pull", "always", "web"]),
+            expect.objectContaining({ cwd: appRoot })
+        );
+        expect(runProcessSpy).toHaveBeenCalledWith(
+            "docker",
+            ["image", "prune", "-f"],
+            expect.objectContaining({ timeoutMs: 120_000 })
+        );
     });
 
     it("reports manual update guard states without touching Docker", async () => {

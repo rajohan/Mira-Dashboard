@@ -855,6 +855,29 @@ fi
         expect(socket?.closeCode).toBe(1000);
     });
 
+    it("reports disconnected gateway state without starting a Gateway client", async () => {
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+
+        gateway.shutdown();
+
+        expect(gateway.isConnected()).toBe(false);
+        expect(gateway.getStatus()).toEqual({ gateway: "disconnected", sessions: 0 });
+        expect(gateway.getGatewayWs()).toBeUndefined();
+        await expect(gateway.request("sessions.list", {})).rejects.toThrow(
+            "Gateway not connected"
+        );
+        await expect(
+            gateway.sendSessionMessage("agent:main:main", "hello")
+        ).rejects.toThrow("Gateway not connected");
+        await expect(gateway.abortSessionRun("agent:main:main")).rejects.toThrow(
+            "Gateway not connected"
+        );
+        await expect(gateway.deleteSession("agent:main:main")).rejects.toThrow(
+            "Gateway not connected"
+        );
+    });
+
     it("returns conflict/not-found errors for clearing inactive backup jobs", async () => {
         const { clearNeedsAttentionBackupJob, mapBackupJob } =
             await import("../src/services/backups.ts");
@@ -1043,6 +1066,53 @@ fi
                 isDryRun: true,
             })
         ).rejects.toThrow();
+    });
+
+    it("reports an active log rotation lock without touching configured log files", async () => {
+        const rotationRoot = createTemporaryRoot("mira-log-rotation-lock-test-");
+        const logFile = path.join(rotationRoot, "locked.log");
+        const configFile = path.join(rotationRoot, "log-rotation.json");
+        const lockFile = path.join(process.cwd(), "data", "log-rotation.lock");
+        mkdirSync(path.dirname(lockFile), { recursive: true });
+        writeFileSync(lockFile, `${process.pid}\n`);
+        cleanupCallbacks.push(() => {
+            rmSync(lockFile, { force: true });
+            rmSync(`${lockFile}.reclaim`, { force: true, recursive: true });
+        });
+        writeFileSync(logFile, "do not rotate\n");
+        writeFileSync(
+            configFile,
+            JSON.stringify({
+                approvedRoots: [rotationRoot],
+                defaults: {
+                    compress: false,
+                    keep: 1,
+                    maxSizeMb: 0.000001,
+                    missingOk: false,
+                    skipEmpty: false,
+                    strategy: "copytruncate",
+                },
+                groups: [{ name: "locked", paths: [logFile] }],
+                version: 1,
+            })
+        );
+        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+
+        const summary = await runLogRotationService({
+            config: configFile,
+            isDryRun: false,
+        });
+
+        expect(summary).toMatchObject({
+            checkedFiles: 0,
+            isDryRun: false,
+            isOk: false,
+            rotatedFiles: 0,
+        });
+        expect(summary.errors).toContainEqual({
+            message: "Log rotation is already running",
+        });
+        expect(readFileSync(logFile, "utf8")).toBe("do not rotate\n");
     });
 
     it("updates agent metadata and rolls active task history forward", async () => {
