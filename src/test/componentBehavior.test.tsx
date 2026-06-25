@@ -1133,7 +1133,7 @@ describe("shared component helpers", () => {
         expect(screen.getByLabelText("Assistant is working")).toBeInTheDocument();
     });
 
-    it("renders file content variants and editable text changes", () => {
+    it("renders file content variants and editable text changes", async () => {
         const onContentChange = jest.fn();
         const baseFile = {
             content: "hello",
@@ -1220,6 +1220,63 @@ describe("shared component helpers", () => {
             target: { value: "const ok = false;" },
         });
         expect(onContentChange).toHaveBeenCalledWith("const ok = false;");
+
+        rerender(
+            <FileContentViewer
+                fileContent={{ ...baseFile, path: "/tmp/notes.md" }}
+                editedContent="# Previewed notes"
+                onContentChange={onContentChange}
+                largeFileWarning={false}
+                isEditable={true}
+                markdownPreview={true}
+                jsonPreview={false}
+                codeEditMode={false}
+                syntaxClass=""
+            />
+        );
+        await waitFor(() => {
+            expect(
+                screen.getByRole("heading", { name: "Previewed notes" })
+            ).toBeInTheDocument();
+        });
+
+        rerender(
+            <FileContentViewer
+                fileContent={{ ...baseFile, path: "/tmp/config.json" }}
+                editedContent="{foo: 'viewer'}"
+                onContentChange={onContentChange}
+                largeFileWarning={false}
+                isEditable={true}
+                markdownPreview={false}
+                jsonPreview={true}
+                codeEditMode={false}
+                syntaxClass=""
+            />
+        );
+        await waitFor(() => {
+            expect(
+                screen.getAllByText((_content, element) =>
+                    Boolean(element?.textContent?.includes("viewer"))
+                ).length
+            ).toBeGreaterThan(0);
+        });
+
+        rerender(
+            <FileContentViewer
+                fileContent={{ ...baseFile, path: "/tmp/script.ts" }}
+                editedContent="const previewed = true;"
+                onContentChange={onContentChange}
+                largeFileWarning={false}
+                isEditable={true}
+                markdownPreview={false}
+                jsonPreview={false}
+                codeEditMode={false}
+                syntaxClass=""
+            />
+        );
+        await waitFor(() => {
+            expect(screen.getByText(/previewed/)).toBeInTheDocument();
+        });
 
         rerender(<MarkdownPreview content={"# Notes\n\n- one"} />);
         expect(screen.getByRole("heading", { name: "Notes" })).toBeInTheDocument();
