@@ -710,6 +710,75 @@ describe("backend service behavior", () => {
         await expect(waitForLocalCacheSeed("missing.key")).resolves.toBeUndefined();
     });
 
+    it("refreshes supported cache keys through the cache route", async () => {
+        cleanupCallbacks.push(() => {
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'weather.spydeberg'")
+                .run();
+        });
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.startsWith("https://wttr.in/Spydeberg")) {
+                return Response.json({
+                    current_condition: [
+                        {
+                            FeelsLikeC: "8",
+                            humidity: "75",
+                            temp_C: "10",
+                            weatherCode: "116",
+                            weatherDesc: [{ value: "Partly cloudy" }],
+                            windspeedKmph: "14",
+                        },
+                    ],
+                    nearest_area: [{ areaName: [{ value: "Spydeberg" }] }],
+                    weather: [
+                        {
+                            date: "2026-06-26",
+                            maxtempC: "18",
+                            mintempC: "7",
+                            hourly: [
+                                {
+                                    weatherCode: "116",
+                                    weatherDesc: [{ value: "Partly cloudy" }],
+                                },
+                            ],
+                        },
+                    ],
+                });
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+
+        const { cacheRoutes } = await import("../src/routes/cacheRoutes.ts");
+        const response = await cacheRoutes["/api/cache/:key/refresh"].POST(
+            Object.assign(
+                new Request(
+                    "https://dashboard.test/api/cache/weather.spydeberg/refresh",
+                    { method: "POST" }
+                ),
+                { params: { key: "weather.spydeberg" } }
+            )
+        );
+
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toMatchObject({
+            entry: {
+                data: {
+                    description: "Partly cloudy",
+                    location: "Spydeberg",
+                    temperatureC: 10,
+                },
+                key: "weather.spydeberg",
+                source: "wttr.in",
+                status: "fresh",
+            },
+            isOk: true,
+        });
+    });
+
     it("maps recent deployment jobs in newest-first order", async () => {
         const olderId = `test-deploy-older-${Bun.randomUUIDv7()}`;
         const newerId = `test-deploy-newer-${Bun.randomUUIDv7()}`;

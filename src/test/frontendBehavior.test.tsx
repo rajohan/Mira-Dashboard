@@ -77,6 +77,12 @@ import { Badge, getSessionTypeVariant } from "../components/ui/Badge";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { Dropdown } from "../components/ui/Dropdown";
 import { SearchInput } from "../components/ui/SearchInput";
+import {
+    useAgentsConfig,
+    useAgentsStatus,
+    useAgentStatus,
+    useAgentTaskHistory,
+} from "../hooks/useAgents";
 import { apiFetch, UnauthorizedError } from "../hooks/useApi";
 import {
     useClearKopiaBackupAttention,
@@ -1335,6 +1341,57 @@ describe("Mira Dashboard frontend behavior", () => {
                     });
                 }
 
+                if (url === "/api/agents/status" && method === "GET") {
+                    return Response.json({
+                        agents: [
+                            {
+                                id: "main",
+                                name: "Mira",
+                                status: "online",
+                                currentTask: "Expanding tests",
+                            },
+                        ],
+                        timestamp: 1_782_475_200_000,
+                    });
+                }
+
+                if (url === "/api/agents/config" && method === "GET") {
+                    return Response.json({
+                        defaults: {
+                            model: { primary: "codex", fallbacks: ["kimi"] },
+                        },
+                        list: [
+                            {
+                                default: true,
+                                id: "main",
+                                model: { primary: "codex", fallbacks: ["kimi"] },
+                                subagents: { allowAgents: ["coder"] },
+                            },
+                        ],
+                    });
+                }
+
+                if (url === "/api/agents/tasks/history?limit=3" && method === "GET") {
+                    return Response.json({
+                        tasks: [
+                            {
+                                archivedAt: "2026-06-23T08:00:00.000Z",
+                                task: "Finished a coverage batch",
+                            },
+                        ],
+                        timestamp: 1_782_475_201_000,
+                    });
+                }
+
+                if (url === "/api/agents/main/status" && method === "GET") {
+                    return Response.json({
+                        id: "main",
+                        name: "Mira",
+                        status: "online",
+                        currentTask: "Expanding tests",
+                    });
+                }
+
                 if (url === "/api/files/src%2Fmain.tsx" && method === "PUT") {
                     expect(JSON.parse(String(init?.body))).toEqual({
                         content: "updated",
@@ -1502,6 +1559,32 @@ describe("Mira Dashboard frontend behavior", () => {
         );
         await waitFor(() =>
             expect(configContent.result.current.data?.content).toBe("{}")
+        );
+
+        const agentsStatus = renderHookWithQueryClient(() => useAgentsStatus());
+        await waitFor(() =>
+            expect(agentsStatus.result.current.data?.agents[0]?.currentTask).toBe(
+                "Expanding tests"
+            )
+        );
+
+        const agentsConfig = renderHookWithQueryClient(() => useAgentsConfig());
+        await waitFor(() =>
+            expect(agentsConfig.result.current.data?.defaults.model?.primary).toBe(
+                "codex"
+            )
+        );
+
+        const agentTaskHistory = renderHookWithQueryClient(() => useAgentTaskHistory(3));
+        await waitFor(() =>
+            expect(agentTaskHistory.result.current.data?.tasks[0]?.task).toBe(
+                "Finished a coverage batch"
+            )
+        );
+
+        const agentStatus = renderHookWithQueryClient(() => useAgentStatus("main"));
+        await waitFor(() =>
+            expect(agentStatus.result.current.data?.currentTask).toBe("Expanding tests")
         );
 
         const saveFile = renderHookWithQueryClient(() => useSaveFile());
