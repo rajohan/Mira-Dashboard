@@ -1066,11 +1066,40 @@ fi
             message: "PR #5 closed",
         });
 
+        const defaultRejectRoute = await pullRequestRoutes[
+            "/api/pull-requests/:number/reject"
+        ].POST(routeRequest("/api/pull-requests/5/reject", { number: "5" }));
+        await expect(defaultRejectRoute.json()).resolves.toMatchObject({
+            isOk: true,
+            message: "PR #5 closed",
+        });
+
+        const malformedApproveRoute = await pullRequestRoutes[
+            "/api/pull-requests/:number/approve"
+        ].POST(
+            routeRequest(
+                "/api/pull-requests/3/approve",
+                { number: "3" },
+                {
+                    body: "{",
+                    headers: { "Content-Type": "application/json" },
+                    method: "POST",
+                }
+            )
+        );
+        expect(malformedApproveRoute.status).toBe(400);
+        await expect(malformedApproveRoute.json()).resolves.toMatchObject({
+            error: expect.stringContaining("JSON"),
+        });
+
         await expect(Bun.file(ghLog).text()).resolves.toContain("pr review 3");
         await expect(Bun.file(ghLog).text()).resolves.toContain(
             "repos/rajohan/Mira-Dashboard/pulls/4/update-branch"
         );
         await expect(Bun.file(ghLog).text()).resolves.toContain("pr close 5");
+        await expect(Bun.file(ghLog).text()).resolves.toContain(
+            "Closed from Mira Dashboard after Rajohan rejected it."
+        );
     });
 
     it("merges an approved pull request and removes its clean local worktree safely", async () => {
@@ -3495,6 +3524,52 @@ fi
             status: "signaled",
         });
         expect(() => stopExecJob(jobId)).toThrow("Job is not running");
+    });
+
+    it("rejects new exec jobs while the active job cap is full", async () => {
+        const { execErrorResponse, startExecJob } =
+            await import("../src/services/execJobs.ts");
+        const exits: Array<ReturnType<typeof Promise.withResolvers<number>>> = [];
+        const spawnSpy = jest
+            .spyOn(processModule, "spawnProcess")
+            .mockImplementation(() => {
+                const exit = Promise.withResolvers<number>();
+                exits.push(exit);
+                return {
+                    exited: exit.promise,
+                    kill: () => {},
+                    pid: 987,
+                    stderr: readableUtf8Stream(""),
+                    stdout: readableUtf8Stream(""),
+                } as unknown as processModule.BunProcess;
+            });
+        const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+        try {
+            let capError: unknown;
+            for (let index = 0; index < 120 && !capError; index += 1) {
+                try {
+                    startExecJob({
+                        command: "__mira_dashboard_shell_smoke_test__",
+                        shell: true,
+                    });
+                } catch (error) {
+                    capError = error;
+                }
+            }
+            expect(execErrorResponse(capError)).toEqual({
+                error: "Too many exec jobs",
+                status: 429,
+            });
+            expect(warnSpy).toHaveBeenCalled();
+        } finally {
+            for (const exit of exits) {
+                exit.resolve(0);
+            }
+            await Bun.sleep(0);
+            spawnSpy.mockRestore();
+            warnSpy.mockRestore();
+        }
     });
 
     it("records exec process failures and trims oversized output", async () => {

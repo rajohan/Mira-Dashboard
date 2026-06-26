@@ -980,6 +980,7 @@ describe("backend route and service behavior", () => {
             { cronRoutes },
             { dockerRoutes },
             gatewayModule,
+            { jobRoutes },
             { moltbookRoutes },
             { pullRequestRoutes },
             { terminalRoutes },
@@ -989,6 +990,7 @@ describe("backend route and service behavior", () => {
             import("../src/routes/cronRoutes.ts"),
             import("../src/routes/dockerRoutes.ts"),
             import("../src/gateway.ts"),
+            import("../src/routes/jobRoutes.ts"),
             import("../src/routes/moltbookRoutes.ts"),
             import("../src/routes/pullRequestRoutes.ts"),
             import("../src/routes/terminalRoutes.ts"),
@@ -1070,6 +1072,63 @@ describe("backend route and service behavior", () => {
 
         const backupStatus = backupRoutes["/api/backups/kopia"].GET();
         await expect(backupStatus.json()).resolves.toEqual({ job: undefined });
+
+        const missingJob = jobRoutes["/api/jobs/:id"].GET(
+            requestWithParameters("/api/jobs/missing-route-job", {
+                id: "missing-route-job",
+            })
+        );
+        expect(missingJob.status).toBe(404);
+        await expect(missingJob.json()).resolves.toEqual({
+            error: "Scheduled job not found",
+        });
+
+        const malformedJobPatch = await jobRoutes["/api/jobs/:id"].PATCH(
+            requestWithParameters(
+                "/api/jobs/missing-route-job",
+                { id: "missing-route-job" },
+                { body: "{", method: "PATCH" }
+            )
+        );
+        expect(malformedJobPatch.status).toBe(400);
+
+        const invalidJobPatchBody = await jobRoutes["/api/jobs/:id"].PATCH(
+            requestWithParameters(
+                "/api/jobs/missing-route-job",
+                { id: "missing-route-job" },
+                { body: JSON.stringify({ patch: [] }), method: "PATCH" }
+            )
+        );
+        expect(invalidJobPatchBody.status).toBe(400);
+
+        const invalidJobPatchField = await jobRoutes["/api/jobs/:id"].PATCH(
+            requestWithParameters(
+                "/api/jobs/missing-route-job",
+                { id: "missing-route-job" },
+                {
+                    body: JSON.stringify({ patch: { enabled: "yes" } }),
+                    method: "PATCH",
+                }
+            )
+        );
+        expect(invalidJobPatchField.status).toBe(400);
+        await expect(invalidJobPatchField.json()).resolves.toEqual({
+            error: "invalid patch field: enabled",
+        });
+
+        const missingJobRun = await jobRoutes["/api/jobs/:id/run"].POST(
+            requestWithParameters("/api/jobs/missing-route-job/run", {
+                id: "missing-route-job",
+            })
+        );
+        expect(missingJobRun.status).toBe(404);
+
+        const missingJobRuns = jobRoutes["/api/jobs/:id/runs"].GET(
+            requestWithParameters("/api/jobs/missing-route-job/runs", {
+                id: "missing-route-job",
+            })
+        );
+        expect(missingJobRuns.status).toBe(404);
 
         const terminalComplete = await terminalRoutes["/api/terminal/complete"].POST(
             jsonRequest("/api/terminal/complete", {
@@ -1373,6 +1432,40 @@ describe("backend route and service behavior", () => {
                 }),
             ],
         });
+
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
+        process.env.MIRA_DOCKER_APPS_ROOT = path.join(
+            terminalRoot,
+            "missing-docker-apps"
+        );
+        process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY = "1";
+        cleanupCallbacks.push(() => {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id = 'docker.updater'")
+                .run();
+            database
+                .prepare("DELETE FROM scheduled_jobs WHERE id = 'docker.updater'")
+                .run();
+        });
+        const updaterRun = await dockerRoutes["/api/docker/updater/run"].POST();
+        expect(updaterRun.status).toBe(200);
+        await expect(updaterRun.json()).resolves.toMatchObject({
+            isSuccess: false,
+            steps: [
+                expect.objectContaining({
+                    isOk: false,
+                    stderr: expect.stringContaining("Compose apps root not found"),
+                    step: "register-services",
+                }),
+            ],
+        });
+        const updaterRunRow = database
+            .prepare(
+                "SELECT status FROM scheduled_job_runs WHERE job_id = 'docker.updater' ORDER BY id DESC LIMIT 1"
+            )
+            .get() as { status?: string } | undefined;
+        expect(updaterRunRow).toEqual({ status: "failed" });
 
         const missingUpdaterService = await dockerRoutes[
             "/api/docker/updater/services/:serviceId/update"

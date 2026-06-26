@@ -1585,6 +1585,15 @@ describe("Mira Dashboard backend integration", () => {
             value: () => {},
             writable: true,
         });
+
+        delete process.env.ELEVENLABS_API_KEY;
+        const missingApiKey = await api<{ error: string }>(
+            "/api/tts/speak",
+            json("POST", { text: "Hei" })
+        );
+        expect(missingApiKey.status).toBe(500);
+        expect(missingApiKey.body.error).toBe("ELEVENLABS_API_KEY is not configured");
+
         process.env.ELEVENLABS_API_KEY = "test-elevenlabs-key";
         const fetchMock = async (input: Request | URL | string, init?: RequestInit) => {
             const url = String(input);
@@ -1606,6 +1615,16 @@ describe("Mira Dashboard backend integration", () => {
         });
 
         try {
+            const invalidJson = await fetch(`${testState.baseUrl}/api/tts/speak`, {
+                body: "{",
+                headers: { "Content-Type": "application/json" },
+                method: "POST",
+            });
+            expect(invalidJson.status).toBe(400);
+            expect(await invalidJson.json()).toMatchObject({
+                error: expect.stringContaining("JSON"),
+            });
+
             const missingText = await api<{ error: string }>(
                 "/api/tts/speak",
                 json("POST", { text: " ".repeat(3) })
