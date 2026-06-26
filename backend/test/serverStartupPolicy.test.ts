@@ -101,6 +101,59 @@ describe("server start scheduler policy", () => {
         }
     });
 
+    it("warns but keeps startup alive when no gateway token is configured", async () => {
+        const originalGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
+        const originalLegacyToken = process.env.OPENCLAW_TOKEN;
+        const originalSchedulerDisabled = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
+        process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER = "1";
+        delete process.env.OPENCLAW_GATEWAY_TOKEN;
+        delete process.env.OPENCLAW_TOKEN;
+        const gatewayModule = await import("../src/gateway.ts");
+        const { database } = await import("../src/database.ts");
+        const serverStartModule = await import("../src/serverStart.ts");
+        database.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
+        database
+            .prepare(
+                "INSERT INTO cache_entries (key, data_json, source, updated_at, last_attempt_at, expires_at, status, consecutive_failures, metadata_json) VALUES ('quotas.summary', '{\"providers\":[]}', 'test', ?, ?, ?, 'fresh', 0, '{}') ON CONFLICT(key) DO UPDATE SET data_json = excluded.data_json, source = excluded.source, updated_at = excluded.updated_at, last_attempt_at = excluded.last_attempt_at, expires_at = excluded.expires_at, status = excluded.status, consecutive_failures = excluded.consecutive_failures, metadata_json = excluded.metadata_json"
+            )
+            .run(Date.now(), Date.now(), Date.now() + 60_000);
+        const initSpy = jest
+            .spyOn(gatewayModule.default, "init")
+            .mockImplementation(() => {});
+        const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            serverStartModule.handleServerListening();
+            expect(initSpy).not.toHaveBeenCalled();
+            expect(warnSpy).toHaveBeenCalledWith(
+                "[Backend] No gateway token configured yet; waiting for bootstrap registration"
+            );
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        } finally {
+            initSpy.mockRestore();
+            warnSpy.mockRestore();
+            errorSpy.mockRestore();
+            if (originalGatewayToken === undefined) {
+                delete process.env.OPENCLAW_GATEWAY_TOKEN;
+            } else {
+                process.env.OPENCLAW_GATEWAY_TOKEN = originalGatewayToken;
+            }
+            if (originalLegacyToken === undefined) {
+                delete process.env.OPENCLAW_TOKEN;
+            } else {
+                process.env.OPENCLAW_TOKEN = originalLegacyToken;
+            }
+            if (originalSchedulerDisabled === undefined) {
+                delete process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
+            } else {
+                process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER = originalSchedulerDisabled;
+            }
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'quotas.summary'")
+                .run();
+        }
+    });
+
     it("starts and stops the backend server with isolated runtime state", async () => {
         const environmentKeys = [
             "MIRA_DASHBOARD_DB_PATH",

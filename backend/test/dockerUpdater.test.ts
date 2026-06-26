@@ -91,13 +91,20 @@ describe("Docker updater tag patterns", () => {
     });
 
     it("rejects unsupported or unsafe regex features", () => {
+        expect(isSafeTagRegexPattern("")).toBe(false);
+        expect(isSafeTagRegexPattern(`^${"1".repeat(129)}$`)).toBe(false);
         expect(isSafeTagRegexPattern("^(a+)+$")).toBe(false);
         expect(isSafeTagRegexPattern("^v(1|2)$")).toBe(false);
         expect(isSafeTagRegexPattern(String.raw`\d+\.\d+`)).toBe(false);
+        expect(isSafeTagRegexPattern(String.raw`^\d+\$`)).toBe(false);
+        expect(isSafeTagRegexPattern(String.raw`^\q+$`)).toBe(false);
+        expect(isSafeTagRegexPattern("^[0-8]+$")).toBe(false);
+        expect(isSafeTagRegexPattern("^[0-9]$")).toBe(false);
         expect(isSafeTagRegexPattern(String.raw`^\d+[0-9]+$`)).toBe(false);
         expect(isSafeTagRegexPattern(String.raw`^[0-9]+\d+$`)).toBe(false);
         expect(isSafeTagRegexPattern(String.raw`^\d+1$`)).toBe(false);
         expect(isSafeTagRegexPattern("^[0-9]+1$")).toBe(false);
+        expect(isSafeTagRegexPattern(String.raw`^\d+.$`)).toBe(false);
         expect(isSafeTagPatternMatch(String.raw`^\d+\.\d+\.\d+$$`, "1.2.x")).toBe(false);
         expect(isSafeTagPatternMatch(String.raw`^v\d+\.\d+\.\d+$$`, "1.2.3")).toBe(false);
         expect(isSafeTagPatternMatch(String.raw`^1\.\d+\.\d+$$`, "2.2.3")).toBe(false);
@@ -841,6 +848,106 @@ describe("Docker updater tag patterns", () => {
             authorization: "Bearer registry-token",
             url: "https://registry-1.docker.io/v2/library/nginx/tags/list?n=1000&page=2",
         });
+    });
+
+    it("polls GHCR tags through bearer auth access tokens and GitHub credentials", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_GITHUB_TOKEN");
+        rememberEnvironment("MIRA_GITHUB_USERNAME");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-ghcr-auth-");
+        const appRoot = path.join(appsRoot, "unit-ghcr-auth-app");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            path.join(appRoot, "compose.yaml"),
+            [
+                "services:",
+                "  web:",
+                "    image: ghcr.io/unit/access:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'false'",
+                "      mira.updater.track: tag",
+                String.raw`      mira.updater.tagPattern: '^1\.\d+\.\d+$'`,
+                "      mira.updater.tagPatternIsRegex: 'true'",
+                "",
+            ].join("\n")
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        process.env.MIRA_GITHUB_USERNAME = "mira-user";
+        process.env.MIRA_GITHUB_TOKEN = "mira-token";
+
+        const requests: Array<{ authorization?: string; url: string }> = [];
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL,
+            init?: RequestInit
+        ) => {
+            const url = String(input);
+            const headers = new Headers(init?.headers);
+            requests.push({
+                authorization: headers.get("authorization") ?? undefined,
+                url,
+            });
+            if (url.endsWith("/v2/unit/access/tags/list?n=1000")) {
+                if (!headers.get("authorization")) {
+                    return new Response("auth required", {
+                        status: 401,
+                        headers: {
+                            "www-authenticate":
+                                'Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:unit/access:pull"',
+                        },
+                    });
+                }
+                expect(headers.get("authorization")).toBe("Bearer ghcr-token");
+                return Response.json({ tags: ["1.0.0", "1.1.0", "2.0.0"] });
+            }
+            if (
+                url ===
+                "https://ghcr.io/token?service=ghcr.io&scope=repository%3Aunit%2Faccess%3Apull"
+            ) {
+                expect(headers.get("authorization")).toBe(
+                    `Basic ${Buffer.from("mira-user:mira-token").toBase64()}`
+                );
+                return Response.json({ access_token: "ghcr-token" });
+            }
+            if (url.endsWith("/v2/unit/access/manifests/1.1.0")) {
+                expect([undefined, "Bearer ghcr-token"]).toContain(
+                    headers.get("authorization") ?? undefined
+                );
+                return Response.json(
+                    { digest: "sha256:ignored-body" },
+                    { headers: { "docker-content-digest": "sha256:ghcr-digest" } }
+                );
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+
+        const registered = await registerDockerUpdaterServices();
+        expect(registered.isOk).toBe(true);
+        const service = database
+            .prepare(
+                `SELECT id
+                 FROM docker_managed_services
+                 WHERE app_slug = 'unit-ghcr-auth-app' AND service_name = 'web'`
+            )
+            .get() as { id: number };
+
+        const polled = await pollDockerUpdaterRegistries(service.id);
+        expect(polled).toMatchObject({ isOk: true, step: "poll", stderr: "" });
+        expect(
+            database
+                .prepare(
+                    "SELECT latest_tag, latest_digest, last_status FROM docker_managed_services WHERE id = ?"
+                )
+                .get(service.id)
+        ).toEqual({
+            latest_digest: "sha256:ghcr-digest",
+            latest_tag: "1.1.0",
+            last_status: "update_available",
+        });
+        expect(requests.map((request) => request.url)).toContain(
+            "https://ghcr.io/token?service=ghcr.io&scope=repository%3Aunit%2Faccess%3Apull"
+        );
     });
 
     it("rejects untrusted registry pagination before reusing bearer auth", async () => {

@@ -2241,6 +2241,70 @@ fi
         }
     });
 
+    it("runs a manual backup without scheduled metadata and trims oversized output", async () => {
+        const { getCurrentBackupJob, startManualBackup } =
+            await import("../src/services/backups.ts");
+        const largeOutput = `${"x".repeat(100_200)}tail-marker\n`;
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (_command, arguments_) => {
+                const joined = arguments_.join(" ");
+                if (joined.includes("pgrep -f")) {
+                    return {
+                        code: 1,
+                        stderr: "",
+                        stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
+                    };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            });
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: Promise.resolve(0),
+                    kill: () => {},
+                    pid: 123,
+                    stderr: readableUtf8Stream(""),
+                    stdout: readableUtf8Stream(largeOutput),
+                }) as unknown as processModule.BunProcess
+        );
+
+        try {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+            const job = await startManualBackup("walg");
+            const completed = await job.completed;
+
+            expect(spawnSpy).toHaveBeenCalledTimes(1);
+            expect(completed).toMatchObject({
+                code: 0,
+                status: "done",
+                type: "walg",
+            });
+            expect(completed.stdout.length).toBeLessThanOrEqual(100_000);
+            expect(completed.stdout).toEndWith("tail-marker\n");
+            expect(completed.manualScheduledRun).toBeUndefined();
+            expect(
+                database
+                    .prepare(
+                        "SELECT COUNT(*) AS count FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'"
+                    )
+                    .get()
+            ).toEqual({ count: 0 });
+            expect(getCurrentBackupJob("walg")).toMatchObject({ status: "done" });
+            expect(getCurrentBackupJob("walg")).toBeUndefined();
+        } finally {
+            runProcessSpy.mockRestore();
+            spawnSpy.mockRestore();
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
     it("marks aborted scheduled backups failed before preflight starts", async () => {
         const { getCurrentBackupJob, registerBackupScheduledJobs } =
             await import("../src/services/backups.ts");
@@ -2596,6 +2660,134 @@ fi
                 .run();
             database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
         }
+    });
+
+    it("rejects invalid log rotation policy configs before touching files", async () => {
+        const rotationRoot = createTemporaryRoot("mira-log-rotation-validation-");
+        const configFile = path.join(rotationRoot, "log-rotation.json");
+        const logFile = path.join(rotationRoot, "service.log");
+        writeFileSync(logFile, "do not touch\n");
+        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+
+        const validBase = {
+            approvedRoots: [rotationRoot],
+            groups: [{ name: "unit", paths: [logFile] }],
+            version: 1,
+        };
+        const invalidCases: Array<{
+            config: unknown;
+            message: string | RegExp;
+            name: string;
+        }> = [
+            {
+                config: JSON.parse("null") as unknown,
+                message: "Config must be an object",
+                name: "non-object config",
+            },
+            {
+                config: { ...validBase, defaults: JSON.parse("null") as unknown },
+                message: "Config defaults must be an object",
+                name: "null defaults",
+            },
+            {
+                config: { ...validBase, version: 2 },
+                message: "Config version must be 1",
+                name: "unsupported version",
+            },
+            {
+                config: { ...validBase, groups: {} },
+                message: "Config groups must be an array",
+                name: "non-array groups",
+            },
+            {
+                config: { ...validBase, approvedRoots: [] },
+                message: "approvedRoots must include at least one entry",
+                name: "empty approved roots",
+            },
+            {
+                config: { ...validBase, defaults: { paths: [""] } },
+                message: "defaults.paths must be an array of non-empty strings",
+                name: "blank default path",
+            },
+            {
+                config: { ...validBase, defaults: { archiveRetentionScope: "all" } },
+                message:
+                    "defaults.archiveRetentionScope must be directory, basename, or parent",
+                name: "bad default retention scope",
+            },
+            {
+                config: { ...validBase, defaults: { strategy: "move" } },
+                message: "defaults.strategy has unsupported strategy",
+                name: "bad default strategy",
+            },
+            {
+                config: { ...validBase, groups: [{ name: "", paths: [logFile] }] },
+                message: "Every group needs a string name",
+                name: "blank group name",
+            },
+            {
+                config: {
+                    ...validBase,
+                    groups: [
+                        { daily: true, name: "unit", paths: [logFile], weekly: true },
+                    ],
+                },
+                message: "Group unit cannot set both daily and weekly rotation",
+                name: "daily and weekly",
+            },
+            {
+                config: { ...validBase, groups: [{ archiveOnly: true, name: "unit" }] },
+                message:
+                    "Archive-only group unit needs at least one archivePaths pattern",
+                name: "archive-only without archives",
+            },
+            {
+                config: { ...validBase, groups: [{ name: "unit" }] },
+                message: "Group unit needs at least one path pattern",
+                name: "group without paths",
+            },
+            {
+                config: {
+                    ...validBase,
+                    groups: [{ name: "unit", paths: [logFile], strategy: "move" }],
+                },
+                message: "Group unit has unsupported strategy",
+                name: "bad group strategy",
+            },
+            {
+                config: {
+                    ...validBase,
+                    groups: [{ enabled: "yes", name: "unit", paths: [logFile] }],
+                },
+                message: "Group unit.enabled must be a boolean",
+                name: "bad boolean",
+            },
+            {
+                config: {
+                    ...validBase,
+                    groups: [{ maxSizeMb: -1, name: "unit", paths: [logFile] }],
+                },
+                message: "Group unit.maxSizeMb must be a non-negative number",
+                name: "bad number",
+            },
+            {
+                config: {
+                    ...validBase,
+                    groups: [{ keep: 0, name: "unit", paths: [logFile] }],
+                },
+                message: "Group unit.keep must be a positive integer",
+                name: "bad keep",
+            },
+        ];
+
+        for (const { config, message, name } of invalidCases) {
+            writeFileSync(configFile, `${JSON.stringify(config)}\n`);
+            await expect(
+                runLogRotationService({ config: configFile, isDryRun: true }),
+                name
+            ).rejects.toThrow(message);
+        }
+        expect(readFileSync(logFile, "utf8")).toBe("do not touch\n");
     });
 
     it("evaluates log rotation policies in dry-run mode with isolated roots", async () => {
@@ -3096,11 +3288,20 @@ fi
         const agentId = `agent-${Bun.randomUUIDv7()}`;
 
         try {
+            await expect(updateAgentCurrentTask("../bad", "Task")).rejects.toMatchObject({
+                statusCode: 400,
+            });
+            await expect(updateAgentCurrentTask(agentId, " ")).rejects.toMatchObject({
+                statusCode: 400,
+            });
+
             const firstMetadata = await updateAgentCurrentTask(agentId, "First task");
             const secondMetadata = await updateAgentCurrentTask(agentId, "Second task");
+            const repeatedMetadata = await updateAgentCurrentTask(agentId, "Second task");
 
             expect(firstMetadata.currentTask).toBe("First task");
             expect(secondMetadata.currentTask).toBe("Second task");
+            expect(repeatedMetadata.currentTask).toBe("Second task");
             const metadataFile = Bun.file(
                 path.join(openclawRoot, "agents", agentId, "sessions", "metadata.json")
             );
@@ -3118,6 +3319,18 @@ fi
                     status: "completed",
                 })
             );
+            const historyRows = database
+                .prepare(
+                    `SELECT task, status
+                     FROM agent_task_history
+                     WHERE agent_id = ?
+                     ORDER BY id`
+                )
+                .all(agentId) as Array<{ task: string; status: string }>;
+            expect(historyRows).toEqual([
+                { task: "First task", status: "completed" },
+                { task: "Second task", status: "active" },
+            ]);
         } finally {
             database
                 .prepare("DELETE FROM agent_task_history WHERE agent_id = ?")
