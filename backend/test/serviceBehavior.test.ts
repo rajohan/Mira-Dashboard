@@ -673,9 +673,34 @@ describe("backend service behavior", () => {
     it("rejects unsupported and aborted cache refresh producer requests", async () => {
         const { refreshCacheProducer, waitForLocalCacheSeed } =
             await import("../src/services/cacheRefresh.ts");
+        const { cacheRoutes } = await import("../src/routes/cacheRoutes.ts");
         await expect(refreshCacheProducer("unknown.cache.key")).rejects.toThrow(
             "No backend refresh producer configured for cache key"
         );
+        const unknownRefresh = await cacheRoutes["/api/cache/:key/refresh"].POST(
+            Object.assign(
+                new Request(
+                    "https://dashboard.test/api/cache/unknown.cache.key/refresh",
+                    {
+                        method: "POST",
+                    }
+                ),
+                { params: { key: "unknown.cache.key" } }
+            )
+        );
+        expect(unknownRefresh.status).toBe(400);
+        await expect(unknownRefresh.json()).resolves.toEqual({
+            error: "No backend refresh producer configured for cache key: unknown.cache.key",
+        });
+        const missingCacheKey = await cacheRoutes["/api/cache/:key"].GET(
+            Object.assign(new Request("https://dashboard.test/api/cache/%20"), {
+                params: { key: " " },
+            })
+        );
+        expect(missingCacheKey.status).toBe(400);
+        await expect(missingCacheKey.json()).resolves.toEqual({
+            error: "Missing cache key",
+        });
 
         const controller = new AbortController();
         controller.abort();
@@ -1228,6 +1253,140 @@ fi
             database
                 .prepare("DELETE FROM deployment_jobs WHERE id LIKE 'approve-%'")
                 .run();
+        }
+    });
+
+    it("reports a successful merge separately from a failed production sync", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
+        rememberEnvironment("RAJOHAN_GITHUB_USERNAME");
+        const fakeRoot = createTemporaryRoot("mira-pr-sync-fail-root-");
+        const worktreeRoot = path.join(fakeRoot, "worktrees");
+        const fakeBin = createTemporaryRoot("mira-pr-sync-fail-bin-");
+        const ghLog = path.join(fakeRoot, "gh.log");
+        const gitLog = path.join(fakeRoot, "git.log");
+        writeFakeGhForPullRequestMerge(path.join(fakeBin, "gh"), ghLog);
+        writeFileSync(
+            path.join(fakeBin, "git"),
+            String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(gitLog)}
+if [[ "$*" == "rev-parse --show-toplevel" ]]; then
+  printf '%s\n' ${JSON.stringify(fakeRoot)}
+elif [[ "$*" == "rev-parse --abbrev-ref HEAD" ]]; then
+  printf 'main\n'
+elif [[ "$*" == "rev-parse --short HEAD" ]]; then
+  printf 'abc1234\n'
+elif [[ "$*" == "rev-parse --abbrev-ref --symbolic-full-name ${"@{u}"}" ]]; then
+  printf 'origin/main\n'
+elif [[ "$*" == "status --short" ]]; then
+  printf ''
+elif [[ "$*" == "worktree list --porcelain" ]]; then
+  printf ''
+elif [[ "$*" == "fetch --prune origin" || "$*" == "checkout main" ]]; then
+  printf ''
+elif [[ "$*" == "pull --ff-only origin main" ]]; then
+  echo 'remote moved unexpectedly' >&2
+  exit 1
+else
+  echo "unexpected git args: $*" >&2
+  exit 2
+fi
+`
+        );
+        chmodSync(path.join(fakeBin, "git"), 0o755);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
+        process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
+
+        try {
+            const { approvePullRequest } =
+                await import("../src/services/pullRequests.ts");
+            const result = await approvePullRequest(11, true);
+
+            expect(result).toMatchObject({
+                cleanup: {
+                    branch: "merge-branch",
+                    status: "skipped",
+                },
+                deployment: undefined,
+                deployError: undefined,
+                isOk: true,
+                message: "PR #11 merged; production sync failed",
+                syncError: expect.stringContaining("remote moved unexpectedly"),
+            });
+            await expect(Bun.file(ghLog).text()).resolves.toContain("pr merge 11");
+            await expect(Bun.file(gitLog).text()).resolves.toContain(
+                "pull --ff-only origin main"
+            );
+        } finally {
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            database
+                .prepare("DELETE FROM deployment_jobs WHERE id LIKE 'approve-%'")
+                .run();
+        }
+    });
+
+    it("rejects oversized GitHub JSON stream rows when listing pull requests", async () => {
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: Promise.resolve(0),
+                    kill: () => {},
+                    pid: 12_345,
+                    stderr: readableUtf8Stream(""),
+                    stdout: readableUtf8Stream(`${"x".repeat(1024 * 1024 + 1)}\n`),
+                }) as unknown as processModule.BunProcess
+        );
+        const killSpy = jest
+            .spyOn(processModule, "killProcessGroup")
+            .mockImplementation(() => {});
+
+        try {
+            const { listDashboardPullRequests } =
+                await import("../src/services/pullRequests.ts");
+            await expect(listDashboardPullRequests()).rejects.toThrow(
+                "GitHub CLI JSON line was too large"
+            );
+            expect(killSpy).toHaveBeenCalledWith(expect.any(Object), "SIGTERM");
+        } finally {
+            spawnSpy.mockRestore();
+            killSpy.mockRestore();
+        }
+    });
+
+    it("maps pull request route validation and GitHub list failures to JSON errors", async () => {
+        const { pullRequestRoutes } = await import("../src/routes/pullRequestRoutes.ts");
+        const invalidNumber = await pullRequestRoutes[
+            "/api/pull-requests/:number/review-approval"
+        ].POST(
+            routeRequest("/api/pull-requests/nope/review-approval", { number: "nope" })
+        );
+        expect(invalidNumber.status).toBe(400);
+        await expect(invalidNumber.json()).resolves.toEqual({
+            error: "Invalid pull request number",
+        });
+
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: Promise.resolve(2),
+                    kill: () => {},
+                    pid: 12_345,
+                    stderr: readableUtf8Stream("graphql unavailable\n"),
+                    stdout: readableUtf8Stream(""),
+                }) as unknown as processModule.BunProcess
+        );
+        try {
+            const listResponse = await pullRequestRoutes["/api/pull-requests"].GET();
+            expect(listResponse.status).toBe(500);
+            await expect(listResponse.json()).resolves.toEqual({
+                error: "graphql unavailable",
+            });
+        } finally {
+            spawnSpy.mockRestore();
         }
     });
 
@@ -2961,6 +3120,54 @@ fi
         expect(readFileSync(logFile, "utf8")).toBe("do not rotate\n");
     });
 
+    it("reclaims stale log rotation locks before live rotation", async () => {
+        const rotationRoot = createTemporaryRoot("mira-log-rotation-stale-lock-");
+        const logFile = path.join(rotationRoot, "stale-lock.log");
+        const configFile = path.join(rotationRoot, "log-rotation.json");
+        const lockFile = path.join(process.cwd(), "data", "log-rotation.lock");
+        mkdirSync(path.dirname(lockFile), { recursive: true });
+        writeFileSync(lockFile, "999999999\n");
+        const staleTime = new Date(Date.now() - 13 * 60 * 60 * 1000);
+        utimesSync(lockFile, staleTime, staleTime);
+        cleanupCallbacks.push(() => {
+            rmSync(lockFile, { force: true });
+            rmSync(`${lockFile}.reclaim`, { force: true, recursive: true });
+        });
+        writeFileSync(logFile, "rotate after stale lock\n");
+        writeFileSync(
+            configFile,
+            JSON.stringify({
+                approvedRoots: [rotationRoot],
+                defaults: {
+                    compress: false,
+                    keep: 1,
+                    maxSizeMb: 0.000001,
+                    missingOk: false,
+                    skipEmpty: false,
+                    strategy: "copytruncate",
+                },
+                groups: [{ name: "stale-lock", paths: [logFile] }],
+                version: 1,
+            })
+        );
+        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+
+        const summary = await runLogRotationService({
+            config: configFile,
+            isDryRun: false,
+        });
+
+        expect(summary).toMatchObject({
+            checkedFiles: 1,
+            isDryRun: false,
+            isOk: true,
+            rotatedFiles: 1,
+        });
+        expect(readFileSync(logFile, "utf8")).toBe("");
+        expect(existsSync(lockFile)).toBe(false);
+        expect(existsSync(`${lockFile}.reclaim`)).toBe(false);
+    });
+
     it("rotates logs with rename strategy and applies archive-only retention", async () => {
         const rotationRoot = createTemporaryRoot("mira-log-rotation-rename-test-");
         const logFile = path.join(rotationRoot, "rename.log");
@@ -4583,6 +4790,115 @@ fi
             })
         );
         expect(missingExec.status).toBe(404);
+        const dockerRunSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (_command, arguments_) => {
+                const joined = arguments_.join(" ");
+                if (joined.includes("ps -a")) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: `${JSON.stringify({
+                            Command: "sleep 100",
+                            CreatedAt: "2026-06-26 01:00:00 +0000 UTC",
+                            ID: "abc123",
+                            Image: "unit/web:latest",
+                            Labels: "",
+                            Mounts: "",
+                            Names: "unit-web",
+                            Networks: "bridge",
+                            Ports: "",
+                            RunningFor: "1 minute",
+                            State: "running",
+                            Status: "Up 1 minute",
+                        })}\n`,
+                    };
+                }
+                if (joined.includes("stats --no-stream")) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: `${JSON.stringify({
+                            BlockIO: "0B / 0B",
+                            CPUPerc: "0.00%",
+                            ID: "abc123",
+                            MemPerc: "0.00%",
+                            MemUsage: "1MiB / 1GiB",
+                            NetIO: "0B / 0B",
+                            PIDs: "1",
+                        })}\n`,
+                    };
+                }
+                if (arguments_[0] === "inspect") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: JSON.stringify([
+                            {
+                                Config: {
+                                    Env: ["API_TOKEN=secret", "PLAIN=value"],
+                                    Labels: { "com.docker.compose.service": "web" },
+                                },
+                                Created: "2026-06-26T01:00:00.000Z",
+                                Id: "abc123full",
+                                Image: "sha256:image",
+                                Mounts: [],
+                                NetworkSettings: { Networks: {} },
+                                RestartCount: 0,
+                                State: { StartedAt: "2026-06-26T01:00:00.000Z" },
+                            },
+                        ]),
+                    };
+                }
+                return { code: 1, stderr: `unexpected docker ${joined}`, stdout: "" };
+            });
+        const dockerSpawnSpy = jest
+            .spyOn(processModule, "spawnProcess")
+            .mockImplementation(() => {
+                throw new Error("docker exec spawn failed");
+            });
+        try {
+            const execStart = await dockerRoutes["/api/docker/exec/start"].POST(
+                new Request("https://dashboard.test/api/docker/exec/start", {
+                    body: JSON.stringify({
+                        command: "echo hello",
+                        containerId: "unit-web",
+                    }),
+                    method: "POST",
+                })
+            );
+            const execStartBody = (await execStart.json()) as { jobId: string };
+            const failedExec = dockerRoutes["/api/docker/exec/:jobId"].GET(
+                Object.assign(
+                    new Request(
+                        `https://dashboard.test/api/docker/exec/${execStartBody.jobId}`
+                    ),
+                    { params: { jobId: execStartBody.jobId } }
+                )
+            );
+            await expect(failedExec.json()).resolves.toMatchObject({
+                code: 1,
+                containerId: "abc123",
+                stderr: "docker exec spawn failed",
+                status: "done",
+            });
+            const stopFinished = await dockerRoutes["/api/docker/exec/:jobId/stop"].POST(
+                Object.assign(
+                    new Request(
+                        `https://dashboard.test/api/docker/exec/${execStartBody.jobId}/stop`,
+                        { method: "POST" }
+                    ),
+                    { params: { jobId: execStartBody.jobId } }
+                )
+            );
+            expect(stopFinished.status).toBe(400);
+            await expect(stopFinished.json()).resolves.toEqual({
+                error: "Job is not running",
+            });
+        } finally {
+            dockerRunSpy.mockRestore();
+            dockerSpawnSpy.mockRestore();
+        }
         const invalidPrune = await dockerRoutes["/api/docker/prune"].POST(
             new Request("https://dashboard.test/api/docker/prune", {
                 body: JSON.stringify({ target: "everything" }),
@@ -4699,6 +5015,48 @@ fi
             expect(disabledServiceResponse.status).toBe(400);
             await expect(disabledServiceResponse.json()).resolves.toEqual({
                 error: "Updater service is disabled",
+            });
+
+            rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+            const appsRoot = createTemporaryRoot("mira-docker-route-unsupported-");
+            const appRoot = path.join(appsRoot, appSlug);
+            mkdirSync(appRoot, { recursive: true });
+            writeFileSync(
+                path.join(appRoot, "compose.yaml"),
+                [
+                    "services:",
+                    "  api:",
+                    "    image: example.com/unit/api:1.0.0",
+                    "    labels:",
+                    "      mira.updater.enabled: 'true'",
+                    "",
+                ].join("\n")
+            );
+            process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+            const { registerDockerUpdaterServices } =
+                await import("../src/services/dockerUpdater.ts");
+            await expect(registerDockerUpdaterServices()).resolves.toMatchObject({
+                isOk: true,
+            });
+            const unsupportedService = database
+                .prepare(
+                    "SELECT id FROM docker_managed_services WHERE app_slug = ? AND service_name = 'api'"
+                )
+                .get(appSlug) as { id: number };
+            const unsupportedRequest = Object.assign(
+                new Request(
+                    `https://dashboard.test/api/docker/updater/services/${unsupportedService.id}/update`,
+                    { method: "POST" }
+                ),
+                { params: { serviceId: String(unsupportedService.id) } }
+            );
+            const unsupportedResponse =
+                await dockerRoutes["/api/docker/updater/services/:serviceId/update"].POST(
+                    unsupportedRequest
+                );
+            expect(unsupportedResponse.status).toBe(422);
+            await expect(unsupportedResponse.json()).resolves.toEqual({
+                error: "Unsupported image registry: example.com",
             });
         } finally {
             database

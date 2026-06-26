@@ -712,6 +712,98 @@ describe("Docker updater tag patterns", () => {
         ).toEqual({ last_status: "manual_update_failed" });
     });
 
+    it("reports reconciliation failures after Compose succeeds", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-reconcile-");
+        const appRoot = path.join(appsRoot, "unit-reconcile-app");
+        const composePath = path.join(appRoot, "compose.yaml");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            composePath,
+            [
+                "services:",
+                "  web:",
+                "    image: ghcr.io/unit/reconcile:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'false'",
+                "      mira.updater.track: tag",
+                "      mira.updater.tagPattern: '1.1.0'",
+                "      mira.updater.tagPatternIsRegex: 'false'",
+                "",
+            ].join("\n")
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.endsWith("/v2/unit/reconcile/manifests/1.1.0")) {
+                return Response.json(
+                    { digest: "sha256:reconcile11" },
+                    { headers: { "docker-content-digest": "sha256:reconcile11" } }
+                );
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockResolvedValue({ code: 0, stderr: "", stdout: "compose applied" });
+        cleanupCallbacks.push(
+            () => fetchSpy.mockRestore(),
+            () => runProcessSpy.mockRestore(),
+            () => {
+                database
+                    .prepare("DROP TRIGGER IF EXISTS unit_reconcile_update_failure")
+                    .run();
+            }
+        );
+
+        const registered = await registerDockerUpdaterServices();
+        expect(registered.isOk).toBe(true);
+        const service = database
+            .prepare(
+                "SELECT id FROM docker_managed_services WHERE app_slug = 'unit-reconcile-app'"
+            )
+            .get() as { id: number };
+        database
+            .prepare(
+                `CREATE TEMP TRIGGER unit_reconcile_update_failure
+                 BEFORE UPDATE OF last_status ON docker_managed_services
+                 WHEN NEW.id = ${service.id} AND NEW.last_status = 'updated'
+                 BEGIN
+                   SELECT RAISE(ABORT, 'unit reconcile failed');
+                 END`
+            )
+            .run();
+
+        const steps = await runDockerUpdaterService(service.id);
+
+        expect(steps).toContainEqual(
+            expect.objectContaining({
+                isOk: false,
+                stderr: expect.stringContaining(
+                    "failed to persist updater state: unit reconcile failed"
+                ),
+                stdout: "compose applied",
+                step: "manual-update:unit-reconcile-app/web",
+            })
+        );
+        expect(readFileSync(composePath, "utf8")).toContain(
+            "image: ghcr.io/unit/reconcile:1.1.0"
+        );
+        expect(
+            database
+                .prepare(
+                    "SELECT event_type, message FROM docker_update_events WHERE managed_service_id = ? ORDER BY id DESC LIMIT 1"
+                )
+                .get(service.id)
+        ).toMatchObject({
+            event_type: "manual_update_reconcile_failed",
+            message: expect.stringContaining("failed to persist updater state"),
+        });
+    });
+
     it("polls Docker Hub tags through bearer auth and paginated tag results", async () => {
         rememberEnvironment("DOCKER_LOGIN");
         rememberEnvironment("DOCKER_TOKEN");

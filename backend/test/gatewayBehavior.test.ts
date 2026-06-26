@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import type { DashboardSocket } from "../src/dashboardSocket.ts";
 import type {
@@ -171,6 +171,10 @@ class FakeDashboardSocket implements DashboardSocket {
         this.messageHandler?.(JSON.stringify(payload));
     }
 
+    emitRawMessage(payload: string): void {
+        this.messageHandler?.(payload);
+    }
+
     emitError(error: unknown): void {
         this.errorHandler?.(error);
     }
@@ -260,6 +264,9 @@ describe("gateway behavior", () => {
         expect(client).toBeDefined();
         expect(client?.isStarted).toBe(true);
         expect(client?.options.url).toBe("ws://gateway.test");
+
+        gateway.init("token-one");
+        expect(fakeClients.length).toBe(1);
 
         client?.options.onHelloOk?.({ type: "hello-ok" });
         await waitFor(() =>
@@ -405,6 +412,37 @@ describe("gateway behavior", () => {
             expect.arrayContaining(["chat.abort", "chat.send", "sessions.delete"])
         );
 
+        socket.emitMessage({ channel: "logs", type: "subscribe" });
+        socket.emitMessage({ channel: "logs", type: "unsubscribe" });
+        socket.emitMessage({
+            id: "logs-subscribe",
+            method: "subscribe",
+            params: { channel: "logs" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"logs-subscribe"'))
+        );
+        expect(
+            socket.sent
+                .map((raw) => JSON.parse(raw) as { id?: string; isOk?: boolean })
+                .find((message) => message.id === "logs-subscribe")
+        ).toMatchObject({ isOk: true });
+        socket.emitMessage({
+            id: "logs-unsubscribe",
+            method: "unsubscribe",
+            params: { channel: "logs" },
+            type: "req",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"logs-unsubscribe"'))
+        );
+        expect(
+            socket.sent
+                .map((raw) => JSON.parse(raw) as { id?: string; isOk?: boolean })
+                .find((message) => message.id === "logs-unsubscribe")
+        ).toMatchObject({ isOk: true });
+
         socket.emitMessage({
             id: "fail-1",
             method: "demo.fail",
@@ -418,8 +456,50 @@ describe("gateway behavior", () => {
                 .find((message) => message.id === "fail-1")
         ).toMatchObject({ error: "gateway rejected" });
 
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            client?.options.onConnectError?.(new Error("connect refused"));
+            client?.options.onEvent?.({
+                event: "sessions.updated",
+                payload: { sessionKey: "agent:main:main" },
+            });
+            socket.emitRawMessage("{");
+            socket.emitError(new Error("client socket exploded"));
+            await waitFor(() =>
+                errorSpy.mock.calls.some((call) =>
+                    String(call[0]).includes("[Gateway] Client message error:")
+                )
+            );
+            client?.options.onClose?.(1006, "lost");
+            await waitFor(() =>
+                socket.sent.some((raw) => raw.includes('"type":"disconnected"'))
+            );
+        } finally {
+            errorSpy.mockRestore();
+            warnSpy.mockRestore();
+        }
+
         socket.close();
         gateway.shutdown();
         expect(client?.isStopped).toBe(true);
+
+        const disconnectedSocket = new FakeDashboardSocket();
+        gateway.handleDashboardClient(disconnectedSocket);
+        disconnectedSocket.emitMessage({
+            id: "after-shutdown",
+            method: "chat.send",
+            params: { message: "hello" },
+            type: "request",
+        });
+        await waitFor(() =>
+            disconnectedSocket.sent.some((raw) => raw.includes('"id":"after-shutdown"'))
+        );
+        expect(
+            disconnectedSocket.sent
+                .map((raw) => JSON.parse(raw) as { error?: string; id?: string })
+                .find((message) => message.id === "after-shutdown")
+        ).toMatchObject({ error: "Gateway not connected" });
+        disconnectedSocket.close();
     });
 });

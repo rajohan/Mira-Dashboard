@@ -154,6 +154,49 @@ describe("server start scheduler policy", () => {
         }
     });
 
+    it("rolls back listening-time startup when Gateway initialization fails", async () => {
+        const originalGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
+        const originalSchedulerDisabled = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
+        process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER = "1";
+        process.env.OPENCLAW_GATEWAY_TOKEN = "broken-token";
+        const gatewayModule = await import("../src/gateway.ts");
+        const serverStartModule = await import("../src/serverStart.ts");
+        const initSpy = jest
+            .spyOn(gatewayModule.default, "init")
+            .mockImplementation(() => {
+                throw new Error("gateway boot failed");
+            });
+        const shutdownSpy = jest
+            .spyOn(gatewayModule.default, "shutdown")
+            .mockImplementation(() => {});
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+        try {
+            expect(() => serverStartModule.handleServerListening()).toThrow(
+                "gateway boot failed"
+            );
+            expect(shutdownSpy).not.toHaveBeenCalled();
+            expect(errorSpy).toHaveBeenCalledWith(
+                "[Backend] Failed to start background services:",
+                expect.any(Error)
+            );
+        } finally {
+            initSpy.mockRestore();
+            shutdownSpy.mockRestore();
+            errorSpy.mockRestore();
+            if (originalGatewayToken === undefined) {
+                delete process.env.OPENCLAW_GATEWAY_TOKEN;
+            } else {
+                process.env.OPENCLAW_GATEWAY_TOKEN = originalGatewayToken;
+            }
+            if (originalSchedulerDisabled === undefined) {
+                delete process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
+            } else {
+                process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER = originalSchedulerDisabled;
+            }
+        }
+    });
+
     it("starts and stops the backend server with isolated runtime state", async () => {
         const environmentKeys = [
             "MIRA_DASHBOARD_DB_PATH",
