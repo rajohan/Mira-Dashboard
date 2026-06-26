@@ -2305,6 +2305,74 @@ fi
         }
     });
 
+    it("records backup process promise failures after startup", async () => {
+        const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
+            await import("../src/services/backups.ts");
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (_command, arguments_) => {
+                const joined = arguments_.join(" ");
+                if (joined.includes("pgrep -f")) {
+                    return {
+                        code: 1,
+                        stderr: "",
+                        stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
+                    };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            });
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: Promise.reject(new Error("child process promise failed")),
+                    kill: () => {},
+                    pid: 123,
+                    stderr: readableUtf8Stream("stderr before failure\n"),
+                    stdout: readableUtf8Stream("stdout before failure\n"),
+                }) as unknown as processModule.BunProcess
+        );
+
+        try {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+            registerBackupScheduledJobs();
+            const job = await startManualBackup("walg");
+            const completed = await job.completed;
+
+            expect(spawnSpy).toHaveBeenCalledTimes(1);
+            expect(completed).toMatchObject({
+                code: 1,
+                status: "done",
+                type: "walg",
+            });
+            expect(completed.stdout).toContain("stdout before failure");
+            expect(completed.stderr).toContain("stderr before failure");
+            expect(completed.stderr).toContain("child process promise failed");
+            await waitFor(() => {
+                const row = database
+                    .prepare(
+                        "SELECT status, message FROM scheduled_job_runs WHERE job_id = 'backup.walg' ORDER BY id DESC LIMIT 1"
+                    )
+                    .get() as { message: string; status: string } | undefined;
+                return (
+                    row?.status === "failed" &&
+                    row.message.includes("child process promise failed")
+                );
+            });
+            expect(getCurrentBackupJob("walg")).toMatchObject({ status: "done" });
+            expect(getCurrentBackupJob("walg")).toBeUndefined();
+        } finally {
+            runProcessSpy.mockRestore();
+            spawnSpy.mockRestore();
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
     it("marks aborted scheduled backups failed before preflight starts", async () => {
         const { getCurrentBackupJob, registerBackupScheduledJobs } =
             await import("../src/services/backups.ts");
