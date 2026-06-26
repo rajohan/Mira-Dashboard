@@ -868,6 +868,11 @@ describe("backend route and service behavior", () => {
         );
         expect(deniedRead.status).toBe(403);
 
+        const missingAllowedRead = await configFileRoutes["/api/config-files/*"].GET(
+            new Request("https://test.local/api/config-files/hooks/transforms/missing.ts")
+        );
+        expect(missingAllowedRead.status).toBe(403);
+
         const read = await configFileRoutes["/api/config-files/*"].GET(
             new Request("https://test.local/api/config-files/openclaw.json")
         );
@@ -888,6 +893,43 @@ describe("backend route and service behavior", () => {
         );
         expect(invalidWrite.status).toBe(400);
 
+        const malformedWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request("https://test.local/api/config-files/openclaw.json", {
+                body: "{",
+                headers: { "Content-Type": "application/json" },
+                method: "PUT",
+            })
+        );
+        expect(malformedWrite.status).toBe(400);
+
+        const arrayWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request("https://test.local/api/config-files/openclaw.json", {
+                body: JSON.stringify([]),
+                headers: { "Content-Type": "application/json" },
+                method: "PUT",
+            })
+        );
+        expect(arrayWrite.status).toBe(400);
+
+        const missingContentWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request("https://test.local/api/config-files/openclaw.json", {
+                body: JSON.stringify({}),
+                headers: { "Content-Type": "application/json" },
+                method: "PUT",
+            })
+        );
+        expect(missingContentWrite.status).toBe(400);
+
+        const oversizedConfigContent = "x".repeat(2 * 1024 * 1024 + 1);
+        const tooLargeConfigWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request("https://test.local/api/config-files/openclaw.json", {
+                body: JSON.stringify({ content: oversizedConfigContent }),
+                headers: { "Content-Type": "application/json" },
+                method: "PUT",
+            })
+        );
+        expect(tooLargeConfigWrite.status).toBe(400);
+
         const written = await configFileRoutes["/api/config-files/*"].PUT(
             new Request("https://test.local/api/config-files/openclaw.json", {
                 body: JSON.stringify({ content: '{"model":"glm51"}\n' }),
@@ -907,6 +949,20 @@ describe("backend route and service behavior", () => {
         await expect(Bun.file(path.join(root, "openclaw.json.bak")).text()).resolves.toBe(
             '{"model":"codex"}\n'
         );
+
+        const linkedConfig = path.join(root, "hooks", "transforms", "agentmail.ts");
+        linkSync(linkedConfig, `${linkedConfig}.hardlink`);
+        const hardLinkedConfigWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request(
+                "https://test.local/api/config-files/hooks/transforms/agentmail.ts",
+                {
+                    body: JSON.stringify({ content: "export default {}\n" }),
+                    headers: { "Content-Type": "application/json" },
+                    method: "PUT",
+                }
+            )
+        );
+        expect(hardLinkedConfigWrite.status).toBe(403);
     });
 
     it("defensive route contracts for Docker, pull requests, cache, database, and backup APIs", async () => {
@@ -1705,6 +1761,28 @@ describe("backend route and service behavior", () => {
             networks: [{ ipAddress: "172.17.0.2", name: "bridge" }],
         });
 
+        const invalidDetails = await dockerRoutes[
+            "/api/docker/containers/:containerId"
+        ].GET(
+            requestWithParameters("/api/docker/containers/-bad", { containerId: "-bad" })
+        );
+        expect(invalidDetails.status).toBe(400);
+        await expect(invalidDetails.json()).resolves.toEqual({
+            error: "Invalid containerId",
+        });
+
+        const missingDetails = await dockerRoutes[
+            "/api/docker/containers/:containerId"
+        ].GET(
+            requestWithParameters("/api/docker/containers/unknown", {
+                containerId: "unknown",
+            })
+        );
+        expect(missingDetails.status).toBe(404);
+        await expect(missingDetails.json()).resolves.toEqual({
+            error: "Container not found",
+        });
+
         const logs = await dockerRoutes["/api/docker/containers/:containerId/logs"].GET(
             requestWithParameters("/api/docker/containers/abc123def456/logs?tail=10", {
                 containerId: "abc123def456",
@@ -1739,6 +1817,24 @@ describe("backend route and service behavior", () => {
             output: "restart sent to demo",
         });
 
+        const invalidContainerAction = await dockerRoutes[
+            "/api/docker/containers/:containerId/action"
+        ].POST(
+            requestWithParameters(
+                "/api/docker/containers/demo/action",
+                { containerId: "demo" },
+                {
+                    body: JSON.stringify({ action: "pause" }),
+                    headers: { "Content-Type": "application/json" },
+                    method: "POST",
+                }
+            )
+        );
+        expect(invalidContainerAction.status).toBe(400);
+        await expect(invalidContainerAction.json()).resolves.toEqual({
+            error: "Invalid container action",
+        });
+
         const images = await dockerRoutes["/api/docker/images"].GET();
         await expect(images.json()).resolves.toMatchObject({
             images: [
@@ -1757,6 +1853,11 @@ describe("backend route and service behavior", () => {
         );
         await expect(removeImage.json()).resolves.toEqual({ isSuccess: true });
 
+        const invalidRemoveImage = await dockerRoutes[
+            "/api/docker/images/:imageId"
+        ].DELETE(requestWithParameters("/api/docker/images/-bad", { imageId: "-bad" }));
+        expect(invalidRemoveImage.status).toBe(400);
+
         const volumes = await dockerRoutes["/api/docker/volumes"].GET();
         await expect(volumes.json()).resolves.toMatchObject({
             volumes: [{ name: "data", size: "1MB", usedBy: ["demo"] }],
@@ -1766,6 +1867,13 @@ describe("backend route and service behavior", () => {
             requestWithParameters("/api/docker/volumes/data", { volumeName: "data" })
         );
         await expect(removeVolume.json()).resolves.toEqual({ isSuccess: true });
+
+        const invalidRemoveVolume = await dockerRoutes[
+            "/api/docker/volumes/:volumeName"
+        ].DELETE(
+            requestWithParameters("/api/docker/volumes/-bad", { volumeName: "-bad" })
+        );
+        expect(invalidRemoveVolume.status).toBe(400);
 
         const pruneImages = await dockerRoutes["/api/docker/prune"].POST(
             jsonRequest("/api/docker/prune", { target: "images" })
@@ -1783,12 +1891,51 @@ describe("backend route and service behavior", () => {
             output: expect.stringContaining("volume prune"),
         });
 
+        const invalidPrune = await dockerRoutes["/api/docker/prune"].POST(
+            jsonRequest("/api/docker/prune", { target: "containers" })
+        );
+        expect(invalidPrune.status).toBe(400);
+        await expect(invalidPrune.json()).resolves.toEqual({
+            error: "Invalid prune target",
+        });
+
+        const malformedPrune = await dockerRoutes["/api/docker/prune"].POST(
+            new Request("https://test.local/api/docker/prune", {
+                body: "{",
+                headers: { "Content-Type": "application/json" },
+                method: "POST",
+            })
+        );
+        expect(malformedPrune.status).toBe(400);
+        await expect(malformedPrune.json()).resolves.toEqual({
+            error: "Invalid JSON",
+        });
+
         const stackAction = await dockerRoutes["/api/docker/stack/action"].POST(
             jsonRequest("/api/docker/stack/action", { action: "stop" })
         );
         await expect(stackAction.json()).resolves.toEqual({
             output: "compose:stop",
         });
+
+        const invalidStackAction = await dockerRoutes["/api/docker/stack/action"].POST(
+            jsonRequest("/api/docker/stack/action", { action: "reload" })
+        );
+        expect(invalidStackAction.status).toBe(400);
+
+        const invalidStackService = await dockerRoutes["/api/docker/stack/action"].POST(
+            jsonRequest("/api/docker/stack/action", { action: "start", service: "-bad" })
+        );
+        expect(invalidStackService.status).toBe(400);
+
+        const malformedStackAction = await dockerRoutes["/api/docker/stack/action"].POST(
+            new Request("https://test.local/api/docker/stack/action", {
+                body: "{",
+                headers: { "Content-Type": "application/json" },
+                method: "POST",
+            })
+        );
+        expect(malformedStackAction.status).toBe(400);
 
         const missingAction = await dockerRoutes[
             "/api/docker/containers/:containerId/action"
@@ -1833,6 +1980,14 @@ describe("backend route and service behavior", () => {
         expect(execData).toMatchObject({
             status: "done",
             stdout: expect.stringContaining("exec output"),
+        });
+
+        const stopCompletedExec = await dockerRoutes["/api/docker/exec/:jobId/stop"].POST(
+            requestWithParameters(`/api/docker/exec/${jobId}/stop`, { jobId })
+        );
+        expect(stopCompletedExec.status).toBe(400);
+        await expect(stopCompletedExec.json()).resolves.toEqual({
+            error: "Job is not running",
         });
     });
 

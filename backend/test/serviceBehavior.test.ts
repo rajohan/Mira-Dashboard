@@ -2105,6 +2105,195 @@ fi
         }
     });
 
+    it("marks scheduled backups failed when the spawned process exits nonzero", async () => {
+        const { registerBackupScheduledJobs } =
+            await import("../src/services/backups.ts");
+        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (_command, arguments_) => {
+                const joined = arguments_.join(" ");
+                if (joined.includes("pgrep -f")) {
+                    return {
+                        code: 1,
+                        stderr: "",
+                        stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
+                    };
+                }
+                if (joined.includes("wal-g backup-list")) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: "[]",
+                    };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            });
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: Promise.resolve(2),
+                    kill: () => {},
+                    pid: 456,
+                    stderr: readableUtf8Stream("backup exploded\n"),
+                    stdout: readableUtf8Stream("backup started\n"),
+                }) as unknown as processModule.BunProcess
+        );
+
+        try {
+            registerBackupScheduledJobs();
+            const run = await runScheduledJob("backup.walg");
+
+            expect(run).toMatchObject({
+                jobId: "backup.walg",
+                status: "failed",
+            });
+            expect(run.message).toContain("WALG backup failed with code 2");
+            expect(run.message).toContain("backup exploded");
+        } finally {
+            runProcessSpy.mockRestore();
+            spawnSpy.mockRestore();
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("runs scheduled Kopia backups through host preflight and records success", async () => {
+        const { registerBackupScheduledJobs } =
+            await import("../src/services/backups.ts");
+        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (command, arguments_) => {
+                if (command === "pgrep") {
+                    expect(arguments_).toEqual([
+                        "-f",
+                        "/opt/docker/apps/kopia/backup.sh",
+                    ]);
+                    return { code: 1, stderr: "", stdout: "" };
+                }
+                return { code: 0, stderr: "", stdout: "{}" };
+            });
+        const spawnSpy = jest
+            .spyOn(processModule, "spawnProcess")
+            .mockImplementation((command, arguments_) => {
+                expect(command).toBe("bash");
+                expect(arguments_).toEqual(["-lc", "/opt/docker/apps/kopia/backup.sh"]);
+                return {
+                    exited: Promise.resolve(0),
+                    kill: () => {},
+                    pid: 654,
+                    stderr: readableUtf8Stream(""),
+                    stdout: readableUtf8Stream("kopia ok\n"),
+                } as unknown as processModule.BunProcess;
+            });
+
+        try {
+            registerBackupScheduledJobs();
+            const run = await runScheduledJob("backup.kopia");
+
+            expect(run).toMatchObject({
+                jobId: "backup.kopia",
+                status: "success",
+            });
+            expect(run.output).toMatchObject({
+                backup: {
+                    code: 0,
+                    status: "done",
+                    stdout: "kopia ok\n",
+                    type: "kopia",
+                },
+            });
+            expect(spawnSpy).toHaveBeenCalledTimes(1);
+        } finally {
+            runProcessSpy.mockRestore();
+            spawnSpy.mockRestore();
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("terminates running WAL-G backups when a scheduled run is aborted", async () => {
+        const { getCurrentBackupJob, registerBackupScheduledJobs } =
+            await import("../src/services/backups.ts");
+        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const exit = Promise.withResolvers<number>();
+        const runProcessCalls: string[] = [];
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (command, arguments_) => {
+                const joined = `${command} ${arguments_.join(" ")}`;
+                runProcessCalls.push(joined);
+                if (joined.includes("pgrep -f")) {
+                    return {
+                        code: 1,
+                        stderr: "",
+                        stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
+                    };
+                }
+                if (joined.includes("pkill")) {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+                if (joined.includes("wal-g backup-list")) {
+                    return { code: 0, stderr: "", stdout: "[]" };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            });
+        const killSignals: NodeJS.Signals[] = [];
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: exit.promise,
+                    kill: (signal: NodeJS.Signals) => {
+                        killSignals.push(signal);
+                    },
+                    pid: undefined,
+                    stderr: readableUtf8Stream("backup output before abort\n"),
+                    stdout: readableUtf8Stream(""),
+                }) as unknown as processModule.BunProcess
+        );
+        const controller = new AbortController();
+
+        try {
+            registerBackupScheduledJobs();
+            const runPromise = runScheduledJob(
+                "backup.walg",
+                "manual",
+                controller.signal
+            );
+            await waitFor(() => spawnSpy.mock.calls.length === 1);
+            controller.abort();
+            exit.resolve(143);
+
+            const run = await runPromise;
+            expect(run.status).toBe("failed");
+            expect(run.message).toBe("Scheduled job aborted");
+            expect(killSignals).toContain("SIGTERM");
+            expect(runProcessCalls).toEqual(
+                expect.arrayContaining([
+                    expect.stringContaining("pkill -TERM"),
+                    expect.stringContaining("pgrep -f"),
+                ])
+            );
+            expect(getCurrentBackupJob("walg")).toMatchObject({
+                code: 130,
+                stderr: expect.stringContaining("Backup aborted by scheduler"),
+                status: "done",
+            });
+        } finally {
+            runProcessSpy.mockRestore();
+            spawnSpy.mockRestore();
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
     it("records and clears WAL-G needs-attention state when container preflight detects a running process", async () => {
         rememberEnvironment("PATH");
         const fakeBin = createTemporaryRoot("mira-backup-walg-running-bin-");
@@ -2432,6 +2621,104 @@ fi
         expect(state.files?.[logFile]?.lastArchive?.endsWith(".gz")).toBe(true);
     });
 
+    it("copy-truncates logs, honors exclusions, and reports unsafe rotation errors", async () => {
+        const rotationRoot = createTemporaryRoot("mira-log-rotation-copy-test-");
+        const outsideRoot = createTemporaryRoot("mira-log-rotation-outside-");
+        const logsRoot = path.join(rotationRoot, "logs");
+        mkdirSync(logsRoot, { recursive: true });
+        const liveLog = path.join(logsRoot, "live.log");
+        const emptyLog = path.join(logsRoot, "empty.log");
+        const excludedLog = path.join(logsRoot, "excluded.log");
+        const linkedSource = path.join(logsRoot, "linked-source.log");
+        const outsideLog = path.join(outsideRoot, "outside.log");
+        const hardlink = path.join(logsRoot, "linked-hardlink.log");
+        const configFile = path.join(rotationRoot, "log-rotation.json");
+        writeFileSync(liveLog, "copytruncate me\n");
+        writeFileSync(emptyLog, "");
+        writeFileSync(excludedLog, "leave me\n");
+        writeFileSync(linkedSource, "do not rotate linked files\n");
+        writeFileSync(outsideLog, "outside root\n");
+        symlinkSync(liveLog, path.join(logsRoot, "live-symlink.log"));
+        try {
+            // Hard links are refused by the service because rotating one would mutate
+            // another path with the same inode.
+            Bun.spawnSync(["ln", linkedSource, hardlink]);
+        } catch {
+            // Some filesystems may not support hard links in tmp; the main path still
+            // exercises copytruncate and exclusions.
+        }
+        writeFileSync(
+            configFile,
+            JSON.stringify({
+                approvedRoots: [rotationRoot],
+                defaults: {
+                    compress: false,
+                    keep: 2,
+                    maxSizeMb: 0.000001,
+                    missingOk: true,
+                    skipEmpty: true,
+                    strategy: "copytruncate",
+                },
+                excludePaths: [excludedLog],
+                groups: [
+                    {
+                        name: "copy",
+                        paths: [
+                            path.join(logsRoot, "*.log"),
+                            path.join(logsRoot, "missing.log"),
+                            outsideLog,
+                        ],
+                    },
+                ],
+                version: 1,
+            })
+        );
+        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+
+        const summary = await runLogRotationService({
+            config: configFile,
+            isDryRun: false,
+            verbose: true,
+        });
+
+        expect(summary).toMatchObject({
+            checkedGroups: 1,
+            deletedArchives: 0,
+            isDryRun: false,
+            isOk: false,
+            rotatedFiles: 1,
+        });
+        expect(readFileSync(liveLog, "utf8")).toBe("");
+        expect(readFileSync(excludedLog, "utf8")).toBe("leave me\n");
+        expect(summary.skippedFiles).toBeGreaterThanOrEqual(1);
+        expect(summary.errors).toContainEqual(
+            expect.objectContaining({
+                filePath: outsideLog,
+                message: expect.stringContaining("Unsafe path outside approved roots"),
+            })
+        );
+        if (existsSync(hardlink)) {
+            expect(summary.errors).toContainEqual(
+                expect.objectContaining({
+                    filePath: hardlink,
+                    message: expect.stringContaining("Refusing multi-linked file"),
+                })
+            );
+        }
+        const stateRow = database
+            .prepare(
+                "SELECT data_json FROM cache_entries WHERE key = 'log_rotation.state'"
+            )
+            .get() as { data_json?: string } | undefined;
+        const state = JSON.parse(stateRow?.data_json ?? "{}") as {
+            files?: Record<string, { lastArchive?: string; lastSizeBytes?: number }>;
+        };
+        expect(state.files?.[liveLog]).toMatchObject({
+            lastArchive: expect.stringContaining("live.log."),
+            lastSizeBytes: "copytruncate me\n".length,
+        });
+    });
+
     it("normalizes elevated log rotation command output and failures", async () => {
         const { runElevatedLogRotationService } =
             await import("../src/services/logRotation.ts");
@@ -2524,6 +2811,103 @@ fi
                 isDryRun: false,
                 isOk: false,
                 stderr: "sudo denied",
+            });
+        } finally {
+            database
+                .prepare(
+                    "DELETE FROM scheduled_job_runs WHERE job_id = 'ops.log-rotation'"
+                )
+                .run();
+            database
+                .prepare("DELETE FROM scheduled_jobs WHERE id = 'ops.log-rotation'")
+                .run();
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'log_rotation.state'")
+                .run();
+        }
+    });
+
+    it("records structured scheduled log-rotation failures when sudo exits cleanly", async () => {
+        const { registerLogRotationScheduledJobs } =
+            await import("../src/services/logRotation.ts");
+        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const runProcessSpy = jest.spyOn(processModule, "runProcess").mockResolvedValue({
+            code: 0,
+            stderr: "",
+            stdout: JSON.stringify({
+                errors: [{ message: "policy rejected group" }],
+                groups: [{ name: "docker" }],
+                isOk: false,
+                stdout: "x".repeat(100_050),
+                warnings: [{ message: "matched no files" }],
+            }),
+        });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        try {
+            registerLogRotationScheduledJobs();
+            const run = await runScheduledJob("ops.log-rotation");
+
+            expect(run.status).toBe("failed");
+            expect(run.message).toContain("Log rotation failed");
+            expect(run.message).toContain("policy rejected group");
+            expect(run.message).toContain("matched no files");
+            expect(run.message).toContain("docker");
+            const row = database
+                .prepare(
+                    "SELECT data_json FROM cache_entries WHERE key = 'log_rotation.state'"
+                )
+                .get() as { data_json?: string } | undefined;
+            const state = JSON.parse(row?.data_json ?? "{}") as {
+                lastRun?: { isOk?: boolean; stdout?: string };
+            };
+            expect(state.lastRun).toMatchObject({ isOk: false });
+            expect(state.lastRun?.stdout).toHaveLength(100_000);
+        } finally {
+            database
+                .prepare(
+                    "DELETE FROM scheduled_job_runs WHERE job_id = 'ops.log-rotation'"
+                )
+                .run();
+            database
+                .prepare("DELETE FROM scheduled_jobs WHERE id = 'ops.log-rotation'")
+                .run();
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'log_rotation.state'")
+                .run();
+        }
+    });
+
+    it("records successful scheduled log-rotation runs", async () => {
+        const { registerLogRotationScheduledJobs } =
+            await import("../src/services/logRotation.ts");
+        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const runProcessSpy = jest.spyOn(processModule, "runProcess").mockResolvedValue({
+            code: 0,
+            stderr: "sudo notice",
+            stdout: JSON.stringify({
+                checkedGroups: 1,
+                isDryRun: false,
+                isOk: true,
+                rotatedFiles: 0,
+            }),
+        });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        try {
+            registerLogRotationScheduledJobs();
+            const run = await runScheduledJob("ops.log-rotation");
+
+            expect(run.status).toBe("success");
+            expect(run.message).toBeUndefined();
+            expect(run.output).toMatchObject({
+                logRotation: {
+                    result: {
+                        checkedGroups: 1,
+                        isOk: true,
+                    },
+                    stderr: "sudo notice",
+                },
             });
         } finally {
             database

@@ -265,6 +265,74 @@ describe("Docker updater tag patterns", () => {
         expect(runProcessSpy).not.toHaveBeenCalled();
     });
 
+    it("registers partial compose discoveries as nonblocking warnings", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-partial-");
+        const appRoot = path.join(appsRoot, "unit-partial-app");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            path.join(appRoot, "compose.yaml"),
+            [
+                "services:",
+                "  web:",
+                "    image: ghcr.io/unit/partial:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "  broken:",
+                "    image:",
+                "      repository: ghcr.io/unit/broken",
+                "",
+            ].join("\n")
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY = "1";
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockResolvedValue({ code: 0, stderr: "", stdout: "should not run" });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        const registered = await registerDockerUpdaterServices();
+
+        expect(registered).toMatchObject({
+            isOk: false,
+            step: "register-services",
+        });
+        expect(JSON.parse(registered.stdout)).toMatchObject({
+            isOk: false,
+            summary: {
+                failedComposeFiles: 1,
+                registeredServices: 1,
+            },
+        });
+        expect(JSON.parse(registered.stderr)).toMatchObject({
+            failed: [
+                {
+                    appSlug: "unit-partial-app",
+                    blocking: false,
+                    error: expect.stringContaining("must define image as a string"),
+                },
+            ],
+        });
+        expect(isNonblockingRegistrationFailure(registered)).toBe(true);
+        const service = database
+            .prepare(
+                "SELECT id, service_name FROM docker_managed_services WHERE app_slug = 'unit-partial-app'"
+            )
+            .get() as { id: number; service_name: string };
+        expect(service.service_name).toBe("web");
+
+        await expect(runDockerUpdaterService(service.id)).resolves.toContainEqual(
+            expect.objectContaining({
+                code: "CONFLICT",
+                isOk: false,
+                step: "manual-update-skipped:unit-partial-app/web",
+                stdout: "No update available after registry poll",
+            })
+        );
+        expect(runProcessSpy).not.toHaveBeenCalled();
+    });
+
     it("applies a manual update to an isolated Compose file without invoking real Docker", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
         rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
