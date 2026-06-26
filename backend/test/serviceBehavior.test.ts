@@ -297,6 +297,7 @@ class FakeGatewayWebSocket extends EventTarget {
     readonly sent: string[] = [];
     closeCode: number | undefined;
     closeReason = "";
+    sendError: Error | undefined;
 
     constructor(readonly url: string) {
         super();
@@ -313,6 +314,9 @@ class FakeGatewayWebSocket extends EventTarget {
     }
 
     send(data: string): void {
+        if (this.sendError) {
+            throw this.sendError;
+        }
         this.sent.push(data);
     }
 
@@ -489,6 +493,57 @@ describe("backend service behavior", () => {
             expect(messages).toContainEqual({ type: "log", line: "third line" });
         } finally {
             unsubscribeFromLogs(socket);
+        }
+    });
+
+    it("completes log history when today's file is missing and ignores subscriber send errors", async () => {
+        rememberEnvironment("MIRA_DASHBOARD_LOGS_ROOT");
+        const logsRoot = createTemporaryRoot("mira-log-streams-empty-test-");
+        process.env.MIRA_DASHBOARD_LOGS_ROOT = logsRoot;
+        const originalConsoleError = console.error;
+        Object.defineProperty(console, "error", {
+            configurable: true,
+            value: () => {},
+            writable: true,
+        });
+
+        const messages: unknown[] = [];
+        const socket = {
+            send: (message: string) => {
+                messages.push(JSON.parse(message) as unknown);
+            },
+        } as DashboardSocket;
+        const throwingSocket = {
+            send: () => {
+                throw new Error("subscriber closed");
+            },
+        } as unknown as DashboardSocket;
+        const { subscribeToLogs, unsubscribeFromLogs } =
+            await import("../src/services/logStreams.ts");
+
+        subscribeToLogs(socket);
+        subscribeToLogs(throwingSocket);
+        try {
+            await waitFor(() =>
+                messages.some(
+                    (message) =>
+                        typeof message === "object" &&
+                        message !== null &&
+                        (message as { type?: unknown }).type === "log_history_complete"
+                )
+            );
+            expect(messages).toContainEqual({
+                type: "log_history_complete",
+                count: 0,
+            });
+        } finally {
+            unsubscribeFromLogs(socket);
+            unsubscribeFromLogs(throwingSocket);
+            Object.defineProperty(console, "error", {
+                configurable: true,
+                value: originalConsoleError,
+                writable: true,
+            });
         }
     });
 
@@ -1776,16 +1831,35 @@ fi
         });
         const helloPayloads: unknown[] = [];
         const events: unknown[] = [];
-        const { OpenClawGatewayClient } =
+        const connectErrors: string[] = [];
+        const closeEvents: Array<{ code: number; reason: string }> = [];
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        cleanupCallbacks.push(() => errorSpy.mockRestore());
+        const identityRoot = createTemporaryRoot("mira-gateway-device-identity-");
+        const { loadOrCreateDeviceIdentity, OpenClawGatewayClient } =
             await import("../src/lib/openclawGatewayClient.ts");
+        const deviceIdentity = loadOrCreateDeviceIdentity(
+            path.join(identityRoot, "device.json")
+        );
         const client = new OpenClawGatewayClient({
+            clientName: "dashboard-client",
+            deviceFamily: "SERVER",
+            deviceIdentity,
+            onClose: (code, reason) => {
+                closeEvents.push({ code, reason });
+            },
+            onConnectError: (error) => {
+                connectErrors.push(error.message);
+            },
             onEvent: (event) => {
                 events.push(event);
             },
             onHelloOk: (payload) => {
                 helloPayloads.push(payload);
             },
+            platform: "LINUX",
             requestTimeoutMs: 100,
+            token: " gateway-token ",
             url: "ws://gateway.test",
         });
 
@@ -1795,6 +1869,9 @@ fi
         expect(socket?.url).toBe("ws://gateway.test");
 
         socket?.open();
+        socket?.message("{");
+        socket?.message(JSON.stringify({ type: "noop" }));
+        expect(socket?.sent).toHaveLength(0);
         socket?.message(
             JSON.stringify({
                 event: "connect.challenge",
@@ -1806,13 +1883,34 @@ fi
         const connectFrame = JSON.parse(socket!.sent[0]!) as {
             id: string;
             method: string;
-            params: { client: { id: string }; role: string };
+            params: {
+                auth: { token: string };
+                client: { deviceFamily: string; id: string; platform: string };
+                device: {
+                    id: string;
+                    nonce: string;
+                    publicKey: string;
+                    signature: string;
+                };
+                role: string;
+            };
             type: string;
         };
         expect(connectFrame).toMatchObject({
             method: "connect",
             params: {
-                client: { id: "gateway-client" },
+                auth: { token: "gateway-token" },
+                client: {
+                    deviceFamily: "SERVER",
+                    id: "dashboard-client",
+                    platform: "LINUX",
+                },
+                device: {
+                    id: deviceIdentity.deviceId,
+                    nonce: "nonce-1",
+                    publicKey: expect.any(String),
+                    signature: expect.any(String),
+                },
                 role: "operator",
             },
             type: "req",
@@ -1857,8 +1955,41 @@ fi
         );
         await expect(failure).rejects.toThrow("gateway rejected");
 
+        socket!.sendError = new Error("send failed");
+        await expect(client.request("demo.send-fail")).rejects.toThrow("send failed");
+        socket!.sendError = undefined;
+
+        const closedRequest = client.request("demo.closed");
+        await waitFor(() => socket!.sent.length === 4);
+        socket?.close(4001, "gone");
+        await expect(closedRequest).rejects.toThrow("gateway closed (4001): gone");
+        expect(closeEvents).toContainEqual({ code: 4001, reason: "gone" });
+
+        const missingNonceClient = new OpenClawGatewayClient({
+            onConnectError: (error) => {
+                connectErrors.push(error.message);
+            },
+            requestTimeoutMs: 100,
+            url: "ws://gateway.test/missing-nonce",
+        });
+        missingNonceClient.start();
+        const missingNonceSocket = FakeGatewayWebSocket.instances.at(-1);
+        missingNonceSocket?.open();
+        missingNonceSocket?.message(
+            JSON.stringify({
+                event: "connect.challenge",
+                payload: {},
+                type: "event",
+            })
+        );
+        await waitFor(
+            () => missingNonceSocket?.closeReason === "connect challenge missing nonce"
+        );
+        expect(connectErrors).toContain("gateway connect challenge missing nonce");
+        missingNonceClient.stop();
+
         client.stop();
-        expect(socket?.closeCode).toBe(1000);
+        expect(socket?.closeCode).toBe(4001);
     });
 
     it("reports disconnected gateway state without starting a Gateway client", async () => {

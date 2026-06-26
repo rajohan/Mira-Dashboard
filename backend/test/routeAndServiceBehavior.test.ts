@@ -8,6 +8,7 @@ import {
     readFileSync,
     rmSync,
     symlinkSync,
+    unlinkSync,
     utimesSync,
     writeFileSync,
 } from "node:fs";
@@ -473,6 +474,44 @@ describe("backend route and service behavior", () => {
         ).toEqual({ count: 0 });
     });
 
+    it("removes a newly persisted Gateway token when first-user bootstrap fails without a previous token", async () => {
+        isolateOpenClawEnvironment("mira-first-user-token-cleanup-");
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const originalInit = gateway.init;
+        cleanupCallbacks.push(() => {
+            gateway.init = originalInit;
+            gateway.shutdown();
+        });
+        gateway.init = () => {
+            throw new Error("gateway unavailable");
+        };
+        const { authRoutes } = await import("../src/routes/authRoutes.ts");
+        const { findUserByUsername, getPersistedGatewayToken } =
+            await import("../src/auth.ts");
+        const server = fakeServer();
+        const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
+        database.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
+
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        cleanupCallbacks.push(() => errorSpy.mockRestore());
+        const response = await authRoutes["/api/auth/register-first-user"].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "new-token",
+                password: "correct-password",
+                username,
+            }),
+            server
+        );
+
+        expect(response.status).toBe(500);
+        await expect(response.json()).resolves.toEqual({
+            error: "Failed to complete first-user setup",
+        });
+        expect(findUserByUsername(username)).toBeUndefined();
+        expect(getPersistedGatewayToken()).toBeUndefined();
+    });
+
     it("task route automation, validation, assignment, movement, updates, and deletion", async () => {
         isolateOpenClawEnvironment("mira-task-route-coverage-");
         const gatewayModule = await import("../src/gateway.ts");
@@ -873,6 +912,11 @@ describe("backend route and service behavior", () => {
         );
         expect(missingAllowedRead.status).toBe(403);
 
+        const malformedConfigPath = await configFileRoutes["/api/config-files/*"].GET(
+            new Request("https://test.local/api/config-files/%E0%A4%A")
+        );
+        expect(malformedConfigPath.status).toBe(400);
+
         const read = await configFileRoutes["/api/config-files/*"].GET(
             new Request("https://test.local/api/config-files/openclaw.json")
         );
@@ -950,6 +994,39 @@ describe("backend route and service behavior", () => {
             '{"model":"codex"}\n'
         );
 
+        writeFileSync(path.join(root, "openclaw.json"), "a\0b");
+        const binaryRead = await configFileRoutes["/api/config-files/*"].GET(
+            new Request("https://test.local/api/config-files/openclaw.json")
+        );
+        await expect(binaryRead.json()).resolves.toMatchObject({
+            content: "[Binary file]",
+            isBinary: true,
+            path: "config:openclaw.json",
+        });
+
+        const symlinkedConfig = path.join(root, "hooks", "transforms", "agentmail.ts");
+        unlinkSync(symlinkedConfig);
+        symlinkSync(path.join(root, "openclaw.json"), symlinkedConfig);
+        const symlinkedRead = await configFileRoutes["/api/config-files/*"].GET(
+            new Request(
+                "https://test.local/api/config-files/hooks/transforms/agentmail.ts"
+            )
+        );
+        expect(symlinkedRead.status).toBe(404);
+        const symlinkedWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request(
+                "https://test.local/api/config-files/hooks/transforms/agentmail.ts",
+                {
+                    body: JSON.stringify({ content: "export default {}\n" }),
+                    headers: { "Content-Type": "application/json" },
+                    method: "PUT",
+                }
+            )
+        );
+        expect(symlinkedWrite.status).toBe(403);
+        unlinkSync(symlinkedConfig);
+        writeFileSync(symlinkedConfig, "export default {}\n");
+
         const linkedConfig = path.join(root, "hooks", "transforms", "agentmail.ts");
         linkSync(linkedConfig, `${linkedConfig}.hardlink`);
         const hardLinkedConfigWrite = await configFileRoutes["/api/config-files/*"].PUT(
@@ -963,6 +1040,16 @@ describe("backend route and service behavior", () => {
             )
         );
         expect(hardLinkedConfigWrite.status).toBe(403);
+
+        writeFileSync(path.join(root, "openclaw.json"), "x".repeat(2 * 1024 * 1024 + 1));
+        const oversizedExistingWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request("https://test.local/api/config-files/openclaw.json", {
+                body: JSON.stringify({ content: "{}\n" }),
+                headers: { "Content-Type": "application/json" },
+                method: "PUT",
+            })
+        );
+        expect(oversizedExistingWrite.status).toBe(413);
     });
 
     it("defensive route contracts for Docker, pull requests, cache, database, and backup APIs", async () => {
@@ -1297,6 +1384,46 @@ describe("backend route and service behavior", () => {
             jsonRequest("/api/docker/prune", { target: "networks" })
         );
         expect(invalidPrune.status).toBe(400);
+
+        const malformedPrune = await dockerRoutes["/api/docker/prune"].POST(
+            new Request("https://test.local/api/docker/prune", {
+                body: "{",
+                method: "POST",
+            })
+        );
+        expect(malformedPrune.status).toBe(400);
+
+        const invalidStackActionBody = await dockerRoutes[
+            "/api/docker/stack/action"
+        ].POST(jsonRequest("/api/docker/stack/action", []));
+        expect(invalidStackActionBody.status).toBe(400);
+
+        const invalidStackAction = await dockerRoutes["/api/docker/stack/action"].POST(
+            jsonRequest("/api/docker/stack/action", { action: "reload" })
+        );
+        expect(invalidStackAction.status).toBe(400);
+
+        const invalidStackService = await dockerRoutes["/api/docker/stack/action"].POST(
+            jsonRequest("/api/docker/stack/action", {
+                action: "restart",
+                service: "--bad",
+            })
+        );
+        expect(invalidStackService.status).toBe(400);
+
+        const invalidImageDelete = await dockerRoutes[
+            "/api/docker/images/:imageId"
+        ].DELETE(requestWithParameters("/api/docker/images/--bad", { imageId: "--bad" }));
+        expect(invalidImageDelete.status).toBe(400);
+
+        const invalidVolumeDelete = await dockerRoutes[
+            "/api/docker/volumes/:volumeName"
+        ].DELETE(
+            requestWithParameters("/api/docker/volumes/--bad", {
+                volumeName: "--bad",
+            })
+        );
+        expect(invalidVolumeDelete.status).toBe(400);
 
         const invalidUpdater = await dockerRoutes[
             "/api/docker/updater/services/:serviceId/update"
@@ -2011,6 +2138,13 @@ describe("backend route and service behavior", () => {
             output: "compose:stop",
         });
 
+        const stackServiceAction = await dockerRoutes["/api/docker/stack/action"].POST(
+            jsonRequest("/api/docker/stack/action", { action: "restart", service: "web" })
+        );
+        await expect(stackServiceAction.json()).resolves.toEqual({
+            output: "compose:restart web",
+        });
+
         const invalidStackAction = await dockerRoutes["/api/docker/stack/action"].POST(
             jsonRequest("/api/docker/stack/action", { action: "reload" })
         );
@@ -2029,6 +2163,31 @@ describe("backend route and service behavior", () => {
             })
         );
         expect(malformedStackAction.status).toBe(400);
+
+        const malformedExecStart = await dockerRoutes["/api/docker/exec/start"].POST(
+            new Request("https://test.local/api/docker/exec/start", {
+                body: "{",
+                headers: { "Content-Type": "application/json" },
+                method: "POST",
+            })
+        );
+        expect(malformedExecStart.status).toBe(400);
+
+        const invalidExecStart = await dockerRoutes["/api/docker/exec/start"].POST(
+            jsonRequest("/api/docker/exec/start", {
+                command: "",
+                containerId: "demo",
+            })
+        );
+        expect(invalidExecStart.status).toBe(400);
+
+        const missingExecContainer = await dockerRoutes["/api/docker/exec/start"].POST(
+            jsonRequest("/api/docker/exec/start", {
+                command: "printf ok",
+                containerId: "missing",
+            })
+        );
+        expect(missingExecContainer.status).toBe(404);
 
         const missingAction = await dockerRoutes[
             "/api/docker/containers/:containerId/action"
