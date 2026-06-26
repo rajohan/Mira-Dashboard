@@ -184,7 +184,7 @@ describe("backend service utilities", () => {
             const missingRoot = path.join(root, "missing-root", "child");
             const missingRootTarget = path.join(missingRoot, "nested", "report.txt");
             expect(
-                path.resolve(
+                canonicalPath(
                     prepareSafeWriteTargetWithinRoot(missingRootTarget, missingRoot)!
                 )
             ).toBe(canonicalPath(missingRootTarget));

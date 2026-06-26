@@ -72,6 +72,21 @@ const animationFrameState = {
 const terminalApiState = {
     wasJobStopped: false,
 };
+const jobsApiState = {
+    cronName: "heartbeat",
+    heartbeatIntervalSeconds: 1800,
+    heartbeatRuns: [
+        {
+            id: 1,
+            jobId: "heartbeat",
+            status: "success",
+            triggerType: "manual",
+            startedAt: "2026-06-24T08:00:00.000Z",
+            finishedAt: "2026-06-24T08:01:00.000Z",
+            output: { message: "ok" },
+        },
+    ],
+};
 
 function requestAnimationFrameForTest(callback: FrameRequestCallback): number {
     const id = ++animationFrameState.id;
@@ -619,7 +634,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
             jobs: [
                 {
                     id: "heartbeat",
-                    name: "heartbeat",
+                    name: jobsApiState.cronName,
                     command: "openclaw heartbeat",
                     schedule: { kind: "cron", expression: "*/30 * * * *" },
                     payload: { kind: "heartbeat" },
@@ -943,7 +958,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     name: "Heartbeat",
                     enabled: true,
                     scheduleType: "interval",
-                    intervalSeconds: 1800,
+                    intervalSeconds: jobsApiState.heartbeatIntervalSeconds,
                     actionKey: "heartbeat",
                     actionPayload: {},
                     createdAt: "2026-06-24T08:00:00.000Z",
@@ -956,23 +971,21 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
 
     if (url === "/api/jobs/heartbeat/runs") {
         return Response.json({
-            runs: [
-                {
-                    id: 1,
-                    jobId: "heartbeat",
-                    status: "success",
-                    triggerType: "manual",
-                    startedAt: "2026-06-24T08:00:00.000Z",
-                    finishedAt: "2026-06-24T08:01:00.000Z",
-                    output: { message: "ok" },
-                },
-            ],
+            runs: jobsApiState.heartbeatRuns,
         });
     }
 
     if (method === "PATCH" && url === "/api/jobs/heartbeat") {
-        const body = parseRequestBody(init);
+        const body = parseRequestBody(init) as {
+            patch?: {
+                cronExpression?: unknown;
+                intervalSeconds?: unknown;
+                scheduleType?: unknown;
+                timeOfDay?: unknown;
+            };
+        };
         const clearedScheduleValue = JSON.parse("null") as null;
+        jobsApiState.heartbeatIntervalSeconds = Number(body.patch?.intervalSeconds);
         expect(body).toEqual({
             patch: {
                 cronExpression: clearedScheduleValue,
@@ -988,7 +1001,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                 name: "Heartbeat",
                 enabled: true,
                 scheduleType: "interval",
-                intervalSeconds: 3600,
+                intervalSeconds: jobsApiState.heartbeatIntervalSeconds,
                 actionKey: "heartbeat",
                 actionPayload: {},
                 createdAt: "2026-06-24T08:00:00.000Z",
@@ -999,9 +1012,8 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     }
 
     if (method === "POST" && url === "/api/jobs/heartbeat/run") {
-        return Response.json({
-            isOk: true,
-            run: {
+        jobsApiState.heartbeatRuns = [
+            {
                 id: 2,
                 jobId: "heartbeat",
                 status: "success",
@@ -1010,6 +1022,11 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                 finishedAt: "2026-06-24T08:06:00.000Z",
                 output: { message: "manual ok" },
             },
+            ...jobsApiState.heartbeatRuns,
+        ];
+        return Response.json({
+            isOk: true,
+            run: jobsApiState.heartbeatRuns[0],
         });
     }
 
@@ -1023,12 +1040,23 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     }
 
     if (method === "POST" && url === "/api/cron/jobs/heartbeat/update") {
-        expect(parseRequestBody(init)).toMatchObject({
+        const body = parseRequestBody(init) as {
             patch: {
-                name: "heartbeat",
+                delivery: { mode: string };
+                name: string;
+                payload: { kind: string };
+                schedule: { kind: string; expression: string };
+            };
+        };
+        expect(body).toEqual({
+            patch: {
+                delivery: { mode: "session" },
+                name: "heartbeat-updated",
+                payload: { kind: "heartbeat" },
                 schedule: { kind: "cron", expression: "*/30 * * * *" },
             },
         });
+        jobsApiState.cronName = body.patch.name;
         return Response.json({ isOk: true });
     }
 
@@ -1230,10 +1258,12 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     }
 
     if (method === "POST" && url === "/api/pull-requests/191/review-approval") {
+        expect(parseRequestBody(init)).toEqual({});
         return Response.json({ isOk: true, message: "Approved PR #191" });
     }
 
     if (method === "POST" && url === "/api/pull-requests/191/update-branch") {
+        expect(parseRequestBody(init)).toEqual({});
         return Response.json({ isOk: true, message: "Branch update queued" });
     }
 
@@ -1369,6 +1399,19 @@ describe("Mira Dashboard pages", () => {
     beforeEach(() => {
         FakeWebSocket.instances = [];
         terminalApiState.wasJobStopped = false;
+        jobsApiState.cronName = "heartbeat";
+        jobsApiState.heartbeatIntervalSeconds = 1800;
+        jobsApiState.heartbeatRuns = [
+            {
+                id: 1,
+                jobId: "heartbeat",
+                status: "success",
+                triggerType: "manual",
+                startedAt: "2026-06-24T08:00:00.000Z",
+                finishedAt: "2026-06-24T08:01:00.000Z",
+                output: { message: "ok" },
+            },
+        ];
         authActions.setSession({
             authenticated: true,
             isBootstrapRequired: false,
@@ -1504,7 +1547,9 @@ describe("Mira Dashboard pages", () => {
             ).toBeInTheDocument();
 
             await user.click(screen.getByRole("button", { name: /^skills$/i }));
-            await user.click(screen.getByRole("switch", { name: "task-tracking" }));
+            await user.click(
+                screen.getByRole("switch", { name: "Toggle task-tracking" })
+            );
 
             await user.click(screen.getByRole("button", { name: /^restart$/i }));
             const restartDialog = screen.getByRole("dialog", {
@@ -1597,16 +1642,13 @@ describe("Mira Dashboard pages", () => {
         await user.type(screen.getByLabelText("Interval seconds"), "3600");
         await user.click(screen.getByRole("button", { name: /save schedule/i }));
         await waitFor(() => {
-            expect(
-                screen.queryByText("Scheduled job update failed")
-            ).not.toBeInTheDocument();
+            expect(screen.getAllByText("Schedule: Every 1h").length).toBeGreaterThan(0);
         });
 
         await user.click(screen.getByRole("button", { name: /run now/i }));
         await waitFor(() => {
-            expect(
-                screen.queryByText("Failed to run scheduled job")
-            ).not.toBeInTheDocument();
+            expect(screen.getByText("manual run #2")).toBeInTheDocument();
+            expect(screen.getByText(/manual ok/)).toBeInTheDocument();
         });
 
         await user.click(screen.getByRole("button", { name: /openclaw cron/i }));
@@ -1622,11 +1664,11 @@ describe("Mira Dashboard pages", () => {
 
         await user.click(screen.getByLabelText("Enabled"));
         await user.click(screen.getByRole("button", { name: /^edit$/i }));
+        await user.clear(screen.getByLabelText("Name"));
+        await user.type(screen.getByLabelText("Name"), "heartbeat-updated");
         await user.click(screen.getByRole("button", { name: /save edits/i }));
         await waitFor(() => {
-            expect(
-                screen.queryByText("Invalid JSON in edit fields")
-            ).not.toBeInTheDocument();
+            expect(screen.getAllByText("heartbeat-updated").length).toBeGreaterThan(0);
         });
 
         await user.click(screen.getByRole("button", { name: /^delete$/i }));

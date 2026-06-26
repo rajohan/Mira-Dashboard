@@ -3289,11 +3289,12 @@ fi
             isDryRun: false,
             verbose: true,
         });
+        const hasCompressionStream = "CompressionStream" in globalThis;
 
         expect(summary).toMatchObject({
             checkedGroups: 2,
             checkedFiles: 3,
-            compressedFiles: 1,
+            compressedFiles: hasCompressionStream ? 1 : 0,
             deletedArchives: 1,
             isDryRun: false,
             isOk: true,
@@ -3302,7 +3303,9 @@ fi
         expect(readFileSync(logFile, "utf8")).toBe("");
         expect(existsSync(oldArchive)).toBe(false);
         expect(existsSync(retainedArchive)).toBe(true);
-        expect(readdirSync(rotationRoot).some((name) => name.endsWith(".gz"))).toBe(true);
+        expect(readdirSync(rotationRoot).some((name) => name.endsWith(".gz"))).toBe(
+            hasCompressionStream
+        );
 
         const row = database
             .prepare(
@@ -3314,7 +3317,9 @@ fi
             lastRun?: { isOk?: boolean };
         };
         expect(state.lastRun?.isOk).toBe(true);
-        expect(state.files?.[logFile]?.lastArchive?.endsWith(".gz")).toBe(true);
+        expect(state.files?.[logFile]?.lastArchive?.endsWith(".gz")).toBe(
+            hasCompressionStream
+        );
     });
 
     it("copy-truncates logs, honors exclusions, and reports unsafe rotation errors", async () => {
@@ -4105,15 +4110,21 @@ fi
         await expect(runExecOnce({ args: [], command: "node" })).rejects.toThrow(
             "command executable is not approved"
         );
-        await expect(runExecOnce({ args: "not-array", command: "node" })).rejects.toThrow(
-            "command executable is not approved"
-        );
-        await expect(runExecOnce({ args: [42], command: "node" })).rejects.toThrow(
-            "command executable is not approved"
-        );
         await expect(
-            runExecOnce({ args: ["bad\0arg"], command: "node" })
-        ).rejects.toThrow("command executable is not approved");
+            runExecOnce({
+                args: "not-array",
+                command: "__mira_dashboard_shell_smoke_test__",
+            })
+        ).rejects.toThrow("args must be an array");
+        await expect(
+            runExecOnce({ args: [42], command: "__mira_dashboard_shell_smoke_test__" })
+        ).rejects.toThrow("all args must be strings");
+        await expect(
+            runExecOnce({
+                args: ["bad\0arg"],
+                command: "__mira_dashboard_shell_smoke_test__",
+            })
+        ).rejects.toThrow("args cannot contain null bytes");
         await expect(
             runExecOnce({
                 command: "__mira_dashboard_shell_smoke_test__",
@@ -4194,24 +4205,42 @@ fi
     it("starts, stops, and reports exec jobs through the service lifecycle", async () => {
         const { getExecJob, startExecJob, stopExecJob } =
             await import("../src/services/execJobs.ts");
-
-        const { jobId } = startExecJob({
-            command: "__mira_dashboard_shell_smoke_test__",
-            shell: true,
-        });
-        expect(getExecJob(jobId)).toMatchObject({
-            jobId,
-            status: "running",
-        });
-        expect(stopExecJob(jobId)).toEqual({
-            isSuccess: true,
-            message: "Stop signal sent",
-        });
-        expect(getExecJob(jobId)).toMatchObject({
-            jobId,
-            status: "signaled",
-        });
-        expect(() => stopExecJob(jobId)).toThrow("Job is not running");
+        const exit = Promise.withResolvers<number>();
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: exit.promise,
+                    kill: () => {
+                        exit.resolve(143);
+                    },
+                    pid: 123,
+                    stderr: readableUtf8Stream(""),
+                    stdout: readableUtf8Stream(""),
+                }) as unknown as processModule.BunProcess
+        );
+        try {
+            const { jobId } = startExecJob({
+                command: "__mira_dashboard_shell_smoke_test__",
+                shell: true,
+            });
+            expect(getExecJob(jobId)).toMatchObject({
+                jobId,
+                status: "running",
+            });
+            expect(stopExecJob(jobId)).toEqual({
+                isSuccess: true,
+                message: "Stop signal sent",
+            });
+            expect(getExecJob(jobId)).toMatchObject({
+                jobId,
+                status: "signaled",
+            });
+            expect(() => stopExecJob(jobId)).toThrow("Job is not running");
+        } finally {
+            exit.resolve(0);
+            await Bun.sleep(0);
+            spawnSpy.mockRestore();
+        }
     });
 
     it("rejects new exec jobs while the active job cap is full", async () => {

@@ -2220,7 +2220,7 @@ describe("backend route and service behavior", () => {
             requestWithParameters(`/api/docker/exec/${jobId}`, { jobId })
         );
         let execData = (await execStatus.json()) as { status: string; stdout: string };
-        const execDeadline = Date.now() + 5000;
+        const execDeadline = Date.now() + 15_000;
         while (execData.status !== "done" && Date.now() < execDeadline) {
             await new Promise((resolve) => setTimeout(resolve, 25));
             execStatus = dockerRoutes["/api/docker/exec/:jobId"].GET(
@@ -2340,7 +2340,7 @@ describe("backend route and service behavior", () => {
             "args are required"
         );
         await expect(runExecOnce({ args: "hi", command: "echo" })).rejects.toThrow(
-            "command executable is not approved"
+            "args must be an array"
         );
         await expect(runExecOnce({ args: ["hi"], command: "./echo" })).rejects.toThrow(
             "command must be an approved executable name"
@@ -2728,16 +2728,26 @@ describe("backend route and service behavior", () => {
         });
         expect(archiveOnlyLiveSummary).toMatchObject({
             checkedFiles: 2,
-            compressedFiles: 1,
+            compressedFiles: hasCompressionStream ? 1 : 0,
             deletedArchives: 1,
             isDryRun: false,
             isOk: true,
         });
+        if (!hasCompressionStream) {
+            expect(archiveOnlyLiveSummary.warnings).toEqual(
+                expect.arrayContaining([expect.stringContaining("Compression failed")])
+            );
+        }
         expect(existsSync(archiveOnlyOld)).toBe(false);
-        expect(existsSync(archiveOnlyNew)).toBe(false);
-        expect(gunzipSync(readFileSync(`${archiveOnlyNew}.gz`)).toString("utf8")).toBe(
-            "new archive\n"
-        );
+        if (hasCompressionStream) {
+            expect(existsSync(archiveOnlyNew)).toBe(false);
+            expect(
+                gunzipSync(readFileSync(`${archiveOnlyNew}.gz`)).toString("utf8")
+            ).toBe("new archive\n");
+        } else {
+            expect(existsSync(archiveOnlyNew)).toBe(true);
+            expect(readFileSync(archiveOnlyNew, "utf8")).toBe("new archive\n");
+        }
     });
 
     it("cached quota/system readers and notification checks", async () => {

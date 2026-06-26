@@ -7,6 +7,7 @@ interface SwitchProperties {
     isChecked: boolean;
     onChange: (isChecked: boolean) => void;
     label?: string;
+    ariaLabel?: string;
     description?: string;
     disabled?: boolean;
     className?: string;
@@ -17,6 +18,7 @@ export function Switch({
     isChecked,
     onChange,
     label,
+    ariaLabel,
     description,
     disabled,
     className,
@@ -43,6 +45,7 @@ export function Switch({
             <HeadlessSwitch
                 checked={isChecked}
                 onChange={onChange}
+                aria-label={label ? undefined : ariaLabel}
                 className={cn(
                     "inline-flex h-6 w-11 shrink-0 items-center rounded-full transition focus:outline-none",
                     "data-focus:ring-accent-500 ring-offset-primary-800 ring-offset-2 data-focus:ring-2",
@@ -50,7 +53,7 @@ export function Switch({
                     disabled ? "cursor-not-allowed opacity-50" : ""
                 )}
             >
-                <span className="sr-only">{label}</span>
+                <span className="sr-only">{label ?? ariaLabel}</span>
                 <span
                     className={cn(
                         "size-4 rounded-full bg-white transition",

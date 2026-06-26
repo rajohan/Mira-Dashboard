@@ -111,6 +111,9 @@ describe("server start scheduler policy", () => {
         const gatewayModule = await import("../src/gateway.ts");
         const { database } = await import("../src/database.ts");
         const serverStartModule = await import("../src/serverStart.ts");
+        const previousPersistedGatewayToken = database
+            .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
+            .get() as { value: string } | undefined;
         database.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
         database
             .prepare(
@@ -151,6 +154,17 @@ describe("server start scheduler policy", () => {
             database
                 .prepare("DELETE FROM cache_entries WHERE key = 'quotas.summary'")
                 .run();
+            if (previousPersistedGatewayToken) {
+                database
+                    .prepare(
+                        "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+                    )
+                    .run(previousPersistedGatewayToken.value, Date.now());
+            } else {
+                database
+                    .prepare("DELETE FROM app_config WHERE key = 'gateway_token'")
+                    .run();
+            }
         }
     });
 
@@ -263,9 +277,10 @@ describe("server start scheduler policy", () => {
                     [Symbol.for("mira.test.options")]: options,
                 }) as unknown as Server<unknown>) as typeof Bun.serve
         );
+        let handleDashboardClientSpy: { mockRestore: () => void } | undefined;
         try {
             const gatewayModule = await import("../src/gateway.ts");
-            const handleDashboardClientSpy = jest
+            handleDashboardClientSpy = jest
                 .spyOn(gatewayModule.default, "handleDashboardClient")
                 .mockImplementation(() => {});
             const { createServer } = await import("../src/server.ts");
@@ -395,9 +410,8 @@ describe("server start scheduler policy", () => {
             expect(messageHandler).toHaveBeenCalledWith(Buffer.from("hello"));
             expect(errorHandler).toHaveBeenCalledWith(expect.any(Error));
             expect(closeHandler).toHaveBeenCalled();
-
-            handleDashboardClientSpy.mockRestore();
         } finally {
+            handleDashboardClientSpy?.mockRestore();
             serveSpy.mockRestore();
             if (originalFrontendPath === undefined) {
                 delete process.env.MIRA_DASHBOARD_FRONTEND_PATH;

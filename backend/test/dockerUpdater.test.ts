@@ -342,7 +342,9 @@ describe("Docker updater tag patterns", () => {
 
     it("applies a manual update to an isolated Compose file without invoking real Docker", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_BIN");
         rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
         rememberEnvironment("MIRA_DOCKER_UPDATER_PLATFORM");
         const appsRoot = createTemporaryRoot("mira-docker-updater-apply-");
         const appRoot = path.join(appsRoot, "unit-apply-app");
@@ -364,7 +366,9 @@ describe("Docker updater tag patterns", () => {
             ].join("\n")
         );
         process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        process.env.MIRA_DOCKER_BIN = "docker";
         process.env.MIRA_DOCKER_COMPOSE_WRAPPER = path.join(appsRoot, "compose-wrapper");
+        delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
         process.env.MIRA_DOCKER_UPDATER_PLATFORM = "linux/amd64";
         const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
             input: Request | string | URL
@@ -452,8 +456,10 @@ describe("Docker updater tag patterns", () => {
 
     it("updates services through parent compose includes and default overrides", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_BIN");
         rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
         rememberEnvironment("MIRA_DOCKER_ROOT");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
         const appsRoot = createTemporaryRoot("mira-docker-updater-parent-compose-");
         const dockerRoot = createTemporaryRoot("mira-docker-updater-root-");
         const appRoot = path.join(appsRoot, "unit-parent-compose-app");
@@ -499,8 +505,10 @@ describe("Docker updater tag patterns", () => {
             ].join("\n")
         );
         process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        process.env.MIRA_DOCKER_BIN = "docker";
         delete process.env.MIRA_DOCKER_COMPOSE_WRAPPER;
         process.env.MIRA_DOCKER_ROOT = dockerRoot;
+        delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
         const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
             input: Request | string | URL
         ) => {
@@ -567,6 +575,7 @@ describe("Docker updater tag patterns", () => {
 
     it("auto-applies eligible updates and treats image prune as best effort", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
         const appsRoot = createTemporaryRoot("mira-docker-updater-auto-");
         const appRoot = path.join(appsRoot, "unit-auto-app");
         const composePath = path.join(appRoot, "compose.yaml");
@@ -587,6 +596,7 @@ describe("Docker updater tag patterns", () => {
             ].join("\n")
         );
         process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
         const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
             input: Request | string | URL
         ) => {

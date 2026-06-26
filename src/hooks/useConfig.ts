@@ -142,13 +142,27 @@ async function fetchSkills(): Promise<Skill[]> {
     return data.skills;
 }
 
+interface ConfigUpdateResponse {
+    isOk?: boolean;
+    result?: {
+        hash?: string;
+        parsed?: OpenClawConfig;
+    };
+}
+
 /** Performs update config. */
-async function updateConfig(config: OpenClawConfig, baseHash?: string): Promise<void> {
+async function updateConfig(
+    config: OpenClawConfig,
+    baseHash?: string
+): Promise<ConfigUpdateResponse | undefined> {
     const configHash = baseHash ?? config.__hash;
     if (!configHash?.trim()) {
         throw new Error("Config hash is required");
     }
-    await apiPut("/config", { ...config, __hash: configHash.trim() });
+    return apiPut<ConfigUpdateResponse>("/config", {
+        ...config,
+        __hash: configHash.trim(),
+    });
 }
 
 /** Performs toggle skill. */
@@ -210,7 +224,17 @@ export function useUpdateConfig() {
             const current = queryClient.getQueryData<OpenClawConfig>(configKeys.config());
             return updateConfig(config, config.__hash ?? current?.__hash);
         },
-        onSuccess: () => {
+        onSuccess: (response, config) => {
+            const nextHash = response?.result?.hash;
+            if (nextHash?.trim()) {
+                queryClient.setQueryData<OpenClawConfig>(
+                    configKeys.config(),
+                    (current) =>
+                        current
+                            ? { ...current, ...config, __hash: nextHash.trim() }
+                            : { ...config, __hash: nextHash.trim() }
+                );
+            }
             queryClient.invalidateQueries({ queryKey: configKeys.config() });
         },
     });

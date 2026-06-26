@@ -1243,7 +1243,7 @@ describe("shared component helpers", () => {
         rerender(
             <FileContentViewer
                 fileContent={{ ...baseFile, path: "/tmp/config.json" }}
-                editedContent='{"foo":"viewer"}'
+                editedContent={JSON.stringify({ foo: "viewer" }, undefined, 2)}
                 onContentChange={onContentChange}
                 largeFileWarning={false}
                 isEditable={true}
@@ -1254,11 +1254,15 @@ describe("shared component helpers", () => {
             />
         );
         await waitFor(() => {
+            expect(screen.getByText("foo")).toBeInTheDocument();
             expect(
-                screen.getAllByText((_content, element) =>
-                    Boolean(element?.textContent?.includes("viewer"))
-                ).length
-            ).toBeGreaterThan(0);
+                screen.getByText((_content, element) =>
+                    Boolean(
+                        element?.classList.contains("string-value") &&
+                        element.textContent?.includes("viewer")
+                    )
+                )
+            ).toBeInTheDocument();
         });
 
         rerender(

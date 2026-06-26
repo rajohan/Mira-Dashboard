@@ -2038,7 +2038,7 @@ describe("Mira Dashboard frontend behavior", () => {
                         __hash: "hash-1",
                         agents: { defaults: { model: { primary: "codex" } } },
                     });
-                    return new Response(undefined, { status: 204 });
+                    return Response.json({ isOk: true, result: { hash: "hash-2" } });
                 }
 
                 if (url === "/api/skills" && method === "GET") {
@@ -2103,6 +2103,9 @@ describe("Mira Dashboard frontend behavior", () => {
             __hash: "hash-1",
             agents: { defaults: { model: { primary: "codex" } } },
         });
+        expect(
+            updateConfig.queryClient.getQueryData<{ __hash?: string }>(["config"])?.__hash
+        ).toBe("hash-2");
 
         const restartGateway = renderHookWithQueryClient(() => useRestartGateway());
         await expect(
