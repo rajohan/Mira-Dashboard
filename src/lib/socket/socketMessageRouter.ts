@@ -70,8 +70,8 @@ export function handleSocketMessage(raw: unknown): boolean | undefined {
         writeAgentsFromWebSocket(data.payload as AgentInfo[]);
     }
 
-    if (data.type === "log" && data.line) {
-        writeLogFromWebSocket(data.line);
+    if (data.type === "log" && data.line && data.history !== true) {
+        writeLogFromWebSocket(data.line, data.lineId);
     }
 
     if (data.type === "response") {

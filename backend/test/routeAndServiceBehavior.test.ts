@@ -1791,9 +1791,224 @@ describe("backend route and service behavior", () => {
             )
         );
         await expect(explicitTail.json()).resolves.toEqual({
-            content: "line 2\nline 3",
+            content: "line 2\nline 3\n",
             file: "openclaw-2026-06-25.log",
+            lineIds: ["7", "14", "21"],
         });
+
+        const tailLineIds = (startOffset: number, content: string) => {
+            const rawLines = content.split("\n");
+            const lineIds: string[] = [];
+            let offset = startOffset;
+
+            for (const [index, line] of rawLines.entries()) {
+                lineIds.push(String(offset));
+                offset += Buffer.byteLength(line);
+                if (index < rawLines.length - 1) {
+                    offset += 1;
+                }
+            }
+
+            return lineIds;
+        };
+        const largePrefix = `${"x".repeat(2 * 1024 * 1024 + 1024)}\n`;
+        const largePrefixLength = Buffer.byteLength(largePrefix);
+
+        writeFileSync(currentLog, `${largePrefix}complete tail\n`);
+        const cappedTail = await logRoutes["/api/logs/content"].GET(
+            new Request(
+                "https://test.local/api/logs/content?file=openclaw-2026-06-25.log&lines=5000"
+            )
+        );
+        await expect(cappedTail.json()).resolves.toMatchObject({
+            content: "complete tail\n",
+            file: "openclaw-2026-06-25.log",
+            lineIds: tailLineIds(largePrefixLength, "complete tail\n"),
+        });
+
+        const boundaryTailStart = "boundary first\nboundary second\n";
+        const boundaryPrefix = "prefix before boundary\n";
+        const boundaryTail =
+            boundaryTailStart +
+            "z".repeat(64 * 1024 - Buffer.byteLength(boundaryTailStart));
+        writeFileSync(currentLog, `${boundaryPrefix}${boundaryTail}`);
+        const boundaryTailResponse = await logRoutes["/api/logs/content"].GET(
+            new Request(
+                "https://test.local/api/logs/content?file=openclaw-2026-06-25.log"
+            )
+        );
+        const boundaryTailBody = (await boundaryTailResponse.json()) as {
+            content: string;
+            lineIds: string[];
+        };
+        expect(boundaryTailBody.content.startsWith(boundaryTailStart)).toBe(true);
+        expect(boundaryTailBody.lineIds[0]).toBe(
+            String(Buffer.byteLength(boundaryPrefix))
+        );
+
+        const prefixedJsonTailStart =
+            '2026-06-27T20:00:00Z {"_meta":{"logLevelName":"INFO"},"0":"prefixed json tail"}\nplain after prefixed json\n';
+        const prefixedJsonTail =
+            prefixedJsonTailStart +
+            "z".repeat(64 * 1024 - Buffer.byteLength(prefixedJsonTailStart));
+        writeFileSync(currentLog, `${boundaryPrefix}${prefixedJsonTail}`);
+        const prefixedJsonTailResponse = await logRoutes["/api/logs/content"].GET(
+            new Request(
+                "https://test.local/api/logs/content?file=openclaw-2026-06-25.log"
+            )
+        );
+        const prefixedJsonTailBody = (await prefixedJsonTailResponse.json()) as {
+            content: string;
+            lineIds: string[];
+        };
+        expect(prefixedJsonTailBody.content.startsWith(prefixedJsonTailStart)).toBe(true);
+        expect(prefixedJsonTailBody.lineIds[0]).toBe(
+            String(Buffer.byteLength(boundaryPrefix))
+        );
+
+        const multibytePrefix = "aé";
+        const multibyteTailStart = "\nmultibyte boundary\n";
+        const multibyteTail =
+            multibyteTailStart +
+            "z".repeat(64 * 1024 - Buffer.byteLength(multibyteTailStart) - 1);
+        writeFileSync(currentLog, `${multibytePrefix}${multibyteTail}`);
+        const multibyteTailResponse = await logRoutes["/api/logs/content"].GET(
+            new Request(
+                "https://test.local/api/logs/content?file=openclaw-2026-06-25.log"
+            )
+        );
+        const multibyteTailBody = (await multibyteTailResponse.json()) as {
+            content: string;
+            lineIds: string[];
+        };
+        expect(multibyteTailBody.content.startsWith("multibyte boundary\n")).toBe(true);
+        expect(multibyteTailBody.lineIds[0]).toBe(
+            String(Buffer.byteLength(multibytePrefix) + 1)
+        );
+
+        const metadataPlainTailStart =
+            "runtimeVersion mismatch in _meta plain warning\nplain after metadata warning\n";
+        const metadataPlainTail =
+            metadataPlainTailStart +
+            "z".repeat(64 * 1024 - Buffer.byteLength(metadataPlainTailStart));
+        writeFileSync(currentLog, `${boundaryPrefix}${metadataPlainTail}`);
+        const metadataPlainTailResponse = await logRoutes["/api/logs/content"].GET(
+            new Request(
+                "https://test.local/api/logs/content?file=openclaw-2026-06-25.log"
+            )
+        );
+        const metadataPlainTailBody = (await metadataPlainTailResponse.json()) as {
+            content: string;
+            lineIds: string[];
+        };
+        expect(metadataPlainTailBody.content.startsWith(metadataPlainTailStart)).toBe(
+            true
+        );
+        expect(metadataPlainTailBody.lineIds[0]).toBe(
+            String(Buffer.byteLength(boundaryPrefix))
+        );
+
+        const structuredFragment = String.raw`{\"subsystem\":\"gateway/ws\"}","1":"partial"`;
+        writeFileSync(
+            currentLog,
+            largePrefix +
+                structuredFragment +
+                "\n" +
+                "plain warning tail\n" +
+                '{"level":"info","message":"complete json tail"}\n'
+        );
+        const cappedJsonTail = await logRoutes["/api/logs/content"].GET(
+            new Request(
+                "https://test.local/api/logs/content?file=openclaw-2026-06-25.log&lines=5000"
+            )
+        );
+        const cappedJsonTailContent =
+            'plain warning tail\n{"level":"info","message":"complete json tail"}\n';
+        await expect(cappedJsonTail.json()).resolves.toMatchObject({
+            content: cappedJsonTailContent,
+            file: "openclaw-2026-06-25.log",
+            lineIds: tailLineIds(
+                largePrefixLength + Buffer.byteLength(structuredFragment) + 1,
+                cappedJsonTailContent
+            ),
+        });
+
+        writeFileSync(
+            currentLog,
+            largePrefix +
+                structuredFragment +
+                "\n" +
+                "plain warning tail\n" +
+                ": retrying tail\n" +
+                '{"level":"info","message":"complete json tail"}\n'
+        );
+        const cappedPlainTail = await logRoutes["/api/logs/content"].GET(
+            new Request(
+                "https://test.local/api/logs/content?file=openclaw-2026-06-25.log&lines=2"
+            )
+        );
+        const cappedPlainTailContent =
+            ': retrying tail\n{"level":"info","message":"complete json tail"}\n';
+        await expect(cappedPlainTail.json()).resolves.toMatchObject({
+            content: cappedPlainTailContent,
+            file: "openclaw-2026-06-25.log",
+            lineIds: tailLineIds(
+                largePrefixLength +
+                    Buffer.byteLength(structuredFragment) +
+                    1 +
+                    Buffer.byteLength("plain warning tail\n"),
+                cappedPlainTailContent
+            ),
+        });
+
+        const fragmentLookingPlainTailContent =
+            ': first complete plain tail\n{"level":"info","message":"complete json tail"}\n';
+        writeFileSync(currentLog, `${largePrefix}${fragmentLookingPlainTailContent}`);
+        const cappedFragmentLookingPlainTail = await logRoutes["/api/logs/content"].GET(
+            new Request(
+                "https://test.local/api/logs/content?file=openclaw-2026-06-25.log&lines=5000"
+            )
+        );
+        await expect(cappedFragmentLookingPlainTail.json()).resolves.toMatchObject({
+            content: fragmentLookingPlainTailContent,
+            file: "openclaw-2026-06-25.log",
+            lineIds: tailLineIds(largePrefixLength, fragmentLookingPlainTailContent),
+        });
+
+        const leadingBlankTailContent =
+            '\n\n{"level":"info","message":"blank-preserved json tail"}\n';
+        writeFileSync(currentLog, `${largePrefix}${leadingBlankTailContent}`);
+        const leadingBlankTail = await logRoutes["/api/logs/content"].GET(
+            new Request(
+                "https://test.local/api/logs/content?file=openclaw-2026-06-25.log&lines=5000"
+            )
+        );
+        await expect(leadingBlankTail.json()).resolves.toMatchObject({
+            content: leadingBlankTailContent,
+            file: "openclaw-2026-06-25.log",
+            lineIds: tailLineIds(largePrefixLength, leadingBlankTailContent),
+        });
+
+        const blankSeparatedTailContent =
+            "older plain tail\n" + "\n".repeat(70 * 1024) + "newest plain tail\n";
+        writeFileSync(currentLog, blankSeparatedTailContent);
+        const blankSeparatedTail = await logRoutes["/api/logs/content"].GET(
+            new Request(
+                "https://test.local/api/logs/content?file=openclaw-2026-06-25.log&lines=2"
+            )
+        );
+        const blankSeparatedTailBody = (await blankSeparatedTail.json()) as {
+            content: string;
+            file: string;
+            lineIds: string[];
+        };
+        expect(blankSeparatedTailBody.file).toBe("openclaw-2026-06-25.log");
+        expect(blankSeparatedTailBody.content).toContain("older plain tail\n");
+        expect(blankSeparatedTailBody.content).toContain("newest plain tail\n");
+        expect(blankSeparatedTailBody.lineIds).toContain("0");
+        expect(blankSeparatedTailBody.lineIds).toContain(
+            String(Buffer.byteLength("older plain tail\n") + 70 * 1024)
+        );
 
         const invalidLines = await logRoutes["/api/logs/content"].GET(
             new Request(

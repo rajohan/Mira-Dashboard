@@ -3,16 +3,12 @@ import path from "node:path";
 
 import { json } from "../http.ts";
 import { guardedPath, openReadNoFollowNonblockingGuarded } from "../lib/guardedOps.ts";
-import { resolveRealLogsDirectory } from "../lib/logRoots.ts";
-
-function dateToISOString(date: Date): string {
-    return date.toISOString();
-}
+import { formatOpenClawLogDate, resolveRealLogsDirectory } from "../lib/logRoots.ts";
+import { lineEntriesFromLogRead, type LogRead } from "../lib/logTail.ts";
 
 const MIN_LOG_TAIL_BYTES = 64 * 1024;
 const MAX_LOG_LINE_COUNT = 5000;
 const MAX_LOG_TAIL_BYTES = 2 * 1024 * 1024;
-const LOG_BYTES_PER_REQUESTED_LINE = 1024;
 const LOG_TAIL_READ_CHUNK_BYTES = 64 * 1024;
 const LOG_NOT_FOUND_ERROR_CODES = new Set(["ENOENT", "ENOTDIR"]);
 const LOG_PATH_UNREADABLE_ERROR_CODES = new Set([
@@ -26,6 +22,11 @@ interface LogFile {
     modified: Date;
     name: string;
     size: number;
+}
+
+interface LogContent {
+    content: string;
+    lineIds: string[];
 }
 
 function isLogNotFoundErrorCode(code: string | undefined): boolean {
@@ -63,29 +64,31 @@ async function readLogContent(
     file: fs.promises.FileHandle,
     stat: fs.Stats,
     lines: number | undefined
-): Promise<string> {
+): Promise<LogRead> {
     if (!lines) {
         const byteLength = Math.min(stat.size, MIN_LOG_TAIL_BYTES);
         const buffer = Buffer.allocUnsafe(byteLength);
         const offset = Math.max(0, stat.size - byteLength);
         const { bytesRead } = await file.read(buffer, 0, byteLength, offset);
-        return buffer.subarray(0, bytesRead).toString("utf8");
+        const bytes = buffer.subarray(0, bytesRead);
+        return {
+            bytes,
+            content: bytes.toString("utf8"),
+            startOffset: offset,
+            startsAtLineBoundary: await readStartsAtLineBoundary(file, offset),
+        };
     }
 
-    const minimumWindowBytes = Math.min(
-        stat.size,
-        MAX_LOG_TAIL_BYTES,
-        Math.max(MIN_LOG_TAIL_BYTES, lines * LOG_BYTES_PER_REQUESTED_LINE)
-    );
     const chunks: Buffer[] = [];
     let offset = stat.size;
     let bytesReadTotal = 0;
-    let newlineCount = 0;
+    let nonEmptyLineCount = 0;
+    let leadingPartialLine = "";
 
     while (
         offset > 0 &&
         bytesReadTotal < MAX_LOG_TAIL_BYTES &&
-        (bytesReadTotal < minimumWindowBytes || newlineCount <= lines)
+        (bytesReadTotal < MIN_LOG_TAIL_BYTES || nonEmptyLineCount <= lines)
     ) {
         const chunkBytes = Math.min(LOG_TAIL_READ_CHUNK_BYTES, offset);
         offset -= chunkBytes;
@@ -93,14 +96,45 @@ async function readLogContent(
         const { bytesRead } = await file.read(buffer, 0, chunkBytes, offset);
         if (bytesRead <= 0) break;
         const chunk = buffer.subarray(0, bytesRead);
-        for (const byte of chunk) {
-            if (byte === 10) newlineCount += 1;
-        }
         chunks.unshift(chunk);
         bytesReadTotal += bytesRead;
+        const linesInWindowPrefix =
+            `${chunk.toString("utf8")}${leadingPartialLine}`.split("\n");
+        leadingPartialLine = linesInWindowPrefix[0] ?? "";
+        nonEmptyLineCount += linesInWindowPrefix
+            .slice(offset > 0 ? 1 : 0)
+            .filter((line) => line.trim()).length;
     }
 
-    return Buffer.concat(chunks, bytesReadTotal).toString("utf8");
+    const bytes = Buffer.concat(chunks, bytesReadTotal);
+    return {
+        bytes,
+        content: bytes.toString("utf8"),
+        startOffset: offset,
+        startsAtLineBoundary: await readStartsAtLineBoundary(file, offset),
+    };
+}
+
+async function readStartsAtLineBoundary(
+    file: fs.promises.FileHandle,
+    offset: number
+): Promise<boolean> {
+    if (offset === 0) {
+        return true;
+    }
+
+    const previousByte = Buffer.allocUnsafe(1);
+    const { bytesRead } = await file.read(previousByte, 0, 1, offset - 1);
+    return bytesRead === 1 && previousByte[0] === 10;
+}
+
+function lineContentWithIds(read: LogRead, lines: number | undefined): LogContent {
+    const entries = lineEntriesFromLogRead(read, lines, { includeBlankLines: true });
+
+    return {
+        content: entries.map((entry) => entry.line).join("\n"),
+        lineIds: entries.map((entry) => entry.lineId),
+    };
 }
 
 function logInfoResponse(): Response {
@@ -161,7 +195,7 @@ async function logContentResponse(request: Request): Promise<Response> {
     }
 
     if (!logFile) {
-        const today = dateToISOString(new Date()).split("T", 1)[0];
+        const today = formatOpenClawLogDate(new Date());
         logFile = `openclaw-${today}.log`;
     }
     const logFileName = path.basename(logFile);
@@ -206,7 +240,7 @@ async function logContentResponse(request: Request): Promise<Response> {
             );
         }
 
-        let content: string;
+        let content: LogContent;
         try {
             const stat = await file.stat();
             if (!stat.isFile()) {
@@ -215,16 +249,16 @@ async function logContentResponse(request: Request): Promise<Response> {
             if (!isOpenedLogPathWithinRoot(file, realRoot) || stat.nlink > 1) {
                 return json({ error: "Access denied" }, { status: 403 });
             }
-            content = await readLogContent(file, stat, lines);
+            content = lineContentWithIds(await readLogContent(file, stat, lines), lines);
         } finally {
             await file.close();
         }
 
-        if (lines) {
-            content = content.trimEnd().split("\n").slice(-lines).join("\n");
-        }
-
-        return json({ content, file: logFile });
+        return json({
+            content: content.content,
+            file: logFile,
+            lineIds: content.lineIds,
+        });
     } catch (error) {
         console.error("[Logs] Failed to read log file:", error);
         return json({ error: "Failed to read log file" }, { status: 500 });

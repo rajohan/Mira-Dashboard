@@ -166,6 +166,7 @@ import {
 import { useWeather } from "../hooks/useWeather";
 import { createSocketClient } from "../lib/socket/socketClient";
 import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
+import { compareLogEntriesByLineId } from "../pages/Logs";
 import { Tasks } from "../pages/Tasks";
 import { authActions, authStore } from "../stores/authStore";
 import type { Task } from "../types/task";
@@ -1232,22 +1233,41 @@ describe("Mira Dashboard frontend behavior", () => {
         });
         try {
             writeLogFromWebSocket(
-                '{"_meta":{"logLevelName":"INFO","date":"2026-06-23T08:00:00.000Z"},"0":"[gateway] connected"}'
+                '{"_meta":{"logLevelName":"INFO","date":"2026-06-23T08:00:00.000Z"},"0":"[gateway] connected"}',
+                "42"
             );
             writeLogFromWebSocket("");
             writeLogFromWebSocket("{bad json");
+            handleSocketMessage({ type: "log_file", file: "openclaw.log" });
+            handleSocketMessage({
+                history: true,
+                line: "history from socket should be ignored",
+                lineId: "100",
+                type: "log",
+            });
+            handleSocketMessage({
+                line: "live from socket should be written while history is loading",
+                lineId: "101",
+                type: "log",
+            });
+            handleSocketMessage({ type: "log_history_complete", count: 1 });
             expect(logUpserts[0]).toMatchObject({
                 level: "info",
+                lineId: "42",
                 subsystem: "gateway",
                 msg: "connected",
             });
-            expect(logUpserts).toHaveLength(2);
             expect(logUpserts[1]).toMatchObject({
                 id: expect.stringContaining("{bad json"),
                 dedupeKey: "|||{bad json",
                 subsystem: "",
                 msg: "{bad json",
                 raw: "{bad json",
+            });
+            expect(logUpserts).toHaveLength(3);
+            expect(logUpserts[2]).toMatchObject({
+                lineId: "101",
+                msg: "live from socket should be written while history is loading",
             });
         } finally {
             restoreLogs();
@@ -1317,7 +1337,10 @@ describe("Mira Dashboard frontend behavior", () => {
                     url === "/api/logs/content?file=openclaw.log&lines=50" &&
                     method === "GET"
                 ) {
-                    return Response.json({ content: "info line\nerror line" });
+                    return Response.json({
+                        content: "info line\nerror line",
+                        lineIds: ["10", false, 20, { id: "30" }, "40"],
+                    });
                 }
 
                 if (url === "/api/files?path=src" && method === "GET") {
@@ -1540,7 +1563,10 @@ describe("Mira Dashboard frontend behavior", () => {
             useLogContent("openclaw.log", 50)
         );
         await waitFor(() =>
-            expect(logContent.result.current.data).toBe("info line\nerror line")
+            expect(logContent.result.current.data).toEqual({
+                content: "info line\nerror line",
+                lineIds: ["10", undefined, 20, undefined, "40"],
+            })
         );
 
         const files = renderHookWithQueryClient(() => useFiles("src"));
@@ -2877,6 +2903,24 @@ describe("Mira Dashboard frontend behavior", () => {
             level: "debug",
             msg: '{"ok":true}',
         });
+        expect(parseLogLine("fallback: connected")).toMatchObject({
+            id: expect.stringContaining("fallback:"),
+            lineId: expect.stringContaining("fallback:"),
+            subsystem: "fallback",
+            msg: "connected",
+        });
+        expect(
+            compareLogEntriesByLineId({ lineId: "10" }, { lineId: "20" })
+        ).toBeLessThan(0);
+        expect(
+            compareLogEntriesByLineId({ lineId: "20" }, { lineId: "10" })
+        ).toBeGreaterThan(0);
+        expect(compareLogEntriesByLineId({ lineId: "10" }, {})).toBeLessThan(0);
+        expect(compareLogEntriesByLineId({}, { lineId: "10" })).toBeGreaterThan(0);
+        expect(
+            compareLogEntriesByLineId({ lineId: " " }, { lineId: "10" })
+        ).toBeGreaterThan(0);
+        expect(compareLogEntriesByLineId({}, {})).toBe(0);
         expect(parseLogLine("")).toBeUndefined();
         expect(formatLogTime("not-a-date")).toBe("--:--:--");
         expect(formatLogTime()).toBe("");

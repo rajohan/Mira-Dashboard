@@ -4,11 +4,8 @@ import path from "node:path";
 import type { DashboardSocket } from "../dashboardSocket.ts";
 import { errorMessage } from "../lib/errors.ts";
 import { guardedPath, openReadNoFollowNonblockingGuarded } from "../lib/guardedOps.ts";
-import { resolveRealLogsDirectory } from "../lib/logRoots.ts";
-
-function dateToISOString(date: Date): string {
-    return date.toISOString();
-}
+import { formatOpenClawLogDate, resolveRealLogsDirectory } from "../lib/logRoots.ts";
+import { lineEntriesFromLogRead, type LogRead } from "../lib/logTail.ts";
 
 const logsRouteState: {
     logWatcher: NodeJS.Timeout | undefined;
@@ -44,7 +41,7 @@ function isLogRootResolutionError(error: unknown): boolean {
 
 /** Returns today log file. */
 function getTodayLogFile(root = resolveRealLogsDirectory()): string {
-    const today = dateToISOString(new Date()).split("T", 1)[0];
+    const today = formatOpenClawLogDate(new Date());
     return path.join(root, "openclaw-" + today + ".log");
 }
 
@@ -52,13 +49,19 @@ async function readLogContent(
     file: fs.promises.FileHandle,
     stat: fs.Stats,
     lines: number | undefined
-): Promise<string> {
+): Promise<LogRead> {
     if (!lines) {
         const byteLength = Math.min(stat.size, MIN_LOG_TAIL_BYTES);
         const buffer = Buffer.allocUnsafe(byteLength);
         const offset = Math.max(0, stat.size - byteLength);
         const { bytesRead } = await file.read(buffer, 0, byteLength, offset);
-        return buffer.subarray(0, bytesRead).toString("utf8");
+        const bytes = buffer.subarray(0, bytesRead);
+        return {
+            bytes,
+            content: bytes.toString("utf8"),
+            startOffset: offset,
+            startsAtLineBoundary: await readStartsAtLineBoundary(file, offset),
+        };
     }
 
     const readWindowBytes = Math.min(
@@ -83,19 +86,35 @@ async function readLogContent(
         bytesReadTotal += bytesRead;
     }
 
-    return Buffer.concat(chunks, bytesReadTotal).toString("utf8");
+    const bytes = Buffer.concat(chunks, bytesReadTotal);
+    return {
+        bytes,
+        content: bytes.toString("utf8"),
+        startOffset: offset,
+        startsAtLineBoundary: await readStartsAtLineBoundary(file, offset),
+    };
+}
+
+async function readStartsAtLineBoundary(
+    file: fs.promises.FileHandle,
+    offset: number
+): Promise<boolean> {
+    if (offset === 0) {
+        return true;
+    }
+
+    const previousByte = Buffer.allocUnsafe(1);
+    const { bytesRead } = await file.read(previousByte, 0, 1, offset - 1);
+    return bytesRead === 1 && previousByte[0] === 10;
 }
 
 async function readLogTailLines(
     file: fs.promises.FileHandle,
     stat: fs.Stats,
     lineCount: number
-): Promise<string[]> {
-    const content = await readLogContent(file, stat, lineCount);
-    return content
-        .split("\n")
-        .filter((line) => line.trim())
-        .slice(-lineCount);
+): Promise<Array<{ line: string; lineId: string }>> {
+    const read = await readLogContent(file, stat, lineCount);
+    return lineEntriesFromLogRead(read, lineCount);
 }
 
 /** Polls the current OpenClaw log once, serialized by startLogWatcher. */
@@ -238,7 +257,7 @@ async function sendLogHistory(ws: DashboardSocket): Promise<void> {
             return;
         }
 
-        let lines: string[];
+        let lines: Array<{ line: string; lineId: string }>;
         try {
             const stat = await file.stat();
             if (!stat.isFile()) {
@@ -256,11 +275,11 @@ async function sendLogHistory(ws: DashboardSocket): Promise<void> {
         }
 
         // Send each line
-        for (const line of lines) {
+        for (const { line, lineId } of lines) {
             if (!logSubscribers.has(ws)) {
                 return;
             }
-            send({ type: "log", line });
+            send({ type: "log", history: true, line, lineId });
         }
 
         // Send completion

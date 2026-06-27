@@ -10,6 +10,8 @@ export interface SocketEnvelope {
     event?: string;
     sessions?: Session[];
     line?: string;
+    lineId?: string;
+    history?: boolean;
     gatewayConnected?: boolean;
 }
 

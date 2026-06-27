@@ -2,6 +2,7 @@
 export interface LogEntry {
     id: string;
     dedupeKey?: string;
+    lineId?: string;
     ts?: string;
     level?: string;
     subsystem?: string;

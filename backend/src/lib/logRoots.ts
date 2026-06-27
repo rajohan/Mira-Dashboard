@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const DEFAULT_LOGS_DIRECTORY = "/tmp/openclaw";
+const DEFAULT_LOG_TIME_ZONE = "Europe/Oslo";
 
 function invalidLogRoot(message: string): Error {
     return Object.assign(new Error(message), { code: "ERR_INVALID_ARG_VALUE" });
@@ -34,4 +35,16 @@ export function resolveRealLogsDirectory(): string {
         });
     }
     return realRoot;
+}
+
+export function formatOpenClawLogDate(date: Date): string {
+    const parts = new Intl.DateTimeFormat("sv-SE", {
+        day: "2-digit",
+        month: "2-digit",
+        timeZone: DEFAULT_LOG_TIME_ZONE,
+        year: "numeric",
+    }).formatToParts(date);
+    const value = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+
+    return `${value("year")}-${value("month")}-${value("day")}`;
 }

@@ -23,13 +23,13 @@ export function preloadLogsCollection() {
 }
 
 /** Performs write log from WebSocket. */
-export function writeLogFromWebSocket(line: string) {
+export function writeLogFromWebSocket(line: string, lineId?: string) {
     if (!logsCollection.isReady()) {
         return;
     }
 
     try {
-        const parsed = parseLogLine(line);
+        const parsed = parseLogLine(line, lineId);
         if (!parsed) {
             return;
         }

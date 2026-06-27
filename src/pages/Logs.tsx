@@ -78,6 +78,49 @@ export function compareLogFileNamesDescending(
     return String(b.name || "").localeCompare(String(a.name || ""));
 }
 
+export function compareLogEntriesByLineId(
+    a: { lineId?: number | string },
+    b: { lineId?: number | string }
+) {
+    const aLineId = readNumericLogLineId(a);
+    const bLineId = readNumericLogLineId(b);
+
+    if (aLineId !== undefined && bLineId !== undefined) {
+        return aLineId - bLineId;
+    }
+
+    if (aLineId !== undefined) {
+        return -1;
+    }
+
+    if (bLineId !== undefined) {
+        return 1;
+    }
+
+    return 0;
+}
+
+export function formatLogEntryCount(visibleCount: number, totalCount: number) {
+    const suffix = visibleCount === 1 ? "entry" : "entries";
+    return visibleCount === totalCount
+        ? `${visibleCount} ${suffix}`
+        : `${visibleCount} of ${totalCount} ${totalCount === 1 ? "entry" : "entries"}`;
+}
+
+function readNumericLogLineId(log: { lineId?: number | string }) {
+    const rawLineId = log.lineId;
+    if (typeof rawLineId === "string" && !rawLineId.trim()) {
+        return;
+    }
+
+    const lineId = Number(rawLineId);
+    return Number.isFinite(lineId) ? lineId : undefined;
+}
+
+function logSnapshotRequestKey(file: string | undefined, lines: number) {
+    return `${file ?? ""}:${lines}`;
+}
+
 /** Renders the logs UI. */
 export function Logs() {
     const [selectedFile, setSelectedFile] = useState<string | undefined>(undefined);
@@ -93,6 +136,13 @@ export function Logs() {
     const lastKnownLogScrollTopReference = useRef(0);
     const subscribedConnectionIdReference = useRef<number | undefined>(undefined);
     const requestSeqReference = useRef(0);
+    const latestSnapshotRequestKeyReference = useRef("");
+    const lastSnapshotFileReference = useRef<string | undefined>(undefined);
+    const lastSnapshotMaxLineIdReference = useRef<number | undefined>(undefined);
+    latestSnapshotRequestKeyReference.current = logSnapshotRequestKey(
+        selectedFile,
+        lineCount
+    );
 
     // OpenClaw connection (shared WebSocket)
     const { isConnected, connectionId, request } = useOpenClawSocket();
@@ -100,6 +150,7 @@ export function Logs() {
     // Logs from collection using live query
     const { data: logs = [] } = useLiveQuery((q) => q.from({ log: logsCollection }));
     const liveLogs = Array.isArray(logs) ? logs : [];
+    const orderedLogs = liveLogs.toSorted(compareLogEntriesByLineId);
 
     // Queries
     const [availableLogFiles, setAvailableLogFiles] = useState<LogFile[]>(
@@ -169,6 +220,8 @@ export function Logs() {
     /** Performs load log content. */
     const loadLogContent = async () => {
         const seq = ++requestSeqReference.current;
+        const requestedFile = selectedFile;
+        const requestKey = logSnapshotRequestKey(requestedFile, lineCount);
         let result: Awaited<ReturnType<typeof refetchContent>>;
 
         try {
@@ -178,25 +231,87 @@ export function Logs() {
             return;
         }
 
-        if (seq === requestSeqReference.current) {
-            const content = result.data || "";
-            const lines = content.split("\n").filter((line) => line.trim());
-            const parsedLogs = lines
-                .map((line, index) => parseLogLine(line, index))
+        if (
+            seq === requestSeqReference.current &&
+            requestKey === latestSnapshotRequestKeyReference.current
+        ) {
+            const content = result.data?.content || "";
+            const lineIds = result.data?.lineIds || [];
+            const parsedLogs = content
+                .split("\n")
+                .map((line, index) =>
+                    parseLogLine(
+                        line,
+                        typeof lineIds[index] === "string" ||
+                            typeof lineIds[index] === "number"
+                            ? lineIds[index]
+                            : index
+                    )
+                )
                 .filter(
                     (entry): entry is NonNullable<typeof entry> => entry !== undefined
                 );
 
             if (logsCollection.isReady()) {
-                // Replace full snapshot without relying on stale array references.
-                const existingKeys = Array.from(logsCollection, ([key]) => String(key));
-                for (const key of existingKeys) {
-                    logsCollection.utils.writeDelete(key);
+                // Replace the snapshot as one collection change so large tails do not
+                // trigger thousands of intermediate live-query updates.
+                const isReplacingDifferentFile =
+                    lastSnapshotFileReference.current !== requestedFile;
+                let snapshotMaxLineId: number | undefined;
+                for (const log of parsedLogs) {
+                    const lineId = readNumericLogLineId(log);
+                    if (lineId !== undefined) {
+                        snapshotMaxLineId =
+                            snapshotMaxLineId === undefined
+                                ? lineId
+                                : Math.max(snapshotMaxLineId, lineId);
+                    }
                 }
-
-                for (const parsed of parsedLogs) {
-                    logsCollection.utils.writeInsert(parsed);
-                }
+                const nextKeys = new Set(parsedLogs.map((log) => log.id));
+                const latestVisibleFileName = [...availableLogFiles].toSorted(
+                    compareLogFileNamesDescending
+                )[0]?.name;
+                const isReplacingOlderFile =
+                    requestedFile !== undefined &&
+                    requestedFile !== latestVisibleFileName;
+                const isReplacingTruncatedFile =
+                    !isReplacingDifferentFile &&
+                    snapshotMaxLineId !== undefined &&
+                    lastSnapshotMaxLineIdReference.current !== undefined &&
+                    snapshotMaxLineId < lastSnapshotMaxLineIdReference.current;
+                const shouldDeleteAllMissing =
+                    isReplacingDifferentFile ||
+                    isReplacingOlderFile ||
+                    isReplacingTruncatedFile ||
+                    snapshotMaxLineId === undefined;
+                const snapshotDedupeKeys = new Set(
+                    parsedLogs
+                        .map((log) => log.dedupeKey)
+                        .filter((key): key is string => typeof key === "string")
+                );
+                const keysToDelete = Array.from(logsCollection, ([key, log]) => {
+                    const lineId = readNumericLogLineId(log);
+                    return { dedupeKey: log.dedupeKey, key: String(key), lineId };
+                })
+                    .filter(
+                        (entry) =>
+                            entry.key &&
+                            !nextKeys.has(entry.key) &&
+                            (shouldDeleteAllMissing ||
+                                (entry.lineId === undefined &&
+                                    entry.dedupeKey !== undefined &&
+                                    snapshotDedupeKeys.has(entry.dedupeKey)) ||
+                                (entry.lineId !== undefined &&
+                                    snapshotMaxLineId !== undefined &&
+                                    entry.lineId <= snapshotMaxLineId))
+                    )
+                    .map((entry) => entry.key);
+                logsCollection.utils.writeBatch(() => {
+                    logsCollection.utils.writeDelete(keysToDelete);
+                    logsCollection.utils.writeUpsert(parsedLogs);
+                });
+                lastSnapshotFileReference.current = requestedFile;
+                lastSnapshotMaxLineIdReference.current = snapshotMaxLineId;
             }
         }
     };
@@ -212,7 +327,7 @@ export function Logs() {
         void loadLogContent();
     }, [selectedFile, lineCount, availableLogFiles.length]);
 
-    const filteredLogs = liveLogs.filter((log) => {
+    const filteredLogs = orderedLogs.filter((log) => {
         const level = typeof log.level === "string" ? log.level.toLowerCase() : undefined;
         if (level && !levelFilter.has(level)) {
             return false;
@@ -317,9 +432,7 @@ export function Logs() {
     /** Performs clear logs. */
     const clearLogs = () => {
         const existingKeys = Array.from(logsCollection, ([key]) => String(key));
-        for (const key of existingKeys) {
-            logsCollection.utils.writeDelete(key);
-        }
+        logsCollection.utils.writeDelete(existingKeys);
     };
 
     return (
@@ -367,7 +480,7 @@ export function Logs() {
                 <div className="text-primary-400 text-sm">
                     {isLoadingContent
                         ? "Loading..."
-                        : `${filteredLogs.length} of ${liveLogs.length} entries`}
+                        : formatLogEntryCount(filteredLogs.length, liveLogs.length)}
                 </div>
 
                 <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center">

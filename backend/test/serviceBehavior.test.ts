@@ -446,12 +446,26 @@ describe("backend service behavior", () => {
         expect(database.prepare("SELECT 1 AS value").get()).toEqual({ value: 1 });
     });
 
+    it("formats OpenClaw log dates in the app timezone regardless of host TZ", async () => {
+        rememberEnvironment("TZ");
+        const { formatOpenClawLogDate } = await import("../src/lib/logRoots.ts");
+        const osloOnlyDate = new Date("2026-06-27T22:30:00.000Z");
+
+        process.env.TZ = "UTC";
+        expect(formatOpenClawLogDate(osloOnlyDate)).toBe("2026-06-28");
+
+        process.env.TZ = "Not/A_Real_Zone";
+        expect(() => formatOpenClawLogDate(osloOnlyDate)).not.toThrow();
+        expect(formatOpenClawLogDate(osloOnlyDate)).toBe("2026-06-28");
+    });
+
     it("sends log history to subscribers from the configured isolated log root", async () => {
         rememberEnvironment("MIRA_DASHBOARD_LOGS_ROOT");
         const logsRoot = createTemporaryRoot("mira-log-streams-test-");
         process.env.MIRA_DASHBOARD_LOGS_ROOT = logsRoot;
 
-        const today = new Date().toISOString().split("T", 1)[0];
+        const { formatOpenClawLogDate } = await import("../src/lib/logRoots.ts");
+        const today = formatOpenClawLogDate(new Date());
         const logFile = path.join(logsRoot, `openclaw-${today}.log`);
         writeFileSync(logFile, "first line\nsecond line\n");
 
@@ -475,11 +489,69 @@ describe("backend service behavior", () => {
                 )
             );
 
-            expect(messages).toContainEqual({ type: "log", line: "first line" });
-            expect(messages).toContainEqual({ type: "log", line: "second line" });
+            expect(messages).toContainEqual({
+                type: "log",
+                history: true,
+                line: "first line",
+                lineId: "0",
+            });
+            expect(messages).toContainEqual({
+                type: "log",
+                history: true,
+                line: "second line",
+                lineId: "11",
+            });
             expect(messages).toContainEqual({
                 type: "log_history_complete",
                 count: 2,
+            });
+
+            unsubscribeFromLogs(socket);
+            messages.length = 0;
+            const multibytePrefix = "aé";
+            const historyWindowBytes = 128 * 1024;
+            const multibyteHistoryLine =
+                "history boundary " +
+                "z".repeat(
+                    historyWindowBytes - Buffer.byteLength("\nhistory boundary \n") - 1
+                );
+            writeFileSync(logFile, `${multibytePrefix}\n${multibyteHistoryLine}\n`);
+            subscribeToLogs(socket);
+            await waitFor(() =>
+                messages.some(
+                    (message) =>
+                        typeof message === "object" &&
+                        message !== null &&
+                        (message as { type?: unknown }).type === "log_history_complete"
+                )
+            );
+
+            const historyCompleteIndex = messages.findIndex(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    (message as { type?: unknown }).type === "log_history_complete"
+            );
+            expect(
+                messages
+                    .slice(0, historyCompleteIndex)
+                    .filter(
+                        (message) =>
+                            typeof message === "object" &&
+                            message !== null &&
+                            (message as { type?: unknown }).type === "log"
+                    )
+            ).toEqual([
+                {
+                    type: "log",
+                    history: true,
+                    line: multibyteHistoryLine,
+                    lineId: String(Buffer.byteLength(multibytePrefix) + 1),
+                },
+            ]);
+            expect(messages[historyCompleteIndex]).toEqual({
+                type: "log_history_complete",
+                count: 1,
             });
 
             appendFileSync(logFile, "third line\n");
