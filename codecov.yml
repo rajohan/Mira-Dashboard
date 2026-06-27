@@ -1,11 +1,11 @@
 coverage:
     precision: 2
     round: down
-    range: 20..80
+    range: 20..85
     status:
         project:
             backend:
-                target: 80%
+                target: 85%
                 threshold: 0%
                 informational: false
                 if_ci_failed: error
@@ -14,7 +14,7 @@ coverage:
                 paths:
                     - backend/src/
             frontend:
-                target: 80%
+                target: 85%
                 threshold: 0%
                 informational: false
                 if_ci_failed: error
@@ -24,7 +24,7 @@ coverage:
                     - src/
         patch:
             backend:
-                target: 80%
+                target: 85%
                 threshold: 0%
                 informational: false
                 if_ci_failed: error
@@ -33,7 +33,7 @@ coverage:
                 paths:
                     - backend/src/
             frontend:
-                target: 80%
+                target: 85%
                 threshold: 0%
                 informational: false
                 if_ci_failed: error

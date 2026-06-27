@@ -1908,6 +1908,58 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
+    it("clears chat history loading when the selected session disappears", async () => {
+        const view = renderPage(createElement(Chat), { withSocket: true });
+
+        await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+        const socket = FakeWebSocket.instances[0]!;
+
+        await act(async () => {
+            socket.emit("open");
+            await Promise.resolve();
+        });
+
+        await waitFor(() => {
+            expect(
+                socket.sent.some((entry) => entry.includes('"method":"sessions.list"'))
+            ).toBe(true);
+        });
+        await respondToSocketRequest(socket, "sessions.list", {
+            sessions: [
+                {
+                    id: "session-main",
+                    key: "agent:main:main",
+                    type: "main",
+                    agentType: "main",
+                    displayLabel: "Main chat",
+                    model: "codex",
+                    updatedAt: "2026-06-24T08:00:00.000Z",
+                },
+            ],
+        });
+
+        await waitFor(() => {
+            expect(
+                socket.sent.some((entry) => entry.includes('"method":"chat.history"'))
+            ).toBe(true);
+        });
+        expect(screen.getByText(/Loading chat/)).toBeInTheDocument();
+
+        await act(async () => {
+            socket.emit("message", {
+                data: JSON.stringify({ type: "state", sessions: [] }),
+            });
+            await Promise.resolve();
+        });
+
+        await waitFor(() => {
+            expect(screen.queryByText(/Loading chat/)).not.toBeInTheDocument();
+        });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("renders sessions page connection state with a socket provider", async () => {
         const view = renderPage(createElement(Sessions), { withSocket: true });
 
