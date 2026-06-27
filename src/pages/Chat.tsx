@@ -444,7 +444,9 @@ export function Chat() {
             if (selectedSessionKey) {
                 setSelectedSessionKey("");
             }
-            setIsLoadingHistory(false);
+            if (isLoadingHistory) {
+                setIsLoadingHistory(false);
+            }
             return;
         }
 
@@ -454,7 +456,7 @@ export function Chat() {
             );
             setSelectedSessionKey(fallbackSession?.key || "");
         }
-    }, [selectedSessionKey, sessionMap, sortedSessions]);
+    }, [isLoadingHistory, selectedSessionKey, sessionMap, sortedSessions]);
 
     useEffect(() => {
         setDeletedMessageKeys(

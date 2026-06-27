@@ -18,7 +18,7 @@
         "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json,css}\" \"backend/**/*.{ts,js}\"",
         "preview": "bun scripts/developmentFrontend.ts",
         "test": "bun test",
-        "test:coverage": "bun test --coverage && bun scripts/checkCoverage.ts coverage/lcov.info 80 src/"
+        "test:coverage": "mkdir -p coverage && bash -o pipefail -c 'bun test --coverage 2>&1 | tee coverage/test-output.log' && bun scripts/checkTestOutput.ts coverage/test-output.log && bun scripts/checkCoverage.ts coverage/lcov.info 90 src/"
     },
     "dependencies": {
         "@dnd-kit/core": "^6.3.1",
