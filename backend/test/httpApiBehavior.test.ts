@@ -1278,13 +1278,14 @@ describe("Mira Dashboard backend integration", () => {
             })
         );
 
-        const content = await api<{ content: string; file: string }>(
+        const content = await api<{ content: string; file: string; lineIds: string[] }>(
             "/api/logs/content?file=openclaw-dashboard-functional-test.log&lines=2"
         );
         expect(content.status).toBe(200);
         expect(content.body).toEqual({
-            content: "second line\nthird line",
+            content: "second line\nthird line\n",
             file: "openclaw-dashboard-functional-test.log",
+            lineIds: ["11", "23", "34"],
         });
 
         const invalidLines = await api<{ error: string }>(

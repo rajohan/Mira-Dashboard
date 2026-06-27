@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
 
+import { logsCollection } from "../collections/logs";
 import {
     createChatVisibility,
     createLocalSystemMessage,
@@ -54,6 +55,7 @@ import {
     Terminal,
 } from "../pages/Terminal";
 import { authActions } from "../stores/authStore";
+import { parseLogLine } from "../utils/logUtilities";
 
 type FakeWebSocketListener = (event?: { data?: string }) => void;
 
@@ -87,6 +89,10 @@ const jobsApiState = {
         },
     ],
 };
+const logsApiState = {
+    openclawHundredLineRequests: 0,
+    simulateOpenclawTruncation: false,
+};
 
 function requestAnimationFrameForTest(callback: FrameRequestCallback): number {
     const id = ++animationFrameState.id;
@@ -111,6 +117,21 @@ function flushAnimationFrames(limit = 20): void {
                 callback(performance.now());
             }
         }
+    });
+}
+
+function resetLogsCollectionForTest() {
+    if (!logsCollection.isReady()) {
+        return;
+    }
+
+    const keys = Array.from(logsCollection, ([key]) => String(key));
+    if (keys.length === 0) {
+        return;
+    }
+
+    logsCollection.utils.writeBatch(() => {
+        logsCollection.utils.writeDelete(keys);
     });
 }
 
@@ -1065,10 +1086,28 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     }
 
     if (url === "/api/logs/info") {
-        return Response.json({ logs: [{ name: "openclaw.log", size: 100 }] });
+        return Response.json({
+            logs: [
+                { name: "openclaw.log", size: 100 },
+                { name: "archived.log", size: 40 },
+                { name: "blank.log", size: 2 },
+            ],
+        });
     }
 
     if (url === "/api/logs/content?file=openclaw.log&lines=100") {
+        logsApiState.openclawHundredLineRequests += 1;
+        if (logsApiState.simulateOpenclawTruncation) {
+            return Response.json({
+                content: JSON.stringify({
+                    level: "info",
+                    time: "2026-06-24T08:00:00.000Z",
+                    msg: "truncated dashboard ready",
+                }),
+                lineIds: ["20"],
+            });
+        }
+
         return Response.json({
             content: [
                 JSON.stringify({
@@ -1082,6 +1121,48 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     msg: "failed backup",
                 }),
             ].join("\n"),
+            lineIds: ["200", "300"],
+        });
+    }
+
+    if (url === "/api/logs/content?file=openclaw.log&lines=5000") {
+        return Response.json({
+            content: [
+                JSON.stringify({
+                    level: "warn",
+                    time: "2026-06-24T07:59:00.000Z",
+                    msg: "expanded tail only",
+                }),
+                JSON.stringify({
+                    level: "info",
+                    time: "2026-06-24T08:00:00.000Z",
+                    msg: "dashboard ready",
+                }),
+                JSON.stringify({
+                    level: "error",
+                    time: "2026-06-24T08:01:00.000Z",
+                    msg: "failed backup",
+                }),
+            ].join("\n"),
+            lineIds: ["100", "200", "300"],
+        });
+    }
+
+    if (url === "/api/logs/content?file=blank.log&lines=100") {
+        return Response.json({
+            content: "\n\n",
+            lineIds: ["0", "1", "2"],
+        });
+    }
+
+    if (url === "/api/logs/content?file=archived.log&lines=100") {
+        return Response.json({
+            content: JSON.stringify({
+                level: "info",
+                time: "2026-06-23T08:00:00.000Z",
+                msg: "archived dashboard ready",
+            }),
+            lineIds: ["20"],
         });
     }
 
@@ -1399,6 +1480,8 @@ describe("Mira Dashboard pages", () => {
     beforeEach(() => {
         FakeWebSocket.instances = [];
         terminalApiState.wasJobStopped = false;
+        logsApiState.openclawHundredLineRequests = 0;
+        logsApiState.simulateOpenclawTruncation = false;
         jobsApiState.cronName = "heartbeat";
         jobsApiState.heartbeatIntervalSeconds = 1800;
         jobsApiState.heartbeatRuns = [
@@ -1446,6 +1529,7 @@ describe("Mira Dashboard pages", () => {
 
     afterEach(() => {
         cleanup();
+        resetLogsCollectionForTest();
         authActions.clearSession();
         localStorage.clear();
         animationFrameState.frames.clear();
@@ -1508,20 +1592,20 @@ describe("Mira Dashboard pages", () => {
         const anchorClick = jest
             .spyOn(HTMLAnchorElement.prototype, "click")
             .mockImplementation(() => {});
-        Object.defineProperties(URL, {
-            createObjectURL: {
-                configurable: true,
-                value: createObjectUrl,
-                writable: true,
-            },
-            revokeObjectURL: {
-                configurable: true,
-                value: revokeObjectUrl,
-                writable: true,
-            },
-        });
 
         try {
+            Object.defineProperties(URL, {
+                createObjectURL: {
+                    configurable: true,
+                    value: createObjectUrl,
+                    writable: true,
+                },
+                revokeObjectURL: {
+                    configurable: true,
+                    value: revokeObjectUrl,
+                    writable: true,
+                },
+            });
             renderPage(createElement(Settings));
             expect(await screen.findByText("Model Configuration")).toBeInTheDocument();
 
@@ -1739,48 +1823,195 @@ describe("Mira Dashboard pages", () => {
 
     it("drives logs page loading, searching, level filtering, and clearing", async () => {
         const user = userEvent.setup();
-        const view = renderPage(createElement(Logs), { withSocket: true });
-
-        await waitFor(() => {
-            expect(screen.getByText("openclaw.log")).toBeInTheDocument();
-            expect(screen.getByText(/2 of 2 entries/)).toBeInTheDocument();
+        const exportedBlobs: Blob[] = [];
+        const createObjectUrl = jest.fn((blob: Blob) => {
+            exportedBlobs.push(blob);
+            return "blob:logs-export";
         });
+        const revokeObjectUrl = jest.fn();
+        const originalCreateObjectUrl = URL.createObjectURL;
+        const originalRevokeObjectUrl = URL.revokeObjectURL;
+        const anchorClick = jest
+            .spyOn(HTMLAnchorElement.prototype, "click")
+            .mockImplementation(() => {});
+        let view: ReturnType<typeof renderPage> | undefined;
 
-        await user.type(screen.getByPlaceholderText("Search logs..."), "failed");
-        await waitFor(() => {
-            expect(screen.getByText(/1 of 2 entries/)).toBeInTheDocument();
-        });
+        try {
+            Object.defineProperties(URL, {
+                createObjectURL: {
+                    configurable: true,
+                    value: createObjectUrl,
+                    writable: true,
+                },
+                revokeObjectURL: {
+                    configurable: true,
+                    value: revokeObjectUrl,
+                    writable: true,
+                },
+            });
+            view = renderPage(createElement(Logs), { withSocket: true });
 
-        const searchInput = screen.getByPlaceholderText("Search logs...");
+            await waitFor(() => {
+                expect(screen.getByText("openclaw.log")).toBeInTheDocument();
+                expect(screen.getByText("2 entries")).toBeInTheDocument();
+            });
 
-        await user.clear(searchInput);
-        await user.type(searchInput, "missing");
-        await waitFor(() => {
-            expect(screen.getByText("No logs match your filter.")).toBeInTheDocument();
-        });
+            const duplicateFallbackLog = parseLogLine(
+                JSON.stringify({
+                    level: "info",
+                    time: "2026-06-24T08:00:00.000Z",
+                    msg: "dashboard ready",
+                })
+            );
+            expect(duplicateFallbackLog).toBeDefined();
+            await act(async () => {
+                logsCollection.utils.writeUpsert(duplicateFallbackLog!);
+                await Promise.resolve();
+            });
+            await waitFor(() => {
+                expect(screen.getByText("3 entries")).toBeInTheDocument();
+            });
+            await user.click(screen.getByRole("button", { name: "Reload" }));
+            await waitFor(() => {
+                expect(screen.getByText("2 entries")).toBeInTheDocument();
+            });
+            await user.click(screen.getByRole("button", { name: "Export" }));
+            const dedupedExport = await exportedBlobs.at(-1)?.text();
+            expect(dedupedExport?.match(/dashboard ready/g)).toHaveLength(1);
 
-        await user.clear(searchInput);
-        await waitFor(() => {
-            expect(screen.getByText(/2 of 2 entries/)).toBeInTheDocument();
-        });
+            await user.click(screen.getByRole("button", { name: "100 lines" }));
+            await user.click(screen.getByRole("menuitem", { name: "5000 lines" }));
+            await waitFor(() => {
+                expect(screen.getByText("3 entries")).toBeInTheDocument();
+            });
 
-        await user.click(screen.getByRole("button", { name: "error" }));
-        await waitFor(() => {
-            expect(screen.getByText(/1 of 2 entries/)).toBeInTheDocument();
-        });
+            await user.click(screen.getByRole("button", { name: "Export" }));
+            const expandedExport = await exportedBlobs.at(-1)?.text();
+            expect(expandedExport).toContain("expanded tail only");
+            expect(expandedExport?.indexOf("expanded tail only")).toBeLessThan(
+                expandedExport?.indexOf("dashboard ready") ?? 0
+            );
 
-        await user.click(screen.getByRole("button", { name: "error" }));
-        await waitFor(() => {
-            expect(screen.getByText(/2 of 2 entries/)).toBeInTheDocument();
-        });
+            const liveLog = parseLogLine(
+                JSON.stringify({
+                    level: "info",
+                    time: "2026-06-24T08:02:00.000Z",
+                    msg: "live after snapshot",
+                }),
+                "400"
+            );
+            const fallbackLiveLog = parseLogLine("fallback live after snapshot");
+            expect(liveLog).toBeDefined();
+            expect(fallbackLiveLog).toBeDefined();
+            await act(async () => {
+                logsCollection.utils.writeUpsert(liveLog!);
+                logsCollection.utils.writeUpsert(fallbackLiveLog!);
+                await Promise.resolve();
+            });
 
-        await user.click(screen.getByRole("button", { name: "Clear" }));
-        await waitFor(() => {
-            expect(screen.getByText("Waiting for logs...")).toBeInTheDocument();
-        });
+            await user.click(screen.getByRole("button", { name: "5000 lines" }));
+            await user.click(screen.getByRole("menuitem", { name: "100 lines" }));
+            await waitFor(() => {
+                expect(screen.getByText("4 entries")).toBeInTheDocument();
+                expect(screen.queryByText("expanded tail only")).toBeNull();
+            });
+            await user.click(screen.getByRole("button", { name: "Export" }));
+            const livePreservedExport = await exportedBlobs.at(-1)?.text();
+            expect(livePreservedExport).toContain("live after snapshot");
+            expect(livePreservedExport).toContain("fallback live after snapshot");
+            expect(livePreservedExport).not.toContain("expanded tail only");
 
-        view.unmount();
-        view.queryClient.clear();
+            await user.click(screen.getByRole("button", { name: "openclaw.log" }));
+            await user.click(screen.getByRole("menuitem", { name: "archived.log" }));
+            await waitFor(() => {
+                expect(screen.getByText("1 entry")).toBeInTheDocument();
+                expect(screen.queryByText("live after snapshot")).toBeNull();
+            });
+            await user.click(screen.getByRole("button", { name: "Export" }));
+            const archivedExport = await exportedBlobs.at(-1)?.text();
+            expect(archivedExport).toContain("archived dashboard ready");
+            expect(archivedExport).not.toContain("live after snapshot");
+
+            await user.click(screen.getByRole("button", { name: "archived.log" }));
+            await user.click(screen.getByRole("menuitem", { name: "openclaw.log" }));
+            await waitFor(() => {
+                expect(screen.getByText("2 entries")).toBeInTheDocument();
+            });
+
+            const searchInput = screen.getByPlaceholderText("Search logs...");
+
+            await user.type(searchInput, "failed");
+            await waitFor(() => {
+                expect(screen.getByText(/1 of 2 entries/)).toBeInTheDocument();
+            });
+
+            await user.clear(searchInput);
+            await user.type(searchInput, "missing");
+            await waitFor(() => {
+                expect(
+                    screen.getByText("No logs match your filter.")
+                ).toBeInTheDocument();
+            });
+
+            await user.clear(searchInput);
+            await waitFor(() => {
+                expect(screen.getByText("2 entries")).toBeInTheDocument();
+            });
+
+            await user.click(screen.getByRole("button", { name: "error" }));
+            await waitFor(() => {
+                expect(screen.getByText(/1 of 2 entries/)).toBeInTheDocument();
+            });
+
+            await user.click(screen.getByRole("button", { name: "error" }));
+            await waitFor(() => {
+                expect(screen.getByText("2 entries")).toBeInTheDocument();
+            });
+
+            logsApiState.simulateOpenclawTruncation = true;
+            await user.click(screen.getByRole("button", { name: "Reload" }));
+            await waitFor(() => {
+                expect(screen.getByText("1 entry")).toBeInTheDocument();
+                expect(screen.queryByText("live after snapshot")).toBeNull();
+                expect(screen.queryByText("failed backup")).toBeNull();
+            });
+            await user.click(screen.getByRole("button", { name: "Export" }));
+            const truncatedExport = await exportedBlobs.at(-1)?.text();
+            expect(truncatedExport).toContain("truncated dashboard ready");
+            expect(truncatedExport).not.toContain("live after snapshot");
+            expect(truncatedExport).not.toContain("fallback live after snapshot");
+            expect(truncatedExport).not.toContain("failed backup");
+
+            await user.click(screen.getByRole("button", { name: "Clear" }));
+            await waitFor(() => {
+                expect(screen.getByText("Waiting for logs...")).toBeInTheDocument();
+                expect(screen.queryByText("truncated dashboard ready")).toBeNull();
+            });
+
+            await user.click(screen.getByRole("button", { name: "openclaw.log" }));
+            await user.click(screen.getByRole("menuitem", { name: "blank.log" }));
+            await waitFor(() => {
+                expect(screen.getByText("Waiting for logs...")).toBeInTheDocument();
+                expect(screen.queryByText("dashboard ready")).toBeNull();
+                expect(screen.queryByText("live after snapshot")).toBeNull();
+            });
+        } finally {
+            view?.unmount();
+            view?.queryClient.clear();
+            anchorClick.mockRestore();
+            Object.defineProperties(URL, {
+                createObjectURL: {
+                    configurable: true,
+                    value: originalCreateObjectUrl,
+                    writable: true,
+                },
+                revokeObjectURL: {
+                    configurable: true,
+                    value: originalRevokeObjectUrl,
+                    writable: true,
+                },
+            });
+        }
     });
 
     it("drives chat page session sync, history loading, diagnostics, and send ack", async () => {

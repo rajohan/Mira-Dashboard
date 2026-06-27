@@ -12,6 +12,12 @@ interface LogFilesResponse {
 /** Represents the log content API response. */
 interface LogContentResponse {
     content: string;
+    lineIds?: unknown[];
+}
+
+export interface LogContentResult {
+    content: string;
+    lineIds: Array<number | string | undefined>;
 }
 
 const logFilesState: { lastKnownLogFiles: LogFile[] } = { lastKnownLogFiles: [] };
@@ -52,11 +58,22 @@ async function fetchLogFiles(): Promise<LogFile[]> {
 }
 
 /** Fetches log content. */
-async function fetchLogContent(file: string, lines: number): Promise<string> {
+async function fetchLogContent(file: string, lines: number): Promise<LogContentResult> {
     const data = await apiFetchRequired<LogContentResponse>(
         `/logs/content?file=${encodeURIComponent(file)}&lines=${lines}`
     );
-    return typeof data.content === "string" ? data.content : "";
+    const lineIds = Array.isArray(data.lineIds)
+        ? data.lineIds.map((lineId) =>
+              typeof lineId === "string" || typeof lineId === "number"
+                  ? lineId
+                  : undefined
+          )
+        : [];
+
+    return {
+        content: typeof data.content === "string" ? data.content : "",
+        lineIds,
+    };
 }
 
 // Hooks

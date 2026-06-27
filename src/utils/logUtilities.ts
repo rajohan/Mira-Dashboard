@@ -152,8 +152,12 @@ function buildDedupeKey(entry: {
 }
 
 /** Parses log line. */
-export function parseLogLine(line: string, index?: number): LogEntry | undefined {
+export function parseLogLine(
+    line: string,
+    lineId?: number | string
+): LogEntry | undefined {
     if (!line || !line.trim()) return undefined;
+    const stableLineId = lineId ?? `fallback:${logParseState.logIdCounter++}`;
 
     let jsonString = line;
 
@@ -186,11 +190,12 @@ export function parseLogLine(line: string, index?: number): LogEntry | undefined
             subsystem: normalized.subsystem,
             msg: normalized.msg,
         });
-        const uniqueId = `${dedupeKey}-${index ?? logParseState.logIdCounter++}`;
+        const uniqueId = `${dedupeKey}-${stableLineId}`;
 
         return {
             id: uniqueId,
             dedupeKey,
+            lineId: String(stableLineId),
             ts,
             level: level.toLowerCase(),
             subsystem: normalized.subsystem,
@@ -205,10 +210,11 @@ export function parseLogLine(line: string, index?: number): LogEntry | undefined
             subsystem: extracted.subsystem,
             msg: message,
         });
-        const errorId = `${dedupeKey}-${index ?? logParseState.logIdCounter++}`;
+        const errorId = `${dedupeKey}-${stableLineId}`;
         return {
             id: errorId,
             dedupeKey,
+            lineId: String(stableLineId),
             subsystem: extracted.subsystem,
             msg: message,
             raw: line,
