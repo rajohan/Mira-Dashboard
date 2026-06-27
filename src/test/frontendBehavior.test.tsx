@@ -77,6 +77,12 @@ import { Badge, getSessionTypeVariant } from "../components/ui/Badge";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { Dropdown } from "../components/ui/Dropdown";
 import { SearchInput } from "../components/ui/SearchInput";
+import {
+    useAgentsConfig,
+    useAgentsStatus,
+    useAgentStatus,
+    useAgentTaskHistory,
+} from "../hooks/useAgents";
 import { apiFetch, UnauthorizedError } from "../hooks/useApi";
 import {
     useClearKopiaBackupAttention,
@@ -92,6 +98,7 @@ import {
     useRefreshCacheEntry,
 } from "../hooks/useCache";
 import {
+    type OpenClawConfig,
     useConfig,
     useCreateBackup,
     useRestartGateway,
@@ -1335,6 +1342,57 @@ describe("Mira Dashboard frontend behavior", () => {
                     });
                 }
 
+                if (url === "/api/agents/status" && method === "GET") {
+                    return Response.json({
+                        agents: [
+                            {
+                                id: "main",
+                                name: "Mira",
+                                status: "online",
+                                currentTask: "Expanding tests",
+                            },
+                        ],
+                        timestamp: 1_782_475_200_000,
+                    });
+                }
+
+                if (url === "/api/agents/config" && method === "GET") {
+                    return Response.json({
+                        defaults: {
+                            model: { primary: "codex", fallbacks: ["kimi"] },
+                        },
+                        list: [
+                            {
+                                default: true,
+                                id: "main",
+                                model: { primary: "codex", fallbacks: ["kimi"] },
+                                subagents: { allowAgents: ["coder"] },
+                            },
+                        ],
+                    });
+                }
+
+                if (url === "/api/agents/tasks/history?limit=3" && method === "GET") {
+                    return Response.json({
+                        tasks: [
+                            {
+                                archivedAt: "2026-06-23T08:00:00.000Z",
+                                task: "Finished a coverage batch",
+                            },
+                        ],
+                        timestamp: 1_782_475_201_000,
+                    });
+                }
+
+                if (url === "/api/agents/main/status" && method === "GET") {
+                    return Response.json({
+                        id: "main",
+                        name: "Mira",
+                        status: "online",
+                        currentTask: "Expanding tests",
+                    });
+                }
+
                 if (url === "/api/files/src%2Fmain.tsx" && method === "PUT") {
                     expect(JSON.parse(String(init?.body))).toEqual({
                         content: "updated",
@@ -1502,6 +1560,32 @@ describe("Mira Dashboard frontend behavior", () => {
         );
         await waitFor(() =>
             expect(configContent.result.current.data?.content).toBe("{}")
+        );
+
+        const agentsStatus = renderHookWithQueryClient(() => useAgentsStatus());
+        await waitFor(() =>
+            expect(agentsStatus.result.current.data?.agents[0]?.currentTask).toBe(
+                "Expanding tests"
+            )
+        );
+
+        const agentsConfig = renderHookWithQueryClient(() => useAgentsConfig());
+        await waitFor(() =>
+            expect(agentsConfig.result.current.data?.defaults.model?.primary).toBe(
+                "codex"
+            )
+        );
+
+        const agentTaskHistory = renderHookWithQueryClient(() => useAgentTaskHistory(3));
+        await waitFor(() =>
+            expect(agentTaskHistory.result.current.data?.tasks[0]?.task).toBe(
+                "Finished a coverage batch"
+            )
+        );
+
+        const agentStatus = renderHookWithQueryClient(() => useAgentStatus("main"));
+        await waitFor(() =>
+            expect(agentStatus.result.current.data?.currentTask).toBe("Expanding tests")
         );
 
         const saveFile = renderHookWithQueryClient(() => useSaveFile());
@@ -1955,7 +2039,7 @@ describe("Mira Dashboard frontend behavior", () => {
                         __hash: "hash-1",
                         agents: { defaults: { model: { primary: "codex" } } },
                     });
-                    return new Response(undefined, { status: 204 });
+                    return Response.json({ isOk: true, result: { hash: "hash-2" } });
                 }
 
                 if (url === "/api/skills" && method === "GET") {
@@ -2020,6 +2104,9 @@ describe("Mira Dashboard frontend behavior", () => {
             __hash: "hash-1",
             agents: { defaults: { model: { primary: "codex" } } },
         });
+        expect(
+            updateConfig.queryClient.getQueryData<{ __hash?: string }>(["config"])?.__hash
+        ).toBe("hash-2");
 
         const restartGateway = renderHookWithQueryClient(() => useRestartGateway());
         await expect(
@@ -2029,6 +2116,58 @@ describe("Mira Dashboard frontend behavior", () => {
         const backup = renderHookWithQueryClient(() => useCreateBackup());
         await expect(backup.result.current.mutateAsync()).resolves.toMatchObject({
             hash: "hash-1",
+        });
+    });
+
+    it("preserves cached nested config when update response only returns a hash", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/config" && method === "GET") {
+                    return Response.json({
+                        __hash: "hash-1",
+                        agents: {
+                            defaults: { model: { primary: "codex" } },
+                            list: [{ id: "ops", name: "Ops" }],
+                        },
+                    });
+                }
+
+                if (url === "/api/config" && method === "PUT") {
+                    return Response.json({ isOk: true, result: { hash: "hash-2" } });
+                }
+
+                throw new Error(`Unexpected config API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const updateConfig = renderHookWithQueryClient(() => useUpdateConfig());
+        updateConfig.queryClient.setQueryData<OpenClawConfig>(["config"], {
+            __hash: "hash-1",
+            agents: {
+                defaults: { model: { primary: "codex" } },
+                list: [{ id: "ops", name: "Ops" }],
+            },
+        });
+        await updateConfig.result.current.mutateAsync({
+            agents: { defaults: { model: { primary: "gpt-5.5" } } },
+        });
+
+        expect(
+            updateConfig.queryClient.getQueryData<OpenClawConfig>(["config"])
+        ).toMatchObject({
+            __hash: "hash-2",
+            agents: {
+                defaults: { model: { primary: "codex" } },
+                list: [{ id: "ops", name: "Ops" }],
+            },
         });
     });
 
@@ -2839,7 +2978,13 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(formatWeekdayShort(new Date("bad"))).toBe("---");
         expect(formatDuration(undefined)).toBe("Unknown");
         expect(formatUtcTimeOfDayInAppTimeZone("bad")).toBe("--:--");
+        expect(formatUtcTimeOfDayInAppTimeZone("12:30", "2026-01-15T00:00:00.000Z")).toBe(
+            "13:30"
+        );
         expect(appTimeOfDayToUtcTimeOfDay("bad")).toBe("bad");
+        expect(appTimeOfDayToUtcTimeOfDay("13:30", "2026-01-15T00:00:00.000Z")).toBe(
+            "12:30"
+        );
     });
 
     it("keeps chat utility behavior stable for slash commands, diagnostics, and optimistic messages", async () => {

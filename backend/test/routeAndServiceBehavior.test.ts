@@ -1,16 +1,20 @@
 import {
     chmodSync,
     existsSync,
+    linkSync,
     mkdirSync,
     mkdtempSync,
     readdirSync,
     readFileSync,
     rmSync,
+    symlinkSync,
+    unlinkSync,
     utimesSync,
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { gunzipSync } from "node:zlib";
 
 import type { Server } from "bun";
 import { afterEach, describe, expect, it, jest } from "bun:test";
@@ -110,6 +114,13 @@ JSON
     ;;
   'logs --tail 50 abc123def456'|'logs --tail 200 abc123def456'|'logs --tail 5000 abc123def456')
     printf '%s\n' 'container log line'
+    ;;
+  'logs --tail 200 missing')
+    echo 'no such container' >&2
+    exit 1
+    ;;
+  exec\ -e\ MIRA_DASHBOARD_EXEC_COMMAND=*\ abc123def4567890\ sh\ -lc*)
+    printf '%s\n' '__MIRA_DOCKER_EXEC_PID_fake:123' 'exec output'
     ;;
   'start abc123def4567890'|'stop abc123def4567890'|'restart abc123def4567890'|'start abc123def456'|'stop abc123def456'|'restart abc123def456'|'image rm image123'|'volume rm data'|'image prune -a -f'|'volume prune -f')
     printf '%s\n' "ok: $args"
@@ -418,6 +429,89 @@ describe("backend route and service behavior", () => {
         });
     });
 
+    it("rolls back first-user bootstrap when Gateway initialization fails", async () => {
+        isolateOpenClawEnvironment("mira-first-user-rollback-coverage-");
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const originalInit = gateway.init;
+        cleanupCallbacks.push(() => {
+            gateway.init = originalInit;
+            gateway.shutdown();
+        });
+        gateway.init = () => {
+            throw new Error("gateway unavailable");
+        };
+        const { authRoutes } = await import("../src/routes/authRoutes.ts");
+        const { findUserByUsername, getPersistedGatewayToken, persistGatewayToken } =
+            await import("../src/auth.ts");
+        const server = fakeServer();
+        const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
+
+        persistGatewayToken("previous-token");
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        cleanupCallbacks.push(() => errorSpy.mockRestore());
+        const response = await authRoutes["/api/auth/register-first-user"].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "new-token",
+                password: "correct-password",
+                username,
+            }),
+            server
+        );
+
+        expect(response.status).toBe(500);
+        await expect(response.json()).resolves.toEqual({
+            error: "Failed to complete first-user setup",
+        });
+        expect(findUserByUsername(username)).toBeUndefined();
+        expect(getPersistedGatewayToken()).toBe("previous-token");
+        expect(
+            database
+                .prepare(
+                    "SELECT COUNT(*) AS count FROM auth_sessions WHERE user_id IN (SELECT id FROM users WHERE username = ?)"
+                )
+                .get(username)
+        ).toEqual({ count: 0 });
+    });
+
+    it("removes a newly persisted Gateway token when first-user bootstrap fails without a previous token", async () => {
+        isolateOpenClawEnvironment("mira-first-user-token-cleanup-");
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const originalInit = gateway.init;
+        cleanupCallbacks.push(() => {
+            gateway.init = originalInit;
+            gateway.shutdown();
+        });
+        gateway.init = () => {
+            throw new Error("gateway unavailable");
+        };
+        const { authRoutes } = await import("../src/routes/authRoutes.ts");
+        const { findUserByUsername, getPersistedGatewayToken } =
+            await import("../src/auth.ts");
+        const server = fakeServer();
+        const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
+        database.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
+
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        cleanupCallbacks.push(() => errorSpy.mockRestore());
+        const response = await authRoutes["/api/auth/register-first-user"].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "new-token",
+                password: "correct-password",
+                username,
+            }),
+            server
+        );
+
+        expect(response.status).toBe(500);
+        await expect(response.json()).resolves.toEqual({
+            error: "Failed to complete first-user setup",
+        });
+        expect(findUserByUsername(username)).toBeUndefined();
+        expect(getPersistedGatewayToken()).toBeUndefined();
+    });
+
     it("task route automation, validation, assignment, movement, updates, and deletion", async () => {
         isolateOpenClawEnvironment("mira-task-route-coverage-");
         const gatewayModule = await import("../src/gateway.ts");
@@ -636,6 +730,32 @@ describe("backend route and service behavior", () => {
         );
         expect(hidden.status).toBe(403);
 
+        const hiddenDirectoryList = await fileRoutes["/api/files"].GET(
+            new Request("https://test.local/api/files?path=notes/.secret")
+        );
+        expect(hiddenDirectoryList.status).toBe(403);
+        await expect(hiddenDirectoryList.json()).resolves.toEqual({
+            error: "Access denied: path outside workspace",
+        });
+
+        const malformedPath = await fileRoutes["/api/files/*"].GET(
+            new Request("https://test.local/api/files/%E0%A4%A")
+        );
+        expect(malformedPath.status).toBe(400);
+        await expect(malformedPath.json()).resolves.toEqual({
+            error: "Malformed file path",
+        });
+
+        const traversal = await fileRoutes["/api/files/*"].GET(
+            new Request("https://test.local/api/files/..%2Foutside.txt")
+        );
+        expect(traversal.status).toBe(403);
+
+        const missingFile = await fileRoutes["/api/files/*"].GET(
+            new Request("https://test.local/api/files/missing.txt")
+        );
+        expect(missingFile.status).toBe(404);
+
         const directory = await fileRoutes["/api/files/*"].GET(
             new Request("https://test.local/api/files/notes")
         );
@@ -670,6 +790,12 @@ describe("backend route and service behavior", () => {
             isSuccess: true,
             path: "notes/readme.txt",
         });
+        expect(
+            readFileSync(path.join(workspaceRoot, "notes", "readme.txt"), "utf8")
+        ).toBe("updated");
+        expect(
+            readFileSync(path.join(workspaceRoot, "notes", "readme.txt.bak"), "utf8")
+        ).toBe("hello");
 
         const directoryWrite = await fileRoutes["/api/files/*"].PUT(
             new Request("https://test.local/api/files/notes", {
@@ -678,6 +804,86 @@ describe("backend route and service behavior", () => {
             })
         );
         expect(directoryWrite.status).toBe(400);
+
+        const hiddenWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/notes/.secret", {
+                body: JSON.stringify({ content: "hidden" }),
+                method: "PUT",
+            })
+        );
+        expect(hiddenWrite.status).toBe(403);
+
+        const invalidWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/notes/readme.txt", {
+                body: JSON.stringify({ content: 42 }),
+                method: "PUT",
+            })
+        );
+        expect(invalidWrite.status).toBe(400);
+
+        const arrayWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/notes/readme.txt", {
+                body: JSON.stringify(["not", "an", "object"]),
+                method: "PUT",
+            })
+        );
+        expect(arrayWrite.status).toBe(400);
+        await expect(arrayWrite.json()).resolves.toEqual({
+            error: "Request body must be an object",
+        });
+
+        const malformedWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/notes/readme.txt", {
+                body: "{",
+                method: "PUT",
+            })
+        );
+        expect(malformedWrite.status).toBe(400);
+
+        const fileParentWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/notes/readme.txt/child.txt", {
+                body: JSON.stringify({ content: "new" }),
+                method: "PUT",
+            })
+        );
+        expect(fileParentWrite.status).toBe(403);
+        await expect(fileParentWrite.json()).resolves.toEqual({
+            error: "Access denied: path outside workspace",
+        });
+
+        const tooLargeContent = "x".repeat(1024 * 1024 + 1);
+        const largeWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/notes/large.txt", {
+                body: JSON.stringify({ content: tooLargeContent }),
+                method: "PUT",
+            })
+        );
+        expect(largeWrite.status).toBe(413);
+
+        const largeImagePath = path.join(workspaceRoot, "large.png");
+        writeFileSync(largeImagePath, Buffer.alloc(1024 * 1024 + 1));
+        const largeImage = await fileRoutes["/api/files/*"].GET(
+            new Request("https://test.local/api/files/large.png")
+        );
+        expect(largeImage.status).toBe(413);
+
+        const hardLinkedPath = path.join(workspaceRoot, "notes", "hardlinked.txt");
+        writeFileSync(hardLinkedPath, "linked");
+        linkSync(
+            hardLinkedPath,
+            path.join(workspaceRoot, "notes", "hardlinked-copy.txt")
+        );
+        const hardLinkedRead = await fileRoutes["/api/files/*"].GET(
+            new Request("https://test.local/api/files/notes/hardlinked.txt")
+        );
+        expect(hardLinkedRead.status).toBe(403);
+        const hardLinkedWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/notes/hardlinked.txt", {
+                body: JSON.stringify({ content: "updated" }),
+                method: "PUT",
+            })
+        );
+        expect(hardLinkedWrite.status).toBe(403);
     });
 
     it("config file route allowlist, reads, writes, and backups", async () => {
@@ -701,6 +907,16 @@ describe("backend route and service behavior", () => {
         );
         expect(deniedRead.status).toBe(403);
 
+        const missingAllowedRead = await configFileRoutes["/api/config-files/*"].GET(
+            new Request("https://test.local/api/config-files/hooks/transforms/missing.ts")
+        );
+        expect(missingAllowedRead.status).toBe(403);
+
+        const malformedConfigPath = await configFileRoutes["/api/config-files/*"].GET(
+            new Request("https://test.local/api/config-files/%E0%A4%A")
+        );
+        expect(malformedConfigPath.status).toBe(400);
+
         const read = await configFileRoutes["/api/config-files/*"].GET(
             new Request("https://test.local/api/config-files/openclaw.json")
         );
@@ -721,6 +937,43 @@ describe("backend route and service behavior", () => {
         );
         expect(invalidWrite.status).toBe(400);
 
+        const malformedWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request("https://test.local/api/config-files/openclaw.json", {
+                body: "{",
+                headers: { "Content-Type": "application/json" },
+                method: "PUT",
+            })
+        );
+        expect(malformedWrite.status).toBe(400);
+
+        const arrayWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request("https://test.local/api/config-files/openclaw.json", {
+                body: JSON.stringify([]),
+                headers: { "Content-Type": "application/json" },
+                method: "PUT",
+            })
+        );
+        expect(arrayWrite.status).toBe(400);
+
+        const missingContentWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request("https://test.local/api/config-files/openclaw.json", {
+                body: JSON.stringify({}),
+                headers: { "Content-Type": "application/json" },
+                method: "PUT",
+            })
+        );
+        expect(missingContentWrite.status).toBe(400);
+
+        const oversizedConfigContent = "x".repeat(2 * 1024 * 1024 + 1);
+        const tooLargeConfigWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request("https://test.local/api/config-files/openclaw.json", {
+                body: JSON.stringify({ content: oversizedConfigContent }),
+                headers: { "Content-Type": "application/json" },
+                method: "PUT",
+            })
+        );
+        expect(tooLargeConfigWrite.status).toBe(400);
+
         const written = await configFileRoutes["/api/config-files/*"].PUT(
             new Request("https://test.local/api/config-files/openclaw.json", {
                 body: JSON.stringify({ content: '{"model":"glm51"}\n' }),
@@ -740,6 +993,63 @@ describe("backend route and service behavior", () => {
         await expect(Bun.file(path.join(root, "openclaw.json.bak")).text()).resolves.toBe(
             '{"model":"codex"}\n'
         );
+
+        writeFileSync(path.join(root, "openclaw.json"), "a\0b");
+        const binaryRead = await configFileRoutes["/api/config-files/*"].GET(
+            new Request("https://test.local/api/config-files/openclaw.json")
+        );
+        await expect(binaryRead.json()).resolves.toMatchObject({
+            content: "[Binary file]",
+            isBinary: true,
+            path: "config:openclaw.json",
+        });
+
+        const symlinkedConfig = path.join(root, "hooks", "transforms", "agentmail.ts");
+        unlinkSync(symlinkedConfig);
+        symlinkSync(path.join(root, "openclaw.json"), symlinkedConfig);
+        const symlinkedRead = await configFileRoutes["/api/config-files/*"].GET(
+            new Request(
+                "https://test.local/api/config-files/hooks/transforms/agentmail.ts"
+            )
+        );
+        expect(symlinkedRead.status).toBe(404);
+        const symlinkedWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request(
+                "https://test.local/api/config-files/hooks/transforms/agentmail.ts",
+                {
+                    body: JSON.stringify({ content: "export default {}\n" }),
+                    headers: { "Content-Type": "application/json" },
+                    method: "PUT",
+                }
+            )
+        );
+        expect(symlinkedWrite.status).toBe(403);
+        unlinkSync(symlinkedConfig);
+        writeFileSync(symlinkedConfig, "export default {}\n");
+
+        const linkedConfig = path.join(root, "hooks", "transforms", "agentmail.ts");
+        linkSync(linkedConfig, `${linkedConfig}.hardlink`);
+        const hardLinkedConfigWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request(
+                "https://test.local/api/config-files/hooks/transforms/agentmail.ts",
+                {
+                    body: JSON.stringify({ content: "export default {}\n" }),
+                    headers: { "Content-Type": "application/json" },
+                    method: "PUT",
+                }
+            )
+        );
+        expect(hardLinkedConfigWrite.status).toBe(403);
+
+        writeFileSync(path.join(root, "openclaw.json"), "x".repeat(2 * 1024 * 1024 + 1));
+        const oversizedExistingWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request("https://test.local/api/config-files/openclaw.json", {
+                body: JSON.stringify({ content: "{}\n" }),
+                headers: { "Content-Type": "application/json" },
+                method: "PUT",
+            })
+        );
+        expect(oversizedExistingWrite.status).toBe(413);
     });
 
     it("defensive route contracts for Docker, pull requests, cache, database, and backup APIs", async () => {
@@ -754,21 +1064,77 @@ describe("backend route and service behavior", () => {
         const [
             { backupRoutes },
             { cacheRoutes },
+            { cronRoutes },
             { dockerRoutes },
+            gatewayModule,
+            { jobRoutes },
+            { moltbookRoutes },
             { pullRequestRoutes },
             { terminalRoutes },
         ] = await Promise.all([
             import("../src/routes/backupRoutes.ts"),
             import("../src/routes/cacheRoutes.ts"),
+            import("../src/routes/cronRoutes.ts"),
             import("../src/routes/dockerRoutes.ts"),
+            import("../src/gateway.ts"),
+            import("../src/routes/jobRoutes.ts"),
+            import("../src/routes/moltbookRoutes.ts"),
             import("../src/routes/pullRequestRoutes.ts"),
             import("../src/routes/terminalRoutes.ts"),
         ]);
+
+        const gateway = gatewayModule.default;
+        const gatewayRequestSpy = jest
+            .spyOn(gateway, "request")
+            .mockImplementation(async (method) => {
+                if (method === "cron.list") {
+                    return { items: [{ enabled: true, id: "item-cron" }] };
+                }
+                throw Object.assign(new Error(`gateway failed for ${method}`), {
+                    statusCode: 502,
+                });
+            });
+        cleanupCallbacks.push(() => gatewayRequestSpy.mockRestore());
+
+        database
+            .prepare(
+                "INSERT INTO cache_entries (key, data_json, source, updated_at, last_attempt_at, expires_at, status, consecutive_failures, metadata_json) VALUES ('route.string', 'raw-value', 'test', ?, ?, ?, 'fresh', 2, '{bad-json') ON CONFLICT(key) DO UPDATE SET data_json = excluded.data_json, metadata_json = excluded.metadata_json, updated_at = excluded.updated_at, last_attempt_at = excluded.last_attempt_at, expires_at = excluded.expires_at"
+            )
+            .run(Date.now(), Date.now(), Date.now() + 60_000);
+        cleanupCallbacks.push(() => {
+            database
+                .prepare(
+                    "DELETE FROM cache_entries WHERE key = 'route.string' OR key LIKE 'moltbook.%'"
+                )
+                .run();
+        });
+
+        const cacheHeartbeat = await cacheRoutes["/api/cache/heartbeat"].GET();
+        await expect(cacheHeartbeat.json()).resolves.toMatchObject({
+            count: expect.any(Number),
+            entries: expect.arrayContaining([
+                expect.objectContaining({
+                    consecutiveFailures: 2,
+                    data: "raw-value",
+                    key: "route.string",
+                    meta: {},
+                }),
+            ]),
+        });
 
         const missingCache = await cacheRoutes["/api/cache/:key"].GET(
             requestWithParameters("/api/cache/", { key: "" })
         );
         expect(missingCache.status).toBe(400);
+
+        const stringCache = await cacheRoutes["/api/cache/:key"].GET(
+            requestWithParameters("/api/cache/route.string", { key: "route.string" })
+        );
+        await expect(stringCache.json()).resolves.toMatchObject({
+            data: "raw-value",
+            key: "route.string",
+            meta: {},
+        });
 
         const unknownCache = await cacheRoutes["/api/cache/:key"].GET(
             requestWithParameters("/api/cache/nope", { key: "nope" })
@@ -793,6 +1159,63 @@ describe("backend route and service behavior", () => {
 
         const backupStatus = backupRoutes["/api/backups/kopia"].GET();
         await expect(backupStatus.json()).resolves.toEqual({ job: undefined });
+
+        const missingJob = jobRoutes["/api/jobs/:id"].GET(
+            requestWithParameters("/api/jobs/missing-route-job", {
+                id: "missing-route-job",
+            })
+        );
+        expect(missingJob.status).toBe(404);
+        await expect(missingJob.json()).resolves.toEqual({
+            error: "Scheduled job not found",
+        });
+
+        const malformedJobPatch = await jobRoutes["/api/jobs/:id"].PATCH(
+            requestWithParameters(
+                "/api/jobs/missing-route-job",
+                { id: "missing-route-job" },
+                { body: "{", method: "PATCH" }
+            )
+        );
+        expect(malformedJobPatch.status).toBe(400);
+
+        const invalidJobPatchBody = await jobRoutes["/api/jobs/:id"].PATCH(
+            requestWithParameters(
+                "/api/jobs/missing-route-job",
+                { id: "missing-route-job" },
+                { body: JSON.stringify({ patch: [] }), method: "PATCH" }
+            )
+        );
+        expect(invalidJobPatchBody.status).toBe(400);
+
+        const invalidJobPatchField = await jobRoutes["/api/jobs/:id"].PATCH(
+            requestWithParameters(
+                "/api/jobs/missing-route-job",
+                { id: "missing-route-job" },
+                {
+                    body: JSON.stringify({ patch: { enabled: "yes" } }),
+                    method: "PATCH",
+                }
+            )
+        );
+        expect(invalidJobPatchField.status).toBe(400);
+        await expect(invalidJobPatchField.json()).resolves.toEqual({
+            error: "invalid patch field: enabled",
+        });
+
+        const missingJobRun = await jobRoutes["/api/jobs/:id/run"].POST(
+            requestWithParameters("/api/jobs/missing-route-job/run", {
+                id: "missing-route-job",
+            })
+        );
+        expect(missingJobRun.status).toBe(404);
+
+        const missingJobRuns = jobRoutes["/api/jobs/:id/runs"].GET(
+            requestWithParameters("/api/jobs/missing-route-job/runs", {
+                id: "missing-route-job",
+            })
+        );
+        expect(missingJobRuns.status).toBe(404);
 
         const terminalComplete = await terminalRoutes["/api/terminal/complete"].POST(
             jsonRequest("/api/terminal/complete", {
@@ -831,6 +1254,44 @@ describe("backend route and service behavior", () => {
         );
         expect(invalidTerminalComplete.status).toBe(400);
 
+        const malformedTerminalComplete = await terminalRoutes[
+            "/api/terminal/complete"
+        ].POST(
+            new Request("https://test.local/api/terminal/complete", {
+                body: "{",
+                method: "POST",
+            })
+        );
+        expect(malformedTerminalComplete.status).toBe(400);
+
+        const missingTerminalCompleteBody = await terminalRoutes[
+            "/api/terminal/complete"
+        ].POST(jsonRequest("/api/terminal/complete", []));
+        expect(missingTerminalCompleteBody.status).toBe(400);
+
+        const invalidTerminalPartial = await terminalRoutes[
+            "/api/terminal/complete"
+        ].POST(
+            jsonRequest("/api/terminal/complete", {
+                cwd: terminalRoot,
+                partial: "bad\0partial",
+            })
+        );
+        expect(invalidTerminalPartial.status).toBe(400);
+
+        const missingDirectoryCompletion = await terminalRoutes[
+            "/api/terminal/complete"
+        ].POST(
+            jsonRequest("/api/terminal/complete", {
+                cwd: terminalRoot,
+                partial: "missing/",
+            })
+        );
+        await expect(missingDirectoryCompletion.json()).resolves.toEqual({
+            commonPrefix: "",
+            completions: [],
+        });
+
         const terminalCdFile = await terminalRoutes["/api/terminal/cd"].POST(
             jsonRequest("/api/terminal/cd", {
                 cwd: terminalRoot,
@@ -842,6 +1303,52 @@ describe("backend route and service behavior", () => {
             isSuccess: false,
             newCwd: terminalRoot,
         });
+
+        const terminalCdHome = await terminalRoutes["/api/terminal/cd"].POST(
+            jsonRequest("/api/terminal/cd", {
+                cwd: terminalRoot,
+                path: "~",
+            })
+        );
+        await expect(terminalCdHome.json()).resolves.toMatchObject({
+            isSuccess: true,
+            newCwd: expect.any(String),
+        });
+
+        const terminalCdNormalized = await terminalRoutes["/api/terminal/cd"].POST(
+            jsonRequest("/api/terminal/cd", {
+                cwd: terminalDirectory,
+                path: "../work dir/.",
+            })
+        );
+        await expect(terminalCdNormalized.json()).resolves.toEqual({
+            isSuccess: true,
+            newCwd: terminalDirectory,
+        });
+
+        const malformedTerminalCd = await terminalRoutes["/api/terminal/cd"].POST(
+            new Request("https://test.local/api/terminal/cd", {
+                body: "{",
+                method: "POST",
+            })
+        );
+        expect(malformedTerminalCd.status).toBe(400);
+
+        const invalidTerminalCd = await terminalRoutes["/api/terminal/cd"].POST(
+            jsonRequest("/api/terminal/cd", {
+                cwd: "relative",
+                path: "work dir",
+            })
+        );
+        expect(invalidTerminalCd.status).toBe(400);
+
+        const missingTerminalCd = await terminalRoutes["/api/terminal/cd"].POST(
+            jsonRequest("/api/terminal/cd", {
+                cwd: terminalRoot,
+                path: "missing",
+            })
+        );
+        expect(missingTerminalCd.status).toBe(400);
 
         const invalidContainer = await dockerRoutes[
             "/api/docker/containers/:containerId"
@@ -878,6 +1385,46 @@ describe("backend route and service behavior", () => {
         );
         expect(invalidPrune.status).toBe(400);
 
+        const malformedPrune = await dockerRoutes["/api/docker/prune"].POST(
+            new Request("https://test.local/api/docker/prune", {
+                body: "{",
+                method: "POST",
+            })
+        );
+        expect(malformedPrune.status).toBe(400);
+
+        const invalidStackActionBody = await dockerRoutes[
+            "/api/docker/stack/action"
+        ].POST(jsonRequest("/api/docker/stack/action", []));
+        expect(invalidStackActionBody.status).toBe(400);
+
+        const invalidStackAction = await dockerRoutes["/api/docker/stack/action"].POST(
+            jsonRequest("/api/docker/stack/action", { action: "reload" })
+        );
+        expect(invalidStackAction.status).toBe(400);
+
+        const invalidStackService = await dockerRoutes["/api/docker/stack/action"].POST(
+            jsonRequest("/api/docker/stack/action", {
+                action: "restart",
+                service: "--bad",
+            })
+        );
+        expect(invalidStackService.status).toBe(400);
+
+        const invalidImageDelete = await dockerRoutes[
+            "/api/docker/images/:imageId"
+        ].DELETE(requestWithParameters("/api/docker/images/--bad", { imageId: "--bad" }));
+        expect(invalidImageDelete.status).toBe(400);
+
+        const invalidVolumeDelete = await dockerRoutes[
+            "/api/docker/volumes/:volumeName"
+        ].DELETE(
+            requestWithParameters("/api/docker/volumes/--bad", {
+                volumeName: "--bad",
+            })
+        );
+        expect(invalidVolumeDelete.status).toBe(400);
+
         const invalidUpdater = await dockerRoutes[
             "/api/docker/updater/services/:serviceId/update"
         ].POST(
@@ -886,6 +1433,243 @@ describe("backend route and service behavior", () => {
             })
         );
         expect(invalidUpdater.status).toBe(400);
+
+        database
+            .prepare(
+                `INSERT INTO docker_managed_services (
+                    app_slug,
+                    service_name,
+                    compose_path,
+                    image_repo,
+                    compose_image_ref,
+                    current_tag,
+                    current_digest,
+                    latest_tag,
+                    latest_digest,
+                    policy,
+                    pin_mode,
+                    enabled,
+                    metadata_json,
+                    last_checked_at,
+                    last_updated_at,
+                    last_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            )
+            .run(
+                "coverage-app",
+                "api",
+                "/tmp/compose.yml",
+                "example/api",
+                "example/api:1.0",
+                "1.0",
+                "sha256:old",
+                "1.1",
+                "sha256:new",
+                "notify",
+                "tag",
+                1,
+                '{"source":"test"}',
+                "2026-06-25T10:00:00.000Z",
+                "2026-06-25T11:00:00.000Z",
+                "auto_update_failed"
+            );
+        const updaterServiceId = Number(
+            (
+                database
+                    .prepare(
+                        "SELECT id FROM docker_managed_services WHERE app_slug = 'coverage-app' AND service_name = 'api'"
+                    )
+                    .get() as { id: number }
+            ).id
+        );
+        database
+            .prepare(
+                `INSERT INTO docker_update_events (
+                    managed_service_id,
+                    app_slug,
+                    service_name,
+                    event_type,
+                    from_tag,
+                    to_tag,
+                    from_digest,
+                    to_digest,
+                    message,
+                    details_json,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            )
+            .run(
+                updaterServiceId,
+                "",
+                "",
+                "update_available",
+                "1.0",
+                "1.1",
+                "sha256:old",
+                "sha256:new",
+                "candidate found",
+                "{}",
+                "2026-06-25T12:00:00.000Z"
+            );
+        cleanupCallbacks.push(() => {
+            database
+                .prepare(
+                    "DELETE FROM docker_update_events WHERE managed_service_id = ? OR app_slug = 'coverage-app'"
+                )
+                .run(updaterServiceId);
+            database
+                .prepare(
+                    "DELETE FROM docker_managed_services WHERE app_slug = 'coverage-app'"
+                )
+                .run();
+        });
+
+        const updaterServices = await dockerRoutes["/api/docker/updater/services"].GET();
+        await expect(updaterServices.json()).resolves.toMatchObject({
+            services: [
+                expect.objectContaining({
+                    appSlug: "coverage-app",
+                    enabled: true,
+                    metadata: { source: "test" },
+                    serviceName: "api",
+                    updateAvailable: true,
+                }),
+            ],
+            summary: expect.objectContaining({
+                enabled: 1,
+                failed: 1,
+                notifyPolicy: 1,
+                total: 1,
+                updateAvailable: 1,
+            }),
+        });
+
+        const updaterEvents = await dockerRoutes["/api/docker/updater/events"].GET(
+            new Request("https://test.local/api/docker/updater/events?limit=500")
+        );
+        await expect(updaterEvents.json()).resolves.toMatchObject({
+            events: [
+                expect.objectContaining({
+                    appSlug: "coverage-app",
+                    eventType: "update_available",
+                    fromTag: "1.0",
+                    managedServiceId: updaterServiceId,
+                    serviceName: "api",
+                    toTag: "1.1",
+                }),
+            ],
+        });
+
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
+        process.env.MIRA_DOCKER_APPS_ROOT = path.join(
+            terminalRoot,
+            "missing-docker-apps"
+        );
+        process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY = "1";
+        cleanupCallbacks.push(() => {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id = 'docker.updater'")
+                .run();
+            database
+                .prepare("DELETE FROM scheduled_jobs WHERE id = 'docker.updater'")
+                .run();
+        });
+        const updaterRun = await dockerRoutes["/api/docker/updater/run"].POST();
+        expect(updaterRun.status).toBe(200);
+        await expect(updaterRun.json()).resolves.toMatchObject({
+            isSuccess: false,
+            steps: [
+                expect.objectContaining({
+                    isOk: false,
+                    stderr: expect.stringContaining("Compose apps root not found"),
+                    step: "register-services",
+                }),
+            ],
+        });
+        const updaterRunRow = database
+            .prepare(
+                "SELECT status FROM scheduled_job_runs WHERE job_id = 'docker.updater' ORDER BY id DESC LIMIT 1"
+            )
+            .get() as { status?: string } | undefined;
+        expect(updaterRunRow).toEqual({ status: "failed" });
+
+        const missingUpdaterService = await dockerRoutes[
+            "/api/docker/updater/services/:serviceId/update"
+        ].POST(
+            requestWithParameters("/api/docker/updater/services/999999/update", {
+                serviceId: "999999",
+            })
+        );
+        expect(missingUpdaterService.status).toBe(404);
+
+        const cronList = await cronRoutes["/api/cron/jobs"].GET();
+        await expect(cronList.json()).resolves.toEqual({
+            jobs: [{ enabled: true, id: "item-cron" }],
+        });
+
+        const badCronToggleBody = await cronRoutes["/api/cron/jobs/:id/toggle"].POST(
+            requestWithParameters(
+                "/api/cron/jobs/item-cron/toggle",
+                { id: "item-cron" },
+                { body: "null", method: "POST" }
+            )
+        );
+        expect(badCronToggleBody.status).toBe(400);
+
+        const badCronToggleValue = await cronRoutes["/api/cron/jobs/:id/toggle"].POST(
+            requestWithParameters(
+                "/api/cron/jobs/item-cron/toggle",
+                { id: "item-cron" },
+                { body: JSON.stringify({ enabled: "yes" }), method: "POST" }
+            )
+        );
+        expect(badCronToggleValue.status).toBe(400);
+
+        const failedCronRun = await cronRoutes["/api/cron/jobs/:id/run"].POST(
+            requestWithParameters("/api/cron/jobs/item-cron/run", { id: "item-cron" })
+        );
+        expect(failedCronRun.status).toBe(502);
+        await expect(failedCronRun.json()).resolves.toEqual({
+            error: "gateway failed for cron.run",
+        });
+
+        const badCronUpdateBody = await cronRoutes["/api/cron/jobs/:id/update"].POST(
+            requestWithParameters(
+                "/api/cron/jobs/item-cron/update",
+                { id: "item-cron" },
+                { body: JSON.stringify([]), method: "POST" }
+            )
+        );
+        expect(badCronUpdateBody.status).toBe(400);
+
+        const badCronUpdatePatch = await cronRoutes["/api/cron/jobs/:id/update"].POST(
+            requestWithParameters(
+                "/api/cron/jobs/item-cron/update",
+                { id: "item-cron" },
+                { body: JSON.stringify({}), method: "POST" }
+            )
+        );
+        expect(badCronUpdatePatch.status).toBe(400);
+
+        for (const [route, handler] of [
+            ["/api/moltbook/home", moltbookRoutes["/api/moltbook/home"].GET],
+            [
+                "/api/moltbook/feed?sort=new",
+                (request?: Request) =>
+                    moltbookRoutes["/api/moltbook/feed"].GET(
+                        request ?? new Request("https://test.local/api/moltbook/feed")
+                    ),
+            ],
+            ["/api/moltbook/profile", moltbookRoutes["/api/moltbook/profile"].GET],
+            ["/api/moltbook/my-posts", moltbookRoutes["/api/moltbook/my-posts"].GET],
+        ] as const) {
+            const response = await handler(new Request(`https://test.local${route}`));
+            expect(response.status).toBe(503);
+            await expect(response.json()).resolves.toEqual({
+                error: expect.any(String),
+            });
+        }
 
         for (const [route, handler] of [
             [
@@ -910,6 +1694,74 @@ describe("backend route and service behavior", () => {
             );
             expect(response.status).toBe(400);
         }
+    });
+
+    it("aggregates metrics tokens by model, display label, and session type", async () => {
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const getSessionsSpy = jest.spyOn(gateway, "getSessions").mockReturnValue([
+            {
+                displayLabel: "Main chat",
+                label: "main",
+                model: "openai/gpt-5.5",
+                tokenCount: 120,
+                type: "chat",
+            },
+            {
+                displayLabel: "",
+                label: "coder",
+                model: "anthropic/claude-sonnet",
+                tokenCount: 80,
+                type: "agent",
+            },
+            {
+                displayLabel: "Untyped",
+                label: "fallback",
+                model: "",
+                tokenCount: 5,
+                type: "",
+            },
+        ] as ReturnType<typeof gateway.getSessions>);
+        cleanupCallbacks.push(() => getSessionsSpy.mockRestore());
+
+        const { metricsRoutes } = await import("../src/routes/metricsRoutes.ts");
+        const response = await metricsRoutes["/api/metrics"].GET();
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toMatchObject({
+            tokens: {
+                byAgent: [
+                    {
+                        label: "Main chat",
+                        model: "openai/gpt-5.5",
+                        tokens: 120,
+                        type: "chat",
+                    },
+                    {
+                        label: "coder",
+                        model: "anthropic/claude-sonnet",
+                        tokens: 80,
+                        type: "agent",
+                    },
+                    {
+                        label: "Untyped",
+                        model: "unknown",
+                        tokens: 5,
+                        type: "Unknown",
+                    },
+                ],
+                byModel: {
+                    "anthropic/claude-sonnet": 80,
+                    "openai/gpt-5.5": 120,
+                    unknown: 5,
+                },
+                sessionsByModel: {
+                    "claude-sonnet": 1,
+                    "gpt-5.5": 1,
+                    unknown: 1,
+                },
+                total: 205,
+            },
+        });
     });
 
     it("serves log route listing and guarded tail reads from an isolated log root", async () => {
@@ -976,6 +1828,72 @@ describe("backend route and service behavior", () => {
         expect(missingContentRoot.status).toBe(404);
     });
 
+    it("serves media from isolated OpenClaw roots while rejecting unsafe paths", async () => {
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        const openclawRoot = createTemporaryRoot("mira-media-route-");
+        const outsideRoot = createTemporaryRoot("mira-media-outside-");
+        const mediaRoot = path.join(openclawRoot, "media");
+        mkdirSync(path.join(mediaRoot, "images"), { recursive: true });
+        mkdirSync(path.join(mediaRoot, "folder"), { recursive: true });
+        writeFileSync(path.join(mediaRoot, "images", "dashboard.txt"), "media ok");
+        writeFileSync(path.join(mediaRoot, "images", "linked.txt"), "linked media");
+        linkSync(
+            path.join(mediaRoot, "images", "linked.txt"),
+            path.join(mediaRoot, "images", "linked-hardlink.txt")
+        );
+        writeFileSync(
+            path.join(outsideRoot, "secret.txt"),
+            "outside media should not be served"
+        );
+        symlinkSync(
+            path.join(outsideRoot, "secret.txt"),
+            path.join(mediaRoot, "images", "outside-link.txt")
+        );
+        process.env.OPENCLAW_HOME = openclawRoot;
+        delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        const { mediaRoutes } = await import("../src/routes/mediaRoutes.ts");
+
+        const missingPath = await mediaRoutes["/api/media"].GET(
+            new Request("https://test.local/api/media")
+        );
+        expect(missingPath.status).toBe(403);
+
+        const invalidPath = await mediaRoutes["/api/media"].GET(
+            new Request("https://test.local/api/media?path=bad%00path")
+        );
+        expect(invalidPath.status).toBe(400);
+
+        const directory = await mediaRoutes["/api/media"].GET(
+            new Request("https://test.local/api/media?path=folder")
+        );
+        expect(directory.status).toBe(400);
+
+        const outside = await mediaRoutes["/api/media"].GET(
+            new Request("https://test.local/api/media?path=images/outside-link.txt")
+        );
+        expect(outside.status).toBe(403);
+
+        const hardlink = await mediaRoutes["/api/media"].GET(
+            new Request("https://test.local/api/media?path=images/linked-hardlink.txt")
+        );
+        expect(hardlink.status).toBe(403);
+
+        const served = await mediaRoutes["/api/media"].GET(
+            new Request("https://test.local/api/media?path=images/dashboard.txt")
+        );
+        expect(served.status).toBe(200);
+        expect(served.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
+        expect(served.headers.get("X-Content-Type-Options")).toBe("nosniff");
+        await expect(served.text()).resolves.toBe("media ok");
+
+        process.env.OPENCLAW_HOME = createTemporaryRoot("mira-media-empty-root-");
+        const missingMediaRoot = await mediaRoutes["/api/media"].GET(
+            new Request("https://test.local/api/media?path=images/dashboard.txt")
+        );
+        expect(missingMediaRoot.status).toBe(404);
+    });
+
     it("starts manual WAL-G backups through the backup route using fake Docker", async () => {
         rememberEnvironment("PATH");
         const fakeBin = createTemporaryRoot("mira-backup-route-docker-bin-");
@@ -1022,11 +1940,17 @@ describe("backend route and service behavior", () => {
 
     it("serves Docker inventory and safe mutations through a fake Docker CLI", async () => {
         rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
         rememberEnvironment("MIRA_DOCKER_ROOT");
         const fakeBin = createTemporaryRoot("mira-docker-route-bin-");
         const dockerRoot = createTemporaryRoot("mira-docker-route-root-");
         writeFakeDockerCli(path.join(fakeBin, "docker"));
+        writeExecutable(
+            path.join(fakeBin, "compose"),
+            "#!/usr/bin/env bash\nprintf 'compose:%s\\n' \"$*\"\n"
+        );
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DOCKER_COMPOSE_WRAPPER = path.join(fakeBin, "compose");
         process.env.MIRA_DOCKER_ROOT = dockerRoot;
         const { dockerRoutes } = await import("../src/routes/dockerRoutes.ts");
 
@@ -1057,6 +1981,28 @@ describe("backend route and service behavior", () => {
             networks: [{ ipAddress: "172.17.0.2", name: "bridge" }],
         });
 
+        const invalidDetails = await dockerRoutes[
+            "/api/docker/containers/:containerId"
+        ].GET(
+            requestWithParameters("/api/docker/containers/-bad", { containerId: "-bad" })
+        );
+        expect(invalidDetails.status).toBe(400);
+        await expect(invalidDetails.json()).resolves.toEqual({
+            error: "Invalid containerId",
+        });
+
+        const missingDetails = await dockerRoutes[
+            "/api/docker/containers/:containerId"
+        ].GET(
+            requestWithParameters("/api/docker/containers/unknown", {
+                containerId: "unknown",
+            })
+        );
+        expect(missingDetails.status).toBe(404);
+        await expect(missingDetails.json()).resolves.toEqual({
+            error: "Container not found",
+        });
+
         const logs = await dockerRoutes["/api/docker/containers/:containerId/logs"].GET(
             requestWithParameters("/api/docker/containers/abc123def456/logs?tail=10", {
                 containerId: "abc123def456",
@@ -1065,6 +2011,14 @@ describe("backend route and service behavior", () => {
         await expect(logs.json()).resolves.toEqual({
             content: "container log line",
         });
+
+        await expect(
+            dockerRoutes["/api/docker/containers/:containerId/logs"].GET(
+                requestWithParameters("/api/docker/containers/missing/logs?tail=abc", {
+                    containerId: "missing",
+                })
+            )
+        ).rejects.toThrow("docker logs failed with exit code 1: no such container");
 
         const restart = await dockerRoutes[
             "/api/docker/containers/:containerId/action"
@@ -1081,6 +2035,24 @@ describe("backend route and service behavior", () => {
         );
         await expect(restart.json()).resolves.toEqual({
             output: "restart sent to demo",
+        });
+
+        const invalidContainerAction = await dockerRoutes[
+            "/api/docker/containers/:containerId/action"
+        ].POST(
+            requestWithParameters(
+                "/api/docker/containers/demo/action",
+                { containerId: "demo" },
+                {
+                    body: JSON.stringify({ action: "pause" }),
+                    headers: { "Content-Type": "application/json" },
+                    method: "POST",
+                }
+            )
+        );
+        expect(invalidContainerAction.status).toBe(400);
+        await expect(invalidContainerAction.json()).resolves.toEqual({
+            error: "Invalid container action",
         });
 
         const images = await dockerRoutes["/api/docker/images"].GET();
@@ -1101,6 +2073,11 @@ describe("backend route and service behavior", () => {
         );
         await expect(removeImage.json()).resolves.toEqual({ isSuccess: true });
 
+        const invalidRemoveImage = await dockerRoutes[
+            "/api/docker/images/:imageId"
+        ].DELETE(requestWithParameters("/api/docker/images/-bad", { imageId: "-bad" }));
+        expect(invalidRemoveImage.status).toBe(400);
+
         const volumes = await dockerRoutes["/api/docker/volumes"].GET();
         await expect(volumes.json()).resolves.toMatchObject({
             volumes: [{ name: "data", size: "1MB", usedBy: ["demo"] }],
@@ -1110,6 +2087,13 @@ describe("backend route and service behavior", () => {
             requestWithParameters("/api/docker/volumes/data", { volumeName: "data" })
         );
         await expect(removeVolume.json()).resolves.toEqual({ isSuccess: true });
+
+        const invalidRemoveVolume = await dockerRoutes[
+            "/api/docker/volumes/:volumeName"
+        ].DELETE(
+            requestWithParameters("/api/docker/volumes/-bad", { volumeName: "-bad" })
+        );
+        expect(invalidRemoveVolume.status).toBe(400);
 
         const pruneImages = await dockerRoutes["/api/docker/prune"].POST(
             jsonRequest("/api/docker/prune", { target: "images" })
@@ -1125,6 +2109,137 @@ describe("backend route and service behavior", () => {
         await expect(pruneVolumes.json()).resolves.toMatchObject({
             isSuccess: true,
             output: expect.stringContaining("volume prune"),
+        });
+
+        const invalidPrune = await dockerRoutes["/api/docker/prune"].POST(
+            jsonRequest("/api/docker/prune", { target: "containers" })
+        );
+        expect(invalidPrune.status).toBe(400);
+        await expect(invalidPrune.json()).resolves.toEqual({
+            error: "Invalid prune target",
+        });
+
+        const malformedPrune = await dockerRoutes["/api/docker/prune"].POST(
+            new Request("https://test.local/api/docker/prune", {
+                body: "{",
+                headers: { "Content-Type": "application/json" },
+                method: "POST",
+            })
+        );
+        expect(malformedPrune.status).toBe(400);
+        await expect(malformedPrune.json()).resolves.toEqual({
+            error: "Invalid JSON",
+        });
+
+        const stackAction = await dockerRoutes["/api/docker/stack/action"].POST(
+            jsonRequest("/api/docker/stack/action", { action: "stop" })
+        );
+        await expect(stackAction.json()).resolves.toEqual({
+            output: "compose:stop",
+        });
+
+        const stackServiceAction = await dockerRoutes["/api/docker/stack/action"].POST(
+            jsonRequest("/api/docker/stack/action", { action: "restart", service: "web" })
+        );
+        await expect(stackServiceAction.json()).resolves.toEqual({
+            output: "compose:restart web",
+        });
+
+        const invalidStackAction = await dockerRoutes["/api/docker/stack/action"].POST(
+            jsonRequest("/api/docker/stack/action", { action: "reload" })
+        );
+        expect(invalidStackAction.status).toBe(400);
+
+        const invalidStackService = await dockerRoutes["/api/docker/stack/action"].POST(
+            jsonRequest("/api/docker/stack/action", { action: "start", service: "-bad" })
+        );
+        expect(invalidStackService.status).toBe(400);
+
+        const malformedStackAction = await dockerRoutes["/api/docker/stack/action"].POST(
+            new Request("https://test.local/api/docker/stack/action", {
+                body: "{",
+                headers: { "Content-Type": "application/json" },
+                method: "POST",
+            })
+        );
+        expect(malformedStackAction.status).toBe(400);
+
+        const malformedExecStart = await dockerRoutes["/api/docker/exec/start"].POST(
+            new Request("https://test.local/api/docker/exec/start", {
+                body: "{",
+                headers: { "Content-Type": "application/json" },
+                method: "POST",
+            })
+        );
+        expect(malformedExecStart.status).toBe(400);
+
+        const invalidExecStart = await dockerRoutes["/api/docker/exec/start"].POST(
+            jsonRequest("/api/docker/exec/start", {
+                command: "",
+                containerId: "demo",
+            })
+        );
+        expect(invalidExecStart.status).toBe(400);
+
+        const missingExecContainer = await dockerRoutes["/api/docker/exec/start"].POST(
+            jsonRequest("/api/docker/exec/start", {
+                command: "printf ok",
+                containerId: "missing",
+            })
+        );
+        expect(missingExecContainer.status).toBe(404);
+
+        const missingAction = await dockerRoutes[
+            "/api/docker/containers/:containerId/action"
+        ].POST(
+            requestWithParameters(
+                "/api/docker/containers/unknown/action",
+                { containerId: "unknown" },
+                {
+                    body: JSON.stringify({ action: "start" }),
+                    headers: { "Content-Type": "application/json" },
+                    method: "POST",
+                }
+            )
+        );
+        expect(missingAction.status).toBe(404);
+        await expect(missingAction.json()).resolves.toEqual({
+            error: "Container not found",
+        });
+
+        const execStart = await dockerRoutes["/api/docker/exec/start"].POST(
+            jsonRequest("/api/docker/exec/start", {
+                command: "printf ok",
+                containerId: "demo",
+            })
+        );
+        const { jobId } = (await execStart.json()) as { jobId: string };
+        expect(jobId).toEqual(expect.any(String));
+
+        let execStatus = dockerRoutes["/api/docker/exec/:jobId"].GET(
+            requestWithParameters(`/api/docker/exec/${jobId}`, { jobId })
+        );
+        let execData = (await execStatus.json()) as { status: string; stdout: string };
+        const execDeadline = Date.now() + 15_000;
+        while (execData.status !== "done" && Date.now() < execDeadline) {
+            await new Promise((resolve) => setTimeout(resolve, 25));
+            execStatus = dockerRoutes["/api/docker/exec/:jobId"].GET(
+                requestWithParameters(`/api/docker/exec/${jobId}`, { jobId })
+            );
+            execData = (await execStatus.json()) as { status: string; stdout: string };
+        }
+        expect(execData.status).toBe("done");
+        expect(execData).toMatchObject({
+            status: "done",
+            stdout: expect.stringContaining("exec output"),
+        });
+
+        const stopCompletedExec = await dockerRoutes["/api/docker/exec/:jobId/stop"].POST(
+            requestWithParameters(`/api/docker/exec/${jobId}/stop`, { jobId })
+        );
+        expect(stopCompletedExec.status).toBe(400);
+        await expect(stopCompletedExec.json()).resolves.toEqual({
+            error: "Job is not running",
         });
     });
 
@@ -1225,7 +2340,7 @@ describe("backend route and service behavior", () => {
             "args are required"
         );
         await expect(runExecOnce({ args: "hi", command: "echo" })).rejects.toThrow(
-            "command executable is not approved"
+            "args must be an array"
         );
         await expect(runExecOnce({ args: ["hi"], command: "./echo" })).rejects.toThrow(
             "command must be an approved executable name"
@@ -1294,6 +2409,7 @@ describe("backend route and service behavior", () => {
 
     it("log rotation config validation and dry-run summaries", async () => {
         const { runLogRotationService } = await import("../src/services/logRotation.ts");
+        const { writeCacheSuccess } = await import("../src/services/cacheEntryWriter.ts");
         const root = createTemporaryRoot("mira-log-rotation-");
         const logFile = path.join(root, "service.log");
         const excludedFile = path.join(root, "excluded.log");
@@ -1365,6 +2481,113 @@ describe("backend route and service behavior", () => {
             runLogRotationService({ config: conflictingCadenceConfig, isDryRun: true })
         ).rejects.toThrow("cannot set both daily and weekly");
 
+        const invalidPolicyConfigs = [
+            {
+                config: {
+                    version: 1,
+                    approvedRoots: [],
+                    groups: [{ name: "app", paths: [logFile] }],
+                },
+                message: "approvedRoots must include at least one entry",
+                name: "empty-approved-roots.json",
+            },
+            {
+                config: {
+                    version: 1,
+                    groups: [{ enabled: "yes", name: "app", paths: [logFile] }],
+                },
+                message: "Group app.enabled must be a boolean",
+                name: "invalid-enabled.json",
+            },
+            {
+                config: {
+                    version: 1,
+                    groups: [{ keep: 0, name: "app", paths: [logFile] }],
+                },
+                message: "Group app.keep must be a positive integer",
+                name: "invalid-keep.json",
+            },
+            {
+                config: {
+                    version: 1,
+                    groups: [
+                        {
+                            archiveOnly: true,
+                            archiveRetentionScope: "global",
+                            archivePaths: [path.join(root, "*.archive")],
+                            name: "archives",
+                        },
+                    ],
+                },
+                message:
+                    "Group archives archiveRetentionScope must be directory, basename, or parent",
+                name: "invalid-archive-scope.json",
+            },
+            {
+                config: {
+                    version: 1,
+                    groups: [{ archiveOnly: true, name: "archives" }],
+                },
+                message:
+                    "Archive-only group archives needs at least one archivePaths pattern",
+                name: "archive-only-missing-paths.json",
+            },
+        ];
+        for (const invalid of invalidPolicyConfigs) {
+            const filePath = path.join(root, invalid.name);
+            writeFileSync(filePath, JSON.stringify(invalid.config));
+            await expect(
+                runLogRotationService({ config: filePath, isDryRun: true })
+            ).rejects.toThrow(invalid.message);
+        }
+
+        const emptyLogFile = path.join(root, "empty.log");
+        const dailyLogFile = path.join(root, "daily.log");
+        writeFileSync(emptyLogFile, "");
+        writeFileSync(dailyLogFile, "already rotated today\n");
+        writeCacheSuccess({
+            data: {
+                version: 1,
+                files: {
+                    [dailyLogFile]: { lastRotatedAt: new Date().toISOString() },
+                },
+            },
+            key: "log_rotation.state",
+            metadata: {},
+            source: "test",
+            ttl: 1,
+            ttlUnit: "hours",
+        });
+        const skipConfig = path.join(root, "skip-log-rotation.json");
+        writeFileSync(
+            skipConfig,
+            JSON.stringify({
+                version: 1,
+                approvedRoots: [root],
+                defaults: {
+                    keep: 1,
+                    maxSizeMb: 0.000001,
+                    missingOk: false,
+                    shouldCompress: false,
+                    strategy: "copytruncate",
+                },
+                groups: [
+                    { name: "empty", paths: [emptyLogFile], skipEmpty: true },
+                    { daily: true, maxSizeMb: 100, name: "daily", paths: [dailyLogFile] },
+                ],
+            })
+        );
+        const skipSummary = await runLogRotationService({
+            config: skipConfig,
+            isDryRun: true,
+        });
+        expect(skipSummary).toMatchObject({
+            checkedFiles: 2,
+            isOk: true,
+            rotatedFiles: 0,
+            skippedFiles: 2,
+        });
+
         const liveLogFile = path.join(root, "live.log");
         writeFileSync(liveLogFile, "rotated bytes\n");
         const liveConfig = path.join(root, "live-log-rotation.json");
@@ -1406,6 +2629,58 @@ describe("backend route and service behavior", () => {
         expect(existsSync(archivePath)).toBe(true);
         expect(readFileSync(archivePath, "utf8")).toBe("rotated bytes\n");
 
+        const renameLogFile = path.join(root, "rename.log");
+        writeFileSync(renameLogFile, "rename bytes\n");
+        const renameConfig = path.join(root, "rename-log-rotation.json");
+        writeFileSync(
+            renameConfig,
+            JSON.stringify({
+                version: 1,
+                approvedRoots: [root],
+                defaults: {
+                    keep: 1,
+                    maxSizeMb: 0.000001,
+                    missingOk: false,
+                    shouldCompress: true,
+                    skipEmpty: false,
+                    strategy: "rename",
+                },
+                groups: [{ name: "rename", paths: [renameLogFile] }],
+            })
+        );
+
+        const renameSummary = await runLogRotationService({
+            config: renameConfig,
+            group: "rename",
+            isDryRun: false,
+        });
+        const hasCompressionStream = "CompressionStream" in globalThis;
+        expect(renameSummary).toMatchObject({
+            compressedFiles: hasCompressionStream ? 1 : 0,
+            isDryRun: false,
+            isOk: true,
+            rotatedFiles: 1,
+        });
+        expect(readFileSync(renameLogFile, "utf8")).toBe("");
+        const compressedRenameArchive = readdirSync(root).find((entry) =>
+            entry.startsWith("rename.log.202")
+        );
+        expect(compressedRenameArchive).toBeDefined();
+        if (hasCompressionStream) {
+            expect(compressedRenameArchive?.endsWith(".gz")).toBe(true);
+            const compressedRenameArchiveBytes = readFileSync(
+                path.join(root, compressedRenameArchive ?? "")
+            );
+            expect(gunzipSync(compressedRenameArchiveBytes).toString("utf8")).toBe(
+                "rename bytes\n"
+            );
+        } else {
+            expect(compressedRenameArchive?.endsWith(".gz")).toBe(false);
+            expect(
+                readFileSync(path.join(root, compressedRenameArchive ?? ""), "utf8")
+            ).toBe("rename bytes\n");
+        }
+
         const archiveOnlyOld = path.join(root, "old.archive");
         const archiveOnlyNew = path.join(root, "new.archive");
         writeFileSync(archiveOnlyOld, "old archive\n");
@@ -1446,6 +2721,36 @@ describe("backend route and service behavior", () => {
         expect(archiveOnlySummary.warnings).toEqual([]);
         expect(existsSync(archiveOnlyOld)).toBe(true);
         expect(existsSync(archiveOnlyNew)).toBe(true);
+
+        const archiveOnlyLiveSummary = await runLogRotationService({
+            config: archiveOnlyConfig,
+            isDryRun: false,
+        });
+        expect(archiveOnlyLiveSummary).toMatchObject({
+            checkedFiles: 2,
+            compressedFiles: hasCompressionStream ? 1 : 0,
+            deletedArchives: 1,
+            isDryRun: false,
+            isOk: true,
+        });
+        if (!hasCompressionStream) {
+            const compressionWarning = expect.objectContaining({
+                message: expect.stringContaining("Compression failed"),
+            });
+            expect(archiveOnlyLiveSummary.warnings).toEqual(
+                expect.arrayContaining([compressionWarning])
+            );
+        }
+        expect(existsSync(archiveOnlyOld)).toBe(false);
+        if (hasCompressionStream) {
+            expect(existsSync(archiveOnlyNew)).toBe(false);
+            expect(
+                gunzipSync(readFileSync(`${archiveOnlyNew}.gz`)).toString("utf8")
+            ).toBe("new archive\n");
+        } else {
+            expect(existsSync(archiveOnlyNew)).toBe(true);
+            expect(readFileSync(archiveOnlyNew, "utf8")).toBe("new archive\n");
+        }
     });
 
     it("cached quota/system readers and notification checks", async () => {
@@ -1750,7 +3055,6 @@ describe("backend route and service behavior", () => {
     });
 
     it("refreshes backup and log-rotation cache producers through fake CLI output", async () => {
-        rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DOCKER_BIN");
         const binRoot = createTemporaryRoot("mira-cache-cli-");
         const now = new Date().toISOString();
@@ -1780,14 +3084,31 @@ else
 fi
 `
         );
-        process.env.MIRA_DOCKER_BIN = dockerBin;
-        process.env.PATH = `${binRoot}:${process.env.PATH ?? ""}`;
 
         const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
-        await expect(refreshCacheProducer("backup.kopia.status")).resolves.toEqual({
+        database
+            .prepare(
+                "DELETE FROM cache_entries WHERE key IN ('backup.kopia.status', 'backup.walg.status', 'log_rotation.state')"
+            )
+            .run();
+        async function refreshWithFakeDocker(key: string) {
+            let lastError: unknown;
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+                try {
+                    process.env.MIRA_DOCKER_BIN = dockerBin;
+                    return await refreshCacheProducer(key);
+                } catch (error) {
+                    lastError = error;
+                    await new Promise((resolve) => setTimeout(resolve, 10));
+                }
+            }
+            throw lastError;
+        }
+
+        await expect(refreshWithFakeDocker("backup.kopia.status")).resolves.toEqual({
             refreshed: ["backup.kopia.status"],
         });
-        await expect(refreshCacheProducer("backup.walg.status")).resolves.toEqual({
+        await expect(refreshWithFakeDocker("backup.walg.status")).resolves.toEqual({
             refreshed: ["backup.walg.status"],
         });
         await expect(refreshCacheProducer("log_rotation.state")).resolves.toEqual({

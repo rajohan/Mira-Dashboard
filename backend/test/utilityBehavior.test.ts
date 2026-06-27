@@ -165,11 +165,14 @@ describe("backend service utilities", () => {
         const outside = mkdtempSync(path.join(tmpdir(), "mira-safe-path-outside-"));
         try {
             writeFileSync(path.join(root, "inside.txt"), "ok");
+            writeFileSync(path.join(root, "file-parent"), "not a directory");
             symlinkSync(outside, path.join(root, "outside-link"));
 
             expect(canonicalPath(safePathWithinRoot("inside.txt", root)!)).toBe(
                 canonicalPath(path.join(root, "inside.txt"))
             );
+            expect(safePathWithinRoot("", root)).toBeUndefined();
+            expect(safePathWithinRoot("inside.txt", "/")).toBeUndefined();
             expect(safePathWithinRoot("../escape.txt", root)).toBeUndefined();
             expect(safePathWithinRoot("outside-link/escape.txt", root)).toBeUndefined();
             expect(safePathWithinRoot("bad\0name", root)).toBeUndefined();
@@ -178,6 +181,23 @@ describe("backend service utilities", () => {
             expect(
                 path.resolve(prepareSafeWriteTargetWithinRoot(writeTarget, root)!)
             ).toBe(path.resolve(writeTarget));
+            const missingRoot = path.join(root, "missing-root", "child");
+            const missingRootTarget = path.join(missingRoot, "nested", "report.txt");
+            expect(
+                canonicalPath(
+                    prepareSafeWriteTargetWithinRoot(missingRootTarget, missingRoot)!
+                )
+            ).toBe(canonicalPath(missingRootTarget));
+            expect(
+                prepareSafeWriteTargetWithinRoot(path.join(root, "bad\0name"), root)
+            ).toBeUndefined();
+            expect(
+                prepareSafeWriteTargetWithinRoot(
+                    path.join(root, "file-parent", "child.txt"),
+                    root
+                )
+            ).toBeUndefined();
+            expect(prepareSafeWriteTargetWithinRoot(writeTarget, "/")).toBeUndefined();
             expect(
                 prepareSafeWriteTargetWithinRoot(path.join(outside, "report.txt"), root)
             ).toBeUndefined();

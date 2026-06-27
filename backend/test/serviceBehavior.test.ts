@@ -4,9 +4,11 @@ import {
     existsSync,
     mkdirSync,
     mkdtempSync,
+    readdirSync,
     readFileSync,
     rmSync,
     symlinkSync,
+    utimesSync,
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,6 +18,7 @@ import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import type { DashboardSocket } from "../src/dashboardSocket.ts";
 import { database, sqlNullable } from "../src/database.ts";
+import * as processModule from "../src/lib/processes.ts";
 
 const cleanupCallbacks: Array<() => void> = [];
 
@@ -36,6 +39,15 @@ function createTemporaryRoot(prefix: string): string {
         rmSync(root, { force: true, recursive: true });
     });
     return root;
+}
+
+function readableUtf8Stream(value: string): ReadableStream<Uint8Array> {
+    return new ReadableStream<Uint8Array>({
+        start(controller) {
+            controller.enqueue(new TextEncoder().encode(value));
+            controller.close();
+        },
+    });
 }
 
 function routeRequest<T extends string>(
@@ -218,6 +230,46 @@ exit 1
     chmodSync(binaryPath, 0o755);
 }
 
+function writeFailingWalgPreflightDocker(binaryPath: string): void {
+    writeFileSync(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"pgrep -f"* ]]; then
+  printf '%s\n' "pgrep failed" >&2
+  exit 2
+fi
+if [[ "$*" == "exec walg wal-g backup-list --detail --json" ]]; then
+  printf '[]\n'
+  exit 0
+fi
+echo "unexpected docker args: $*" >&2
+exit 2
+`
+    );
+    chmodSync(binaryPath, 0o755);
+}
+
+function writeRunningWalgPreflightDocker(binaryPath: string): void {
+    writeFileSync(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"pgrep -f"* ]]; then
+  printf '23456\n'
+  exit 0
+fi
+if [[ "$*" == "exec walg wal-g backup-list --detail --json" ]]; then
+  printf '[]\n'
+  exit 0
+fi
+echo "unexpected docker args: $*" >&2
+exit 2
+`
+    );
+    chmodSync(binaryPath, 0o755);
+}
+
 function writeFakeOpenClaw(binaryPath: string): void {
     writeFileSync(
         binaryPath,
@@ -245,6 +297,7 @@ class FakeGatewayWebSocket extends EventTarget {
     readonly sent: string[] = [];
     closeCode: number | undefined;
     closeReason = "";
+    sendError: Error | undefined;
 
     constructor(readonly url: string) {
         super();
@@ -261,6 +314,9 @@ class FakeGatewayWebSocket extends EventTarget {
     }
 
     send(data: string): void {
+        if (this.sendError) {
+            throw this.sendError;
+        }
         this.sent.push(data);
     }
 
@@ -440,6 +496,57 @@ describe("backend service behavior", () => {
         }
     });
 
+    it("completes log history when today's file is missing and ignores subscriber send errors", async () => {
+        rememberEnvironment("MIRA_DASHBOARD_LOGS_ROOT");
+        const logsRoot = createTemporaryRoot("mira-log-streams-empty-test-");
+        process.env.MIRA_DASHBOARD_LOGS_ROOT = logsRoot;
+        const originalConsoleError = console.error;
+        Object.defineProperty(console, "error", {
+            configurable: true,
+            value: () => {},
+            writable: true,
+        });
+
+        const messages: unknown[] = [];
+        const socket = {
+            send: (message: string) => {
+                messages.push(JSON.parse(message) as unknown);
+            },
+        } as DashboardSocket;
+        const throwingSocket = {
+            send: () => {
+                throw new Error("subscriber closed");
+            },
+        } as unknown as DashboardSocket;
+        const { subscribeToLogs, unsubscribeFromLogs } =
+            await import("../src/services/logStreams.ts");
+
+        subscribeToLogs(socket);
+        subscribeToLogs(throwingSocket);
+        try {
+            await waitFor(() =>
+                messages.some(
+                    (message) =>
+                        typeof message === "object" &&
+                        message !== null &&
+                        (message as { type?: unknown }).type === "log_history_complete"
+                )
+            );
+            expect(messages).toContainEqual({
+                type: "log_history_complete",
+                count: 0,
+            });
+        } finally {
+            unsubscribeFromLogs(socket);
+            unsubscribeFromLogs(throwingSocket);
+            Object.defineProperty(console, "error", {
+                configurable: true,
+                value: originalConsoleError,
+                writable: true,
+            });
+        }
+    });
+
     it("validates configured log roots before routes and streams use them", async () => {
         rememberEnvironment("MIRA_DASHBOARD_LOGS_ROOT");
         const logsRoot = createTemporaryRoot("mira-log-root-test-");
@@ -566,9 +673,34 @@ describe("backend service behavior", () => {
     it("rejects unsupported and aborted cache refresh producer requests", async () => {
         const { refreshCacheProducer, waitForLocalCacheSeed } =
             await import("../src/services/cacheRefresh.ts");
+        const { cacheRoutes } = await import("../src/routes/cacheRoutes.ts");
         await expect(refreshCacheProducer("unknown.cache.key")).rejects.toThrow(
             "No backend refresh producer configured for cache key"
         );
+        const unknownRefresh = await cacheRoutes["/api/cache/:key/refresh"].POST(
+            Object.assign(
+                new Request(
+                    "https://dashboard.test/api/cache/unknown.cache.key/refresh",
+                    {
+                        method: "POST",
+                    }
+                ),
+                { params: { key: "unknown.cache.key" } }
+            )
+        );
+        expect(unknownRefresh.status).toBe(400);
+        await expect(unknownRefresh.json()).resolves.toEqual({
+            error: "No backend refresh producer configured for cache key: unknown.cache.key",
+        });
+        const missingCacheKey = await cacheRoutes["/api/cache/:key"].GET(
+            Object.assign(new Request("https://dashboard.test/api/cache/%20"), {
+                params: { key: " " },
+            })
+        );
+        expect(missingCacheKey.status).toBe(400);
+        await expect(missingCacheKey.json()).resolves.toEqual({
+            error: "Missing cache key",
+        });
 
         const controller = new AbortController();
         controller.abort();
@@ -576,6 +708,75 @@ describe("backend service behavior", () => {
             refreshCacheProducer("weather.spydeberg", controller.signal)
         ).rejects.toMatchObject({ name: "AbortError" });
         await expect(waitForLocalCacheSeed("missing.key")).resolves.toBeUndefined();
+    });
+
+    it("refreshes supported cache keys through the cache route", async () => {
+        cleanupCallbacks.push(() => {
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'weather.spydeberg'")
+                .run();
+        });
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.startsWith("https://wttr.in/Spydeberg")) {
+                return Response.json({
+                    current_condition: [
+                        {
+                            FeelsLikeC: "8",
+                            humidity: "75",
+                            temp_C: "10",
+                            weatherCode: "116",
+                            weatherDesc: [{ value: "Partly cloudy" }],
+                            windspeedKmph: "14",
+                        },
+                    ],
+                    nearest_area: [{ areaName: [{ value: "Spydeberg" }] }],
+                    weather: [
+                        {
+                            date: "2026-06-26",
+                            maxtempC: "18",
+                            mintempC: "7",
+                            hourly: [
+                                {
+                                    weatherCode: "116",
+                                    weatherDesc: [{ value: "Partly cloudy" }],
+                                },
+                            ],
+                        },
+                    ],
+                });
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+
+        const { cacheRoutes } = await import("../src/routes/cacheRoutes.ts");
+        const response = await cacheRoutes["/api/cache/:key/refresh"].POST(
+            Object.assign(
+                new Request(
+                    "https://dashboard.test/api/cache/weather.spydeberg/refresh",
+                    { method: "POST" }
+                ),
+                { params: { key: "weather.spydeberg" } }
+            )
+        );
+
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toMatchObject({
+            entry: {
+                data: {
+                    description: "Partly cloudy",
+                    location: "Spydeberg",
+                    temperatureC: 10,
+                },
+                key: "weather.spydeberg",
+                source: "wttr.in",
+                status: "fresh",
+            },
+            isOk: true,
+        });
     });
 
     it("maps recent deployment jobs in newest-first order", async () => {
@@ -1014,11 +1215,40 @@ fi
             message: "PR #5 closed",
         });
 
+        const defaultRejectRoute = await pullRequestRoutes[
+            "/api/pull-requests/:number/reject"
+        ].POST(routeRequest("/api/pull-requests/5/reject", { number: "5" }));
+        await expect(defaultRejectRoute.json()).resolves.toMatchObject({
+            isOk: true,
+            message: "PR #5 closed",
+        });
+
+        const malformedApproveRoute = await pullRequestRoutes[
+            "/api/pull-requests/:number/approve"
+        ].POST(
+            routeRequest(
+                "/api/pull-requests/3/approve",
+                { number: "3" },
+                {
+                    body: "{",
+                    headers: { "Content-Type": "application/json" },
+                    method: "POST",
+                }
+            )
+        );
+        expect(malformedApproveRoute.status).toBe(400);
+        await expect(malformedApproveRoute.json()).resolves.toMatchObject({
+            error: expect.stringContaining("JSON"),
+        });
+
         await expect(Bun.file(ghLog).text()).resolves.toContain("pr review 3");
         await expect(Bun.file(ghLog).text()).resolves.toContain(
             "repos/rajohan/Mira-Dashboard/pulls/4/update-branch"
         );
         await expect(Bun.file(ghLog).text()).resolves.toContain("pr close 5");
+        await expect(Bun.file(ghLog).text()).resolves.toContain(
+            "Closed from Mira Dashboard after Rajohan rejected it."
+        );
     });
 
     it("merges an approved pull request and removes its clean local worktree safely", async () => {
@@ -1092,6 +1322,140 @@ fi
             database
                 .prepare("DELETE FROM deployment_jobs WHERE id LIKE 'approve-%'")
                 .run();
+        }
+    });
+
+    it("reports a successful merge separately from a failed production sync", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
+        rememberEnvironment("RAJOHAN_GITHUB_USERNAME");
+        const fakeRoot = createTemporaryRoot("mira-pr-sync-fail-root-");
+        const worktreeRoot = path.join(fakeRoot, "worktrees");
+        const fakeBin = createTemporaryRoot("mira-pr-sync-fail-bin-");
+        const ghLog = path.join(fakeRoot, "gh.log");
+        const gitLog = path.join(fakeRoot, "git.log");
+        writeFakeGhForPullRequestMerge(path.join(fakeBin, "gh"), ghLog);
+        writeFileSync(
+            path.join(fakeBin, "git"),
+            String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(gitLog)}
+if [[ "$*" == "rev-parse --show-toplevel" ]]; then
+  printf '%s\n' ${JSON.stringify(fakeRoot)}
+elif [[ "$*" == "rev-parse --abbrev-ref HEAD" ]]; then
+  printf 'main\n'
+elif [[ "$*" == "rev-parse --short HEAD" ]]; then
+  printf 'abc1234\n'
+elif [[ "$*" == "rev-parse --abbrev-ref --symbolic-full-name ${"@{u}"}" ]]; then
+  printf 'origin/main\n'
+elif [[ "$*" == "status --short" ]]; then
+  printf ''
+elif [[ "$*" == "worktree list --porcelain" ]]; then
+  printf ''
+elif [[ "$*" == "fetch --prune origin" || "$*" == "checkout main" ]]; then
+  printf ''
+elif [[ "$*" == "pull --ff-only origin main" ]]; then
+  echo 'remote moved unexpectedly' >&2
+  exit 1
+else
+  echo "unexpected git args: $*" >&2
+  exit 2
+fi
+`
+        );
+        chmodSync(path.join(fakeBin, "git"), 0o755);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
+        process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
+
+        try {
+            const { approvePullRequest } =
+                await import("../src/services/pullRequests.ts");
+            const result = await approvePullRequest(11, true);
+
+            expect(result).toMatchObject({
+                cleanup: {
+                    branch: "merge-branch",
+                    status: "skipped",
+                },
+                deployment: undefined,
+                deployError: undefined,
+                isOk: true,
+                message: "PR #11 merged; production sync failed",
+                syncError: expect.stringContaining("remote moved unexpectedly"),
+            });
+            await expect(Bun.file(ghLog).text()).resolves.toContain("pr merge 11");
+            await expect(Bun.file(gitLog).text()).resolves.toContain(
+                "pull --ff-only origin main"
+            );
+        } finally {
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            database
+                .prepare("DELETE FROM deployment_jobs WHERE id LIKE 'approve-%'")
+                .run();
+        }
+    });
+
+    it("rejects oversized GitHub JSON stream rows when listing pull requests", async () => {
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: Promise.resolve(0),
+                    kill: () => {},
+                    pid: 12_345,
+                    stderr: readableUtf8Stream(""),
+                    stdout: readableUtf8Stream(`${"x".repeat(1024 * 1024 + 1)}\n`),
+                }) as unknown as processModule.BunProcess
+        );
+        const killSpy = jest
+            .spyOn(processModule, "killProcessGroup")
+            .mockImplementation(() => {});
+
+        try {
+            const { listDashboardPullRequests } =
+                await import("../src/services/pullRequests.ts");
+            await expect(listDashboardPullRequests()).rejects.toThrow(
+                "GitHub CLI JSON line was too large"
+            );
+            expect(killSpy).toHaveBeenCalledWith(expect.any(Object), "SIGTERM");
+        } finally {
+            spawnSpy.mockRestore();
+            killSpy.mockRestore();
+        }
+    });
+
+    it("maps pull request route validation and GitHub list failures to JSON errors", async () => {
+        const { pullRequestRoutes } = await import("../src/routes/pullRequestRoutes.ts");
+        const invalidNumber = await pullRequestRoutes[
+            "/api/pull-requests/:number/review-approval"
+        ].POST(
+            routeRequest("/api/pull-requests/nope/review-approval", { number: "nope" })
+        );
+        expect(invalidNumber.status).toBe(400);
+        await expect(invalidNumber.json()).resolves.toEqual({
+            error: "Invalid pull request number",
+        });
+
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: Promise.resolve(2),
+                    kill: () => {},
+                    pid: 12_345,
+                    stderr: readableUtf8Stream("graphql unavailable\n"),
+                    stdout: readableUtf8Stream(""),
+                }) as unknown as processModule.BunProcess
+        );
+        try {
+            const listResponse = await pullRequestRoutes["/api/pull-requests"].GET();
+            expect(listResponse.status).toBe(500);
+            await expect(listResponse.json()).resolves.toEqual({
+                error: "graphql unavailable",
+            });
+        } finally {
+            spawnSpy.mockRestore();
         }
     });
 
@@ -1209,6 +1573,475 @@ fi
         });
     });
 
+    it("refreshes git cache from sanitized command output", async () => {
+        cleanupCallbacks.push(() => {
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'git.workspace'")
+                .run();
+        });
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (file, arguments_) => {
+                expect(file).toBe("git");
+                const gitArguments = [...arguments_];
+                let repo = "";
+                let commandArguments = gitArguments;
+                if (gitArguments[0] === "-C") {
+                    repo = String(gitArguments[1]);
+                    commandArguments = gitArguments.slice(2);
+                }
+                const command = commandArguments.join(" ");
+                if (command === "rev-parse --is-inside-work-tree") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout:
+                            repo === "/home/ubuntu/projects/n8n" ? "false\n" : "true\n",
+                    };
+                }
+                if (command === "branch --show-current") {
+                    return { code: 0, stderr: "", stdout: "main\n" };
+                }
+                if (command === "rev-parse HEAD") {
+                    return { code: 0, stderr: "", stdout: "abcdef1234567890\n" };
+                }
+                if (command === "remote -v") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: [
+                            `origin\thttps://token@example.com/${path.basename(repo)}.git (fetch)`,
+                            `origin\tgit@example.com:${path.basename(repo)}.git (push)`,
+                            "",
+                        ].join("\n"),
+                    };
+                }
+                if (command === "status --short") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: [
+                            " M modified.txt",
+                            "A  staged.txt",
+                            "D  deleted.txt",
+                            "R  old.txt -> new.txt",
+                            "?? untracked.txt",
+                            "UU conflicted.txt",
+                            "",
+                        ].join("\n"),
+                    };
+                }
+                return {
+                    code: 2,
+                    stderr: `unexpected git args for ${repo}: ${command}`,
+                    stdout: "",
+                };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+        const { refreshGitCache } = await import("../src/services/cacheRefresh.ts");
+
+        const result = await refreshGitCache();
+
+        expect(result).toEqual({ refreshed: ["git.workspace"] });
+        const row = database
+            .prepare(
+                "SELECT data_json, metadata_json, status FROM cache_entries WHERE key = 'git.workspace'"
+            )
+            .get() as { data_json: string; metadata_json: string; status: string };
+        expect(row.status).toBe("fresh");
+        const data = JSON.parse(row.data_json) as {
+            dirtyCount: number;
+            dirtyRepos: string[];
+            missingRepos: string[];
+            repos: Array<{
+                branch?: string;
+                dirty: boolean;
+                exists: boolean;
+                key: string;
+                remote?: string;
+                statusSummary: Record<string, number>;
+                statusTruncated?: boolean;
+            }>;
+        };
+        expect(data.dirtyRepos).toEqual(["openclaw", "mira-dashboard", "docker"]);
+        expect(data.missingRepos).toEqual(["n8n"]);
+        expect(data.dirtyCount).toBe(3);
+        expect(data.repos.find((repo) => repo.key === "mira-dashboard")).toMatchObject({
+            branch: "main",
+            dirty: true,
+            exists: true,
+            remote: "https://example.com/mira-dashboard.git",
+            statusSummary: {
+                conflicted: 1,
+                deleted: 1,
+                modified: 1,
+                renamed: 1,
+                staged: 3,
+                total: 6,
+                untracked: 1,
+            },
+            statusTruncated: false,
+        });
+        expect(JSON.parse(row.metadata_json)).toMatchObject({
+            summary: {
+                dirtyCount: 3,
+                dirtyRepos: ["openclaw", "mira-dashboard", "docker"],
+                missingRepos: ["n8n"],
+                repoCount: 4,
+            },
+        });
+    });
+
+    it("refreshes quota cache from provider and Codex status output", async () => {
+        for (const key of [
+            "OPENROUTER_API_KEY",
+            "ELEVENLABS_API_KEY",
+            "SYNTHETIC_API_KEY",
+            "QUOTAS_CODEX_HOME",
+            "CODEX_BIN",
+        ]) {
+            rememberEnvironment(key);
+        }
+        const codexHome = createTemporaryRoot("mira-quota-codex-home-");
+        process.env.OPENROUTER_API_KEY = "openrouter-key";
+        process.env.ELEVENLABS_API_KEY = "elevenlabs-key";
+        process.env.SYNTHETIC_API_KEY = "synthetic-key";
+        process.env.QUOTAS_CODEX_HOME = codexHome;
+        process.env.CODEX_BIN = "/usr/local/bin/codex";
+        cleanupCallbacks.push(() => {
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'quotas.summary'")
+                .run();
+        });
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url === "https://openrouter.ai/api/v1/key") {
+                return Response.json({
+                    data: { usage: 2, usage_monthly: 7 },
+                });
+            }
+            if (url === "https://openrouter.ai/api/v1/credits") {
+                return Response.json({
+                    data: { total_credits: 10 },
+                });
+            }
+            if (url === "https://api.elevenlabs.io/v1/user") {
+                return Response.json({
+                    subscription: {
+                        character_count: 250,
+                        character_limit: 1000,
+                        next_character_count_reset_unix: 1_800_000_000,
+                        tier: "creator",
+                    },
+                });
+            }
+            if (url === "https://api.synthetic.new/v2/quotas") {
+                return Response.json({
+                    rollingFiveHourLimit: {
+                        limited: false,
+                        max: 100,
+                        nextTickAt: "soon",
+                        remaining: 75,
+                        tickPercent: 10,
+                    },
+                    search: {
+                        hourly: {
+                            limit: 20,
+                            renewsAt: "later",
+                            requests: 5,
+                        },
+                    },
+                    subscription: {
+                        limit: 50,
+                        renewsAt: "tomorrow",
+                        requests: 10,
+                    },
+                    weeklyTokenLimit: {
+                        maxCredits: "$100.00",
+                        nextRegenAt: "weekly",
+                        nextRegenCredits: "$20.00",
+                        remainingCredits: "$40.00",
+                    },
+                });
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const runProcessSpy = jest.spyOn(processModule, "runProcess").mockResolvedValue({
+            code: 0,
+            stderr: "",
+            stdout: [
+                "Account: raymond@example.com",
+                "Model: gpt-5.5 (high)",
+                "5h limit: 80% left (resets 13:00)",
+                "Weekly limit: 65% left (resets Monday)",
+                "",
+            ].join("\n"),
+        });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+
+        await expect(
+            refreshCacheProducer("quotas.summary", undefined, { force: true })
+        ).resolves.toEqual({ refreshed: ["quotas.summary"] });
+
+        const row = database
+            .prepare(
+                "SELECT data_json, metadata_json, status FROM cache_entries WHERE key = 'quotas.summary'"
+            )
+            .get() as { data_json: string; metadata_json: string; status: string };
+        expect(row.status).toBe("fresh");
+        const data = JSON.parse(row.data_json);
+        expect(data.openrouter).toMatchObject({
+            percentUsed: 20,
+            remaining: 8,
+            totalCredits: 10,
+            usage: 2,
+            usageMonthly: 7,
+        });
+        expect(data.elevenlabs).toMatchObject({
+            percentUsed: 25,
+            remaining: 750,
+            tier: "creator",
+            total: 1000,
+            used: 250,
+        });
+        expect(data.synthetic).toMatchObject({
+            rollingFiveHourLimit: { percentUsed: 25, remaining: 75 },
+            searchHourly: { percentUsed: 25, remaining: 15 },
+            subscription: { percentUsed: 20, remaining: 40 },
+            weeklyTokenLimit: {
+                nextRegenPercent: 20,
+                percentRemaining: 40,
+            },
+        });
+        expect(data.openai).toMatchObject({
+            fiveHourLeftPercent: 80,
+            percentUsed: 35,
+            weeklyLeftPercent: 65,
+        });
+        expect(data.openai.account).toBeUndefined();
+        expect(JSON.parse(row.metadata_json)).toMatchObject({
+            missing: [],
+            producers: ["openrouter", "elevenlabs", "synthetic", "openai"],
+        });
+    });
+
+    it("refreshes weather through the Open-Meteo fallback when wttr.in fails", async () => {
+        cleanupCallbacks.push(() => {
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'weather.spydeberg'")
+                .run();
+        });
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.startsWith("https://wttr.in/Spydeberg")) {
+                return new Response("upstream unavailable", { status: 503 });
+            }
+            if (url.startsWith("https://api.open-meteo.com/")) {
+                return Response.json({
+                    current: {
+                        apparent_temperature: 12.5,
+                        relative_humidity_2m: 94,
+                        temperature_2m: 13,
+                        weather_code: 61,
+                        wind_speed_10m: 5,
+                    },
+                    daily: {
+                        temperature_2m_max: [21, 22, 20],
+                        temperature_2m_min: [14, 15, 13],
+                        time: ["2026-06-26", "2026-06-27", "2026-06-28"],
+                        weather_code: [0, 95, "bad"],
+                    },
+                });
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+
+        await expect(
+            refreshCacheProducer("weather.spydeberg", undefined, { force: true })
+        ).resolves.toEqual({ refreshed: ["weather.spydeberg"] });
+
+        const row = database
+            .prepare(
+                "SELECT data_json, metadata_json, status FROM cache_entries WHERE key = 'weather.spydeberg'"
+            )
+            .get() as { data_json: string; metadata_json: string; status: string };
+        expect(row.status).toBe("fresh");
+        const data = JSON.parse(row.data_json);
+        expect(data).toMatchObject({
+            description: "Rain",
+            forecast: [
+                { date: "2026-06-26", description: "Clear" },
+                { date: "2026-06-27", description: "Thunderstorm" },
+                { date: "2026-06-28", description: "Unknown" },
+            ],
+            humidityPercent: 94,
+            location: "Spydeberg",
+            temperatureC: 13,
+        });
+        expect(JSON.parse(row.metadata_json)).toMatchObject({
+            fallbackReason: expect.stringContaining("HTTP 503"),
+            fallbackUsed: true,
+            providerPriority: ["wttr.in", "open-meteo"],
+        });
+    });
+
+    it("records Moltbook sub-request failures without discarding successful cache writes", async () => {
+        rememberEnvironment("MOLTBOOK_API_KEY");
+        process.env.MOLTBOOK_API_KEY = "moltbook-key";
+        cleanupCallbacks.push(() => {
+            database
+                .prepare("DELETE FROM cache_entries WHERE key LIKE 'moltbook.%'")
+                .run();
+        });
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.endsWith("/home")) {
+                return Response.json({
+                    activity_on_your_posts: [{ id: "activity-1" }],
+                    latest_moltbook_announcement: {
+                        author_name: "OpenClaw",
+                        created_at: "2026-06-25T10:00:00.000Z",
+                        post_id: "post-1",
+                        preview: "Hello",
+                        title: "Announcement",
+                    },
+                    posts_from_accounts_you_follow: [{ id: "followed-1" }],
+                    what_to_do_next: [{ label: "reply" }],
+                    your_direct_messages: {
+                        pending_request_count: "2",
+                        unread_message_count: "3",
+                    },
+                });
+            }
+            if (url.endsWith("/feed?sort=hot&limit=25")) {
+                return Response.json({
+                    feed_filter: "all",
+                    feed_type: "hot",
+                    has_more: true,
+                    posts: [{ id: "hot-1" }],
+                    tip: "keep going",
+                });
+            }
+            if (url.endsWith("/feed?sort=new&limit=25")) {
+                return new Response("feed failed", { status: 502 });
+            }
+            if (url.endsWith("/agents/profile?name=mira_2026")) {
+                return Response.json({
+                    agent: { name: "mira_2026" },
+                    recentComments: [{ id: "comment-1" }],
+                    recentPosts: [{ id: "post-2" }],
+                });
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+
+        await expect(
+            refreshCacheProducer("moltbook", undefined, { force: true })
+        ).rejects.toThrow("Moltbook refresh had sub-request failures");
+
+        const rows = database
+            .prepare(
+                "SELECT key, data_json, error_message, status FROM cache_entries WHERE key LIKE 'moltbook.%' ORDER BY key"
+            )
+            .all() as Array<{
+            data_json: string | null;
+            error_message: string | null;
+            key: string;
+            status: string;
+        }>;
+        expect(rows.map((row) => [row.key, row.status])).toEqual([
+            ["moltbook.feed.hot", "fresh"],
+            ["moltbook.feed.new", "error"],
+            ["moltbook.home", "fresh"],
+            ["moltbook.my-content", "fresh"],
+            ["moltbook.profile", "fresh"],
+        ]);
+        expect(
+            JSON.parse(rows.find((row) => row.key === "moltbook.home")?.data_json ?? "{}")
+        ).toMatchObject({
+            activityOnYourPostsCount: 1,
+            pendingRequestCount: 2,
+            unreadMessageCount: 3,
+        });
+        expect(
+            rows.find((row) => row.key === "moltbook.feed.new")?.error_message
+        ).toContain("Moltbook refresh had sub-request failures");
+    });
+
+    it("coordinates cache refresh in-flight sharing and abort handling", async () => {
+        cleanupCallbacks.push(() => {
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'weather.spydeberg'")
+                .run();
+        });
+        let weatherResponses = 0;
+        let releaseWeather: (() => void) | undefined;
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.startsWith("https://wttr.in/Spydeberg")) {
+                weatherResponses += 1;
+                const gate = Promise.withResolvers<void>();
+                releaseWeather = gate.resolve;
+                await gate.promise;
+                return Response.json({
+                    current_condition: [
+                        {
+                            FeelsLikeC: "13",
+                            humidity: "80",
+                            temp_C: "14",
+                            weatherDesc: [{ value: "Clear" }],
+                            windspeedKmph: "5",
+                        },
+                    ],
+                    weather: [
+                        {
+                            date: "2026-06-26",
+                            hourly: [{ weatherDesc: [{ value: "Clear" }] }],
+                            maxtempC: "21",
+                            mintempC: "14",
+                        },
+                    ],
+                });
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+        const firstRefresh = refreshCacheProducer("weather.spydeberg", undefined, {
+            force: true,
+        });
+        await waitFor(() => weatherResponses === 1);
+        const secondRefresh = refreshCacheProducer("weather.spydeberg");
+        const abortController = new AbortController();
+        abortController.abort();
+        await expect(
+            refreshCacheProducer("weather.spydeberg", abortController.signal)
+        ).rejects.toThrow("Cache refresh aborted");
+        releaseWeather?.();
+
+        await expect(firstRefresh).resolves.toEqual({
+            refreshed: ["weather.spydeberg"],
+        });
+        await expect(secondRefresh).resolves.toEqual({
+            refreshed: ["weather.spydeberg"],
+        });
+        expect(weatherResponses).toBe(1);
+    });
+
     it("drives OpenClaw Gateway client connect and request lifecycle with a fake socket", async () => {
         const originalWebSocket = WebSocket;
         cleanupCallbacks.push(() => {
@@ -1226,16 +2059,35 @@ fi
         });
         const helloPayloads: unknown[] = [];
         const events: unknown[] = [];
-        const { OpenClawGatewayClient } =
+        const connectErrors: string[] = [];
+        const closeEvents: Array<{ code: number; reason: string }> = [];
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        cleanupCallbacks.push(() => errorSpy.mockRestore());
+        const identityRoot = createTemporaryRoot("mira-gateway-device-identity-");
+        const { loadOrCreateDeviceIdentity, OpenClawGatewayClient } =
             await import("../src/lib/openclawGatewayClient.ts");
+        const deviceIdentity = loadOrCreateDeviceIdentity(
+            path.join(identityRoot, "device.json")
+        );
         const client = new OpenClawGatewayClient({
+            clientName: "dashboard-client",
+            deviceFamily: "SERVER",
+            deviceIdentity,
+            onClose: (code, reason) => {
+                closeEvents.push({ code, reason });
+            },
+            onConnectError: (error) => {
+                connectErrors.push(error.message);
+            },
             onEvent: (event) => {
                 events.push(event);
             },
             onHelloOk: (payload) => {
                 helloPayloads.push(payload);
             },
+            platform: "LINUX",
             requestTimeoutMs: 100,
+            token: " gateway-token ",
             url: "ws://gateway.test",
         });
 
@@ -1245,6 +2097,9 @@ fi
         expect(socket?.url).toBe("ws://gateway.test");
 
         socket?.open();
+        socket?.message("{");
+        socket?.message(JSON.stringify({ type: "noop" }));
+        expect(socket?.sent).toHaveLength(0);
         socket?.message(
             JSON.stringify({
                 event: "connect.challenge",
@@ -1256,13 +2111,34 @@ fi
         const connectFrame = JSON.parse(socket!.sent[0]!) as {
             id: string;
             method: string;
-            params: { client: { id: string }; role: string };
+            params: {
+                auth: { token: string };
+                client: { deviceFamily: string; id: string; platform: string };
+                device: {
+                    id: string;
+                    nonce: string;
+                    publicKey: string;
+                    signature: string;
+                };
+                role: string;
+            };
             type: string;
         };
         expect(connectFrame).toMatchObject({
             method: "connect",
             params: {
-                client: { id: "gateway-client" },
+                auth: { token: "gateway-token" },
+                client: {
+                    deviceFamily: "SERVER",
+                    id: "dashboard-client",
+                    platform: "LINUX",
+                },
+                device: {
+                    id: deviceIdentity.deviceId,
+                    nonce: "nonce-1",
+                    publicKey: expect.any(String),
+                    signature: expect.any(String),
+                },
                 role: "operator",
             },
             type: "req",
@@ -1307,8 +2183,41 @@ fi
         );
         await expect(failure).rejects.toThrow("gateway rejected");
 
+        socket!.sendError = new Error("send failed");
+        await expect(client.request("demo.send-fail")).rejects.toThrow("send failed");
+        socket!.sendError = undefined;
+
+        const closedRequest = client.request("demo.closed");
+        await waitFor(() => socket!.sent.length === 4);
+        socket?.close(4001, "gone");
+        await expect(closedRequest).rejects.toThrow("gateway closed (4001): gone");
+        expect(closeEvents).toContainEqual({ code: 4001, reason: "gone" });
+
+        const missingNonceClient = new OpenClawGatewayClient({
+            onConnectError: (error) => {
+                connectErrors.push(error.message);
+            },
+            requestTimeoutMs: 100,
+            url: "ws://gateway.test/missing-nonce",
+        });
+        missingNonceClient.start();
+        const missingNonceSocket = FakeGatewayWebSocket.instances.at(-1);
+        missingNonceSocket?.open();
+        missingNonceSocket?.message(
+            JSON.stringify({
+                event: "connect.challenge",
+                payload: {},
+                type: "event",
+            })
+        );
+        await waitFor(
+            () => missingNonceSocket?.closeReason === "connect challenge missing nonce"
+        );
+        expect(connectErrors).toContain("gateway connect challenge missing nonce");
+        missingNonceClient.stop();
+
         client.stop();
-        expect(socket?.closeCode).toBe(1000);
+        expect(socket?.closeCode).toBe(4001);
     });
 
     it("reports disconnected gateway state without starting a Gateway client", async () => {
@@ -1436,6 +2345,564 @@ fi
         }
     });
 
+    it("reports WAL-G preflight failures without starting a backup job", async () => {
+        rememberEnvironment("PATH");
+        const fakeBin = createTemporaryRoot("mira-backup-preflight-bin-");
+        writeFailingWalgPreflightDocker(path.join(fakeBin, "docker"));
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
+            await import("../src/services/backups.ts");
+
+        try {
+            registerBackupScheduledJobs();
+            await expect(startManualBackup("walg")).rejects.toMatchObject({
+                statusCode: 503,
+            });
+            expect(getCurrentBackupJob("walg")).toBeUndefined();
+            await waitFor(() => {
+                const row = database
+                    .prepare(
+                        "SELECT status, message FROM scheduled_job_runs WHERE job_id = 'backup.walg' ORDER BY id DESC LIMIT 1"
+                    )
+                    .get() as { message?: string; status?: string } | undefined;
+                return (
+                    row?.status === "failed" &&
+                    row.message?.includes("pgrep failed") === true
+                );
+            });
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("cleans backup route state when backup process spawn fails", async () => {
+        rememberEnvironment("PATH");
+        const fakeBin = createTemporaryRoot("mira-backup-spawn-fail-bin-");
+        writeFakeDocker(path.join(fakeBin, "docker"));
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        const processModule = await import("../src/lib/processes.ts");
+        const spawnSpy = jest
+            .spyOn(processModule, "spawnProcess")
+            .mockImplementation(() => {
+                throw new Error("spawn unavailable");
+            });
+        const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+        const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
+            await import("../src/services/backups.ts");
+
+        try {
+            registerBackupScheduledJobs();
+            await expect(startManualBackup("walg")).rejects.toThrow("spawn unavailable");
+            expect(getCurrentBackupJob("walg")).toBeUndefined();
+        } finally {
+            spawnSpy.mockRestore();
+            warnSpy.mockRestore();
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("reuses an already running WAL-G backup job instead of spawning another", async () => {
+        const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
+            await import("../src/services/backups.ts");
+        const exit = Promise.withResolvers<number>();
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (_command, arguments_) => {
+                const joined = arguments_.join(" ");
+                if (joined.includes("pgrep -f")) {
+                    return {
+                        code: 1,
+                        stderr: "",
+                        stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
+                    };
+                }
+                if (joined.includes("wal-g backup-list")) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: "[]",
+                    };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            });
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: exit.promise,
+                    kill: () => {},
+                    pid: 789,
+                    stderr: readableUtf8Stream(""),
+                    stdout: readableUtf8Stream("backup still running\n"),
+                }) as unknown as processModule.BunProcess
+        );
+
+        try {
+            registerBackupScheduledJobs();
+            const first = await startManualBackup("walg");
+            const second = await startManualBackup("walg");
+            expect(second.id).toBe(first.id);
+            expect(spawnSpy).toHaveBeenCalledTimes(1);
+
+            exit.resolve(0);
+            await expect(first.completed).resolves.toMatchObject({
+                code: 0,
+                status: "done",
+            });
+            expect(getCurrentBackupJob("walg")).toMatchObject({
+                id: first.id,
+                status: "done",
+            });
+            expect(getCurrentBackupJob("walg")).toBeUndefined();
+        } finally {
+            runProcessSpy.mockRestore();
+            spawnSpy.mockRestore();
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("runs a manual backup without scheduled metadata and trims oversized output", async () => {
+        const { getCurrentBackupJob, startManualBackup } =
+            await import("../src/services/backups.ts");
+        const largeOutput = `${"x".repeat(100_200)}tail-marker\n`;
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (_command, arguments_) => {
+                const joined = arguments_.join(" ");
+                if (joined.includes("pgrep -f")) {
+                    return {
+                        code: 1,
+                        stderr: "",
+                        stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
+                    };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            });
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: Promise.resolve(0),
+                    kill: () => {},
+                    pid: 123,
+                    stderr: readableUtf8Stream(""),
+                    stdout: readableUtf8Stream(largeOutput),
+                }) as unknown as processModule.BunProcess
+        );
+
+        try {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+            const job = await startManualBackup("walg");
+            const completed = await job.completed;
+
+            expect(spawnSpy).toHaveBeenCalledTimes(1);
+            expect(completed).toMatchObject({
+                code: 0,
+                status: "done",
+                type: "walg",
+            });
+            expect(completed.stdout.length).toBeLessThanOrEqual(100_000);
+            expect(completed.stdout).toEndWith("tail-marker\n");
+            expect(completed.manualScheduledRun).toBeUndefined();
+            expect(
+                database
+                    .prepare(
+                        "SELECT COUNT(*) AS count FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'"
+                    )
+                    .get()
+            ).toEqual({ count: 0 });
+            expect(getCurrentBackupJob("walg")).toMatchObject({ status: "done" });
+            expect(getCurrentBackupJob("walg")).toBeUndefined();
+        } finally {
+            runProcessSpy.mockRestore();
+            spawnSpy.mockRestore();
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("records backup process promise failures after startup", async () => {
+        const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
+            await import("../src/services/backups.ts");
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (_command, arguments_) => {
+                const joined = arguments_.join(" ");
+                if (joined.includes("pgrep -f")) {
+                    return {
+                        code: 1,
+                        stderr: "",
+                        stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
+                    };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            });
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: Promise.reject(new Error("child process promise failed")),
+                    kill: () => {},
+                    pid: 123,
+                    stderr: readableUtf8Stream("stderr before failure\n"),
+                    stdout: readableUtf8Stream("stdout before failure\n"),
+                }) as unknown as processModule.BunProcess
+        );
+
+        try {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+            registerBackupScheduledJobs();
+            const job = await startManualBackup("walg");
+            const completed = await job.completed;
+
+            expect(spawnSpy).toHaveBeenCalledTimes(1);
+            expect(completed).toMatchObject({
+                code: 1,
+                status: "done",
+                type: "walg",
+            });
+            expect(completed.stdout).toContain("stdout before failure");
+            expect(completed.stderr).toContain("stderr before failure");
+            expect(completed.stderr).toContain("child process promise failed");
+            await waitFor(() => {
+                const row = database
+                    .prepare(
+                        "SELECT status, message FROM scheduled_job_runs WHERE job_id = 'backup.walg' ORDER BY id DESC LIMIT 1"
+                    )
+                    .get() as { message: string; status: string } | undefined;
+                return (
+                    row?.status === "failed" &&
+                    row.message.includes("child process promise failed")
+                );
+            });
+            expect(getCurrentBackupJob("walg")).toMatchObject({ status: "done" });
+            expect(getCurrentBackupJob("walg")).toBeUndefined();
+        } finally {
+            runProcessSpy.mockRestore();
+            spawnSpy.mockRestore();
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("marks aborted scheduled backups failed before preflight starts", async () => {
+        const { getCurrentBackupJob, registerBackupScheduledJobs } =
+            await import("../src/services/backups.ts");
+        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const controller = new AbortController();
+        controller.abort();
+
+        try {
+            registerBackupScheduledJobs();
+            const run = await runScheduledJob("backup.walg", "manual", controller.signal);
+            expect(run).toMatchObject({
+                jobId: "backup.walg",
+                message: "Scheduled job aborted",
+                status: "failed",
+            });
+            expect(getCurrentBackupJob("walg")).toBeUndefined();
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("marks scheduled backups failed when the spawned process exits nonzero", async () => {
+        const { registerBackupScheduledJobs } =
+            await import("../src/services/backups.ts");
+        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (_command, arguments_) => {
+                const joined = arguments_.join(" ");
+                if (joined.includes("pgrep -f")) {
+                    return {
+                        code: 1,
+                        stderr: "",
+                        stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
+                    };
+                }
+                if (joined.includes("wal-g backup-list")) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: "[]",
+                    };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            });
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: Promise.resolve(2),
+                    kill: () => {},
+                    pid: 456,
+                    stderr: readableUtf8Stream("backup exploded\n"),
+                    stdout: readableUtf8Stream("backup started\n"),
+                }) as unknown as processModule.BunProcess
+        );
+
+        try {
+            registerBackupScheduledJobs();
+            const run = await runScheduledJob("backup.walg");
+
+            expect(run).toMatchObject({
+                jobId: "backup.walg",
+                status: "failed",
+            });
+            expect(run.message).toContain("WALG backup failed with code 2");
+            expect(run.message).toContain("backup exploded");
+        } finally {
+            runProcessSpy.mockRestore();
+            spawnSpy.mockRestore();
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("runs scheduled Kopia backups through host preflight and records success", async () => {
+        const { registerBackupScheduledJobs } =
+            await import("../src/services/backups.ts");
+        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (command, arguments_) => {
+                if (command === "pgrep") {
+                    expect(arguments_).toEqual([
+                        "-f",
+                        "/opt/docker/apps/kopia/backup.sh",
+                    ]);
+                    return { code: 1, stderr: "", stdout: "" };
+                }
+                return { code: 0, stderr: "", stdout: "{}" };
+            });
+        const spawnSpy = jest
+            .spyOn(processModule, "spawnProcess")
+            .mockImplementation((command, arguments_) => {
+                expect(command).toBe("bash");
+                expect(arguments_).toEqual(["-lc", "/opt/docker/apps/kopia/backup.sh"]);
+                return {
+                    exited: Promise.resolve(0),
+                    kill: () => {},
+                    pid: 654,
+                    stderr: readableUtf8Stream(""),
+                    stdout: readableUtf8Stream("kopia ok\n"),
+                } as unknown as processModule.BunProcess;
+            });
+
+        try {
+            registerBackupScheduledJobs();
+            const run = await runScheduledJob("backup.kopia");
+
+            expect(run).toMatchObject({
+                jobId: "backup.kopia",
+                status: "success",
+            });
+            expect(run.output).toMatchObject({
+                backup: {
+                    code: 0,
+                    status: "done",
+                    stdout: "kopia ok\n",
+                    type: "kopia",
+                },
+            });
+            expect(spawnSpy).toHaveBeenCalledTimes(1);
+        } finally {
+            runProcessSpy.mockRestore();
+            spawnSpy.mockRestore();
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("terminates running WAL-G backups when a scheduled run is aborted", async () => {
+        const { getCurrentBackupJob, registerBackupScheduledJobs } =
+            await import("../src/services/backups.ts");
+        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const exit = Promise.withResolvers<number>();
+        const runProcessCalls: string[] = [];
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (command, arguments_) => {
+                const joined = `${command} ${arguments_.join(" ")}`;
+                runProcessCalls.push(joined);
+                if (joined.includes("pgrep -f")) {
+                    return {
+                        code: 1,
+                        stderr: "",
+                        stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
+                    };
+                }
+                if (joined.includes("pkill")) {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+                if (joined.includes("wal-g backup-list")) {
+                    return { code: 0, stderr: "", stdout: "[]" };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            });
+        const killSignals: NodeJS.Signals[] = [];
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: exit.promise,
+                    kill: (signal: NodeJS.Signals) => {
+                        killSignals.push(signal);
+                    },
+                    pid: undefined,
+                    stderr: readableUtf8Stream("backup output before abort\n"),
+                    stdout: readableUtf8Stream(""),
+                }) as unknown as processModule.BunProcess
+        );
+        const controller = new AbortController();
+
+        try {
+            registerBackupScheduledJobs();
+            const runPromise = runScheduledJob(
+                "backup.walg",
+                "manual",
+                controller.signal
+            );
+            await waitFor(() => spawnSpy.mock.calls.length === 1);
+            controller.abort();
+            exit.resolve(143);
+
+            const run = await runPromise;
+            expect(run.status).toBe("failed");
+            expect(run.message).toBe("Scheduled job aborted");
+            expect(killSignals).toContain("SIGTERM");
+            expect(runProcessCalls).toEqual(
+                expect.arrayContaining([
+                    expect.stringContaining("pkill -TERM"),
+                    expect.stringContaining("pgrep -f"),
+                ])
+            );
+            expect(getCurrentBackupJob("walg")).toMatchObject({
+                code: 130,
+                stderr: expect.stringContaining("Backup aborted by scheduler"),
+                status: "done",
+            });
+        } finally {
+            runProcessSpy.mockRestore();
+            spawnSpy.mockRestore();
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("records and clears WAL-G needs-attention state when container preflight detects a running process", async () => {
+        rememberEnvironment("PATH");
+        const fakeBin = createTemporaryRoot("mira-backup-walg-running-bin-");
+        writeRunningWalgPreflightDocker(path.join(fakeBin, "docker"));
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        const {
+            clearNeedsAttentionBackupJob,
+            getCurrentBackupJob,
+            mapBackupJob,
+            registerBackupScheduledJobs,
+            startManualBackup,
+        } = await import("../src/services/backups.ts");
+
+        try {
+            registerBackupScheduledJobs();
+            await expect(startManualBackup("walg")).rejects.toMatchObject({
+                statusCode: 409,
+            });
+            expect(mapBackupJob(getCurrentBackupJob("walg"))).toMatchObject({
+                code: 130,
+                status: "needs_attention",
+                stderr: expect.stringContaining("backup process is still running"),
+                type: "walg",
+            });
+            await expect(startManualBackup("walg")).rejects.toThrow(
+                "WALG backup needs attention"
+            );
+
+            const clearedJob = await clearNeedsAttentionBackupJob("walg");
+            expect(mapBackupJob(clearedJob)).toMatchObject({
+                status: "needs_attention",
+                type: "walg",
+            });
+            expect(getCurrentBackupJob("walg")).toBeUndefined();
+            await waitFor(() => {
+                const row = database
+                    .prepare(
+                        "SELECT status FROM scheduled_job_runs WHERE job_id = 'backup.walg' ORDER BY id DESC LIMIT 1"
+                    )
+                    .get() as { status?: string } | undefined;
+                return row?.status === "failed";
+            });
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("reports Kopia host pgrep failures without recording needs-attention state", async () => {
+        rememberEnvironment("PATH");
+        const fakeBin = createTemporaryRoot("mira-backup-host-pgrep-error-bin-");
+        writeFakeDocker(path.join(fakeBin, "docker"));
+        const fakePgrep = path.join(fakeBin, "pgrep");
+        writeFileSync(
+            fakePgrep,
+            "#!/usr/bin/env bash\nprintf 'pgrep unavailable\\n' >&2\nexit 2\n"
+        );
+        chmodSync(fakePgrep, 0o755);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
+            await import("../src/services/backups.ts");
+
+        try {
+            registerBackupScheduledJobs();
+            await expect(startManualBackup("kopia")).rejects.toMatchObject({
+                statusCode: 503,
+            });
+            expect(getCurrentBackupJob("kopia")).toBeUndefined();
+            await waitFor(() => {
+                const row = database
+                    .prepare(
+                        "SELECT status, message FROM scheduled_job_runs WHERE job_id = 'backup.kopia' ORDER BY id DESC LIMIT 1"
+                    )
+                    .get() as { message?: string; status?: string } | undefined;
+                return (
+                    row?.status === "failed" &&
+                    row.message?.includes("pgrep unavailable") === true
+                );
+            });
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
     it("records and clears Kopia needs-attention state when host preflight detects a running process", async () => {
         rememberEnvironment("PATH");
         const fakeBin = createTemporaryRoot("mira-backup-pgrep-bin-");
@@ -1489,6 +2956,134 @@ fi
                 .run();
             database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
         }
+    });
+
+    it("rejects invalid log rotation policy configs before touching files", async () => {
+        const rotationRoot = createTemporaryRoot("mira-log-rotation-validation-");
+        const configFile = path.join(rotationRoot, "log-rotation.json");
+        const logFile = path.join(rotationRoot, "service.log");
+        writeFileSync(logFile, "do not touch\n");
+        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+
+        const validBase = {
+            approvedRoots: [rotationRoot],
+            groups: [{ name: "unit", paths: [logFile] }],
+            version: 1,
+        };
+        const invalidCases: Array<{
+            config: unknown;
+            message: string | RegExp;
+            name: string;
+        }> = [
+            {
+                config: JSON.parse("null") as unknown,
+                message: "Config must be an object",
+                name: "non-object config",
+            },
+            {
+                config: { ...validBase, defaults: JSON.parse("null") as unknown },
+                message: "Config defaults must be an object",
+                name: "null defaults",
+            },
+            {
+                config: { ...validBase, version: 2 },
+                message: "Config version must be 1",
+                name: "unsupported version",
+            },
+            {
+                config: { ...validBase, groups: {} },
+                message: "Config groups must be an array",
+                name: "non-array groups",
+            },
+            {
+                config: { ...validBase, approvedRoots: [] },
+                message: "approvedRoots must include at least one entry",
+                name: "empty approved roots",
+            },
+            {
+                config: { ...validBase, defaults: { paths: [""] } },
+                message: "defaults.paths must be an array of non-empty strings",
+                name: "blank default path",
+            },
+            {
+                config: { ...validBase, defaults: { archiveRetentionScope: "all" } },
+                message:
+                    "defaults.archiveRetentionScope must be directory, basename, or parent",
+                name: "bad default retention scope",
+            },
+            {
+                config: { ...validBase, defaults: { strategy: "move" } },
+                message: "defaults.strategy has unsupported strategy",
+                name: "bad default strategy",
+            },
+            {
+                config: { ...validBase, groups: [{ name: "", paths: [logFile] }] },
+                message: "Every group needs a string name",
+                name: "blank group name",
+            },
+            {
+                config: {
+                    ...validBase,
+                    groups: [
+                        { daily: true, name: "unit", paths: [logFile], weekly: true },
+                    ],
+                },
+                message: "Group unit cannot set both daily and weekly rotation",
+                name: "daily and weekly",
+            },
+            {
+                config: { ...validBase, groups: [{ archiveOnly: true, name: "unit" }] },
+                message:
+                    "Archive-only group unit needs at least one archivePaths pattern",
+                name: "archive-only without archives",
+            },
+            {
+                config: { ...validBase, groups: [{ name: "unit" }] },
+                message: "Group unit needs at least one path pattern",
+                name: "group without paths",
+            },
+            {
+                config: {
+                    ...validBase,
+                    groups: [{ name: "unit", paths: [logFile], strategy: "move" }],
+                },
+                message: "Group unit has unsupported strategy",
+                name: "bad group strategy",
+            },
+            {
+                config: {
+                    ...validBase,
+                    groups: [{ enabled: "yes", name: "unit", paths: [logFile] }],
+                },
+                message: "Group unit.enabled must be a boolean",
+                name: "bad boolean",
+            },
+            {
+                config: {
+                    ...validBase,
+                    groups: [{ maxSizeMb: -1, name: "unit", paths: [logFile] }],
+                },
+                message: "Group unit.maxSizeMb must be a non-negative number",
+                name: "bad number",
+            },
+            {
+                config: {
+                    ...validBase,
+                    groups: [{ keep: 0, name: "unit", paths: [logFile] }],
+                },
+                message: "Group unit.keep must be a positive integer",
+                name: "bad keep",
+            },
+        ];
+
+        for (const { config, message, name } of invalidCases) {
+            writeFileSync(configFile, `${JSON.stringify(config)}\n`);
+            await expect(
+                runLogRotationService({ config: configFile, isDryRun: true }),
+                name
+            ).rejects.toThrow(message);
+        }
+        expect(readFileSync(logFile, "utf8")).toBe("do not touch\n");
     });
 
     it("evaluates log rotation policies in dry-run mode with isolated roots", async () => {
@@ -1594,6 +3189,442 @@ fi
         expect(readFileSync(logFile, "utf8")).toBe("do not rotate\n");
     });
 
+    it("reclaims stale log rotation locks before live rotation", async () => {
+        const rotationRoot = createTemporaryRoot("mira-log-rotation-stale-lock-");
+        const logFile = path.join(rotationRoot, "stale-lock.log");
+        const configFile = path.join(rotationRoot, "log-rotation.json");
+        const lockFile = path.join(process.cwd(), "data", "log-rotation.lock");
+        mkdirSync(path.dirname(lockFile), { recursive: true });
+        writeFileSync(lockFile, "999999999\n");
+        const staleTime = new Date(Date.now() - 13 * 60 * 60 * 1000);
+        utimesSync(lockFile, staleTime, staleTime);
+        cleanupCallbacks.push(() => {
+            rmSync(lockFile, { force: true });
+            rmSync(`${lockFile}.reclaim`, { force: true, recursive: true });
+        });
+        writeFileSync(logFile, "rotate after stale lock\n");
+        writeFileSync(
+            configFile,
+            JSON.stringify({
+                approvedRoots: [rotationRoot],
+                defaults: {
+                    compress: false,
+                    keep: 1,
+                    maxSizeMb: 0.000001,
+                    missingOk: false,
+                    skipEmpty: false,
+                    strategy: "copytruncate",
+                },
+                groups: [{ name: "stale-lock", paths: [logFile] }],
+                version: 1,
+            })
+        );
+        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+
+        const summary = await runLogRotationService({
+            config: configFile,
+            isDryRun: false,
+        });
+
+        expect(summary).toMatchObject({
+            checkedFiles: 1,
+            isDryRun: false,
+            isOk: true,
+            rotatedFiles: 1,
+        });
+        expect(readFileSync(logFile, "utf8")).toBe("");
+        expect(existsSync(lockFile)).toBe(false);
+        expect(existsSync(`${lockFile}.reclaim`)).toBe(false);
+    });
+
+    it("rotates logs with rename strategy and applies archive-only retention", async () => {
+        const rotationRoot = createTemporaryRoot("mira-log-rotation-rename-test-");
+        const logFile = path.join(rotationRoot, "rename.log");
+        const archiveRoot = path.join(rotationRoot, "archives");
+        const configFile = path.join(rotationRoot, "log-rotation.json");
+        mkdirSync(archiveRoot, { recursive: true });
+        writeFileSync(logFile, "rename me\n");
+        const oldArchive = path.join(archiveRoot, "app.1.log");
+        const retainedArchive = path.join(archiveRoot, "app.2.log");
+        writeFileSync(oldArchive, "old archive\n");
+        writeFileSync(retainedArchive, "new archive\n");
+        const oldTime = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+        const retainedTime = new Date(Date.now() - 5 * 60 * 1000);
+        utimesSync(oldArchive, oldTime, oldTime);
+        utimesSync(retainedArchive, retainedTime, retainedTime);
+        writeFileSync(
+            configFile,
+            JSON.stringify({
+                approvedRoots: [rotationRoot],
+                defaults: {
+                    keep: 1,
+                    maxSizeMb: 0.000001,
+                    missingOk: false,
+                    skipEmpty: false,
+                },
+                groups: [
+                    {
+                        compress: true,
+                        name: "rename",
+                        paths: [logFile],
+                        strategy: "rename",
+                    },
+                    {
+                        archiveOnly: true,
+                        archivePaths: [path.join(archiveRoot, "*.log")],
+                        archiveRetentionScope: "directory",
+                        keep: 1,
+                        keepDays: 1,
+                        name: "archives",
+                        shouldCompress: false,
+                    },
+                ],
+                version: 1,
+            })
+        );
+        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+
+        const summary = await runLogRotationService({
+            config: configFile,
+            isDryRun: false,
+            verbose: true,
+        });
+        const hasCompressionStream = "CompressionStream" in globalThis;
+
+        expect(summary).toMatchObject({
+            checkedGroups: 2,
+            checkedFiles: 3,
+            compressedFiles: hasCompressionStream ? 1 : 0,
+            deletedArchives: 1,
+            isDryRun: false,
+            isOk: true,
+            rotatedFiles: 1,
+        });
+        expect(readFileSync(logFile, "utf8")).toBe("");
+        expect(existsSync(oldArchive)).toBe(false);
+        expect(existsSync(retainedArchive)).toBe(true);
+        expect(readdirSync(rotationRoot).some((name) => name.endsWith(".gz"))).toBe(
+            hasCompressionStream
+        );
+
+        const row = database
+            .prepare(
+                "SELECT data_json FROM cache_entries WHERE key = 'log_rotation.state'"
+            )
+            .get() as { data_json?: string } | undefined;
+        const state = JSON.parse(row?.data_json ?? "{}") as {
+            files?: Record<string, { lastArchive?: string }>;
+            lastRun?: { isOk?: boolean };
+        };
+        expect(state.lastRun?.isOk).toBe(true);
+        expect(state.files?.[logFile]?.lastArchive?.endsWith(".gz")).toBe(
+            hasCompressionStream
+        );
+    });
+
+    it("copy-truncates logs, honors exclusions, and reports unsafe rotation errors", async () => {
+        const rotationRoot = createTemporaryRoot("mira-log-rotation-copy-test-");
+        const outsideRoot = createTemporaryRoot("mira-log-rotation-outside-");
+        const logsRoot = path.join(rotationRoot, "logs");
+        mkdirSync(logsRoot, { recursive: true });
+        const liveLog = path.join(logsRoot, "live.log");
+        const emptyLog = path.join(logsRoot, "empty.log");
+        const excludedLog = path.join(logsRoot, "excluded.log");
+        const linkedSource = path.join(logsRoot, "linked-source.log");
+        const outsideLog = path.join(outsideRoot, "outside.log");
+        const hardlink = path.join(logsRoot, "linked-hardlink.log");
+        const configFile = path.join(rotationRoot, "log-rotation.json");
+        writeFileSync(liveLog, "copytruncate me\n");
+        writeFileSync(emptyLog, "");
+        writeFileSync(excludedLog, "leave me\n");
+        writeFileSync(linkedSource, "do not rotate linked files\n");
+        writeFileSync(outsideLog, "outside root\n");
+        symlinkSync(liveLog, path.join(logsRoot, "live-symlink.log"));
+        try {
+            // Hard links are refused by the service because rotating one would mutate
+            // another path with the same inode.
+            Bun.spawnSync(["ln", linkedSource, hardlink]);
+        } catch {
+            // Some filesystems may not support hard links in tmp; the main path still
+            // exercises copytruncate and exclusions.
+        }
+        writeFileSync(
+            configFile,
+            JSON.stringify({
+                approvedRoots: [rotationRoot],
+                defaults: {
+                    compress: false,
+                    keep: 2,
+                    maxSizeMb: 0.000001,
+                    missingOk: true,
+                    skipEmpty: true,
+                    strategy: "copytruncate",
+                },
+                excludePaths: [excludedLog],
+                groups: [
+                    {
+                        name: "copy",
+                        paths: [
+                            path.join(logsRoot, "*.log"),
+                            path.join(logsRoot, "missing.log"),
+                            outsideLog,
+                        ],
+                    },
+                ],
+                version: 1,
+            })
+        );
+        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+
+        const summary = await runLogRotationService({
+            config: configFile,
+            isDryRun: false,
+            verbose: true,
+        });
+
+        expect(summary).toMatchObject({
+            checkedGroups: 1,
+            deletedArchives: 0,
+            isDryRun: false,
+            isOk: false,
+            rotatedFiles: 1,
+        });
+        expect(readFileSync(liveLog, "utf8")).toBe("");
+        expect(readFileSync(excludedLog, "utf8")).toBe("leave me\n");
+        expect(summary.skippedFiles).toBeGreaterThanOrEqual(1);
+        expect(summary.errors).toContainEqual(
+            expect.objectContaining({
+                filePath: outsideLog,
+                message: expect.stringContaining("Unsafe path outside approved roots"),
+            })
+        );
+        if (existsSync(hardlink)) {
+            expect(summary.errors).toContainEqual(
+                expect.objectContaining({
+                    filePath: hardlink,
+                    message: expect.stringContaining("Refusing multi-linked file"),
+                })
+            );
+        }
+        const stateRow = database
+            .prepare(
+                "SELECT data_json FROM cache_entries WHERE key = 'log_rotation.state'"
+            )
+            .get() as { data_json?: string } | undefined;
+        const state = JSON.parse(stateRow?.data_json ?? "{}") as {
+            files?: Record<string, { lastArchive?: string; lastSizeBytes?: number }>;
+        };
+        expect(state.files?.[liveLog]).toMatchObject({
+            lastArchive: expect.stringContaining("live.log."),
+            lastSizeBytes: "copytruncate me\n".length,
+        });
+    });
+
+    it("normalizes elevated log rotation command output and failures", async () => {
+        const { runElevatedLogRotationService } =
+            await import("../src/services/logRotation.ts");
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockResolvedValueOnce({
+                code: 0,
+                stderr: "sudo notice",
+                stdout: 'banner before json\n{"isOk":true,"checkedFiles":2}\n',
+            })
+            .mockResolvedValueOnce({
+                code: 0,
+                stderr: "",
+                stdout: "",
+            })
+            .mockResolvedValueOnce({
+                code: 1,
+                stderr: "sudo failed",
+                stdout: '{"isOk":false,"error":"policy denied","stdout":"details"}\n',
+            })
+            .mockResolvedValueOnce({
+                code: 0,
+                stderr: "bad json stderr",
+                stdout: "not json",
+            });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        await expect(runElevatedLogRotationService({ isDryRun: true })).resolves.toEqual({
+            result: { checkedFiles: 2, isOk: true },
+            stderr: "sudo notice",
+        });
+        await expect(
+            runElevatedLogRotationService({ isDryRun: false })
+        ).resolves.toMatchObject({
+            result: {
+                error: "Elevated log rotation returned empty JSON output",
+                isOk: false,
+            },
+            stderr: "Elevated log rotation returned empty JSON output",
+        });
+        await expect(runElevatedLogRotationService({ isDryRun: false })).resolves.toEqual(
+            {
+                result: { error: "policy denied", isOk: false, stdout: "details" },
+                stderr: "sudo failed",
+            }
+        );
+        await expect(
+            runElevatedLogRotationService({ isDryRun: false })
+        ).resolves.toMatchObject({
+            result: {
+                error: "Failed to parse elevated log rotation JSON",
+                isOk: false,
+                stdout: "not json",
+            },
+            stderr: expect.stringContaining("bad json stderr"),
+        });
+    });
+
+    it("records scheduled log-rotation failures in cache state", async () => {
+        const { registerLogRotationScheduledJobs } =
+            await import("../src/services/logRotation.ts");
+        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const runProcessSpy = jest.spyOn(processModule, "runProcess").mockResolvedValue({
+            code: 1,
+            stderr: "sudo denied",
+            stdout: JSON.stringify({
+                errors: [{ message: "policy denied" }],
+                groups: [{ name: "docker" }],
+                isOk: false,
+                warnings: [{ message: "warn" }],
+            }),
+        });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        try {
+            registerLogRotationScheduledJobs();
+            const run = await runScheduledJob("ops.log-rotation");
+
+            expect(run.status).toBe("failed");
+            expect(run.message).toContain("sudo denied");
+            const row = database
+                .prepare(
+                    "SELECT data_json FROM cache_entries WHERE key = 'log_rotation.state'"
+                )
+                .get() as { data_json?: string } | undefined;
+            const state = JSON.parse(row?.data_json ?? "{}") as {
+                lastRun?: { isDryRun?: boolean; isOk?: boolean; stderr?: string };
+            };
+            expect(state.lastRun).toMatchObject({
+                isDryRun: false,
+                isOk: false,
+                stderr: "sudo denied",
+            });
+        } finally {
+            database
+                .prepare(
+                    "DELETE FROM scheduled_job_runs WHERE job_id = 'ops.log-rotation'"
+                )
+                .run();
+            database
+                .prepare("DELETE FROM scheduled_jobs WHERE id = 'ops.log-rotation'")
+                .run();
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'log_rotation.state'")
+                .run();
+        }
+    });
+
+    it("records structured scheduled log-rotation failures when sudo exits cleanly", async () => {
+        const { registerLogRotationScheduledJobs } =
+            await import("../src/services/logRotation.ts");
+        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const runProcessSpy = jest.spyOn(processModule, "runProcess").mockResolvedValue({
+            code: 0,
+            stderr: "",
+            stdout: JSON.stringify({
+                errors: [{ message: "policy rejected group" }],
+                groups: [{ name: "docker" }],
+                isOk: false,
+                stdout: "x".repeat(100_050),
+                warnings: [{ message: "matched no files" }],
+            }),
+        });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        try {
+            registerLogRotationScheduledJobs();
+            const run = await runScheduledJob("ops.log-rotation");
+
+            expect(run.status).toBe("failed");
+            expect(run.message).toContain("Log rotation failed");
+            expect(run.message).toContain("policy rejected group");
+            expect(run.message).toContain("matched no files");
+            expect(run.message).toContain("docker");
+            const row = database
+                .prepare(
+                    "SELECT data_json FROM cache_entries WHERE key = 'log_rotation.state'"
+                )
+                .get() as { data_json?: string } | undefined;
+            const state = JSON.parse(row?.data_json ?? "{}") as {
+                lastRun?: { isOk?: boolean; stdout?: string };
+            };
+            expect(state.lastRun).toMatchObject({ isOk: false });
+            expect(state.lastRun?.stdout).toHaveLength(100_000);
+        } finally {
+            database
+                .prepare(
+                    "DELETE FROM scheduled_job_runs WHERE job_id = 'ops.log-rotation'"
+                )
+                .run();
+            database
+                .prepare("DELETE FROM scheduled_jobs WHERE id = 'ops.log-rotation'")
+                .run();
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'log_rotation.state'")
+                .run();
+        }
+    });
+
+    it("records successful scheduled log-rotation runs", async () => {
+        const { registerLogRotationScheduledJobs } =
+            await import("../src/services/logRotation.ts");
+        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const runProcessSpy = jest.spyOn(processModule, "runProcess").mockResolvedValue({
+            code: 0,
+            stderr: "sudo notice",
+            stdout: JSON.stringify({
+                checkedGroups: 1,
+                isDryRun: false,
+                isOk: true,
+                rotatedFiles: 0,
+            }),
+        });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        try {
+            registerLogRotationScheduledJobs();
+            const run = await runScheduledJob("ops.log-rotation");
+
+            expect(run.status).toBe("success");
+            expect(run.message).toBeUndefined();
+            expect(run.output).toMatchObject({
+                logRotation: {
+                    result: {
+                        checkedGroups: 1,
+                        isOk: true,
+                    },
+                    stderr: "sudo notice",
+                },
+            });
+        } finally {
+            database
+                .prepare(
+                    "DELETE FROM scheduled_job_runs WHERE job_id = 'ops.log-rotation'"
+                )
+                .run();
+            database
+                .prepare("DELETE FROM scheduled_jobs WHERE id = 'ops.log-rotation'")
+                .run();
+            database
+                .prepare("DELETE FROM cache_entries WHERE key = 'log_rotation.state'")
+                .run();
+        }
+    });
+
     it("updates agent metadata and rolls active task history forward", async () => {
         rememberEnvironment("OPENCLAW_HOME");
         rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
@@ -1606,11 +3637,20 @@ fi
         const agentId = `agent-${Bun.randomUUIDv7()}`;
 
         try {
+            await expect(updateAgentCurrentTask("../bad", "Task")).rejects.toMatchObject({
+                statusCode: 400,
+            });
+            await expect(updateAgentCurrentTask(agentId, " ")).rejects.toMatchObject({
+                statusCode: 400,
+            });
+
             const firstMetadata = await updateAgentCurrentTask(agentId, "First task");
             const secondMetadata = await updateAgentCurrentTask(agentId, "Second task");
+            const repeatedMetadata = await updateAgentCurrentTask(agentId, "Second task");
 
             expect(firstMetadata.currentTask).toBe("First task");
             expect(secondMetadata.currentTask).toBe("Second task");
+            expect(repeatedMetadata.currentTask).toBe("Second task");
             const metadataFile = Bun.file(
                 path.join(openclawRoot, "agents", agentId, "sessions", "metadata.json")
             );
@@ -1628,6 +3668,18 @@ fi
                     status: "completed",
                 })
             );
+            const historyRows = database
+                .prepare(
+                    `SELECT task, status
+                     FROM agent_task_history
+                     WHERE agent_id = ?
+                     ORDER BY id`
+                )
+                .all(agentId) as Array<{ task: string; status: string }>;
+            expect(historyRows).toEqual([
+                { task: "First task", status: "completed" },
+                { task: "Second task", status: "active" },
+            ]);
         } finally {
             database
                 .prepare("DELETE FROM agent_task_history WHERE agent_id = ?")
@@ -1642,8 +3694,55 @@ fi
         const agentsRoot = path.join(openclawRoot, "agents");
         const miraSessions = path.join(agentsRoot, "mira-2026", "sessions");
         const coderSessions = path.join(agentsRoot, "coder", "sessions");
+        const researcherSessions = path.join(
+            agentsRoot,
+            "researcher",
+            "agent",
+            "codex-home",
+            "sessions",
+            "2026",
+            "06"
+        );
+        const auditorSessions = path.join(agentsRoot, "auditor", "sessions");
+        const writerSessions = path.join(agentsRoot, "writer", "sessions");
+        const browserSessions = path.join(agentsRoot, "browser", "sessions");
+        const staleSessions = path.join(agentsRoot, "stale", "sessions");
+        const responseItemAgents = [
+            {
+                activity: "edit files",
+                id: "patcher",
+                input: "await tools.apply_patch({})",
+                task: "Patch files",
+            },
+            {
+                activity: "session_status",
+                id: "session-checker",
+                input: "await tools.openclaw_session_status({})",
+                task: "Check session",
+            },
+            {
+                activity: "terminal output",
+                id: "terminal-reader",
+                input: "await tools.write_stdin({session_id:1})",
+                task: "Read terminal",
+            },
+            {
+                activity: "memory_search",
+                id: "memory-agent",
+                input: 'await tools.memory_search({"query":"dashboard coverage"})',
+                task: "Search memory",
+            },
+        ];
         mkdirSync(miraSessions, { recursive: true });
         mkdirSync(coderSessions, { recursive: true });
+        mkdirSync(researcherSessions, { recursive: true });
+        mkdirSync(auditorSessions, { recursive: true });
+        mkdirSync(writerSessions, { recursive: true });
+        mkdirSync(browserSessions, { recursive: true });
+        mkdirSync(staleSessions, { recursive: true });
+        for (const agent of responseItemAgents) {
+            mkdirSync(path.join(agentsRoot, agent.id, "sessions"), { recursive: true });
+        }
         process.env.OPENCLAW_HOME = openclawRoot;
         delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
         writeFileSync(
@@ -1659,6 +3758,12 @@ fi
                     list: [
                         { default: true, id: "mira-2026" },
                         { id: "coder", model: { primary: "openai/gpt-4.1" } },
+                        { id: "researcher" },
+                        { id: "auditor" },
+                        { id: "writer" },
+                        { id: "browser" },
+                        { id: "stale" },
+                        ...responseItemAgents.map((agent) => ({ id: agent.id })),
                     ],
                 },
             })
@@ -1678,6 +3783,156 @@ fi
                 },
                 { key: 123, updatedAt: "bad" },
             ])
+        );
+        writeFileSync(
+            path.join(researcherSessions, "researcher.trajectory.jsonl"),
+            [
+                {
+                    data: {
+                        prompt: [
+                            "Research coverage gaps",
+                            "[media attached: ignored]",
+                            "Conversation info: ignored",
+                        ].join("\n"),
+                    },
+                    runId: "research-run",
+                    type: "prompt.submitted",
+                },
+                {
+                    data: {
+                        arguments: { path: "/tmp/coverage.ts" },
+                        name: "read",
+                        turnId: "research-turn",
+                    },
+                    runId: "research-run",
+                    type: "tool.call",
+                },
+            ]
+                .map((entry) => JSON.stringify(entry))
+                .join("\n")
+        );
+        writeFileSync(
+            path.join(writerSessions, "session.jsonl"),
+            [
+                "{malformed",
+                JSON.stringify({
+                    message: {
+                        content: "Write task from session file",
+                        role: "user",
+                    },
+                    runId: "writer-run",
+                }),
+                JSON.stringify({
+                    message: {
+                        content: [
+                            {
+                                partialJson: '{"file_path":"/tmp/output.md"}',
+                                type: "toolCall",
+                                name: "write",
+                            },
+                        ],
+                        role: "assistant",
+                    },
+                    runId: "writer-run",
+                }),
+            ].join("\n")
+        );
+        writeFileSync(
+            path.join(browserSessions, "session.jsonl"),
+            [
+                {
+                    data: {
+                        args: {
+                            parameters: {
+                                action: "navigate",
+                                url: "https://dashboard.test",
+                            },
+                        },
+                        name: "browser",
+                        prompt: "Browse dashboard",
+                    },
+                    runId: "browser-run",
+                    type: "prompt.submitted",
+                },
+                {
+                    data: {
+                        args: {
+                            parameters: {
+                                action: "navigate",
+                                url: "https://dashboard.test",
+                            },
+                        },
+                        name: "browser",
+                    },
+                    runId: "browser-run",
+                    type: "tool.result",
+                },
+            ]
+                .map((entry) => JSON.stringify(entry))
+                .join("\n")
+        );
+        const staleFile = path.join(staleSessions, "session.jsonl");
+        writeFileSync(
+            staleFile,
+            JSON.stringify({
+                message: {
+                    content: "Old task should not be active",
+                    role: "user",
+                },
+                runId: "stale-run",
+            })
+        );
+        const staleDate = new Date(Date.now() - 10 * 60_000);
+        await Bun.write(staleFile, await Bun.file(staleFile).text());
+        utimesSync(staleFile, staleDate, staleDate);
+        for (const agent of responseItemAgents) {
+            writeFileSync(
+                path.join(agentsRoot, agent.id, "sessions", "session.jsonl"),
+                [
+                    {
+                        message: { content: agent.task, role: "user" },
+                        runId: `${agent.id}-run`,
+                    },
+                    {
+                        payload: {
+                            input: agent.input,
+                            name: "exec",
+                            type: "custom_tool_call",
+                        },
+                        runId: `${agent.id}-run`,
+                        type: "response_item",
+                    },
+                ]
+                    .map((entry) => JSON.stringify(entry))
+                    .join("\n")
+            );
+        }
+        writeFileSync(
+            path.join(auditorSessions, "session.jsonl"),
+            [
+                {
+                    message: {
+                        __openclaw: { mirrorIdentity: "audit-turn:user" },
+                        content: [
+                            { text: "Audit backend coverage", type: "text" },
+                            { text: '```json\n{"ignore":true}\n```', type: "text" },
+                        ],
+                        role: "user",
+                    },
+                    runId: "audit-run",
+                },
+                {
+                    payload: {
+                        input: 'await tools.exec_command({"cmd":"git status --short"})',
+                        name: "exec",
+                        type: "custom_tool_call",
+                    },
+                    runId: "audit-run",
+                    type: "response_item",
+                },
+            ]
+                .map((entry) => JSON.stringify(entry))
+                .join("\n")
         );
 
         const gatewayModule = await import("../src/gateway.ts");
@@ -1736,7 +3991,16 @@ fi
 
         expect(parseAgentsConfig()).toMatchObject({
             defaults: { model: { primary: "codex" } },
-            list: [{ id: "mira-2026" }, { id: "coder" }],
+            list: [
+                { id: "mira-2026" },
+                { id: "coder" },
+                { id: "researcher" },
+                { id: "auditor" },
+                { id: "writer" },
+                { id: "browser" },
+                { id: "stale" },
+                ...responseItemAgents.map((agent) => ({ id: agent.id })),
+            ],
         });
         const statuses = await buildAgentStatuses(parseAgentsConfig()!);
         expect(statuses).toContainEqual(
@@ -1755,6 +4019,57 @@ fi
                 sessionKey: "agent:coder:main",
             })
         );
+        expect(statuses).toContainEqual(
+            expect.objectContaining({
+                currentActivity: "read /tmp/coverage.ts",
+                currentTask: "Research coverage gaps",
+                id: "researcher",
+                model: "gpt-5.5",
+                status: "active",
+            })
+        );
+        expect(statuses).toContainEqual(
+            expect.objectContaining({
+                currentActivity: "exec git status --short",
+                currentTask: "Audit backend coverage",
+                id: "auditor",
+                status: "active",
+            })
+        );
+        expect(statuses).toContainEqual(
+            expect.objectContaining({
+                currentActivity: "write /tmp/output.md",
+                currentTask: "Write task from session file",
+                id: "writer",
+                status: "active",
+            })
+        );
+        expect(statuses).toContainEqual(
+            expect.objectContaining({
+                currentActivity: "browser navigate https://dashboard.test",
+                currentTask: "Browse dashboard",
+                id: "browser",
+                status: "active",
+            })
+        );
+        expect(statuses).toContainEqual(
+            expect.objectContaining({
+                currentActivity: undefined,
+                currentTask: undefined,
+                id: "stale",
+                status: "idle",
+            })
+        );
+        for (const agent of responseItemAgents) {
+            expect(statuses).toContainEqual(
+                expect.objectContaining({
+                    currentActivity: agent.activity,
+                    currentTask: agent.task,
+                    id: agent.id,
+                    status: "active",
+                })
+            );
+        }
         await expect(
             buildSingleAgentStatus("missing", parseAgentsConfig()!)
         ).resolves.toBe(undefined);
@@ -1789,9 +4104,50 @@ fi
         await expect(
             runExecOnce({ args: [], command: "node", shell: true })
         ).rejects.toThrow("args cannot be combined with shell mode");
+        await expect(runExecOnce({ args: [], command: "node/child" })).rejects.toThrow(
+            "command must be an approved executable name"
+        );
         await expect(runExecOnce({ args: [], command: "node" })).rejects.toThrow(
             "command executable is not approved"
         );
+        await expect(
+            runExecOnce({
+                args: "not-array",
+                command: "__mira_dashboard_shell_smoke_test__",
+            })
+        ).rejects.toThrow("args must be an array");
+        await expect(
+            runExecOnce({ args: [42], command: "__mira_dashboard_shell_smoke_test__" })
+        ).rejects.toThrow("all args must be strings");
+        await expect(
+            runExecOnce({
+                args: ["bad\0arg"],
+                command: "__mira_dashboard_shell_smoke_test__",
+            })
+        ).rejects.toThrow("args cannot contain null bytes");
+        await expect(
+            runExecOnce({
+                command: "__mira_dashboard_shell_smoke_test__",
+                cwd: 42,
+                shell: true,
+            })
+        ).rejects.toThrow("cwd must be a string");
+        await expect(
+            runExecOnce({
+                command: "__mira_dashboard_shell_smoke_test__",
+                cwd: "relative",
+                shell: true,
+            })
+        ).rejects.toThrow("cwd must be an absolute path");
+        const execFileCwd = path.join(createTemporaryRoot("mira-exec-cwd-"), "file");
+        writeFileSync(execFileCwd, "not a directory");
+        await expect(
+            runExecOnce({
+                command: "__mira_dashboard_shell_smoke_test__",
+                cwd: execFileCwd,
+                shell: true,
+            })
+        ).rejects.toThrow("cwd must be a directory");
         const notFoundError = Object.assign(new Error("missing"), { statusCode: 404 });
         expect(execErrorResponse(notFoundError)).toEqual({
             error: "missing",
@@ -1844,6 +4200,218 @@ fi
         await expect(stopMissingJob.json()).resolves.toEqual({
             error: "Exec job not found",
         });
+    });
+
+    it("starts, stops, and reports exec jobs through the service lifecycle", async () => {
+        const { getExecJob, startExecJob, stopExecJob } =
+            await import("../src/services/execJobs.ts");
+        const exit = Promise.withResolvers<number>();
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: exit.promise,
+                    kill: () => {
+                        exit.resolve(143);
+                    },
+                    pid: 123,
+                    stderr: readableUtf8Stream(""),
+                    stdout: readableUtf8Stream(""),
+                }) as unknown as processModule.BunProcess
+        );
+        try {
+            const { jobId } = startExecJob({
+                command: "__mira_dashboard_shell_smoke_test__",
+                shell: true,
+            });
+            expect(getExecJob(jobId)).toMatchObject({
+                jobId,
+                status: "running",
+            });
+            expect(stopExecJob(jobId)).toEqual({
+                isSuccess: true,
+                message: "Stop signal sent",
+            });
+            expect(getExecJob(jobId)).toMatchObject({
+                jobId,
+                status: "signaled",
+            });
+            expect(() => stopExecJob(jobId)).toThrow("Job is not running");
+        } finally {
+            exit.resolve(0);
+            await Bun.sleep(0);
+            spawnSpy.mockRestore();
+        }
+    });
+
+    it("rejects new exec jobs while the active job cap is full", async () => {
+        const { execErrorResponse, startExecJob } =
+            await import("../src/services/execJobs.ts");
+        const exits: Array<ReturnType<typeof Promise.withResolvers<number>>> = [];
+        const spawnSpy = jest
+            .spyOn(processModule, "spawnProcess")
+            .mockImplementation(() => {
+                const exit = Promise.withResolvers<number>();
+                exits.push(exit);
+                return {
+                    exited: exit.promise,
+                    kill: () => {},
+                    pid: 987,
+                    stderr: readableUtf8Stream(""),
+                    stdout: readableUtf8Stream(""),
+                } as unknown as processModule.BunProcess;
+            });
+        const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+        try {
+            let capError: unknown;
+            for (let index = 0; index < 120 && !capError; index += 1) {
+                try {
+                    startExecJob({
+                        command: "__mira_dashboard_shell_smoke_test__",
+                        shell: true,
+                    });
+                } catch (error) {
+                    capError = error;
+                }
+            }
+            expect(execErrorResponse(capError)).toEqual({
+                error: "Too many exec jobs",
+                status: 429,
+            });
+            expect(warnSpy).toHaveBeenCalled();
+        } finally {
+            for (const exit of exits) {
+                exit.resolve(0);
+            }
+            await Bun.sleep(0);
+            spawnSpy.mockRestore();
+            warnSpy.mockRestore();
+        }
+    });
+
+    it("records exec process failures and trims oversized output", async () => {
+        const { getExecJob, runExecOnce, startExecJob } =
+            await import("../src/services/execJobs.ts");
+        const longOutput = `${"x".repeat(101_000)}tail`;
+        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
+            () =>
+                ({
+                    exited: Promise.resolve(0),
+                    kill: () => {},
+                    pid: 123,
+                    stderr: readableUtf8Stream(""),
+                    stdout: readableUtf8Stream(longOutput),
+                }) as unknown as processModule.BunProcess
+        );
+
+        try {
+            const once = await runExecOnce({
+                command: "__mira_dashboard_shell_smoke_test__",
+                shell: true,
+            });
+            expect(once.code).toBe(0);
+            expect(once.stdout).toHaveLength(10_000);
+            expect(once.stdout.endsWith("tail")).toBe(true);
+        } finally {
+            spawnSpy.mockRestore();
+        }
+
+        const failingSpawnSpy = jest
+            .spyOn(processModule, "spawnProcess")
+            .mockImplementation(
+                () =>
+                    ({
+                        exited: Promise.reject(new Error("spawn exit failed")),
+                        kill: () => {},
+                        pid: 456,
+                        stderr: readableUtf8Stream("before failure"),
+                        stdout: readableUtf8Stream(""),
+                    }) as unknown as processModule.BunProcess
+            );
+        try {
+            const started = startExecJob({
+                command: "__mira_dashboard_shell_smoke_test__",
+                shell: true,
+            });
+            const deadline = Date.now() + 2000;
+            let job = getExecJob(started.jobId);
+            while (job.status === "running" && Date.now() < deadline) {
+                await Bun.sleep(10);
+                job = getExecJob(started.jobId);
+            }
+            expect(job).toMatchObject({
+                code: 1,
+                status: "done",
+            });
+            expect(job.stderr).toContain("spawn exit failed");
+        } finally {
+            failingSpawnSpy.mockRestore();
+        }
+    });
+
+    it("validates scheduled job action and schedule boundaries", async () => {
+        const {
+            calculateNextRunAt,
+            listScheduledJobRuns,
+            registerScheduledJobAction,
+            updateScheduledJob,
+            upsertScheduledJob,
+        } = await import("../src/services/scheduledJobs.ts");
+        const jobId = `test-job-validation-${Bun.randomUUIDv7()}`;
+
+        try {
+            expect(() => registerScheduledJobAction("Bad.Action", () => {})).toThrow(
+                "Job action key is invalid"
+            );
+            expect(() =>
+                registerScheduledJobAction("test.timeout", () => {}, { timeoutMs: 0 })
+            ).toThrow(
+                "Scheduled job action timeout must be an integer between 1 and 2147483647"
+            );
+            expect(() =>
+                upsertScheduledJob({
+                    actionKey: "test.validation",
+                    enabled: true,
+                    id: jobId,
+                    intervalSeconds: 30,
+                    name: "Coverage validation job",
+                    scheduleType: "interval",
+                })
+            ).toThrow("Interval must be at least 60 seconds");
+            expect(() =>
+                calculateNextRunAt({
+                    cronExpression: "61 * * * *",
+                    enabled: true,
+                    intervalSeconds: 3600,
+                    scheduleType: "cron",
+                    timeOfDay: undefined,
+                })
+            ).toThrow("Cron jobs require a valid cronExpression");
+
+            const job = upsertScheduledJob({
+                actionKey: "test.validation",
+                enabled: true,
+                id: jobId,
+                intervalSeconds: 3600,
+                name: "Coverage validation job",
+                scheduleType: "daily",
+                timeOfDay: "23:59",
+            });
+            expect(job.nextRunAt).toEqual(expect.any(String));
+            expect(updateScheduledJob("missing-job", { enabled: false })).toBeUndefined();
+            expect(() =>
+                updateScheduledJob(jobId, {
+                    cronExpression: "not cron",
+                    scheduleType: "cron",
+                })
+            ).toThrow("Cron jobs require a valid cronExpression");
+            expect(listScheduledJobRuns(jobId, -20)).toEqual([]);
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id = ?")
+                .run(jobId);
+            database.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run(jobId);
+        }
     });
 
     it("serves OpenClaw config, skill, backup, and restart route contracts with fakes", async () => {
@@ -2320,6 +4888,115 @@ fi
             })
         );
         expect(missingExec.status).toBe(404);
+        const dockerRunSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (_command, arguments_) => {
+                const joined = arguments_.join(" ");
+                if (joined.includes("ps -a")) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: `${JSON.stringify({
+                            Command: "sleep 100",
+                            CreatedAt: "2026-06-26 01:00:00 +0000 UTC",
+                            ID: "abc123",
+                            Image: "unit/web:latest",
+                            Labels: "",
+                            Mounts: "",
+                            Names: "unit-web",
+                            Networks: "bridge",
+                            Ports: "",
+                            RunningFor: "1 minute",
+                            State: "running",
+                            Status: "Up 1 minute",
+                        })}\n`,
+                    };
+                }
+                if (joined.includes("stats --no-stream")) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: `${JSON.stringify({
+                            BlockIO: "0B / 0B",
+                            CPUPerc: "0.00%",
+                            ID: "abc123",
+                            MemPerc: "0.00%",
+                            MemUsage: "1MiB / 1GiB",
+                            NetIO: "0B / 0B",
+                            PIDs: "1",
+                        })}\n`,
+                    };
+                }
+                if (arguments_[0] === "inspect") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: JSON.stringify([
+                            {
+                                Config: {
+                                    Env: ["API_TOKEN=secret", "PLAIN=value"],
+                                    Labels: { "com.docker.compose.service": "web" },
+                                },
+                                Created: "2026-06-26T01:00:00.000Z",
+                                Id: "abc123full",
+                                Image: "sha256:image",
+                                Mounts: [],
+                                NetworkSettings: { Networks: {} },
+                                RestartCount: 0,
+                                State: { StartedAt: "2026-06-26T01:00:00.000Z" },
+                            },
+                        ]),
+                    };
+                }
+                return { code: 1, stderr: `unexpected docker ${joined}`, stdout: "" };
+            });
+        const dockerSpawnSpy = jest
+            .spyOn(processModule, "spawnProcess")
+            .mockImplementation(() => {
+                throw new Error("docker exec spawn failed");
+            });
+        try {
+            const execStart = await dockerRoutes["/api/docker/exec/start"].POST(
+                new Request("https://dashboard.test/api/docker/exec/start", {
+                    body: JSON.stringify({
+                        command: "echo hello",
+                        containerId: "unit-web",
+                    }),
+                    method: "POST",
+                })
+            );
+            const execStartBody = (await execStart.json()) as { jobId: string };
+            const failedExec = dockerRoutes["/api/docker/exec/:jobId"].GET(
+                Object.assign(
+                    new Request(
+                        `https://dashboard.test/api/docker/exec/${execStartBody.jobId}`
+                    ),
+                    { params: { jobId: execStartBody.jobId } }
+                )
+            );
+            await expect(failedExec.json()).resolves.toMatchObject({
+                code: 1,
+                containerId: "abc123",
+                stderr: "docker exec spawn failed",
+                status: "done",
+            });
+            const stopFinished = await dockerRoutes["/api/docker/exec/:jobId/stop"].POST(
+                Object.assign(
+                    new Request(
+                        `https://dashboard.test/api/docker/exec/${execStartBody.jobId}/stop`,
+                        { method: "POST" }
+                    ),
+                    { params: { jobId: execStartBody.jobId } }
+                )
+            );
+            expect(stopFinished.status).toBe(400);
+            await expect(stopFinished.json()).resolves.toEqual({
+                error: "Job is not running",
+            });
+        } finally {
+            dockerRunSpy.mockRestore();
+            dockerSpawnSpy.mockRestore();
+        }
         const invalidPrune = await dockerRoutes["/api/docker/prune"].POST(
             new Request("https://dashboard.test/api/docker/prune", {
                 body: JSON.stringify({ target: "everything" }),
@@ -2437,6 +5114,48 @@ fi
             await expect(disabledServiceResponse.json()).resolves.toEqual({
                 error: "Updater service is disabled",
             });
+
+            rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+            const appsRoot = createTemporaryRoot("mira-docker-route-unsupported-");
+            const appRoot = path.join(appsRoot, appSlug);
+            mkdirSync(appRoot, { recursive: true });
+            writeFileSync(
+                path.join(appRoot, "compose.yaml"),
+                [
+                    "services:",
+                    "  api:",
+                    "    image: example.com/unit/api:1.0.0",
+                    "    labels:",
+                    "      mira.updater.enabled: 'true'",
+                    "",
+                ].join("\n")
+            );
+            process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+            const { registerDockerUpdaterServices } =
+                await import("../src/services/dockerUpdater.ts");
+            await expect(registerDockerUpdaterServices()).resolves.toMatchObject({
+                isOk: true,
+            });
+            const unsupportedService = database
+                .prepare(
+                    "SELECT id FROM docker_managed_services WHERE app_slug = ? AND service_name = 'api'"
+                )
+                .get(appSlug) as { id: number };
+            const unsupportedRequest = Object.assign(
+                new Request(
+                    `https://dashboard.test/api/docker/updater/services/${unsupportedService.id}/update`,
+                    { method: "POST" }
+                ),
+                { params: { serviceId: String(unsupportedService.id) } }
+            );
+            const unsupportedResponse =
+                await dockerRoutes["/api/docker/updater/services/:serviceId/update"].POST(
+                    unsupportedRequest
+                );
+            expect(unsupportedResponse.status).toBe(422);
+            await expect(unsupportedResponse.json()).resolves.toEqual({
+                error: "Unsupported image registry: example.com",
+            });
         } finally {
             database
                 .prepare("DELETE FROM docker_update_events WHERE app_slug = ?")
@@ -2451,11 +5170,15 @@ fi
         const actionKey = `test-action-${Bun.randomUUIDv7()}`;
         const keepId = `test-job-keep-${Bun.randomUUIDv7()}`;
         const pruneId = `test-job-prune-${Bun.randomUUIDv7()}`;
+        const scheduledDueId = `test-job-scheduled-due-${Bun.randomUUIDv7()}`;
+        const scheduledFutureId = `test-job-scheduled-future-${Bun.randomUUIDv7()}`;
+        const scheduledDisabledId = `test-job-scheduled-disabled-${Bun.randomUUIDv7()}`;
         const {
             calculateNextRunAt,
             finishScheduledJobRun,
             getScheduledJob,
             isScheduledJobValidationError,
+            listScheduledJobs,
             listScheduledJobRuns,
             registerScheduledJobAction,
             removeScheduledJobsNotInAction,
@@ -2626,9 +5349,73 @@ fi
             });
             expect(listScheduledJobRuns(keepId, 2)).toHaveLength(2);
 
+            upsertScheduledJob({
+                actionKey,
+                actionPayload: { value: "scheduled" },
+                enabled: true,
+                id: scheduledDueId,
+                intervalSeconds: 120,
+                name: "Scheduled due job",
+                scheduleType: "interval",
+            });
+            database
+                .prepare("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?")
+                .run("2026-01-01T00:00:00.000Z", scheduledDueId);
+            const scheduledRun = await runScheduledJob(scheduledDueId, "schedule");
+            expect(scheduledRun).toMatchObject({
+                jobId: scheduledDueId,
+                output: { jobId: scheduledDueId, payloadValue: "scheduled" },
+                status: "success",
+                triggerType: "schedule",
+            });
+            expect(getScheduledJob(scheduledDueId)?.nextRunAt).not.toBe(
+                "2026-01-01T00:00:00.000Z"
+            );
+
+            upsertScheduledJob({
+                actionKey,
+                actionPayload: { value: "future" },
+                enabled: true,
+                id: scheduledFutureId,
+                intervalSeconds: 120,
+                name: "Scheduled future job",
+                scheduleType: "interval",
+            });
+            await expect(
+                runScheduledJob(scheduledFutureId, "schedule")
+            ).rejects.toMatchObject({
+                statusCode: 409,
+            });
+
+            upsertScheduledJob({
+                actionKey,
+                actionPayload: { value: "disabled" },
+                enabled: false,
+                id: scheduledDisabledId,
+                intervalSeconds: 120,
+                name: "Scheduled disabled job",
+                scheduleType: "interval",
+            });
+            await expect(
+                runScheduledJob(scheduledDisabledId, "schedule")
+            ).rejects.toMatchObject({
+                statusCode: 409,
+            });
+
+            database
+                .prepare("UPDATE scheduled_job_runs SET output_json = ? WHERE job_id = ?")
+                .run("not json", keepId);
+            expect(listScheduledJobRuns(keepId, 0)).toHaveLength(2);
+            expect(listScheduledJobRuns(keepId, 1)).toHaveLength(1);
+            expect(getScheduledJob(keepId)?.lastRun?.output).toEqual({});
+            expect(
+                listScheduledJobs().find((job) => job.id === keepId)?.lastRun?.output
+            ).toEqual({});
+
             removeScheduledJobsNotInAction(actionKey, [keepId]);
             expect(getScheduledJob(keepId)).toBeDefined();
             expect(getScheduledJob(pruneId)).toBeUndefined();
+            expect(getScheduledJob(scheduledDueId)).toBeUndefined();
 
             const missingActionId = `test-job-missing-action-${Bun.randomUUIDv7()}`;
             upsertScheduledJob({

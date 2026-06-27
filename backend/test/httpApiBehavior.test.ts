@@ -1071,6 +1071,47 @@ describe("Mira Dashboard backend integration", () => {
         expect(invalidPatch.status).toBe(400);
         expect(invalidPatch.body.error).toBe("invalid patch field: unknown");
 
+        const nonObjectPatch = await api<{ error: string }>(
+            "/api/jobs/functional.test.job",
+            json("PATCH", { patch: [] })
+        );
+        expect(nonObjectPatch.status).toBe(400);
+        expect(nonObjectPatch.body.error).toBe("patch must be an object");
+
+        const invalidEnabledPatch = await api<{ error: string }>(
+            "/api/jobs/functional.test.job",
+            json("PATCH", { patch: { enabled: "yes" } })
+        );
+        expect(invalidEnabledPatch.status).toBe(400);
+        expect(invalidEnabledPatch.body.error).toBe("invalid patch field: enabled");
+
+        const invalidScheduleTypePatch = await api<{ error: string }>(
+            "/api/jobs/functional.test.job",
+            json("PATCH", { patch: { scheduleType: "weekly" } })
+        );
+        expect(invalidScheduleTypePatch.status).toBe(400);
+        expect(invalidScheduleTypePatch.body.error).toBe(
+            "invalid patch field: scheduleType"
+        );
+
+        const malformedPatch = await fetch(
+            `${testState.baseUrl}/api/jobs/functional.test.job`,
+            {
+                body: "{",
+                headers: { "Content-Type": "application/json" },
+                method: "PATCH",
+            }
+        );
+        expect(malformedPatch.status).toBe(400);
+        await expect(malformedPatch.json()).resolves.toEqual({ error: "Invalid JSON" });
+
+        const missingPatchTarget = await api<{ error: string }>(
+            "/api/jobs/not-present",
+            json("PATCH", { patch: { enabled: true } })
+        );
+        expect(missingPatchTarget.status).toBe(404);
+        expect(missingPatchTarget.body.error).toBe("Scheduled job not found");
+
         const run = await api<{
             isOk: boolean;
             run: {
@@ -1106,6 +1147,16 @@ describe("Mira Dashboard backend integration", () => {
         const missing = await api<{ error: string }>("/api/jobs/not-present");
         expect(missing.status).toBe(404);
         expect(missing.body.error).toBe("Scheduled job not found");
+
+        const missingRun = await api<{ error: string }>("/api/jobs/not-present/run", {
+            method: "POST",
+        });
+        expect(missingRun.status).toBe(404);
+        expect(missingRun.body.error).toBe("Scheduled job not found");
+
+        const missingRuns = await api<{ error: string }>("/api/jobs/not-present/runs");
+        expect(missingRuns.status).toBe(404);
+        expect(missingRuns.body.error).toBe("Scheduled job not found");
     });
 
     it("validates legacy cron route payloads and reports log rotation state", async () => {
@@ -1534,6 +1585,15 @@ describe("Mira Dashboard backend integration", () => {
             value: () => {},
             writable: true,
         });
+
+        delete process.env.ELEVENLABS_API_KEY;
+        const missingApiKey = await api<{ error: string }>(
+            "/api/tts/speak",
+            json("POST", { text: "Hei" })
+        );
+        expect(missingApiKey.status).toBe(500);
+        expect(missingApiKey.body.error).toBe("ELEVENLABS_API_KEY is not configured");
+
         process.env.ELEVENLABS_API_KEY = "test-elevenlabs-key";
         const fetchMock = async (input: Request | URL | string, init?: RequestInit) => {
             const url = String(input);
@@ -1555,6 +1615,16 @@ describe("Mira Dashboard backend integration", () => {
         });
 
         try {
+            const invalidJson = await fetch(`${testState.baseUrl}/api/tts/speak`, {
+                body: "{",
+                headers: { "Content-Type": "application/json" },
+                method: "POST",
+            });
+            expect(invalidJson.status).toBe(400);
+            expect(await invalidJson.json()).toMatchObject({
+                error: expect.stringContaining("JSON"),
+            });
+
             const missingText = await api<{ error: string }>(
                 "/api/tts/speak",
                 json("POST", { text: " ".repeat(3) })

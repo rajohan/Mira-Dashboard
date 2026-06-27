@@ -23,6 +23,7 @@ import {
 import { OpenClawSocketProvider } from "../hooks/useOpenClawSocket";
 import { Agents } from "../pages/Agents";
 import {
+    Chat,
     hasNewerAssistantMessageInHistory,
     nextHistoryBottomState,
     nextHistoryLoadSendError,
@@ -70,6 +71,21 @@ const animationFrameState = {
 };
 const terminalApiState = {
     wasJobStopped: false,
+};
+const jobsApiState = {
+    cronName: "heartbeat",
+    heartbeatIntervalSeconds: 1800,
+    heartbeatRuns: [
+        {
+            id: 1,
+            jobId: "heartbeat",
+            status: "success",
+            triggerType: "manual",
+            startedAt: "2026-06-24T08:00:00.000Z",
+            finishedAt: "2026-06-24T08:01:00.000Z",
+            output: { message: "ok" },
+        },
+    ],
 };
 
 function requestAnimationFrameForTest(callback: FrameRequestCallback): number {
@@ -149,6 +165,46 @@ class FakeWebSocket {
         this.readyState = FakeWebSocket.CLOSED;
         this.emit("close");
     }
+}
+
+async function respondToSocketRequest(
+    socket: FakeWebSocket,
+    method: string,
+    payload: unknown = {},
+    isOk = true
+) {
+    const request = findSocketRequest(socket, method);
+
+    if (!request?.id) {
+        throw new Error(`No socket request found for ${method}`);
+    }
+
+    await act(async () => {
+        socket.emit("message", {
+            data: JSON.stringify({
+                type: "response",
+                id: request.id,
+                isOk,
+                payload,
+            }),
+        });
+        await Promise.resolve();
+    });
+}
+
+function findSocketRequest(socket: FakeWebSocket, method: string) {
+    return socket.sent
+        .toReversed()
+        .map(
+            (entry) =>
+                JSON.parse(entry) as {
+                    id?: string;
+                    method?: string;
+                    params?: unknown;
+                    type?: string;
+                }
+        )
+        .find((entry) => entry.type === "req" && entry.method === method);
 }
 
 function parseRequestBody(init: RequestInit | undefined) {
@@ -578,9 +634,11 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
             jobs: [
                 {
                     id: "heartbeat",
-                    name: "heartbeat",
+                    name: jobsApiState.cronName,
                     command: "openclaw heartbeat",
-                    schedule: "*/30 * * * *",
+                    schedule: { kind: "cron", expression: "*/30 * * * *" },
+                    payload: { kind: "heartbeat" },
+                    delivery: { mode: "session" },
                     enabled: true,
                     state: {
                         lastRunAtMs: 1_719_216_000_000,
@@ -900,7 +958,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     name: "Heartbeat",
                     enabled: true,
                     scheduleType: "interval",
-                    intervalSeconds: 1800,
+                    intervalSeconds: jobsApiState.heartbeatIntervalSeconds,
                     actionKey: "heartbeat",
                     actionPayload: {},
                     createdAt: "2026-06-24T08:00:00.000Z",
@@ -913,18 +971,97 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
 
     if (url === "/api/jobs/heartbeat/runs") {
         return Response.json({
-            runs: [
-                {
-                    id: 1,
-                    jobId: "heartbeat",
-                    status: "success",
-                    triggerType: "manual",
-                    startedAt: "2026-06-24T08:00:00.000Z",
-                    finishedAt: "2026-06-24T08:01:00.000Z",
-                    output: { message: "ok" },
-                },
-            ],
+            runs: jobsApiState.heartbeatRuns,
         });
+    }
+
+    if (method === "PATCH" && url === "/api/jobs/heartbeat") {
+        const body = parseRequestBody(init) as {
+            patch?: {
+                cronExpression?: unknown;
+                intervalSeconds?: unknown;
+                scheduleType?: unknown;
+                timeOfDay?: unknown;
+            };
+        };
+        const clearedScheduleValue = JSON.parse("null") as null;
+        jobsApiState.heartbeatIntervalSeconds = Number(body.patch?.intervalSeconds);
+        expect(body).toEqual({
+            patch: {
+                cronExpression: clearedScheduleValue,
+                intervalSeconds: 3600,
+                scheduleType: "interval",
+                timeOfDay: clearedScheduleValue,
+            },
+        });
+        return Response.json({
+            isOk: true,
+            job: {
+                id: "heartbeat",
+                name: "Heartbeat",
+                enabled: true,
+                scheduleType: "interval",
+                intervalSeconds: jobsApiState.heartbeatIntervalSeconds,
+                actionKey: "heartbeat",
+                actionPayload: {},
+                createdAt: "2026-06-24T08:00:00.000Z",
+                updatedAt: "2026-06-24T08:05:00.000Z",
+                isRunning: false,
+            },
+        });
+    }
+
+    if (method === "POST" && url === "/api/jobs/heartbeat/run") {
+        jobsApiState.heartbeatRuns = [
+            {
+                id: 2,
+                jobId: "heartbeat",
+                status: "success",
+                triggerType: "manual",
+                startedAt: "2026-06-24T08:05:00.000Z",
+                finishedAt: "2026-06-24T08:06:00.000Z",
+                output: { message: "manual ok" },
+            },
+            ...jobsApiState.heartbeatRuns,
+        ];
+        return Response.json({
+            isOk: true,
+            run: jobsApiState.heartbeatRuns[0],
+        });
+    }
+
+    if (method === "POST" && url === "/api/cron/jobs/heartbeat/run") {
+        return Response.json({ isOk: true });
+    }
+
+    if (method === "POST" && url === "/api/cron/jobs/heartbeat/toggle") {
+        expect(parseRequestBody(init)).toEqual({ enabled: false });
+        return Response.json({ isOk: true });
+    }
+
+    if (method === "POST" && url === "/api/cron/jobs/heartbeat/update") {
+        const body = parseRequestBody(init) as {
+            patch: {
+                delivery: { mode: string };
+                name: string;
+                payload: { kind: string };
+                schedule: { kind: string; expression: string };
+            };
+        };
+        expect(body).toEqual({
+            patch: {
+                delivery: { mode: "session" },
+                name: "heartbeat-updated",
+                payload: { kind: "heartbeat" },
+                schedule: { kind: "cron", expression: "*/30 * * * *" },
+            },
+        });
+        jobsApiState.cronName = body.patch.name;
+        return Response.json({ isOk: true });
+    }
+
+    if (method === "POST" && url === "/api/cron/jobs/heartbeat/delete") {
+        return Response.json({ isOk: true });
     }
 
     if (url === "/api/logs/info") {
@@ -933,7 +1070,18 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
 
     if (url === "/api/logs/content?file=openclaw.log&lines=100") {
         return Response.json({
-            content: "2026-06-24T08:00:00.000Z info dashboard ready",
+            content: [
+                JSON.stringify({
+                    level: "info",
+                    time: "2026-06-24T08:00:00.000Z",
+                    msg: "dashboard ready",
+                }),
+                JSON.stringify({
+                    level: "error",
+                    time: "2026-06-24T08:01:00.000Z",
+                    msg: "failed backup",
+                }),
+            ].join("\n"),
         });
     }
 
@@ -1031,13 +1179,49 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     reviewDecision: "APPROVED",
                     mergeStateStatus: "CLEAN",
                     statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }],
+                    additions: 12,
+                    deletions: 3,
+                    changedFiles: 2,
+                    reviewerApproved: true,
+                    body: String.raw`## Summary\nCoverage body`,
+                },
+                {
+                    number: 191,
+                    title: "Bump dashboard dependency",
+                    url: "https://github.com/rajohan/Mira-Dashboard/pull/191",
+                    headRefName: "dependabot/npm-and-yarn/pkg",
+                    baseRefName: "main",
+                    author: { login: "app/dependabot" },
+                    createdAt: "2026-06-24T09:00:00.000Z",
+                    updatedAt: "2026-06-24T09:05:00.000Z",
+                    isDraft: false,
+                    reviewDecision: "REVIEW_REQUIRED",
+                    mergeStateStatus: "BEHIND",
+                    mergeable: "MERGEABLE",
+                    statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }],
+                    additions: 4,
+                    deletions: 1,
+                    changedFiles: 1,
+                    canReviewerApprove: true,
+                    body: "Dependency update",
                 },
             ],
         });
     }
 
     if (url === "/api/pull-requests/deployments") {
-        return Response.json({ deployments: [] });
+        return Response.json({
+            deployments: [
+                {
+                    id: "deploy-1",
+                    commit: "abc123",
+                    commitTitle: "Deploy dashboard",
+                    status: "isOk",
+                    updatedAt: "2026-06-24T08:10:00.000Z",
+                    note: "deployed",
+                },
+            ],
+        });
     }
 
     if (url === "/api/pull-requests/production-checkout") {
@@ -1056,20 +1240,105 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
         });
     }
 
+    if (method === "POST" && url === "/api/pull-requests/190/approve") {
+        expect(parseRequestBody(init)).toEqual({ deploy: false });
+        return Response.json({
+            isOk: true,
+            message: "Merged PR #190",
+            cleanup: { isOk: true, message: "Cleaned worktree" },
+        });
+    }
+
+    if (method === "POST" && url === "/api/pull-requests/190/reject") {
+        expect(parseRequestBody(init)).toEqual({});
+        return Response.json({
+            isOk: true,
+            message: "Rejected PR #190",
+        });
+    }
+
+    if (method === "POST" && url === "/api/pull-requests/191/review-approval") {
+        expect(parseRequestBody(init)).toEqual({});
+        return Response.json({ isOk: true, message: "Approved PR #191" });
+    }
+
+    if (method === "POST" && url === "/api/pull-requests/191/update-branch") {
+        expect(parseRequestBody(init)).toEqual({});
+        return Response.json({ isOk: true, message: "Branch update queued" });
+    }
+
+    if (method === "POST" && url === "/api/pull-requests/deploy") {
+        return Response.json({
+            isOk: true,
+            deployment: {
+                id: "deploy-2",
+                commit: "def456",
+                status: "restart-scheduled",
+                updatedAt: "2026-06-24T08:15:00.000Z",
+                note: "Deploy scheduled",
+            },
+        });
+    }
+
     if (url === "/api/config") {
+        if (method === "PUT") {
+            const body = parseRequestBody(init);
+            expect(body.__hash).toBe("config-hash-1");
+            return Response.json({ isOk: true });
+        }
         return Response.json({
             __hash: "config-hash-1",
             agents: { list: [{ id: "ops", heartbeat: { every: "30m" } }] },
             session: { reset: { idleMinutes: 60 } },
+            channels: {
+                webchat: { enabled: true, dmPolicy: "allow" },
+            },
+            auth: { profiles: { owner: {} } },
+            commands: { ownerAllowFrom: ["rajohan"], restart: true },
+            logging: { redactSensitive: "strict" },
+            meta: {
+                lastTouchedAt: "2026-06-25T18:00:00.000Z",
+                lastTouchedVersion: "2026.6.10",
+            },
             models: {},
-            tools: {},
+            tools: {
+                exec: { ask: "always", security: "deny" },
+                web: { fetch: { enabled: true }, search: { enabled: true } },
+            },
         });
+    }
+
+    if (method === "POST" && url === "/api/skills/task-tracking") {
+        expect(parseRequestBody(init)).toEqual({
+            __hash: "config-hash-1",
+            enabled: false,
+        });
+        return Response.json({ isOk: true });
     }
 
     if (url === "/api/skills") {
         return Response.json({
-            skills: [{ name: "task-tracking", description: "Tasks", enabled: true }],
+            skills: [
+                {
+                    name: "task-tracking",
+                    description: "Tasks",
+                    enabled: true,
+                    source: "workspace",
+                },
+            ],
         });
+    }
+
+    if (method === "POST" && url === "/api/backup") {
+        return Response.json({
+            createdAt: "2026-06-25T18:30:00.000Z",
+            hash: "backup-hash",
+            config: { model: "codex" },
+        });
+    }
+
+    if (method === "POST" && url === "/api/restart") {
+        return new Response(undefined, { status: 204 });
     }
 
     if (url === "/api/cache/system.host") {
@@ -1130,6 +1399,19 @@ describe("Mira Dashboard pages", () => {
     beforeEach(() => {
         FakeWebSocket.instances = [];
         terminalApiState.wasJobStopped = false;
+        jobsApiState.cronName = "heartbeat";
+        jobsApiState.heartbeatIntervalSeconds = 1800;
+        jobsApiState.heartbeatRuns = [
+            {
+                id: 1,
+                jobId: "heartbeat",
+                status: "success",
+                triggerType: "manual",
+                startedAt: "2026-06-24T08:00:00.000Z",
+                finishedAt: "2026-06-24T08:01:00.000Z",
+                output: { message: "ok" },
+            },
+        ];
         authActions.setSession({
             authenticated: true,
             isBootstrapRequired: false,
@@ -1215,6 +1497,415 @@ describe("Mira Dashboard pages", () => {
             view.unmount();
             view.queryClient.clear();
         }
+    });
+
+    it("drives settings backup, restart, skill toggle, and save flows", async () => {
+        const user = userEvent.setup();
+        const createObjectUrl = jest.fn(() => "blob:settings-backup");
+        const revokeObjectUrl = jest.fn();
+        const originalCreateObjectUrl = URL.createObjectURL;
+        const originalRevokeObjectUrl = URL.revokeObjectURL;
+        const anchorClick = jest
+            .spyOn(HTMLAnchorElement.prototype, "click")
+            .mockImplementation(() => {});
+        Object.defineProperties(URL, {
+            createObjectURL: {
+                configurable: true,
+                value: createObjectUrl,
+                writable: true,
+            },
+            revokeObjectURL: {
+                configurable: true,
+                value: revokeObjectUrl,
+                writable: true,
+            },
+        });
+
+        try {
+            renderPage(createElement(Settings));
+            expect(await screen.findByText("Model Configuration")).toBeInTheDocument();
+
+            await user.click(screen.getByRole("button", { name: /^backup$/i }));
+            await waitFor(() => expect(createObjectUrl).toHaveBeenCalled());
+            expect(anchorClick).toHaveBeenCalled();
+            expect(revokeObjectUrl).toHaveBeenCalledWith("blob:settings-backup");
+
+            await user.click(screen.getByRole("button", { name: /^session$/i }));
+            await user.clear(screen.getByLabelText(/idle timeout/i));
+            await user.type(screen.getByLabelText(/idle timeout/i), "45");
+            await user.click(screen.getAllByRole("button", { name: /^save$/i }).at(-1)!);
+            expect(await screen.findByText("Session settings saved")).toBeInTheDocument();
+
+            await user.click(screen.getByRole("button", { name: /^heartbeat$/i }));
+            await user.clear(screen.getByLabelText("Interval (seconds)"));
+            await user.type(screen.getByLabelText("Interval (seconds)"), "120");
+            await user.clear(screen.getByLabelText("Target Channel"));
+            await user.type(screen.getByLabelText("Target Channel"), "ops-room");
+            await user.click(screen.getAllByRole("button", { name: /^save$/i }).at(-1)!);
+            expect(
+                await screen.findByText("Heartbeat settings saved")
+            ).toBeInTheDocument();
+
+            await user.click(screen.getByRole("button", { name: /^skills$/i }));
+            await user.click(
+                screen.getByRole("switch", { name: "Toggle task-tracking" })
+            );
+
+            await user.click(screen.getByRole("button", { name: /^restart$/i }));
+            const restartDialog = screen.getByRole("dialog", {
+                name: "Restart Gateway",
+            });
+            const restartDialogButtons = [...restartDialog.querySelectorAll("button")];
+            await user.click(restartDialogButtons.at(-1)!);
+            await waitFor(() =>
+                expect(
+                    (
+                        fetch as unknown as {
+                            mock: { calls: Array<[string, RequestInit | undefined]> };
+                        }
+                    ).mock.calls.some(
+                        ([url, init]) =>
+                            url === "/api/restart" &&
+                            (init as RequestInit | undefined)?.method === "POST"
+                    )
+                ).toBe(true)
+            );
+
+            const fetchCalls = (
+                fetch as unknown as {
+                    mock: { calls: Array<[string, RequestInit | undefined]> };
+                }
+            ).mock.calls;
+            const configWrites = fetchCalls
+                .filter(
+                    ([url, init]) =>
+                        url === "/api/config" && init?.method === "PUT" && init.body
+                )
+                .map(([, init]) => parseRequestBody(init));
+            expect(configWrites).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        __hash: "config-hash-1",
+                        session: { reset: { idleMinutes: 45 } },
+                    }),
+                    expect.objectContaining({
+                        __hash: "config-hash-1",
+                        agents: {
+                            list: [
+                                {
+                                    heartbeat: {
+                                        every: "2m",
+                                        target: "ops-room",
+                                    },
+                                    id: "ops",
+                                },
+                            ],
+                        },
+                    }),
+                ])
+            );
+            expect(fetchCalls).toEqual(
+                expect.arrayContaining([
+                    [
+                        "/api/skills/task-tracking",
+                        expect.objectContaining({ method: "POST" }),
+                    ],
+                ])
+            );
+        } finally {
+            anchorClick.mockRestore();
+            Object.defineProperties(URL, {
+                createObjectURL: {
+                    configurable: true,
+                    value: originalCreateObjectUrl,
+                    writable: true,
+                },
+                revokeObjectURL: {
+                    configurable: true,
+                    value: originalRevokeObjectUrl,
+                    writable: true,
+                },
+            });
+        }
+    });
+
+    it("edits and runs Dashboard jobs plus OpenClaw cron jobs", async () => {
+        const user = userEvent.setup();
+        const view = renderPage(createElement(Jobs));
+
+        await waitFor(() => {
+            expect(screen.queryAllByText("Heartbeat").length).toBeGreaterThan(0);
+            expect(screen.getByText("Run logs")).toBeInTheDocument();
+        });
+
+        await user.clear(screen.getByLabelText("Interval seconds"));
+        await user.type(screen.getByLabelText("Interval seconds"), "3600");
+        await user.click(screen.getByRole("button", { name: /save schedule/i }));
+        await waitFor(() => {
+            expect(screen.getAllByText("Schedule: Every 1h").length).toBeGreaterThan(0);
+        });
+
+        await user.click(screen.getByRole("button", { name: /run now/i }));
+        await waitFor(() => {
+            expect(screen.getByText("manual run #2")).toBeInTheDocument();
+            expect(screen.getByText(/manual ok/)).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: /openclaw cron/i }));
+        await waitFor(() => {
+            expect(screen.queryAllByText("heartbeat").length).toBeGreaterThan(0);
+            expect(screen.getByText("Job config")).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: /trigger now/i }));
+        await waitFor(() => {
+            expect(screen.getByText(/Triggered/)).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByLabelText("Enabled"));
+        await user.click(screen.getByRole("button", { name: /^edit$/i }));
+        await user.clear(screen.getByLabelText("Name"));
+        await user.type(screen.getByLabelText("Name"), "heartbeat-updated");
+        await user.click(screen.getByRole("button", { name: /save edits/i }));
+        await waitFor(() => {
+            expect(screen.getAllByText("heartbeat-updated").length).toBeGreaterThan(0);
+        });
+
+        await user.click(screen.getByRole("button", { name: /^delete$/i }));
+        expect(
+            screen.getByRole("heading", { name: "Delete cron job" })
+        ).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: /^delete cron job$/i }));
+        await waitFor(() => {
+            expect(screen.queryByText("Delete cron job")).not.toBeInTheDocument();
+        });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("drives pull request review, branch update, deploy, merge, and reject flows", async () => {
+        const user = userEvent.setup();
+        const view = renderPage(createElement(PullRequests));
+
+        await waitFor(() => {
+            expect(screen.getByText("Expand backend coverage")).toBeInTheDocument();
+            expect(screen.getByText("Bump dashboard dependency")).toBeInTheDocument();
+            expect(screen.getByText("Deploy dashboard")).toBeInTheDocument();
+        });
+        expect(screen.getByText("Coverage body")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Approve PR" }));
+        expect(screen.getByRole("heading", { name: "Approve PR" })).toBeInTheDocument();
+        await user.click(screen.getAllByRole("button", { name: "Approve PR" }).at(-1)!);
+        await waitFor(() => {
+            expect(screen.getByText("Approved PR #191")).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: "Update branch" }));
+        await waitFor(() => {
+            expect(screen.getByText("Branch update queued")).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: "Deploy latest main" }));
+        expect(
+            screen.getByRole("heading", { name: "Deploy latest main" })
+        ).toBeInTheDocument();
+        await user.click(
+            screen.getAllByRole("button", { name: "Deploy latest main" }).at(-1)!
+        );
+        await waitFor(() => {
+            expect(screen.getByText("Deploy scheduled")).toBeInTheDocument();
+        });
+
+        await user.click(screen.getAllByRole("button", { name: "Merge only" })[0]!);
+        expect(screen.getByRole("heading", { name: "Merge PR" })).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Merge PR" }));
+        await waitFor(() => {
+            expect(screen.getByText(/Merged PR #190/)).toBeInTheDocument();
+            expect(screen.getByText(/Cleaned worktree/)).toBeInTheDocument();
+        });
+
+        await user.click(screen.getAllByRole("button", { name: "Reject" })[0]!);
+        expect(screen.getByRole("heading", { name: "Reject PR" })).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Reject PR" }));
+        await waitFor(() => {
+            expect(screen.getByText("Rejected PR #190")).toBeInTheDocument();
+        });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("drives logs page loading, searching, level filtering, and clearing", async () => {
+        const user = userEvent.setup();
+        const view = renderPage(createElement(Logs), { withSocket: true });
+
+        await waitFor(() => {
+            expect(screen.getByText("openclaw.log")).toBeInTheDocument();
+            expect(screen.getByText(/2 of 2 entries/)).toBeInTheDocument();
+        });
+
+        await user.type(screen.getByPlaceholderText("Search logs..."), "failed");
+        await waitFor(() => {
+            expect(screen.getByText(/1 of 2 entries/)).toBeInTheDocument();
+        });
+
+        const searchInput = screen.getByPlaceholderText("Search logs...");
+
+        await user.clear(searchInput);
+        await user.type(searchInput, "missing");
+        await waitFor(() => {
+            expect(screen.getByText("No logs match your filter.")).toBeInTheDocument();
+        });
+
+        await user.clear(searchInput);
+        await waitFor(() => {
+            expect(screen.getByText(/2 of 2 entries/)).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: "error" }));
+        await waitFor(() => {
+            expect(screen.getByText(/1 of 2 entries/)).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: "error" }));
+        await waitFor(() => {
+            expect(screen.getByText(/2 of 2 entries/)).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: "Clear" }));
+        await waitFor(() => {
+            expect(screen.getByText("Waiting for logs...")).toBeInTheDocument();
+        });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("drives chat page session sync, history loading, diagnostics, and send ack", async () => {
+        const user = userEvent.setup();
+        const view = renderPage(createElement(Chat), { withSocket: true });
+
+        await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+        const socket = FakeWebSocket.instances[0]!;
+
+        await act(async () => {
+            socket.emit("open");
+            await Promise.resolve();
+        });
+
+        await waitFor(() => {
+            expect(
+                socket.sent.some((entry) => entry.includes('"method":"sessions.list"'))
+            ).toBe(true);
+        });
+        await respondToSocketRequest(socket, "sessions.list", {
+            sessions: [
+                {
+                    id: "session-main",
+                    key: "agent:main:main",
+                    type: "main",
+                    agentType: "main",
+                    displayLabel: "Main chat",
+                    model: "codex",
+                    thinkingLevel: "medium",
+                    verboseLevel: "compact",
+                    updatedAt: "2026-06-24T08:00:00.000Z",
+                },
+            ],
+        });
+        await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(
+                socket.sent.some((entry) => entry.includes('"method":"models.list"'))
+            ).toBe(true);
+        });
+        await respondToSocketRequest(socket, "models.list", {
+            models: [{ id: "codex", label: "Codex" }],
+        });
+        await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(
+                socket.sent.some((entry) => entry.includes('"method":"chat.history"'))
+            ).toBe(true);
+        });
+        expect(findSocketRequest(socket, "chat.history")?.params).toMatchObject({
+            sessionKey: "agent:main:main",
+        });
+        await respondToSocketRequest(socket, "chat.history", {
+            messages: [
+                {
+                    role: "user",
+                    content: "Previous question",
+                    timestamp: "2026-06-24T08:00:00.000Z",
+                },
+                {
+                    role: "assistant",
+                    content: "Previous answer",
+                    timestamp: "2026-06-24T08:00:01.000Z",
+                },
+            ],
+        });
+        await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(
+                screen.getByText(/MAIN · codex · Thinking: medium/)
+            ).toBeInTheDocument();
+        });
+
+        const thinkingToggle = screen.getByRole("button", { name: "Thinking" });
+        const toolsToggle = screen.getByRole("button", { name: "Tools" });
+        await user.click(thinkingToggle);
+        await user.click(toolsToggle);
+        expect(thinkingToggle).toHaveAttribute("aria-pressed", "true");
+        expect(toolsToggle).toHaveAttribute("aria-pressed", "true");
+
+        await user.type(
+            screen.getByPlaceholderText(
+                "Message, attach files, or use / commands (try /help)"
+            ),
+            "Ship it"
+        );
+        await user.click(screen.getByRole("button", { name: "Send" }));
+
+        await waitFor(() => {
+            expect(
+                socket.sent.some((entry) => entry.includes('"method":"sessions.patch"'))
+            ).toBe(true);
+        });
+        await respondToSocketRequest(socket, "sessions.patch", {});
+        await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(
+                socket.sent.some((entry) => entry.includes('"method":"chat.send"'))
+            ).toBe(true);
+        });
+        const chatSendRequest = socket.sent
+            .map((entry) => JSON.parse(entry) as { method?: string; params?: unknown })
+            .find((entry) => entry.method === "chat.send");
+        expect(chatSendRequest?.params).toMatchObject({
+            sessionKey: "agent:main:main",
+            sessionId: "session-main",
+            message: "Ship it",
+        });
+        await respondToSocketRequest(socket, "chat.send", { runId: "run-123" });
+        await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(
+                screen.getByPlaceholderText(
+                    "Message, attach files, or use / commands (try /help)"
+                )
+            ).toHaveValue("");
+        });
+
+        view.unmount();
+        view.queryClient.clear();
     });
 
     it("renders sessions page connection state with a socket provider", async () => {

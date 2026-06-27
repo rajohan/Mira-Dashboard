@@ -146,6 +146,7 @@ export function SkillsSection({ skills, onToggle }: SkillsSectionProperties) {
                                     )}
                                 </div>
                                 <Switch
+                                    ariaLabel={`Toggle ${skill.name}`}
                                     isChecked={skill.enabled}
                                     onChange={(isChecked) =>
                                         onToggle(skill.name, isChecked)

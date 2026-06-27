@@ -118,9 +118,6 @@ function validateExecRequest(payload: unknown): ExecRequest {
     if (args !== undefined && path.basename(command) !== command) {
         throw new ExecValidationError("command must be an approved executable name");
     }
-    if (args !== undefined && !ALLOWED_DIRECT_EXECUTABLES.has(path.basename(command))) {
-        throw new ExecValidationError("command executable is not approved");
-    }
     if (args !== undefined && !Array.isArray(args)) {
         throw new ExecValidationError("args must be an array");
     }
@@ -133,6 +130,9 @@ function validateExecRequest(payload: unknown): ExecRequest {
                 throw new ExecValidationError("args cannot contain null bytes");
             }
         }
+    }
+    if (args !== undefined && !ALLOWED_DIRECT_EXECUTABLES.has(path.basename(command))) {
+        throw new ExecValidationError("command executable is not approved");
     }
     if (cwd !== undefined && typeof cwd !== "string") {
         throw new ExecValidationError("cwd must be a string");
