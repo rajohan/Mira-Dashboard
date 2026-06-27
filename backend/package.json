@@ -14,7 +14,7 @@
         "format": "prettier --write '**/*.{ts,js}'",
         "format:check": "prettier --check '**/*.{ts,js}'",
         "test": "bun test",
-        "test:coverage": "bun test --coverage && bun ../scripts/checkCoverage.ts coverage/lcov.info 85 src/"
+        "test:coverage": "bun ../scripts/runCoverage.ts 85 src/"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
