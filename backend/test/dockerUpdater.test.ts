@@ -661,6 +661,7 @@ describe("Docker updater tag patterns", () => {
 
     it("rolls back compose files when an update command fails", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
         const appsRoot = createTemporaryRoot("mira-docker-updater-rollback-");
         const appRoot = path.join(appsRoot, "unit-rollback-app");
         const composePath = path.join(appRoot, "compose.yaml");
@@ -679,6 +680,7 @@ describe("Docker updater tag patterns", () => {
         ].join("\n");
         writeFileSync(composePath, originalCompose);
         process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
         const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
             input: Request | string | URL
         ) => {
@@ -724,6 +726,7 @@ describe("Docker updater tag patterns", () => {
 
     it("reports reconciliation failures after Compose succeeds", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
         const appsRoot = createTemporaryRoot("mira-docker-updater-reconcile-");
         const appRoot = path.join(appsRoot, "unit-reconcile-app");
         const composePath = path.join(appRoot, "compose.yaml");
@@ -744,6 +747,7 @@ describe("Docker updater tag patterns", () => {
             ].join("\n")
         );
         process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
         const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
             input: Request | string | URL
         ) => {
@@ -956,6 +960,7 @@ describe("Docker updater tag patterns", () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
         rememberEnvironment("MIRA_GITHUB_TOKEN");
         rememberEnvironment("MIRA_GITHUB_USERNAME");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
         const appsRoot = createTemporaryRoot("mira-docker-updater-ghcr-auth-");
         const appRoot = path.join(appsRoot, "unit-ghcr-auth-app");
         mkdirSync(appRoot, { recursive: true });
@@ -977,6 +982,7 @@ describe("Docker updater tag patterns", () => {
         process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
         process.env.MIRA_GITHUB_USERNAME = "mira-user";
         process.env.MIRA_GITHUB_TOKEN = "mira-token";
+        delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
 
         const requests: Array<{ authorization?: string; url: string }> = [];
         const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (

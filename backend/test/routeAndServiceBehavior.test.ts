@@ -2734,8 +2734,11 @@ describe("backend route and service behavior", () => {
             isOk: true,
         });
         if (!hasCompressionStream) {
+            const compressionWarning = expect.objectContaining({
+                message: expect.stringContaining("Compression failed"),
+            });
             expect(archiveOnlyLiveSummary.warnings).toEqual(
-                expect.arrayContaining([expect.stringContaining("Compression failed")])
+                expect.arrayContaining([compressionWarning])
             );
         }
         expect(existsSync(archiveOnlyOld)).toBe(false);

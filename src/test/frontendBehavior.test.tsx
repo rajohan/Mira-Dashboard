@@ -98,6 +98,7 @@ import {
     useRefreshCacheEntry,
 } from "../hooks/useCache";
 import {
+    type OpenClawConfig,
     useConfig,
     useCreateBackup,
     useRestartGateway,
