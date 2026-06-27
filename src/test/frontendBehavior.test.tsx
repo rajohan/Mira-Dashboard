@@ -2118,6 +2118,58 @@ describe("Mira Dashboard frontend behavior", () => {
         });
     });
 
+    it("preserves cached nested config when update response only returns a hash", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/config" && method === "GET") {
+                    return Response.json({
+                        __hash: "hash-1",
+                        agents: {
+                            defaults: { model: { primary: "codex" } },
+                            list: [{ id: "ops", name: "Ops" }],
+                        },
+                    });
+                }
+
+                if (url === "/api/config" && method === "PUT") {
+                    return Response.json({ isOk: true, result: { hash: "hash-2" } });
+                }
+
+                throw new Error(`Unexpected config API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const updateConfig = renderHookWithQueryClient(() => useUpdateConfig());
+        updateConfig.queryClient.setQueryData<OpenClawConfig>(["config"], {
+            __hash: "hash-1",
+            agents: {
+                defaults: { model: { primary: "codex" } },
+                list: [{ id: "ops", name: "Ops" }],
+            },
+        });
+        await updateConfig.result.current.mutateAsync({
+            agents: { defaults: { model: { primary: "gpt-5.5" } } },
+        });
+
+        expect(
+            updateConfig.queryClient.getQueryData<OpenClawConfig>(["config"])
+        ).toMatchObject({
+            __hash: "hash-2",
+            agents: {
+                defaults: { model: { primary: "codex" } },
+                list: [{ id: "ops", name: "Ops" }],
+            },
+        });
+    });
+
     it("fetches database overview and mutates sessions through hooks", async () => {
         const fetchMock = jest.fn(
             async (input: RequestInfo | URL, init?: RequestInit) => {

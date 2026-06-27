@@ -227,12 +227,15 @@ export function useUpdateConfig() {
         onSuccess: (response, config) => {
             const nextHash = response?.result?.hash;
             if (nextHash?.trim()) {
+                const nextConfig = response?.result?.parsed;
                 queryClient.setQueryData<OpenClawConfig>(
                     configKeys.config(),
                     (current) =>
-                        current
-                            ? { ...current, ...config, __hash: nextHash.trim() }
-                            : { ...config, __hash: nextHash.trim() }
+                        nextConfig
+                            ? { ...nextConfig, __hash: nextHash.trim() }
+                            : current
+                              ? { ...current, __hash: nextHash.trim() }
+                              : { ...config, __hash: nextHash.trim() }
                 );
             }
             queryClient.invalidateQueries({ queryKey: configKeys.config() });
