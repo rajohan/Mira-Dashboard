@@ -1794,6 +1794,180 @@ describe("shared component helpers", () => {
                 now
             )
         ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "assistant recovered text",
+                        thinking: undefined,
+                    },
+                    text: "assistant recovered text",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "assistant recovered text",
+                        images: [],
+                        role: "assistant",
+                        text: "assistant recovered text",
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "",
+                        thinking: undefined,
+                        toolCalls: [{ name: "exec" }],
+                    },
+                    text: "",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [{ name: "exec" }],
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        thinking: [{ text: "exact thinking recovered" }],
+                    },
+                },
+                [
+                    {
+                        attachments: [],
+                        content: [{ text: "exact thinking recovered", type: "thinking" }],
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        thinking: [{ text: "exact thinking recovered" }],
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "",
+                        thinking: undefined,
+                        toolCalls: [{ id: "call-1", name: "exec" }],
+                    },
+                    text: "",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [{ id: "call-1", name: "exec" }],
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "",
+                        thinking: undefined,
+                        toolResult: {
+                            content: "ok",
+                            id: "call-1",
+                            name: "exec",
+                        },
+                    },
+                    text: "",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolResult: {
+                            content: "ok",
+                            id: "call-1",
+                            name: "exec",
+                        },
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "",
+                        thinking: undefined,
+                        toolResult: {
+                            content: "ok",
+                            name: "exec",
+                        },
+                    },
+                    text: "",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolResult: {
+                            content: "ok",
+                            name: "exec",
+                        },
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                { ...stream, updatedAt: quietUpdatedAt },
+                [
+                    {
+                        attachments: [],
+                        content: "thinking recovered prefix and suffix",
+                        images: [],
+                        role: "user",
+                        text: "thinking recovered prefix and suffix",
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
     });
 
     it("renders chat messages list helpers and primary row actions", async () => {
