@@ -1358,6 +1358,38 @@ describe("shared component helpers", () => {
                     )
             )
         ).toBe(true);
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "merge-args-tool",
+                        isError: true,
+                        name: "functions.exec_command",
+                        phase: "error",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            toolCall.id === "merge-args-tool" &&
+                            toolCall.toolResult?.content === "workspace" &&
+                            toolCall.toolResult.isError === true
+                    )
+            )
+        ).toBe(true);
         expect(
             messages
                 .flatMap((message) => {
@@ -1374,6 +1406,80 @@ describe("shared component helpers", () => {
                 })
                 .filter((toolCall) => toolCall.id === "merge-args-tool")
         ).toHaveLength(1);
+
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "shared-call",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-a",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "run-b" },
+                        id: "shared-call",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-b",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        const sharedCallRows = messages.flatMap((message) => {
+            if (
+                typeof message === "object" &&
+                message !== null &&
+                "toolCalls" in message &&
+                Array.isArray(message.toolCalls) &&
+                message.toolCalls.some((toolCall) => toolCall.id === "shared-call")
+            ) {
+                return [
+                    {
+                        runId:
+                            "runId" in message && typeof message.runId === "string"
+                                ? message.runId
+                                : undefined,
+                        toolCalls: message.toolCalls,
+                    },
+                ];
+            }
+
+            return [];
+        });
+        expect(sharedCallRows).toHaveLength(2);
+        expect(
+            sharedCallRows.find((row) => row.runId === "run-a")?.toolCalls[0]?.arguments
+        ).toBeUndefined();
+        expect(
+            sharedCallRows.find((row) => row.runId === "run-b")?.toolCalls[0]?.arguments
+        ).toEqual({ command: "run-b" });
+        for (const runId of ["run-a", "run-b"]) {
+            act(() => {
+                listener?.({
+                    event: "model.completed",
+                    payload: {
+                        runId,
+                        sessionKey: "agent:main:main",
+                    },
+                    type: "event",
+                });
+            });
+        }
 
         act(() => {
             listener?.({
@@ -3150,6 +3256,36 @@ describe("shared component helpers", () => {
                 [mixedDiagnosticHistoryRow]
             )[0]?.thinking?.[0]?.text
         ).toBe("local reasoning");
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [mixedDiagnosticLocalRow],
+                [
+                    {
+                        ...mixedDiagnosticHistoryRow,
+                        thinking: [{ text: "history reasoning" }],
+                    },
+                ]
+            )[0]?.thinking?.[0]?.text
+        ).toBe("history reasoning");
+
+        const firstDoneDiagnostic = {
+            ...mixedDiagnosticLocalRow,
+            runId: "done-1",
+            text: "Done",
+            thinking: [{ text: "first done reasoning" }],
+        };
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [firstDoneDiagnostic],
+                [{ content: "Done", role: "assistant", runId: "done-2", text: "Done" }]
+            )[0]?.thinking
+        ).toBeUndefined();
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [firstDoneDiagnostic],
+                [{ content: "Done", role: "assistant", runId: "done-1", text: "Done" }]
+            )[0]?.thinking?.[0]?.text
+        ).toBe("first done reasoning");
     });
 
     it("detects recovered thinking-only active streams", () => {
@@ -3363,6 +3499,68 @@ describe("shared component helpers", () => {
                         toolCalls: [
                             { arguments: { command: "same" }, name: "exec" },
                             { arguments: { command: "same" }, name: "exec" },
+                        ],
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        const toolCallWithResultStream = {
+            ...stream,
+            message: {
+                ...stream.message,
+                text: "",
+                thinking: undefined,
+                toolCalls: [
+                    {
+                        id: "call-1",
+                        name: "exec",
+                        toolResult: {
+                            content: "ok",
+                            id: "call-1",
+                            name: "exec",
+                        },
+                    },
+                ],
+            },
+            text: "",
+        };
+        expect(
+            isActiveStreamRecoveredInMessages(
+                toolCallWithResultStream,
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [{ id: "call-1", name: "exec" }],
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                toolCallWithResultStream,
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [
+                            {
+                                id: "call-1",
+                                name: "exec",
+                                toolResult: {
+                                    content: "ok",
+                                    id: "call-1",
+                                    name: "exec",
+                                },
+                            },
                         ],
                     },
                 ],

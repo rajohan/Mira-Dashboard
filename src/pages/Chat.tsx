@@ -81,6 +81,26 @@ function toolArgumentsIdentity(value: unknown): string {
     return JSON.stringify(value ?? undefined);
 }
 
+function isMatchingToolResult(
+    left: NonNullable<ChatHistoryMessage["toolCalls"]>[number]["toolResult"],
+    right: NonNullable<ChatHistoryMessage["toolCalls"]>[number]["toolResult"]
+): boolean {
+    if (!left || !right) {
+        return false;
+    }
+
+    if (left.id || right.id) {
+        return Boolean(left.id && right.id && left.id === right.id);
+    }
+
+    return (
+        left.name === right.name &&
+        left.content === right.content &&
+        (left.images?.length || 0) === (right.images?.length || 0) &&
+        left.isError === right.isError
+    );
+}
+
 /** Returns whether an active stream is already represented in visible history. */
 export function isActiveStreamRecoveredInMessages(
     stream: ActiveChatStream,
@@ -128,21 +148,29 @@ export function isActiveStreamRecoveredInMessages(
                 const hasRecoveredToolCalls = stream.message.toolCalls.every(
                     (streamToolCall) => {
                         const matchingIndex = unmatchedToolCalls.findIndex((toolCall) => {
-                            if (streamToolCall.id || toolCall.id) {
-                                return Boolean(
-                                    streamToolCall.id &&
-                                    toolCall.id &&
-                                    streamToolCall.id === toolCall.id
-                                );
+                            const isMatchingCall =
+                                streamToolCall.id || toolCall.id
+                                    ? Boolean(
+                                          streamToolCall.id &&
+                                          toolCall.id &&
+                                          streamToolCall.id === toolCall.id
+                                      )
+                                    : streamToolCall.name === toolCall.name &&
+                                      toolArgumentsIdentity(streamToolCall.arguments) ===
+                                          toolArgumentsIdentity(toolCall.arguments) &&
+                                      !streamToolCall.id &&
+                                      !toolCall.id;
+
+                            if (!isMatchingCall) {
+                                return false;
                             }
 
-                            return (
-                                streamToolCall.name === toolCall.name &&
-                                toolArgumentsIdentity(streamToolCall.arguments) ===
-                                    toolArgumentsIdentity(toolCall.arguments) &&
-                                !streamToolCall.id &&
-                                !toolCall.id
-                            );
+                            return streamToolCall.toolResult
+                                ? isMatchingToolResult(
+                                      streamToolCall.toolResult,
+                                      toolCall.toolResult
+                                  )
+                                : true;
                         });
 
                         if (matchingIndex === -1) {

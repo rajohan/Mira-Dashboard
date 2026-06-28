@@ -495,11 +495,15 @@ function matchingToolMessageIndex(
 /** Finds an existing live tool call row for a repeated call update. */
 function matchingToolCallUpdateIndex(
     messages: ChatHistoryMessage[],
-    incomingToolCall: NonNullable<ChatHistoryMessage["toolCalls"]>[number]
+    incomingToolCall: NonNullable<ChatHistoryMessage["toolCalls"]>[number],
+    incomingRunId?: string
 ): { messageIndex: number; toolCallIndex: number } | undefined {
     for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
         const existing = messages[messageIndex];
         if (existing?.role.toLowerCase() !== "assistant") {
+            continue;
+        }
+        if (incomingRunId && existing.runId && existing.runId !== incomingRunId) {
             continue;
         }
 
@@ -547,7 +551,7 @@ function mergeRuntimeToolMessages(
         if (!message.toolResult) {
             const incomingToolCall = message.toolCalls?.[0];
             const match = incomingToolCall
-                ? matchingToolCallUpdateIndex(next, incomingToolCall)
+                ? matchingToolCallUpdateIndex(next, incomingToolCall, message.runId)
                 : undefined;
             if (incomingToolCall && match) {
                 const existing = next[match.messageIndex]!;
@@ -583,10 +587,19 @@ function mergeRuntimeToolMessages(
             const hasIncomingOutput = Boolean(
                 result.content.length > 0 || result.images?.length
             );
-            const toolResult =
-                hasIncomingOutput || !matchingToolCall.toolResult
-                    ? result
-                    : matchingToolCall.toolResult;
+            const hasIncomingError = result.isError === true;
+            let toolResult = matchingToolCall.toolResult;
+            if (hasIncomingOutput || !toolResult) {
+                toolResult = result;
+            } else if (hasIncomingError) {
+                toolResult = {
+                    ...toolResult,
+                    ...result,
+                    content: result.content || toolResult.content,
+                    images: (result.images?.length ? result : toolResult).images,
+                    isError: true,
+                };
+            }
             const mergedToolCall = incomingToolCall
                 ? {
                       ...matchingToolCall,

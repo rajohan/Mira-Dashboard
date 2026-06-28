@@ -113,32 +113,44 @@ function mergeDiagnosticDetails(
     previousMessages: ChatHistoryMessage[],
     nextMessages: ChatHistoryMessage[]
 ): ChatHistoryMessage[] {
+    const unmatchedPrevious = previousMessages.filter(
+        (candidate) =>
+            candidate.local === true &&
+            candidate.role.toLowerCase() === "assistant" &&
+            candidate.text.trim() &&
+            hasDiagnosticDetails(candidate)
+    );
+
     return nextMessages.map((message) => {
-        if (
-            message.role.toLowerCase() !== "assistant" ||
-            hasDiagnosticDetails(message) ||
-            !message.text.trim()
-        ) {
+        if (message.role.toLowerCase() !== "assistant" || !message.text.trim()) {
             return message;
         }
 
-        const previous = previousMessages.find(
+        const previousIndex = unmatchedPrevious.findIndex(
             (candidate) =>
-                candidate.local === true &&
-                candidate.role.toLowerCase() === "assistant" &&
                 candidate.text.trim() === message.text.trim() &&
-                hasDiagnosticDetails(candidate)
+                (!candidate.runId || !message.runId || candidate.runId === message.runId)
         );
+
+        if (previousIndex === -1) {
+            return message;
+        }
+
+        const previous = unmatchedPrevious[previousIndex];
+        unmatchedPrevious.splice(previousIndex, 1);
 
         if (!previous) {
             return message;
         }
 
+        const thinking = (message.thinking?.length ? message : previous).thinking;
+        const toolCalls = (message.toolCalls?.length ? message : previous).toolCalls;
+
         return {
             ...message,
-            thinking: previous.thinking,
-            toolCalls: previous.toolCalls,
-            toolResult: previous.toolResult,
+            thinking,
+            toolCalls,
+            toolResult: message.toolResult || previous.toolResult,
         };
     });
 }
