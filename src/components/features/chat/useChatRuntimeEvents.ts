@@ -511,6 +511,7 @@ function matchingToolCallUpdateIndex(
 
                 return (
                     !toolCall.id &&
+                    !toolCall.toolResult &&
                     toolCall.name === incomingToolCall.name &&
                     JSON.stringify(toolCall.arguments ?? undefined) ===
                         JSON.stringify(incomingToolCall.arguments ?? undefined)
@@ -519,6 +520,7 @@ function matchingToolCallUpdateIndex(
 
             return (
                 !toolCall.id &&
+                !toolCall.toolResult &&
                 toolCall.name === incomingToolCall.name &&
                 JSON.stringify(toolCall.arguments ?? undefined) ===
                     JSON.stringify(incomingToolCall.arguments ?? undefined)
@@ -556,6 +558,7 @@ function mergeRuntimeToolMessages(
                     ...incomingToolCall,
                     id: incomingToolCall.id || matchingToolCall.id,
                     name: incomingToolCall.name || matchingToolCall.name,
+                    arguments: incomingToolCall.arguments ?? matchingToolCall.arguments,
                     toolResult: matchingToolCall.toolResult,
                 };
                 next[match.messageIndex] = {
@@ -779,6 +782,7 @@ function runtimeReasoningItemMessage(
         return undefined;
     }
     const thinkingId = runtimeItemStringValues(data, ["itemId", "id"]).at(0);
+    const isDeltaItem = runtimeItemTextValues(data, ["delta"]).length > 0;
 
     return {
         role: "assistant",
@@ -786,7 +790,7 @@ function runtimeReasoningItemMessage(
         text: "",
         images: [],
         attachments: [],
-        thinking: [{ id: thinkingId, snapshot: isRuntimePreambleItem(data), text }],
+        thinking: [{ id: thinkingId, snapshot: !isDeltaItem, text }],
         timestamp: currentIsoString(),
         runId: typeof payload.runId === "string" ? payload.runId : undefined,
     };
@@ -1470,13 +1474,18 @@ export function useChatRuntimeEvents({
                     const runId = isStartsNewRun
                         ? incomingRunId
                         : existing?.runId || incomingRunId;
+                    const previousText =
+                        isStartsNewRun && !promotesProvisionalRun
+                            ? ""
+                            : existing?.text || "";
+                    const shouldAppendRuntimeText =
+                        runtimeMessageToApply &&
+                        stream === "assistant" &&
+                        rawStringValue(data.delta) !== undefined;
                     const text = runtimeMessageToApply
-                        ? mergeStreamText(
-                              isStartsNewRun && !promotesProvisionalRun
-                                  ? ""
-                                  : existing?.text || "",
-                              runtimeMessageToApply.text
-                          )
+                        ? shouldAppendRuntimeText
+                            ? `${previousText}${runtimeMessageToApply.text}`
+                            : mergeStreamText(previousText, runtimeMessageToApply.text)
                         : isStartsNewRun
                           ? ""
                           : existing?.text || "";

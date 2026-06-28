@@ -1061,6 +1061,37 @@ describe("shared component helpers", () => {
                 "Hello world"
             );
         });
+        for (const delta of ["hel", "l", "o"]) {
+            act(() => {
+                listener?.({
+                    event: "agent",
+                    payload: {
+                        data: { delta },
+                        runId: "assistant-deltas",
+                        sessionKey: "agent:main:main",
+                        stream: "assistant",
+                    },
+                    type: "event",
+                });
+            });
+        }
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current[
+                    "agent:main:main::assistant-deltas::assistant"
+                ]?.text
+            ).toBe("hello");
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "assistant-deltas",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
 
         act(() => {
             listener?.({
@@ -1302,6 +1333,126 @@ describe("shared component helpers", () => {
                 })
                 .filter((toolCall) => toolCall.id === "merge-args-tool")
         ).toHaveLength(1);
+
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "sparse-update" },
+                        id: "sparse-update-tool",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "sparse-update-tool",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "sparse-update-tool",
+                        name: "functions.exec_command",
+                        phase: "result",
+                        result: "sparse output",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            toolCall.id === "sparse-update-tool" &&
+                            toolCall.arguments?.command === "sparse-update" &&
+                            toolCall.toolResult?.content === "sparse output"
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "repeat-same" },
+                        name: "functions.exec_command",
+                        phase: "result",
+                        result: "old repeat output",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "repeat-same" },
+                        id: "repeat-same-new",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        const repeatedSameCalls = messages.flatMap((message) => {
+            if (
+                typeof message === "object" &&
+                message !== null &&
+                "toolCalls" in message &&
+                Array.isArray(message.toolCalls)
+            ) {
+                return message.toolCalls.filter(
+                    (toolCall) => toolCall.arguments?.command === "repeat-same"
+                );
+            }
+
+            return [];
+        });
+        expect(repeatedSameCalls).toHaveLength(2);
+        expect(
+            repeatedSameCalls.find((toolCall) => toolCall.id === "repeat-same-new")
+                ?.toolResult
+        ).toBeUndefined();
 
         act(() => {
             listener?.({
@@ -1619,6 +1770,48 @@ describe("shared component helpers", () => {
                 )
             ).toBe(true);
             expect(stream?.statusText).toBeUndefined();
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning-summary",
+                        itemKind: "analysis",
+                        summary: "checking",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning-summary",
+                        itemKind: "analysis",
+                        summary: "checking files",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const stream =
+                activeStreamsReference.current["agent:main:main::run-1::reasoning"];
+            const matches = thinkingTexts(stream).filter((text) =>
+                text.includes("checking")
+            );
+            expect(matches).toContain("checking files");
+            expect(matches).not.toContain("checkingchecking files");
         });
 
         act(() => {
