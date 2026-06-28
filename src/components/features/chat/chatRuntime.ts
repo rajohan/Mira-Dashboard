@@ -63,7 +63,7 @@ function mergeThinkingBlocks(
     }
 
     const merged = [...wasPrevious.thinking];
-    for (const nextBlock of next.thinking) {
+    for (const [nextIndex, nextBlock] of next.thinking.entries()) {
         if (nextBlock.id) {
             const index = merged.findIndex((block) => block.id === nextBlock.id);
             if (index !== -1) {
@@ -77,11 +77,12 @@ function mergeThinkingBlocks(
             }
         }
 
-        const lastBlock = merged.at(-1);
-        if (!nextBlock.id && lastBlock && !lastBlock.id) {
-            merged[merged.length - 1] = {
-                ...lastBlock,
-                text: mergeDiagnosticText(lastBlock.text, nextBlock.text),
+        const previousBlockAtIndex = merged[nextIndex];
+        if (!nextBlock.id && previousBlockAtIndex && !previousBlockAtIndex.id) {
+            merged[nextIndex] = {
+                ...previousBlockAtIndex,
+                ...nextBlock,
+                text: mergeDiagnosticText(previousBlockAtIndex.text, nextBlock.text),
             };
             continue;
         }

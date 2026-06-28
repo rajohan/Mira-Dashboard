@@ -80,6 +80,24 @@ function diagnosticMessageIdentity(message: ChatHistoryMessage): string | undefi
     return undefined;
 }
 
+/** Returns a stable key for carrying tool results between matching tool rows. */
+function toolCallRowIdentity(message: ChatHistoryMessage): string | undefined {
+    if (!message.toolCalls?.length) {
+        return undefined;
+    }
+
+    return [
+        "tool-calls",
+        ...message.toolCalls.map((toolCall, index) =>
+            [
+                toolCall.id || `no-id-${index}`,
+                toolCall.name,
+                JSON.stringify(toolCall.arguments ?? undefined),
+            ].join("::")
+        ),
+    ].join("::");
+}
+
 /** Performs message IDentity. */
 export function messageIdentity(message: ChatHistoryMessage): string {
     const role = message.role.toLowerCase();
@@ -207,32 +225,56 @@ function mergeToolCallResults(
     previousMessages: ChatHistoryMessage[],
     nextMessages: ChatHistoryMessage[]
 ): ChatHistoryMessage[] {
-    const previousByIdentity = new Map(
-        previousMessages.map((message) => [messageIdentity(message), message])
-    );
+    const previousByIdentity = new Map<string, ChatHistoryMessage>();
+    for (const message of previousMessages) {
+        const identity = toolCallRowIdentity(message);
+        if (identity) {
+            previousByIdentity.set(identity, message);
+        }
+    }
 
     return nextMessages.map((message) => {
-        if (!message.toolCalls?.length) {
+        const identity = toolCallRowIdentity(message);
+        if (!identity || !message.toolCalls?.length) {
             return message;
         }
 
-        const previous = previousByIdentity.get(messageIdentity(message));
+        const previous = previousByIdentity.get(identity);
         if (!previous?.toolCalls?.length) {
             return message;
         }
 
+        const consumedPreviousIndexes = new Set<number>();
         const toolCalls = message.toolCalls.map((toolCall) => {
             if (toolCall.toolResult) {
                 return toolCall;
             }
 
-            const previousToolCall = previous.toolCalls?.find((candidate) => {
-                if (toolCall.id && candidate.id) {
-                    return toolCall.id === candidate.id;
-                }
+            const previousToolCallIndex = previous.toolCalls?.findIndex(
+                (candidate, index) => {
+                    if (consumedPreviousIndexes.has(index)) {
+                        return false;
+                    }
 
-                return toolCall.name === candidate.name && !toolCall.id && !candidate.id;
-            });
+                    if (toolCall.id && candidate.id) {
+                        return toolCall.id === candidate.id;
+                    }
+
+                    return (
+                        toolCall.name === candidate.name &&
+                        JSON.stringify(toolCall.arguments ?? undefined) ===
+                            JSON.stringify(candidate.arguments ?? undefined) &&
+                        !toolCall.id &&
+                        !candidate.id
+                    );
+                }
+            );
+            if (previousToolCallIndex === undefined || previousToolCallIndex === -1) {
+                return toolCall;
+            }
+
+            consumedPreviousIndexes.add(previousToolCallIndex);
+            const previousToolCall = previous.toolCalls?.[previousToolCallIndex];
 
             return previousToolCall?.toolResult
                 ? { ...toolCall, toolResult: previousToolCall.toolResult }

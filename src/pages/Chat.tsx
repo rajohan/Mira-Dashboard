@@ -143,7 +143,11 @@ export function isActiveStreamRecoveredInMessages(
                 }
 
                 return Boolean(
-                    streamResult.name && result.name && streamResult.name === result.name
+                    !streamResult.id &&
+                    !result.id &&
+                    streamResult.name &&
+                    result.name &&
+                    streamResult.name === result.name
                 );
             }
 

@@ -347,6 +347,11 @@ function runtimeToolMessages(
 
     const timestamp = currentIsoString();
     const messages: ChatHistoryMessage[] = [];
+    const resultContent = runtimeDisplayText(result);
+    const resultImages = extractImages(result);
+    const hasResultOutput = resultContent.length > 0 || resultImages.length > 0;
+    const shouldCreateToolResult =
+        hasResult && (phase !== "end" || hasResultOutput || data.isError === true);
     const toolCall =
         arguments_ !== undefined || !hasResult
             ? {
@@ -356,13 +361,13 @@ function runtimeToolMessages(
                   toolResult: undefined,
               }
             : undefined;
-    const toolResult = hasResult
+    const toolResult = shouldCreateToolResult
         ? {
               id,
               name,
-              content: runtimeDisplayText(result),
+              content: resultContent,
               isError: phase === "error" || data.isError === true,
-              images: extractImages(result),
+              images: resultImages,
           }
         : undefined;
 
@@ -462,16 +467,33 @@ function mergeRuntimeToolMessages(
             const existing = next[match.messageIndex]!;
             const nextToolCalls = [...(existing.toolCalls || [])];
             const matchingToolCall = nextToolCalls[match.toolCallIndex]!;
+            const incomingToolCall = message.toolCalls?.[0];
+            const hasIncomingOutput = Boolean(
+                result.content.length > 0 || result.images?.length
+            );
+            const toolResult =
+                hasIncomingOutput || !matchingToolCall.toolResult
+                    ? result
+                    : matchingToolCall.toolResult;
+            const mergedToolCall = incomingToolCall
+                ? {
+                      ...matchingToolCall,
+                      ...incomingToolCall,
+                  }
+                : matchingToolCall;
             nextToolCalls[match.toolCallIndex] = {
-                ...matchingToolCall,
-                toolResult: result,
+                ...mergedToolCall,
+                id: mergedToolCall.id || matchingToolCall.id,
+                name: mergedToolCall.name || matchingToolCall.name,
+                arguments: mergedToolCall.arguments ?? matchingToolCall.arguments,
+                toolResult,
             };
             next[match.messageIndex] = {
                 ...existing,
                 toolCalls: nextToolCalls,
                 toolResult:
                     existing.toolResult ||
-                    (nextToolCalls.length === 1 ? result : undefined),
+                    (nextToolCalls.length === 1 ? toolResult : undefined),
             };
         } else {
             unmerged.push(message);
@@ -480,7 +502,6 @@ function mergeRuntimeToolMessages(
 
     return dedupeMessages([...next, ...unmerged]);
 }
-
 /** Returns a record nested in common runtime event fields. */
 function nestedRuntimeRecord(data: Record<string, unknown>): Record<string, unknown> {
     for (const key of ["item", "payload", "message"]) {
@@ -547,7 +568,7 @@ function runtimeReasoningItemText(data: Record<string, unknown>): string | undef
         "delta",
         "meta",
         "content",
-    ]).find((value) => value.trim());
+    ]).find((value) => value.length > 0);
 }
 
 /** Returns whether an item-like payload represents a tool call. */
@@ -645,7 +666,7 @@ function runtimeReasoningItemMessage(
     }
 
     const text = runtimeReasoningItemText(data) || "";
-    if (!text.trim()) {
+    if (text.length === 0) {
         return undefined;
     }
     const thinkingId = runtimeItemStringValues(data, ["itemId", "id"]).at(0);
@@ -1049,6 +1070,26 @@ export function useChatRuntimeEvents({
 
             if (isTerminalLifecycleEvent) {
                 flushPendingDeltaUpdates();
+                const bufferedText = activeAssistantTextForRun(
+                    selectedSessionKey,
+                    eventRunId
+                );
+                if (bufferedText.trim()) {
+                    setMessages((wasPrevious) =>
+                        dedupeMessages([
+                            ...wasPrevious,
+                            {
+                                role: "assistant",
+                                content: bufferedText,
+                                text: bufferedText,
+                                images: [],
+                                attachments: [],
+                                timestamp: currentIsoString(),
+                                runId: eventRunId,
+                            },
+                        ])
+                    );
+                }
                 updateActiveStreamsReference.current((wasPrevious) => {
                     const next = { ...wasPrevious };
                     for (const [key, streamEntry] of Object.entries(wasPrevious)) {

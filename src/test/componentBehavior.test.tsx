@@ -31,6 +31,7 @@ import {
 import {
     type ActiveChatStreams,
     createChatVisibility,
+    mergeStreamMessage,
 } from "../components/features/chat/chatRuntime";
 import { normalizeVisibleChatHistoryMessages } from "../components/features/chat/chatTypes";
 import { mergeWithRecentOptimisticMessages } from "../components/features/chat/chatUtilities";
@@ -883,6 +884,28 @@ describe("shared component helpers", () => {
         expect(isRuntimeWorkEvent("session.tool", "tool", "start", "Tool")).toBe(true);
         expect(isRuntimeWorkEvent("session.tool", "tool", "start")).toBe(false);
         expect(isRuntimeWorkEvent("session.event", "lifecycle", "start")).toBe(true);
+        expect(
+            mergeStreamMessage(
+                {
+                    attachments: [],
+                    content: [],
+                    images: [],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "first" }, { text: "second" }],
+                },
+                {
+                    attachments: [],
+                    content: [],
+                    images: [],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: " update" }],
+                },
+                "",
+                "run-1"
+            ).thinking?.map((block) => block.text)
+        ).toEqual(["first update", "second"]);
     });
 
     it("drives chat runtime event subscription, stream buffering, and refreshes", async () => {
@@ -1090,6 +1113,72 @@ describe("shared component helpers", () => {
 
         act(() => {
             listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "merge-args-tool",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "pwd" },
+                        id: "merge-args-tool",
+                        name: "functions.exec_command",
+                        phase: "result",
+                        result: "workspace",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "merge-args-tool",
+                        name: "functions.exec_command",
+                        phase: "end",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            toolCall.id === "merge-args-tool" &&
+                            toolCall.arguments?.command === "pwd" &&
+                            toolCall.toolResult?.content === "workspace"
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
                 event: "agent",
                 payload: {
                     data: {
@@ -1165,6 +1254,61 @@ describe("shared component helpers", () => {
                 thinkingTexts(stream).some((text) =>
                     text.includes("array reasoning block")
                 )
+            ).toBe(true);
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning-space",
+                        kind: "preamble",
+                        progressText: "checking",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning-space",
+                        kind: "preamble",
+                        progressText: " ",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning-space",
+                        kind: "preamble",
+                        progressText: "files",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const stream = activeStreamsReference.current["agent:main:main::reasoning"];
+            expect(
+                thinkingTexts(stream).some((text) => text.includes("checking files"))
             ).toBe(true);
         });
 
@@ -1451,6 +1595,17 @@ describe("shared component helpers", () => {
         await waitFor(() => {
             expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
         });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "text" in message &&
+                    message.text === "Hello world"
+            )
+        ).toBe(true);
 
         act(() => {
             listener?.({
@@ -1793,6 +1948,55 @@ describe("shared component helpers", () => {
                 [alreadyEnrichedHistoryRow]
             )[0]?.toolCalls?.[0]?.toolResult?.content
         ).toBe("history output");
+
+        const duplicateNameLocalRow = {
+            content: "same assistant text",
+            local: true,
+            role: "assistant",
+            text: "same assistant text",
+            timestamp: new Date().toISOString(),
+            toolCalls: [
+                {
+                    arguments: { command: "first" },
+                    name: "functions.exec_command",
+                    toolResult: {
+                        content: "first output",
+                        name: "functions.exec_command",
+                    },
+                },
+                {
+                    arguments: { command: "second" },
+                    name: "functions.exec_command",
+                    toolResult: {
+                        content: "second output",
+                        name: "functions.exec_command",
+                    },
+                },
+            ],
+        };
+        const duplicateNameHistoryRow = {
+            content: "same assistant text",
+            role: "assistant",
+            text: "same assistant text",
+            timestamp: new Date().toISOString(),
+            toolCalls: [
+                {
+                    arguments: { command: "first" },
+                    name: "functions.exec_command",
+                },
+                {
+                    arguments: { command: "second" },
+                    name: "functions.exec_command",
+                },
+            ],
+        };
+
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [duplicateNameLocalRow],
+                [duplicateNameHistoryRow]
+            )[0]?.toolCalls?.map((toolCall) => toolCall.toolResult?.content)
+        ).toEqual(["first output", "second output"]);
     });
 
     it("detects recovered thinking-only active streams", () => {
