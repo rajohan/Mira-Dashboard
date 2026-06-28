@@ -28,6 +28,7 @@ import {
     ChatMessagesList,
     previewFromAttachment,
 } from "../components/features/chat/ChatMessagesList";
+import type { ActiveChatStreams } from "../components/features/chat/chatRuntime";
 import {
     compactStatusText,
     detailFromArguments,
@@ -181,6 +182,10 @@ function createQueryClient() {
             queries: { retry: false, staleTime: Infinity },
         },
     });
+}
+
+function thinkingTexts(stream?: ActiveChatStreams[string]) {
+    return stream?.message?.thinking?.map((block) => block.text) || [];
 }
 
 describe("shared component helpers", () => {
@@ -596,9 +601,10 @@ describe("shared component helpers", () => {
         expect(onToggleTools).toHaveBeenCalledTimes(1);
         expect(screen.getByText(/Thinking: high/)).toBeInTheDocument();
         expect(screen.getByText("Thinking / working")).toBeInTheDocument();
-        expect(screen.getByText("Tool call · run")).toBeInTheDocument();
+        expect(screen.getByText("Run")).toBeInTheDocument();
+        expect(screen.getAllByText("Tool input")).toHaveLength(2);
+        expect(screen.getByText("Tool output")).toBeInTheDocument();
         expect(screen.getByText("No arguments")).toBeInTheDocument();
-        expect(screen.getByText("Tool result · run")).toBeInTheDocument();
     });
 
     it("drives chat composer attachments, slash suggestions, emoji, and submit controls", async () => {
@@ -789,6 +795,48 @@ describe("shared component helpers", () => {
             })
         ).toBe("Todo: write tests");
         expect(
+            runtimeProgressText("session.event", "item", "start", {
+                kind: "preamble",
+                progressText: "Codex preamble text",
+                source: "codex-app-server",
+                title: "Preamble",
+            })
+        ).toBeUndefined();
+        expect(
+            runtimeProgressText("session.event", "item", "start", {
+                itemId: "reasoning",
+                itemKind: "analysis",
+                progressText: "reasoning snapshot",
+                title: "Reasoning",
+            })
+        ).toBeUndefined();
+        expect(
+            runtimeProgressText("session.event", "item", "start", {
+                itemId: "rs_123",
+                kind: "analysis",
+                status: "running",
+                title: "Reasoning",
+            })
+        ).toBeUndefined();
+        expect(
+            runtimeProgressText("session.event", "item", "start", {
+                kind: "command",
+                meta: "git status (repo)",
+                name: "bash",
+                suppressChannelProgress: true,
+                title: "Command",
+            })
+        ).toBeUndefined();
+        expect(
+            runtimeProgressText("session.event", "item", "start", {
+                item: {
+                    kind: "reasoning",
+                    summary: "full nested reasoning snapshot",
+                    type: "analysis",
+                },
+            })
+        ).toBeUndefined();
+        expect(
             runtimeProgressText("session.event", "plan", "start", {
                 explanation: "Update plan",
             })
@@ -812,6 +860,11 @@ describe("shared component helpers", () => {
         expect(runtimeProgressText("session.event", "lifecycle", "start", {})).toBe(
             "Thinking"
         );
+        expect(
+            runtimeProgressText("session.event", "thinking", "delta", {
+                delta: "x".repeat(200),
+            })
+        ).toBe("Thinking");
         expect(
             runtimeProgressText("session.event", "unknown", "start", {})
         ).toBeUndefined();
@@ -849,7 +902,7 @@ describe("shared component helpers", () => {
             }
             return {} as T;
         };
-        let activeStreams = {};
+        let activeStreams: ActiveChatStreams = {};
         const activeStreamsReference = { current: activeStreams };
         const liveHistoryRefreshTimerReference = { current: undefined };
         const shouldStickToBottomReference = { current: true };
@@ -924,7 +977,7 @@ describe("shared component helpers", () => {
                         args: { command: "bun test" },
                         name: "functions.exec_command",
                         phase: "end",
-                        result: { ok: true },
+                        result: { output: "ok" },
                     },
                     runId: "run-1",
                     sessionKey: "agent:main:main",
@@ -939,12 +992,229 @@ describe("shared component helpers", () => {
                     typeof message === "object" &&
                     message !== null &&
                     "role" in message &&
-                    message.role === "tool" &&
-                    "text" in message &&
-                    typeof message.text === "string" &&
-                    message.text.includes("ok")
+                    message.role === "assistant" &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) => toolCall.name === "functions.exec_command"
+                    ) &&
+                    "toolResult" in message &&
+                    typeof message.toolResult === "object" &&
+                    message.toolResult !== null &&
+                    "content" in message.toolResult &&
+                    typeof message.toolResult.content === "string" &&
+                    message.toolResult.content.includes("ok")
             )
         ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "checking files",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const stream = activeStreamsReference.current["agent:main:main::thinking"];
+            expect(stream?.message?.thinking?.[0]?.text).toContain("checking files");
+            expect(stream?.statusText).toBeUndefined();
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        args: { path: "src/pages/Chat.tsx" },
+                        name: "functions.read_file",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            toolCall.name === "functions.read_file" &&
+                            toolCall.arguments?.path === "src/pages/Chat.tsx"
+                    )
+            )
+        ).toBe(true);
+        expect(
+            activeStreamsReference.current["agent:main:main::thinking"]?.message
+                ?.thinking?.[0]?.text
+        ).toContain("checking files");
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning",
+                        itemKind: "analysis",
+                        progressText: "reasoning snapshot",
+                        title: "Reasoning",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const stream = activeStreamsReference.current["agent:main:main::reasoning"];
+            expect(
+                thinkingTexts(stream).some((text) => text.includes("reasoning snapshot"))
+            ).toBe(true);
+            expect(stream?.statusText).toBeUndefined();
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        item: {
+                            kind: "reasoning",
+                            summary: "nested reasoning snapshot",
+                            type: "analysis",
+                        },
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const stream = activeStreamsReference.current["agent:main:main::reasoning"];
+            expect(
+                thinkingTexts(stream).some((text) =>
+                    text.includes("nested reasoning snapshot")
+                )
+            ).toBe(true);
+            expect(stream?.statusText).toBeUndefined();
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        kind: "preamble",
+                        itemId: "preamble-1",
+                        phase: "update",
+                        progressText: "Codex preamble should",
+                        source: "codex-app-server",
+                        title: "Preamble",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        kind: "preamble",
+                        itemId: "preamble-1",
+                        phase: "update",
+                        progressText: "Codex preamble should be thinking",
+                        source: "codex-app-server",
+                        title: "Preamble",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const stream = activeStreamsReference.current["agent:main:main::reasoning"];
+            const matches = thinkingTexts(stream).filter((text) =>
+                text.includes("Codex preamble")
+            );
+            expect(matches).toEqual(["Codex preamble should be thinking"]);
+            expect(stream?.statusText).toBeUndefined();
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        item: {
+                            id: "codex-tool-1",
+                            input: "await tools.exec_command({cmd:'git status'})",
+                            name: "exec",
+                            type: "custom_tool_call",
+                        },
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            toolCall.id === "codex-tool-1" &&
+                            toolCall.name === "exec" &&
+                            toolCall.arguments ===
+                                "await tools.exec_command({cmd:'git status'})"
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+        });
 
         act(() => {
             listener?.({

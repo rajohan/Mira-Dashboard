@@ -43,8 +43,18 @@ interface PendingDeltaUpdate {
 }
 
 const TERMINAL_LIFECYCLE_PHASES = new Set(["end", "error"]);
+const TERMINAL_RUNTIME_EVENTS = new Set(["model.completed", "session.ended"]);
 const TERMINAL_CHAT_STATES = new Set(["aborted", "error", "final"]);
-const WORK_STREAMS = new Set(["tool", "item", "plan", "approval", "patch", "compaction"]);
+const WORK_STREAMS = new Set([
+    "assistant",
+    "thinking",
+    "tool",
+    "item",
+    "plan",
+    "approval",
+    "patch",
+    "compaction",
+]);
 const NON_WORK_TOOL_NAMES = new Set([
     "message",
     "messages",
@@ -68,6 +78,11 @@ function isNonWorkToolName(value: string): boolean {
 /** Returns whether a queued delta used its session key as a provisional run id. */
 function isProvisionalRunId(streamSessionKey: string, runId: string): boolean {
     return runId === streamSessionKey;
+}
+
+/** Returns an internal active stream key for non-message runtime work. */
+function runtimeWorkStreamKey(sessionKey: string, stream: string, eventName: string) {
+    return `${sessionKey}::${stream || eventName || "work"}`;
 }
 
 /** Performs compact status text. */
@@ -147,6 +162,10 @@ export function runtimeProgressText(
         return phase === "start" ? "Thinking" : undefined;
     }
 
+    if (stream === "thinking") {
+        return "Thinking";
+    }
+
     if (stream === "tool" || eventName === "session.tool") {
         const toolName = stringValue(data.name) || stringValue(data.toolName) || "tool";
         if (isNonWorkToolName(toolName)) {
@@ -165,6 +184,10 @@ export function runtimeProgressText(
     }
 
     if (stream === "item") {
+        if (data.suppressChannelProgress === true || isRuntimeThinkingItem(data)) {
+            return undefined;
+        }
+
         const itemName = stringValue(data.name) || stringValue(data.itemKind);
         const detail =
             stringValue(data.meta) ||
@@ -312,41 +335,46 @@ function runtimeToolMessages(
 
     const timestamp = currentIsoString();
     const messages: ChatHistoryMessage[] = [];
+    const toolCall =
+        arguments_ !== undefined || !hasResult
+            ? {
+                  id,
+                  name,
+                  arguments: arguments_,
+              }
+            : undefined;
+    const toolResult = hasResult
+        ? {
+              id,
+              name,
+              content: runtimeDisplayText(result),
+              isError: phase === "error" || data.isError === true,
+          }
+        : undefined;
 
-    if (arguments_ !== undefined || !hasResult) {
+    if (toolCall) {
         messages.push({
             role: "assistant",
             content: "",
             text: "",
             images: [],
             attachments: [],
-            toolCalls: [
-                {
-                    id,
-                    name,
-                    arguments: arguments_,
-                },
-            ],
+            toolCalls: [toolCall],
+            toolResult,
             timestamp,
             local: true,
             runId,
         });
     }
 
-    if (hasResult) {
-        const content = runtimeDisplayText(result);
+    if (!toolCall && toolResult) {
         messages.push({
             role: "tool",
-            content,
-            text: content,
+            content: toolResult.content,
+            text: toolResult.content,
             images: [],
             attachments: [],
-            toolResult: {
-                id,
-                name,
-                content,
-                isError: phase === "error" || data.isError === true,
-            },
+            toolResult,
             timestamp: isoStringFromDate(Date.now() + messages.length),
             local: true,
             runId,
@@ -354,6 +382,253 @@ function runtimeToolMessages(
     }
 
     return messages;
+}
+
+/** Returns whether a tool result belongs to a tool call row. */
+function isMatchingToolMessage(
+    message: ChatHistoryMessage,
+    result: NonNullable<ChatHistoryMessage["toolResult"]>
+): boolean {
+    return Boolean(
+        message.role.toLowerCase() === "assistant" &&
+        message.toolCalls?.some((toolCall) => {
+            if (result.id && toolCall.id) {
+                return result.id === toolCall.id;
+            }
+
+            return result.name && toolCall.name === result.name;
+        })
+    );
+}
+
+/** Merges tool result rows into their matching tool call row when possible. */
+function mergeRuntimeToolMessages(
+    wasPrevious: ChatHistoryMessage[],
+    incoming: ChatHistoryMessage[]
+): ChatHistoryMessage[] {
+    let next = [...wasPrevious];
+    const unmerged: ChatHistoryMessage[] = [];
+
+    for (const message of incoming) {
+        if (!message.toolResult) {
+            unmerged.push(message);
+            continue;
+        }
+
+        let didMerge = false;
+        next = next.map((existing) => {
+            if (
+                didMerge ||
+                !message.toolResult ||
+                !isMatchingToolMessage(existing, message.toolResult)
+            ) {
+                return existing;
+            }
+
+            didMerge = true;
+            return {
+                ...existing,
+                toolResult: message.toolResult,
+            };
+        });
+
+        if (!didMerge) {
+            unmerged.push(message);
+        }
+    }
+
+    return dedupeMessages([...next, ...unmerged]);
+}
+
+/** Returns a record nested in common runtime event fields. */
+function nestedRuntimeRecord(data: Record<string, unknown>): Record<string, unknown> {
+    for (const key of ["item", "payload", "message"]) {
+        const nested = data[key];
+        if (isRecord(nested)) {
+            return nested;
+        }
+    }
+
+    return data;
+}
+
+/** Returns string fields from an item and its common wrapper fields. */
+function runtimeItemStringValues(
+    data: Record<string, unknown>,
+    keys: string[]
+): string[] {
+    const item = nestedRuntimeRecord(data);
+    const values: string[] = [];
+    const sources = item === data ? [data] : [data, item];
+
+    for (const source of sources) {
+        for (const key of keys) {
+            const value = stringValue(source[key]);
+            if (value) {
+                values.push(value);
+            }
+        }
+    }
+
+    return uniqueStrings(values);
+}
+
+/** Returns text carried by a reasoning item event. */
+function runtimeReasoningItemText(data: Record<string, unknown>): string | undefined {
+    return runtimeItemStringValues(data, [
+        "progressText",
+        "summary",
+        "text",
+        "delta",
+        "meta",
+        "content",
+    ]).find((value) => value.trim());
+}
+
+/** Returns whether an item-like payload represents a tool call. */
+function isRuntimeToolCallItem(data: Record<string, unknown>): boolean {
+    const type = stringValue(data.type)?.toLowerCase();
+    return Boolean(
+        type &&
+        [
+            "custom_tool_call",
+            "function_call",
+            "tool_call",
+            "toolcall",
+            "tool_use",
+        ].includes(type)
+    );
+}
+
+/** Builds transient chat rows for OpenAI/Codex response item tool events. */
+function runtimeItemToolMessages(
+    data: Record<string, unknown>,
+    runId?: string
+): ChatHistoryMessage[] {
+    const item = nestedRuntimeRecord(data);
+    if (!isRuntimeToolCallItem(item)) {
+        return [];
+    }
+
+    const normalized = {
+        ...item,
+        args: item.args ?? item.arguments ?? item.input,
+        id: item.id ?? item.call_id ?? item.callId ?? item.toolCallId,
+        name: item.name ?? item.toolName,
+        phase: data.phase ?? item.phase,
+    };
+    return runtimeToolMessages(normalized, runId);
+}
+
+/** Returns whether an item event is Codex preamble/status text. */
+function isRuntimePreambleItem(data: Record<string, unknown>): boolean {
+    const markers = runtimeItemStringValues(data, ["kind", "type", "title", "name"]).map(
+        (value) => value.toLowerCase()
+    );
+
+    return markers.includes("preamble");
+}
+
+/** Returns whether an item event marks model reasoning/thinking activity. */
+function isRuntimeReasoningMarkerItem(data: Record<string, unknown>): boolean {
+    const markers = runtimeItemStringValues(data, [
+        "itemId",
+        "itemKind",
+        "kind",
+        "type",
+        "title",
+        "name",
+        "role",
+        "stream",
+    ]);
+    const markerText = markers.join(" ").toLowerCase();
+    const hasReasoningMarker =
+        /\b(reasoning|reason|thinking|analysis)\b/.test(markerText) ||
+        markerText.includes("reasoning");
+
+    return hasReasoningMarker;
+}
+
+/** Returns whether an item event belongs in the thinking/reasoning bubble. */
+function isRuntimeThinkingItem(data: Record<string, unknown>): boolean {
+    return isRuntimePreambleItem(data) || isRuntimeReasoningMarkerItem(data);
+}
+
+/** Builds a thinking message from reasoning item events. */
+function runtimeReasoningItemMessage(
+    payload: Record<string, unknown>,
+    data: Record<string, unknown>
+): ChatHistoryMessage | undefined {
+    if (!isRuntimeThinkingItem(data)) {
+        return undefined;
+    }
+
+    const text = runtimeReasoningItemText(data) || "";
+    if (!text.trim()) {
+        return undefined;
+    }
+    const thinkingId = runtimeItemStringValues(data, ["itemId", "id"]).at(0);
+
+    return {
+        role: "assistant",
+        content: [{ id: thinkingId, text, type: "thinking" }],
+        text: "",
+        images: [],
+        attachments: [],
+        thinking: [{ id: thinkingId, text }],
+        timestamp: currentIsoString(),
+        runId: typeof payload.runId === "string" ? payload.runId : undefined,
+    };
+}
+
+/** Builds an active stream message from runtime text streams. */
+function runtimeStreamMessage(
+    stream: string,
+    payload: Record<string, unknown>,
+    data: Record<string, unknown>
+): ChatHistoryMessage | undefined {
+    const runId = typeof payload.runId === "string" ? payload.runId : undefined;
+    const text =
+        stringValue(data.delta) ||
+        stringValue(data.text) ||
+        stringValue(data.deltaText) ||
+        stringValue(data.summary) ||
+        "";
+
+    if (stream === "assistant") {
+        if (!text.trim()) {
+            return undefined;
+        }
+
+        return {
+            role: "assistant",
+            content: text,
+            text,
+            images: [],
+            attachments: [],
+            timestamp: currentIsoString(),
+            runId,
+        };
+    }
+
+    if (stream === "thinking") {
+        if (!text.trim()) {
+            return undefined;
+        }
+
+        return {
+            role: "assistant",
+            content: [{ text, type: "thinking" }],
+            text: "",
+            images: [],
+            attachments: [],
+            thinking: [{ text }],
+            timestamp: currentIsoString(),
+            runId,
+        };
+    }
+
+    return undefined;
 }
 
 /** Builds a transient assistant message for Gateway v4 session.message events. */
@@ -628,34 +903,50 @@ export function useChatRuntimeEvents({
             const data = isRecord(payload.data) ? payload.data : {};
             const phase = typeof data.phase === "string" ? data.phase : "";
             const isTerminalLifecycleEvent =
-                stream === "lifecycle" && TERMINAL_LIFECYCLE_PHASES.has(phase);
+                (stream === "lifecycle" && TERMINAL_LIFECYCLE_PHASES.has(phase)) ||
+                TERMINAL_RUNTIME_EVENTS.has(eventName);
 
             if (isTerminalLifecycleEvent) {
                 flushPendingDeltaUpdates();
                 updateActiveStreamsReference.current((wasPrevious) => {
-                    const existing = wasPrevious[selectedSessionKey];
-                    if (
-                        !existing ||
-                        (eventRunId &&
-                            existing.runId !== eventRunId &&
-                            !existing.aliases.includes(eventRunId))
-                    ) {
-                        return wasPrevious;
-                    }
-
                     const next = { ...wasPrevious };
-                    delete next[selectedSessionKey];
+                    for (const [key, streamEntry] of Object.entries(wasPrevious)) {
+                        if (
+                            !isSameSessionKey(streamEntry.sessionKey, selectedSessionKey)
+                        ) {
+                            continue;
+                        }
+
+                        if (
+                            eventRunId &&
+                            streamEntry.runId !== eventRunId &&
+                            !streamEntry.aliases.includes(eventRunId)
+                        ) {
+                            continue;
+                        }
+
+                        delete next[key];
+                    }
                     return next;
                 });
                 refreshSelectedHistorySoon(150);
                 return;
             }
 
-            if (eventName === "session.tool" && showToolOutput) {
+            if ((eventName === "session.tool" || stream === "tool") && showToolOutput) {
                 const toolMessages = runtimeToolMessages(data, eventRunId);
                 if (toolMessages.length > 0) {
                     setMessages((wasPrevious) =>
-                        dedupeMessages([...wasPrevious, ...toolMessages])
+                        mergeRuntimeToolMessages(wasPrevious, toolMessages)
+                    );
+                }
+            }
+
+            if (stream === "item" && showToolOutput) {
+                const toolMessages = runtimeItemToolMessages(data, eventRunId);
+                if (toolMessages.length > 0) {
+                    setMessages((wasPrevious) =>
+                        mergeRuntimeToolMessages(wasPrevious, toolMessages)
                     );
                 }
             }
@@ -670,7 +961,11 @@ export function useChatRuntimeEvents({
             const runtimeMessage =
                 eventName === "session.message"
                     ? runtimeSessionMessage(payload)
-                    : undefined;
+                    : stream === "assistant" || stream === "thinking"
+                      ? runtimeStreamMessage(stream, payload, data)
+                      : stream === "item"
+                        ? runtimeReasoningItemMessage(payload, data)
+                        : undefined;
             const shouldApplyRuntimeMessage = runtimeMessage
                 ? hasActiveStreamContent(runtimeMessage)
                 : false;
@@ -681,7 +976,11 @@ export function useChatRuntimeEvents({
             if (runtimeMessage && !runtimeMessageToApply) {
                 flushPendingDeltaUpdates();
                 updateActiveStreamsReference.current((wasPrevious) => {
-                    const existing = wasPrevious[selectedSessionKey];
+                    const streamKey =
+                        stream === "assistant" || stream === "thinking"
+                            ? runtimeWorkStreamKey(selectedSessionKey, stream, eventName)
+                            : selectedSessionKey;
+                    const existing = wasPrevious[streamKey];
                     const incomingRunId = eventRunId;
                     if (
                         !existing ||
@@ -693,7 +992,7 @@ export function useChatRuntimeEvents({
                     }
 
                     const next = { ...wasPrevious };
-                    delete next[selectedSessionKey];
+                    delete next[streamKey];
                     return next;
                 });
             }
@@ -704,7 +1003,24 @@ export function useChatRuntimeEvents({
                 }
 
                 updateActiveStreamsReference.current((wasPrevious) => {
-                    const existing = wasPrevious[selectedSessionKey];
+                    const streamKey =
+                        runtimeMessageToApply &&
+                        (stream === "assistant" ||
+                            stream === "thinking" ||
+                            (stream === "item" && isRuntimeThinkingItem(data)))
+                            ? runtimeWorkStreamKey(
+                                  selectedSessionKey,
+                                  stream === "item" ? "reasoning" : stream,
+                                  eventName
+                              )
+                            : runtimeMessageToApply
+                              ? selectedSessionKey
+                              : runtimeWorkStreamKey(
+                                    selectedSessionKey,
+                                    stream,
+                                    eventName
+                                );
+                    const existing = wasPrevious[streamKey];
                     const incomingRunId =
                         eventRunId || existing?.runId || selectedSessionKey;
                     const isStartsNewRun = isNewRunForStream(existing, eventRunId);
@@ -716,14 +1032,16 @@ export function useChatRuntimeEvents({
                         : isStartsNewRun
                           ? ""
                           : existing?.text || "";
-                    const nextStatusText = shouldTrackActivity
-                        ? statusText ||
-                          (isStartsNewRun ? undefined : existing?.statusText) ||
-                          "Thinking"
-                        : statusText;
+                    const nextStatusText = runtimeMessageToApply
+                        ? undefined
+                        : shouldTrackActivity
+                          ? statusText ||
+                            (isStartsNewRun ? undefined : existing?.statusText) ||
+                            "Thinking"
+                          : statusText;
                     return {
                         ...wasPrevious,
-                        [selectedSessionKey]: {
+                        [streamKey]: {
                             sessionKey: selectedSessionKey,
                             runId,
                             aliases: uniqueStrings([

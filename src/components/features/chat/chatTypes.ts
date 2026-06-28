@@ -62,6 +62,7 @@ export interface ChatGatewayAttachment {
 
 /** Represents chat thinking display. */
 export interface ChatThinkingDisplay {
+    id?: string;
     text: string;
 }
 
@@ -565,6 +566,49 @@ export function isRenderableChatHistoryMessage(
     );
 }
 
+/** Returns whether a tool result belongs to a tool call row. */
+function isMatchingToolHistoryMessage(
+    message: ChatHistoryMessage,
+    result: NonNullable<ChatHistoryMessage["toolResult"]>
+): boolean {
+    return Boolean(
+        message.role.toLowerCase() === "assistant" &&
+        message.toolCalls?.some((toolCall) => {
+            if (result.id && toolCall.id) {
+                return result.id === toolCall.id;
+            }
+
+            return result.name && toolCall.name === result.name;
+        })
+    );
+}
+
+/** Appends a visible message, folding tool results into matching call rows. */
+function pushVisibleMessage(
+    messages: ChatHistoryMessage[],
+    message: ChatHistoryMessage
+): void {
+    if (!message.toolResult || !isToolRole(message.role)) {
+        messages.push(message);
+        return;
+    }
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const existing = messages[index];
+        if (!existing || !isMatchingToolHistoryMessage(existing, message.toolResult)) {
+            continue;
+        }
+
+        messages[index] = {
+            ...existing,
+            toolResult: message.toolResult,
+        };
+        return;
+    }
+
+    messages.push(message);
+}
+
 /** Normalizes visible chat history messages. */
 export function normalizeVisibleChatHistoryMessages(
     messages: RawChatHistoryMessage[],
@@ -602,7 +646,7 @@ export function normalizeVisibleChatHistoryMessages(
             continue;
         }
 
-        visibleMessages.push(message);
+        pushVisibleMessage(visibleMessages, message);
     }
 
     if (pendingHiddenToolMedia.length > 0) {

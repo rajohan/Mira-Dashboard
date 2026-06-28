@@ -44,6 +44,54 @@ export function mergeStreamText(wasPrevious: string, next: string): string {
     return `${wasPrevious}${next}`;
 }
 
+/** Merges diagnostic stream blocks that may arrive as deltas or full replacements. */
+function mergeDiagnosticText(wasPrevious = "", next = ""): string {
+    return mergeStreamText(wasPrevious, next);
+}
+
+/** Merges thinking blocks from stream events. */
+function mergeThinkingBlocks(
+    wasPrevious: ChatHistoryMessage | undefined,
+    next: ChatHistoryMessage
+): ChatHistoryMessage["thinking"] {
+    if (!next.thinking?.length) {
+        return wasPrevious?.thinking;
+    }
+
+    if (!wasPrevious?.thinking?.length) {
+        return next.thinking;
+    }
+
+    const merged = [...wasPrevious.thinking];
+    for (const nextBlock of next.thinking) {
+        if (nextBlock.id) {
+            const index = merged.findIndex((block) => block.id === nextBlock.id);
+            if (index !== -1) {
+                const previousBlock = merged[index]!;
+                merged[index] = {
+                    ...previousBlock,
+                    ...nextBlock,
+                    text: mergeDiagnosticText(previousBlock.text, nextBlock.text),
+                };
+                continue;
+            }
+        }
+
+        const lastBlock = merged.at(-1);
+        if (!nextBlock.id && lastBlock && !lastBlock.id) {
+            merged[merged.length - 1] = {
+                ...lastBlock,
+                text: mergeDiagnosticText(lastBlock.text, nextBlock.text),
+            };
+            continue;
+        }
+
+        merged.push(nextBlock);
+    }
+
+    return merged;
+}
+
 /** Performs unique strings. */
 export function uniqueStrings(values: Array<string | undefined>): string[] {
     return [...new Set(values.filter(Boolean))] as string[];
@@ -148,7 +196,7 @@ export function mergeStreamMessage(
         attachments: next.attachments?.length
             ? next.attachments
             : wasPrevious?.attachments || [],
-        thinking: next.thinking?.length ? next.thinking : wasPrevious?.thinking,
+        thinking: mergeThinkingBlocks(wasPrevious, next),
         toolCalls: next.toolCalls?.length ? next.toolCalls : wasPrevious?.toolCalls,
         toolResult: next.toolResult || wasPrevious?.toolResult,
         timestamp: currentIsoString(),

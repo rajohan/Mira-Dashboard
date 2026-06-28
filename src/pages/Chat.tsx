@@ -9,6 +9,7 @@ import { ChatComposer } from "../components/features/chat/ChatComposer";
 import { ChatHeader } from "../components/features/chat/ChatHeader";
 import { ChatMessagesList } from "../components/features/chat/ChatMessagesList";
 import {
+    type ActiveChatStream,
     type ActiveChatStreams,
     createChatVisibility,
     hasRecoveredStreamHistory,
@@ -374,73 +375,115 @@ export function Chat() {
     const sessionsForSelectedAgent = selectedAgentId
         ? sortedSessions.filter((session) => getChatAgentId(session) === selectedAgentId)
         : sortedSessions;
-    const selectedStream = selectedSessionKey
-        ? activeStreams[selectedSessionKey]
-        : undefined;
-    const selectedStreamText = selectedStream?.text || "";
-    const selectedStreamMessage = selectedStream?.message;
+    const selectedStreams = selectedSessionKey
+        ? Object.entries(activeStreams)
+              .filter(([, stream]) =>
+                  isSameSessionKey(stream.sessionKey, selectedSessionKey)
+              )
+              .toSorted(([leftKey], [rightKey]) => {
+                  if (leftKey === selectedSessionKey) {
+                      return -1;
+                  }
+                  if (rightKey === selectedSessionKey) {
+                      return 1;
+                  }
+                  return leftKey.localeCompare(rightKey);
+              })
+        : [];
+    const selectedStreamsText = selectedStreams
+        .map(([, stream]) => stream.text)
+        .filter(Boolean)
+        .join("\n");
     const chatVisibility = createChatVisibility(showThinkingOutput, showToolOutput);
     const visibleMessagesForRows = dedupeMessages(messages).filter(
         (message) =>
             !deletedMessageKeys.has(messageDeleteKey(message)) &&
             isRenderableChatHistoryMessage(message, chatVisibility)
     );
-    const selectedStreamUpdatedAt = sessionTimestampMs(selectedStream?.updatedAt);
-    const isSelectedStreamIsQuiet =
-        selectedStreamUpdatedAt === undefined ||
-        Date.now() - selectedStreamUpdatedAt >= ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
-    const isSelectedStreamIsRecoveredInMessages = Boolean(
-        selectedStreamText.trim() &&
-        visibleMessagesForRows.some((message) => {
-            if (message.role.toLowerCase() !== "assistant") {
-                return false;
-            }
+    /** Returns whether active stream text is already represented in history. */
+    function isStreamRecoveredInMessages(stream: ActiveChatStream): boolean {
+        const streamText = stream.text || "";
+        const streamUpdatedAt = sessionTimestampMs(stream.updatedAt);
+        const isStreamQuiet =
+            streamUpdatedAt === undefined ||
+            Date.now() - streamUpdatedAt >= ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
 
-            if (message.text.trim() === selectedStreamText.trim()) {
-                return true;
-            }
+        return Boolean(
+            streamText.trim() &&
+            visibleMessagesForRows.some((message) => {
+                if (message.role.toLowerCase() !== "assistant") {
+                    return false;
+                }
 
-            return (
-                isSelectedStreamIsQuiet &&
-                isRecoveredAssistantText(message.text, selectedStreamText)
-            );
-        })
-    );
-    const shouldShowSelectedStreamRow =
-        !isSelectedStreamIsRecoveredInMessages &&
-        shouldRenderStreamRow(selectedStreamText, selectedStreamMessage, chatVisibility);
-    const shouldShowTypingIndicator = Boolean(
-        selectedStream &&
-        !isSelectedStreamIsRecoveredInMessages &&
-        (selectedStream.statusText || !shouldShowSelectedStreamRow)
-    );
+                if (message.text.trim() === streamText.trim()) {
+                    return true;
+                }
+
+                return (
+                    isStreamQuiet && isRecoveredAssistantText(message.text, streamText)
+                );
+            })
+        );
+    }
+
     const chatRows: ChatRow[] = visibleMessagesForRows.map((message) => ({
         key: messageDeleteKey(message),
         kind: "message",
         message,
     }));
+    let latestTypingStream:
+        | { key: string; statusText: string; updatedAt?: string }
+        | undefined;
 
-    if (shouldShowSelectedStreamRow) {
-        chatRows.push({
-            key: `stream-${selectedSessionKey}`,
-            kind: "stream",
-            message: selectedStreamMessage || {
-                role: "assistant",
-                content: selectedStreamText,
-                text: selectedStreamText,
-            },
-        });
+    for (const [streamKey, stream] of selectedStreams) {
+        const streamText = stream.text || "";
+        const streamMessage = stream.message;
+        const isStreamRecoveredInHistory = isStreamRecoveredInMessages(stream);
+        const shouldShowStreamRow =
+            !isStreamRecoveredInHistory &&
+            shouldRenderStreamRow(streamText, streamMessage, chatVisibility);
+        const shouldShowTypingIndicator = Boolean(
+            !isStreamRecoveredInHistory && !shouldShowStreamRow && stream.statusText
+        );
+
+        if (shouldShowStreamRow) {
+            chatRows.push({
+                key: `stream-${streamKey}`,
+                kind: "stream",
+                message: streamMessage || {
+                    role: "assistant",
+                    content: streamText,
+                    text: streamText,
+                },
+            });
+        }
+
+        if (shouldShowTypingIndicator) {
+            const statusText = stream.statusText || "Thinking";
+            const previousUpdatedAt = sessionTimestampMs(latestTypingStream?.updatedAt);
+            const nextUpdatedAt = sessionTimestampMs(stream.updatedAt);
+            if (
+                !latestTypingStream ||
+                previousUpdatedAt === undefined ||
+                (nextUpdatedAt !== undefined && nextUpdatedAt >= previousUpdatedAt)
+            ) {
+                latestTypingStream = {
+                    key: streamKey,
+                    statusText,
+                    updatedAt: stream.updatedAt,
+                };
+            }
+        }
     }
 
-    if (shouldShowTypingIndicator) {
-        const typingStream = selectedStream!;
+    if (latestTypingStream) {
         chatRows.push({
-            key: `typing-${selectedSessionKey}-${typingStream.statusText || "working"}`,
+            key: `typing-${latestTypingStream.key}-${latestTypingStream.statusText}`,
             kind: "typing",
             message: {
                 role: "assistant",
-                content: typingStream.statusText || "Thinking",
-                text: typingStream.statusText || "Thinking",
+                content: latestTypingStream.statusText,
+                text: latestTypingStream.statusText,
             },
         });
     }
@@ -871,11 +914,11 @@ export function Chat() {
             previousSelectedSessionKeyReference.current !== selectedSessionKey;
         const isRowsWereAdded = chatRows.length > previousChatRowsLengthReference.current;
         const isStreamTextChanged =
-            previousSelectedStreamTextReference.current !== selectedStreamText;
+            previousSelectedStreamTextReference.current !== selectedStreamsText;
 
         previousSelectedSessionKeyReference.current = selectedSessionKey;
         previousChatRowsLengthReference.current = chatRows.length;
-        previousSelectedStreamTextReference.current = selectedStreamText;
+        previousSelectedStreamTextReference.current = selectedStreamsText;
 
         if (chatRows.length === 0) {
             return;
@@ -899,7 +942,7 @@ export function Chat() {
         const scrollFrame = requestAnimationFrame(scrollMessagesToBottom);
 
         return () => cancelAnimationFrame(scrollFrame);
-    }, [chatRows.length, selectedStreamText, selectedSessionKey]);
+    }, [chatRows.length, selectedStreamsText, selectedSessionKey]);
 
     const sessionOptions = sessionsForSelectedAgent
         .filter((session) => hasSessionKey(session))
