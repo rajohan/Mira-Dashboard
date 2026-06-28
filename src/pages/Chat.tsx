@@ -67,11 +67,11 @@ const NO_CHAT_SCROLL_ELEMENT = JSON.parse("null") as HTMLDivElement | null;
 
 /** Returns visible text carried by active stream message details. */
 export function activeStreamRenderableText(stream: ActiveChatStream): string {
-    return [
+    return uniqueStrings([
         stream.text,
         stream.message?.thinking?.map((block) => block.text).join("\n"),
         stream.message?.text,
-    ]
+    ])
         .filter(Boolean)
         .join("\n");
 }
@@ -404,6 +404,16 @@ export function Chat() {
             return next;
         });
     };
+    /** Clears active streams for a session, including per-stream diagnostic keys. */
+    const clearActiveStreamsForSession = (sessionKey: string) => {
+        updateActiveStreams((wasPrevious) =>
+            Object.fromEntries(
+                Object.entries(wasPrevious).filter(
+                    ([, stream]) => !isSameSessionKey(stream.sessionKey, sessionKey)
+                )
+            )
+        );
+    };
 
     const sortedSessions = useMemo(
         () => sortSessionsByTypeAndActivity(sessions),
@@ -715,22 +725,35 @@ export function Chat() {
                     result.messages,
                     createChatVisibility(showThinkingOutput, showToolOutput)
                 );
-                const activeStream = activeStreamsReference.current[requestSessionKey];
-                const activeStreamUpdatedAt = sessionTimestampMs(activeStream?.updatedAt);
-                const isActiveStreamIsQuiet =
-                    activeStreamUpdatedAt === undefined ||
-                    Date.now() - activeStreamUpdatedAt >=
-                        ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
-                const isRecoveredStreamInHistory = Boolean(
-                    activeStream &&
-                    isActiveStreamIsQuiet &&
-                    ((activeStream.text &&
-                        hasRecoveredStreamHistory(nextMessages, activeStream.text)) ||
-                        hasNewerAssistantMessageInHistory(
-                            nextMessages,
-                            activeStream.updatedAt
-                        ))
-                );
+                const recoveredStreamKeys = Object.entries(activeStreamsReference.current)
+                    .filter(([, stream]) =>
+                        isSameSessionKey(stream.sessionKey, requestSessionKey)
+                    )
+                    .filter(([, stream]) => {
+                        const streamText = activeStreamRenderableText(stream);
+                        const activeStreamUpdatedAt = sessionTimestampMs(
+                            stream.updatedAt
+                        );
+                        const isActiveStreamIsQuiet =
+                            activeStreamUpdatedAt === undefined ||
+                            Date.now() - activeStreamUpdatedAt >=
+                                ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
+                        return Boolean(
+                            isActiveStreamIsQuiet &&
+                            (isActiveStreamRecoveredInMessages(stream, nextMessages) ||
+                                (streamText &&
+                                    hasRecoveredStreamHistory(
+                                        nextMessages,
+                                        streamText
+                                    )) ||
+                                hasNewerAssistantMessageInHistory(
+                                    nextMessages,
+                                    stream.updatedAt
+                                ))
+                        );
+                    })
+                    .map(([key]) => key);
+                const isRecoveredStreamInHistory = recoveredStreamKeys.length > 0;
                 setMessages((wasPrevious) => {
                     const previousLast = wasPrevious.at(-1)?.timestamp;
                     const nextLast = nextMessages.at(-1)?.timestamp;
@@ -748,7 +771,9 @@ export function Chat() {
                 if (isRecoveredStreamInHistory) {
                     updateActiveStreams((wasPrevious) => {
                         const next = { ...wasPrevious };
-                        delete next[requestSessionKey];
+                        for (const key of recoveredStreamKeys) {
+                            delete next[key];
+                        }
                         return next;
                     });
                 }
@@ -1415,11 +1440,7 @@ export function Chat() {
 
             if (isResetCommand) {
                 setMessages([]);
-                updateActiveStreams((wasPrevious) => {
-                    const next = { ...wasPrevious };
-                    delete next[selectedSessionKey];
-                    return next;
-                });
+                clearActiveStreamsForSession(selectedSessionKey);
             } else {
                 const acknowledgedRunId = result?.runId;
                 if (acknowledgedRunId) {
@@ -1445,11 +1466,7 @@ export function Chat() {
             }
         } catch (error_) {
             setSendError(chatErrorMessage(error_, "Failed to send message"));
-            updateActiveStreams((wasPrevious) => {
-                const next = { ...wasPrevious };
-                delete next[selectedSessionKey];
-                return next;
-            });
+            clearActiveStreamsForSession(selectedSessionKey);
         } finally {
             endSend(sendEpoch);
         }

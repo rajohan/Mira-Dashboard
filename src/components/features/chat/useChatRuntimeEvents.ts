@@ -979,7 +979,14 @@ export function useChatRuntimeEvents({
                 .map((streamEntry) => streamEntry.text)
                 .filter((text) => text.trim());
 
-            return uniqueStrings(matchingTexts).join("");
+            const completeTexts = uniqueStrings(matchingTexts).filter(
+                (text, _index, texts) =>
+                    texts.every(
+                        (candidate) => candidate === text || !candidate.includes(text)
+                    )
+            );
+
+            return completeTexts.join("");
         };
 
         /** Responds to runtime transcript event events. */
@@ -996,8 +1003,10 @@ export function useChatRuntimeEvents({
             const eventRunId =
                 typeof payload.runId === "string" ? payload.runId : undefined;
             const streamForRun = eventRunId
-                ? Object.values(activeStreamsReference.current).find((stream) =>
-                      stream.aliases.includes(eventRunId)
+                ? Object.values(activeStreamsReference.current).find(
+                      (stream) =>
+                          stream.runId === eventRunId ||
+                          stream.aliases.includes(eventRunId)
                   )
                 : undefined;
             const eventMatchesSelected = isSameSessionKey(
@@ -1030,7 +1039,8 @@ export function useChatRuntimeEvents({
                         if (
                             eventRunId &&
                             streamEntry.runId !== eventRunId &&
-                            !streamEntry.aliases.includes(eventRunId)
+                            !streamEntry.aliases.includes(eventRunId) &&
+                            !isProvisionalRunId(selectedSessionKey, streamEntry.runId)
                         ) {
                             continue;
                         }
@@ -1246,6 +1256,7 @@ export function useChatRuntimeEvents({
             const isStaleSelectedTerminalEvent =
                 eventMatchesSelected &&
                 selectedStream &&
+                !streamForRun &&
                 payload.runId &&
                 TERMINAL_CHAT_STATES.has(payload.state || "") &&
                 !selectedStreamRunIds.includes(payload.runId);

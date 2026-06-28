@@ -99,7 +99,10 @@ import { ExpandableCard, ReadOnlyField } from "../components/ui/ExpandableCard";
 import { getProgressColor, ProgressBar } from "../components/ui/ProgressBar";
 import { useFileExplorerState } from "../hooks/useFileExplorerState";
 import { useSessionActions } from "../hooks/useSessionActions";
-import { isActiveStreamRecoveredInMessages } from "../pages/Chat";
+import {
+    activeStreamRenderableText,
+    isActiveStreamRecoveredInMessages,
+} from "../pages/Chat";
 
 const originalFetch = fetch;
 const originalAnimationFrame = {
@@ -1422,6 +1425,91 @@ describe("shared component helpers", () => {
             listener?.({
                 event: "chat",
                 payload: {
+                    deltaText: "Hello",
+                    runId: "overlap-run",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "Hello world",
+                    },
+                    runId: "overlap-run",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current["agent:main:main::assistant"]?.text
+            ).toBe("Hello world");
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "overlap-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "text" in message &&
+                    message.text === "Hello world"
+            )
+        ).toBe(true);
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "provisional thinking",
+                    },
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current["agent:main:main::thinking"]?.runId
+            ).toBe("agent:main:main");
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "real-runtime-terminal",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
                     message: { role: "assistant", text: "final answer" },
                     runId: "run-1",
                     sessionKey: "agent:main:main",
@@ -1588,6 +1676,17 @@ describe("shared component helpers", () => {
             },
         ];
 
+        expect(
+            activeStreamRenderableText({
+                ...stream,
+                message: {
+                    content: "Done",
+                    role: "assistant",
+                    text: "Done",
+                },
+                text: "Done",
+            })
+        ).toBe("Done");
         expect(
             isActiveStreamRecoveredInMessages(stream, visibleMessages, Date.now())
         ).toBe(true);
