@@ -88,6 +88,7 @@ function toolCallRowIdentity(message: ChatHistoryMessage): string | undefined {
 
     return [
         "tool-calls",
+        message.runId || message.timestamp || message.text.trim() || "no-row",
         ...message.toolCalls.map((toolCall, index) =>
             [
                 toolCall.id || `no-id-${index}`,

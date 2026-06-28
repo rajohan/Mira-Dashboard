@@ -87,6 +87,11 @@ function isProvisionalRunId(streamSessionKey: string, runId: string): boolean {
     return runId === streamSessionKey;
 }
 
+/** Returns whether a stream run id came from an optimistic dashboard send. */
+function isOptimisticRunId(runId: string): boolean {
+    return runId.startsWith("dashboard-chat-");
+}
+
 /** Returns an internal active stream key for non-message runtime work. */
 function runtimeWorkStreamKey(sessionKey: string, stream: string, eventName: string) {
     return `${sessionKey}::${stream || eventName || "work"}`;
@@ -1103,7 +1108,8 @@ export function useChatRuntimeEvents({
                             eventRunId &&
                             streamEntry.runId !== eventRunId &&
                             !streamEntry.aliases.includes(eventRunId) &&
-                            !isProvisionalRunId(selectedSessionKey, streamEntry.runId)
+                            !isProvisionalRunId(selectedSessionKey, streamEntry.runId) &&
+                            !isOptimisticRunId(streamEntry.runId)
                         ) {
                             continue;
                         }

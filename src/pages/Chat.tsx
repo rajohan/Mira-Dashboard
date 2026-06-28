@@ -469,10 +469,14 @@ export function Chat() {
         updateActiveStreams((wasPrevious) =>
             Object.fromEntries(
                 Object.entries(wasPrevious).filter(
-                    ([, stream]) =>
+                    ([streamKey, stream]) =>
                         !(
                             isSameSessionKey(stream.sessionKey, sessionKey) &&
-                            (stream.runId === runId || stream.aliases.includes(runId))
+                            (stream.runId === runId ||
+                                stream.aliases.includes(runId) ||
+                                stream.runId === sessionKey ||
+                                stream.runId.startsWith("dashboard-chat-") ||
+                                streamKey.startsWith(`${sessionKey}::`))
                         )
                 )
             )

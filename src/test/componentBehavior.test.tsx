@@ -1741,6 +1741,14 @@ describe("shared component helpers", () => {
                 activeStreamsReference.current["agent:main:main::thinking"]?.runId
             ).toBe("agent:main:main");
         });
+        activeStreamsReference.current["agent:main:main"] = {
+            aliases: [],
+            runId: "dashboard-chat-test",
+            sessionKey: "agent:main:main",
+            statusText: "Thinking",
+            text: "",
+            updatedAt: new Date().toISOString(),
+        };
         act(() => {
             listener?.({
                 event: "model.completed",
@@ -1859,6 +1867,7 @@ describe("shared component helpers", () => {
             role: "assistant",
             text: "",
             timestamp: new Date().toISOString(),
+            runId: "tool-row-run",
             toolCalls: [
                 {
                     arguments: { command: "git status" },
@@ -1877,6 +1886,7 @@ describe("shared component helpers", () => {
             role: "assistant",
             text: "",
             timestamp: new Date().toISOString(),
+            runId: "tool-row-run",
             toolCalls: [
                 {
                     arguments: { command: "git status" },
@@ -1901,6 +1911,7 @@ describe("shared component helpers", () => {
             role: "assistant",
             text: "",
             timestamp: new Date().toISOString(),
+            runId: "named-tool-row-run",
             toolCalls: [
                 {
                     arguments: { command: "git diff" },
@@ -1917,6 +1928,7 @@ describe("shared component helpers", () => {
             role: "assistant",
             text: "",
             timestamp: new Date().toISOString(),
+            runId: "named-tool-row-run",
             toolCalls: [
                 {
                     arguments: { command: "git diff" },
@@ -1955,6 +1967,7 @@ describe("shared component helpers", () => {
             role: "assistant",
             text: "same assistant text",
             timestamp: new Date().toISOString(),
+            runId: "duplicate-tool-row-run",
             toolCalls: [
                 {
                     arguments: { command: "first" },
@@ -1979,6 +1992,7 @@ describe("shared component helpers", () => {
             role: "assistant",
             text: "same assistant text",
             timestamp: new Date().toISOString(),
+            runId: "duplicate-tool-row-run",
             toolCalls: [
                 {
                     arguments: { command: "first" },
@@ -1997,6 +2011,12 @@ describe("shared component helpers", () => {
                 [duplicateNameHistoryRow]
             )[0]?.toolCalls?.map((toolCall) => toolCall.toolResult?.content)
         ).toEqual(["first output", "second output"]);
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [duplicateNameLocalRow],
+                [{ ...duplicateNameHistoryRow, runId: "new-duplicate-tool-row-run" }]
+            )[0]?.toolCalls?.some((toolCall) => toolCall.toolResult)
+        ).toBe(false);
     });
 
     it("detects recovered thinking-only active streams", () => {
