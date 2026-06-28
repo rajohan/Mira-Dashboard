@@ -992,7 +992,8 @@ export function useChatRuntimeEvents({
                         runId &&
                         streamEntry.runId !== runId &&
                         !streamEntry.aliases.includes(runId) &&
-                        !isProvisionalRunId(sessionKey, streamEntry.runId)
+                        !isProvisionalRunId(sessionKey, streamEntry.runId) &&
+                        !isOptimisticRunId(streamEntry.runId)
                     ) {
                         continue;
                     }
@@ -1021,7 +1022,8 @@ export function useChatRuntimeEvents({
                     return (
                         streamEntry.runId === runId ||
                         streamEntry.aliases.includes(runId) ||
-                        isProvisionalRunId(sessionKey, streamEntry.runId)
+                        isProvisionalRunId(sessionKey, streamEntry.runId) ||
+                        isOptimisticRunId(streamEntry.runId)
                     );
                 })
                 .map((streamEntry) => streamEntry.text)
@@ -1340,7 +1342,8 @@ export function useChatRuntimeEvents({
                 !streamForRun &&
                 payload.runId &&
                 TERMINAL_CHAT_STATES.has(payload.state || "") &&
-                !selectedStreamRunIds.includes(payload.runId);
+                !selectedStreamRunIds.includes(payload.runId) &&
+                !isOptimisticRunId(selectedStream.runId);
             if (isStaleSelectedTerminalEvent) {
                 return;
             }

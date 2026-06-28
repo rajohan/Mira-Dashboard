@@ -60,6 +60,21 @@ export interface ChatGatewayAttachment {
     content: string;
 }
 
+/** Merges attachment display rows without repeating IDs. */
+function mergeChatAttachments(
+    previous: ChatAttachmentDisplay[] = [],
+    next: ChatAttachmentDisplay[] = []
+): ChatAttachmentDisplay[] {
+    const seenIds = new Set<string>();
+    return [...previous, ...next].filter((attachment) => {
+        if (seenIds.has(attachment.id)) {
+            return false;
+        }
+        seenIds.add(attachment.id);
+        return true;
+    });
+}
+
 /** Represents chat thinking display. */
 export interface ChatThinkingDisplay {
     id?: string;
@@ -621,6 +636,7 @@ function pushVisibleMessage(
 
         messages[index] = {
             ...existing,
+            attachments: mergeChatAttachments(existing.attachments, message.attachments),
             toolCalls: nextToolCalls,
             toolResult:
                 existing.toolResult ||

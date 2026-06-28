@@ -76,6 +76,11 @@ export function activeStreamRenderableText(stream: ActiveChatStream): string {
         .join("\n");
 }
 
+/** Returns stable argument text for tool recovery comparisons. */
+function toolArgumentsIdentity(value: unknown): string {
+    return JSON.stringify(value ?? undefined);
+}
+
 /** Returns whether an active stream is already represented in visible history. */
 export function isActiveStreamRecoveredInMessages(
     stream: ActiveChatStream,
@@ -126,6 +131,8 @@ export function isActiveStreamRecoveredInMessages(
 
                         return (
                             streamToolCall.name === toolCall.name &&
+                            toolArgumentsIdentity(streamToolCall.arguments) ===
+                                toolArgumentsIdentity(toolCall.arguments) &&
                             !streamToolCall.id &&
                             !toolCall.id
                         );
@@ -466,21 +473,35 @@ export function Chat() {
             return;
         }
 
-        updateActiveStreams((wasPrevious) =>
-            Object.fromEntries(
-                Object.entries(wasPrevious).filter(
-                    ([streamKey, stream]) =>
-                        !(
-                            isSameSessionKey(stream.sessionKey, sessionKey) &&
-                            (stream.runId === runId ||
-                                stream.aliases.includes(runId) ||
-                                stream.runId === sessionKey ||
-                                stream.runId.startsWith("dashboard-chat-") ||
-                                streamKey.startsWith(`${sessionKey}::`))
-                        )
-                )
-            )
-        );
+        updateActiveStreams((wasPrevious) => {
+            const optimisticUpdatedAt = sessionTimestampMs(
+                wasPrevious[sessionKey]?.runId === runId
+                    ? wasPrevious[sessionKey]?.updatedAt
+                    : undefined
+            );
+
+            return Object.fromEntries(
+                Object.entries(wasPrevious).filter(([streamKey, stream]) => {
+                    if (!isSameSessionKey(stream.sessionKey, sessionKey)) {
+                        return true;
+                    }
+
+                    if (stream.runId === runId || stream.aliases.includes(runId)) {
+                        return false;
+                    }
+
+                    const streamUpdatedAt = sessionTimestampMs(stream.updatedAt);
+                    const isSameSendProvisionalRuntimeStream =
+                        streamKey.startsWith(`${sessionKey}::`) &&
+                        stream.runId === sessionKey &&
+                        optimisticUpdatedAt !== undefined &&
+                        streamUpdatedAt !== undefined &&
+                        streamUpdatedAt >= optimisticUpdatedAt;
+
+                    return !isSameSendProvisionalRuntimeStream;
+                })
+            );
+        });
     };
 
     const sortedSessions = useMemo(

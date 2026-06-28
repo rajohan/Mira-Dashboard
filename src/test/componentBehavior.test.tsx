@@ -1670,6 +1670,51 @@ describe("shared component helpers", () => {
 
         act(() => {
             listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "Optimistic buffered answer",
+                    },
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        activeStreamsReference.current["agent:main:main"] = {
+            aliases: [],
+            runId: "dashboard-chat-optimistic",
+            sessionKey: "agent:main:main",
+            statusText: "Thinking",
+            text: "Optimistic buffered answer",
+            updatedAt: new Date().toISOString(),
+        };
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "real-chat-terminal",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "text" in message &&
+                    message.text === "Optimistic buffered answer"
+            )
+        ).toBe(true);
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
+        act(() => {
+            listener?.({
                 event: "chat",
                 payload: {
                     deltaText: "Hello",
@@ -1858,6 +1903,33 @@ describe("shared component helpers", () => {
         expect(visible[0]?.toolCalls?.[0]?.toolResult?.content).toBe("first output");
         expect(visible[0]?.toolCalls?.[1]?.toolResult?.images).toHaveLength(1);
         expect(visible.some((message) => message.role === "tool")).toBe(false);
+
+        const mediaVisible = normalizeVisibleChatHistoryMessages(
+            [
+                {
+                    content: [
+                        {
+                            arguments: { path: "/tmp/chart.png" },
+                            name: "functions.image",
+                            type: "toolCall",
+                        },
+                    ],
+                    role: "assistant",
+                },
+                {
+                    content: "MEDIA:/tmp/chart.png",
+                    role: "tool",
+                    toolName: "functions.image",
+                },
+            ],
+            createChatVisibility(true, true)
+        );
+
+        expect(mediaVisible).toHaveLength(1);
+        expect(mediaVisible[0]?.toolCalls?.[0]?.toolResult?.content).toContain(
+            "MEDIA:/tmp/chart.png"
+        );
+        expect(mediaVisible[0]?.attachments?.[0]?.fileName).toBe("chart.png");
     });
 
     it("keeps live tool results when history briefly lags", () => {
@@ -2095,6 +2167,41 @@ describe("shared component helpers", () => {
                 now
             )
         ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "",
+                        thinking: undefined,
+                        toolCalls: [
+                            {
+                                arguments: { command: "git status" },
+                                name: "exec",
+                            },
+                        ],
+                    },
+                    text: "",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [
+                            {
+                                arguments: { command: "git diff" },
+                                name: "exec",
+                            },
+                        ],
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
         expect(
             isActiveStreamRecoveredInMessages(
                 {
