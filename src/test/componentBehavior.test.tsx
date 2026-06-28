@@ -1146,6 +1146,33 @@ describe("shared component helpers", () => {
                 event: "agent",
                 payload: {
                     data: {
+                        item: {
+                            kind: "preamble",
+                            summary: [{ text: "array reasoning block", type: "text" }],
+                            type: "analysis",
+                        },
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const stream = activeStreamsReference.current["agent:main:main::reasoning"];
+            expect(
+                thinkingTexts(stream).some((text) =>
+                    text.includes("array reasoning block")
+                )
+            ).toBe(true);
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
                         kind: "preamble",
                         itemId: "preamble-1",
                         phase: "update",
@@ -1207,7 +1234,21 @@ describe("shared component helpers", () => {
                 event: "agent",
                 payload: {
                     data: {
-                        delta: " world",
+                        delta: " ",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "world",
                     },
                     runId: "run-1",
                     sessionKey: "agent:main:main",
@@ -1312,6 +1353,38 @@ describe("shared component helpers", () => {
 
         act(() => {
             listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "other-call-id",
+                        name: "exec",
+                        phase: "result",
+                        result: "wrong call output",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "tool" &&
+                    "toolResult" in message &&
+                    typeof message.toolResult === "object" &&
+                    message.toolResult !== null &&
+                    "id" in message.toolResult &&
+                    message.toolResult.id === "other-call-id"
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
                 event: "agent",
                 payload: {
                     data: {
@@ -1399,6 +1472,25 @@ describe("shared component helpers", () => {
         });
         act(() => {
             listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: " continued",
+                    },
+                    runId: "real-run-after-provisional",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current["agent:main:main::assistant"]?.text
+            ).toBe("Buffered terminal answer continued");
+        });
+        act(() => {
+            listener?.({
                 event: "chat",
                 payload: {
                     runId: "real-run-after-provisional",
@@ -1416,7 +1508,7 @@ describe("shared component helpers", () => {
                     "role" in message &&
                     message.role === "assistant" &&
                     "text" in message &&
-                    message.text === "Buffered terminal answer"
+                    message.text === "Buffered terminal answer continued"
             )
         ).toBe(true);
         expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
@@ -1644,35 +1736,40 @@ describe("shared component helpers", () => {
             [staleHistoryRow]
         );
 
-        expect(merged.includes(localToolRow)).toBe(true);
-        expect(merged.includes(staleHistoryRow)).toBe(true);
+        expect(merged).toHaveLength(1);
+        expect(merged[0]?.toolCalls?.[0]?.id).toBe("call-1");
+        expect(merged[0]?.toolCalls?.[0]?.toolResult?.content).toBe("clean");
     });
 
     it("detects recovered thinking-only active streams", () => {
-        const updatedAt = new Date(Date.now() - 130_000).toISOString();
+        const now = Date.now();
+        const recentUpdatedAt = new Date(now - 1000).toISOString();
+        const quietUpdatedAt = new Date(now - 130_000).toISOString();
         const stream = {
             aliases: [],
             message: {
                 attachments: [],
-                content: [{ text: "thinking recovered", type: "thinking" }],
+                content: [{ text: "thinking recovered prefix", type: "thinking" }],
                 images: [],
                 role: "assistant",
                 text: "",
-                thinking: [{ text: "thinking recovered" }],
+                thinking: [{ text: "thinking recovered prefix" }],
             },
             runId: "run-1",
             sessionKey: "agent:main:main",
             text: "",
-            updatedAt,
+            updatedAt: recentUpdatedAt,
         };
         const visibleMessages = [
             {
                 attachments: [],
-                content: [{ text: "thinking recovered", type: "thinking" }],
+                content: [
+                    { text: "thinking recovered prefix and suffix", type: "thinking" },
+                ],
                 images: [],
                 role: "assistant",
                 text: "",
-                thinking: [{ text: "thinking recovered" }],
+                thinking: [{ text: "thinking recovered prefix and suffix" }],
             },
         ];
 
@@ -1687,8 +1784,15 @@ describe("shared component helpers", () => {
                 text: "Done",
             })
         ).toBe("Done");
+        expect(isActiveStreamRecoveredInMessages(stream, visibleMessages, now)).toBe(
+            false
+        );
         expect(
-            isActiveStreamRecoveredInMessages(stream, visibleMessages, Date.now())
+            isActiveStreamRecoveredInMessages(
+                { ...stream, updatedAt: quietUpdatedAt },
+                visibleMessages,
+                now
+            )
         ).toBe(true);
     });
 

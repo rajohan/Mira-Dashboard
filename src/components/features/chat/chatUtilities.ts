@@ -56,10 +56,6 @@ function diagnosticMessageIdentity(message: ChatHistoryMessage): string | undefi
                     toolCall.id || "no-id-" + fallbackScope + "-" + index,
                     toolCall.name,
                     JSON.stringify(toolCall.arguments ?? undefined),
-                    toolCall.toolResult?.id || "no-result-id",
-                    toolCall.toolResult?.name || "no-result-name",
-                    toolCall.toolResult?.content.trim() || "no-result-content",
-                    toolCall.toolResult?.images?.length || 0,
                 ].join("::")
             ),
         ].join("::");
@@ -206,6 +202,47 @@ function insertMessagesByTimestamp(
     return merged;
 }
 
+/** Copies live tool results onto matching history tool calls. */
+function mergeToolCallResults(
+    previousMessages: ChatHistoryMessage[],
+    nextMessages: ChatHistoryMessage[]
+): ChatHistoryMessage[] {
+    const previousByIdentity = new Map(
+        previousMessages.map((message) => [messageIdentity(message), message])
+    );
+
+    return nextMessages.map((message) => {
+        if (!message.toolCalls?.length) {
+            return message;
+        }
+
+        const previous = previousByIdentity.get(messageIdentity(message));
+        if (!previous?.toolCalls?.length) {
+            return message;
+        }
+
+        const toolCalls = message.toolCalls.map((toolCall) => {
+            if (toolCall.toolResult) {
+                return toolCall;
+            }
+
+            const previousToolCall = previous.toolCalls?.find((candidate) => {
+                if (toolCall.id && candidate.id) {
+                    return toolCall.id === candidate.id;
+                }
+
+                return toolCall.name === candidate.name && !toolCall.id && !candidate.id;
+            });
+
+            return previousToolCall?.toolResult
+                ? { ...toolCall, toolResult: previousToolCall.toolResult }
+                : toolCall;
+        });
+
+        return { ...message, toolCalls };
+    });
+}
+
 /** Performs merge with recent optimistic messages. */
 export function mergeWithRecentOptimisticMessages(
     previousMessages: ChatHistoryMessage[],
@@ -219,8 +256,9 @@ export function mergeWithRecentOptimisticMessages(
         return previousMessages;
     }
 
+    const enrichedNextMessages = mergeToolCallResults(previousMessages, nextMessages);
     const nextIdentities = new Set(
-        nextMessages.map((message) => messageIdentity(message))
+        enrichedNextMessages.map((message) => messageIdentity(message))
     );
     const nextAssistantTexts = nextMessages
         .filter((message) => message.role.toLowerCase() === "assistant")
@@ -272,7 +310,9 @@ export function mergeWithRecentOptimisticMessages(
         );
     });
 
-    return dedupeMessages(insertMessagesByTimestamp(nextMessages, recentMissingMessages));
+    return dedupeMessages(
+        insertMessagesByTimestamp(enrichedNextMessages, recentMissingMessages)
+    );
 }
 
 /** Performs read file as data URL. */

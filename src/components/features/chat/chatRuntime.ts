@@ -25,7 +25,7 @@ export type ActiveChatStreams = Record<string, ActiveChatStream>;
 
 /** Performs merge stream text. */
 export function mergeStreamText(wasPrevious: string, next: string): string {
-    if (!next.trim()) {
+    if (next.length === 0) {
         return wasPrevious;
     }
 

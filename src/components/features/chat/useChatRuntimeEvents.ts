@@ -411,9 +411,7 @@ function matchingToolCallIndex(
         const idMatchIndex = toolCalls.findIndex(
             (toolCall) => toolCall.id && toolCall.id === result.id
         );
-        if (idMatchIndex !== -1) {
-            return idMatchIndex;
-        }
+        return idMatchIndex;
     }
 
     if (!result.name) {
@@ -516,9 +514,33 @@ function runtimeItemStringValues(
     return uniqueStrings(values);
 }
 
+/** Returns text from string fields or block arrays in common runtime wrappers. */
+function runtimeItemTextValues(data: Record<string, unknown>, keys: string[]): string[] {
+    const item = nestedRuntimeRecord(data);
+    const values: string[] = [];
+    const sources = item === data ? [data] : [data, item];
+
+    for (const source of sources) {
+        for (const key of keys) {
+            const rawValue = source[key];
+            const value = rawStringValue(rawValue);
+            if (value) {
+                values.push(value);
+            } else if (Array.isArray(rawValue)) {
+                const text = normalizeText(rawValue);
+                if (text.trim()) {
+                    values.push(text);
+                }
+            }
+        }
+    }
+
+    return uniqueStrings(values);
+}
+
 /** Returns text carried by a reasoning item event. */
 function runtimeReasoningItemText(data: Record<string, unknown>): string | undefined {
-    return runtimeItemStringValues(data, [
+    return runtimeItemTextValues(data, [
         "progressText",
         "summary",
         "text",
@@ -655,7 +677,7 @@ function runtimeStreamMessage(
         "";
 
     if (stream === "assistant") {
-        if (!text.trim()) {
+        if (text.length === 0) {
             return undefined;
         }
 
@@ -671,7 +693,7 @@ function runtimeStreamMessage(
     }
 
     if (isRuntimeThinkingStream(stream)) {
-        if (!text.trim()) {
+        if (text.length === 0) {
             return undefined;
         }
 
@@ -712,7 +734,7 @@ function runtimeSessionMessage(
 /** Returns whether a transcript message should occupy active stream state. */
 function hasActiveStreamContent(message: ChatHistoryMessage): boolean {
     return Boolean(
-        message.text.trim() ||
+        message.text.length > 0 ||
         message.thinking?.length ||
         message.toolCalls?.length ||
         message.images?.length ||
@@ -1144,12 +1166,18 @@ export function useChatRuntimeEvents({
                     const incomingRunId =
                         eventRunId || existing?.runId || selectedSessionKey;
                     const isStartsNewRun = isNewRunForStream(existing, eventRunId);
+                    const promotesProvisionalRun =
+                        isStartsNewRun &&
+                        existing &&
+                        isProvisionalRunId(selectedSessionKey, existing.runId);
                     const runId = isStartsNewRun
                         ? incomingRunId
                         : existing?.runId || incomingRunId;
                     const text = runtimeMessageToApply
                         ? mergeStreamText(
-                              isStartsNewRun ? "" : existing?.text || "",
+                              isStartsNewRun && !promotesProvisionalRun
+                                  ? ""
+                                  : existing?.text || "",
                               runtimeMessageToApply.text
                           )
                         : isStartsNewRun
@@ -1159,7 +1187,9 @@ export function useChatRuntimeEvents({
                         ? undefined
                         : shouldTrackActivity
                           ? statusText ||
-                            (isStartsNewRun ? undefined : existing?.statusText) ||
+                            (isStartsNewRun && !promotesProvisionalRun
+                                ? undefined
+                                : existing?.statusText) ||
                             "Thinking"
                           : statusText;
                     return {
@@ -1168,14 +1198,18 @@ export function useChatRuntimeEvents({
                             sessionKey: selectedSessionKey,
                             runId,
                             aliases: uniqueStrings([
-                                ...(isStartsNewRun ? [] : existing?.aliases || []),
+                                ...(isStartsNewRun && !promotesProvisionalRun
+                                    ? []
+                                    : existing?.aliases || []),
                                 eventRunId,
                                 runId,
                             ]),
                             text,
                             message: runtimeMessageToApply
                                 ? mergeStreamMessage(
-                                      isStartsNewRun ? undefined : existing?.message,
+                                      isStartsNewRun && !promotesProvisionalRun
+                                          ? undefined
+                                          : existing?.message,
                                       runtimeMessageToApply,
                                       text,
                                       runId

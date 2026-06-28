@@ -83,26 +83,68 @@ export function isActiveStreamRecoveredInMessages(
     now = Date.now()
 ): boolean {
     const streamText = activeStreamRenderableText(stream);
+    const streamThinkingText =
+        stream.message?.thinking?.map((block) => block.text).join("\n") || "";
+    const hasToolDetails = Boolean(
+        stream.message?.toolCalls?.length || stream.message?.toolResult
+    );
     const streamUpdatedAt = sessionTimestampMs(stream.updatedAt);
     const isStreamQuiet =
         streamUpdatedAt === undefined ||
         now - streamUpdatedAt >= ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
 
     return Boolean(
-        streamText.trim() &&
+        (streamText.trim() || hasToolDetails) &&
         visibleMessages.some((message) => {
             if (message.role.toLowerCase() !== "assistant") {
                 return false;
             }
 
-            if (message.text.trim() === streamText.trim()) {
+            if (
+                stream.message?.text.trim() &&
+                message.text.trim() === stream.message.text.trim()
+            ) {
                 return true;
             }
 
             const thinkingText =
                 message.thinking?.map((block) => block.text).join("\n") || "";
-            if (thinkingText.trim() === streamText.trim()) {
+            if (
+                streamThinkingText.trim() &&
+                thinkingText.trim() === streamThinkingText.trim()
+            ) {
                 return true;
+            }
+
+            if (
+                stream.message?.toolCalls?.length &&
+                message.toolCalls?.some((toolCall) =>
+                    stream.message?.toolCalls?.some((streamToolCall) => {
+                        if (streamToolCall.id && toolCall.id) {
+                            return streamToolCall.id === toolCall.id;
+                        }
+
+                        return (
+                            streamToolCall.name === toolCall.name &&
+                            !streamToolCall.id &&
+                            !toolCall.id
+                        );
+                    })
+                )
+            ) {
+                return true;
+            }
+
+            if (stream.message?.toolResult && message.toolResult) {
+                const streamResult = stream.message.toolResult;
+                const result = message.toolResult;
+                if (streamResult.id && result.id) {
+                    return streamResult.id === result.id;
+                }
+
+                return Boolean(
+                    streamResult.name && result.name && streamResult.name === result.name
+                );
             }
 
             return (
@@ -410,6 +452,24 @@ export function Chat() {
             Object.fromEntries(
                 Object.entries(wasPrevious).filter(
                     ([, stream]) => !isSameSessionKey(stream.sessionKey, sessionKey)
+                )
+            )
+        );
+    };
+    /** Clears only the optimistic stream created for one send attempt. */
+    const clearOptimisticSendStream = (sessionKey: string, runId?: string) => {
+        if (!runId) {
+            return;
+        }
+
+        updateActiveStreams((wasPrevious) =>
+            Object.fromEntries(
+                Object.entries(wasPrevious).filter(
+                    ([, stream]) =>
+                        !(
+                            isSameSessionKey(stream.sessionKey, sessionKey) &&
+                            (stream.runId === runId || stream.aliases.includes(runId))
+                        )
                 )
             )
         );
@@ -1466,7 +1526,7 @@ export function Chat() {
             }
         } catch (error_) {
             setSendError(chatErrorMessage(error_, "Failed to send message"));
-            clearActiveStreamsForSession(selectedSessionKey);
+            clearOptimisticSendStream(selectedSessionKey, idempotencyKey);
         } finally {
             endSend(sendEpoch);
         }

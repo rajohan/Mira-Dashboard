@@ -580,9 +580,7 @@ function matchingToolCallIndex(
         const idMatchIndex = toolCalls.findIndex(
             (toolCall) => toolCall.id && toolCall.id === result.id
         );
-        if (idMatchIndex !== -1) {
-            return idMatchIndex;
-        }
+        return idMatchIndex;
     }
 
     if (!result.name) {
