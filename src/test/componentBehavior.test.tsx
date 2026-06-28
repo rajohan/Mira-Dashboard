@@ -28,7 +28,11 @@ import {
     ChatMessagesList,
     previewFromAttachment,
 } from "../components/features/chat/ChatMessagesList";
-import type { ActiveChatStreams } from "../components/features/chat/chatRuntime";
+import {
+    type ActiveChatStreams,
+    createChatVisibility,
+} from "../components/features/chat/chatRuntime";
+import { normalizeVisibleChatHistoryMessages } from "../components/features/chat/chatTypes";
 import {
     compactStatusText,
     detailFromArguments,
@@ -1006,6 +1010,21 @@ describe("shared component helpers", () => {
                     message.toolResult.content.includes("ok")
             )
         ).toBe(true);
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "tool" &&
+                    "toolResult" in message &&
+                    typeof message.toolResult === "object" &&
+                    message.toolResult !== null &&
+                    "content" in message.toolResult &&
+                    typeof message.toolResult.content === "string" &&
+                    message.toolResult.content.includes("ok")
+            )
+        ).toBe(false);
 
         act(() => {
             listener?.({
@@ -1169,6 +1188,40 @@ describe("shared component helpers", () => {
                 event: "agent",
                 payload: {
                     data: {
+                        delta: "Hello",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: " world",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current["agent:main:main::assistant"]?.text
+            ).toBe("Hello world");
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
                         item: {
                             id: "codex-tool-1",
                             input: "await tools.exec_command({cmd:'git status'})",
@@ -1201,6 +1254,56 @@ describe("shared component helpers", () => {
                     )
             )
         ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        item: {
+                            call_id: "codex-tool-1",
+                            output: "git clean",
+                            type: "custom_tool_call_output",
+                        },
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            toolCall.id === "codex-tool-1" &&
+                            toolCall.toolResult?.content.includes("git clean")
+                    )
+            )
+        ).toBe(true);
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "tool" &&
+                    "toolResult" in message &&
+                    typeof message.toolResult === "object" &&
+                    message.toolResult !== null &&
+                    "content" in message.toolResult &&
+                    typeof message.toolResult.content === "string" &&
+                    message.toolResult.content.includes("git clean")
+            )
+        ).toBe(false);
 
         act(() => {
             listener?.({
@@ -1269,6 +1372,50 @@ describe("shared component helpers", () => {
 
         unmount();
         expect(unsubscribe).toHaveBeenCalledTimes(1);
+    });
+
+    it("folds repeated tool results into matching calls without clobbering", () => {
+        const visible = normalizeVisibleChatHistoryMessages(
+            [
+                {
+                    content: [
+                        {
+                            arguments: { command: "first" },
+                            name: "functions.exec_command",
+                            type: "toolCall",
+                        },
+                        {
+                            arguments: { command: "second" },
+                            name: "functions.exec_command",
+                            type: "toolCall",
+                        },
+                    ],
+                    role: "assistant",
+                },
+                {
+                    content: "first output",
+                    role: "tool",
+                    toolName: "functions.exec_command",
+                },
+                {
+                    content: [
+                        {
+                            data: "a",
+                            mimeType: "image/png",
+                            type: "image",
+                        },
+                    ],
+                    role: "tool",
+                    toolName: "functions.exec_command",
+                },
+            ],
+            createChatVisibility(true, true)
+        );
+
+        expect(visible).toHaveLength(1);
+        expect(visible[0]?.toolCalls?.[0]?.toolResult?.content).toBe("first output");
+        expect(visible[0]?.toolCalls?.[1]?.toolResult?.images).toHaveLength(1);
+        expect(visible.some((message) => message.role === "tool")).toBe(false);
     });
 
     it("renders chat messages list helpers and primary row actions", async () => {

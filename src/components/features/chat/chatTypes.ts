@@ -71,6 +71,7 @@ export interface ChatToolCallDisplay {
     id?: string;
     name: string;
     arguments?: unknown;
+    toolResult?: ChatToolResultDisplay;
 }
 
 /** Represents chat tool result display. */
@@ -567,19 +568,29 @@ export function isRenderableChatHistoryMessage(
 }
 
 /** Returns whether a tool result belongs to a tool call row. */
-function isMatchingToolHistoryMessage(
-    message: ChatHistoryMessage,
+function matchingToolCallIndex(
+    toolCalls: ChatToolCallDisplay[] | undefined,
     result: NonNullable<ChatHistoryMessage["toolResult"]>
-): boolean {
-    return Boolean(
-        message.role.toLowerCase() === "assistant" &&
-        message.toolCalls?.some((toolCall) => {
-            if (result.id && toolCall.id) {
-                return result.id === toolCall.id;
-            }
+): number {
+    if (!toolCalls?.length) {
+        return -1;
+    }
 
-            return result.name && toolCall.name === result.name;
-        })
+    if (result.id) {
+        const idMatchIndex = toolCalls.findIndex(
+            (toolCall) => toolCall.id && toolCall.id === result.id
+        );
+        if (idMatchIndex !== -1) {
+            return idMatchIndex;
+        }
+    }
+
+    if (!result.name) {
+        return -1;
+    }
+
+    return toolCalls.findIndex(
+        (toolCall) => toolCall.name === result.name && !toolCall.toolResult
     );
 }
 
@@ -595,13 +606,27 @@ function pushVisibleMessage(
 
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const existing = messages[index];
-        if (!existing || !isMatchingToolHistoryMessage(existing, message.toolResult)) {
+        const matchingIndex =
+            existing?.role.toLowerCase() === "assistant"
+                ? matchingToolCallIndex(existing.toolCalls, message.toolResult)
+                : -1;
+        if (!existing || matchingIndex === -1) {
             continue;
         }
 
+        const nextToolCalls = [...(existing.toolCalls || [])];
+        const matchingToolCall = nextToolCalls[matchingIndex]!;
+        nextToolCalls[matchingIndex] = {
+            ...matchingToolCall,
+            toolResult: message.toolResult,
+        };
+
         messages[index] = {
             ...existing,
-            toolResult: message.toolResult,
+            toolCalls: nextToolCalls,
+            toolResult:
+                existing.toolResult ||
+                (nextToolCalls.length === 1 ? message.toolResult : undefined),
         };
         return;
     }

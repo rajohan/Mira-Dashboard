@@ -391,7 +391,15 @@ export function Chat() {
               })
         : [];
     const selectedStreamsText = selectedStreams
-        .map(([, stream]) => stream.text)
+        .map(([, stream]) =>
+            [
+                stream.text,
+                stream.message?.thinking?.map((block) => block.text).join("\n"),
+                stream.message?.text,
+            ]
+                .filter(Boolean)
+                .join("\n")
+        )
         .filter(Boolean)
         .join("\n");
     const chatVisibility = createChatVisibility(showThinkingOutput, showToolOutput);

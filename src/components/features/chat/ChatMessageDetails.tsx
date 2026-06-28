@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useLayoutEffect, useRef } from "react";
 
 import type {
     ChatHistoryMessage,
+    ChatImageBlock,
     ChatToolCallDisplay,
     ChatToolResultDisplay,
     ChatVisibilitySettings,
@@ -77,6 +78,77 @@ function isMatchingToolResult(
     return Boolean(toolResult.name && toolCall.name === toolResult.name);
 }
 
+/** Returns an embeddable image URL for chat image blocks. */
+function toolImageUrl(image: ChatImageBlock): string | undefined {
+    const imageData = image.source?.data || image.data;
+    if (!imageData) {
+        return undefined;
+    }
+
+    const imageMime = image.source?.media_type || image.mimeType || "image/png";
+    return `data:${imageMime};base64,${imageData}`;
+}
+
+/** Renders tool result images. */
+function ToolResultImages({ images = [] }: { images?: ChatImageBlock[] }) {
+    const imageUrls = images
+        .map((image) => toolImageUrl(image))
+        .filter((imageUrl): imageUrl is string => Boolean(imageUrl));
+    if (imageUrls.length === 0) {
+        return;
+    }
+
+    return (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {imageUrls.map((imageUrl, index) => (
+                <img
+                    key={`${imageUrl.slice(0, 48)}-${index}`}
+                    src={imageUrl}
+                    alt={`Tool output ${index + 1}`}
+                    className="max-h-40 max-w-full rounded-md border border-amber-400/20 object-contain"
+                />
+            ))}
+        </div>
+    );
+}
+
+/** Renders thinking blocks while following the bottom unless the user scrolls up. */
+function ThinkingBlocks({ blocks }: { blocks: ChatHistoryMessage["thinking"] }) {
+    const containerReference = useRef<HTMLDivElement>(null);
+    const shouldStickToBottomReference = useRef(true);
+    const textSignature = blocks?.map((block) => block.text).join("\n") || "";
+
+    useLayoutEffect(() => {
+        const container = containerReference.current;
+        if (!container || !shouldStickToBottomReference.current) {
+            return;
+        }
+
+        container.scrollTop = container.scrollHeight;
+    }, [textSignature]);
+
+    return (
+        <div
+            ref={containerReference}
+            className="max-h-80 space-y-2 overflow-y-auto pr-1"
+            onScroll={(event) => {
+                const element = event.currentTarget;
+                shouldStickToBottomReference.current =
+                    element.scrollHeight - element.scrollTop - element.clientHeight < 8;
+            }}
+        >
+            {blocks?.map((block, index) => (
+                <pre
+                    key={block.id || `thinking-${index}`}
+                    className="text-primary-200 font-mono text-[11px] leading-normal break-words whitespace-pre-wrap"
+                >
+                    {block.text}
+                </pre>
+            ))}
+        </div>
+    );
+}
+
 /** Renders the detail block UI. */
 function DetailBlock({
     label,
@@ -146,16 +218,7 @@ export function ChatMessageDetails({
         <div className="mt-1.5 space-y-1.5">
             {shouldShowThinking ? (
                 <DetailBlock label="Thinking / working">
-                    <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
-                        {message.thinking?.map((block, index) => (
-                            <pre
-                                key={block.id || `thinking-${index}`}
-                                className="text-primary-200 font-mono text-[11px] leading-normal break-words whitespace-pre-wrap"
-                            >
-                                {block.text}
-                            </pre>
-                        ))}
-                    </div>
+                    <ThinkingBlocks blocks={message.thinking} />
                 </DetailBlock>
             ) : undefined}
 
@@ -163,12 +226,11 @@ export function ChatMessageDetails({
                 ? message.toolCalls?.map((toolCall, index) => {
                       const formattedArguments = formatToolArguments(toolCall);
                       const summary = toolCallSummary(toolCall);
-                      const toolResult = isMatchingToolResult(
-                          toolCall,
-                          message.toolResult
-                      )
-                          ? message.toolResult
-                          : undefined;
+                      const toolResult =
+                          toolCall.toolResult ||
+                          (isMatchingToolResult(toolCall, message.toolResult)
+                              ? message.toolResult
+                              : undefined);
                       return (
                           <DetailBlock
                               key={toolCall.id || `tool-${index}`}
@@ -202,6 +264,7 @@ export function ChatMessageDetails({
                                               No text output
                                           </span>
                                       )}
+                                      <ToolResultImages images={toolResult.images} />
                                   </ToolSection>
                               ) : undefined}
                           </DetailBlock>
@@ -221,6 +284,7 @@ export function ChatMessageDetails({
                     ) : (
                         <span className="text-primary-300">No text output</span>
                     )}
+                    <ToolResultImages images={message.toolResult?.images} />
                 </DetailBlock>
             ) : undefined}
         </div>
