@@ -93,6 +93,7 @@ export function isActiveStreamRecoveredInMessages(
     const hasToolDetails = Boolean(
         stream.message?.toolCalls?.length || stream.message?.toolResult
     );
+    const hasDiagnosticDetails = Boolean(streamThinkingText.trim() || hasToolDetails);
     const streamUpdatedAt = sessionTimestampMs(stream.updatedAt);
     const isStreamQuiet =
         streamUpdatedAt === undefined ||
@@ -106,6 +107,7 @@ export function isActiveStreamRecoveredInMessages(
             }
 
             if (
+                !hasDiagnosticDetails &&
                 stream.message?.text.trim() &&
                 message.text.trim() === stream.message.text.trim()
             ) {

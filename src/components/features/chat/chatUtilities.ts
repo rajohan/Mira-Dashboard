@@ -99,6 +99,50 @@ function toolCallRowIdentity(message: ChatHistoryMessage): string | undefined {
     ].join("::");
 }
 
+/** Returns whether message carries diagnostic details beyond primary text. */
+function hasDiagnosticDetails(message: ChatHistoryMessage): boolean {
+    return Boolean(
+        (message.thinking?.length || 0) > 0 ||
+        (message.toolCalls?.length || 0) > 0 ||
+        message.toolResult
+    );
+}
+
+/** Carries local diagnostic details onto matching history text rows. */
+function mergeDiagnosticDetails(
+    previousMessages: ChatHistoryMessage[],
+    nextMessages: ChatHistoryMessage[]
+): ChatHistoryMessage[] {
+    return nextMessages.map((message) => {
+        if (
+            message.role.toLowerCase() !== "assistant" ||
+            hasDiagnosticDetails(message) ||
+            !message.text.trim()
+        ) {
+            return message;
+        }
+
+        const previous = previousMessages.find(
+            (candidate) =>
+                candidate.local === true &&
+                candidate.role.toLowerCase() === "assistant" &&
+                candidate.text.trim() === message.text.trim() &&
+                hasDiagnosticDetails(candidate)
+        );
+
+        if (!previous) {
+            return message;
+        }
+
+        return {
+            ...message,
+            thinking: previous.thinking,
+            toolCalls: previous.toolCalls,
+            toolResult: previous.toolResult,
+        };
+    });
+}
+
 /** Performs message IDentity. */
 export function messageIdentity(message: ChatHistoryMessage): string {
     const role = message.role.toLowerCase();
@@ -310,7 +354,10 @@ export function mergeWithRecentOptimisticMessages(
         return previousMessages;
     }
 
-    const enrichedNextMessages = mergeToolCallResults(previousMessages, nextMessages);
+    const enrichedNextMessages = mergeDiagnosticDetails(
+        previousMessages,
+        mergeToolCallResults(previousMessages, nextMessages)
+    );
     const nextIdentities = new Set(
         enrichedNextMessages.map((message) => messageIdentity(message))
     );
@@ -324,12 +371,8 @@ export function mergeWithRecentOptimisticMessages(
         const isLocalMessage = message.local === true;
         const isSystemMessage = role === "system";
         const isLocalUiMessage = isLocalMessage || isSystemMessage;
-        const hasLocalDiagnosticDetails =
-            (message.thinking?.length || 0) > 0 ||
-            (message.toolCalls?.length || 0) > 0 ||
-            Boolean(message.toolResult);
         const isLocalDiagnosticMessage =
-            message.local === true && hasLocalDiagnosticDetails;
+            message.local === true && hasDiagnosticDetails(message);
 
         if (!isOptimisticRole && !isLocalUiMessage && !isLocalDiagnosticMessage) {
             return false;

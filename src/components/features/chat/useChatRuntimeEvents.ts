@@ -838,7 +838,7 @@ function runtimeStreamMessage(
             text: "",
             images: [],
             attachments: [],
-            thinking: [{ text }],
+            thinking: [{ snapshot: rawStringValue(data.delta) === undefined, text }],
             timestamp: currentIsoString(),
             runId,
         };
@@ -1177,7 +1177,8 @@ export function useChatRuntimeEvents({
                             message.toolResult) &&
                         isRenderableChatHistoryMessage(message, visibility)
                     )
-                );
+                )
+                .map((message) => ({ ...message, local: true }));
         };
 
         /** Responds to runtime transcript event events. */

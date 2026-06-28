@@ -1197,6 +1197,47 @@ describe("shared component helpers", () => {
                 type: "event",
             });
         });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { text: "snapshot checking" },
+                    runId: "thinking-snapshot",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { text: "snapshot checking files" },
+                    runId: "thinking-snapshot",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current[
+                    "agent:main:main::thinking-snapshot::thinking"
+                ]?.message?.thinking?.[0]?.text
+            ).toBe("snapshot checking files");
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "thinking-snapshot",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
 
         act(() => {
             listener?.({
@@ -2096,6 +2137,8 @@ describe("shared component helpers", () => {
                     message !== null &&
                     "thinking" in message &&
                     Array.isArray(message.thinking) &&
+                    "local" in message &&
+                    message.local === true &&
                     message.thinking.some((block) =>
                         block.text.includes("terminal reasoning")
                     )
@@ -2138,6 +2181,8 @@ describe("shared component helpers", () => {
                     Array.isArray(message.thinking) &&
                     "text" in message &&
                     typeof message.text === "string" &&
+                    "local" in message &&
+                    message.local === true &&
                     message.text.includes("Mixed visible text") &&
                     message.thinking.some((block) =>
                         block.text.includes("mixed terminal reasoning")
@@ -3082,6 +3127,29 @@ describe("shared component helpers", () => {
                 [{ ...duplicateNameHistoryRow, runId: "new-duplicate-tool-row-run" }]
             )[0]?.toolCalls?.some((toolCall) => toolCall.toolResult)
         ).toBe(false);
+
+        const mixedDiagnosticLocalRow = {
+            content: [
+                { text: "same visible text", type: "text" },
+                { text: "local reasoning", type: "thinking" },
+            ],
+            local: true,
+            role: "assistant",
+            text: "same visible text",
+            thinking: [{ text: "local reasoning" }],
+            timestamp: new Date().toISOString(),
+        };
+        const mixedDiagnosticHistoryRow = {
+            content: "same visible text",
+            role: "assistant",
+            text: "same visible text",
+        };
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [mixedDiagnosticLocalRow],
+                [mixedDiagnosticHistoryRow]
+            )[0]?.thinking?.[0]?.text
+        ).toBe("local reasoning");
     });
 
     it("detects recovered thinking-only active streams", () => {
@@ -3155,6 +3223,49 @@ describe("shared component helpers", () => {
                         images: [],
                         role: "assistant",
                         text: "assistant recovered text",
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        const mixedTextDiagnosticStream = {
+            ...stream,
+            message: {
+                ...stream.message,
+                text: "assistant recovered text",
+                thinking: [{ text: "still live reasoning" }],
+            },
+            text: "assistant recovered text",
+        };
+        expect(
+            isActiveStreamRecoveredInMessages(
+                mixedTextDiagnosticStream,
+                [
+                    {
+                        attachments: [],
+                        content: "assistant recovered text",
+                        images: [],
+                        role: "assistant",
+                        text: "assistant recovered text",
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                mixedTextDiagnosticStream,
+                [
+                    {
+                        attachments: [],
+                        content: [
+                            { text: "assistant recovered text", type: "text" },
+                            { text: "still live reasoning", type: "thinking" },
+                        ],
+                        images: [],
+                        role: "assistant",
+                        text: "assistant recovered text",
+                        thinking: [{ text: "still live reasoning" }],
                     },
                 ],
                 now
