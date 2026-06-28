@@ -123,10 +123,14 @@ export function isActiveStreamRecoveredInMessages(
 
             if (
                 stream.message?.toolCalls?.length &&
-                message.toolCalls?.some((toolCall) =>
-                    stream.message?.toolCalls?.some((streamToolCall) => {
-                        if (streamToolCall.id && toolCall.id) {
-                            return streamToolCall.id === toolCall.id;
+                stream.message.toolCalls.every((streamToolCall) =>
+                    message.toolCalls?.some((toolCall) => {
+                        if (streamToolCall.id || toolCall.id) {
+                            return Boolean(
+                                streamToolCall.id &&
+                                toolCall.id &&
+                                streamToolCall.id === toolCall.id
+                            );
                         }
 
                         return (

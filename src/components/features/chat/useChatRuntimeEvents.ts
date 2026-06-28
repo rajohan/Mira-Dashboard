@@ -451,6 +451,38 @@ function matchingToolMessageIndex(
     return undefined;
 }
 
+/** Finds an existing live tool call row for a repeated call update. */
+function matchingToolCallUpdateIndex(
+    messages: ChatHistoryMessage[],
+    incomingToolCall: NonNullable<ChatHistoryMessage["toolCalls"]>[number]
+): { messageIndex: number; toolCallIndex: number } | undefined {
+    for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+        const existing = messages[messageIndex];
+        if (existing?.role.toLowerCase() !== "assistant") {
+            continue;
+        }
+
+        const toolCallIndex = (existing.toolCalls || []).findIndex((toolCall) => {
+            if (incomingToolCall.id) {
+                return toolCall.id === incomingToolCall.id;
+            }
+
+            return (
+                !toolCall.id &&
+                toolCall.name === incomingToolCall.name &&
+                JSON.stringify(toolCall.arguments ?? undefined) ===
+                    JSON.stringify(incomingToolCall.arguments ?? undefined)
+            );
+        });
+
+        if (toolCallIndex !== -1) {
+            return { messageIndex, toolCallIndex };
+        }
+    }
+
+    return undefined;
+}
+
 /** Merges tool result rows into their matching tool call row when possible. */
 function mergeRuntimeToolMessages(
     wasPrevious: ChatHistoryMessage[],
@@ -461,6 +493,28 @@ function mergeRuntimeToolMessages(
 
     for (const message of incoming) {
         if (!message.toolResult) {
+            const incomingToolCall = message.toolCalls?.[0];
+            const match = incomingToolCall
+                ? matchingToolCallUpdateIndex(next, incomingToolCall)
+                : undefined;
+            if (incomingToolCall && match) {
+                const existing = next[match.messageIndex]!;
+                const nextToolCalls = [...(existing.toolCalls || [])];
+                const matchingToolCall = nextToolCalls[match.toolCallIndex]!;
+                nextToolCalls[match.toolCallIndex] = {
+                    ...matchingToolCall,
+                    ...incomingToolCall,
+                    id: incomingToolCall.id || matchingToolCall.id,
+                    name: incomingToolCall.name || matchingToolCall.name,
+                    toolResult: matchingToolCall.toolResult,
+                };
+                next[match.messageIndex] = {
+                    ...existing,
+                    toolCalls: nextToolCalls,
+                };
+                continue;
+            }
+
             unmerged.push(message);
             continue;
         }
@@ -992,8 +1046,7 @@ export function useChatRuntimeEvents({
                         runId &&
                         streamEntry.runId !== runId &&
                         !streamEntry.aliases.includes(runId) &&
-                        !isProvisionalRunId(sessionKey, streamEntry.runId) &&
-                        !isOptimisticRunId(streamEntry.runId)
+                        !isProvisionalRunId(sessionKey, streamEntry.runId)
                     ) {
                         continue;
                     }
@@ -1022,8 +1075,7 @@ export function useChatRuntimeEvents({
                     return (
                         streamEntry.runId === runId ||
                         streamEntry.aliases.includes(runId) ||
-                        isProvisionalRunId(sessionKey, streamEntry.runId) ||
-                        isOptimisticRunId(streamEntry.runId)
+                        isProvisionalRunId(sessionKey, streamEntry.runId)
                     );
                 })
                 .map((streamEntry) => streamEntry.text)
@@ -1110,8 +1162,7 @@ export function useChatRuntimeEvents({
                             eventRunId &&
                             streamEntry.runId !== eventRunId &&
                             !streamEntry.aliases.includes(eventRunId) &&
-                            !isProvisionalRunId(selectedSessionKey, streamEntry.runId) &&
-                            !isOptimisticRunId(streamEntry.runId)
+                            !isProvisionalRunId(selectedSessionKey, streamEntry.runId)
                         ) {
                             continue;
                         }

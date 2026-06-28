@@ -1132,6 +1132,23 @@ describe("shared component helpers", () => {
                 event: "session.tool",
                 payload: {
                     data: {
+                        args: { command: "p" },
+                        id: "merge-args-tool",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
                         args: { command: "pwd" },
                         id: "merge-args-tool",
                         name: "functions.exec_command",
@@ -1176,6 +1193,22 @@ describe("shared component helpers", () => {
                     )
             )
         ).toBe(true);
+        expect(
+            messages
+                .flatMap((message) => {
+                    if (
+                        typeof message === "object" &&
+                        message !== null &&
+                        "toolCalls" in message &&
+                        Array.isArray(message.toolCalls)
+                    ) {
+                        return message.toolCalls;
+                    }
+
+                    return [];
+                })
+                .filter((toolCall) => toolCall.id === "merge-args-tool")
+        ).toHaveLength(1);
 
         act(() => {
             listener?.({
@@ -1668,19 +1701,6 @@ describe("shared component helpers", () => {
         ).toBe(true);
         expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
 
-        act(() => {
-            listener?.({
-                event: "agent",
-                payload: {
-                    data: {
-                        delta: "Optimistic buffered answer",
-                    },
-                    sessionKey: "agent:main:main",
-                    stream: "assistant",
-                },
-                type: "event",
-            });
-        });
         activeStreamsReference.current["agent:main:main"] = {
             aliases: [],
             runId: "dashboard-chat-optimistic",
@@ -1710,8 +1730,11 @@ describe("shared component helpers", () => {
                     "text" in message &&
                     message.text === "Optimistic buffered answer"
             )
-        ).toBe(true);
-        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+        ).toBe(false);
+        expect(activeStreamsReference.current["agent:main:main"]?.runId).toBe(
+            "dashboard-chat-optimistic"
+        );
+        activeStreamsReference.current = {};
 
         act(() => {
             listener?.({
@@ -1804,7 +1827,13 @@ describe("shared component helpers", () => {
                 type: "event",
             });
         });
-        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+        expect(
+            activeStreamsReference.current["agent:main:main::thinking"]
+        ).toBeUndefined();
+        expect(activeStreamsReference.current["agent:main:main"]?.runId).toBe(
+            "dashboard-chat-test"
+        );
+        activeStreamsReference.current = {};
 
         act(() => {
             listener?.({
@@ -2162,6 +2191,56 @@ describe("shared component helpers", () => {
                         images: [],
                         role: "assistant",
                         text: "assistant recovered text",
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        const parallelToolStream = {
+            ...stream,
+            message: {
+                ...stream.message,
+                text: "",
+                thinking: undefined,
+                toolCalls: [
+                    { arguments: { command: "git status" }, name: "exec" },
+                    { arguments: { command: "git diff" }, name: "exec" },
+                ],
+            },
+            text: "",
+        };
+        expect(
+            isActiveStreamRecoveredInMessages(
+                parallelToolStream,
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [
+                            { arguments: { command: "git status" }, name: "exec" },
+                        ],
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                parallelToolStream,
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [
+                            { arguments: { command: "git status" }, name: "exec" },
+                            { arguments: { command: "git diff" }, name: "exec" },
+                        ],
                     },
                 ],
                 now
