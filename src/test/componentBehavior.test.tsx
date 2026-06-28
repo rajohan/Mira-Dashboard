@@ -1739,6 +1739,60 @@ describe("shared component helpers", () => {
         expect(merged).toHaveLength(1);
         expect(merged[0]?.toolCalls?.[0]?.id).toBe("call-1");
         expect(merged[0]?.toolCalls?.[0]?.toolResult?.content).toBe("clean");
+
+        const namedLocalRow = {
+            content: "",
+            local: true,
+            role: "assistant",
+            text: "",
+            timestamp: new Date().toISOString(),
+            toolCalls: [
+                {
+                    arguments: { command: "git diff" },
+                    name: "functions.exec_command",
+                    toolResult: {
+                        content: "diff output",
+                        name: "functions.exec_command",
+                    },
+                },
+            ],
+        };
+        const namedHistoryRow = {
+            content: "",
+            role: "assistant",
+            text: "",
+            timestamp: new Date().toISOString(),
+            toolCalls: [
+                {
+                    arguments: { command: "git diff" },
+                    name: "functions.exec_command",
+                },
+            ],
+        };
+        const alreadyEnrichedHistoryRow = {
+            ...namedHistoryRow,
+            toolCalls: [
+                {
+                    arguments: { command: "git diff" },
+                    name: "functions.exec_command",
+                    toolResult: {
+                        content: "history output",
+                        name: "functions.exec_command",
+                    },
+                },
+            ],
+        };
+
+        expect(
+            mergeWithRecentOptimisticMessages([namedLocalRow], [namedHistoryRow])[0]
+                ?.toolCalls?.[0]?.toolResult?.content
+        ).toBe("diff output");
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [namedLocalRow],
+                [alreadyEnrichedHistoryRow]
+            )[0]?.toolCalls?.[0]?.toolResult?.content
+        ).toBe("history output");
     });
 
     it("detects recovered thinking-only active streams", () => {
