@@ -1221,6 +1221,12 @@ export function useChatRuntimeEvents({
             const runtimeMessageToApply = shouldApplyRuntimeMessage
                 ? runtimeMessage
                 : undefined;
+            const isRuntimeMessageRenderable = runtimeMessageToApply
+                ? isRenderableChatHistoryMessage(
+                      runtimeMessageToApply,
+                      createChatVisibility(showThinkingOutput, showToolOutput)
+                  )
+                : false;
 
             if (runtimeMessage && !runtimeMessageToApply) {
                 flushPendingDeltaUpdates();
@@ -1325,15 +1331,16 @@ export function useChatRuntimeEvents({
                         : isStartsNewRun
                           ? ""
                           : existing?.text || "";
-                    const nextStatusText = runtimeMessageToApply
-                        ? undefined
-                        : shouldTrackActivity
-                          ? statusText ||
-                            (isStartsNewRun && !promotesProvisionalRun
-                                ? undefined
-                                : existing?.statusText) ||
-                            "Thinking"
-                          : statusText;
+                    const nextStatusText =
+                        runtimeMessageToApply && isRuntimeMessageRenderable
+                            ? undefined
+                            : shouldTrackActivity || runtimeMessageToApply
+                              ? statusText ||
+                                (isStartsNewRun && !promotesProvisionalRun
+                                    ? undefined
+                                    : existing?.statusText) ||
+                                "Thinking"
+                              : statusText;
                     const next = { ...wasPrevious };
                     if (fallbackStreamKey !== streamKey) {
                         delete next[fallbackStreamKey];

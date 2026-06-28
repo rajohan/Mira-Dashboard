@@ -227,10 +227,19 @@ function mergeToolCallResults(
     nextMessages: ChatHistoryMessage[]
 ): ChatHistoryMessage[] {
     const previousByIdentity = new Map<string, ChatHistoryMessage>();
+    const previousByMessageIdentity = new Map<string, ChatHistoryMessage>();
     for (const message of previousMessages) {
         const identity = toolCallRowIdentity(message);
         if (identity) {
             previousByIdentity.set(identity, message);
+        }
+        const canUseMessageIdentityFallback =
+            !message.text.trim() || message.toolCalls?.every((toolCall) => toolCall.id);
+        if (
+            canUseMessageIdentityFallback &&
+            message.toolCalls?.some((toolCall) => toolCall.toolResult)
+        ) {
+            previousByMessageIdentity.set(messageIdentity(message), message);
         }
     }
 
@@ -240,7 +249,9 @@ function mergeToolCallResults(
             return message;
         }
 
-        const previous = previousByIdentity.get(identity);
+        const previous =
+            previousByIdentity.get(identity) ||
+            previousByMessageIdentity.get(messageIdentity(message));
         if (!previous?.toolCalls?.length) {
             return message;
         }

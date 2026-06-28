@@ -1994,6 +1994,67 @@ describe("shared component helpers", () => {
         expect(unsubscribe).toHaveBeenCalledTimes(1);
     });
 
+    it("keeps thinking status visible when thinking output is hidden", async () => {
+        let listener: ((message: unknown) => void) | undefined;
+        const unsubscribe = jest.fn();
+        const activeStreamsReference: { current: ActiveChatStreams } = { current: {} };
+        let activeStreams: ActiveChatStreams = {};
+        const updateActiveStreams = jest.fn((updater) => {
+            activeStreams = updater(activeStreams);
+            activeStreamsReference.current = activeStreams;
+        });
+        const subscribe = jest.fn((nextListener: (data: unknown) => void) => {
+            listener = nextListener;
+            return unsubscribe;
+        });
+
+        const { unmount } = renderHook(() =>
+            useChatRuntimeEvents({
+                activeStreamsReference,
+                connectionId: 1,
+                isConnected: true,
+                liveHistoryRefreshTimerReference: { current: undefined },
+                request: jest.fn(),
+                selectedSessionKey: "agent:main:main",
+                setHistoryLoadVersion: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages: jest.fn(),
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                showThinkingOutput: false,
+                showToolOutput: true,
+                subscribe,
+                updateActiveStreams,
+            })
+        );
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "hidden reasoning",
+                    },
+                    runId: "hidden-thinking-run",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current[
+                    "agent:main:main::hidden-thinking-run::thinking"
+                ]?.statusText
+            ).toBe("Thinking");
+        });
+
+        unmount();
+        expect(unsubscribe).toHaveBeenCalledTimes(1);
+    });
+
     it("folds repeated tool results into matching calls without clobbering", () => {
         const visible = normalizeVisibleChatHistoryMessages(
             [
@@ -2090,8 +2151,6 @@ describe("shared component helpers", () => {
             content: "",
             role: "assistant",
             text: "",
-            timestamp: new Date().toISOString(),
-            runId: "tool-row-run",
             toolCalls: [
                 {
                     arguments: { command: "git status" },
