@@ -155,6 +155,16 @@ export function isSameSessionKey(left?: string, right?: string): boolean {
 
 /** Normalizes assistant payload. */
 export function normalizeAssistantPayload(value: unknown): ChatHistoryMessage {
+    if (typeof value === "string" && value.length > 0 && !value.trim()) {
+        return {
+            role: "assistant",
+            content: value,
+            text: value,
+            images: [],
+            attachments: [],
+        };
+    }
+
     if (value && typeof value === "object" && !Array.isArray(value)) {
         const record = value as RawChatHistoryMessage;
         if ("content" in record || "text" in record || "role" in record) {

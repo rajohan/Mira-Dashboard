@@ -121,29 +121,40 @@ export function isActiveStreamRecoveredInMessages(
                 return true;
             }
 
-            if (
-                stream.message?.toolCalls?.length &&
-                stream.message.toolCalls.every((streamToolCall) =>
-                    message.toolCalls?.some((toolCall) => {
-                        if (streamToolCall.id || toolCall.id) {
-                            return Boolean(
-                                streamToolCall.id &&
-                                toolCall.id &&
-                                streamToolCall.id === toolCall.id
+            if (stream.message?.toolCalls?.length) {
+                const unmatchedToolCalls = [...(message.toolCalls || [])];
+                const hasRecoveredToolCalls = stream.message.toolCalls.every(
+                    (streamToolCall) => {
+                        const matchingIndex = unmatchedToolCalls.findIndex((toolCall) => {
+                            if (streamToolCall.id || toolCall.id) {
+                                return Boolean(
+                                    streamToolCall.id &&
+                                    toolCall.id &&
+                                    streamToolCall.id === toolCall.id
+                                );
+                            }
+
+                            return (
+                                streamToolCall.name === toolCall.name &&
+                                toolArgumentsIdentity(streamToolCall.arguments) ===
+                                    toolArgumentsIdentity(toolCall.arguments) &&
+                                !streamToolCall.id &&
+                                !toolCall.id
                             );
+                        });
+
+                        if (matchingIndex === -1) {
+                            return false;
                         }
 
-                        return (
-                            streamToolCall.name === toolCall.name &&
-                            toolArgumentsIdentity(streamToolCall.arguments) ===
-                                toolArgumentsIdentity(toolCall.arguments) &&
-                            !streamToolCall.id &&
-                            !toolCall.id
-                        );
-                    })
-                )
-            ) {
-                return true;
+                        unmatchedToolCalls.splice(matchingIndex, 1);
+                        return true;
+                    }
+                );
+
+                if (hasRecoveredToolCalls) {
+                    return true;
+                }
             }
 
             if (stream.message?.toolResult && message.toolResult) {

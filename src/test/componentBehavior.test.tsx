@@ -1032,6 +1032,35 @@ describe("shared component helpers", () => {
         await waitFor(() => {
             expect(activeStreamsReference.current).toHaveProperty("agent:main:main");
         });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: " ",
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "world",
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe(
+                "Hello world"
+            );
+        });
 
         act(() => {
             listener?.({
@@ -1296,6 +1325,80 @@ describe("shared component helpers", () => {
             id: "late-id-tool",
             toolResult: { content: "late id output" },
         });
+
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "arg-first" },
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "arg-second" },
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "arg-second" },
+                        name: "functions.exec_command",
+                        phase: "result",
+                        result: "second arg output",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        const argumentMatchedCalls = messages.flatMap((message) => {
+            if (
+                typeof message === "object" &&
+                message !== null &&
+                "toolCalls" in message &&
+                Array.isArray(message.toolCalls)
+            ) {
+                return message.toolCalls.filter((toolCall) =>
+                    ["arg-first", "arg-second"].includes(toolCall.arguments?.command)
+                );
+            }
+
+            return [];
+        });
+        expect(
+            argumentMatchedCalls.find(
+                (toolCall) => toolCall.arguments?.command === "arg-first"
+            )?.toolResult
+        ).toBeUndefined();
+        expect(
+            argumentMatchedCalls.find(
+                (toolCall) => toolCall.arguments?.command === "arg-second"
+            )?.toolResult?.content
+        ).toBe("second arg output");
 
         act(() => {
             listener?.({
@@ -1636,6 +1739,83 @@ describe("shared component helpers", () => {
                     Array.isArray(message.thinking) &&
                     message.thinking.some((block) =>
                         block.text.includes("terminal reasoning")
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "chat final reasoning",
+                    },
+                    runId: "chat-final-diagnostic",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: { role: "assistant", text: "" },
+                    runId: "chat-final-diagnostic",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking.some((block) =>
+                        block.text.includes("chat final reasoning")
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "aborted reasoning",
+                    },
+                    runId: "chat-aborted-diagnostic",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "chat-aborted-diagnostic",
+                    sessionKey: "agent:main:main",
+                    state: "aborted",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking.some((block) =>
+                        block.text.includes("aborted reasoning")
                     )
             )
         ).toBe(true);
@@ -2622,6 +2802,54 @@ describe("shared component helpers", () => {
                         toolCalls: [
                             { arguments: { command: "git status" }, name: "exec" },
                             { arguments: { command: "git diff" }, name: "exec" },
+                        ],
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        const duplicateToolStream = {
+            ...stream,
+            message: {
+                ...stream.message,
+                text: "",
+                thinking: undefined,
+                toolCalls: [
+                    { arguments: { command: "same" }, name: "exec" },
+                    { arguments: { command: "same" }, name: "exec" },
+                ],
+            },
+            text: "",
+        };
+        expect(
+            isActiveStreamRecoveredInMessages(
+                duplicateToolStream,
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [{ arguments: { command: "same" }, name: "exec" }],
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                duplicateToolStream,
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [
+                            { arguments: { command: "same" }, name: "exec" },
+                            { arguments: { command: "same" }, name: "exec" },
                         ],
                     },
                 ],

@@ -452,6 +452,16 @@ function matchingToolCallIndex(
         return -1;
     }
 
+    if (incomingToolCall?.arguments !== undefined) {
+        const incomingArguments = JSON.stringify(incomingToolCall.arguments ?? undefined);
+        return toolCalls.findIndex(
+            (toolCall) =>
+                toolCall.name === result.name &&
+                !toolCall.toolResult &&
+                JSON.stringify(toolCall.arguments ?? undefined) === incomingArguments
+        );
+    }
+
     return toolCalls.findIndex(
         (toolCall) => toolCall.name === result.name && !toolCall.toolResult
     );
@@ -1593,7 +1603,7 @@ export function useChatRuntimeEvents({
                 const nextText = deltaMessage.text;
 
                 if (
-                    nextText.trim() ||
+                    nextText.length > 0 ||
                     deltaMessage.thinking?.length ||
                     deltaMessage.toolCalls?.length
                 ) {
@@ -1693,6 +1703,10 @@ export function useChatRuntimeEvents({
                     streamSessionKey,
                     payload.runId
                 );
+                const diagnosticMessages = activeDiagnosticMessagesForRun(
+                    streamSessionKey,
+                    payload.runId
+                );
                 const messageToAppend = isCommandMessagePayload(payload.message)
                     ? createLocalSystemMessage(finalMessage.text)
                     : isRenderableChatHistoryMessage(
@@ -1712,9 +1726,13 @@ export function useChatRuntimeEvents({
                           }
                         : undefined;
 
-                if (messageToAppend && eventMatchesSelected) {
+                const messagesToAppend = [
+                    ...(messageToAppend ? [messageToAppend] : []),
+                    ...diagnosticMessages,
+                ];
+                if (messagesToAppend.length > 0 && eventMatchesSelected) {
                     setMessages((wasPrevious) =>
-                        dedupeMessages([...wasPrevious, messageToAppend])
+                        dedupeMessages([...wasPrevious, ...messagesToAppend])
                     );
                 }
 
@@ -1729,20 +1747,29 @@ export function useChatRuntimeEvents({
                     streamSessionKey,
                     payload.runId
                 );
-                if (bufferedText.trim() && eventMatchesSelected) {
+                const diagnosticMessages = activeDiagnosticMessagesForRun(
+                    streamSessionKey,
+                    payload.runId
+                );
+                const messagesToAppend: ChatHistoryMessage[] = [
+                    ...(bufferedText.trim()
+                        ? [
+                              {
+                                  role: "assistant" as const,
+                                  content: bufferedText,
+                                  text: bufferedText,
+                                  images: [],
+                                  attachments: [],
+                                  timestamp: currentIsoString(),
+                                  runId: payload.runId,
+                              },
+                          ]
+                        : []),
+                    ...diagnosticMessages,
+                ];
+                if (messagesToAppend.length > 0 && eventMatchesSelected) {
                     setMessages((wasPrevious) =>
-                        dedupeMessages([
-                            ...wasPrevious,
-                            {
-                                role: "assistant",
-                                content: bufferedText,
-                                text: bufferedText,
-                                images: [],
-                                attachments: [],
-                                timestamp: currentIsoString(),
-                                runId: payload.runId,
-                            },
-                        ])
+                        dedupeMessages([...wasPrevious, ...messagesToAppend])
                     );
                 }
                 clearActiveStreamsForRun(streamSessionKey, payload.runId);
