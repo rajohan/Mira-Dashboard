@@ -1069,7 +1069,8 @@ describe("shared component helpers", () => {
             });
         });
         await waitFor(() => {
-            const stream = activeStreamsReference.current["agent:main:main::thinking"];
+            const stream =
+                activeStreamsReference.current["agent:main:main::run-1::thinking"];
             expect(stream?.message?.thinking?.[0]?.text).toContain("checking files");
             expect(stream?.statusText).toBeUndefined();
         });
@@ -1107,7 +1108,7 @@ describe("shared component helpers", () => {
             )
         ).toBe(true);
         expect(
-            activeStreamsReference.current["agent:main:main::thinking"]?.message
+            activeStreamsReference.current["agent:main:main::run-1::thinking"]?.message
                 ?.thinking?.[0]?.text
         ).toContain("checking files");
 
@@ -1228,7 +1229,8 @@ describe("shared component helpers", () => {
             });
         });
         await waitFor(() => {
-            const stream = activeStreamsReference.current["agent:main:main::reasoning"];
+            const stream =
+                activeStreamsReference.current["agent:main:main::run-1::reasoning"];
             expect(
                 thinkingTexts(stream).some((text) => text.includes("reasoning snapshot"))
             ).toBe(true);
@@ -1254,7 +1256,8 @@ describe("shared component helpers", () => {
             });
         });
         await waitFor(() => {
-            const stream = activeStreamsReference.current["agent:main:main::reasoning"];
+            const stream =
+                activeStreamsReference.current["agent:main:main::run-1::reasoning"];
             expect(
                 thinkingTexts(stream).some((text) =>
                     text.includes("nested reasoning snapshot")
@@ -1282,7 +1285,8 @@ describe("shared component helpers", () => {
             });
         });
         await waitFor(() => {
-            const stream = activeStreamsReference.current["agent:main:main::reasoning"];
+            const stream =
+                activeStreamsReference.current["agent:main:main::run-1::reasoning"];
             expect(
                 thinkingTexts(stream).some((text) =>
                     text.includes("array reasoning block")
@@ -1339,7 +1343,8 @@ describe("shared component helpers", () => {
             });
         });
         await waitFor(() => {
-            const stream = activeStreamsReference.current["agent:main:main::reasoning"];
+            const stream =
+                activeStreamsReference.current["agent:main:main::run-1::reasoning"];
             expect(
                 thinkingTexts(stream).some((text) => text.includes("checking files"))
             ).toBe(true);
@@ -1384,7 +1389,8 @@ describe("shared component helpers", () => {
             });
         });
         await waitFor(() => {
-            const stream = activeStreamsReference.current["agent:main:main::reasoning"];
+            const stream =
+                activeStreamsReference.current["agent:main:main::run-1::reasoning"];
             const matches = thinkingTexts(stream).filter((text) =>
                 text.includes("Codex preamble")
             );
@@ -1436,8 +1442,38 @@ describe("shared component helpers", () => {
         });
         await waitFor(() => {
             expect(
-                activeStreamsReference.current["agent:main:main::assistant"]?.text
+                activeStreamsReference.current["agent:main:main::run-1::assistant"]?.text
             ).toBe("Hello world");
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        content: "Content stream",
+                    },
+                    runId: "content-run",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current["agent:main:main::content-run::assistant"]
+                    ?.text
+            ).toBe("Content stream");
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "content-run",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
         });
 
         act(() => {
@@ -1674,7 +1710,9 @@ describe("shared component helpers", () => {
         });
         await waitFor(() => {
             expect(
-                activeStreamsReference.current["agent:main:main::assistant"]?.text
+                activeStreamsReference.current[
+                    "agent:main:main::real-run-after-provisional::assistant"
+                ]?.text
             ).toBe("Buffered terminal answer continued");
         });
         act(() => {
@@ -1764,7 +1802,8 @@ describe("shared component helpers", () => {
         });
         await waitFor(() => {
             expect(
-                activeStreamsReference.current["agent:main:main::assistant"]?.text
+                activeStreamsReference.current["agent:main:main::overlap-run::assistant"]
+                    ?.text
             ).toBe("Hello world");
         });
         act(() => {
@@ -1790,6 +1829,71 @@ describe("shared component helpers", () => {
             )
         ).toBe(true);
         expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "Run A",
+                    },
+                    runId: "overlap-a",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "Run B",
+                    },
+                    runId: "overlap-b",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current["agent:main:main::overlap-a::assistant"]
+                    ?.text
+            ).toBe("Run A");
+            expect(
+                activeStreamsReference.current["agent:main:main::overlap-b::assistant"]
+                    ?.text
+            ).toBe("Run B");
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "overlap-a",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "text" in message &&
+                    message.text === "Run A"
+            )
+        ).toBe(true);
+        expect(
+            activeStreamsReference.current["agent:main:main::overlap-b::assistant"]?.text
+        ).toBe("Run B");
+        activeStreamsReference.current = {};
 
         act(() => {
             listener?.({

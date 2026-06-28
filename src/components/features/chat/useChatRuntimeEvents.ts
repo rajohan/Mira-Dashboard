@@ -92,9 +92,15 @@ function isOptimisticRunId(runId: string): boolean {
     return runId.startsWith("dashboard-chat-");
 }
 
-/** Returns an internal active stream key for non-message runtime work. */
-function runtimeWorkStreamKey(sessionKey: string, stream: string, eventName: string) {
-    return `${sessionKey}::${stream || eventName || "work"}`;
+/** Returns an internal active stream key for runtime work. */
+function runtimeWorkStreamKey(
+    sessionKey: string,
+    stream: string,
+    eventName: string,
+    runId?: string
+) {
+    const channel = stream || eventName || "work";
+    return runId ? `${sessionKey}::${runId}::${channel}` : `${sessionKey}::${channel}`;
 }
 
 /** Performs compact status text. */
@@ -754,6 +760,7 @@ function runtimeStreamMessage(
         rawStringValue(data.text) ||
         rawStringValue(data.deltaText) ||
         rawStringValue(data.summary) ||
+        rawStringValue(data.content) ||
         "";
 
     if (stream === "assistant") {
@@ -1220,9 +1227,23 @@ export function useChatRuntimeEvents({
                 updateActiveStreamsReference.current((wasPrevious) => {
                     const streamKey =
                         stream === "assistant" || isRuntimeThinkingStream(stream)
-                            ? runtimeWorkStreamKey(selectedSessionKey, stream, eventName)
+                            ? runtimeWorkStreamKey(
+                                  selectedSessionKey,
+                                  stream,
+                                  eventName,
+                                  eventRunId
+                              )
                             : selectedSessionKey;
-                    const existing = wasPrevious[streamKey];
+                    const fallbackStreamKey =
+                        eventRunId &&
+                        (stream === "assistant" || isRuntimeThinkingStream(stream))
+                            ? runtimeWorkStreamKey(selectedSessionKey, stream, eventName)
+                            : streamKey;
+                    const fallbackExisting =
+                        fallbackStreamKey === streamKey
+                            ? undefined
+                            : wasPrevious[fallbackStreamKey];
+                    const existing = wasPrevious[streamKey] || fallbackExisting;
                     const incomingRunId = eventRunId;
                     if (
                         !existing ||
@@ -1235,6 +1256,9 @@ export function useChatRuntimeEvents({
 
                     const next = { ...wasPrevious };
                     delete next[streamKey];
+                    if (fallbackStreamKey !== streamKey) {
+                        delete next[fallbackStreamKey];
+                    }
                     return next;
                 });
             }
@@ -1245,6 +1269,10 @@ export function useChatRuntimeEvents({
                 }
 
                 updateActiveStreamsReference.current((wasPrevious) => {
+                    const streamChannel =
+                        stream === "item" && isRuntimeThinkingItem(data)
+                            ? "reasoning"
+                            : stream;
                     const streamKey =
                         runtimeMessageToApply &&
                         (stream === "assistant" ||
@@ -1252,17 +1280,31 @@ export function useChatRuntimeEvents({
                             (stream === "item" && isRuntimeThinkingItem(data)))
                             ? runtimeWorkStreamKey(
                                   selectedSessionKey,
-                                  stream === "item" ? "reasoning" : stream,
-                                  eventName
+                                  streamChannel,
+                                  eventName,
+                                  eventRunId
                               )
                             : runtimeMessageToApply
                               ? selectedSessionKey
                               : runtimeWorkStreamKey(
                                     selectedSessionKey,
-                                    stream,
-                                    eventName
+                                    streamChannel,
+                                    eventName,
+                                    eventRunId
                                 );
-                    const existing = wasPrevious[streamKey];
+                    const fallbackStreamKey =
+                        eventRunId && streamKey !== selectedSessionKey
+                            ? runtimeWorkStreamKey(
+                                  selectedSessionKey,
+                                  streamChannel,
+                                  eventName
+                              )
+                            : streamKey;
+                    const fallbackExisting =
+                        fallbackStreamKey === streamKey
+                            ? undefined
+                            : wasPrevious[fallbackStreamKey];
+                    const existing = wasPrevious[streamKey] || fallbackExisting;
                     const incomingRunId =
                         eventRunId || existing?.runId || selectedSessionKey;
                     const isStartsNewRun = isNewRunForStream(existing, eventRunId);
@@ -1292,8 +1334,13 @@ export function useChatRuntimeEvents({
                                 : existing?.statusText) ||
                             "Thinking"
                           : statusText;
+                    const next = { ...wasPrevious };
+                    if (fallbackStreamKey !== streamKey) {
+                        delete next[fallbackStreamKey];
+                    }
+
                     return {
-                        ...wasPrevious,
+                        ...next,
                         [streamKey]: {
                             sessionKey: selectedSessionKey,
                             runId,

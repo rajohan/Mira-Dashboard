@@ -835,14 +835,7 @@ export function Chat() {
                             isActiveStreamIsQuiet &&
                             (isActiveStreamRecoveredInMessages(stream, nextMessages) ||
                                 (streamText &&
-                                    hasRecoveredStreamHistory(
-                                        nextMessages,
-                                        streamText
-                                    )) ||
-                                hasNewerAssistantMessageInHistory(
-                                    nextMessages,
-                                    stream.updatedAt
-                                ))
+                                    hasRecoveredStreamHistory(nextMessages, streamText)))
                         );
                     })
                     .map(([key]) => key);
