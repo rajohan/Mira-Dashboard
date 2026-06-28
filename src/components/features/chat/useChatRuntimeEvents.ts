@@ -1121,6 +1121,41 @@ export function useChatRuntimeEvents({
             return completeTexts.join("");
         };
 
+        /** Returns renderable non-text diagnostics from active stream rows. */
+        const activeDiagnosticMessagesForRun = (
+            sessionKey: string,
+            runId?: string
+        ): ChatHistoryMessage[] => {
+            const visibility = createChatVisibility(showThinkingOutput, showToolOutput);
+            return Object.values(activeStreamsReference.current)
+                .filter((streamEntry) => {
+                    if (!isSameSessionKey(streamEntry.sessionKey, sessionKey)) {
+                        return false;
+                    }
+
+                    if (!runId) {
+                        return true;
+                    }
+
+                    return (
+                        streamEntry.runId === runId ||
+                        streamEntry.aliases.includes(runId) ||
+                        isProvisionalRunId(sessionKey, streamEntry.runId)
+                    );
+                })
+                .map((streamEntry) => streamEntry.message)
+                .filter((message): message is ChatHistoryMessage =>
+                    Boolean(
+                        message &&
+                        !message.text.trim() &&
+                        ((message.thinking?.length || 0) > 0 ||
+                            (message.toolCalls?.length || 0) > 0 ||
+                            message.toolResult) &&
+                        isRenderableChatHistoryMessage(message, visibility)
+                    )
+                );
+        };
+
         /** Responds to runtime transcript event events. */
         const handleRuntimeTranscriptEvent = (
             eventName: string | undefined,
@@ -1153,33 +1188,101 @@ export function useChatRuntimeEvents({
             const stream = normalizeRuntimeStream(payload.stream);
             const data = isRecord(payload.data) ? payload.data : {};
             const phase = typeof data.phase === "string" ? data.phase : "";
-            const isTerminalLifecycleEvent =
-                ((stream === "lifecycle" ||
-                    stream === "assistant" ||
-                    isRuntimeThinkingStream(stream)) &&
-                    TERMINAL_LIFECYCLE_PHASES.has(phase)) ||
+            const isWholeRunTerminalEvent =
+                (stream === "lifecycle" && TERMINAL_LIFECYCLE_PHASES.has(phase)) ||
                 TERMINAL_RUNTIME_EVENTS.has(eventName);
+            const isChannelTerminalEvent =
+                (stream === "assistant" || isRuntimeThinkingStream(stream)) &&
+                TERMINAL_LIFECYCLE_PHASES.has(phase);
 
-            if (isTerminalLifecycleEvent) {
+            if (isChannelTerminalEvent && !isWholeRunTerminalEvent) {
+                flushPendingDeltaUpdates();
+                const bufferedText =
+                    stream === "assistant"
+                        ? activeAssistantTextForRun(selectedSessionKey, eventRunId)
+                        : "";
+                const diagnosticMessages =
+                    stream === "assistant"
+                        ? []
+                        : activeDiagnosticMessagesForRun(selectedSessionKey, eventRunId);
+                const messagesToAppend: ChatHistoryMessage[] = [
+                    ...(bufferedText.trim()
+                        ? [
+                              {
+                                  role: "assistant" as const,
+                                  content: bufferedText,
+                                  text: bufferedText,
+                                  images: [],
+                                  attachments: [],
+                                  timestamp: currentIsoString(),
+                                  runId: eventRunId,
+                              },
+                          ]
+                        : []),
+                    ...diagnosticMessages,
+                ];
+                if (messagesToAppend.length > 0) {
+                    setMessages((wasPrevious) =>
+                        dedupeMessages([...wasPrevious, ...messagesToAppend])
+                    );
+                }
+                updateActiveStreamsReference.current((wasPrevious) => {
+                    const next = { ...wasPrevious };
+                    for (const [key, streamEntry] of Object.entries(wasPrevious)) {
+                        if (
+                            !isSameSessionKey(streamEntry.sessionKey, selectedSessionKey)
+                        ) {
+                            continue;
+                        }
+
+                        if (
+                            eventRunId &&
+                            streamEntry.runId !== eventRunId &&
+                            !streamEntry.aliases.includes(eventRunId) &&
+                            !isProvisionalRunId(selectedSessionKey, streamEntry.runId)
+                        ) {
+                            continue;
+                        }
+
+                        if (key.endsWith(`::${stream}`)) {
+                            delete next[key];
+                        }
+                    }
+                    return next;
+                });
+                refreshSelectedHistorySoon(150);
+                return;
+            }
+
+            if (isWholeRunTerminalEvent) {
                 flushPendingDeltaUpdates();
                 const bufferedText = activeAssistantTextForRun(
                     selectedSessionKey,
                     eventRunId
                 );
-                if (bufferedText.trim()) {
+                const diagnosticMessages = activeDiagnosticMessagesForRun(
+                    selectedSessionKey,
+                    eventRunId
+                );
+                const messagesToAppend: ChatHistoryMessage[] = [
+                    ...(bufferedText.trim()
+                        ? [
+                              {
+                                  role: "assistant" as const,
+                                  content: bufferedText,
+                                  text: bufferedText,
+                                  images: [],
+                                  attachments: [],
+                                  timestamp: currentIsoString(),
+                                  runId: eventRunId,
+                              },
+                          ]
+                        : []),
+                    ...diagnosticMessages,
+                ];
+                if (messagesToAppend.length > 0) {
                     setMessages((wasPrevious) =>
-                        dedupeMessages([
-                            ...wasPrevious,
-                            {
-                                role: "assistant",
-                                content: bufferedText,
-                                text: bufferedText,
-                                images: [],
-                                attachments: [],
-                                timestamp: currentIsoString(),
-                                runId: eventRunId,
-                            },
-                        ])
+                        dedupeMessages([...wasPrevious, ...messagesToAppend])
                     );
                 }
                 updateActiveStreamsReference.current((wasPrevious) => {

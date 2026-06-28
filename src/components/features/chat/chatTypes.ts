@@ -603,7 +603,11 @@ function matchingToolCallIndex(
     }
 
     return toolCalls.findIndex(
-        (toolCall) => toolCall.name === result.name && !toolCall.toolResult
+        (toolCall) =>
+            !toolCall.id &&
+            !result.id &&
+            toolCall.name === result.name &&
+            !toolCall.toolResult
     );
 }
 
@@ -641,6 +645,7 @@ function pushVisibleMessage(
             toolResult:
                 existing.toolResult ||
                 (nextToolCalls.length === 1 ? message.toolResult : undefined),
+            timestamp: message.timestamp || existing.timestamp,
         };
         return;
     }

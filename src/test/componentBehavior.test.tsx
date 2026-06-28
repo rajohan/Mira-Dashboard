@@ -1536,6 +1536,27 @@ describe("shared component helpers", () => {
                 event: "agent",
                 payload: {
                     data: {
+                        phase: "end",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            activeStreamsReference.current["agent:main:main::run-1::assistant"]?.text
+        ).toBe("Hello world");
+        expect(
+            activeStreamsReference.current["agent:main:main::run-1::thinking"]
+        ).toBeUndefined();
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
                         content: "Content stream",
                     },
                     runId: "content-run",
@@ -1581,6 +1602,43 @@ describe("shared component helpers", () => {
                 type: "event",
             });
         });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "terminal reasoning",
+                    },
+                    runId: "diagnostic-terminal",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "diagnostic-terminal",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking.some((block) =>
+                        block.text.includes("terminal reasoning")
+                    )
+            )
+        ).toBe(true);
 
         act(() => {
             listener?.({
@@ -2230,6 +2288,61 @@ describe("shared component helpers", () => {
             "MEDIA:/tmp/chart.png"
         );
         expect(mediaVisible[0]?.attachments?.[0]?.fileName).toBe("chart.png");
+
+        const idBearingVisible = normalizeVisibleChatHistoryMessages(
+            [
+                {
+                    content: [
+                        {
+                            arguments: { command: "first" },
+                            id: "call-with-id",
+                            name: "functions.exec_command",
+                            type: "toolCall",
+                        },
+                    ],
+                    role: "assistant",
+                    timestamp: "2026-06-28T10:00:00.000Z",
+                },
+                {
+                    content: "unscoped output",
+                    role: "tool",
+                    timestamp: "2026-06-28T10:01:00.000Z",
+                    toolName: "functions.exec_command",
+                },
+            ],
+            createChatVisibility(true, true)
+        );
+        expect(idBearingVisible).toHaveLength(2);
+        expect(idBearingVisible[0]?.toolCalls?.[0]?.toolResult).toBeUndefined();
+        expect(idBearingVisible[1]?.role).toBe("tool");
+
+        const foldedTimestampVisible = normalizeVisibleChatHistoryMessages(
+            [
+                {
+                    content: [
+                        {
+                            arguments: { command: "fresh" },
+                            name: "functions.exec_command",
+                            type: "toolCall",
+                        },
+                    ],
+                    role: "assistant",
+                    timestamp: "2026-06-28T10:00:00.000Z",
+                },
+                {
+                    content: "fresh output",
+                    role: "tool",
+                    timestamp: "2026-06-28T10:02:00.000Z",
+                    toolName: "functions.exec_command",
+                },
+            ],
+            createChatVisibility(true, true)
+        );
+        expect(foldedTimestampVisible).toHaveLength(1);
+        expect(foldedTimestampVisible[0]?.timestamp).toBe("2026-06-28T10:02:00.000Z");
+        expect(foldedTimestampVisible[0]?.toolCalls?.[0]?.toolResult?.content).toBe(
+            "fresh output"
+        );
     });
 
     it("keeps live tool results when history briefly lags", () => {
