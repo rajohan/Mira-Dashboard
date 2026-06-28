@@ -75,7 +75,12 @@ function isMatchingToolResult(
         return toolCall.id === toolResult.id;
     }
 
-    return Boolean(toolResult.name && toolCall.name === toolResult.name);
+    return Boolean(
+        !toolCall.id &&
+        !toolResult.id &&
+        toolResult.name &&
+        toolCall.name === toolResult.name
+    );
 }
 
 /** Returns an embeddable image URL for chat image blocks. */

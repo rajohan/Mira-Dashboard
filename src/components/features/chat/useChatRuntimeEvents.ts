@@ -417,7 +417,8 @@ function runtimeToolMessages(
 /** Returns the best tool call index for a result. */
 function matchingToolCallIndex(
     toolCalls: ChatHistoryMessage["toolCalls"],
-    result: NonNullable<ChatHistoryMessage["toolResult"]>
+    result: NonNullable<ChatHistoryMessage["toolResult"]>,
+    incomingToolCall?: NonNullable<ChatHistoryMessage["toolCalls"]>[number]
 ): number {
     if (!toolCalls?.length) {
         return -1;
@@ -427,7 +428,24 @@ function matchingToolCallIndex(
         const idMatchIndex = toolCalls.findIndex(
             (toolCall) => toolCall.id && toolCall.id === result.id
         );
-        return idMatchIndex;
+        if (idMatchIndex !== -1) {
+            return idMatchIndex;
+        }
+
+        if (incomingToolCall?.id === result.id) {
+            const incomingArguments = JSON.stringify(
+                incomingToolCall.arguments ?? undefined
+            );
+            return toolCalls.findIndex(
+                (toolCall) =>
+                    !toolCall.id &&
+                    !toolCall.toolResult &&
+                    toolCall.name === incomingToolCall.name &&
+                    JSON.stringify(toolCall.arguments ?? undefined) === incomingArguments
+            );
+        }
+
+        return -1;
     }
 
     if (!result.name) {
@@ -442,12 +460,17 @@ function matchingToolCallIndex(
 /** Finds the latest assistant row with an unfilled matching tool call. */
 function matchingToolMessageIndex(
     messages: ChatHistoryMessage[],
-    result: NonNullable<ChatHistoryMessage["toolResult"]>
+    result: NonNullable<ChatHistoryMessage["toolResult"]>,
+    incomingToolCall?: NonNullable<ChatHistoryMessage["toolCalls"]>[number]
 ): { messageIndex: number; toolCallIndex: number } | undefined {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const existing = messages[index]!;
         if (existing.role.toLowerCase() === "assistant") {
-            const toolCallIndex = matchingToolCallIndex(existing.toolCalls, result);
+            const toolCallIndex = matchingToolCallIndex(
+                existing.toolCalls,
+                result,
+                incomingToolCall
+            );
             if (toolCallIndex !== -1) {
                 return { messageIndex: index, toolCallIndex };
             }
@@ -526,13 +549,13 @@ function mergeRuntimeToolMessages(
         }
 
         const result = message.toolResult;
-        const match = matchingToolMessageIndex(next, result);
+        const incomingToolCall = message.toolCalls?.[0];
+        const match = matchingToolMessageIndex(next, result, incomingToolCall);
 
         if (match) {
             const existing = next[match.messageIndex]!;
             const nextToolCalls = [...(existing.toolCalls || [])];
             const matchingToolCall = nextToolCalls[match.toolCallIndex]!;
-            const incomingToolCall = message.toolCalls?.[0];
             const hasIncomingOutput = Boolean(
                 result.content.length > 0 || result.images?.length
             );
@@ -1131,7 +1154,10 @@ export function useChatRuntimeEvents({
             const data = isRecord(payload.data) ? payload.data : {};
             const phase = typeof data.phase === "string" ? data.phase : "";
             const isTerminalLifecycleEvent =
-                (stream === "lifecycle" && TERMINAL_LIFECYCLE_PHASES.has(phase)) ||
+                ((stream === "lifecycle" ||
+                    stream === "assistant" ||
+                    isRuntimeThinkingStream(stream)) &&
+                    TERMINAL_LIFECYCLE_PHASES.has(phase)) ||
                 TERMINAL_RUNTIME_EVENTS.has(eventName);
 
             if (isTerminalLifecycleEvent) {

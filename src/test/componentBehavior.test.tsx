@@ -582,13 +582,43 @@ describe("shared component helpers", () => {
                         text: "answer",
                         thinking: [{ text: "working" }],
                         toolCalls: [
-                            { arguments: { ok: true }, id: "tool-1", name: "run" },
+                            {
+                                arguments: { ok: true },
+                                id: "tool-1",
+                                name: "run",
+                                toolResult: {
+                                    content: "tool output",
+                                    id: "tool-1",
+                                    name: "run",
+                                },
+                            },
                             { id: "tool-2", name: "empty" },
                         ],
                         toolResult: {
-                            content: "tool output",
+                            content: "standalone output",
                             isError: true,
                             name: "run",
+                        },
+                    }}
+                />
+                <ChatMessageDetails
+                    visibility={{ shouldShowThinking: true, shouldShowTools: true }}
+                    message={{
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [
+                            {
+                                arguments: { command: "older call" },
+                                name: "functions.exec_command",
+                            },
+                        ],
+                        toolResult: {
+                            content: "late id output",
+                            id: "late-result-id",
+                            name: "functions.exec_command",
                         },
                     }}
                 />
@@ -612,8 +642,10 @@ describe("shared component helpers", () => {
         expect(screen.getByText(/Thinking: high/)).toBeInTheDocument();
         expect(screen.getByText("Thinking / working")).toBeInTheDocument();
         expect(screen.getByText("Run")).toBeInTheDocument();
-        expect(screen.getAllByText("Tool input")).toHaveLength(2);
+        expect(screen.getAllByText("Tool input")).toHaveLength(3);
         expect(screen.getByText("Tool output")).toBeInTheDocument();
+        expect(screen.getByText("Tool result · Bash")).toBeInTheDocument();
+        expect(screen.getByText("late id output")).toBeInTheDocument();
         expect(screen.getByText("No arguments")).toBeInTheDocument();
     });
 
@@ -1213,6 +1245,60 @@ describe("shared component helpers", () => {
 
         act(() => {
             listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "late-id" },
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "late-id" },
+                        id: "late-id-tool",
+                        name: "functions.exec_command",
+                        phase: "result",
+                        result: "late id output",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        const lateIdToolCalls = messages.flatMap((message) => {
+            if (
+                typeof message === "object" &&
+                message !== null &&
+                "toolCalls" in message &&
+                Array.isArray(message.toolCalls)
+            ) {
+                return message.toolCalls.filter(
+                    (toolCall) => toolCall.arguments?.command === "late-id"
+                );
+            }
+
+            return [];
+        });
+        expect(lateIdToolCalls).toHaveLength(1);
+        expect(lateIdToolCalls[0]).toMatchObject({
+            id: "late-id-tool",
+            toolResult: { content: "late id output" },
+        });
+
+        act(() => {
+            listener?.({
                 event: "agent",
                 payload: {
                     data: {
@@ -1465,6 +1551,26 @@ describe("shared component helpers", () => {
                     ?.text
             ).toBe("Content stream");
         });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        phase: "end",
+                    },
+                    runId: "empty-assistant-end",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            activeStreamsReference.current[
+                "agent:main:main::empty-assistant-end::assistant"
+            ]
+        ).toBeUndefined();
+
         act(() => {
             listener?.({
                 event: "model.completed",
