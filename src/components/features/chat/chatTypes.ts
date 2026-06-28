@@ -78,6 +78,7 @@ function mergeChatAttachments(
 /** Represents chat thinking display. */
 export interface ChatThinkingDisplay {
     id?: string;
+    snapshot?: boolean;
     text: string;
 }
 

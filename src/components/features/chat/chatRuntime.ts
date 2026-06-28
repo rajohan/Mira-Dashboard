@@ -44,11 +44,6 @@ export function mergeStreamText(wasPrevious: string, next: string): string {
     return `${wasPrevious}${next}`;
 }
 
-/** Merges diagnostic stream blocks that may arrive as deltas or full replacements. */
-function mergeDiagnosticText(wasPrevious = "", next = ""): string {
-    return mergeStreamText(wasPrevious, next);
-}
-
 /** Merges thinking blocks from stream events. */
 function mergeThinkingBlocks(
     wasPrevious: ChatHistoryMessage | undefined,
@@ -71,7 +66,9 @@ function mergeThinkingBlocks(
                 merged[index] = {
                     ...previousBlock,
                     ...nextBlock,
-                    text: mergeDiagnosticText(previousBlock.text, nextBlock.text),
+                    text: nextBlock.snapshot
+                        ? mergeStreamText(previousBlock.text, nextBlock.text)
+                        : `${previousBlock.text}${nextBlock.text}`,
                 };
                 continue;
             }
@@ -82,7 +79,9 @@ function mergeThinkingBlocks(
             merged[nextIndex] = {
                 ...previousBlockAtIndex,
                 ...nextBlock,
-                text: mergeDiagnosticText(previousBlockAtIndex.text, nextBlock.text),
+                text: nextBlock.snapshot
+                    ? mergeStreamText(previousBlockAtIndex.text, nextBlock.text)
+                    : `${previousBlockAtIndex.text}${nextBlock.text}`,
             };
             continue;
         }

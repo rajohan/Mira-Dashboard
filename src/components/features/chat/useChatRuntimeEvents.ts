@@ -456,6 +456,7 @@ function matchingToolCallIndex(
         const incomingArguments = JSON.stringify(incomingToolCall.arguments ?? undefined);
         return toolCalls.findIndex(
             (toolCall) =>
+                !toolCall.id &&
                 toolCall.name === result.name &&
                 !toolCall.toolResult &&
                 JSON.stringify(toolCall.arguments ?? undefined) === incomingArguments
@@ -463,7 +464,8 @@ function matchingToolCallIndex(
     }
 
     return toolCalls.findIndex(
-        (toolCall) => toolCall.name === result.name && !toolCall.toolResult
+        (toolCall) =>
+            !toolCall.id && toolCall.name === result.name && !toolCall.toolResult
     );
 }
 
@@ -503,7 +505,16 @@ function matchingToolCallUpdateIndex(
 
         const toolCallIndex = (existing.toolCalls || []).findIndex((toolCall) => {
             if (incomingToolCall.id) {
-                return toolCall.id === incomingToolCall.id;
+                if (toolCall.id === incomingToolCall.id) {
+                    return true;
+                }
+
+                return (
+                    !toolCall.id &&
+                    toolCall.name === incomingToolCall.name &&
+                    JSON.stringify(toolCall.arguments ?? undefined) ===
+                        JSON.stringify(incomingToolCall.arguments ?? undefined)
+                );
             }
 
             return (
@@ -775,7 +786,7 @@ function runtimeReasoningItemMessage(
         text: "",
         images: [],
         attachments: [],
-        thinking: [{ id: thinkingId, text }],
+        thinking: [{ id: thinkingId, snapshot: isRuntimePreambleItem(data), text }],
         timestamp: currentIsoString(),
         runId: typeof payload.runId === "string" ? payload.runId : undefined,
     };
@@ -1157,7 +1168,6 @@ export function useChatRuntimeEvents({
                 .filter((message): message is ChatHistoryMessage =>
                     Boolean(
                         message &&
-                        !message.text.trim() &&
                         ((message.thinking?.length || 0) > 0 ||
                             (message.toolCalls?.length || 0) > 0 ||
                             message.toolResult) &&

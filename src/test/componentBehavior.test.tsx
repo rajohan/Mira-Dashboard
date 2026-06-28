@@ -1135,6 +1135,37 @@ describe("shared component helpers", () => {
             expect(stream?.message?.thinking?.[0]?.text).toContain("checking files");
             expect(stream?.statusText).toBeUndefined();
         });
+        for (const delta of ["hel", "l", "o"]) {
+            act(() => {
+                listener?.({
+                    event: "agent",
+                    payload: {
+                        data: { delta },
+                        runId: "diagnostic-deltas",
+                        sessionKey: "agent:main:main",
+                        stream: "thinking",
+                    },
+                    type: "event",
+                });
+            });
+        }
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current[
+                    "agent:main:main::diagnostic-deltas::thinking"
+                ]?.message?.thinking?.[0]?.text
+            ).toBe("hello");
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "diagnostic-deltas",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
 
         act(() => {
             listener?.({
@@ -1331,6 +1362,76 @@ describe("shared component helpers", () => {
                 event: "session.tool",
                 payload: {
                     data: {
+                        args: { command: "late-update-id" },
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "late-update-id" },
+                        id: "late-update-id-tool",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "late-update-id-tool",
+                        name: "functions.exec_command",
+                        phase: "result",
+                        result: "late update id output",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        const lateUpdateToolCalls = messages.flatMap((message) => {
+            if (
+                typeof message === "object" &&
+                message !== null &&
+                "toolCalls" in message &&
+                Array.isArray(message.toolCalls)
+            ) {
+                return message.toolCalls.filter(
+                    (toolCall) => toolCall.arguments?.command === "late-update-id"
+                );
+            }
+
+            return [];
+        });
+        expect(lateUpdateToolCalls).toHaveLength(1);
+        expect(lateUpdateToolCalls[0]).toMatchObject({
+            id: "late-update-id-tool",
+            toolResult: { content: "late update id output" },
+        });
+
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
                         args: { command: "arg-first" },
                         name: "functions.exec_command",
                         phase: "start",
@@ -1399,6 +1500,71 @@ describe("shared component helpers", () => {
                 (toolCall) => toolCall.arguments?.command === "arg-second"
             )?.toolResult?.content
         ).toBe("second arg output");
+
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "id-backed" },
+                        id: "id-backed-call",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "id-backed" },
+                        name: "functions.exec_command",
+                        phase: "result",
+                        result: "no id output",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        const idBackedToolCalls = messages.flatMap((message) => {
+            if (
+                typeof message === "object" &&
+                message !== null &&
+                "toolCalls" in message &&
+                Array.isArray(message.toolCalls)
+            ) {
+                return message.toolCalls.filter(
+                    (toolCall) => toolCall.id === "id-backed-call"
+                );
+            }
+
+            return [];
+        });
+        expect(idBackedToolCalls[0]?.toolResult).toBeUndefined();
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            !toolCall.id &&
+                            toolCall.arguments?.command === "id-backed" &&
+                            toolCall.toolResult?.content.includes("no id output")
+                    )
+            )
+        ).toBe(true);
 
         act(() => {
             listener?.({
@@ -1739,6 +1905,49 @@ describe("shared component helpers", () => {
                     Array.isArray(message.thinking) &&
                     message.thinking.some((block) =>
                         block.text.includes("terminal reasoning")
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: [
+                            { text: "Mixed visible text", type: "text" },
+                            { text: "mixed terminal reasoning", type: "thinking" },
+                        ],
+                        role: "assistant",
+                    },
+                    runId: "mixed-terminal-diagnostic",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "mixed-terminal-diagnostic",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    "text" in message &&
+                    typeof message.text === "string" &&
+                    message.text.includes("Mixed visible text") &&
+                    message.thinking.some((block) =>
+                        block.text.includes("mixed terminal reasoning")
                     )
             )
         ).toBe(true);
