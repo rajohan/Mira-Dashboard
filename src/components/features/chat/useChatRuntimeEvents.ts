@@ -571,7 +571,7 @@ function runtimeItemToolMessages(
     const normalized = {
         ...item,
         args: item.args ?? item.arguments ?? item.input,
-        id: item.id ?? item.call_id ?? item.callId ?? item.toolCallId,
+        id: item.call_id ?? item.callId ?? item.toolCallId ?? item.id,
         name: item.name ?? item.toolName,
         phase: isRuntimeToolOutputItem(item) ? "result" : (data.phase ?? item.phase),
         result: item.output ?? item.result ?? item.content ?? item.text,
@@ -943,7 +943,8 @@ export function useChatRuntimeEvents({
                     if (
                         runId &&
                         streamEntry.runId !== runId &&
-                        !streamEntry.aliases.includes(runId)
+                        !streamEntry.aliases.includes(runId) &&
+                        !isProvisionalRunId(sessionKey, streamEntry.runId)
                     ) {
                         continue;
                     }
@@ -952,6 +953,33 @@ export function useChatRuntimeEvents({
                 }
                 return next;
             });
+        };
+
+        /** Returns buffered assistant text from base or per-stream runtime rows. */
+        const activeAssistantTextForRun = (
+            sessionKey: string,
+            runId?: string
+        ): string => {
+            const matchingTexts = Object.values(activeStreamsReference.current)
+                .filter((streamEntry) => {
+                    if (!isSameSessionKey(streamEntry.sessionKey, sessionKey)) {
+                        return false;
+                    }
+
+                    if (!runId) {
+                        return true;
+                    }
+
+                    return (
+                        streamEntry.runId === runId ||
+                        streamEntry.aliases.includes(runId) ||
+                        isProvisionalRunId(sessionKey, streamEntry.runId)
+                    );
+                })
+                .map((streamEntry) => streamEntry.text)
+                .filter((text) => text.trim());
+
+            return uniqueStrings(matchingTexts).join("");
         };
 
         /** Responds to runtime transcript event events. */
@@ -1332,8 +1360,10 @@ export function useChatRuntimeEvents({
             if (payload.state === "final") {
                 flushPendingDeltaUpdates();
                 const finalMessage = finalMessageFromPayload(payload);
-                const bufferedText =
-                    activeStreamsReference.current[streamSessionKey]?.text || "";
+                const bufferedText = activeAssistantTextForRun(
+                    streamSessionKey,
+                    payload.runId
+                );
                 const messageToAppend = isCommandMessagePayload(payload.message)
                     ? createLocalSystemMessage(finalMessage.text)
                     : isRenderableChatHistoryMessage(
@@ -1366,8 +1396,10 @@ export function useChatRuntimeEvents({
 
             if (payload.state === "aborted") {
                 flushPendingDeltaUpdates();
-                const bufferedText =
-                    activeStreamsReference.current[streamSessionKey]?.text || "";
+                const bufferedText = activeAssistantTextForRun(
+                    streamSessionKey,
+                    payload.runId
+                );
                 if (bufferedText.trim() && eventMatchesSelected) {
                     setMessages((wasPrevious) =>
                         dedupeMessages([

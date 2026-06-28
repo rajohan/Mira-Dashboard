@@ -65,6 +65,55 @@ const LIVE_HISTORY_POLL_MS = 2000;
 const ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS = 120_000;
 const NO_CHAT_SCROLL_ELEMENT = JSON.parse("null") as HTMLDivElement | null;
 
+/** Returns visible text carried by active stream message details. */
+export function activeStreamRenderableText(stream: ActiveChatStream): string {
+    return [
+        stream.text,
+        stream.message?.thinking?.map((block) => block.text).join("\n"),
+        stream.message?.text,
+    ]
+        .filter(Boolean)
+        .join("\n");
+}
+
+/** Returns whether an active stream is already represented in visible history. */
+export function isActiveStreamRecoveredInMessages(
+    stream: ActiveChatStream,
+    visibleMessages: ChatHistoryMessage[],
+    now = Date.now()
+): boolean {
+    const streamText = activeStreamRenderableText(stream);
+    const streamUpdatedAt = sessionTimestampMs(stream.updatedAt);
+    const isStreamQuiet =
+        streamUpdatedAt === undefined ||
+        now - streamUpdatedAt >= ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
+
+    return Boolean(
+        streamText.trim() &&
+        visibleMessages.some((message) => {
+            if (message.role.toLowerCase() !== "assistant") {
+                return false;
+            }
+
+            if (message.text.trim() === streamText.trim()) {
+                return true;
+            }
+
+            const thinkingText =
+                message.thinking?.map((block) => block.text).join("\n") || "";
+            if (thinkingText.trim() === streamText.trim()) {
+                return true;
+            }
+
+            return (
+                isStreamQuiet &&
+                (isRecoveredAssistantText(message.text, streamText) ||
+                    isRecoveredAssistantText(thinkingText, streamText))
+            );
+        })
+    );
+}
+
 /** Normalizes chat agent IDs for case-insensitive session bucketing. */
 function normalizeChatAgentId(agentId: string): string {
     return agentId.toLowerCase();
@@ -391,15 +440,7 @@ export function Chat() {
               })
         : [];
     const selectedStreamsText = selectedStreams
-        .map(([, stream]) =>
-            [
-                stream.text,
-                stream.message?.thinking?.map((block) => block.text).join("\n"),
-                stream.message?.text,
-            ]
-                .filter(Boolean)
-                .join("\n")
-        )
+        .map(([, stream]) => activeStreamRenderableText(stream))
         .filter(Boolean)
         .join("\n");
     const chatVisibility = createChatVisibility(showThinkingOutput, showToolOutput);
@@ -410,27 +451,10 @@ export function Chat() {
     );
     /** Returns whether active stream text is already represented in history. */
     function isStreamRecoveredInMessages(stream: ActiveChatStream): boolean {
-        const streamText = stream.text || "";
-        const streamUpdatedAt = sessionTimestampMs(stream.updatedAt);
-        const isStreamQuiet =
-            streamUpdatedAt === undefined ||
-            Date.now() - streamUpdatedAt >= ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
-
-        return Boolean(
-            streamText.trim() &&
-            visibleMessagesForRows.some((message) => {
-                if (message.role.toLowerCase() !== "assistant") {
-                    return false;
-                }
-
-                if (message.text.trim() === streamText.trim()) {
-                    return true;
-                }
-
-                return (
-                    isStreamQuiet && isRecoveredAssistantText(message.text, streamText)
-                );
-            })
+        return isActiveStreamRecoveredInMessages(
+            stream,
+            visibleMessagesForRows,
+            Date.now()
         );
     }
 

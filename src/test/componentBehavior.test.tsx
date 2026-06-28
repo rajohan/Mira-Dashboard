@@ -33,6 +33,7 @@ import {
     createChatVisibility,
 } from "../components/features/chat/chatRuntime";
 import { normalizeVisibleChatHistoryMessages } from "../components/features/chat/chatTypes";
+import { mergeWithRecentOptimisticMessages } from "../components/features/chat/chatUtilities";
 import {
     compactStatusText,
     detailFromArguments,
@@ -98,6 +99,7 @@ import { ExpandableCard, ReadOnlyField } from "../components/ui/ExpandableCard";
 import { getProgressColor, ProgressBar } from "../components/ui/ProgressBar";
 import { useFileExplorerState } from "../hooks/useFileExplorerState";
 import { useSessionActions } from "../hooks/useSessionActions";
+import { isActiveStreamRecoveredInMessages } from "../pages/Chat";
 
 const originalFetch = fetch;
 const originalAnimationFrame = {
@@ -1307,6 +1309,61 @@ describe("shared component helpers", () => {
 
         act(() => {
             listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        item: {
+                            call_id: "responses-call-1",
+                            id: "responses-item-1",
+                            input: { command: "pwd" },
+                            name: "functions.exec_command",
+                            type: "function_call",
+                        },
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        item: {
+                            call_id: "responses-call-1",
+                            output: "/home/ubuntu/projects/mira-dashboard",
+                            type: "function_call_output",
+                        },
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            toolCall.id === "responses-call-1" &&
+                            toolCall.toolResult?.content.includes("mira-dashboard")
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
                 event: "model.completed",
                 payload: {
                     runId: "run-1",
@@ -1318,6 +1375,48 @@ describe("shared component helpers", () => {
         await waitFor(() => {
             expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
         });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "Buffered terminal answer",
+                    },
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current["agent:main:main::assistant"]?.runId
+            ).toBe("agent:main:main");
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "real-run-after-provisional",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "text" in message &&
+                    message.text === "Buffered terminal answer"
+            )
+        ).toBe(true);
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
 
         act(() => {
             listener?.({
@@ -1416,6 +1515,82 @@ describe("shared component helpers", () => {
         expect(visible[0]?.toolCalls?.[0]?.toolResult?.content).toBe("first output");
         expect(visible[0]?.toolCalls?.[1]?.toolResult?.images).toHaveLength(1);
         expect(visible.some((message) => message.role === "tool")).toBe(false);
+    });
+
+    it("keeps live tool results when history briefly lags", () => {
+        const localToolRow = {
+            content: "",
+            local: true,
+            role: "assistant",
+            text: "",
+            timestamp: new Date().toISOString(),
+            toolCalls: [
+                {
+                    arguments: { command: "git status" },
+                    id: "call-1",
+                    name: "functions.exec_command",
+                    toolResult: {
+                        content: "clean",
+                        id: "call-1",
+                        name: "functions.exec_command",
+                    },
+                },
+            ],
+        };
+        const staleHistoryRow = {
+            content: "",
+            role: "assistant",
+            text: "",
+            timestamp: new Date().toISOString(),
+            toolCalls: [
+                {
+                    arguments: { command: "git status" },
+                    id: "call-1",
+                    name: "functions.exec_command",
+                },
+            ],
+        };
+
+        const merged = mergeWithRecentOptimisticMessages(
+            [localToolRow],
+            [staleHistoryRow]
+        );
+
+        expect(merged.includes(localToolRow)).toBe(true);
+        expect(merged.includes(staleHistoryRow)).toBe(true);
+    });
+
+    it("detects recovered thinking-only active streams", () => {
+        const updatedAt = new Date(Date.now() - 130_000).toISOString();
+        const stream = {
+            aliases: [],
+            message: {
+                attachments: [],
+                content: [{ text: "thinking recovered", type: "thinking" }],
+                images: [],
+                role: "assistant",
+                text: "",
+                thinking: [{ text: "thinking recovered" }],
+            },
+            runId: "run-1",
+            sessionKey: "agent:main:main",
+            text: "",
+            updatedAt,
+        };
+        const visibleMessages = [
+            {
+                attachments: [],
+                content: [{ text: "thinking recovered", type: "thinking" }],
+                images: [],
+                role: "assistant",
+                text: "",
+                thinking: [{ text: "thinking recovered" }],
+            },
+        ];
+
+        expect(
+            isActiveStreamRecoveredInMessages(stream, visibleMessages, Date.now())
+        ).toBe(true);
     });
 
     it("renders chat messages list helpers and primary row actions", async () => {

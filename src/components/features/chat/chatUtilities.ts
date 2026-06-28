@@ -56,6 +56,10 @@ function diagnosticMessageIdentity(message: ChatHistoryMessage): string | undefi
                     toolCall.id || "no-id-" + fallbackScope + "-" + index,
                     toolCall.name,
                     JSON.stringify(toolCall.arguments ?? undefined),
+                    toolCall.toolResult?.id || "no-result-id",
+                    toolCall.toolResult?.name || "no-result-name",
+                    toolCall.toolResult?.content.trim() || "no-result-content",
+                    toolCall.toolResult?.images?.length || 0,
                 ].join("::")
             ),
         ].join("::");
