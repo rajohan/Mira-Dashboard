@@ -344,6 +344,26 @@ export function hasNewerAssistantMessageInHistory(
     });
 }
 
+/** Returns refreshed messages, preserving previous state when history is unchanged. */
+export function nextRefreshedChatMessages(
+    wasPrevious: ChatHistoryMessage[],
+    nextMessages: ChatHistoryMessage[],
+    shouldForceMerge = false
+): ChatHistoryMessage[] {
+    const previousLast = wasPrevious.at(-1)?.timestamp;
+    const nextLast = nextMessages.at(-1)?.timestamp;
+
+    if (
+        !shouldForceMerge &&
+        wasPrevious.length === nextMessages.length &&
+        previousLast === nextLast
+    ) {
+        return wasPrevious;
+    }
+
+    return mergeWithRecentOptimisticMessages(wasPrevious, nextMessages);
+}
+
 /** Returns the next history-load bottom-following state. */
 export function nextHistoryBottomState(
     wasPrevious: boolean,
@@ -907,19 +927,13 @@ export function Chat() {
                     })
                     .map(([key]) => key);
                 const isRecoveredStreamInHistory = recoveredStreamKeys.length > 0;
-                setMessages((wasPrevious) => {
-                    const previousLast = wasPrevious.at(-1)?.timestamp;
-                    const nextLast = nextMessages.at(-1)?.timestamp;
-
-                    if (
-                        wasPrevious.length === nextMessages.length &&
-                        previousLast === nextLast
-                    ) {
-                        return wasPrevious;
-                    }
-
-                    return mergeWithRecentOptimisticMessages(wasPrevious, nextMessages);
-                });
+                setMessages((wasPrevious) =>
+                    nextRefreshedChatMessages(
+                        wasPrevious,
+                        nextMessages,
+                        isRecoveredStreamInHistory
+                    )
+                );
                 setIsAtBottom(shouldStickToBottomReference.current);
                 if (isRecoveredStreamInHistory) {
                     updateActiveStreams((wasPrevious) => {
@@ -991,19 +1005,9 @@ export function Chat() {
                     createChatVisibility(showThinkingOutput, showToolOutput)
                 );
 
-                setMessages((wasPrevious) => {
-                    const previousLast = wasPrevious.at(-1)?.timestamp;
-                    const nextLast = nextMessages.at(-1)?.timestamp;
-
-                    if (
-                        wasPrevious.length === nextMessages.length &&
-                        previousLast === nextLast
-                    ) {
-                        return wasPrevious;
-                    }
-
-                    return mergeWithRecentOptimisticMessages(wasPrevious, nextMessages);
-                });
+                setMessages((wasPrevious) =>
+                    nextRefreshedChatMessages(wasPrevious, nextMessages)
+                );
 
                 setIsAtBottom(shouldStickToBottomReference.current);
                 setHistoryLoadVersion((wasPrevious) => wasPrevious + 1);

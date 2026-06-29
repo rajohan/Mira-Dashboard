@@ -108,6 +108,49 @@ function hasDiagnosticDetails(message: ChatHistoryMessage): boolean {
     );
 }
 
+/** Carries local tool results onto matching history tool calls. */
+function mergeToolCallsWithResults(
+    messageToolCalls: NonNullable<ChatHistoryMessage["toolCalls"]>,
+    previousToolCalls: NonNullable<ChatHistoryMessage["toolCalls"]>
+): NonNullable<ChatHistoryMessage["toolCalls"]> {
+    const consumedPreviousIndexes = new Set<number>();
+
+    return messageToolCalls.map((toolCall) => {
+        if (toolCall.toolResult) {
+            return toolCall;
+        }
+
+        const previousToolCallIndex = previousToolCalls.findIndex((candidate, index) => {
+            if (consumedPreviousIndexes.has(index)) {
+                return false;
+            }
+
+            if (toolCall.id || candidate.id) {
+                return Boolean(
+                    toolCall.id && candidate.id && toolCall.id === candidate.id
+                );
+            }
+
+            return (
+                toolCall.name === candidate.name &&
+                JSON.stringify(toolCall.arguments ?? undefined) ===
+                    JSON.stringify(candidate.arguments ?? undefined)
+            );
+        });
+
+        if (previousToolCallIndex === -1) {
+            return toolCall;
+        }
+
+        consumedPreviousIndexes.add(previousToolCallIndex);
+        const previousToolCall = previousToolCalls[previousToolCallIndex];
+
+        return previousToolCall?.toolResult
+            ? { ...toolCall, toolResult: previousToolCall.toolResult }
+            : toolCall;
+    });
+}
+
 /** Carries local diagnostic details onto matching history text rows. */
 function mergeDiagnosticDetails(
     previousMessages: ChatHistoryMessage[],
@@ -144,7 +187,10 @@ function mergeDiagnosticDetails(
         }
 
         const thinking = (message.thinking?.length ? message : previous).thinking;
-        const toolCalls = (message.toolCalls?.length ? message : previous).toolCalls;
+        const toolCalls =
+            message.toolCalls?.length && previous.toolCalls?.length
+                ? mergeToolCallsWithResults(message.toolCalls, previous.toolCalls)
+                : (message.toolCalls?.length ? message : previous).toolCalls;
 
         return {
             ...message,
@@ -322,42 +368,10 @@ function mergeToolCallResults(
             return message;
         }
 
-        const consumedPreviousIndexes = new Set<number>();
-        const toolCalls = message.toolCalls.map((toolCall) => {
-            if (toolCall.toolResult) {
-                return toolCall;
-            }
-
-            const previousToolCallIndex = previous.toolCalls?.findIndex(
-                (candidate, index) => {
-                    if (consumedPreviousIndexes.has(index)) {
-                        return false;
-                    }
-
-                    if (toolCall.id && candidate.id) {
-                        return toolCall.id === candidate.id;
-                    }
-
-                    return (
-                        toolCall.name === candidate.name &&
-                        JSON.stringify(toolCall.arguments ?? undefined) ===
-                            JSON.stringify(candidate.arguments ?? undefined) &&
-                        !toolCall.id &&
-                        !candidate.id
-                    );
-                }
-            );
-            if (previousToolCallIndex === undefined || previousToolCallIndex === -1) {
-                return toolCall;
-            }
-
-            consumedPreviousIndexes.add(previousToolCallIndex);
-            const previousToolCall = previous.toolCalls?.[previousToolCallIndex];
-
-            return previousToolCall?.toolResult
-                ? { ...toolCall, toolResult: previousToolCall.toolResult }
-                : toolCall;
-        });
+        const toolCalls = mergeToolCallsWithResults(
+            message.toolCalls,
+            previous.toolCalls
+        );
 
         return { ...message, toolCalls };
     });

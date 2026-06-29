@@ -103,6 +103,7 @@ import { useSessionActions } from "../hooks/useSessionActions";
 import {
     activeStreamRenderableText,
     isActiveStreamRecoveredInMessages,
+    nextRefreshedChatMessages,
 } from "../pages/Chat";
 
 const originalFetch = fetch;
@@ -3823,6 +3824,53 @@ describe("shared component helpers", () => {
             )[0]?.toolCalls?.some((toolCall) => toolCall.toolResult)
         ).toBe(false);
 
+        const idlessTextLocalRow = {
+            content: "same assistant text with tools",
+            local: true,
+            role: "assistant",
+            text: "same assistant text with tools",
+            timestamp: new Date().toISOString(),
+            toolCalls: [
+                {
+                    arguments: { command: "first" },
+                    name: "functions.exec_command",
+                    toolResult: {
+                        content: "first live output",
+                        name: "functions.exec_command",
+                    },
+                },
+                {
+                    arguments: { command: "second" },
+                    name: "functions.exec_command",
+                    toolResult: {
+                        content: "second live output",
+                        name: "functions.exec_command",
+                    },
+                },
+            ],
+        };
+        const idlessTextHistoryRow = {
+            content: "same assistant text with tools",
+            role: "assistant",
+            text: "same assistant text with tools",
+            toolCalls: [
+                {
+                    arguments: { command: "first" },
+                    name: "functions.exec_command",
+                },
+                {
+                    arguments: { command: "second" },
+                    name: "functions.exec_command",
+                },
+            ],
+        };
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [idlessTextLocalRow],
+                [idlessTextHistoryRow]
+            )[0]?.toolCalls?.map((toolCall) => toolCall.toolResult?.content)
+        ).toEqual(["first live output", "second live output"]);
+
         const mixedDiagnosticLocalRow = {
             content: [
                 { text: "same visible text", type: "text" },
@@ -3875,6 +3923,35 @@ describe("shared component helpers", () => {
                 [{ content: "Done", role: "assistant", runId: "done-1", text: "Done" }]
             )[0]?.thinking?.[0]?.text
         ).toBe("first done reasoning");
+    });
+
+    it("forces refreshed chat diagnostics to merge before clearing streams", () => {
+        const previousMessages = [
+            {
+                content: "Done",
+                role: "assistant",
+                text: "Done",
+                timestamp: "2026-06-29T03:00:00.000Z",
+            },
+        ];
+        const diagnosticMessages = [
+            {
+                ...previousMessages[0]!,
+                content: [
+                    { text: "Done", type: "text" },
+                    { text: "recovered reasoning", type: "thinking" },
+                ],
+                thinking: [{ text: "recovered reasoning" }],
+            },
+        ];
+
+        expect(nextRefreshedChatMessages(previousMessages, diagnosticMessages)).toBe(
+            previousMessages
+        );
+        expect(
+            nextRefreshedChatMessages(previousMessages, diagnosticMessages, true)[0]
+                ?.thinking?.[0]?.text
+        ).toBe("recovered reasoning");
     });
 
     it("detects recovered thinking-only active streams", () => {
