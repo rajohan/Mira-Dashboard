@@ -201,8 +201,13 @@ export function Reports() {
         linkedReportId === selectedReportQuery.data?.report?.id
             ? selectedReportQuery.data?.report
             : undefined;
+    const isLinkedReportMatchingFilter = Boolean(
+        linkedReport && (filter === "all" || linkedReport.type === filter)
+    );
     const reportItems =
-        linkedReport && reports.every((report) => report.id !== linkedReport.id)
+        linkedReport &&
+        isLinkedReportMatchingFilter &&
+        reports.every((report) => report.id !== linkedReport.id)
             ? [linkedReport, ...reports]
             : reports;
 
@@ -225,6 +230,7 @@ export function Reports() {
         }
         setSelectedId(reportItems[0]?.id);
     }, [
+        isLinkedReportMatchingFilter,
         linkedReport,
         linkedReportId,
         reportsQuery.data?.items,
@@ -232,8 +238,13 @@ export function Reports() {
         selectedReportQuery.isLoading,
     ]);
 
+    const selectedReportFromDetail =
+        selectedReportQuery.data?.report &&
+        (filter === "all" || selectedReportQuery.data.report.type === filter)
+            ? selectedReportQuery.data.report
+            : undefined;
     const selectedReport =
-        selectedReportQuery.data?.report ??
+        selectedReportFromDetail ??
         reportItems.find((report) => report.id === selectedId);
 
     return (

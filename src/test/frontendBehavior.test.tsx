@@ -2994,7 +2994,30 @@ describe("Mira Dashboard frontend behavior", () => {
     it("loads linked dashboard report details outside the first report page", async () => {
         const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
             const url = String(input);
-            if (url === "/api/reports") {
+            const [path, query = ""] = url.split("?");
+            const reportType = new URLSearchParams(query).get("type");
+            if (path === "/api/reports" && reportType === "heartbeat") {
+                return Response.json({
+                    items: [
+                        {
+                            id: 11,
+                            type: "heartbeat",
+                            status: "warning",
+                            title: "Linked page heartbeat",
+                            bodyMd: "",
+                            summary: "Heartbeat summary.",
+                            source: "openclaw",
+                            sourceJobId: "ops-check",
+                            dedupeKey: "heartbeat:warning:cache",
+                            metadata: {},
+                            createdAt: "2026-06-23T10:00:00.000Z",
+                            updatedAt: "2026-06-23T10:00:00.000Z",
+                            occurredAt: "2026-06-23T10:00:00.000Z",
+                        },
+                    ],
+                });
+            }
+            if (path === "/api/reports") {
                 return Response.json({
                     items: [
                         {
@@ -3042,10 +3065,16 @@ describe("Mira Dashboard frontend behavior", () => {
             writable: true,
         });
 
+        const user = userEvent.setup();
         renderWithQueryClientAndRouter(createElement(Reports), "/reports?reportId=99");
 
         expect(await screen.findAllByText("Linked old summary")).not.toHaveLength(0);
         expect(screen.getByText("Linked body.")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: /heartbeat/i }));
+        expect(await screen.findAllByText("Linked page heartbeat")).not.toHaveLength(0);
+        await waitFor(() =>
+            expect(screen.queryByText("Linked old summary")).not.toBeInTheDocument()
+        );
     });
 
     it("keeps log, file, cron, session, and format utilities aligned with UI behavior", () => {

@@ -109,7 +109,9 @@ function notificationTitle(report: ReportRecord): string {
 
 function notificationDedupeKey(report: ReportRecord): string {
     if (report.type === "heartbeat") {
-        return `report:heartbeat:${report.status}`;
+        return report.dedupeKey
+            ? `report:heartbeat:${report.status}:${report.dedupeKey}`
+            : `report:heartbeat:${report.status}:${report.id}`;
     }
     return report.dedupeKey
         ? `report:${report.dedupeKey}`

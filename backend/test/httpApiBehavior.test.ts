@@ -625,6 +625,23 @@ describe("Mira Dashboard backend integration", () => {
         );
         expect(heartbeatWarning.status).toBe(201);
 
+        const secondHeartbeatWarning = await api<{
+            isOk: boolean;
+            report: { id: number };
+        }>(
+            "/api/reports",
+            json("POST", {
+                type: "heartbeat",
+                status: "warning",
+                title: "Heartbeat warning",
+                bodyMd: "Cache check needs attention.",
+                summary: "Cache check needs attention.",
+                dedupeKey: "heartbeat:warning:cache",
+                occurredAt: "2026-06-23T07:05:00.000Z",
+            })
+        );
+        expect(secondHeartbeatWarning.status).toBe(201);
+
         const custom = await api<{ isOk: boolean; report: { id: number } }>(
             "/api/reports",
             json("POST", {
@@ -710,6 +727,16 @@ describe("Mira Dashboard backend integration", () => {
                 (item) => item.metadata.reportId === heartbeatOk.body.report.id
             )
         ).toBe(false);
+        expect(
+            reportNotifications.some(
+                (item) => item.metadata.reportId === heartbeatWarning.body.report.id
+            )
+        ).toBe(true);
+        expect(
+            reportNotifications.some(
+                (item) => item.metadata.reportId === secondHeartbeatWarning.body.report.id
+            )
+        ).toBe(true);
 
         const deletedBrief = await api<{ deleted: number; isOk: boolean }>(
             `/api/reports/${brief.body.report.id}`,
