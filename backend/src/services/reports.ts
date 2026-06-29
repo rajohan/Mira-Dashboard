@@ -215,7 +215,7 @@ export function listReports(options: ListReportsOptions = {}): ReportRecord[] {
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
     const rows = database
         .prepare(
-            `SELECT id, type, status, title, body_md, summary, source, source_job_id, dedupe_key, metadata_json, created_at, updated_at, occurred_at
+            `SELECT id, type, status, title, '' AS body_md, summary, source, source_job_id, dedupe_key, metadata_json, created_at, updated_at, occurred_at
              FROM reports
              ${where}
              ORDER BY occurred_at DESC

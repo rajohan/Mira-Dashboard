@@ -18,10 +18,15 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function stringField(field: string, value: unknown): string | Response {
-    return typeof value === "string" && value.trim()
-        ? value.trim()
-        : json({ error: `${field} is required` }, { status: 400 });
+function requiredStringField(
+    field: string,
+    value: unknown,
+    options: { preserveWhitespace?: boolean } = {}
+): string | Response {
+    if (typeof value !== "string" || !value.trim()) {
+        return json({ error: `${field} is required` }, { status: 400 });
+    }
+    return options.preserveWhitespace ? value : value.trim();
 }
 
 function optionalStringField(
@@ -109,9 +114,11 @@ export const reportRoutes = {
             if (type instanceof Response) return type;
             const status = parseReportStatus(body.status);
             if (status instanceof Response) return status;
-            const title = stringField("title", body.title);
+            const title = requiredStringField("title", body.title);
             if (title instanceof Response) return title;
-            const bodyMd = stringField("bodyMd", body.bodyMd);
+            const bodyMd = requiredStringField("bodyMd", body.bodyMd, {
+                preserveWhitespace: true,
+            });
             if (bodyMd instanceof Response) return bodyMd;
             const summary = optionalStringField("summary", body.summary);
             if (summary instanceof Response) return summary;

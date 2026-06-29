@@ -581,7 +581,7 @@ describe("Mira Dashboard backend integration", () => {
                 type: "daily_brief",
                 status: "ok",
                 title: "Daily brief",
-                bodyMd: "# Brief\n\n- One thing",
+                bodyMd: "    command\n\n- One thing\n",
                 summary: "One thing",
                 source: "openclaw",
                 sourceJobId: "daily-brief",
@@ -657,18 +657,25 @@ describe("Mira Dashboard backend integration", () => {
         expect(customWithoutDedupe.body.report.id).not.toBe(custom.body.report.id);
 
         const listed = await api<{
-            items: Array<{ id: number; status: string; title: string; type: string }>;
+            items: Array<{
+                bodyMd: string;
+                id: number;
+                status: string;
+                title: string;
+                type: string;
+            }>;
         }>("/api/reports?type=heartbeat&limit=10");
         expect(listed.status).toBe(200);
         expect(listed.body.items.map((item) => item.title)).toContain("HEARTBEAT_OK");
         expect(listed.body.items.every((item) => item.type === "heartbeat")).toBe(true);
+        expect(listed.body.items.every((item) => item.bodyMd === "")).toBe(true);
 
         const detail = await api<{
             report: { bodyMd: string; id: number; sourceJobId?: string };
         }>(`/api/reports/${brief.body.report.id}`);
         expect(detail.status).toBe(200);
         expect(detail.body.report).toMatchObject({
-            bodyMd: "# Brief\n\n- One thing",
+            bodyMd: "    command\n\n- One thing\n",
             sourceJobId: "daily-brief",
         });
 

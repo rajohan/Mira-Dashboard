@@ -1,7 +1,7 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertCircle } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { sessionsCollection } from "../collections/sessions";
 import { AttachmentPreviewModal } from "../components/features/chat/AttachmentPreviewModal";
@@ -579,8 +579,14 @@ export function Chat() {
         });
     };
 
-    const sortedSessions = sortSessionsByTypeAndActivity(sessions);
-    const sessionMap = new Map(sortedSessions.map((session) => [session.key, session]));
+    const sortedSessions = useMemo(
+        () => sortSessionsByTypeAndActivity(sessions),
+        [sessions]
+    );
+    const sessionMap = useMemo(
+        () => new Map(sortedSessions.map((session) => [session.key, session])),
+        [sortedSessions]
+    );
     const selectedSessionUpdatedAt = selectedSessionKey
         ? sessionMap.get(selectedSessionKey)?.updatedAt
         : undefined;

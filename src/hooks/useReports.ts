@@ -99,7 +99,8 @@ export function useDeleteReport() {
     return useMutation({
         mutationFn: (id: number) =>
             apiDeleteRequired<{ deleted: number; isOk: boolean }>(`/reports/${id}`),
-        onSuccess: () => {
+        onSuccess: (_data, id) => {
+            queryClient.removeQueries({ exact: true, queryKey: reportKeys.detail(id) });
             void queryClient.invalidateQueries({ queryKey: reportKeys.all });
         },
     });

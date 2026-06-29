@@ -192,12 +192,15 @@ export function Reports() {
     const reportsQuery = useReports(
         filter === "all" ? {} : { type: filter as ReportType }
     );
-    const linkedReportQuery = useReport(linkedReportId);
+    const selectedReportQuery = useReport(selectedId);
     const deleteReport = useDeleteReport();
     const reports = [...(reportsQuery.data?.items ?? [])].toSorted(
         (a, b) => reportTimestamp(b) - reportTimestamp(a)
     );
-    const linkedReport = linkedReportQuery.data?.report;
+    const linkedReport =
+        linkedReportId === selectedReportQuery.data?.report?.id
+            ? selectedReportQuery.data?.report
+            : undefined;
     const reportItems =
         linkedReport && reports.every((report) => report.id !== linkedReport.id)
             ? [linkedReport, ...reports]
@@ -206,15 +209,32 @@ export function Reports() {
     useEffect(() => {
         if (linkedReportId !== undefined) {
             setSelectedId(linkedReportId);
+        }
+    }, [linkedReportId]);
+
+    useEffect(() => {
+        if (
+            linkedReportId !== undefined &&
+            selectedId === linkedReportId &&
+            selectedReportQuery.isLoading
+        ) {
             return;
         }
         if (selectedId && reportItems.some((report) => report.id === selectedId)) {
             return;
         }
         setSelectedId(reportItems[0]?.id);
-    }, [linkedReportId, linkedReport, reportsQuery.data?.items, selectedId]);
+    }, [
+        linkedReport,
+        linkedReportId,
+        reportsQuery.data?.items,
+        selectedId,
+        selectedReportQuery.isLoading,
+    ]);
 
-    const selectedReport = reportItems.find((report) => report.id === selectedId);
+    const selectedReport =
+        selectedReportQuery.data?.report ??
+        reportItems.find((report) => report.id === selectedId);
 
     return (
         <div className="space-y-4 p-4 sm:p-6">
@@ -249,7 +269,18 @@ export function Reports() {
                     <ReportDetails
                         report={selectedReport}
                         deletePending={deleteReport.isPending}
-                        onDelete={(id) => deleteReport.mutate(id)}
+                        onDelete={(id) =>
+                            deleteReport.mutate(id, {
+                                onSuccess: () => {
+                                    if (selectedId === id) {
+                                        setSelectedId(
+                                            reportItems.find((report) => report.id !== id)
+                                                ?.id
+                                        );
+                                    }
+                                },
+                            })
+                        }
                     />
                 </div>
             )}
