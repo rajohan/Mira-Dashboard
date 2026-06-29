@@ -3017,6 +3017,47 @@ describe("shared component helpers", () => {
         ).toBe("Unscoped B");
         activeStreamsReference.current = {};
 
+        activeStreamsReference.current["agent:main:main"] = {
+            aliases: [],
+            runId: "dashboard-chat-legacy",
+            sessionKey: "agent:main:main",
+            statusText: "Thinking",
+            text: "",
+            updatedAt: new Date().toISOString(),
+        };
+        activeStreamsReference.current["agent:main:main::assistant"] = {
+            aliases: [],
+            runId: "agent:main:main",
+            sessionKey: "agent:main:main",
+            text: "Legacy buffered answer",
+            updatedAt: new Date().toISOString(),
+        };
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "text" in message &&
+                    message.text === "Legacy buffered answer"
+            )
+        ).toBe(true);
+        expect(activeStreamsReference.current["agent:main:main"]).toBeUndefined();
+        expect(
+            activeStreamsReference.current["agent:main:main::assistant"]
+        ).toBeUndefined();
+        activeStreamsReference.current = {};
+
         act(() => {
             listener?.({
                 event: "agent",

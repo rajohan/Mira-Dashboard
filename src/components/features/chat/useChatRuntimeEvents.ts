@@ -100,7 +100,10 @@ function isActiveStreamMatchingRun(
     runId?: string
 ): boolean {
     if (!runId) {
-        return false;
+        return (
+            isProvisionalRunId(sessionKey, streamEntry.runId) ||
+            isOptimisticRunId(streamEntry.runId)
+        );
     }
 
     return (
