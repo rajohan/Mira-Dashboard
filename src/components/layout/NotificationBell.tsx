@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { Bell, BellRing } from "lucide-react";
 import { useState } from "react";
 
@@ -178,12 +179,18 @@ export function NotificationBell() {
                                     </div>
                                     <div className="mt-2 flex items-center gap-2">
                                         {reportIdFromNotification(notification) ? (
-                                            <a
+                                            <Link
                                                 className="border-primary-600 text-primary-200 hover:bg-primary-700 rounded-md border px-2 py-1 text-xs"
-                                                href={`/reports?reportId=${reportIdFromNotification(notification)}`}
+                                                to="/reports"
+                                                search={{
+                                                    reportId:
+                                                        reportIdFromNotification(
+                                                            notification
+                                                        ),
+                                                }}
                                             >
                                                 Open report
-                                            </a>
+                                            </Link>
                                         ) : undefined}
                                         {!notification.isRead && (
                                             <button

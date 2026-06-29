@@ -1,5 +1,6 @@
-import { FileText, HeartPulse, Newspaper, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "@tanstack/react-router";
+import { FileText, HeartPulse, Newspaper, ScrollText, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -9,7 +10,7 @@ import { Card, CardTitle } from "../components/ui/Card";
 import { EmptyState } from "../components/ui/EmptyState";
 import { LoadingState } from "../components/ui/LoadingState";
 import type { ReportItem, ReportType } from "../hooks/useReports";
-import { useDeleteReport, useReports } from "../hooks/useReports";
+import { useDeleteReport, useReport, useReports } from "../hooks/useReports";
 import { cn } from "../utils/cn";
 import { formatDate } from "../utils/format";
 
@@ -24,6 +25,7 @@ const reportFilters: Array<{
     { icon: Newspaper, label: "Briefs", value: "daily_brief" },
     { icon: FileText, label: "Summaries", value: "daily_summary" },
     { icon: HeartPulse, label: "Heartbeat", value: "heartbeat" },
+    { icon: ScrollText, label: "Custom", value: "custom" },
 ];
 
 function typeLabel(type: ReportType): string {
@@ -39,8 +41,8 @@ function statusVariant(status: ReportItem["status"]) {
     return "success" as const;
 }
 
-function getInitialReportId(): number | undefined {
-    const value = new URLSearchParams(location.search).get("reportId");
+function reportIdFromSearch(search: string): number | undefined {
+    const value = new URLSearchParams(search).get("reportId");
     const id = Number(value);
     return Number.isSafeInteger(id) && id > 0 ? id : undefined;
 }
@@ -183,28 +185,36 @@ function ReportDetails({ report, onDelete, deletePending }: ReportDetailsPropert
 }
 
 export function Reports() {
+    const location = useLocation();
     const [filter, setFilter] = useState<ReportFilter>("all");
-    const [selectedId, setSelectedId] = useState<number | undefined>(getInitialReportId);
+    const linkedReportId = reportIdFromSearch(location.searchStr);
+    const [selectedId, setSelectedId] = useState<number | undefined>(linkedReportId);
     const reportsQuery = useReports(
         filter === "all" ? {} : { type: filter as ReportType }
     );
+    const linkedReportQuery = useReport(linkedReportId);
     const deleteReport = useDeleteReport();
-    const reports = useMemo(
-        () =>
-            [...(reportsQuery.data?.items ?? [])].toSorted(
-                (a, b) => reportTimestamp(b) - reportTimestamp(a)
-            ),
-        [reportsQuery.data?.items]
+    const reports = [...(reportsQuery.data?.items ?? [])].toSorted(
+        (a, b) => reportTimestamp(b) - reportTimestamp(a)
     );
+    const linkedReport = linkedReportQuery.data?.report;
+    const reportItems =
+        linkedReport && reports.every((report) => report.id !== linkedReport.id)
+            ? [linkedReport, ...reports]
+            : reports;
 
     useEffect(() => {
-        if (selectedId && reports.some((report) => report.id === selectedId)) {
+        if (linkedReportId !== undefined) {
+            setSelectedId(linkedReportId);
             return;
         }
-        setSelectedId(reports[0]?.id);
-    }, [reports, selectedId]);
+        if (selectedId && reportItems.some((report) => report.id === selectedId)) {
+            return;
+        }
+        setSelectedId(reportItems[0]?.id);
+    }, [linkedReportId, linkedReport, reportsQuery.data?.items, selectedId]);
 
-    const selectedReport = reports.find((report) => report.id === selectedId);
+    const selectedReport = reportItems.find((report) => report.id === selectedId);
 
     return (
         <div className="space-y-4 p-4 sm:p-6">
@@ -232,7 +242,7 @@ export function Reports() {
             ) : (
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(18rem,24rem)_minmax(0,1fr)]">
                     <ReportList
-                        reports={reports}
+                        reports={reportItems}
                         selectedId={selectedId}
                         onSelect={setSelectedId}
                     />

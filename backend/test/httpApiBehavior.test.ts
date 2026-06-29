@@ -569,7 +569,12 @@ describe("Mira Dashboard backend integration", () => {
     it("creates and lists delivery reports without spamming heartbeat ok notifications", async () => {
         const brief = await api<{
             isOk: boolean;
-            report: { id: number; metadata: Record<string, unknown>; title: string };
+            report: {
+                id: number;
+                metadata: Record<string, unknown>;
+                occurredAt: string;
+                title: string;
+            };
         }>(
             "/api/reports",
             json("POST", {
@@ -582,12 +587,13 @@ describe("Mira Dashboard backend integration", () => {
                 sourceJobId: "daily-brief",
                 dedupeKey: "brief:2026-06-23",
                 metadata: { channel: "dashboard" },
-                occurredAt: "2026-06-23T06:00:00.000Z",
+                occurredAt: "2026-06-23 06:00:00 +0200",
             })
         );
         expect(brief.status).toBe(201);
         expect(brief.body.report).toMatchObject({
             metadata: { channel: "dashboard" },
+            occurredAt: "2026-06-23T04:00:00.000Z",
             title: "Daily brief",
         });
 
@@ -618,6 +624,37 @@ describe("Mira Dashboard backend integration", () => {
             })
         );
         expect(heartbeatWarning.status).toBe(201);
+
+        const custom = await api<{ isOk: boolean; report: { id: number } }>(
+            "/api/reports",
+            json("POST", {
+                type: "custom",
+                status: "ok",
+                title: "Custom report",
+                bodyMd: "Custom delivery.",
+                summary: "Custom delivery.",
+                dedupeKey: " ".repeat(3),
+                occurredAt: "2026-06-23T08:00:00.000Z",
+            })
+        );
+        const customWithoutDedupe = await api<{
+            isOk: boolean;
+            report: { id: number };
+        }>(
+            "/api/reports",
+            json("POST", {
+                type: "custom",
+                status: "ok",
+                title: "Second custom report",
+                bodyMd: "Second custom delivery.",
+                summary: "Second custom delivery.",
+                dedupeKey: " ".repeat(3),
+                occurredAt: "2026-06-23T08:30:00.000Z",
+            })
+        );
+        expect(custom.status).toBe(201);
+        expect(customWithoutDedupe.status).toBe(201);
+        expect(customWithoutDedupe.body.report.id).not.toBe(custom.body.report.id);
 
         const listed = await api<{
             items: Array<{ id: number; status: string; title: string; type: string }>;
@@ -655,11 +692,31 @@ describe("Mira Dashboard backend integration", () => {
                     title: "Heartbeat warning",
                     type: "warning",
                 }),
+                expect.objectContaining({
+                    title: "Custom report",
+                    type: "info",
+                }),
             ])
         );
-        expect(reportNotifications.some((item) => item.title === "HEARTBEAT_OK")).toBe(
-            false
+        expect(
+            reportNotifications.some(
+                (item) => item.metadata.reportId === heartbeatOk.body.report.id
+            )
+        ).toBe(false);
+
+        const deletedBrief = await api<{ deleted: number; isOk: boolean }>(
+            `/api/reports/${brief.body.report.id}`,
+            { method: "DELETE" }
         );
+        expect(deletedBrief.body).toEqual({ deleted: 1, isOk: true });
+        const notificationsAfterDelete = await api<{
+            items: Array<{ metadata: Record<string, unknown> }>;
+        }>("/api/notifications?limit=50");
+        expect(
+            notificationsAfterDelete.body.items.some(
+                (item) => item.metadata.reportId === brief.body.report.id
+            )
+        ).toBe(false);
     });
 
     it("loads, validates, clamps, and persists dashboard settings", async () => {

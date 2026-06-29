@@ -384,6 +384,45 @@ function renderWithQueryClient(children: ReactNode) {
     };
 }
 
+function renderWithQueryClientAndRouter(children: ReactNode, initialEntry = "/") {
+    const rootRoute = createRootRoute({
+        component: () => createElement(Outlet),
+    });
+    const indexRoute = createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/",
+        component: () => createElement("div", undefined, children),
+    });
+    const reportsRoute = createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/reports",
+        component: () => createElement("div", undefined, children),
+    });
+    const router = createRouter({
+        history: createMemoryHistory({ initialEntries: [initialEntry] }),
+        routeTree: rootRoute.addChildren([indexRoute, reportsRoute]),
+    });
+    const queryClient = new QueryClient({
+        defaultOptions: {
+            queries: { retry: false },
+            mutations: { retry: false },
+        },
+    });
+    const view = render(
+        createElement(
+            QueryClientProvider,
+            { client: queryClient },
+            createElement(RouterProvider, { router })
+        )
+    );
+
+    return {
+        ...view,
+        queryClient,
+        router,
+    };
+}
+
 function renderHookWithQueryClient<Result>(callback: () => Result) {
     const queryClient = new QueryClient({
         defaultOptions: {
@@ -2833,7 +2872,7 @@ describe("Mira Dashboard frontend behavior", () => {
         });
         const user = userEvent.setup();
 
-        renderWithQueryClient(createElement(NotificationBell));
+        renderWithQueryClientAndRouter(createElement(NotificationBell));
 
         await user.click(
             await screen.findByRole("button", {
@@ -2842,8 +2881,7 @@ describe("Mira Dashboard frontend behavior", () => {
         );
         expect(await screen.findByText("Cache refresh failed")).toBeInTheDocument();
         expect(screen.getByText("Backup complete")).toBeInTheDocument();
-        expect(screen.getByText("Open report").closest("a")).toHaveAttribute(
-            "href",
+        expect(screen.getByText("Open report").closest("a")?.getAttribute("href")).toBe(
             "/reports?reportId=42"
         );
 
@@ -2935,11 +2973,79 @@ describe("Mira Dashboard frontend behavior", () => {
             value: fetchMock,
             writable: true,
         });
-        renderWithQueryClient(createElement(Reports));
+        const user = userEvent.setup();
+        renderWithQueryClientAndRouter(createElement(Reports), "/reports");
 
         expect(await screen.findAllByText("Daily brief")).not.toHaveLength(0);
         expect(await screen.findAllByText("Review PRs")).not.toHaveLength(0);
-        expect(screen.getByRole("button", { name: /heartbeat/i })).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: /heartbeat/i }));
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/reports?type=heartbeat",
+                expect.any(Object)
+            )
+        );
+        expect(await screen.findAllByText("Heartbeat warning")).not.toHaveLength(0);
+        expect(await screen.findAllByText("Git check needs attention.")).not.toHaveLength(
+            0
+        );
+    });
+
+    it("loads linked dashboard report details outside the first report page", async () => {
+        const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
+            const url = String(input);
+            if (url === "/api/reports") {
+                return Response.json({
+                    items: [
+                        {
+                            id: 10,
+                            type: "daily_brief",
+                            status: "ok",
+                            title: "Newest brief",
+                            bodyMd: "Newest body.",
+                            summary: "Newest summary.",
+                            source: "openclaw",
+                            sourceJobId: "daily-brief",
+                            dedupeKey: "brief:latest",
+                            metadata: {},
+                            createdAt: "2026-06-23T09:00:00.000Z",
+                            updatedAt: "2026-06-23T09:00:00.000Z",
+                            occurredAt: "2026-06-23T09:00:00.000Z",
+                        },
+                    ],
+                });
+            }
+            if (url === "/api/reports/99") {
+                return Response.json({
+                    report: {
+                        id: 99,
+                        type: "daily_summary",
+                        status: "ok",
+                        title: "Linked old summary",
+                        bodyMd: "Linked body.",
+                        summary: "Linked summary.",
+                        source: "openclaw",
+                        sourceJobId: "daily-summary",
+                        dedupeKey: "summary:old",
+                        metadata: {},
+                        createdAt: "2026-06-20T20:00:00.000Z",
+                        updatedAt: "2026-06-20T20:00:00.000Z",
+                        occurredAt: "2026-06-20T20:00:00.000Z",
+                    },
+                });
+            }
+            return Response.json({ items: [] });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        renderWithQueryClientAndRouter(createElement(Reports), "/reports?reportId=99");
+
+        expect(await screen.findAllByText("Linked old summary")).not.toHaveLength(0);
+        expect(screen.getByText("Linked body.")).toBeInTheDocument();
     });
 
     it("keeps log, file, cron, session, and format utilities aligned with UI behavior", () => {

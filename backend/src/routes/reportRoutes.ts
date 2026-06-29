@@ -28,12 +28,14 @@ function optionalStringField(
     field: string,
     value: unknown
 ): string | undefined | Response {
-    if (value == undefined || value === "") {
+    if (value == undefined) {
         return undefined;
     }
-    return typeof value === "string"
-        ? value.trim()
-        : json({ error: `${field} must be a string` }, { status: 400 });
+    if (typeof value !== "string") {
+        return json({ error: `${field} must be a string` }, { status: 400 });
+    }
+    const trimmed = value.trim();
+    return trimmed || undefined;
 }
 
 function validId(value: string | undefined): number | undefined {
@@ -126,6 +128,8 @@ export const reportRoutes = {
             ) {
                 return json({ error: "invalid occurredAt" }, { status: 400 });
             }
+            const normalizedOccurredAt =
+                occurredAt === undefined ? undefined : new Date(occurredAt).toISOString();
             if (body.metadata !== undefined && !isJsonObject(body.metadata)) {
                 return json({ error: "metadata must be an object" }, { status: 400 });
             }
@@ -139,7 +143,7 @@ export const reportRoutes = {
                     dedupeKey,
                     metadata: body.metadata as Record<string, unknown> | undefined,
                     notify: body.notify,
-                    occurredAt,
+                    occurredAt: normalizedOccurredAt,
                     source,
                     sourceJobId,
                     status,

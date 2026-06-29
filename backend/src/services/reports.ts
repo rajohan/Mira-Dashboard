@@ -97,7 +97,7 @@ function notificationTypeForReport(status: ReportStatus): "error" | "info" | "wa
 function shouldCreateNotification(report: ReportRecord, shouldNotify: boolean): boolean {
     if (!shouldNotify) return false;
     if (report.type === "heartbeat") return report.status !== "ok";
-    return report.type === "daily_brief" || report.type === "daily_summary";
+    return true;
 }
 
 function notificationTitle(report: ReportRecord): string {
@@ -218,7 +218,7 @@ export function listReports(options: ListReportsOptions = {}): ReportRecord[] {
             `SELECT id, type, status, title, body_md, summary, source, source_job_id, dedupe_key, metadata_json, created_at, updated_at, occurred_at
              FROM reports
              ${where}
-             ORDER BY COALESCE(datetime(occurred_at), datetime(created_at)) DESC
+             ORDER BY occurred_at DESC
              LIMIT ?`
         )
         .all(...bindings) as ReportRow[];
@@ -237,5 +237,15 @@ export function getReport(id: number): ReportRecord | undefined {
 }
 
 export function deleteReport(id: number): number {
-    return database.prepare("DELETE FROM reports WHERE id = ?").run(id).changes || 0;
+    const transaction = database.transaction((reportId: number) => {
+        database
+            .prepare(
+                `DELETE FROM notifications
+                 WHERE json_extract(metadata_json, '$.reportId') = ?`
+            )
+            .run(reportId);
+        return database.prepare("DELETE FROM reports WHERE id = ?").run(reportId).changes;
+    });
+
+    return transaction(id) || 0;
 }
