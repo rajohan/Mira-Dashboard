@@ -167,6 +167,7 @@ import { useWeather } from "../hooks/useWeather";
 import { createSocketClient } from "../lib/socket/socketClient";
 import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
 import { compareLogEntriesByLineId } from "../pages/Logs";
+import { Reports } from "../pages/Reports";
 import { Tasks } from "../pages/Tasks";
 import { authActions, authStore } from "../stores/authStore";
 import type { Task } from "../types/task";
@@ -380,6 +381,45 @@ function renderWithQueryClient(children: ReactNode) {
     return {
         ...view,
         queryClient,
+    };
+}
+
+function renderWithQueryClientAndRouter(children: ReactNode, initialEntry = "/") {
+    const rootRoute = createRootRoute({
+        component: () => createElement(Outlet),
+    });
+    const indexRoute = createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/",
+        component: () => createElement("div", undefined, children),
+    });
+    const reportsRoute = createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/reports",
+        component: () => createElement("div", undefined, children),
+    });
+    const router = createRouter({
+        history: createMemoryHistory({ initialEntries: [initialEntry] }),
+        routeTree: rootRoute.addChildren([indexRoute, reportsRoute]),
+    });
+    const queryClient = new QueryClient({
+        defaultOptions: {
+            queries: { retry: false },
+            mutations: { retry: false },
+        },
+    });
+    const view = render(
+        createElement(
+            QueryClientProvider,
+            { client: queryClient },
+            createElement(RouterProvider, { router })
+        )
+    );
+
+    return {
+        ...view,
+        queryClient,
+        router,
     };
 }
 
@@ -2812,6 +2852,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 id: 1,
                 title: "Cache refresh failed",
                 description: "Needs attention",
+                metadata: { reportId: 42 },
                 type: "warning",
                 occurredAt: "2026-06-23T10:00:00.000Z",
             }),
@@ -2831,7 +2872,7 @@ describe("Mira Dashboard frontend behavior", () => {
         });
         const user = userEvent.setup();
 
-        renderWithQueryClient(createElement(NotificationBell));
+        renderWithQueryClientAndRouter(createElement(NotificationBell));
 
         await user.click(
             await screen.findByRole("button", {
@@ -2840,6 +2881,9 @@ describe("Mira Dashboard frontend behavior", () => {
         );
         expect(await screen.findByText("Cache refresh failed")).toBeInTheDocument();
         expect(screen.getByText("Backup complete")).toBeInTheDocument();
+        expect(screen.getByText("Open report").closest("a")?.getAttribute("href")).toBe(
+            "/reports?reportId=42"
+        );
 
         await user.click(screen.getByRole("menuitemradio", { name: "Unread" }));
         expect(screen.getByText("Cache refresh failed")).toBeInTheDocument();
@@ -2872,6 +2916,164 @@ describe("Mira Dashboard frontend behavior", () => {
                 "/api/notifications/clear-read",
                 expect.objectContaining({ method: "POST" })
             )
+        );
+    });
+
+    it("renders dashboard reports and switches report filters", async () => {
+        const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
+            const url = String(input);
+            const [path, query = ""] = url.split("?");
+            const reportType = new URLSearchParams(query).get("type");
+            if (path === "/api/reports" && reportType === "heartbeat") {
+                return Response.json({
+                    items: [
+                        {
+                            id: 11,
+                            type: "heartbeat",
+                            status: "warning",
+                            title: "Heartbeat warning",
+                            bodyMd: "Git check needs attention.",
+                            summary: "Git check needs attention.",
+                            source: "openclaw",
+                            sourceJobId: "ops-check",
+                            dedupeKey: "heartbeat:warning:git",
+                            metadata: {},
+                            createdAt: "2026-06-23T07:00:00.000Z",
+                            updatedAt: "2026-06-23T07:00:00.000Z",
+                            occurredAt: "2026-06-23T07:00:00.000Z",
+                        },
+                    ],
+                });
+            }
+            if (path === "/api/reports") {
+                return Response.json({
+                    items: [
+                        {
+                            id: 10,
+                            type: "daily_brief",
+                            status: "ok",
+                            title: "Daily brief",
+                            bodyMd: "# Brief\n\n- Review PRs",
+                            summary: "Review PRs",
+                            source: "openclaw",
+                            sourceJobId: "daily-brief",
+                            dedupeKey: "brief:2026-06-23",
+                            metadata: {},
+                            createdAt: "2026-06-23T06:00:00.000Z",
+                            updatedAt: "2026-06-23T06:00:00.000Z",
+                            occurredAt: "2026-06-23T06:00:00.000Z",
+                        },
+                    ],
+                });
+            }
+            return Response.json({ items: [] });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+        const user = userEvent.setup();
+        renderWithQueryClientAndRouter(createElement(Reports), "/reports");
+
+        expect(await screen.findAllByText("Daily brief")).not.toHaveLength(0);
+        expect(await screen.findAllByText("Review PRs")).not.toHaveLength(0);
+        await user.click(screen.getByRole("button", { name: /heartbeat/i }));
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/reports?type=heartbeat",
+                expect.any(Object)
+            )
+        );
+        expect(await screen.findAllByText("Heartbeat warning")).not.toHaveLength(0);
+        expect(await screen.findAllByText("Git check needs attention.")).not.toHaveLength(
+            0
+        );
+    });
+
+    it("loads linked dashboard report details outside the first report page", async () => {
+        const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
+            const url = String(input);
+            const [path, query = ""] = url.split("?");
+            const reportType = new URLSearchParams(query).get("type");
+            if (path === "/api/reports" && reportType === "heartbeat") {
+                return Response.json({
+                    items: [
+                        {
+                            id: 11,
+                            type: "heartbeat",
+                            status: "warning",
+                            title: "Linked page heartbeat",
+                            bodyMd: "",
+                            summary: "Heartbeat summary.",
+                            source: "openclaw",
+                            sourceJobId: "ops-check",
+                            dedupeKey: "heartbeat:warning:cache",
+                            metadata: {},
+                            createdAt: "2026-06-23T10:00:00.000Z",
+                            updatedAt: "2026-06-23T10:00:00.000Z",
+                            occurredAt: "2026-06-23T10:00:00.000Z",
+                        },
+                    ],
+                });
+            }
+            if (path === "/api/reports") {
+                return Response.json({
+                    items: [
+                        {
+                            id: 10,
+                            type: "daily_brief",
+                            status: "ok",
+                            title: "Newest brief",
+                            bodyMd: "Newest body.",
+                            summary: "Newest summary.",
+                            source: "openclaw",
+                            sourceJobId: "daily-brief",
+                            dedupeKey: "brief:latest",
+                            metadata: {},
+                            createdAt: "2026-06-23T09:00:00.000Z",
+                            updatedAt: "2026-06-23T09:00:00.000Z",
+                            occurredAt: "2026-06-23T09:00:00.000Z",
+                        },
+                    ],
+                });
+            }
+            if (url === "/api/reports/99") {
+                return Response.json({
+                    report: {
+                        id: 99,
+                        type: "daily_summary",
+                        status: "ok",
+                        title: "Linked old summary",
+                        bodyMd: "Linked body.",
+                        summary: "Linked summary.",
+                        source: "openclaw",
+                        sourceJobId: "daily-summary",
+                        dedupeKey: "summary:old",
+                        metadata: {},
+                        createdAt: "2026-06-20T20:00:00.000Z",
+                        updatedAt: "2026-06-20T20:00:00.000Z",
+                        occurredAt: "2026-06-20T20:00:00.000Z",
+                    },
+                });
+            }
+            return Response.json({ items: [] });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const user = userEvent.setup();
+        renderWithQueryClientAndRouter(createElement(Reports), "/reports?reportId=99");
+
+        expect(await screen.findAllByText("Linked old summary")).not.toHaveLength(0);
+        expect(screen.getByText("Linked body.")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: /heartbeat/i }));
+        expect(await screen.findAllByText("Linked page heartbeat")).not.toHaveLength(0);
+        await waitFor(() =>
+            expect(screen.queryByText("Linked old summary")).not.toBeInTheDocument()
         );
     });
 

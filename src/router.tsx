@@ -18,6 +18,7 @@ import { Login } from "./pages/Login";
 import { Logs } from "./pages/Logs";
 import { Moltbook } from "./pages/Moltbook";
 import { PullRequests } from "./pages/PullRequests";
+import { Reports } from "./pages/Reports";
 import { Sessions } from "./pages/Sessions";
 import { Settings } from "./pages/Settings";
 import { Tasks } from "./pages/Tasks";
@@ -98,6 +99,12 @@ const jobsRoute = createRoute({
     component: Jobs,
 });
 
+const reportsRoute = createRoute({
+    getParentRoute: () => authenticatedRoute,
+    path: "/reports",
+    component: Reports,
+});
+
 const pullRequestsRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/pull-requests",
@@ -150,6 +157,7 @@ const routeTree = rootRoute.addChildren([
         chatRoute,
         logsRoute,
         jobsRoute,
+        reportsRoute,
         pullRequestsRoute,
         filesRoute,
         dockerRoute,

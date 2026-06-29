@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { Bell, BellRing } from "lucide-react";
 import { useState } from "react";
 
@@ -34,6 +35,13 @@ function formatNotificationTime(notification: NotificationItem): string {
     const timestamp = getNotificationTimestamp(notification);
 
     return timestamp > 0 ? formatDate(timestamp) : "Unknown time";
+}
+
+function reportIdFromNotification(notification: NotificationItem): number | undefined {
+    const value = notification.metadata.reportId;
+    return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+        ? value
+        : undefined;
 }
 
 /** Renders the notification bell UI. */
@@ -170,6 +178,20 @@ export function NotificationBell() {
                                         {notification.description}
                                     </div>
                                     <div className="mt-2 flex items-center gap-2">
+                                        {reportIdFromNotification(notification) ? (
+                                            <Link
+                                                className="border-primary-600 text-primary-200 hover:bg-primary-700 rounded-md border px-2 py-1 text-xs"
+                                                to="/reports"
+                                                search={{
+                                                    reportId:
+                                                        reportIdFromNotification(
+                                                            notification
+                                                        ),
+                                                }}
+                                            >
+                                                Open report
+                                            </Link>
+                                        ) : undefined}
                                         {!notification.isRead && (
                                             <button
                                                 type="button"

@@ -566,6 +566,291 @@ describe("Mira Dashboard backend integration", () => {
         expect(deleteUnread.body).toEqual({ deleted: 1, isOk: true });
     });
 
+    it("creates and lists delivery reports without spamming heartbeat ok notifications", async () => {
+        const brief = await api<{
+            isOk: boolean;
+            report: {
+                id: number;
+                metadata: Record<string, unknown>;
+                occurredAt: string;
+                title: string;
+            };
+        }>(
+            "/api/reports",
+            json("POST", {
+                type: "daily_brief",
+                status: "ok",
+                title: "Daily brief",
+                bodyMd: "    command\n\n- One thing\n",
+                summary: "One thing",
+                source: "openclaw",
+                sourceJobId: "daily-brief",
+                dedupeKey: "brief:2026-06-23",
+                metadata: { channel: "dashboard" },
+                occurredAt: "2026-06-23 06:00:00 +0200",
+            })
+        );
+        expect(brief.status).toBe(201);
+        expect(brief.body.report).toMatchObject({
+            metadata: { channel: "dashboard" },
+            occurredAt: "2026-06-23T04:00:00.000Z",
+            title: "Daily brief",
+        });
+
+        const heartbeatOk = await api<{ isOk: boolean; report: { id: number } }>(
+            "/api/reports",
+            json("POST", {
+                type: "heartbeat",
+                status: "ok",
+                title: "HEARTBEAT_OK",
+                bodyMd: "All checks passed.",
+                summary: "All checks passed.",
+                dedupeKey: "heartbeat:ok:2026-06-23T06:30",
+                occurredAt: "2026-06-23T06:30:00.000Z",
+            })
+        );
+        expect(heartbeatOk.status).toBe(201);
+
+        const heartbeatWarning = await api<{ isOk: boolean; report: { id: number } }>(
+            "/api/reports",
+            json("POST", {
+                type: "heartbeat",
+                status: "warning",
+                title: "Heartbeat warning",
+                bodyMd: "Git check needs attention.",
+                summary: "Git check needs attention.",
+                dedupeKey: "heartbeat:warning:git",
+                occurredAt: "2026-06-23T07:00:00.000Z",
+            })
+        );
+        expect(heartbeatWarning.status).toBe(201);
+
+        const secondHeartbeatWarning = await api<{
+            isOk: boolean;
+            report: { id: number };
+        }>(
+            "/api/reports",
+            json("POST", {
+                type: "heartbeat",
+                status: "warning",
+                title: "Heartbeat warning",
+                bodyMd: "Cache check needs attention.",
+                summary: "Cache check needs attention.",
+                dedupeKey: "heartbeat:warning:cache",
+                occurredAt: "2026-06-23T07:05:00.000Z",
+            })
+        );
+        expect(secondHeartbeatWarning.status).toBe(201);
+
+        const changingHeartbeatWarning = await api<{
+            isOk: boolean;
+            report: { id: number };
+        }>(
+            "/api/reports",
+            json("POST", {
+                type: "heartbeat",
+                status: "warning",
+                title: "Heartbeat status change",
+                bodyMd: "Status-changing check needs attention.",
+                summary: "Status-changing check needs attention.",
+                dedupeKey: "heartbeat:status-changing",
+                occurredAt: "2026-06-23T07:10:00.000Z",
+            })
+        );
+        const changingHeartbeatError = await api<{
+            isOk: boolean;
+            report: { id: number };
+        }>(
+            "/api/reports",
+            json("POST", {
+                type: "heartbeat",
+                status: "error",
+                title: "Heartbeat status change",
+                bodyMd: "Status-changing check failed.",
+                summary: "Status-changing check failed.",
+                dedupeKey: "heartbeat:status-changing",
+                occurredAt: "2026-06-23T07:15:00.000Z",
+            })
+        );
+        expect(changingHeartbeatError.body.report.id).toBe(
+            changingHeartbeatWarning.body.report.id
+        );
+
+        const custom = await api<{ isOk: boolean; report: { id: number } }>(
+            "/api/reports",
+            json("POST", {
+                type: "custom",
+                status: "ok",
+                title: "Custom report",
+                bodyMd: "Custom delivery.",
+                summary: "Custom delivery.",
+                dedupeKey: " ".repeat(3),
+                occurredAt: "2026-06-23T08:00:00.000Z",
+            })
+        );
+        const customWithoutDedupe = await api<{
+            isOk: boolean;
+            report: { id: number };
+        }>(
+            "/api/reports",
+            json("POST", {
+                type: "custom",
+                status: "ok",
+                title: "Second custom report",
+                bodyMd: "Second custom delivery.",
+                summary: "Second custom delivery.",
+                dedupeKey: " ".repeat(3),
+                occurredAt: "2026-06-23T08:30:00.000Z",
+            })
+        );
+        expect(custom.status).toBe(201);
+        expect(customWithoutDedupe.status).toBe(201);
+        expect(customWithoutDedupe.body.report.id).not.toBe(custom.body.report.id);
+        const noisyCustom = await api<{ isOk: boolean; report: { id: number } }>(
+            "/api/reports",
+            json("POST", {
+                type: "custom",
+                status: "ok",
+                title: "Noisy custom report",
+                bodyMd: "Notify first.",
+                summary: "Notify first.",
+                dedupeKey: "custom:notify-toggle",
+                occurredAt: "2026-06-23T08:40:00.000Z",
+            })
+        );
+        const quietCustom = await api<{ isOk: boolean; report: { id: number } }>(
+            "/api/reports",
+            json("POST", {
+                type: "custom",
+                status: "ok",
+                title: "Quiet custom report",
+                bodyMd: "Updated silently.",
+                summary: "Updated silently.",
+                dedupeKey: "custom:notify-toggle",
+                notify: false,
+                occurredAt: "2026-06-23T08:45:00.000Z",
+            })
+        );
+        expect(quietCustom.body.report.id).toBe(noisyCustom.body.report.id);
+
+        const listed = await api<{
+            items: Array<{
+                bodyMd: string;
+                id: number;
+                status: string;
+                title: string;
+                type: string;
+            }>;
+        }>("/api/reports?type=heartbeat&limit=10");
+        expect(listed.status).toBe(200);
+        expect(listed.body.items.map((item) => item.title)).toContain("HEARTBEAT_OK");
+        expect(listed.body.items.every((item) => item.type === "heartbeat")).toBe(true);
+        expect(listed.body.items.every((item) => item.bodyMd === "")).toBe(true);
+
+        const detail = await api<{
+            report: { bodyMd: string; id: number; sourceJobId?: string };
+        }>(`/api/reports/${brief.body.report.id}`);
+        expect(detail.status).toBe(200);
+        expect(detail.body.report).toMatchObject({
+            bodyMd: "    command\n\n- One thing\n",
+            sourceJobId: "daily-brief",
+        });
+
+        const notifications = await api<{
+            items: Array<{
+                metadata: Record<string, unknown>;
+                title: string;
+                type: string;
+            }>;
+        }>("/api/notifications?limit=50");
+        const reportNotifications = notifications.body.items.filter(
+            (item) => item.metadata.reportId
+        );
+        expect(reportNotifications).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    title: "Daily brief ready",
+                    type: "info",
+                }),
+                expect.objectContaining({
+                    title: "Heartbeat warning",
+                    type: "warning",
+                }),
+                expect.objectContaining({
+                    title: "Custom report",
+                    type: "info",
+                }),
+            ])
+        );
+        expect(
+            reportNotifications.some(
+                (item) => item.metadata.reportId === heartbeatOk.body.report.id
+            )
+        ).toBe(false);
+        expect(
+            reportNotifications.some(
+                (item) => item.metadata.reportId === heartbeatWarning.body.report.id
+            )
+        ).toBe(true);
+        expect(
+            reportNotifications.some(
+                (item) => item.metadata.reportId === secondHeartbeatWarning.body.report.id
+            )
+        ).toBe(true);
+        const changingHeartbeatNotifications = reportNotifications.filter(
+            (item) => item.metadata.reportId === changingHeartbeatError.body.report.id
+        );
+        expect(changingHeartbeatNotifications).toHaveLength(1);
+        expect(changingHeartbeatNotifications[0]).toMatchObject({
+            title: "Heartbeat error",
+            type: "error",
+        });
+
+        const changingHeartbeatOk = await api<{ isOk: boolean; report: { id: number } }>(
+            "/api/reports",
+            json("POST", {
+                type: "heartbeat",
+                status: "ok",
+                title: "HEARTBEAT_OK",
+                bodyMd: "Status-changing check recovered.",
+                summary: "Status-changing check recovered.",
+                dedupeKey: "heartbeat:status-changing",
+                occurredAt: "2026-06-23T07:20:00.000Z",
+            })
+        );
+        expect(changingHeartbeatOk.body.report.id).toBe(
+            changingHeartbeatWarning.body.report.id
+        );
+        const notificationsAfterHeartbeatRecovery = await api<{
+            items: Array<{ metadata: Record<string, unknown> }>;
+        }>("/api/notifications?limit=50");
+        expect(
+            notificationsAfterHeartbeatRecovery.body.items.some(
+                (item) =>
+                    item.metadata.reportId === changingHeartbeatWarning.body.report.id
+            )
+        ).toBe(false);
+        expect(
+            notificationsAfterHeartbeatRecovery.body.items.some(
+                (item) => item.metadata.reportId === quietCustom.body.report.id
+            )
+        ).toBe(false);
+
+        const deletedBrief = await api<{ deleted: number; isOk: boolean }>(
+            `/api/reports/${brief.body.report.id}`,
+            { method: "DELETE" }
+        );
+        expect(deletedBrief.body).toEqual({ deleted: 1, isOk: true });
+        const notificationsAfterDelete = await api<{
+            items: Array<{ metadata: Record<string, unknown> }>;
+        }>("/api/notifications?limit=50");
+        expect(
+            notificationsAfterDelete.body.items.some(
+                (item) => item.metadata.reportId === brief.body.report.id
+            )
+        ).toBe(false);
+    });
+
     it("loads, validates, clamps, and persists dashboard settings", async () => {
         const defaults = await api<{
             defaultModel: string;

@@ -152,6 +152,26 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE INDEX IF NOT EXISTS idx_notifications_occurred_at ON notifications(occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(is_read);
 
+CREATE TABLE IF NOT EXISTS reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ok',
+    title TEXT NOT NULL,
+    body_md TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    source TEXT,
+    source_job_id TEXT,
+    dedupe_key TEXT UNIQUE,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    occurred_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_reports_occurred_at ON reports(occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reports_type_occurred_at ON reports(type, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reports_status_occurred_at ON reports(status, occurred_at DESC);
+
 CREATE TABLE IF NOT EXISTS cache_entries (
     key TEXT PRIMARY KEY,
     data_json TEXT,
