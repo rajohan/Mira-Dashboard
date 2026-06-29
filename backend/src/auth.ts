@@ -101,6 +101,10 @@ export async function createFirstUser(
     username: string,
     password: string
 ): Promise<AuthUser | undefined> {
+    if (getUserCount() > 0) {
+        return undefined;
+    }
+
     const normalizedUsername = normalizeUsername(username);
     const timestamp = nowIso();
     const passwordHash = await hashPassword(password);

@@ -372,6 +372,7 @@ describe("backend service behavior", () => {
         const {
             cleanupExpiredSessions,
             createSession,
+            createFirstUser,
             createUser,
             deleteSession,
             findUserByUsername,
@@ -392,6 +393,18 @@ describe("backend service behavior", () => {
 
             const user = await createUser(username, "test-password");
             expect(user).toMatchObject({ username: normalizedUsername });
+            const originalHashPassword = Bun.password.hash;
+            cleanupCallbacks.push(() => {
+                Bun.password.hash = originalHashPassword;
+            });
+            Bun.password.hash = () => {
+                throw new Error("Password hashing should not run after bootstrap closes");
+            };
+            await expect(
+                createFirstUser(`first-${username}`, "correct-password")
+            ).resolves.toBeUndefined();
+            Bun.password.hash = originalHashPassword;
+
             expect(findUserByUsername(`  ${username.toUpperCase()}  `)).toMatchObject({
                 id: user.id,
                 username: normalizedUsername,
