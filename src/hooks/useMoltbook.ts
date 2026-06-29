@@ -77,11 +77,9 @@ function transformPost(apiPost: Record<string, unknown>): MoltbookPost {
                 (apiPost.author as Record<string, unknown>)?.name ||
                 "unknown") as string,
             display_name: (apiPost.author as Record<string, unknown>)?.display_name as
-                | string
-                | undefined,
+                string | undefined,
             avatar_url: (apiPost.author as Record<string, unknown>)?.avatar_url as
-                | string
-                | undefined,
+                string | undefined,
         },
         upvotes: (apiPost.upvotes || 0) as number,
         downvotes: (apiPost.downvotes || 0) as number,
