@@ -174,6 +174,10 @@ function environmentGatewayToken(): string | undefined {
     );
 }
 
+const firstUserBootstrapState = {
+    isInProgress: false,
+};
+
 export const authRoutes = {
     "/api/auth/bootstrap": {
         GET: () =>
@@ -222,7 +226,17 @@ export const authRoutes = {
                     { status: 400 }
                 );
             }
+            if (!isBootstrapRequired()) {
+                return responseForClosedBootstrap();
+            }
+            if (firstUserBootstrapState.isInProgress) {
+                return json(
+                    { error: "First-user setup is already in progress" },
+                    { status: 409 }
+                );
+            }
             const gatewayToken = rawGatewayToken.trim();
+            firstUserBootstrapState.isInProgress = true;
             let user: Awaited<ReturnType<typeof createUser>> | undefined;
             let previousGatewayToken: string | undefined;
             let previousActiveGatewayToken: string | undefined;
@@ -311,6 +325,8 @@ export const authRoutes = {
                     },
                     { status: !isRollbackFailed && isAuthFailure ? 401 : 500 }
                 );
+            } finally {
+                firstUserBootstrapState.isInProgress = false;
             }
         },
     },
