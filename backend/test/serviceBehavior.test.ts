@@ -383,12 +383,14 @@ describe("backend service behavior", () => {
         } = await import("../src/auth.ts");
 
         try {
-            const hash = hashPassword("correct horse battery staple");
-            expect(isPasswordVerified("correct horse battery staple", hash)).toBe(true);
-            expect(isPasswordVerified("wrong password", hash)).toBe(false);
-            expect(isPasswordVerified("password", "not-a-valid-hash")).toBe(false);
+            const hash = await hashPassword("correct horse battery staple");
+            expect(await isPasswordVerified("correct horse battery staple", hash)).toBe(
+                true
+            );
+            expect(await isPasswordVerified("wrong password", hash)).toBe(false);
+            expect(await isPasswordVerified("password", "not-a-valid-hash")).toBe(false);
 
-            const user = createUser(username, "test-password");
+            const user = await createUser(username, "test-password");
             expect(user).toMatchObject({ username: normalizedUsername });
             expect(findUserByUsername(`  ${username.toUpperCase()}  `)).toMatchObject({
                 id: user.id,

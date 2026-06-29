@@ -298,7 +298,7 @@ describe("backend route and service behavior", () => {
         );
         expect(bootstrapLogin.status).toBe(409);
 
-        const user = createUser(username, "correct-password");
+        const user = await createUser(username, "correct-password");
         const invalidLogin = await authRoutes["/api/auth/login"].POST(
             jsonRequest("/api/auth/login", {
                 password: "wrong-password",

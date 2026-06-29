@@ -1,5 +1,3 @@
-import { scryptSync, timingSafeEqual } from "node:crypto";
-
 import { database } from "./database.ts";
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
@@ -30,11 +28,9 @@ function normalizeUsername(username: string): string {
     return username.trim().toLowerCase();
 }
 
-/** Performs hash password. */
-export function hashPassword(password: string): string {
-    const salt = randomHex(16);
-    const derivedKey = scryptSync(password, salt, 64);
-    return `scrypt:${salt}:${derivedKey.toString("hex")}`;
+/** Hashes a password with Bun's runtime password hashing API. */
+export async function hashPassword(password: string): Promise<string> {
+    return Bun.password.hash(password);
 }
 
 /** Returns cryptographically secure random bytes as hex using Bun's Web Crypto runtime. */
@@ -44,23 +40,16 @@ function randomHex(byteLength: number): string {
     return Buffer.from(bytes).toString("hex");
 }
 
-/** Performs verify password. */
-export function isPasswordVerified(password: string, storedHash: string): boolean {
-    const parts = storedHash.split(":");
-    if (parts.length !== 3) return false;
-    const [algorithm, salt, hash] = parts;
-    if (algorithm !== "scrypt" || !salt || !hash) {
+/** Verifies a password with Bun's runtime password hashing API. */
+export async function isPasswordVerified(
+    password: string,
+    storedHash: string
+): Promise<boolean> {
+    try {
+        return await Bun.password.verify(password, storedHash);
+    } catch {
         return false;
     }
-
-    const derivedKey = scryptSync(password, salt, 64);
-    const storedBuffer = Buffer.from(hash, "hex");
-
-    if (storedBuffer.length !== derivedKey.length) {
-        return false;
-    }
-
-    return timingSafeEqual(storedBuffer, derivedKey);
 }
 
 /** Returns user count. */
@@ -89,10 +78,10 @@ export function findUserByUsername(username: string): UserRow | undefined {
 }
 
 /** Creates user. */
-export function createUser(username: string, password: string): AuthUser {
+export async function createUser(username: string, password: string): Promise<AuthUser> {
     const normalizedUsername = normalizeUsername(username);
     const timestamp = nowIso();
-    const passwordHash = hashPassword(password);
+    const passwordHash = await hashPassword(password);
 
     const result = database
         .prepare(
@@ -108,13 +97,13 @@ export function createUser(username: string, password: string): AuthUser {
 }
 
 /** Atomically creates the first user only when no users exist. */
-export function createFirstUser(
+export async function createFirstUser(
     username: string,
     password: string
-): AuthUser | undefined {
+): Promise<AuthUser | undefined> {
     const normalizedUsername = normalizeUsername(username);
     const timestamp = nowIso();
-    const passwordHash = hashPassword(password);
+    const passwordHash = await hashPassword(password);
     const rollback = (transactionError?: unknown) => {
         try {
             database.run("ROLLBACK");

@@ -169,9 +169,9 @@ export const authRoutes = {
                 );
             }
             const gatewayToken = rawGatewayToken.trim();
-            let user: ReturnType<typeof createUser>;
+            let user: Awaited<ReturnType<typeof createUser>>;
             try {
-                const createdUser = createFirstUser(username, password);
+                const createdUser = await createFirstUser(username, password);
                 if (!createdUser) {
                     return json(
                         { error: "Bootstrap registration is no longer available" },
@@ -279,7 +279,7 @@ export const authRoutes = {
                 );
             }
             const user = findUserByUsername(username);
-            if (!user || !isPasswordVerified(password, user.password_hash)) {
+            if (!user || !(await isPasswordVerified(password, user.password_hash))) {
                 return json({ error: "Invalid username or password" }, { status: 401 });
             }
             const sessionId = createSession(user.id);
