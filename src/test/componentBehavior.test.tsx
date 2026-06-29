@@ -2412,6 +2412,53 @@ describe("shared component helpers", () => {
 
         act(() => {
             listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "channel ",
+                    },
+                    runId: "thinking-channel-end",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "end chunk",
+                        phase: "end",
+                    },
+                    runId: "thinking-channel-end",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking.some((block) =>
+                        block.text.includes("channel end chunk")
+                    )
+            )
+        ).toBe(true);
+        expect(
+            activeStreamsReference.current[
+                "agent:main:main::thinking-channel-end::thinking"
+            ]
+        ).toBeUndefined();
+
+        act(() => {
+            listener?.({
                 event: "session.message",
                 payload: {
                     message: {
@@ -2451,6 +2498,66 @@ describe("shared component helpers", () => {
                     message.text.includes("Mixed visible text") &&
                     message.thinking.some((block) =>
                         block.text.includes("mixed terminal reasoning")
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: [
+                            { text: "Final payload with media", type: "text" },
+                            { text: "final rich reasoning", type: "thinking" },
+                        ],
+                        role: "assistant",
+                    },
+                    runId: "final-rich-diagnostic",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: {
+                        content: [
+                            { text: "Final payload with media", type: "text" },
+                            {
+                                source: {
+                                    data: "ZmFrZQ==",
+                                    media_type: "image/png",
+                                    type: "base64",
+                                },
+                                type: "image",
+                            },
+                        ],
+                        role: "assistant",
+                    },
+                    runId: "final-rich-diagnostic",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "text" in message &&
+                    message.text === "Final payload with media" &&
+                    "images" in message &&
+                    Array.isArray(message.images) &&
+                    message.images.length === 1 &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking.some((block) =>
+                        block.text.includes("final rich reasoning")
                     )
             )
         ).toBe(true);
@@ -3600,6 +3707,47 @@ describe("shared component helpers", () => {
         expect(isActiveStreamRecoveredInMessages(stream, visibleMessages, now)).toBe(
             false
         );
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "assistant still streaming",
+                    },
+                    text: "assistant still streaming",
+                },
+                visibleMessages,
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "assistant still streaming",
+                    },
+                    text: "assistant still streaming",
+                },
+                [
+                    {
+                        ...visibleMessages[0]!,
+                        content: [
+                            { text: "assistant still streaming", type: "text" },
+                            {
+                                text: "thinking recovered prefix",
+                                type: "thinking",
+                            },
+                        ],
+                        thinking: [{ text: "thinking recovered prefix" }],
+                        text: "assistant still streaming",
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
         expect(
             isActiveStreamRecoveredInMessages(
                 { ...stream, updatedAt: quietUpdatedAt },

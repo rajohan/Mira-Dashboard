@@ -1313,10 +1313,46 @@ export function useChatRuntimeEvents({
                                   runtimeMessageToApply.text
                               )
                         : existingBufferedText;
-                const diagnosticMessages =
+                let diagnosticMessages =
                     stream === "assistant"
                         ? []
                         : activeDiagnosticMessagesForRun(selectedSessionKey, eventRunId);
+                if (stream !== "assistant" && runtimeMessageToApply) {
+                    const existingChannelEntry = Object.entries(
+                        activeStreamsReference.current
+                    ).find(
+                        ([key, streamEntry]) =>
+                            key.endsWith(`::${stream}`) &&
+                            isSameSessionKey(
+                                streamEntry.sessionKey,
+                                selectedSessionKey
+                            ) &&
+                            isActiveStreamMatchingRun(
+                                selectedSessionKey,
+                                streamEntry,
+                                eventRunId
+                            )
+                    );
+                    const terminalDiagnosticMessage = mergeStreamMessage(
+                        existingChannelEntry?.[1].message,
+                        runtimeMessageToApply,
+                        "",
+                        eventRunId
+                    );
+                    if (
+                        isRenderableChatHistoryMessage(
+                            terminalDiagnosticMessage,
+                            createChatVisibility(showThinkingOutput, showToolOutput)
+                        )
+                    ) {
+                        diagnosticMessages = [
+                            ...diagnosticMessages.filter(
+                                (message) => message !== existingChannelEntry?.[1].message
+                            ),
+                            { ...terminalDiagnosticMessage, local: true },
+                        ];
+                    }
+                }
                 const messagesToAppend: ChatHistoryMessage[] = [
                     ...(bufferedText.trim()
                         ? [
@@ -1829,9 +1865,55 @@ export function useChatRuntimeEvents({
                           }
                         : undefined;
 
+                let finalMessageToAppend = messageToAppend;
+                const remainingDiagnosticMessages = [...diagnosticMessages];
+                if (
+                    finalMessageToAppend &&
+                    finalMessageToAppend.role.toLowerCase() === "assistant" &&
+                    finalMessageToAppend.text.trim()
+                ) {
+                    const diagnosticIndex = remainingDiagnosticMessages.findIndex(
+                        (message) => {
+                            const diagnosticText = message.text.trim();
+                            const finalText = finalMessageToAppend!.text.trim();
+                            return (
+                                message.role.toLowerCase() === "assistant" &&
+                                Boolean(diagnosticText) &&
+                                (diagnosticText === finalText ||
+                                    diagnosticText.includes(finalText) ||
+                                    finalText.includes(diagnosticText)) &&
+                                (!message.runId ||
+                                    !finalMessageToAppend!.runId ||
+                                    message.runId === finalMessageToAppend!.runId)
+                            );
+                        }
+                    );
+                    const diagnosticMessage =
+                        diagnosticIndex === -1
+                            ? undefined
+                            : remainingDiagnosticMessages[diagnosticIndex];
+                    if (diagnosticMessage) {
+                        remainingDiagnosticMessages.splice(diagnosticIndex, 1);
+                        finalMessageToAppend = {
+                            ...finalMessageToAppend,
+                            thinking: (finalMessageToAppend.thinking?.length
+                                ? finalMessageToAppend
+                                : diagnosticMessage
+                            ).thinking,
+                            toolCalls: (finalMessageToAppend.toolCalls?.length
+                                ? finalMessageToAppend
+                                : diagnosticMessage
+                            ).toolCalls,
+                            toolResult:
+                                finalMessageToAppend.toolResult ||
+                                diagnosticMessage.toolResult,
+                        };
+                    }
+                }
+
                 const messagesToAppend = [
-                    ...(messageToAppend ? [messageToAppend] : []),
-                    ...diagnosticMessages,
+                    ...remainingDiagnosticMessages,
+                    ...(finalMessageToAppend ? [finalMessageToAppend] : []),
                 ];
                 if (messagesToAppend.length > 0 && eventMatchesSelected) {
                     setMessages((wasPrevious) =>

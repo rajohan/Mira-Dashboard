@@ -140,7 +140,10 @@ export function isActiveStreamRecoveredInMessages(
                 streamThinkingText.trim() &&
                 thinkingText.trim() === streamThinkingText.trim()
             ) {
-                return true;
+                return !(
+                    stream.message?.text.trim() &&
+                    message.text.trim() !== stream.message.text.trim()
+                );
             }
 
             if (stream.message?.toolCalls?.length) {
