@@ -120,6 +120,11 @@ function rollbackCreatedFirstUser(userId: number): void {
     }
 }
 
+function isGatewayAuthFailure(error: unknown): boolean {
+    const message = errorMessage(error, String(error)).toLowerCase();
+    return message.includes("unauthorized") || message.includes("token mismatch");
+}
+
 export const authRoutes = {
     "/api/auth/bootstrap": {
         GET: () =>
@@ -197,7 +202,7 @@ export const authRoutes = {
                 previousGatewayToken = getPersistedGatewayToken();
                 persistGatewayToken(gatewayToken);
                 isAttemptedGatewaySwitch = true;
-                gateway.init(gatewayToken);
+                await gateway.initAndWait(gatewayToken);
                 const sessionId = createSession(user.id);
                 return withCookie(
                     json(
@@ -252,9 +257,11 @@ export const authRoutes = {
                     {
                         error: isRollbackFailed
                             ? "Failed to roll back first-user bootstrap"
-                            : "Failed to complete first-user setup",
+                            : isGatewayAuthFailure(bootstrapError)
+                              ? "Invalid OpenClaw gateway token"
+                              : "Failed to complete first-user setup",
                     },
-                    { status: 500 }
+                    { status: isGatewayAuthFailure(bootstrapError) ? 401 : 500 }
                 );
             }
         },

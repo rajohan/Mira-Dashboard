@@ -173,7 +173,9 @@ class NoopGatewayClient implements OpenClawGatewayClientInstance {
         return { method, parameters };
     }
 
-    start(): void {}
+    start(): void {
+        this.options.onHelloOk?.({ type: "hello-ok" });
+    }
 
     stop(): void {}
 }
@@ -433,12 +435,12 @@ describe("backend route and service behavior", () => {
         isolateOpenClawEnvironment("mira-first-user-rollback-coverage-");
         const gatewayModule = await import("../src/gateway.ts");
         const gateway = gatewayModule.default;
-        const originalInit = gateway.init;
+        const originalInitAndWait = gateway.initAndWait;
         cleanupCallbacks.push(() => {
-            gateway.init = originalInit;
+            gateway.initAndWait = originalInitAndWait;
             gateway.shutdown();
         });
-        gateway.init = () => {
+        gateway.initAndWait = async () => {
             throw new Error("gateway unavailable");
         };
         const { authRoutes } = await import("../src/routes/authRoutes.ts");
@@ -478,12 +480,12 @@ describe("backend route and service behavior", () => {
         isolateOpenClawEnvironment("mira-first-user-token-cleanup-");
         const gatewayModule = await import("../src/gateway.ts");
         const gateway = gatewayModule.default;
-        const originalInit = gateway.init;
+        const originalInitAndWait = gateway.initAndWait;
         cleanupCallbacks.push(() => {
-            gateway.init = originalInit;
+            gateway.initAndWait = originalInitAndWait;
             gateway.shutdown();
         });
-        gateway.init = () => {
+        gateway.initAndWait = async () => {
             throw new Error("gateway unavailable");
         };
         const { authRoutes } = await import("../src/routes/authRoutes.ts");
@@ -510,6 +512,46 @@ describe("backend route and service behavior", () => {
         });
         expect(findUserByUsername(username)).toBeUndefined();
         expect(getPersistedGatewayToken()).toBeUndefined();
+    });
+
+    it("rejects first-user bootstrap when the Gateway token is invalid", async () => {
+        isolateOpenClawEnvironment("mira-first-user-invalid-token-coverage-");
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const originalInitAndWait = gateway.initAndWait;
+        cleanupCallbacks.push(() => {
+            gateway.initAndWait = originalInitAndWait;
+            gateway.shutdown();
+        });
+        gateway.initAndWait = async () => {
+            throw new Error(
+                "unauthorized: gateway token mismatch (provide gateway auth token)"
+            );
+        };
+        const { authRoutes } = await import("../src/routes/authRoutes.ts");
+        const { findUserByUsername, getPersistedGatewayToken, persistGatewayToken } =
+            await import("../src/auth.ts");
+        const server = fakeServer();
+        const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
+
+        persistGatewayToken("previous-token");
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        cleanupCallbacks.push(() => errorSpy.mockRestore());
+        const response = await authRoutes["/api/auth/register-first-user"].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "wrong-token",
+                password: "correct-password",
+                username,
+            }),
+            server
+        );
+
+        expect(response.status).toBe(401);
+        await expect(response.json()).resolves.toEqual({
+            error: "Invalid OpenClaw gateway token",
+        });
+        expect(findUserByUsername(username)).toBeUndefined();
+        expect(getPersistedGatewayToken()).toBe("previous-token");
     });
 
     it("task route automation, validation, assignment, movement, updates, and deletion", async () => {
