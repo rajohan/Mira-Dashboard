@@ -1390,6 +1390,98 @@ describe("shared component helpers", () => {
                     )
             )
         ).toBe(true);
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "run-a" },
+                        id: "shared-result",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "result-run-a",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "run-b" },
+                        id: "shared-result",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "result-run-b",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "shared-result",
+                        name: "functions.exec_command",
+                        phase: "result",
+                        result: "run a output",
+                    },
+                    runId: "result-run-a",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const sharedResultRows = messages.flatMap((message) => {
+                if (
+                    typeof message === "object" &&
+                    message !== null &&
+                    "runId" in message &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some((toolCall) => toolCall.id === "shared-result")
+                ) {
+                    return [
+                        {
+                            runId: message.runId,
+                            result: message.toolCalls.find(
+                                (toolCall) => toolCall.id === "shared-result"
+                            )?.toolResult?.content,
+                        },
+                    ];
+                }
+
+                return [];
+            });
+            expect(
+                sharedResultRows.find((row) => row.runId === "result-run-a")?.result
+            ).toBe("run a output");
+            expect(
+                sharedResultRows.find((row) => row.runId === "result-run-b")?.result
+            ).toBeUndefined();
+        });
+        for (const runId of ["result-run-a", "result-run-b"]) {
+            act(() => {
+                listener?.({
+                    event: "model.completed",
+                    payload: {
+                        runId,
+                        sessionKey: "agent:main:main",
+                    },
+                    type: "event",
+                });
+            });
+        }
         expect(
             messages
                 .flatMap((message) => {
@@ -2711,6 +2803,15 @@ describe("shared component helpers", () => {
             text: "Optimistic buffered answer",
             updatedAt: new Date().toISOString(),
         };
+        activeStreamsReference.current[
+            "agent:main:main::dashboard-chat-optimistic::assistant"
+        ] = {
+            aliases: ["dashboard-chat-optimistic"],
+            runId: "dashboard-chat-optimistic",
+            sessionKey: "agent:main:main",
+            text: "Optimistic buffered answer",
+            updatedAt: new Date().toISOString(),
+        };
         act(() => {
             listener?.({
                 event: "chat",
@@ -2732,10 +2833,13 @@ describe("shared component helpers", () => {
                     "text" in message &&
                     message.text === "Optimistic buffered answer"
             )
-        ).toBe(false);
-        expect(activeStreamsReference.current["agent:main:main"]?.runId).toBe(
-            "dashboard-chat-optimistic"
-        );
+        ).toBe(true);
+        expect(activeStreamsReference.current["agent:main:main"]).toBeUndefined();
+        expect(
+            activeStreamsReference.current[
+                "agent:main:main::dashboard-chat-optimistic::assistant"
+            ]
+        ).toBeUndefined();
         activeStreamsReference.current = {};
 
         act(() => {
@@ -2857,6 +2961,60 @@ describe("shared component helpers", () => {
         expect(
             activeStreamsReference.current["agent:main:main::overlap-b::assistant"]?.text
         ).toBe("Run B");
+        activeStreamsReference.current = {};
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "Unscoped A",
+                    },
+                    runId: "unscoped-a",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "Unscoped B",
+                    },
+                    runId: "unscoped-b",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "text" in message &&
+                    (message.text === "Unscoped A" || message.text === "Unscoped B")
+            )
+        ).toBe(false);
+        expect(
+            activeStreamsReference.current["agent:main:main::unscoped-a::assistant"]?.text
+        ).toBe("Unscoped A");
+        expect(
+            activeStreamsReference.current["agent:main:main::unscoped-b::assistant"]?.text
+        ).toBe("Unscoped B");
         activeStreamsReference.current = {};
 
         act(() => {

@@ -2,6 +2,7 @@ import { type Dispatch, type SetStateAction, useEffect, useRef } from "react";
 
 import { currentIsoString, isoStringFromDate } from "../../../utils/date";
 import {
+    type ActiveChatStream,
     type ActiveChatStreams,
     createChatVisibility,
     createLocalSystemMessage,
@@ -90,6 +91,23 @@ function isProvisionalRunId(streamSessionKey: string, runId: string): boolean {
 /** Returns whether a stream run id came from an optimistic dashboard send. */
 function isOptimisticRunId(runId: string): boolean {
     return runId.startsWith("dashboard-chat-");
+}
+
+/** Returns whether an active stream belongs to a concrete run id. */
+function isActiveStreamMatchingRun(
+    sessionKey: string,
+    streamEntry: ActiveChatStream,
+    runId?: string
+): boolean {
+    if (!runId) {
+        return false;
+    }
+
+    return (
+        streamEntry.runId === runId ||
+        streamEntry.aliases.includes(runId) ||
+        isProvisionalRunId(sessionKey, streamEntry.runId)
+    );
 }
 
 /** Returns an internal active stream key for runtime work. */
@@ -473,11 +491,16 @@ function matchingToolCallIndex(
 function matchingToolMessageIndex(
     messages: ChatHistoryMessage[],
     result: NonNullable<ChatHistoryMessage["toolResult"]>,
-    incomingToolCall?: NonNullable<ChatHistoryMessage["toolCalls"]>[number]
+    incomingToolCall?: NonNullable<ChatHistoryMessage["toolCalls"]>[number],
+    incomingRunId?: string
 ): { messageIndex: number; toolCallIndex: number } | undefined {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const existing = messages[index]!;
         if (existing.role.toLowerCase() === "assistant") {
+            if (incomingRunId && existing.runId && existing.runId !== incomingRunId) {
+                continue;
+            }
+
             const toolCallIndex = matchingToolCallIndex(
                 existing.toolCalls,
                 result,
@@ -578,7 +601,12 @@ function mergeRuntimeToolMessages(
 
         const result = message.toolResult;
         const incomingToolCall = message.toolCalls?.[0];
-        const match = matchingToolMessageIndex(next, result, incomingToolCall);
+        const match = matchingToolMessageIndex(
+            next,
+            result,
+            incomingToolCall,
+            message.runId
+        );
 
         if (match) {
             const existing = next[match.messageIndex]!;
@@ -1110,18 +1138,46 @@ export function useChatRuntimeEvents({
                         continue;
                     }
 
-                    if (
-                        runId &&
-                        streamEntry.runId !== runId &&
-                        !streamEntry.aliases.includes(runId) &&
-                        !isProvisionalRunId(sessionKey, streamEntry.runId)
-                    ) {
+                    if (!isActiveStreamMatchingRun(sessionKey, streamEntry, runId)) {
                         continue;
                     }
 
                     delete next[key];
                 }
                 return next;
+            });
+        };
+
+        /** Adds a canonical run alias to active optimistic streams for one send. */
+        const aliasOptimisticStreamsForRun = (
+            sessionKey: string,
+            optimisticRunId: string,
+            runId: string
+        ) => {
+            updateActiveStreamsReference.current((wasPrevious) => {
+                let hasChanged = false;
+                const next = { ...wasPrevious };
+                for (const [key, streamEntry] of Object.entries(wasPrevious)) {
+                    if (
+                        !isSameSessionKey(streamEntry.sessionKey, sessionKey) ||
+                        (streamEntry.runId !== optimisticRunId &&
+                            !streamEntry.aliases.includes(optimisticRunId))
+                    ) {
+                        continue;
+                    }
+
+                    hasChanged = true;
+                    next[key] = {
+                        ...streamEntry,
+                        aliases: uniqueStrings([
+                            ...streamEntry.aliases,
+                            optimisticRunId,
+                            runId,
+                        ]),
+                    };
+                }
+
+                return hasChanged ? next : wasPrevious;
             });
         };
 
@@ -1136,15 +1192,7 @@ export function useChatRuntimeEvents({
                         return false;
                     }
 
-                    if (!runId) {
-                        return true;
-                    }
-
-                    return (
-                        streamEntry.runId === runId ||
-                        streamEntry.aliases.includes(runId) ||
-                        isProvisionalRunId(sessionKey, streamEntry.runId)
-                    );
+                    return isActiveStreamMatchingRun(sessionKey, streamEntry, runId);
                 })
                 .map((streamEntry) => streamEntry.text)
                 .filter((text) => text.trim());
@@ -1171,15 +1219,7 @@ export function useChatRuntimeEvents({
                         return false;
                     }
 
-                    if (!runId) {
-                        return true;
-                    }
-
-                    return (
-                        streamEntry.runId === runId ||
-                        streamEntry.aliases.includes(runId) ||
-                        isProvisionalRunId(sessionKey, streamEntry.runId)
-                    );
+                    return isActiveStreamMatchingRun(sessionKey, streamEntry, runId);
                 })
                 .map((streamEntry) => streamEntry.message)
                 .filter((message): message is ChatHistoryMessage =>
@@ -1305,10 +1345,11 @@ export function useChatRuntimeEvents({
                         }
 
                         if (
-                            eventRunId &&
-                            streamEntry.runId !== eventRunId &&
-                            !streamEntry.aliases.includes(eventRunId) &&
-                            !isProvisionalRunId(selectedSessionKey, streamEntry.runId)
+                            !isActiveStreamMatchingRun(
+                                selectedSessionKey,
+                                streamEntry,
+                                eventRunId
+                            )
                         ) {
                             continue;
                         }
@@ -1364,10 +1405,11 @@ export function useChatRuntimeEvents({
                         }
 
                         if (
-                            eventRunId &&
-                            streamEntry.runId !== eventRunId &&
-                            !streamEntry.aliases.includes(eventRunId) &&
-                            !isProvisionalRunId(selectedSessionKey, streamEntry.runId)
+                            !isActiveStreamMatchingRun(
+                                selectedSessionKey,
+                                streamEntry,
+                                eventRunId
+                            )
                         ) {
                             continue;
                         }
@@ -1619,9 +1661,24 @@ export function useChatRuntimeEvents({
             const selectedStream = eventMatchesSelected
                 ? streams[selectedSessionKey]
                 : undefined;
+            const shouldAliasOptimisticTerminal =
+                eventMatchesSelected &&
+                selectedStream &&
+                !streamForRun &&
+                payload.runId &&
+                TERMINAL_CHAT_STATES.has(payload.state || "") &&
+                isOptimisticRunId(selectedStream.runId);
+            if (shouldAliasOptimisticTerminal && payload.runId) {
+                aliasOptimisticStreamsForRun(
+                    selectedSessionKey,
+                    selectedStream.runId,
+                    payload.runId
+                );
+            }
             const selectedStreamRunIds = uniqueStrings([
                 selectedStream?.runId,
                 ...(selectedStream?.aliases || []),
+                shouldAliasOptimisticTerminal ? payload.runId : undefined,
             ]);
             const isStaleSelectedTerminalEvent =
                 eventMatchesSelected &&

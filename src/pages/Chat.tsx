@@ -1563,24 +1563,38 @@ export function Chat() {
                 clearActiveStreamsForSession(selectedSessionKey);
             } else {
                 const acknowledgedRunId = result?.runId;
-                if (acknowledgedRunId) {
+                if (acknowledgedRunId && idempotencyKey) {
                     updateActiveStreams((wasPrevious) => {
-                        const existing = wasPrevious[selectedSessionKey];
-                        if (!existing) {
-                            return wasPrevious;
-                        }
+                        let hasChanged = false;
+                        const next = { ...wasPrevious };
+                        for (const [key, stream] of Object.entries(wasPrevious)) {
+                            if (
+                                !isSameSessionKey(
+                                    stream.sessionKey,
+                                    selectedSessionKey
+                                ) ||
+                                (stream.runId !== idempotencyKey &&
+                                    !stream.aliases.includes(idempotencyKey))
+                            ) {
+                                continue;
+                            }
 
-                        return {
-                            ...wasPrevious,
-                            [selectedSessionKey]: {
-                                ...existing,
-                                runId: acknowledgedRunId,
+                            hasChanged = true;
+                            next[key] = {
+                                ...stream,
+                                runId:
+                                    stream.runId === idempotencyKey
+                                        ? acknowledgedRunId
+                                        : stream.runId,
                                 aliases: uniqueStrings([
-                                    ...existing.aliases,
+                                    ...stream.aliases,
+                                    idempotencyKey,
                                     acknowledgedRunId,
                                 ]),
-                            },
-                        };
+                            };
+                        }
+
+                        return hasChanged ? next : wasPrevious;
                     });
                 }
             }
