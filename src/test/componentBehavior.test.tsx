@@ -3425,6 +3425,56 @@ describe("shared component helpers", () => {
             )
         ).toBe(true);
 
+        sendError = undefined;
+        setSendError.mockClear();
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        args: { cmd: "sqlite3 backend/data/mira-dashboard.db" },
+                        error: "database is locked",
+                        isError: true,
+                        name: "functions.exec_command",
+                        phase: "error",
+                    },
+                    runId: "run-3",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    errorMessage: "tool call failed",
+                    runId: "run-3",
+                    sessionKey: "agent:main:main",
+                    state: "error",
+                },
+                type: "event",
+            });
+        });
+        expect(setSendError).not.toHaveBeenCalled();
+        expect(sendError).toBeUndefined();
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            toolCall.name === "functions.exec_command" &&
+                            toolCall.toolResult?.isError === true &&
+                            toolCall.toolResult.content.includes("database is locked")
+                    )
+            )
+        ).toBe(true);
+
         await act(async () => {
             await new Promise((resolve) => setTimeout(resolve, 550));
         });

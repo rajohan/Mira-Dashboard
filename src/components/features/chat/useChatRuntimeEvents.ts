@@ -999,6 +999,7 @@ export function useChatRuntimeEvents({
     const selectedSessionKeyReference = useRef(selectedSessionKey);
     const updateActiveStreamsReference = useRef(updateActiveStreams);
     const requestReference = useRef(request);
+    const toolErrorRunIdsReference = useRef(new Set<string>());
 
     updateActiveStreamsReference.current = updateActiveStreams;
     requestReference.current = request;
@@ -1552,6 +1553,18 @@ export function useChatRuntimeEvents({
             if ((eventName === "session.tool" || stream === "tool") && showToolOutput) {
                 const toolMessages = runtimeToolMessages(data, eventRunId);
                 if (toolMessages.length > 0) {
+                    if (
+                        eventRunId &&
+                        toolMessages.some(
+                            (message) =>
+                                message.toolResult?.isError ||
+                                message.toolCalls?.some(
+                                    (toolCall) => toolCall.toolResult?.isError
+                                )
+                        )
+                    ) {
+                        toolErrorRunIdsReference.current.add(eventRunId);
+                    }
                     setMessages((wasPrevious) =>
                         mergeRuntimeToolMessages(wasPrevious, toolMessages)
                     );
@@ -1561,6 +1574,18 @@ export function useChatRuntimeEvents({
             if (stream === "item" && showToolOutput) {
                 const toolMessages = runtimeItemToolMessages(data, eventRunId);
                 if (toolMessages.length > 0) {
+                    if (
+                        eventRunId &&
+                        toolMessages.some(
+                            (message) =>
+                                message.toolResult?.isError ||
+                                message.toolCalls?.some(
+                                    (toolCall) => toolCall.toolResult?.isError
+                                )
+                        )
+                    ) {
+                        toolErrorRunIdsReference.current.add(eventRunId);
+                    }
                     setMessages((wasPrevious) =>
                         mergeRuntimeToolMessages(wasPrevious, toolMessages)
                     );
@@ -2081,7 +2106,17 @@ export function useChatRuntimeEvents({
                         dedupeMessages([...wasPrevious, ...messagesToAppend])
                     );
                 }
-                if (eventMatchesSelected) {
+                const hasToolDiagnostics = diagnosticMessages.some(
+                    (message) =>
+                        (message.toolCalls?.length || 0) > 0 || message.toolResult
+                );
+                const hasToolErrorForRun = Boolean(
+                    payload.runId && toolErrorRunIdsReference.current.has(payload.runId)
+                );
+                if (payload.runId && TERMINAL_CHAT_STATES.has(payload.state || "")) {
+                    toolErrorRunIdsReference.current.delete(payload.runId);
+                }
+                if (eventMatchesSelected && !hasToolDiagnostics && !hasToolErrorForRun) {
                     setSendError(payload.errorMessage || "Chat request failed");
                 }
                 clearActiveStreamsForRun(streamSessionKey, payload.runId);
