@@ -3422,6 +3422,45 @@ describe("shared component helpers", () => {
         expect(idBearingVisible[0]?.toolCalls?.[0]?.toolResult).toBeUndefined();
         expect(idBearingVisible[1]?.role).toBe("tool");
 
+        const completedLaterCallVisible = normalizeVisibleChatHistoryMessages(
+            [
+                {
+                    content: [
+                        {
+                            arguments: { command: "later" },
+                            id: "call-1",
+                            name: "functions.exec_command",
+                            type: "toolCall",
+                        },
+                    ],
+                    role: "assistant",
+                    timestamp: "2026-06-28T10:02:00.000Z",
+                },
+                {
+                    content: "later output",
+                    role: "tool",
+                    timestamp: "2026-06-28T10:03:00.000Z",
+                    toolCallId: "call-1",
+                    toolName: "functions.exec_command",
+                },
+                {
+                    content: "older delayed output",
+                    role: "tool",
+                    timestamp: "2026-06-28T10:04:00.000Z",
+                    toolCallId: "call-1",
+                    toolName: "functions.exec_command",
+                },
+            ],
+            createChatVisibility(true, true)
+        );
+        expect(completedLaterCallVisible).toHaveLength(2);
+        expect(completedLaterCallVisible[0]?.toolCalls?.[0]?.toolResult?.content).toBe(
+            "later output"
+        );
+        expect(completedLaterCallVisible[1]?.toolResult?.content).toBe(
+            "older delayed output"
+        );
+
         const foldedTimestampVisible = normalizeVisibleChatHistoryMessages(
             [
                 {

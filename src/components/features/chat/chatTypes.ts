@@ -594,7 +594,14 @@ function matchingToolCallIndex(
 
     if (result.id) {
         const idMatchIndex = toolCalls.findIndex(
-            (toolCall) => toolCall.id && toolCall.id === result.id
+            (toolCall) =>
+                toolCall.id &&
+                toolCall.id === result.id &&
+                (!toolCall.toolResult ||
+                    (toolCall.toolResult.content === result.content &&
+                        toolCall.toolResult.isError === result.isError &&
+                        (toolCall.toolResult.images?.length || 0) ===
+                            (result.images?.length || 0)))
         );
         return idMatchIndex;
     }

@@ -868,11 +868,20 @@ export function Chat() {
                             activeStreamUpdatedAt === undefined ||
                             Date.now() - activeStreamUpdatedAt >=
                                 ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
+                        const isStatusOnlyStream = !streamText && !stream.message;
                         return Boolean(
                             isActiveStreamIsQuiet &&
                             (isActiveStreamRecoveredInMessages(stream, nextMessages) ||
                                 (streamText &&
-                                    hasRecoveredStreamHistory(nextMessages, streamText)))
+                                    hasRecoveredStreamHistory(
+                                        nextMessages,
+                                        streamText
+                                    )) ||
+                                (isStatusOnlyStream &&
+                                    hasNewerAssistantMessageInHistory(
+                                        nextMessages,
+                                        stream.updatedAt
+                                    )))
                         );
                     })
                     .map(([key]) => key);
