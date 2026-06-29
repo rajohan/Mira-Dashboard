@@ -151,7 +151,7 @@ function ReportDetails({ report, onDelete, deletePending }: ReportDetailsPropert
 
     return (
         <Card variant="bordered" className="min-w-0">
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="mb-4 flex items-start justify-between gap-3">
                 <div className="min-w-0">
                     <div className="mb-2 flex flex-wrap items-center gap-2">
                         <Badge variant="info">{typeLabel(report.type)}</Badge>
@@ -170,12 +170,13 @@ function ReportDetails({ report, onDelete, deletePending }: ReportDetailsPropert
                     type="button"
                     variant="ghost"
                     size="sm"
+                    className="shrink-0"
                     onClick={() => onDelete(report.id)}
                     disabled={deletePending}
                     aria-label={`Delete ${report.title}`}
                 >
                     <Trash2 className="h-4 w-4" />
-                    Delete
+                    <span className="hidden sm:inline">Delete</span>
                 </Button>
             </div>
 
