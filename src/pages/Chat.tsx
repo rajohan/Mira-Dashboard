@@ -183,23 +183,16 @@ export function isActiveStreamRecoveredInMessages(
                 );
 
                 if (hasRecoveredToolCalls) {
-                    return true;
+                    return stream.message.text.trim()
+                        ? message.text.trim() === stream.message.text.trim()
+                        : true;
                 }
             }
 
             if (stream.message?.toolResult && message.toolResult) {
-                const streamResult = stream.message.toolResult;
-                const result = message.toolResult;
-                if (streamResult.id && result.id) {
-                    return streamResult.id === result.id;
-                }
-
-                return Boolean(
-                    !streamResult.id &&
-                    !result.id &&
-                    streamResult.name &&
-                    result.name &&
-                    streamResult.name === result.name
+                return isMatchingToolResult(
+                    stream.message.toolResult,
+                    message.toolResult
                 );
             }
 

@@ -67,7 +67,7 @@ function mergeThinkingBlocks(
                     ...previousBlock,
                     ...nextBlock,
                     text: nextBlock.snapshot
-                        ? mergeStreamText(previousBlock.text, nextBlock.text)
+                        ? nextBlock.text
                         : `${previousBlock.text}${nextBlock.text}`,
                 };
                 continue;
@@ -80,7 +80,7 @@ function mergeThinkingBlocks(
                 ...previousBlockAtIndex,
                 ...nextBlock,
                 text: nextBlock.snapshot
-                    ? mergeStreamText(previousBlockAtIndex.text, nextBlock.text)
+                    ? nextBlock.text
                     : `${previousBlockAtIndex.text}${nextBlock.text}`,
             };
             continue;

@@ -1232,13 +1232,44 @@ export function useChatRuntimeEvents({
             const isChannelTerminalEvent =
                 (stream === "assistant" || isRuntimeThinkingStream(stream)) &&
                 TERMINAL_LIFECYCLE_PHASES.has(phase);
+            const runtimeMessage =
+                eventName === "session.message"
+                    ? runtimeSessionMessage(payload)
+                    : stream === "assistant" || isRuntimeThinkingStream(stream)
+                      ? runtimeStreamMessage(stream, payload, data)
+                      : stream === "item"
+                        ? runtimeReasoningItemMessage(payload, data)
+                        : undefined;
+            const shouldApplyRuntimeMessage = runtimeMessage
+                ? hasActiveStreamContent(runtimeMessage)
+                : false;
+            const runtimeMessageToApply = shouldApplyRuntimeMessage
+                ? runtimeMessage
+                : undefined;
+            const isRuntimeMessageRenderable = runtimeMessageToApply
+                ? isRenderableChatHistoryMessage(
+                      runtimeMessageToApply,
+                      createChatVisibility(showThinkingOutput, showToolOutput)
+                  )
+                : false;
 
             if (isChannelTerminalEvent && !isWholeRunTerminalEvent) {
                 flushPendingDeltaUpdates();
-                const bufferedText =
+                const existingBufferedText =
                     stream === "assistant"
                         ? activeAssistantTextForRun(selectedSessionKey, eventRunId)
                         : "";
+                const isAssistantDelta =
+                    stream === "assistant" && rawStringValue(data.delta) !== undefined;
+                const bufferedText =
+                    stream === "assistant" && runtimeMessageToApply?.text
+                        ? isAssistantDelta
+                            ? `${existingBufferedText}${runtimeMessageToApply.text}`
+                            : mergeStreamText(
+                                  existingBufferedText,
+                                  runtimeMessageToApply.text
+                              )
+                        : existingBufferedText;
                 const diagnosticMessages =
                     stream === "assistant"
                         ? []
@@ -1374,27 +1405,6 @@ export function useChatRuntimeEvents({
                 phase,
                 statusText
             );
-            const runtimeMessage =
-                eventName === "session.message"
-                    ? runtimeSessionMessage(payload)
-                    : stream === "assistant" || isRuntimeThinkingStream(stream)
-                      ? runtimeStreamMessage(stream, payload, data)
-                      : stream === "item"
-                        ? runtimeReasoningItemMessage(payload, data)
-                        : undefined;
-            const shouldApplyRuntimeMessage = runtimeMessage
-                ? hasActiveStreamContent(runtimeMessage)
-                : false;
-            const runtimeMessageToApply = shouldApplyRuntimeMessage
-                ? runtimeMessage
-                : undefined;
-            const isRuntimeMessageRenderable = runtimeMessageToApply
-                ? isRenderableChatHistoryMessage(
-                      runtimeMessageToApply,
-                      createChatVisibility(showThinkingOutput, showToolOutput)
-                  )
-                : false;
-
             if (runtimeMessage && !runtimeMessageToApply) {
                 flushPendingDeltaUpdates();
                 updateActiveStreamsReference.current((wasPrevious) => {

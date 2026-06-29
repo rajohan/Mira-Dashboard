@@ -1889,6 +1889,29 @@ describe("shared component helpers", () => {
             ).toBe(true);
             expect(stream?.statusText).toBeUndefined();
         });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning",
+                        itemKind: "analysis",
+                        progressText: "reading files",
+                        title: "Reasoning",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const stream =
+                activeStreamsReference.current["agent:main:main::run-1::reasoning"];
+            expect(thinkingTexts(stream)).toContain("reading files");
+            expect(thinkingTexts(stream)).not.toContain("reasoning snapshot");
+        });
 
         act(() => {
             listener?.({
@@ -2159,6 +2182,50 @@ describe("shared component helpers", () => {
         ).toBe("Hello world");
         expect(
             activeStreamsReference.current["agent:main:main::run-1::thinking"]
+        ).toBeUndefined();
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "Hello ",
+                    },
+                    runId: "assistant-end-text",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        phase: "end",
+                        text: "world",
+                    },
+                    runId: "assistant-end-text",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "text" in message &&
+                    message.text === "Hello world"
+            )
+        ).toBe(true);
+        expect(
+            activeStreamsReference.current[
+                "agent:main:main::assistant-end-text::assistant"
+            ]
         ).toBeUndefined();
 
         act(() => {
@@ -3567,6 +3634,48 @@ describe("shared component helpers", () => {
                 now
             )
         ).toBe(true);
+        const mixedTextToolStream = {
+            ...stream,
+            message: {
+                ...stream.message,
+                text: "assistant text with tool",
+                thinking: undefined,
+                toolCalls: [{ id: "call-2", name: "exec" }],
+            },
+            text: "assistant text with tool",
+        };
+        expect(
+            isActiveStreamRecoveredInMessages(
+                mixedTextToolStream,
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [{ id: "call-2", name: "exec" }],
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                mixedTextToolStream,
+                [
+                    {
+                        attachments: [],
+                        content: "assistant text with tool",
+                        images: [],
+                        role: "assistant",
+                        text: "assistant text with tool",
+                        toolCalls: [{ id: "call-2", name: "exec" }],
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
         expect(
             isActiveStreamRecoveredInMessages(
                 {
@@ -3738,6 +3847,37 @@ describe("shared component helpers", () => {
                 now
             )
         ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "",
+                        thinking: undefined,
+                        toolResult: {
+                            content: "new output",
+                            name: "exec",
+                        },
+                    },
+                    text: "",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolResult: {
+                            content: "old output",
+                            name: "exec",
+                        },
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
         expect(
             isActiveStreamRecoveredInMessages(
                 { ...stream, updatedAt: quietUpdatedAt },
