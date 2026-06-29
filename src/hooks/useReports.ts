@@ -48,6 +48,8 @@ interface ReportsFilters {
     type?: ReportType;
 }
 
+const REPORTS_REFRESH_INTERVAL_MS = 30_000;
+
 export const reportKeys = {
     all: ["reports"] as const,
     detail: (id: number | undefined) => ["reports", "detail", id] as const,
@@ -67,6 +69,7 @@ export function useReports(filters: ReportsFilters = {}) {
         queryKey: reportKeys.list(filters),
         queryFn: () =>
             apiFetchRequired<ReportsResponse>(`/reports${reportQueryString(filters)}`),
+        refetchInterval: REPORTS_REFRESH_INTERVAL_MS,
         staleTime: 5000,
     });
 }
@@ -76,6 +79,7 @@ export function useReport(id: number | undefined) {
         enabled: id !== undefined,
         queryKey: reportKeys.detail(id),
         queryFn: () => apiFetchRequired<ReportResponse>(`/reports/${id}`),
+        refetchInterval: REPORTS_REFRESH_INTERVAL_MS,
         staleTime: 5000,
     });
 }
