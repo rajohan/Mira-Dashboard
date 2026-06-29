@@ -2109,8 +2109,7 @@ function isCacheEntryFresh(key: string): boolean {
     );
     return keys.every((cacheKey) => {
         const row = statement.get(cacheKey) as
-            | undefined
-            | { status: string; expires_at: string };
+            undefined | { status: string; expires_at: string };
         if (!row || row.status !== "fresh") {
             return false;
         }

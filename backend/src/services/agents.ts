@@ -892,8 +892,7 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
         nested.file_path ||
         nested.filePath ||
         (Array.isArray(nested.paths) ? nested.paths[0] : undefined)) as
-        | string
-        | undefined;
+        string | undefined;
     const command = (arguments_.command ||
         arguments_.cmd ||
         nested.command ||
@@ -915,8 +914,7 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
                 pj.file_path ||
                 pj.filePath ||
                 (Array.isArray(pj.paths) ? pj.paths[0] : undefined)) as
-                | string
-                | undefined;
+                string | undefined;
         } catch {
             const match = parsed.partialJson.match(
                 /"(?:path|file_path|filePath)"\s*:\s*"([^"]+)"/

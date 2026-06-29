@@ -596,8 +596,7 @@ export function listScheduledJobs(): ScheduledJob[] {
 
 export function getScheduledJob(id: string): ScheduledJob | undefined {
     const row = database.prepare("SELECT * FROM scheduled_jobs WHERE id = ?").get(id) as
-        | ScheduledJobRow
-        | undefined;
+        ScheduledJobRow | undefined;
     return row ? mapJob(row) : undefined;
 }
 

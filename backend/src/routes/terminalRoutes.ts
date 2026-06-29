@@ -86,7 +86,7 @@ function completionInput(input: string): { pathPart: string; prefix: string } {
     let quote: "'" | '"' | undefined;
     let isEscaped = false;
     let tokenStart = 0;
-    for (let index = 0; index < input.length; ) {
+    for (let index = 0; index < input.length;) {
         const character = input.codePointAt(index);
         if (character === undefined) break;
         const characterText = String.fromCodePoint(character);

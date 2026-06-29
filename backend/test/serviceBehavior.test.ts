@@ -3394,6 +3394,57 @@ fi
         );
     });
 
+    it("includes configured archives when applying log rotation retention", async () => {
+        const rotationRoot = createTemporaryRoot("mira-log-rotation-archives-test-");
+        const logFile = path.join(rotationRoot, "app.log");
+        const archiveRoot = path.join(rotationRoot, "archives");
+        const configFile = path.join(rotationRoot, "log-rotation.json");
+        mkdirSync(archiveRoot, { recursive: true });
+        writeFileSync(logFile, "rotate me\n");
+        const configuredArchive = path.join(archiveRoot, "app.previous.log");
+        writeFileSync(configuredArchive, "older archive\n");
+        const oldTime = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+        utimesSync(configuredArchive, oldTime, oldTime);
+        writeFileSync(
+            configFile,
+            JSON.stringify({
+                approvedRoots: [rotationRoot],
+                defaults: {
+                    keep: 2,
+                    maxSizeMb: 0.000001,
+                    missingOk: false,
+                    skipEmpty: false,
+                },
+                groups: [
+                    {
+                        archivePaths: [path.join(archiveRoot, "*.log")],
+                        archiveRetentionScope: "directory",
+                        name: "logs",
+                        paths: [logFile],
+                        strategy: "rename",
+                    },
+                ],
+                version: 1,
+            })
+        );
+        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+
+        const summary = await runLogRotationService({
+            config: configFile,
+            isDryRun: true,
+            verbose: true,
+        });
+
+        expect(summary).toMatchObject({
+            checkedFiles: 1,
+            deletedArchives: 0,
+            isDryRun: true,
+            isOk: true,
+            rotatedFiles: 1,
+        });
+        expect(existsSync(configuredArchive)).toBe(true);
+    });
+
     it("copy-truncates logs, honors exclusions, and reports unsafe rotation errors", async () => {
         const rotationRoot = createTemporaryRoot("mira-log-rotation-copy-test-");
         const outsideRoot = createTemporaryRoot("mira-log-rotation-outside-");

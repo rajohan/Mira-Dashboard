@@ -3387,8 +3387,7 @@ fi
                 "SELECT data_json, metadata_json, status FROM cache_entries WHERE key = 'quotas.summary' LIMIT 1"
             )
             .get() as
-            | { data_json: string; metadata_json: string; status: string }
-            | undefined;
+            { data_json: string; metadata_json: string; status: string } | undefined;
         expect(row?.status).toBe("fresh");
         const data = JSON.parse(row?.data_json ?? "{}") as Record<
             string,
