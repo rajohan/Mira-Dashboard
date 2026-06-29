@@ -120,6 +120,47 @@ function rollbackCreatedFirstUser(userId: number): void {
     }
 }
 
+function rollbackGatewayTokenSwitch(
+    gatewayToken: string,
+    previousGatewayToken?: string | undefined
+): void {
+    database.run("BEGIN IMMEDIATE");
+    try {
+        if (previousGatewayToken) {
+            persistGatewayToken(previousGatewayToken);
+        } else {
+            database
+                .prepare(
+                    "DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?"
+                )
+                .run(gatewayToken);
+        }
+        database.run("COMMIT");
+    } catch (error) {
+        try {
+            database.run("ROLLBACK");
+        } catch (rollbackError) {
+            console.error(
+                "[Auth] Gateway token rollback transaction rollback failed:",
+                rollbackError
+            );
+            throw new AggregateError(
+                [error, rollbackError],
+                "Gateway token rollback transaction and rollback failed",
+                { cause: rollbackError }
+            );
+        }
+        throw error;
+    }
+}
+
+function responseForClosedBootstrap(): Response {
+    return json(
+        { error: "Bootstrap registration is no longer available" },
+        { status: 409 }
+    );
+}
+
 function isGatewayAuthFailure(error: unknown): boolean {
     const message = errorMessage(error, String(error)).toLowerCase();
     return message.includes("unauthorized") || message.includes("token mismatch");
@@ -182,38 +223,26 @@ export const authRoutes = {
                 );
             }
             const gatewayToken = rawGatewayToken.trim();
-            let user: Awaited<ReturnType<typeof createUser>>;
-            try {
-                const createdUser = await createFirstUser(username, password);
-                if (!createdUser) {
-                    return json(
-                        { error: "Bootstrap registration is no longer available" },
-                        { status: 409 }
-                    );
-                }
-                user = createdUser;
-            } catch (error_) {
-                if (
-                    error_ &&
-                    typeof error_ === "object" &&
-                    "code" in error_ &&
-                    error_.code === "SQLITE_CONSTRAINT_UNIQUE"
-                ) {
-                    return json({ error: "Username already exists" }, { status: 409 });
-                }
-                return json({ error: "Failed to create first user" }, { status: 500 });
-            }
-
+            let user: Awaited<ReturnType<typeof createUser>> | undefined;
             let previousGatewayToken: string | undefined;
             let previousActiveGatewayToken: string | undefined;
             let isAttemptedGatewaySwitch = false;
             try {
                 previousGatewayToken = getPersistedGatewayToken();
                 previousActiveGatewayToken =
-                    previousGatewayToken?.trim() || environmentGatewayToken();
+                    environmentGatewayToken() || previousGatewayToken?.trim();
                 persistGatewayToken(gatewayToken);
                 isAttemptedGatewaySwitch = true;
                 await gateway.initAndWait(gatewayToken);
+                const createdUser = await createFirstUser(username, password);
+                if (!createdUser) {
+                    rollbackGatewayTokenSwitch(gatewayToken, previousGatewayToken);
+                    if (previousActiveGatewayToken) {
+                        gateway.init(previousActiveGatewayToken);
+                    }
+                    return responseForClosedBootstrap();
+                }
+                user = createdUser;
                 const sessionId = createSession(user.id);
                 return withCookie(
                     json(
@@ -230,11 +259,18 @@ export const authRoutes = {
                 let isRollbackFailed = false;
                 if (isAttemptedGatewaySwitch) {
                     try {
-                        rollbackFirstUserBootstrap(
-                            user.id,
-                            gatewayToken,
-                            previousGatewayToken
-                        );
+                        if (user) {
+                            rollbackFirstUserBootstrap(
+                                user.id,
+                                gatewayToken,
+                                previousGatewayToken
+                            );
+                        } else {
+                            rollbackGatewayTokenSwitch(
+                                gatewayToken,
+                                previousGatewayToken
+                            );
+                        }
                     } catch (rollbackError) {
                         isRollbackFailed = true;
                         console.error(
@@ -242,7 +278,7 @@ export const authRoutes = {
                             rollbackError
                         );
                     }
-                } else {
+                } else if (user) {
                     try {
                         rollbackCreatedFirstUser(user.id);
                     } catch (rollbackError) {
