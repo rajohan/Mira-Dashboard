@@ -454,6 +454,80 @@ describe("Docker updater tag patterns", () => {
         );
     });
 
+    it("preserves compose formatting when updating image references", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_BIN");
+        rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_PLATFORM");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-formatting-");
+        const appRoot = path.join(appsRoot, "unit-formatting-app");
+        const composePath = path.join(appRoot, "compose.yaml");
+        mkdirSync(appRoot, { recursive: true });
+        const originalCompose = [
+            "services:",
+            "  web:",
+            "    # Keep this comment and spacing intact.",
+            "    image: ghcr.io/unit/format:1.0.0 # current image",
+            "",
+            "    labels:",
+            "      - mira.updater.enabled=true",
+            "      - mira.updater.autoUpdate=false",
+            "      - mira.updater.track=tag",
+            "      - mira.updater.tagPattern=1.0.1",
+            "      - mira.updater.tagPatternIsRegex=false",
+            "",
+        ].join("\n");
+        writeFileSync(composePath, originalCompose);
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        process.env.MIRA_DOCKER_BIN = "docker";
+        process.env.MIRA_DOCKER_COMPOSE_WRAPPER = path.join(appsRoot, "compose-wrapper");
+        delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
+        process.env.MIRA_DOCKER_UPDATER_PLATFORM = "linux/amd64";
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.endsWith("/v2/unit/format/manifests/1.0.1")) {
+                return Response.json(
+                    { digest: "sha256:format11" },
+                    { headers: { "docker-content-digest": "sha256:format11" } }
+                );
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockResolvedValue({ code: 0, stderr: "", stdout: "compose ok" });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        const registered = await registerDockerUpdaterServices();
+        expect(registered.isOk).toBe(true);
+        const service = database
+            .prepare(
+                `SELECT id
+                 FROM docker_managed_services
+                 WHERE app_slug = 'unit-formatting-app' AND service_name = 'web'`
+            )
+            .get() as { id: number };
+
+        const steps = await runDockerUpdaterService(service.id);
+
+        expect(steps).toContainEqual(
+            expect.objectContaining({
+                isOk: true,
+                step: "manual-update:unit-formatting-app/web",
+            })
+        );
+        expect(readFileSync(composePath, "utf8")).toBe(
+            originalCompose.replace(
+                "image: ghcr.io/unit/format:1.0.0 # current image",
+                "image: ghcr.io/unit/format:1.0.1 # current image"
+            )
+        );
+    });
+
     it("updates services through parent compose includes and default overrides", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
         rememberEnvironment("MIRA_DOCKER_BIN");
