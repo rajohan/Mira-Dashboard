@@ -127,8 +127,7 @@ export const jobRoutes = {
                             ? jobPatch.intervalSeconds
                             : undefined,
                     scheduleType: jobPatch.scheduleType as
-                        | ScheduledJobScheduleType
-                        | undefined,
+                        ScheduledJobScheduleType | undefined,
                     timeOfDay:
                         typeof jobPatch.timeOfDay === "string" ||
                         jobPatch.timeOfDay === null ||

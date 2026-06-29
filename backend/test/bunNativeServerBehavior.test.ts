@@ -138,8 +138,7 @@ describe("Bun-native dashboard backend", () => {
                 );
             });
             let next:
-                | Awaited<ReturnType<typeof reader.read>>
-                | { code: number; done: true };
+                Awaited<ReturnType<typeof reader.read>> | { code: number; done: true };
             try {
                 next = await Promise.race([reader.read(), exited, startupTimeout]);
             } finally {

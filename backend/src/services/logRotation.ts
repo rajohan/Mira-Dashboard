@@ -990,13 +990,11 @@ async function addConfiguredArchiveIfInRetentionScope(
     policy: LogRotationPolicy,
     approvedRoots: string[]
 ): Promise<void> {
-    if (
-        !(
-            isArchiveMatchRetentionScope(filePath, archivePath, policy) &&
-            (await assertSafePath(archivePath, approvedRoots)) &&
-            !(await isSameResolvedPath(archivePath, filePath))
-        )
-    ) {
+    if (!(
+        isArchiveMatchRetentionScope(filePath, archivePath, policy) &&
+        (await assertSafePath(archivePath, approvedRoots)) &&
+        !(await isSameResolvedPath(archivePath, filePath))
+    )) {
         return;
     }
 
