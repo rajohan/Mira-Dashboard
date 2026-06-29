@@ -465,17 +465,27 @@ describe("Docker updater tag patterns", () => {
         const composePath = path.join(appRoot, "compose.yaml");
         mkdirSync(appRoot, { recursive: true });
         const originalCompose = [
+            "x-template:",
+            "  services:",
+            "    web:",
+            "      image: ghcr.io/unit/template:1.0.0",
+            "",
             "services:",
+            "  other:",
+            "    labels:",
+            "      web:",
+            "        image: ghcr.io/unit/other-label:1.0.0",
             "  web:",
             "    # Keep this comment and spacing intact.",
-            "    image: ghcr.io/unit/format:1.0.0 # current image",
-            "",
+            "    build:",
+            "      image: ghcr.io/unit/label:1.0.0",
             "    labels:",
             "      - mira.updater.enabled=true",
             "      - mira.updater.autoUpdate=false",
             "      - mira.updater.track=tag",
             "      - mira.updater.tagPattern=1.0.1",
             "      - mira.updater.tagPatternIsRegex=false",
+            "    image: ghcr.io/unit/format:1.0.0 # current image",
             "",
         ].join("\n");
         writeFileSync(composePath, originalCompose);
