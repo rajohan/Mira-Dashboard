@@ -1,9 +1,9 @@
 # Mira Dashboard
 
-[![frontend coverage](https://codecov.io/gh/rajohan/Mira-Dashboard/branch/main/graph/badge.svg?flag=frontend)](https://codecov.io/gh/rajohan/Mira-Dashboard)
-[![backend coverage](https://codecov.io/gh/rajohan/Mira-Dashboard/branch/main/graph/badge.svg?flag=backend)](https://codecov.io/gh/rajohan/Mira-Dashboard)
-[![Dashboard checks](https://github.com/rajohan/Mira-Dashboard/actions/workflows/dashboard-checks.yml/badge.svg?branch=main)](https://github.com/rajohan/Mira-Dashboard/actions/workflows/dashboard-checks.yml)
-[![CodeQL](https://github.com/rajohan/Mira-Dashboard/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/rajohan/Mira-Dashboard/actions/workflows/codeql.yml)
+[![frontend coverage](https://img.shields.io/codecov/c/github/rajohan/Mira-Dashboard/main?flag=frontend&label=frontend%20coverage&logo=codecov)](https://codecov.io/gh/rajohan/Mira-Dashboard)
+[![backend coverage](https://img.shields.io/codecov/c/github/rajohan/Mira-Dashboard/main?flag=backend&label=backend%20coverage&logo=codecov)](https://codecov.io/gh/rajohan/Mira-Dashboard)
+[![checks](https://img.shields.io/github/actions/workflow/status/rajohan/Mira-Dashboard/dashboard-checks.yml?branch=main&label=checks&logo=github)](https://github.com/rajohan/Mira-Dashboard/actions/workflows/dashboard-checks.yml)
+[![codeql](https://img.shields.io/github/actions/workflow/status/rajohan/Mira-Dashboard/codeql.yml?branch=main&label=codeql&logo=github)](https://github.com/rajohan/Mira-Dashboard/actions/workflows/codeql.yml)
 [![Bun](https://img.shields.io/badge/runtime-Bun-black?logo=bun)](https://bun.sh)
 [![License](https://img.shields.io/github/license/rajohan/Mira-Dashboard)](LICENSE)
 
