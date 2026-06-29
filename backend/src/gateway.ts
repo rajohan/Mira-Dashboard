@@ -161,13 +161,16 @@ const gatewayState: {
     isConnected: boolean;
     requestId: number;
     currentToken: string | undefined;
+    connectError: string | undefined;
 } = {
     client: undefined,
     sessions: [],
     isConnected: false,
     requestId: 1000,
     currentToken: undefined,
+    connectError: undefined,
 };
+const DEFAULT_GATEWAY_CONNECTION_WAIT_MS = 45_000;
 const subscribers = new Set<DashboardSocket>();
 const pendingRequests = new Map<string, PendingRequest>();
 type GatewayClientConstructor = new (
@@ -775,6 +778,7 @@ function init(token: string): void {
     }
     gatewayState.isConnected = false;
     gatewayState.sessions = [];
+    gatewayState.connectError = undefined;
     failPendingRequests("Gateway disconnected");
     broadcast({ type: "disconnected", gatewayConnected: false });
     gatewayState.currentToken = token;
@@ -839,6 +843,7 @@ function init(token: string): void {
         if (!getCurrentInitGatewayClient()) {
             return;
         }
+        gatewayState.connectError = error.message;
         console.error("[Gateway] Connect failed:", error.message);
     }
     /** Marks Gateway state disconnected and informs dashboard clients. */
@@ -878,6 +883,58 @@ function init(token: string): void {
         }
         throw error;
     }
+}
+
+function isGatewayAuthFailureMessage(message: string): boolean {
+    const normalized = message.toLowerCase();
+    return normalized.includes("unauthorized") || normalized.includes("token mismatch");
+}
+
+function waitForConnection(
+    expectedToken: string,
+    timeoutMs = DEFAULT_GATEWAY_CONNECTION_WAIT_MS
+): Promise<void> {
+    if (gatewayState.currentToken === expectedToken && gatewayState.isConnected) {
+        return Promise.resolve();
+    }
+
+    return new Promise((resolve, reject) => {
+        const deadline = Date.now() + timeoutMs;
+        const interval = setInterval(() => {
+            if (gatewayState.currentToken !== expectedToken) {
+                clearInterval(interval);
+                reject(new Error("Gateway token changed before connection completed"));
+                return;
+            }
+            if (gatewayState.isConnected) {
+                clearInterval(interval);
+                resolve();
+                return;
+            }
+            if (
+                gatewayState.connectError &&
+                isGatewayAuthFailureMessage(gatewayState.connectError)
+            ) {
+                clearInterval(interval);
+                reject(new Error(gatewayState.connectError));
+                return;
+            }
+            if (Date.now() >= deadline) {
+                clearInterval(interval);
+                reject(
+                    new Error(
+                        gatewayState.connectError ||
+                            "Gateway connection was not established"
+                    )
+                );
+            }
+        }, 50);
+    });
+}
+
+async function initAndWait(token: string): Promise<void> {
+    init(token);
+    await waitForConnection(token);
 }
 
 /** Performs forward request. */
@@ -1178,6 +1235,7 @@ function shutdown(): void {
 
 export default {
     init,
+    initAndWait,
     handleDashboardClient,
     getStatus,
     getSessions,

@@ -173,7 +173,9 @@ class NoopGatewayClient implements OpenClawGatewayClientInstance {
         return { method, parameters };
     }
 
-    start(): void {}
+    start(): void {
+        this.options.onHelloOk?.({ type: "hello-ok" });
+    }
 
     stop(): void {}
 }
@@ -429,16 +431,230 @@ describe("backend route and service behavior", () => {
         });
     });
 
+    it("keeps first-user bootstrap closed until Gateway validation finishes", async () => {
+        isolateOpenClawEnvironment("mira-first-user-deferred-coverage-");
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const originalInitAndWait = gateway.initAndWait;
+        const gatewayValidation = Promise.withResolvers<void>();
+        let isGatewayValidationStarted = false;
+        const validationTokens: string[] = [];
+        cleanupCallbacks.push(() => {
+            gateway.initAndWait = originalInitAndWait;
+            gateway.shutdown();
+        });
+        gateway.initAndWait = async (token: string) => {
+            isGatewayValidationStarted = true;
+            validationTokens.push(token);
+            return gatewayValidation.promise;
+        };
+        const { authRoutes } = await import("../src/routes/authRoutes.ts");
+        const { findUserByUsername, getPersistedGatewayToken } =
+            await import("../src/auth.ts");
+        const server = fakeServer();
+        const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
+
+        const responsePromise = authRoutes["/api/auth/register-first-user"].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "test-gateway-token-a",
+                password: "correct-password",
+                username,
+            }),
+            server
+        );
+
+        for (let attempt = 0; attempt < 50 && !isGatewayValidationStarted; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(isGatewayValidationStarted).toBe(true);
+        expect(findUserByUsername(username)).toBeUndefined();
+        const loginDuringHandshake = await authRoutes["/api/auth/login"].POST(
+            jsonRequest("/api/auth/login", {
+                password: "correct-password",
+                username,
+            }),
+            server
+        );
+        expect(loginDuringHandshake.status).toBe(409);
+        const overlappingBootstrap = await authRoutes[
+            "/api/auth/register-first-user"
+        ].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "test-gateway-token-b",
+                password: "correct-password",
+                username: `coverage-${Bun.randomUUIDv7().slice(-8)}`,
+            }),
+            server
+        );
+        expect(overlappingBootstrap.status).toBe(409);
+        await expect(overlappingBootstrap.json()).resolves.toEqual({
+            error: "First-user setup is already in progress",
+        });
+        expect(validationTokens).toEqual(["test-gateway-token-a"]);
+        expect(getPersistedGatewayToken()).toBe("test-gateway-token-a");
+
+        gatewayValidation.resolve();
+        const response = await responsePromise;
+        expect(response.status).toBe(201);
+        expect(findUserByUsername(username)).toMatchObject({ username });
+    });
+
+    it("rejects closed first-user bootstrap before switching Gateway tokens", async () => {
+        isolateOpenClawEnvironment("mira-first-user-closed-switch-coverage-");
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const originalInitAndWait = gateway.initAndWait;
+        const validationTokens: string[] = [];
+        cleanupCallbacks.push(() => {
+            gateway.initAndWait = originalInitAndWait;
+            gateway.shutdown();
+        });
+        gateway.initAndWait = async (token: string) => {
+            validationTokens.push(token);
+        };
+        const { authRoutes } = await import("../src/routes/authRoutes.ts");
+        const { createUser, getPersistedGatewayToken, persistGatewayToken } =
+            await import("../src/auth.ts");
+        const server = fakeServer();
+        await createUser(`coverage-${Bun.randomUUIDv7().slice(-8)}`, "correct-password");
+        persistGatewayToken("previous-token");
+
+        const response = await authRoutes["/api/auth/register-first-user"].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "hostile-token",
+                password: "correct-password",
+                username: `coverage-${Bun.randomUUIDv7().slice(-8)}`,
+            }),
+            server
+        );
+
+        expect(response.status).toBe(409);
+        await expect(response.json()).resolves.toEqual({
+            error: "Bootstrap registration is no longer available",
+        });
+        expect(validationTokens).toEqual([]);
+        expect(getPersistedGatewayToken()).toBe("previous-token");
+    });
+
+    it("restores Gateway state when first-user bootstrap closes during token validation", async () => {
+        isolateOpenClawEnvironment("mira-first-user-race-close-coverage-");
+        rememberEnvironment("OPENCLAW_GATEWAY_TOKEN");
+        rememberEnvironment("OPENCLAW_TOKEN");
+        delete process.env.OPENCLAW_GATEWAY_TOKEN;
+        delete process.env.OPENCLAW_TOKEN;
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const originalInit = gateway.init;
+        const originalInitAndWait = gateway.initAndWait;
+        const gatewayValidation = Promise.withResolvers<void>();
+        let isGatewayValidationStarted = false;
+        const initTokens: string[] = [];
+        cleanupCallbacks.push(() => {
+            gateway.init = originalInit;
+            gateway.initAndWait = originalInitAndWait;
+            gateway.shutdown();
+        });
+        gateway.initAndWait = async () => {
+            isGatewayValidationStarted = true;
+            return gatewayValidation.promise;
+        };
+        gateway.init = (token: string) => {
+            initTokens.push(token);
+        };
+        const { authRoutes } = await import("../src/routes/authRoutes.ts");
+        const { createUser, getPersistedGatewayToken, persistGatewayToken } =
+            await import("../src/auth.ts");
+        const server = fakeServer();
+        const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
+        persistGatewayToken("previous-token");
+
+        const responsePromise = authRoutes["/api/auth/register-first-user"].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "new-token",
+                password: "correct-password",
+                username,
+            }),
+            server
+        );
+        for (let attempt = 0; attempt < 50 && !isGatewayValidationStarted; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(isGatewayValidationStarted).toBe(true);
+        await createUser(`coverage-${Bun.randomUUIDv7().slice(-8)}`, "correct-password");
+
+        gatewayValidation.resolve();
+        const response = await responsePromise;
+
+        expect(response.status).toBe(409);
+        await expect(response.json()).resolves.toEqual({
+            error: "Bootstrap registration is no longer available",
+        });
+        expect(getPersistedGatewayToken()).toBe("previous-token");
+        expect(initTokens).toEqual(["previous-token"]);
+    });
+
+    it("shuts down rejected first-user bootstrap Gateway when no previous token exists", async () => {
+        isolateOpenClawEnvironment("mira-first-user-race-shutdown-coverage-");
+        rememberEnvironment("OPENCLAW_GATEWAY_TOKEN");
+        rememberEnvironment("OPENCLAW_TOKEN");
+        delete process.env.OPENCLAW_GATEWAY_TOKEN;
+        delete process.env.OPENCLAW_TOKEN;
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const originalShutdown = gateway.shutdown;
+        const originalInitAndWait = gateway.initAndWait;
+        const gatewayValidation = Promise.withResolvers<void>();
+        let isGatewayValidationStarted = false;
+        let shutdownCount = 0;
+        cleanupCallbacks.push(() => {
+            gateway.shutdown = originalShutdown;
+            gateway.initAndWait = originalInitAndWait;
+            gateway.shutdown();
+        });
+        gateway.initAndWait = async () => {
+            isGatewayValidationStarted = true;
+            return gatewayValidation.promise;
+        };
+        gateway.shutdown = () => {
+            shutdownCount += 1;
+        };
+        const { authRoutes } = await import("../src/routes/authRoutes.ts");
+        const { createUser, getPersistedGatewayToken } = await import("../src/auth.ts");
+        const server = fakeServer();
+        database.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
+
+        const responsePromise = authRoutes["/api/auth/register-first-user"].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "new-token",
+                password: "correct-password",
+                username: `coverage-${Bun.randomUUIDv7().slice(-8)}`,
+            }),
+            server
+        );
+        for (let attempt = 0; attempt < 50 && !isGatewayValidationStarted; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(isGatewayValidationStarted).toBe(true);
+        await createUser(`coverage-${Bun.randomUUIDv7().slice(-8)}`, "correct-password");
+
+        gatewayValidation.resolve();
+        const response = await responsePromise;
+
+        expect(response.status).toBe(409);
+        expect(getPersistedGatewayToken()).toBeUndefined();
+        expect(shutdownCount).toBe(1);
+    });
+
     it("rolls back first-user bootstrap when Gateway initialization fails", async () => {
         isolateOpenClawEnvironment("mira-first-user-rollback-coverage-");
         const gatewayModule = await import("../src/gateway.ts");
         const gateway = gatewayModule.default;
-        const originalInit = gateway.init;
+        const originalInitAndWait = gateway.initAndWait;
         cleanupCallbacks.push(() => {
-            gateway.init = originalInit;
+            gateway.initAndWait = originalInitAndWait;
             gateway.shutdown();
         });
-        gateway.init = () => {
+        gateway.initAndWait = async () => {
             throw new Error("gateway unavailable");
         };
         const { authRoutes } = await import("../src/routes/authRoutes.ts");
@@ -474,16 +690,62 @@ describe("backend route and service behavior", () => {
         ).toEqual({ count: 0 });
     });
 
+    it("rolls back first-user bootstrap when session creation fails", async () => {
+        isolateOpenClawEnvironment("mira-first-user-session-rollback-coverage-");
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const originalInitAndWait = gateway.initAndWait;
+        cleanupCallbacks.push(() => {
+            gateway.initAndWait = originalInitAndWait;
+            gateway.shutdown();
+        });
+        gateway.initAndWait = async () => {};
+        const { authRoutes } = await import("../src/routes/authRoutes.ts");
+        const { findUserByUsername, getPersistedGatewayToken, persistGatewayToken } =
+            await import("../src/auth.ts");
+        const server = fakeServer();
+        const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
+        persistGatewayToken("previous-token");
+        database.run(
+            `CREATE TEMP TRIGGER fail_auth_session_insert
+             BEFORE INSERT ON auth_sessions
+             BEGIN
+                 SELECT RAISE(ABORT, 'session blocked');
+             END`
+        );
+        cleanupCallbacks.push(() => {
+            database.run("DROP TRIGGER IF EXISTS fail_auth_session_insert");
+        });
+
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        cleanupCallbacks.push(() => errorSpy.mockRestore());
+        const response = await authRoutes["/api/auth/register-first-user"].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "new-token",
+                password: "correct-password",
+                username,
+            }),
+            server
+        );
+
+        expect(response.status).toBe(500);
+        await expect(response.json()).resolves.toEqual({
+            error: "Failed to complete first-user setup",
+        });
+        expect(findUserByUsername(username)).toBeUndefined();
+        expect(getPersistedGatewayToken()).toBe("previous-token");
+    });
+
     it("removes a newly persisted Gateway token when first-user bootstrap fails without a previous token", async () => {
         isolateOpenClawEnvironment("mira-first-user-token-cleanup-");
         const gatewayModule = await import("../src/gateway.ts");
         const gateway = gatewayModule.default;
-        const originalInit = gateway.init;
+        const originalInitAndWait = gateway.initAndWait;
         cleanupCallbacks.push(() => {
-            gateway.init = originalInit;
+            gateway.initAndWait = originalInitAndWait;
             gateway.shutdown();
         });
-        gateway.init = () => {
+        gateway.initAndWait = async () => {
             throw new Error("gateway unavailable");
         };
         const { authRoutes } = await import("../src/routes/authRoutes.ts");
@@ -510,6 +772,90 @@ describe("backend route and service behavior", () => {
         });
         expect(findUserByUsername(username)).toBeUndefined();
         expect(getPersistedGatewayToken()).toBeUndefined();
+    });
+
+    it("restores the environment Gateway token after failed first-user bootstrap", async () => {
+        isolateOpenClawEnvironment("mira-first-user-env-token-restore-");
+        rememberEnvironment("OPENCLAW_GATEWAY_TOKEN");
+        process.env.OPENCLAW_GATEWAY_TOKEN = "environment-token";
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const originalInit = gateway.init;
+        const originalInitAndWait = gateway.initAndWait;
+        const initCalls: string[] = [];
+        cleanupCallbacks.push(() => {
+            gateway.init = originalInit;
+            gateway.initAndWait = originalInitAndWait;
+            gateway.shutdown();
+        });
+        gateway.initAndWait = async () => {
+            throw new Error("gateway unavailable");
+        };
+        gateway.init = (token: string) => {
+            initCalls.push(token);
+        };
+        const { authRoutes } = await import("../src/routes/authRoutes.ts");
+        const { findUserByUsername, getPersistedGatewayToken, persistGatewayToken } =
+            await import("../src/auth.ts");
+        const server = fakeServer();
+        const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
+        persistGatewayToken("persisted-token");
+
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        cleanupCallbacks.push(() => errorSpy.mockRestore());
+        const response = await authRoutes["/api/auth/register-first-user"].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "new-token",
+                password: "correct-password",
+                username,
+            }),
+            server
+        );
+
+        expect(response.status).toBe(500);
+        expect(findUserByUsername(username)).toBeUndefined();
+        expect(getPersistedGatewayToken()).toBe("persisted-token");
+        expect(initCalls).toEqual(["environment-token"]);
+    });
+
+    it("rejects first-user bootstrap when the Gateway token is invalid", async () => {
+        isolateOpenClawEnvironment("mira-first-user-invalid-token-coverage-");
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const originalInitAndWait = gateway.initAndWait;
+        cleanupCallbacks.push(() => {
+            gateway.initAndWait = originalInitAndWait;
+            gateway.shutdown();
+        });
+        gateway.initAndWait = async () => {
+            throw new Error(
+                "unauthorized: gateway token mismatch (provide gateway auth token)"
+            );
+        };
+        const { authRoutes } = await import("../src/routes/authRoutes.ts");
+        const { findUserByUsername, getPersistedGatewayToken, persistGatewayToken } =
+            await import("../src/auth.ts");
+        const server = fakeServer();
+        const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
+
+        persistGatewayToken("previous-token");
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        cleanupCallbacks.push(() => errorSpy.mockRestore());
+        const response = await authRoutes["/api/auth/register-first-user"].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "wrong-token",
+                password: "correct-password",
+                username,
+            }),
+            server
+        );
+
+        expect(response.status).toBe(401);
+        await expect(response.json()).resolves.toEqual({
+            error: "Invalid OpenClaw gateway token",
+        });
+        expect(findUserByUsername(username)).toBeUndefined();
+        expect(getPersistedGatewayToken()).toBe("previous-token");
     });
 
     it("task route automation, validation, assignment, movement, updates, and deletion", async () => {

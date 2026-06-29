@@ -96,29 +96,42 @@ function rollbackFirstUserBootstrap(
     }
 }
 
-function rollbackCreatedFirstUser(userId: number): void {
-    database.run("BEGIN IMMEDIATE");
-    try {
-        database.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
-        database.prepare("DELETE FROM users WHERE id = ?").run(userId);
-        database.run("COMMIT");
-    } catch (error) {
-        try {
-            database.run("ROLLBACK");
-        } catch (rollbackError) {
-            console.error(
-                "[Auth] First-user cleanup transaction rollback failed:",
-                rollbackError
-            );
-            throw new AggregateError(
-                [error, rollbackError],
-                "First-user cleanup transaction and rollback failed",
-                { cause: rollbackError }
-            );
-        }
-        throw error;
+function rollbackGatewayTokenSwitch(
+    gatewayToken: string,
+    previousGatewayToken?: string | undefined
+): void {
+    if (previousGatewayToken) {
+        persistGatewayToken(previousGatewayToken);
+        return;
     }
+    database
+        .prepare("DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?")
+        .run(gatewayToken);
 }
+
+function responseForClosedBootstrap(): Response {
+    return json(
+        { error: "Bootstrap registration is no longer available" },
+        { status: 409 }
+    );
+}
+
+function isGatewayAuthFailure(error: unknown): boolean {
+    const message = errorMessage(error, String(error)).toLowerCase();
+    return message.includes("unauthorized") || message.includes("token mismatch");
+}
+
+function environmentGatewayToken(): string | undefined {
+    return (
+        process.env.OPENCLAW_GATEWAY_TOKEN?.trim() ||
+        process.env.OPENCLAW_TOKEN?.trim() ||
+        undefined
+    );
+}
+
+const firstUserBootstrapState = {
+    isInProgress: false,
+};
 
 export const authRoutes = {
     "/api/auth/bootstrap": {
@@ -168,36 +181,39 @@ export const authRoutes = {
                     { status: 400 }
                 );
             }
-            const gatewayToken = rawGatewayToken.trim();
-            let user: Awaited<ReturnType<typeof createUser>>;
-            try {
-                const createdUser = await createFirstUser(username, password);
-                if (!createdUser) {
-                    return json(
-                        { error: "Bootstrap registration is no longer available" },
-                        { status: 409 }
-                    );
-                }
-                user = createdUser;
-            } catch (error_) {
-                if (
-                    error_ &&
-                    typeof error_ === "object" &&
-                    "code" in error_ &&
-                    error_.code === "SQLITE_CONSTRAINT_UNIQUE"
-                ) {
-                    return json({ error: "Username already exists" }, { status: 409 });
-                }
-                return json({ error: "Failed to create first user" }, { status: 500 });
+            if (!isBootstrapRequired()) {
+                return responseForClosedBootstrap();
             }
-
+            if (firstUserBootstrapState.isInProgress) {
+                return json(
+                    { error: "First-user setup is already in progress" },
+                    { status: 409 }
+                );
+            }
+            const gatewayToken = rawGatewayToken.trim();
+            firstUserBootstrapState.isInProgress = true;
+            let user: Awaited<ReturnType<typeof createUser>> | undefined;
             let previousGatewayToken: string | undefined;
+            let previousActiveGatewayToken: string | undefined;
             let isAttemptedGatewaySwitch = false;
             try {
                 previousGatewayToken = getPersistedGatewayToken();
+                previousActiveGatewayToken =
+                    environmentGatewayToken() || previousGatewayToken?.trim();
                 persistGatewayToken(gatewayToken);
                 isAttemptedGatewaySwitch = true;
-                gateway.init(gatewayToken);
+                await gateway.initAndWait(gatewayToken);
+                const createdUser = await createFirstUser(username, password);
+                if (!createdUser) {
+                    rollbackGatewayTokenSwitch(gatewayToken, previousGatewayToken);
+                    if (previousActiveGatewayToken) {
+                        gateway.init(previousActiveGatewayToken);
+                    } else {
+                        gateway.shutdown();
+                    }
+                    return responseForClosedBootstrap();
+                }
+                user = createdUser;
                 const sessionId = createSession(user.id);
                 return withCookie(
                     json(
@@ -214,24 +230,24 @@ export const authRoutes = {
                 let isRollbackFailed = false;
                 if (isAttemptedGatewaySwitch) {
                     try {
-                        rollbackFirstUserBootstrap(
-                            user.id,
-                            gatewayToken,
-                            previousGatewayToken
-                        );
+                        if (user) {
+                            rollbackFirstUserBootstrap(
+                                user.id,
+                                gatewayToken,
+                                previousGatewayToken
+                            );
+                        } else {
+                            rollbackGatewayTokenSwitch(
+                                gatewayToken,
+                                previousGatewayToken
+                            );
+                        }
                     } catch (rollbackError) {
                         isRollbackFailed = true;
                         console.error(
                             "[Auth] First-user bootstrap rollback failed:",
                             rollbackError
                         );
-                    }
-                } else {
-                    try {
-                        rollbackCreatedFirstUser(user.id);
-                    } catch (rollbackError) {
-                        isRollbackFailed = true;
-                        console.error("[Auth] First-user cleanup failed:", rollbackError);
                     }
                 }
                 if (isAttemptedGatewaySwitch && !isRollbackFailed) {
@@ -240,22 +256,27 @@ export const authRoutes = {
                     } catch {
                         // Preserve the original bootstrap failure response.
                     }
-                    if (previousGatewayToken) {
+                    if (previousActiveGatewayToken) {
                         try {
-                            gateway.init(previousGatewayToken);
+                            gateway.init(previousActiveGatewayToken);
                         } catch {
                             // Preserve the original bootstrap failure response.
                         }
                     }
                 }
+                const isAuthFailure = isGatewayAuthFailure(bootstrapError);
                 return json(
                     {
                         error: isRollbackFailed
                             ? "Failed to roll back first-user bootstrap"
-                            : "Failed to complete first-user setup",
+                            : isAuthFailure
+                              ? "Invalid OpenClaw gateway token"
+                              : "Failed to complete first-user setup",
                     },
-                    { status: 500 }
+                    { status: !isRollbackFailed && isAuthFailure ? 401 : 500 }
                 );
+            } finally {
+                firstUserBootstrapState.isInProgress = false;
             }
         },
     },
