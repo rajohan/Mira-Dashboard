@@ -2081,6 +2081,73 @@ describe("shared component helpers", () => {
                 event: "agent",
                 payload: {
                     data: {
+                        delta: " files",
+                        itemId: "reasoning-progress-delta",
+                        itemKind: "analysis",
+                        progressText: "checking files",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const block = activeStreamsReference.current[
+                "agent:main:main::run-1::reasoning"
+            ]?.message?.thinking?.find(
+                (thinkingBlock) => thinkingBlock.id === "reasoning-progress-delta"
+            );
+            expect(block?.text).toBe(" files");
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning-blank-snapshot",
+                        itemKind: "analysis",
+                        progressText: "visible reasoning",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning-blank-snapshot",
+                        itemKind: "analysis",
+                        progressText: " ",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const block = activeStreamsReference.current[
+                "agent:main:main::run-1::reasoning"
+            ]?.message?.thinking?.find(
+                (thinkingBlock) => thinkingBlock.id === "reasoning-blank-snapshot"
+            );
+            expect(block?.text).toBe("visible reasoning");
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
                         item: {
                             kind: "preamble",
                             summary: [{ text: "array reasoning block", type: "text" }],
@@ -2456,6 +2523,16 @@ describe("shared component helpers", () => {
                 "agent:main:main::thinking-channel-end::thinking"
             ]
         ).toBeUndefined();
+        expect(
+            messages.filter(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking.some((block) => block.text.includes("channel"))
+            )
+        ).toHaveLength(1);
 
         act(() => {
             listener?.({
@@ -2498,6 +2575,57 @@ describe("shared component helpers", () => {
                     message.text.includes("Mixed visible text") &&
                     message.thinking.some((block) =>
                         block.text.includes("mixed terminal reasoning")
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    data: {
+                        delta: "whole-run final answer",
+                    },
+                    runId: "whole-run-terminal-assistant-payload",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "text" in message &&
+                    message.text === "whole-run final answer"
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    data: {
+                        delta: "whole-run final reasoning",
+                    },
+                    runId: "whole-run-terminal-thinking-payload",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking.some((block) =>
+                        block.text.includes("whole-run final reasoning")
                     )
             )
         ).toBe(true);

@@ -124,6 +124,35 @@ function runtimeWorkStreamKey(
     return runId ? `${sessionKey}::${runId}::${channel}` : `${sessionKey}::${channel}`;
 }
 
+/** Returns diagnostic message identity used to replace terminal channel buffers. */
+function diagnosticMessageIdentity(message?: ChatHistoryMessage): string {
+    if (!message) {
+        return "";
+    }
+
+    return JSON.stringify({
+        role: message.role.toLowerCase(),
+        runId: message.runId || "",
+        text: message.text,
+        thinking: (message.thinking || []).map((block) => ({
+            id: block.id || "",
+            text: block.text,
+        })),
+        toolCalls: (message.toolCalls || []).map((toolCall) => ({
+            id: toolCall.id || "",
+            name: toolCall.name,
+        })),
+        toolResult: message.toolResult
+            ? {
+                  id: message.toolResult.id || "",
+                  name: message.toolResult.name || "",
+                  content: message.toolResult.content,
+                  isError: message.toolResult.isError || false,
+              }
+            : undefined,
+    });
+}
+
 /** Performs compact status text. */
 export function compactStatusText(value: string): string {
     const normalized = value.replaceAll(/\s+/g, " ").trim();
@@ -721,7 +750,6 @@ function runtimeReasoningItemText(data: Record<string, unknown>): string | undef
         "progressText",
         "summary",
         "text",
-        "delta",
         "meta",
         "content",
     ]).find((value) => value.length > 0);
@@ -821,12 +849,15 @@ function runtimeReasoningItemMessage(
         return undefined;
     }
 
-    const text = runtimeReasoningItemText(data) || "";
-    if (text.length === 0) {
+    const deltaText = runtimeItemTextValues(data, ["delta"]).find(
+        (value) => value.length > 0
+    );
+    const isDeltaItem = deltaText !== undefined;
+    const text = deltaText ?? runtimeReasoningItemText(data) ?? "";
+    if (text.length === 0 || (!isDeltaItem && !text.trim())) {
         return undefined;
     }
     const thinkingId = runtimeItemStringValues(data, ["itemId", "id"]).at(0);
-    const isDeltaItem = runtimeItemTextValues(data, ["delta"]).length > 0;
 
     return {
         role: "assistant",
@@ -1345,9 +1376,14 @@ export function useChatRuntimeEvents({
                             createChatVisibility(showThinkingOutput, showToolOutput)
                         )
                     ) {
+                        const staleDiagnosticIdentity = diagnosticMessageIdentity(
+                            existingChannelEntry?.[1].message
+                        );
                         diagnosticMessages = [
                             ...diagnosticMessages.filter(
-                                (message) => message !== existingChannelEntry?.[1].message
+                                (message) =>
+                                    diagnosticMessageIdentity(message) !==
+                                    staleDiagnosticIdentity
                             ),
                             { ...terminalDiagnosticMessage, local: true },
                         ];
@@ -1405,14 +1441,66 @@ export function useChatRuntimeEvents({
 
             if (isWholeRunTerminalEvent) {
                 flushPendingDeltaUpdates();
-                const bufferedText = activeAssistantTextForRun(
+                const existingBufferedText = activeAssistantTextForRun(
                     selectedSessionKey,
                     eventRunId
                 );
-                const diagnosticMessages = activeDiagnosticMessagesForRun(
+                const isAssistantDelta =
+                    stream === "assistant" && rawStringValue(data.delta) !== undefined;
+                const bufferedText =
+                    stream === "assistant" && runtimeMessageToApply?.text
+                        ? isAssistantDelta
+                            ? `${existingBufferedText}${runtimeMessageToApply.text}`
+                            : mergeStreamText(
+                                  existingBufferedText,
+                                  runtimeMessageToApply.text
+                              )
+                        : existingBufferedText;
+                let diagnosticMessages = activeDiagnosticMessagesForRun(
                     selectedSessionKey,
                     eventRunId
                 );
+                if (stream !== "assistant" && runtimeMessageToApply) {
+                    const existingChannelEntry = Object.entries(
+                        activeStreamsReference.current
+                    ).find(
+                        ([key, streamEntry]) =>
+                            key.endsWith(`::${stream}`) &&
+                            isSameSessionKey(
+                                streamEntry.sessionKey,
+                                selectedSessionKey
+                            ) &&
+                            isActiveStreamMatchingRun(
+                                selectedSessionKey,
+                                streamEntry,
+                                eventRunId
+                            )
+                    );
+                    const terminalDiagnosticMessage = mergeStreamMessage(
+                        existingChannelEntry?.[1].message,
+                        runtimeMessageToApply,
+                        "",
+                        eventRunId
+                    );
+                    if (
+                        isRenderableChatHistoryMessage(
+                            terminalDiagnosticMessage,
+                            createChatVisibility(showThinkingOutput, showToolOutput)
+                        )
+                    ) {
+                        const staleDiagnosticIdentity = diagnosticMessageIdentity(
+                            existingChannelEntry?.[1].message
+                        );
+                        diagnosticMessages = [
+                            ...diagnosticMessages.filter(
+                                (message) =>
+                                    diagnosticMessageIdentity(message) !==
+                                    staleDiagnosticIdentity
+                            ),
+                            { ...terminalDiagnosticMessage, local: true },
+                        ];
+                    }
+                }
                 const messagesToAppend: ChatHistoryMessage[] = [
                     ...(bufferedText.trim()
                         ? [
