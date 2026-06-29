@@ -203,7 +203,7 @@ export function createReport(input: CreateReportInput): ReportRecord {
     const report = toReportRecord(row);
     if (shouldCreateNotification(report, input.notify ?? true)) {
         createReportNotification(report);
-    } else if (report.type === "heartbeat" && report.status === "ok") {
+    } else {
         deleteReportNotification(report);
     }
     return report;

@@ -706,6 +706,32 @@ describe("Mira Dashboard backend integration", () => {
         expect(custom.status).toBe(201);
         expect(customWithoutDedupe.status).toBe(201);
         expect(customWithoutDedupe.body.report.id).not.toBe(custom.body.report.id);
+        const noisyCustom = await api<{ isOk: boolean; report: { id: number } }>(
+            "/api/reports",
+            json("POST", {
+                type: "custom",
+                status: "ok",
+                title: "Noisy custom report",
+                bodyMd: "Notify first.",
+                summary: "Notify first.",
+                dedupeKey: "custom:notify-toggle",
+                occurredAt: "2026-06-23T08:40:00.000Z",
+            })
+        );
+        const quietCustom = await api<{ isOk: boolean; report: { id: number } }>(
+            "/api/reports",
+            json("POST", {
+                type: "custom",
+                status: "ok",
+                title: "Quiet custom report",
+                bodyMd: "Updated silently.",
+                summary: "Updated silently.",
+                dedupeKey: "custom:notify-toggle",
+                notify: false,
+                occurredAt: "2026-06-23T08:45:00.000Z",
+            })
+        );
+        expect(quietCustom.body.report.id).toBe(noisyCustom.body.report.id);
 
         const listed = await api<{
             items: Array<{
@@ -802,6 +828,11 @@ describe("Mira Dashboard backend integration", () => {
             notificationsAfterHeartbeatRecovery.body.items.some(
                 (item) =>
                     item.metadata.reportId === changingHeartbeatWarning.body.report.id
+            )
+        ).toBe(false);
+        expect(
+            notificationsAfterHeartbeatRecovery.body.items.some(
+                (item) => item.metadata.reportId === quietCustom.body.report.id
             )
         ).toBe(false);
 
