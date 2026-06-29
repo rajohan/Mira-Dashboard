@@ -538,6 +538,113 @@ describe("Docker updater tag patterns", () => {
         );
     });
 
+    it("falls back to safe compose serialization for complex image scalars", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_BIN");
+        rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_PLATFORM");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-complex-scalar-");
+        const appRoot = path.join(appsRoot, "unit-complex-scalar-app");
+        const composePath = path.join(appRoot, "compose.yaml");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            composePath,
+            [
+                "services:",
+                "  block:",
+                "    image: >-",
+                "      ghcr.io/unit/block:1.0.0",
+                "    labels:",
+                "      - mira.updater.enabled=true",
+                "      - mira.updater.autoUpdate=false",
+                "      - mira.updater.track=tag",
+                "      - mira.updater.tagPattern=1.0.1",
+                "      - mira.updater.tagPatternIsRegex=false",
+                "  anchored:",
+                "    image: &app_image ghcr.io/unit/anchored:1.0.0",
+                "    environment:",
+                "      - IMAGE_REF=*app_image",
+                "    labels:",
+                "      - mira.updater.enabled=true",
+                "      - mira.updater.autoUpdate=false",
+                "      - mira.updater.track=tag",
+                "      - mira.updater.tagPattern=1.0.1",
+                "      - mira.updater.tagPatternIsRegex=false",
+                "",
+            ].join("\n")
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        process.env.MIRA_DOCKER_BIN = "docker";
+        process.env.MIRA_DOCKER_COMPOSE_WRAPPER = path.join(appsRoot, "compose-wrapper");
+        delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
+        process.env.MIRA_DOCKER_UPDATER_PLATFORM = "linux/amd64";
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.endsWith("/v2/unit/block/manifests/1.0.1")) {
+                return Response.json(
+                    { digest: "sha256:block11" },
+                    { headers: { "docker-content-digest": "sha256:block11" } }
+                );
+            }
+            if (url.endsWith("/v2/unit/anchored/manifests/1.0.1")) {
+                return Response.json(
+                    { digest: "sha256:anchored11" },
+                    { headers: { "docker-content-digest": "sha256:anchored11" } }
+                );
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockResolvedValue({ code: 0, stderr: "", stdout: "compose ok" });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        const registered = await registerDockerUpdaterServices();
+        expect(registered.isOk).toBe(true);
+        const services = database
+            .prepare(
+                `SELECT id, service_name
+                 FROM docker_managed_services
+                 WHERE app_slug = 'unit-complex-scalar-app'
+                 ORDER BY service_name`
+            )
+            .all() as Array<{ id: number; service_name: string }>;
+
+        await expect(
+            runDockerUpdaterService(
+                services.find((service) => service.service_name === "block")?.id
+            )
+        ).resolves.toContainEqual(
+            expect.objectContaining({
+                isOk: true,
+                step: "manual-update:unit-complex-scalar-app/block",
+            })
+        );
+        expect(readFileSync(composePath, "utf8")).toContain(
+            "image: ghcr.io/unit/block:1.0.1"
+        );
+        expect(readFileSync(composePath, "utf8")).not.toContain("image: >-");
+
+        await expect(
+            runDockerUpdaterService(
+                services.find((service) => service.service_name === "anchored")?.id
+            )
+        ).resolves.toContainEqual(
+            expect.objectContaining({
+                isOk: true,
+                step: "manual-update:unit-complex-scalar-app/anchored",
+            })
+        );
+        expect(readFileSync(composePath, "utf8")).toContain(
+            "image: ghcr.io/unit/anchored:1.0.1"
+        );
+        expect(readFileSync(composePath, "utf8")).not.toContain("&app_image");
+    });
+
     it("updates services through parent compose includes and default overrides", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
         rememberEnvironment("MIRA_DOCKER_BIN");

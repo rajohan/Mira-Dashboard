@@ -1323,6 +1323,16 @@ function firstChildIndent(lines: string[], startIndex: number, parentIndent: num
     return childIndent;
 }
 
+function isComplexYamlScalar(value: string): boolean {
+    const trimmed = value.trimStart();
+    return (
+        trimmed.startsWith(">") ||
+        trimmed.startsWith("|") ||
+        trimmed.startsWith("&") ||
+        trimmed.startsWith("!")
+    );
+}
+
 function updateComposeImageLine(
     raw: string,
     composeImageField: string,
@@ -1390,6 +1400,10 @@ function updateComposeImageLine(
         if (!match) continue;
         const prefix = match[1];
         const quote = match[2] ?? "";
+        const unquotedValue = match[4] ?? "";
+        if (!quote && isComplexYamlScalar(unquotedValue)) {
+            return undefined;
+        }
         const suffix = match[5] ?? "";
         const nextValue = quote
             ? `${quote}${targetImageReference}${quote}`
