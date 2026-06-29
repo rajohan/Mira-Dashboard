@@ -5516,8 +5516,7 @@ describe("shared component helpers", () => {
         await user.click(screen.getAllByRole("switch").at(-1)!);
         await user.click(screen.getByRole("button", { name: "Save access control" }));
         const latestSaveCall = onSaveAgents.mock.calls.at(-1) as
-            | [Array<{ id: string; tools?: { allow?: string[] } }>]
-            | undefined;
+            [Array<{ id: string; tools?: { allow?: string[] } }>] | undefined;
         const savedAgents = latestSaveCall?.[0] ?? [];
         expect(savedAgents).toContainEqual(
             expect.objectContaining({
