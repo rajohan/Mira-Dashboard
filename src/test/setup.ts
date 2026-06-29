@@ -34,5 +34,5 @@ const { cleanup } = await import("@testing-library/react");
 afterEach(() => {
     jest.restoreAllMocks();
     cleanup();
-    document.body.innerHTML = "";
+    document.body.replaceChildren();
 });
