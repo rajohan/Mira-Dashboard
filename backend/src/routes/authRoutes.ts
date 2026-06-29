@@ -96,62 +96,17 @@ function rollbackFirstUserBootstrap(
     }
 }
 
-function rollbackCreatedFirstUser(userId: number): void {
-    database.run("BEGIN IMMEDIATE");
-    try {
-        database.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
-        database.prepare("DELETE FROM users WHERE id = ?").run(userId);
-        database.run("COMMIT");
-    } catch (error) {
-        try {
-            database.run("ROLLBACK");
-        } catch (rollbackError) {
-            console.error(
-                "[Auth] First-user cleanup transaction rollback failed:",
-                rollbackError
-            );
-            throw new AggregateError(
-                [error, rollbackError],
-                "First-user cleanup transaction and rollback failed",
-                { cause: rollbackError }
-            );
-        }
-        throw error;
-    }
-}
-
 function rollbackGatewayTokenSwitch(
     gatewayToken: string,
     previousGatewayToken?: string | undefined
 ): void {
-    database.run("BEGIN IMMEDIATE");
-    try {
-        if (previousGatewayToken) {
-            persistGatewayToken(previousGatewayToken);
-        } else {
-            database
-                .prepare(
-                    "DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?"
-                )
-                .run(gatewayToken);
-        }
-        database.run("COMMIT");
-    } catch (error) {
-        try {
-            database.run("ROLLBACK");
-        } catch (rollbackError) {
-            console.error(
-                "[Auth] Gateway token rollback transaction rollback failed:",
-                rollbackError
-            );
-            throw new AggregateError(
-                [error, rollbackError],
-                "Gateway token rollback transaction and rollback failed",
-                { cause: rollbackError }
-            );
-        }
-        throw error;
+    if (previousGatewayToken) {
+        persistGatewayToken(previousGatewayToken);
+        return;
     }
+    database
+        .prepare("DELETE FROM app_config WHERE key = 'gateway_token' AND value = ?")
+        .run(gatewayToken);
 }
 
 function responseForClosedBootstrap(): Response {
@@ -253,6 +208,8 @@ export const authRoutes = {
                     rollbackGatewayTokenSwitch(gatewayToken, previousGatewayToken);
                     if (previousActiveGatewayToken) {
                         gateway.init(previousActiveGatewayToken);
+                    } else {
+                        gateway.shutdown();
                     }
                     return responseForClosedBootstrap();
                 }
@@ -291,13 +248,6 @@ export const authRoutes = {
                             "[Auth] First-user bootstrap rollback failed:",
                             rollbackError
                         );
-                    }
-                } else if (user) {
-                    try {
-                        rollbackCreatedFirstUser(user.id);
-                    } catch (rollbackError) {
-                        isRollbackFailed = true;
-                        console.error("[Auth] First-user cleanup failed:", rollbackError);
                     }
                 }
                 if (isAttemptedGatewaySwitch && !isRollbackFailed) {

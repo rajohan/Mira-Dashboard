@@ -593,6 +593,58 @@ describe("backend route and service behavior", () => {
         expect(initTokens).toEqual(["previous-token"]);
     });
 
+    it("shuts down rejected first-user bootstrap Gateway when no previous token exists", async () => {
+        isolateOpenClawEnvironment("mira-first-user-race-shutdown-coverage-");
+        rememberEnvironment("OPENCLAW_GATEWAY_TOKEN");
+        rememberEnvironment("OPENCLAW_TOKEN");
+        delete process.env.OPENCLAW_GATEWAY_TOKEN;
+        delete process.env.OPENCLAW_TOKEN;
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const originalShutdown = gateway.shutdown;
+        const originalInitAndWait = gateway.initAndWait;
+        const gatewayValidation = Promise.withResolvers<void>();
+        let isGatewayValidationStarted = false;
+        let shutdownCount = 0;
+        cleanupCallbacks.push(() => {
+            gateway.shutdown = originalShutdown;
+            gateway.initAndWait = originalInitAndWait;
+            gateway.shutdown();
+        });
+        gateway.initAndWait = async () => {
+            isGatewayValidationStarted = true;
+            return gatewayValidation.promise;
+        };
+        gateway.shutdown = () => {
+            shutdownCount += 1;
+        };
+        const { authRoutes } = await import("../src/routes/authRoutes.ts");
+        const { createUser, getPersistedGatewayToken } = await import("../src/auth.ts");
+        const server = fakeServer();
+        database.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
+
+        const responsePromise = authRoutes["/api/auth/register-first-user"].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "new-token",
+                password: "correct-password",
+                username: `coverage-${Bun.randomUUIDv7().slice(-8)}`,
+            }),
+            server
+        );
+        for (let attempt = 0; attempt < 50 && !isGatewayValidationStarted; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(isGatewayValidationStarted).toBe(true);
+        await createUser(`coverage-${Bun.randomUUIDv7().slice(-8)}`, "correct-password");
+
+        gatewayValidation.resolve();
+        const response = await responsePromise;
+
+        expect(response.status).toBe(409);
+        expect(getPersistedGatewayToken()).toBeUndefined();
+        expect(shutdownCount).toBe(1);
+    });
+
     it("rolls back first-user bootstrap when Gateway initialization fails", async () => {
         isolateOpenClawEnvironment("mira-first-user-rollback-coverage-");
         const gatewayModule = await import("../src/gateway.ts");
