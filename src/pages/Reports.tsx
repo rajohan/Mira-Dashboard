@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
+import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { EmptyState } from "../components/ui/EmptyState";
 import { LoadingState } from "../components/ui/LoadingState";
 import type { ReportItem, ReportType } from "../hooks/useReports";
@@ -189,6 +190,7 @@ export function Reports() {
     const [filter, setFilter] = useState<ReportFilter>("all");
     const linkedReportId = reportIdFromSearch(location.searchStr);
     const [selectedId, setSelectedId] = useState<number | undefined>(linkedReportId);
+    const [deleteTarget, setDeleteTarget] = useState<ReportItem | undefined>();
     const reportsQuery = useReports(
         filter === "all" ? {} : { type: filter as ReportType }
     );
@@ -281,20 +283,43 @@ export function Reports() {
                         report={selectedReport}
                         deletePending={deleteReport.isPending}
                         onDelete={(id) =>
-                            deleteReport.mutate(id, {
-                                onSuccess: () => {
-                                    if (selectedId === id) {
-                                        setSelectedId(
-                                            reportItems.find((report) => report.id !== id)
-                                                ?.id
-                                        );
-                                    }
-                                },
-                            })
+                            setDeleteTarget(
+                                reportItems.find((report) => report.id === id) ??
+                                    selectedReport
+                            )
                         }
                     />
                 </div>
             )}
+            <ConfirmModal
+                isOpen={deleteTarget !== undefined}
+                title="Delete report"
+                message={
+                    deleteTarget
+                        ? `Delete "${deleteTarget.title}"? This removes the report and its linked notification.`
+                        : "Delete this report? This removes the report and its linked notification."
+                }
+                confirmLabel="Delete"
+                confirmLoadingLabel="Deleting..."
+                loading={deleteReport.isPending}
+                danger
+                onCancel={() => setDeleteTarget(undefined)}
+                onConfirm={() => {
+                    if (!deleteTarget) return;
+                    deleteReport.mutate(deleteTarget.id, {
+                        onSuccess: () => {
+                            if (selectedId === deleteTarget.id) {
+                                setSelectedId(
+                                    reportItems.find(
+                                        (report) => report.id !== deleteTarget.id
+                                    )?.id
+                                );
+                            }
+                            setDeleteTarget(undefined);
+                        },
+                    });
+                }}
+            />
         </div>
     );
 }

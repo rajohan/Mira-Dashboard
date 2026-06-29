@@ -642,6 +642,40 @@ describe("Mira Dashboard backend integration", () => {
         );
         expect(secondHeartbeatWarning.status).toBe(201);
 
+        const changingHeartbeatWarning = await api<{
+            isOk: boolean;
+            report: { id: number };
+        }>(
+            "/api/reports",
+            json("POST", {
+                type: "heartbeat",
+                status: "warning",
+                title: "Heartbeat status change",
+                bodyMd: "Status-changing check needs attention.",
+                summary: "Status-changing check needs attention.",
+                dedupeKey: "heartbeat:status-changing",
+                occurredAt: "2026-06-23T07:10:00.000Z",
+            })
+        );
+        const changingHeartbeatError = await api<{
+            isOk: boolean;
+            report: { id: number };
+        }>(
+            "/api/reports",
+            json("POST", {
+                type: "heartbeat",
+                status: "error",
+                title: "Heartbeat status change",
+                bodyMd: "Status-changing check failed.",
+                summary: "Status-changing check failed.",
+                dedupeKey: "heartbeat:status-changing",
+                occurredAt: "2026-06-23T07:15:00.000Z",
+            })
+        );
+        expect(changingHeartbeatError.body.report.id).toBe(
+            changingHeartbeatWarning.body.report.id
+        );
+
         const custom = await api<{ isOk: boolean; report: { id: number } }>(
             "/api/reports",
             json("POST", {
@@ -737,6 +771,39 @@ describe("Mira Dashboard backend integration", () => {
                 (item) => item.metadata.reportId === secondHeartbeatWarning.body.report.id
             )
         ).toBe(true);
+        const changingHeartbeatNotifications = reportNotifications.filter(
+            (item) => item.metadata.reportId === changingHeartbeatError.body.report.id
+        );
+        expect(changingHeartbeatNotifications).toHaveLength(1);
+        expect(changingHeartbeatNotifications[0]).toMatchObject({
+            title: "Heartbeat error",
+            type: "error",
+        });
+
+        const changingHeartbeatOk = await api<{ isOk: boolean; report: { id: number } }>(
+            "/api/reports",
+            json("POST", {
+                type: "heartbeat",
+                status: "ok",
+                title: "HEARTBEAT_OK",
+                bodyMd: "Status-changing check recovered.",
+                summary: "Status-changing check recovered.",
+                dedupeKey: "heartbeat:status-changing",
+                occurredAt: "2026-06-23T07:20:00.000Z",
+            })
+        );
+        expect(changingHeartbeatOk.body.report.id).toBe(
+            changingHeartbeatWarning.body.report.id
+        );
+        const notificationsAfterHeartbeatRecovery = await api<{
+            items: Array<{ metadata: Record<string, unknown> }>;
+        }>("/api/notifications?limit=50");
+        expect(
+            notificationsAfterHeartbeatRecovery.body.items.some(
+                (item) =>
+                    item.metadata.reportId === changingHeartbeatWarning.body.report.id
+            )
+        ).toBe(false);
 
         const deletedBrief = await api<{ deleted: number; isOk: boolean }>(
             `/api/reports/${brief.body.report.id}`,

@@ -2920,54 +2920,60 @@ describe("Mira Dashboard frontend behavior", () => {
     });
 
     it("renders dashboard reports and switches report filters", async () => {
-        const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
-            const url = String(input);
-            const [path, query = ""] = url.split("?");
-            const reportType = new URLSearchParams(query).get("type");
-            if (path === "/api/reports" && reportType === "heartbeat") {
-                return Response.json({
-                    items: [
-                        {
-                            id: 11,
-                            type: "heartbeat",
-                            status: "warning",
-                            title: "Heartbeat warning",
-                            bodyMd: "Git check needs attention.",
-                            summary: "Git check needs attention.",
-                            source: "openclaw",
-                            sourceJobId: "ops-check",
-                            dedupeKey: "heartbeat:warning:git",
-                            metadata: {},
-                            createdAt: "2026-06-23T07:00:00.000Z",
-                            updatedAt: "2026-06-23T07:00:00.000Z",
-                            occurredAt: "2026-06-23T07:00:00.000Z",
-                        },
-                    ],
-                });
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const [path, query = ""] = url.split("?");
+                if (path === "/api/reports/10" && init?.method === "DELETE") {
+                    return Response.json({ deleted: 1, isOk: true });
+                }
+
+                const reportType = new URLSearchParams(query).get("type");
+                if (path === "/api/reports" && reportType === "heartbeat") {
+                    return Response.json({
+                        items: [
+                            {
+                                id: 11,
+                                type: "heartbeat",
+                                status: "warning",
+                                title: "Heartbeat warning",
+                                bodyMd: "Git check needs attention.",
+                                summary: "Git check needs attention.",
+                                source: "openclaw",
+                                sourceJobId: "ops-check",
+                                dedupeKey: "heartbeat:warning:git",
+                                metadata: {},
+                                createdAt: "2026-06-23T07:00:00.000Z",
+                                updatedAt: "2026-06-23T07:00:00.000Z",
+                                occurredAt: "2026-06-23T07:00:00.000Z",
+                            },
+                        ],
+                    });
+                }
+                if (path === "/api/reports") {
+                    return Response.json({
+                        items: [
+                            {
+                                id: 10,
+                                type: "daily_brief",
+                                status: "ok",
+                                title: "Daily brief",
+                                bodyMd: "# Brief\n\n- Review PRs",
+                                summary: "Review PRs",
+                                source: "openclaw",
+                                sourceJobId: "daily-brief",
+                                dedupeKey: "brief:2026-06-23",
+                                metadata: {},
+                                createdAt: "2026-06-23T06:00:00.000Z",
+                                updatedAt: "2026-06-23T06:00:00.000Z",
+                                occurredAt: "2026-06-23T06:00:00.000Z",
+                            },
+                        ],
+                    });
+                }
+                return Response.json({ items: [] });
             }
-            if (path === "/api/reports") {
-                return Response.json({
-                    items: [
-                        {
-                            id: 10,
-                            type: "daily_brief",
-                            status: "ok",
-                            title: "Daily brief",
-                            bodyMd: "# Brief\n\n- Review PRs",
-                            summary: "Review PRs",
-                            source: "openclaw",
-                            sourceJobId: "daily-brief",
-                            dedupeKey: "brief:2026-06-23",
-                            metadata: {},
-                            createdAt: "2026-06-23T06:00:00.000Z",
-                            updatedAt: "2026-06-23T06:00:00.000Z",
-                            occurredAt: "2026-06-23T06:00:00.000Z",
-                        },
-                    ],
-                });
-            }
-            return Response.json({ items: [] });
-        });
+        );
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
             value: fetchMock,
@@ -2978,6 +2984,29 @@ describe("Mira Dashboard frontend behavior", () => {
 
         expect(await screen.findAllByText("Daily brief")).not.toHaveLength(0);
         expect(await screen.findAllByText("Review PRs")).not.toHaveLength(0);
+        await user.click(screen.getByRole("button", { name: "Delete Daily brief" }));
+        expect(
+            screen.getByText(/removes the report and its linked notification/i)
+        ).toBeInTheDocument();
+        expect(
+            fetchMock.mock.calls.some(
+                ([request, init]) =>
+                    String(request) === "/api/reports/10" &&
+                    (init as RequestInit | undefined)?.method === "DELETE"
+            )
+        ).toBe(false);
+        await user.click(screen.getByRole("button", { name: /^delete$/i }));
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/reports/10",
+                expect.objectContaining({ method: "DELETE" })
+            )
+        );
+        await waitFor(() =>
+            expect(
+                screen.getByRole("button", { name: "Delete Daily brief" })
+            ).toBeEnabled()
+        );
         await user.click(screen.getByRole("button", { name: /heartbeat/i }));
         await waitFor(() =>
             expect(fetchMock).toHaveBeenCalledWith(

@@ -110,12 +110,18 @@ function notificationTitle(report: ReportRecord): string {
 function notificationDedupeKey(report: ReportRecord): string {
     if (report.type === "heartbeat") {
         return report.dedupeKey
-            ? `report:heartbeat:${report.status}:${report.dedupeKey}`
-            : `report:heartbeat:${report.status}:${report.id}`;
+            ? `report:heartbeat:${report.dedupeKey}`
+            : `report:heartbeat:${report.id}`;
     }
     return report.dedupeKey
         ? `report:${report.dedupeKey}`
         : `report:${report.type}:${report.id}`;
+}
+
+function deleteReportNotification(report: ReportRecord): void {
+    database
+        .prepare("DELETE FROM notifications WHERE dedupe_key = ?")
+        .run(notificationDedupeKey(report));
 }
 
 function createReportNotification(report: ReportRecord): void {
@@ -197,6 +203,8 @@ export function createReport(input: CreateReportInput): ReportRecord {
     const report = toReportRecord(row);
     if (shouldCreateNotification(report, input.notify ?? true)) {
         createReportNotification(report);
+    } else if (report.type === "heartbeat" && report.status === "ok") {
+        deleteReportNotification(report);
     }
     return report;
 }
