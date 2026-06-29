@@ -566,6 +566,102 @@ describe("Mira Dashboard backend integration", () => {
         expect(deleteUnread.body).toEqual({ deleted: 1, isOk: true });
     });
 
+    it("creates and lists delivery reports without spamming heartbeat ok notifications", async () => {
+        const brief = await api<{
+            isOk: boolean;
+            report: { id: number; metadata: Record<string, unknown>; title: string };
+        }>(
+            "/api/reports",
+            json("POST", {
+                type: "daily_brief",
+                status: "ok",
+                title: "Daily brief",
+                bodyMd: "# Brief\n\n- One thing",
+                summary: "One thing",
+                source: "openclaw",
+                sourceJobId: "daily-brief",
+                dedupeKey: "brief:2026-06-23",
+                metadata: { channel: "dashboard" },
+                occurredAt: "2026-06-23T06:00:00.000Z",
+            })
+        );
+        expect(brief.status).toBe(201);
+        expect(brief.body.report).toMatchObject({
+            metadata: { channel: "dashboard" },
+            title: "Daily brief",
+        });
+
+        const heartbeatOk = await api<{ isOk: boolean; report: { id: number } }>(
+            "/api/reports",
+            json("POST", {
+                type: "heartbeat",
+                status: "ok",
+                title: "HEARTBEAT_OK",
+                bodyMd: "All checks passed.",
+                summary: "All checks passed.",
+                dedupeKey: "heartbeat:ok:2026-06-23T06:30",
+                occurredAt: "2026-06-23T06:30:00.000Z",
+            })
+        );
+        expect(heartbeatOk.status).toBe(201);
+
+        const heartbeatWarning = await api<{ isOk: boolean; report: { id: number } }>(
+            "/api/reports",
+            json("POST", {
+                type: "heartbeat",
+                status: "warning",
+                title: "Heartbeat warning",
+                bodyMd: "Git check needs attention.",
+                summary: "Git check needs attention.",
+                dedupeKey: "heartbeat:warning:git",
+                occurredAt: "2026-06-23T07:00:00.000Z",
+            })
+        );
+        expect(heartbeatWarning.status).toBe(201);
+
+        const listed = await api<{
+            items: Array<{ id: number; status: string; title: string; type: string }>;
+        }>("/api/reports?type=heartbeat&limit=10");
+        expect(listed.status).toBe(200);
+        expect(listed.body.items.map((item) => item.title)).toContain("HEARTBEAT_OK");
+        expect(listed.body.items.every((item) => item.type === "heartbeat")).toBe(true);
+
+        const detail = await api<{
+            report: { bodyMd: string; id: number; sourceJobId?: string };
+        }>(`/api/reports/${brief.body.report.id}`);
+        expect(detail.status).toBe(200);
+        expect(detail.body.report).toMatchObject({
+            bodyMd: "# Brief\n\n- One thing",
+            sourceJobId: "daily-brief",
+        });
+
+        const notifications = await api<{
+            items: Array<{
+                metadata: Record<string, unknown>;
+                title: string;
+                type: string;
+            }>;
+        }>("/api/notifications?limit=50");
+        const reportNotifications = notifications.body.items.filter(
+            (item) => item.metadata.reportId
+        );
+        expect(reportNotifications).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    title: "Daily brief ready",
+                    type: "info",
+                }),
+                expect.objectContaining({
+                    title: "Heartbeat warning",
+                    type: "warning",
+                }),
+            ])
+        );
+        expect(reportNotifications.some((item) => item.title === "HEARTBEAT_OK")).toBe(
+            false
+        );
+    });
+
     it("loads, validates, clamps, and persists dashboard settings", async () => {
         const defaults = await api<{
             defaultModel: string;

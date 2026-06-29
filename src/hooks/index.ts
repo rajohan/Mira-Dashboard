@@ -83,6 +83,14 @@ export {
     useUpdatePullRequestBranch,
 } from "./usePullRequests";
 export { hasQuotaStatus, useQuotas } from "./useQuotas";
+export type { ReportItem, ReportStatus, ReportType } from "./useReports";
+export {
+    reportKeys,
+    useCreateReport,
+    useDeleteReport,
+    useReport,
+    useReports,
+} from "./useReports";
 export type {
     ScheduledJob,
     ScheduledJobPatch,

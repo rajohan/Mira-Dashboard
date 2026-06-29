@@ -22,6 +22,7 @@ import { notificationRoutes } from "./routes/notificationRoutes.ts";
 import { openclawConfigRoutes } from "./routes/openclawConfigRoutes.ts";
 import { opsRoutes } from "./routes/opsRoutes.ts";
 import { pullRequestRoutes } from "./routes/pullRequestRoutes.ts";
+import { reportRoutes } from "./routes/reportRoutes.ts";
 import { sessionRoutes } from "./routes/sessionRoutes.ts";
 import { settingsRoutes } from "./routes/settingsRoutes.ts";
 import { sttRoutes } from "./routes/sttRoutes.ts";
@@ -90,6 +91,7 @@ const routeTable = {
     ...opsRoutes,
     ...openclawConfigRoutes,
     ...pullRequestRoutes,
+    ...reportRoutes,
     ...sessionRoutes,
     ...settingsRoutes,
     ...sttRoutes,

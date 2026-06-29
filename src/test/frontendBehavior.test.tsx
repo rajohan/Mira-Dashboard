@@ -167,6 +167,7 @@ import { useWeather } from "../hooks/useWeather";
 import { createSocketClient } from "../lib/socket/socketClient";
 import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
 import { compareLogEntriesByLineId } from "../pages/Logs";
+import { Reports } from "../pages/Reports";
 import { Tasks } from "../pages/Tasks";
 import { authActions, authStore } from "../stores/authStore";
 import type { Task } from "../types/task";
@@ -2812,6 +2813,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 id: 1,
                 title: "Cache refresh failed",
                 description: "Needs attention",
+                metadata: { reportId: 42 },
                 type: "warning",
                 occurredAt: "2026-06-23T10:00:00.000Z",
             }),
@@ -2840,6 +2842,10 @@ describe("Mira Dashboard frontend behavior", () => {
         );
         expect(await screen.findByText("Cache refresh failed")).toBeInTheDocument();
         expect(screen.getByText("Backup complete")).toBeInTheDocument();
+        expect(screen.getByText("Open report").closest("a")).toHaveAttribute(
+            "href",
+            "/reports?reportId=42"
+        );
 
         await user.click(screen.getByRole("menuitemradio", { name: "Unread" }));
         expect(screen.getByText("Cache refresh failed")).toBeInTheDocument();
@@ -2873,6 +2879,67 @@ describe("Mira Dashboard frontend behavior", () => {
                 expect.objectContaining({ method: "POST" })
             )
         );
+    });
+
+    it("renders dashboard reports and switches report filters", async () => {
+        const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
+            const url = String(input);
+            const [path, query = ""] = url.split("?");
+            const reportType = new URLSearchParams(query).get("type");
+            if (path === "/api/reports" && reportType === "heartbeat") {
+                return Response.json({
+                    items: [
+                        {
+                            id: 11,
+                            type: "heartbeat",
+                            status: "warning",
+                            title: "Heartbeat warning",
+                            bodyMd: "Git check needs attention.",
+                            summary: "Git check needs attention.",
+                            source: "openclaw",
+                            sourceJobId: "ops-check",
+                            dedupeKey: "heartbeat:warning:git",
+                            metadata: {},
+                            createdAt: "2026-06-23T07:00:00.000Z",
+                            updatedAt: "2026-06-23T07:00:00.000Z",
+                            occurredAt: "2026-06-23T07:00:00.000Z",
+                        },
+                    ],
+                });
+            }
+            if (path === "/api/reports") {
+                return Response.json({
+                    items: [
+                        {
+                            id: 10,
+                            type: "daily_brief",
+                            status: "ok",
+                            title: "Daily brief",
+                            bodyMd: "# Brief\n\n- Review PRs",
+                            summary: "Review PRs",
+                            source: "openclaw",
+                            sourceJobId: "daily-brief",
+                            dedupeKey: "brief:2026-06-23",
+                            metadata: {},
+                            createdAt: "2026-06-23T06:00:00.000Z",
+                            updatedAt: "2026-06-23T06:00:00.000Z",
+                            occurredAt: "2026-06-23T06:00:00.000Z",
+                        },
+                    ],
+                });
+            }
+            return Response.json({ items: [] });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+        renderWithQueryClient(createElement(Reports));
+
+        expect(await screen.findAllByText("Daily brief")).not.toHaveLength(0);
+        expect(await screen.findAllByText("Review PRs")).not.toHaveLength(0);
+        expect(screen.getByRole("button", { name: /heartbeat/i })).toBeInTheDocument();
     });
 
     it("keeps log, file, cron, session, and format utilities aligned with UI behavior", () => {

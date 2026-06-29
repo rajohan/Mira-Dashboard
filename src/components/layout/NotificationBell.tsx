@@ -36,6 +36,13 @@ function formatNotificationTime(notification: NotificationItem): string {
     return timestamp > 0 ? formatDate(timestamp) : "Unknown time";
 }
 
+function reportIdFromNotification(notification: NotificationItem): number | undefined {
+    const value = notification.metadata.reportId;
+    return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+        ? value
+        : undefined;
+}
+
 /** Renders the notification bell UI. */
 export function NotificationBell() {
     const { data: notifications } = useNotifications(AUTO_REFRESH_MS);
@@ -170,6 +177,14 @@ export function NotificationBell() {
                                         {notification.description}
                                     </div>
                                     <div className="mt-2 flex items-center gap-2">
+                                        {reportIdFromNotification(notification) ? (
+                                            <a
+                                                className="border-primary-600 text-primary-200 hover:bg-primary-700 rounded-md border px-2 py-1 text-xs"
+                                                href={`/reports?reportId=${reportIdFromNotification(notification)}`}
+                                            >
+                                                Open report
+                                            </a>
+                                        ) : undefined}
                                         {!notification.isRead && (
                                             <button
                                                 type="button"
