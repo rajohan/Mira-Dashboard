@@ -125,6 +125,14 @@ function isGatewayAuthFailure(error: unknown): boolean {
     return message.includes("unauthorized") || message.includes("token mismatch");
 }
 
+function environmentGatewayToken(): string | undefined {
+    return (
+        process.env.OPENCLAW_GATEWAY_TOKEN?.trim() ||
+        process.env.OPENCLAW_TOKEN?.trim() ||
+        undefined
+    );
+}
+
 export const authRoutes = {
     "/api/auth/bootstrap": {
         GET: () =>
@@ -197,9 +205,12 @@ export const authRoutes = {
             }
 
             let previousGatewayToken: string | undefined;
+            let previousActiveGatewayToken: string | undefined;
             let isAttemptedGatewaySwitch = false;
             try {
                 previousGatewayToken = getPersistedGatewayToken();
+                previousActiveGatewayToken =
+                    previousGatewayToken?.trim() || environmentGatewayToken();
                 persistGatewayToken(gatewayToken);
                 isAttemptedGatewaySwitch = true;
                 await gateway.initAndWait(gatewayToken);
@@ -245,23 +256,24 @@ export const authRoutes = {
                     } catch {
                         // Preserve the original bootstrap failure response.
                     }
-                    if (previousGatewayToken) {
+                    if (previousActiveGatewayToken) {
                         try {
-                            gateway.init(previousGatewayToken);
+                            gateway.init(previousActiveGatewayToken);
                         } catch {
                             // Preserve the original bootstrap failure response.
                         }
                     }
                 }
+                const isAuthFailure = isGatewayAuthFailure(bootstrapError);
                 return json(
                     {
                         error: isRollbackFailed
                             ? "Failed to roll back first-user bootstrap"
-                            : isGatewayAuthFailure(bootstrapError)
+                            : isAuthFailure
                               ? "Invalid OpenClaw gateway token"
                               : "Failed to complete first-user setup",
                     },
-                    { status: isGatewayAuthFailure(bootstrapError) ? 401 : 500 }
+                    { status: !isRollbackFailed && isAuthFailure ? 401 : 500 }
                 );
             }
         },

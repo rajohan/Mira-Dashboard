@@ -170,7 +170,7 @@ const gatewayState: {
     currentToken: undefined,
     connectError: undefined,
 };
-const DEFAULT_GATEWAY_CONNECTION_WAIT_MS = 15_000;
+const DEFAULT_GATEWAY_CONNECTION_WAIT_MS = 45_000;
 const subscribers = new Set<DashboardSocket>();
 const pendingRequests = new Map<string, PendingRequest>();
 type GatewayClientConstructor = new (

@@ -514,6 +514,50 @@ describe("backend route and service behavior", () => {
         expect(getPersistedGatewayToken()).toBeUndefined();
     });
 
+    it("restores the environment Gateway token after failed first-user bootstrap", async () => {
+        isolateOpenClawEnvironment("mira-first-user-env-token-restore-");
+        rememberEnvironment("OPENCLAW_GATEWAY_TOKEN");
+        process.env.OPENCLAW_GATEWAY_TOKEN = "environment-token";
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const originalInit = gateway.init;
+        const originalInitAndWait = gateway.initAndWait;
+        const initCalls: string[] = [];
+        cleanupCallbacks.push(() => {
+            gateway.init = originalInit;
+            gateway.initAndWait = originalInitAndWait;
+            gateway.shutdown();
+        });
+        gateway.initAndWait = async () => {
+            throw new Error("gateway unavailable");
+        };
+        gateway.init = (token: string) => {
+            initCalls.push(token);
+        };
+        const { authRoutes } = await import("../src/routes/authRoutes.ts");
+        const { findUserByUsername, getPersistedGatewayToken } =
+            await import("../src/auth.ts");
+        const server = fakeServer();
+        const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
+        database.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
+
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        cleanupCallbacks.push(() => errorSpy.mockRestore());
+        const response = await authRoutes["/api/auth/register-first-user"].POST(
+            jsonRequest("/api/auth/register-first-user", {
+                gatewayToken: "new-token",
+                password: "correct-password",
+                username,
+            }),
+            server
+        );
+
+        expect(response.status).toBe(500);
+        expect(findUserByUsername(username)).toBeUndefined();
+        expect(getPersistedGatewayToken()).toBeUndefined();
+        expect(initCalls).toEqual(["environment-token"]);
+    });
+
     it("rejects first-user bootstrap when the Gateway token is invalid", async () => {
         isolateOpenClawEnvironment("mira-first-user-invalid-token-coverage-");
         const gatewayModule = await import("../src/gateway.ts");
