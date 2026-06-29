@@ -213,6 +213,77 @@ afterEach(() => {
 });
 
 describe("gateway behavior", () => {
+    it("waits through transient connect errors during bootstrap", async () => {
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        const root = createTemporaryRoot("mira-gateway-bootstrap-transient-");
+        const openclawHome = path.join(root, "openclaw");
+        const dashboardHome = path.join(root, "dashboard-openclaw");
+        mkdirSync(openclawHome, { recursive: true });
+        mkdirSync(dashboardHome, { recursive: true });
+        process.env.OPENCLAW_HOME = openclawHome;
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
+
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        gateway.shutdown();
+        cleanupCallbacks.push(
+            gatewayModule.setGatewayRootsForTests({
+                dashboardOpenClawHome: dashboardHome,
+                openClawHome: openclawHome,
+            }),
+            gatewayModule.setGatewayClientConstructorForTests(FakeOpenClawGatewayClient),
+            () => gateway.shutdown()
+        );
+
+        const initPromise = gateway.initAndWait("valid-token");
+        const client = fakeClients.at(-1);
+        expect(client).toBeDefined();
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        cleanupCallbacks.push(() => errorSpy.mockRestore());
+        client?.options.onConnectError?.(new Error("gateway websocket error"));
+        client?.options.onHelloOk?.({ type: "hello-ok" });
+
+        await expect(initPromise).resolves.toBeUndefined();
+        expect(gateway.isConnected()).toBe(true);
+    });
+
+    it("rejects bootstrap immediately on Gateway auth failures", async () => {
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        const root = createTemporaryRoot("mira-gateway-bootstrap-auth-");
+        const openclawHome = path.join(root, "openclaw");
+        const dashboardHome = path.join(root, "dashboard-openclaw");
+        mkdirSync(openclawHome, { recursive: true });
+        mkdirSync(dashboardHome, { recursive: true });
+        process.env.OPENCLAW_HOME = openclawHome;
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
+
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        gateway.shutdown();
+        cleanupCallbacks.push(
+            gatewayModule.setGatewayRootsForTests({
+                dashboardOpenClawHome: dashboardHome,
+                openClawHome: openclawHome,
+            }),
+            gatewayModule.setGatewayClientConstructorForTests(FakeOpenClawGatewayClient),
+            () => gateway.shutdown()
+        );
+
+        const initPromise = gateway.initAndWait("bad-token");
+        const client = fakeClients.at(-1);
+        expect(client).toBeDefined();
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        cleanupCallbacks.push(() => errorSpy.mockRestore());
+        client?.options.onConnectError?.(
+            new Error("unauthorized: gateway token mismatch")
+        );
+
+        await expect(initPromise).rejects.toThrow("gateway token mismatch");
+        expect(gateway.isConnected()).toBe(false);
+    });
+
     it("normalizes sessions, enriches events, and hydrates omitted chat images without a real gateway", async () => {
         rememberEnvironment("OPENCLAW_HOME");
         rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");

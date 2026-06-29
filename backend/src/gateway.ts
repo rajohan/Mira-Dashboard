@@ -170,7 +170,7 @@ const gatewayState: {
     currentToken: undefined,
     connectError: undefined,
 };
-const DEFAULT_GATEWAY_CONNECTION_WAIT_MS = 5000;
+const DEFAULT_GATEWAY_CONNECTION_WAIT_MS = 15_000;
 const subscribers = new Set<DashboardSocket>();
 const pendingRequests = new Map<string, PendingRequest>();
 type GatewayClientConstructor = new (
@@ -885,6 +885,11 @@ function init(token: string): void {
     }
 }
 
+function isGatewayAuthFailureMessage(message: string): boolean {
+    const normalized = message.toLowerCase();
+    return normalized.includes("unauthorized") || normalized.includes("token mismatch");
+}
+
 function waitForConnection(
     expectedToken: string,
     timeoutMs = DEFAULT_GATEWAY_CONNECTION_WAIT_MS
@@ -906,14 +911,22 @@ function waitForConnection(
                 resolve();
                 return;
             }
-            if (gatewayState.connectError) {
+            if (
+                gatewayState.connectError &&
+                isGatewayAuthFailureMessage(gatewayState.connectError)
+            ) {
                 clearInterval(interval);
                 reject(new Error(gatewayState.connectError));
                 return;
             }
             if (Date.now() >= deadline) {
                 clearInterval(interval);
-                reject(new Error("Gateway connection was not established"));
+                reject(
+                    new Error(
+                        gatewayState.connectError ||
+                            "Gateway connection was not established"
+                    )
+                );
             }
         }, 50);
     });
