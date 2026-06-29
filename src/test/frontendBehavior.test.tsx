@@ -2986,7 +2986,9 @@ describe("Mira Dashboard frontend behavior", () => {
             )
         );
         expect(await screen.findAllByText("Heartbeat warning")).not.toHaveLength(0);
-        expect(await screen.findAllByText("Git check needs attention.")).toHaveLength(2);
+        await waitFor(() =>
+            expect(screen.getAllByText("Git check needs attention.")).toHaveLength(2)
+        );
     });
 
     it("loads linked dashboard report details outside the first report page", async () => {

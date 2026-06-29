@@ -275,7 +275,7 @@ export function Reports() {
 
             {reportsQuery.isLoading ? (
                 <LoadingState message="Loading reports..." />
-            ) : reportsQuery.isError ? (
+            ) : reportsQuery.isError && !reportsQuery.data ? (
                 <Card variant="bordered">
                     <p className="text-red-300">Failed to load reports.</p>
                 </Card>
