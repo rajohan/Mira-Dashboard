@@ -93,10 +93,24 @@ function isMatchingToolResult(
         return Boolean(left.id && right.id && left.id === right.id);
     }
 
+    const imageIdentity = (
+        images: NonNullable<
+            NonNullable<ChatHistoryMessage["toolCalls"]>[number]["toolResult"]
+        >["images"] = []
+    ) =>
+        JSON.stringify(
+            images.map((image) => ({
+                data: image.data || image.source?.data || "",
+                mediaType: image.mimeType || image.source?.media_type || "",
+                sourceType: image.source?.type || "",
+                type: image.type,
+            }))
+        );
+
     return (
         left.name === right.name &&
         left.content === right.content &&
-        (left.images?.length || 0) === (right.images?.length || 0) &&
+        imageIdentity(left.images) === imageIdentity(right.images) &&
         left.isError === right.isError
     );
 }
@@ -868,7 +882,14 @@ export function Chat() {
                             activeStreamUpdatedAt === undefined ||
                             Date.now() - activeStreamUpdatedAt >=
                                 ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
-                        const isStatusOnlyStream = !streamText && !stream.message;
+                        const streamMessageIsRenderable = stream.message
+                            ? isRenderableChatHistoryMessage(
+                                  stream.message,
+                                  createChatVisibility(showThinkingOutput, showToolOutput)
+                              )
+                            : false;
+                        const isStatusOnlyStream =
+                            !stream.message || !streamMessageIsRenderable;
                         return Boolean(
                             isActiveStreamIsQuiet &&
                             (isActiveStreamRecoveredInMessages(stream, nextMessages) ||

@@ -2052,6 +2052,35 @@ export function useChatRuntimeEvents({
 
             if (payload.state === "error") {
                 flushPendingDeltaUpdates();
+                const bufferedText = activeAssistantTextForRun(
+                    streamSessionKey,
+                    payload.runId
+                );
+                const diagnosticMessages = activeDiagnosticMessagesForRun(
+                    streamSessionKey,
+                    payload.runId
+                );
+                const messagesToAppend: ChatHistoryMessage[] = [
+                    ...(bufferedText.trim()
+                        ? [
+                              {
+                                  role: "assistant" as const,
+                                  content: bufferedText,
+                                  text: bufferedText,
+                                  images: [],
+                                  attachments: [],
+                                  timestamp: currentIsoString(),
+                                  runId: payload.runId,
+                              },
+                          ]
+                        : []),
+                    ...diagnosticMessages,
+                ];
+                if (messagesToAppend.length > 0 && eventMatchesSelected) {
+                    setMessages((wasPrevious) =>
+                        dedupeMessages([...wasPrevious, ...messagesToAppend])
+                    );
+                }
                 if (eventMatchesSelected) {
                     setSendError(payload.errorMessage || "Chat request failed");
                 }

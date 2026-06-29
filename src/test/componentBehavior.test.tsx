@@ -3363,6 +3363,34 @@ describe("shared component helpers", () => {
 
         act(() => {
             listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "partial before error",
+                    },
+                    runId: "run-2",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "reasoning before error",
+                    },
+                    runId: "run-2",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
                 event: "chat",
                 payload: {
                     errorMessage: "failed",
@@ -3374,6 +3402,27 @@ describe("shared component helpers", () => {
             });
         });
         expect(sendError).toBe("failed");
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "text" in message &&
+                    message.text === "partial before error"
+            )
+        ).toBe(true);
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking.some((block) =>
+                        block.text.includes("reasoning before error")
+                    )
+            )
+        ).toBe(true);
 
         await act(async () => {
             await new Promise((resolve) => setTimeout(resolve, 550));
@@ -4392,6 +4441,96 @@ describe("shared component helpers", () => {
                 now
             )
         ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "",
+                        thinking: undefined,
+                        toolResult: {
+                            content: "",
+                            images: [
+                                {
+                                    data: "new-image",
+                                    mimeType: "image/png",
+                                    type: "image",
+                                },
+                            ],
+                            name: "image_tool",
+                        },
+                    },
+                    text: "",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolResult: {
+                            content: "",
+                            images: [
+                                {
+                                    data: "old-image",
+                                    mimeType: "image/png",
+                                    type: "image",
+                                },
+                            ],
+                            name: "image_tool",
+                        },
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "",
+                        thinking: undefined,
+                        toolResult: {
+                            content: "",
+                            images: [
+                                {
+                                    data: "new-image",
+                                    mimeType: "image/png",
+                                    type: "image",
+                                },
+                            ],
+                            name: "image_tool",
+                        },
+                    },
+                    text: "",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolResult: {
+                            content: "",
+                            images: [
+                                {
+                                    data: "new-image",
+                                    mimeType: "image/png",
+                                    type: "image",
+                                },
+                            ],
+                            name: "image_tool",
+                        },
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
         expect(
             isActiveStreamRecoveredInMessages(
                 { ...stream, updatedAt: quietUpdatedAt },
