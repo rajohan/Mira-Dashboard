@@ -25,7 +25,7 @@ export type ActiveChatStreams = Record<string, ActiveChatStream>;
 
 /** Performs merge stream text. */
 export function mergeStreamText(wasPrevious: string, next: string): string {
-    if (!next.trim()) {
+    if (next.length === 0) {
         return wasPrevious;
     }
 
@@ -42,6 +42,54 @@ export function mergeStreamText(wasPrevious: string, next: string): string {
     }
 
     return `${wasPrevious}${next}`;
+}
+
+/** Merges thinking blocks from stream events. */
+function mergeThinkingBlocks(
+    wasPrevious: ChatHistoryMessage | undefined,
+    next: ChatHistoryMessage
+): ChatHistoryMessage["thinking"] {
+    if (!next.thinking?.length) {
+        return wasPrevious?.thinking;
+    }
+
+    if (!wasPrevious?.thinking?.length) {
+        return next.thinking;
+    }
+
+    const merged = [...wasPrevious.thinking];
+    for (const [nextIndex, nextBlock] of next.thinking.entries()) {
+        if (nextBlock.id) {
+            const index = merged.findIndex((block) => block.id === nextBlock.id);
+            if (index !== -1) {
+                const previousBlock = merged[index]!;
+                merged[index] = {
+                    ...previousBlock,
+                    ...nextBlock,
+                    text: nextBlock.snapshot
+                        ? nextBlock.text
+                        : `${previousBlock.text}${nextBlock.text}`,
+                };
+                continue;
+            }
+        }
+
+        const previousBlockAtIndex = merged[nextIndex];
+        if (!nextBlock.id && previousBlockAtIndex && !previousBlockAtIndex.id) {
+            merged[nextIndex] = {
+                ...previousBlockAtIndex,
+                ...nextBlock,
+                text: nextBlock.snapshot
+                    ? nextBlock.text
+                    : `${previousBlockAtIndex.text}${nextBlock.text}`,
+            };
+            continue;
+        }
+
+        merged.push(nextBlock);
+    }
+
+    return merged;
 }
 
 /** Performs unique strings. */
@@ -106,6 +154,16 @@ export function isSameSessionKey(left?: string, right?: string): boolean {
 
 /** Normalizes assistant payload. */
 export function normalizeAssistantPayload(value: unknown): ChatHistoryMessage {
+    if (typeof value === "string" && value.length > 0 && !value.trim()) {
+        return {
+            role: "assistant",
+            content: value,
+            text: value,
+            images: [],
+            attachments: [],
+        };
+    }
+
     if (value && typeof value === "object" && !Array.isArray(value)) {
         const record = value as RawChatHistoryMessage;
         if ("content" in record || "text" in record || "role" in record) {
@@ -148,7 +206,7 @@ export function mergeStreamMessage(
         attachments: next.attachments?.length
             ? next.attachments
             : wasPrevious?.attachments || [],
-        thinking: next.thinking?.length ? next.thinking : wasPrevious?.thinking,
+        thinking: mergeThinkingBlocks(wasPrevious, next),
         toolCalls: next.toolCalls?.length ? next.toolCalls : wasPrevious?.toolCalls,
         toolResult: next.toolResult || wasPrevious?.toolResult,
         timestamp: currentIsoString(),

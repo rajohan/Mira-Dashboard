@@ -2435,7 +2435,7 @@ describe("Mira Dashboard pages", () => {
         expect(mergeStreamText("hello", "hello world")).toBe("hello world");
         expect(mergeStreamText("hello", "lo")).toBe("hello");
         expect(mergeStreamText("hello", " world")).toBe("hello world");
-        expect(mergeStreamText("hello", " ".repeat(3))).toBe("hello");
+        expect(mergeStreamText("hello", " ".repeat(3))).toBe("hello   ");
 
         expect(uniqueStrings(["a", undefined, "a", "b"])).toEqual(["a", "b"]);
         expect(parseAgentSessionKey("agent:Main:Session")).toEqual({

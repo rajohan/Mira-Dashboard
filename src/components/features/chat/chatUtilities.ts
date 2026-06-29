@@ -80,6 +80,127 @@ function diagnosticMessageIdentity(message: ChatHistoryMessage): string | undefi
     return undefined;
 }
 
+/** Returns a stable key for carrying tool results between matching tool rows. */
+function toolCallRowIdentity(message: ChatHistoryMessage): string | undefined {
+    if (!message.toolCalls?.length) {
+        return undefined;
+    }
+
+    return [
+        "tool-calls",
+        message.runId || message.timestamp || message.text.trim() || "no-row",
+        ...message.toolCalls.map((toolCall, index) =>
+            [
+                toolCall.id || `no-id-${index}`,
+                toolCall.name,
+                JSON.stringify(toolCall.arguments ?? undefined),
+            ].join("::")
+        ),
+    ].join("::");
+}
+
+/** Returns whether message carries diagnostic details beyond primary text. */
+function hasDiagnosticDetails(message: ChatHistoryMessage): boolean {
+    return Boolean(
+        (message.thinking?.length || 0) > 0 ||
+        (message.toolCalls?.length || 0) > 0 ||
+        message.toolResult
+    );
+}
+
+/** Carries local tool results onto matching history tool calls. */
+function mergeToolCallsWithResults(
+    messageToolCalls: NonNullable<ChatHistoryMessage["toolCalls"]>,
+    previousToolCalls: NonNullable<ChatHistoryMessage["toolCalls"]>
+): NonNullable<ChatHistoryMessage["toolCalls"]> {
+    const consumedPreviousIndexes = new Set<number>();
+
+    return messageToolCalls.map((toolCall) => {
+        if (toolCall.toolResult) {
+            return toolCall;
+        }
+
+        const previousToolCallIndex = previousToolCalls.findIndex((candidate, index) => {
+            if (consumedPreviousIndexes.has(index)) {
+                return false;
+            }
+
+            if (toolCall.id || candidate.id) {
+                return Boolean(
+                    toolCall.id && candidate.id && toolCall.id === candidate.id
+                );
+            }
+
+            return (
+                toolCall.name === candidate.name &&
+                JSON.stringify(toolCall.arguments ?? undefined) ===
+                    JSON.stringify(candidate.arguments ?? undefined)
+            );
+        });
+
+        if (previousToolCallIndex === -1) {
+            return toolCall;
+        }
+
+        consumedPreviousIndexes.add(previousToolCallIndex);
+        const previousToolCall = previousToolCalls[previousToolCallIndex];
+
+        return previousToolCall?.toolResult
+            ? { ...toolCall, toolResult: previousToolCall.toolResult }
+            : toolCall;
+    });
+}
+
+/** Carries local diagnostic details onto matching history text rows. */
+function mergeDiagnosticDetails(
+    previousMessages: ChatHistoryMessage[],
+    nextMessages: ChatHistoryMessage[]
+): ChatHistoryMessage[] {
+    const unmatchedPrevious = previousMessages.filter(
+        (candidate) =>
+            candidate.local === true &&
+            candidate.role.toLowerCase() === "assistant" &&
+            candidate.text.trim() &&
+            hasDiagnosticDetails(candidate)
+    );
+
+    return nextMessages.map((message) => {
+        if (message.role.toLowerCase() !== "assistant" || !message.text.trim()) {
+            return message;
+        }
+
+        const previousIndex = unmatchedPrevious.findIndex(
+            (candidate) =>
+                candidate.text.trim() === message.text.trim() &&
+                (!candidate.runId || !message.runId || candidate.runId === message.runId)
+        );
+
+        if (previousIndex === -1) {
+            return message;
+        }
+
+        const previous = unmatchedPrevious[previousIndex];
+        unmatchedPrevious.splice(previousIndex, 1);
+
+        if (!previous) {
+            return message;
+        }
+
+        const thinking = (message.thinking?.length ? message : previous).thinking;
+        const toolCalls =
+            message.toolCalls?.length && previous.toolCalls?.length
+                ? mergeToolCallsWithResults(message.toolCalls, previous.toolCalls)
+                : (message.toolCalls?.length ? message : previous).toolCalls;
+
+        return {
+            ...message,
+            thinking,
+            toolCalls,
+            toolResult: message.toolResult || previous.toolResult,
+        };
+    });
+}
+
 /** Performs message IDentity. */
 export function messageIdentity(message: ChatHistoryMessage): string {
     const role = message.role.toLowerCase();
@@ -202,6 +323,60 @@ function insertMessagesByTimestamp(
     return merged;
 }
 
+/** Copies live tool results onto matching history tool calls. */
+function mergeToolCallResults(
+    previousMessages: ChatHistoryMessage[],
+    nextMessages: ChatHistoryMessage[]
+): ChatHistoryMessage[] {
+    const previousByIdentity = new Map<string, ChatHistoryMessage>();
+    const previousByMessageIdentity = new Map<string, ChatHistoryMessage[]>();
+    for (const message of previousMessages) {
+        const identity = toolCallRowIdentity(message);
+        if (identity) {
+            previousByIdentity.set(identity, message);
+        }
+        const canUseMessageIdentityFallback =
+            !message.text.trim() || message.toolCalls?.every((toolCall) => toolCall.id);
+        if (
+            canUseMessageIdentityFallback &&
+            message.toolCalls?.some((toolCall) => toolCall.toolResult)
+        ) {
+            const identity = messageIdentity(message);
+            previousByMessageIdentity.set(identity, [
+                ...(previousByMessageIdentity.get(identity) || []),
+                message,
+            ]);
+        }
+    }
+
+    return nextMessages.map((message) => {
+        const identity = toolCallRowIdentity(message);
+        if (!identity || !message.toolCalls?.length) {
+            return message;
+        }
+
+        let previous = previousByIdentity.get(identity);
+        if (!previous) {
+            const identityFallback = messageIdentity(message);
+            const candidates = previousByMessageIdentity.get(identityFallback) || [];
+            previous = candidates.shift();
+            if (candidates.length === 0) {
+                previousByMessageIdentity.delete(identityFallback);
+            }
+        }
+        if (!previous?.toolCalls?.length) {
+            return message;
+        }
+
+        const toolCalls = mergeToolCallsWithResults(
+            message.toolCalls,
+            previous.toolCalls
+        );
+
+        return { ...message, toolCalls };
+    });
+}
+
 /** Performs merge with recent optimistic messages. */
 export function mergeWithRecentOptimisticMessages(
     previousMessages: ChatHistoryMessage[],
@@ -215,8 +390,12 @@ export function mergeWithRecentOptimisticMessages(
         return previousMessages;
     }
 
+    const enrichedNextMessages = mergeDiagnosticDetails(
+        previousMessages,
+        mergeToolCallResults(previousMessages, nextMessages)
+    );
     const nextIdentities = new Set(
-        nextMessages.map((message) => messageIdentity(message))
+        enrichedNextMessages.map((message) => messageIdentity(message))
     );
     const nextAssistantTexts = nextMessages
         .filter((message) => message.role.toLowerCase() === "assistant")
@@ -228,12 +407,8 @@ export function mergeWithRecentOptimisticMessages(
         const isLocalMessage = message.local === true;
         const isSystemMessage = role === "system";
         const isLocalUiMessage = isLocalMessage || isSystemMessage;
-        const hasLocalDiagnosticDetails =
-            (message.thinking?.length || 0) > 0 ||
-            (message.toolCalls?.length || 0) > 0 ||
-            Boolean(message.toolResult);
         const isLocalDiagnosticMessage =
-            message.local === true && hasLocalDiagnosticDetails;
+            message.local === true && hasDiagnosticDetails(message);
 
         if (!isOptimisticRole && !isLocalUiMessage && !isLocalDiagnosticMessage) {
             return false;
@@ -268,7 +443,9 @@ export function mergeWithRecentOptimisticMessages(
         );
     });
 
-    return dedupeMessages(insertMessagesByTimestamp(nextMessages, recentMissingMessages));
+    return dedupeMessages(
+        insertMessagesByTimestamp(enrichedNextMessages, recentMissingMessages)
+    );
 }
 
 /** Performs read file as data URL. */

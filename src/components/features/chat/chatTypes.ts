@@ -60,8 +60,25 @@ export interface ChatGatewayAttachment {
     content: string;
 }
 
+/** Merges attachment display rows without repeating IDs. */
+function mergeChatAttachments(
+    previous: ChatAttachmentDisplay[] = [],
+    next: ChatAttachmentDisplay[] = []
+): ChatAttachmentDisplay[] {
+    const seenIds = new Set<string>();
+    return [...previous, ...next].filter((attachment) => {
+        if (seenIds.has(attachment.id)) {
+            return false;
+        }
+        seenIds.add(attachment.id);
+        return true;
+    });
+}
+
 /** Represents chat thinking display. */
 export interface ChatThinkingDisplay {
+    id?: string;
+    snapshot?: boolean;
     text: string;
 }
 
@@ -70,6 +87,7 @@ export interface ChatToolCallDisplay {
     id?: string;
     name: string;
     arguments?: unknown;
+    toolResult?: ChatToolResultDisplay;
 }
 
 /** Represents chat tool result display. */
@@ -565,6 +583,84 @@ export function isRenderableChatHistoryMessage(
     );
 }
 
+/** Returns whether a tool result belongs to a tool call row. */
+function matchingToolCallIndex(
+    toolCalls: ChatToolCallDisplay[] | undefined,
+    result: NonNullable<ChatHistoryMessage["toolResult"]>
+): number {
+    if (!toolCalls?.length) {
+        return -1;
+    }
+
+    if (result.id) {
+        const idMatchIndex = toolCalls.findIndex(
+            (toolCall) =>
+                toolCall.id &&
+                toolCall.id === result.id &&
+                (!toolCall.toolResult ||
+                    (toolCall.toolResult.content === result.content &&
+                        toolCall.toolResult.isError === result.isError &&
+                        (toolCall.toolResult.images?.length || 0) ===
+                            (result.images?.length || 0)))
+        );
+        return idMatchIndex;
+    }
+
+    if (!result.name) {
+        return -1;
+    }
+
+    return toolCalls.findIndex(
+        (toolCall) =>
+            !toolCall.id &&
+            !result.id &&
+            toolCall.name === result.name &&
+            !toolCall.toolResult
+    );
+}
+
+/** Appends a visible message, folding tool results into matching call rows. */
+function pushVisibleMessage(
+    messages: ChatHistoryMessage[],
+    message: ChatHistoryMessage
+): void {
+    if (!message.toolResult || !isToolRole(message.role)) {
+        messages.push(message);
+        return;
+    }
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const existing = messages[index];
+        const matchingIndex =
+            existing?.role.toLowerCase() === "assistant"
+                ? matchingToolCallIndex(existing.toolCalls, message.toolResult)
+                : -1;
+        if (!existing || matchingIndex === -1) {
+            continue;
+        }
+
+        const nextToolCalls = [...(existing.toolCalls || [])];
+        const matchingToolCall = nextToolCalls[matchingIndex]!;
+        nextToolCalls[matchingIndex] = {
+            ...matchingToolCall,
+            toolResult: message.toolResult,
+        };
+
+        messages[index] = {
+            ...existing,
+            attachments: mergeChatAttachments(existing.attachments, message.attachments),
+            toolCalls: nextToolCalls,
+            toolResult:
+                existing.toolResult ||
+                (nextToolCalls.length === 1 ? message.toolResult : undefined),
+            timestamp: message.timestamp || existing.timestamp,
+        };
+        return;
+    }
+
+    messages.push(message);
+}
+
 /** Normalizes visible chat history messages. */
 export function normalizeVisibleChatHistoryMessages(
     messages: RawChatHistoryMessage[],
@@ -602,7 +698,7 @@ export function normalizeVisibleChatHistoryMessages(
             continue;
         }
 
-        visibleMessages.push(message);
+        pushVisibleMessage(visibleMessages, message);
     }
 
     if (pendingHiddenToolMedia.length > 0) {

@@ -9,6 +9,7 @@ import { ChatComposer } from "../components/features/chat/ChatComposer";
 import { ChatHeader } from "../components/features/chat/ChatHeader";
 import { ChatMessagesList } from "../components/features/chat/ChatMessagesList";
 import {
+    type ActiveChatStream,
     type ActiveChatStreams,
     createChatVisibility,
     hasRecoveredStreamHistory,
@@ -63,6 +64,163 @@ const CHAT_BOTTOM_THRESHOLD_PX = 32;
 const LIVE_HISTORY_POLL_MS = 2000;
 const ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS = 120_000;
 const NO_CHAT_SCROLL_ELEMENT = JSON.parse("null") as HTMLDivElement | null;
+
+/** Returns visible text carried by active stream message details. */
+export function activeStreamRenderableText(stream: ActiveChatStream): string {
+    return uniqueStrings([
+        stream.text,
+        stream.message?.thinking?.map((block) => block.text).join("\n"),
+        stream.message?.text,
+    ])
+        .filter(Boolean)
+        .join("\n");
+}
+
+/** Returns stable argument text for tool recovery comparisons. */
+function toolArgumentsIdentity(value: unknown): string {
+    return JSON.stringify(value ?? undefined);
+}
+
+function isMatchingToolResult(
+    left: NonNullable<ChatHistoryMessage["toolCalls"]>[number]["toolResult"],
+    right: NonNullable<ChatHistoryMessage["toolCalls"]>[number]["toolResult"]
+): boolean {
+    if (!left || !right) {
+        return false;
+    }
+
+    if (left.id || right.id) {
+        return Boolean(left.id && right.id && left.id === right.id);
+    }
+
+    const imageIdentity = (
+        images: NonNullable<
+            NonNullable<ChatHistoryMessage["toolCalls"]>[number]["toolResult"]
+        >["images"] = []
+    ) =>
+        JSON.stringify(
+            images.map((image) => ({
+                data: image.data || image.source?.data || "",
+                mediaType: image.mimeType || image.source?.media_type || "",
+                sourceType: image.source?.type || "",
+                type: image.type,
+            }))
+        );
+
+    return (
+        left.name === right.name &&
+        left.content === right.content &&
+        imageIdentity(left.images) === imageIdentity(right.images) &&
+        left.isError === right.isError
+    );
+}
+
+/** Returns whether an active stream is already represented in visible history. */
+export function isActiveStreamRecoveredInMessages(
+    stream: ActiveChatStream,
+    visibleMessages: ChatHistoryMessage[],
+    now = Date.now()
+): boolean {
+    const streamText = activeStreamRenderableText(stream);
+    const streamThinkingText =
+        stream.message?.thinking?.map((block) => block.text).join("\n") || "";
+    const hasToolDetails = Boolean(
+        stream.message?.toolCalls?.length || stream.message?.toolResult
+    );
+    const hasDiagnosticDetails = Boolean(streamThinkingText.trim() || hasToolDetails);
+    const streamUpdatedAt = sessionTimestampMs(stream.updatedAt);
+    const isStreamQuiet =
+        streamUpdatedAt === undefined ||
+        now - streamUpdatedAt >= ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
+
+    return Boolean(
+        (streamText.trim() || hasToolDetails) &&
+        visibleMessages.some((message) => {
+            if (message.role.toLowerCase() !== "assistant") {
+                return false;
+            }
+
+            if (
+                !hasDiagnosticDetails &&
+                stream.message?.text.trim() &&
+                message.text.trim() === stream.message.text.trim()
+            ) {
+                return true;
+            }
+
+            const thinkingText =
+                message.thinking?.map((block) => block.text).join("\n") || "";
+            if (
+                streamThinkingText.trim() &&
+                thinkingText.trim() === streamThinkingText.trim()
+            ) {
+                return !(
+                    stream.message?.text.trim() &&
+                    message.text.trim() !== stream.message.text.trim()
+                );
+            }
+
+            if (stream.message?.toolCalls?.length) {
+                const unmatchedToolCalls = [...(message.toolCalls || [])];
+                const hasRecoveredToolCalls = stream.message.toolCalls.every(
+                    (streamToolCall) => {
+                        const matchingIndex = unmatchedToolCalls.findIndex((toolCall) => {
+                            const isMatchingCall =
+                                streamToolCall.id || toolCall.id
+                                    ? Boolean(
+                                          streamToolCall.id &&
+                                          toolCall.id &&
+                                          streamToolCall.id === toolCall.id
+                                      )
+                                    : streamToolCall.name === toolCall.name &&
+                                      toolArgumentsIdentity(streamToolCall.arguments) ===
+                                          toolArgumentsIdentity(toolCall.arguments) &&
+                                      !streamToolCall.id &&
+                                      !toolCall.id;
+
+                            if (!isMatchingCall) {
+                                return false;
+                            }
+
+                            return streamToolCall.toolResult
+                                ? isMatchingToolResult(
+                                      streamToolCall.toolResult,
+                                      toolCall.toolResult
+                                  )
+                                : true;
+                        });
+
+                        if (matchingIndex === -1) {
+                            return false;
+                        }
+
+                        unmatchedToolCalls.splice(matchingIndex, 1);
+                        return true;
+                    }
+                );
+
+                if (hasRecoveredToolCalls) {
+                    return stream.message.text.trim()
+                        ? message.text.trim() === stream.message.text.trim()
+                        : true;
+                }
+            }
+
+            if (stream.message?.toolResult && message.toolResult) {
+                return isMatchingToolResult(
+                    stream.message.toolResult,
+                    message.toolResult
+                );
+            }
+
+            return (
+                isStreamQuiet &&
+                (isRecoveredAssistantText(message.text, streamText) ||
+                    isRecoveredAssistantText(thinkingText, streamText))
+            );
+        })
+    );
+}
 
 /** Normalizes chat agent IDs for case-insensitive session bucketing. */
 function normalizeChatAgentId(agentId: string): string {
@@ -184,6 +342,26 @@ export function hasNewerAssistantMessageInHistory(
         const messageTimestamp = sessionTimestampMs(message.timestamp);
         return messageTimestamp !== undefined && messageTimestamp >= streamUpdatedAt;
     });
+}
+
+/** Returns refreshed messages, preserving previous state when history is unchanged. */
+export function nextRefreshedChatMessages(
+    wasPrevious: ChatHistoryMessage[],
+    nextMessages: ChatHistoryMessage[],
+    shouldForceMerge = false
+): ChatHistoryMessage[] {
+    const previousLast = wasPrevious.at(-1)?.timestamp;
+    const nextLast = nextMessages.at(-1)?.timestamp;
+
+    if (
+        !shouldForceMerge &&
+        wasPrevious.length === nextMessages.length &&
+        previousLast === nextLast
+    ) {
+        return wasPrevious;
+    }
+
+    return mergeWithRecentOptimisticMessages(wasPrevious, nextMessages);
 }
 
 /** Returns the next history-load bottom-following state. */
@@ -354,6 +532,52 @@ export function Chat() {
             return next;
         });
     };
+    /** Clears active streams for a session, including per-stream diagnostic keys. */
+    const clearActiveStreamsForSession = (sessionKey: string) => {
+        updateActiveStreams((wasPrevious) =>
+            Object.fromEntries(
+                Object.entries(wasPrevious).filter(
+                    ([, stream]) => !isSameSessionKey(stream.sessionKey, sessionKey)
+                )
+            )
+        );
+    };
+    /** Clears only the optimistic stream created for one send attempt. */
+    const clearOptimisticSendStream = (sessionKey: string, runId?: string) => {
+        if (!runId) {
+            return;
+        }
+
+        updateActiveStreams((wasPrevious) => {
+            const optimisticUpdatedAt = sessionTimestampMs(
+                wasPrevious[sessionKey]?.runId === runId
+                    ? wasPrevious[sessionKey]?.updatedAt
+                    : undefined
+            );
+
+            return Object.fromEntries(
+                Object.entries(wasPrevious).filter(([streamKey, stream]) => {
+                    if (!isSameSessionKey(stream.sessionKey, sessionKey)) {
+                        return true;
+                    }
+
+                    if (stream.runId === runId || stream.aliases.includes(runId)) {
+                        return false;
+                    }
+
+                    const streamUpdatedAt = sessionTimestampMs(stream.updatedAt);
+                    const isSameSendProvisionalRuntimeStream =
+                        streamKey.startsWith(`${sessionKey}::`) &&
+                        stream.runId === sessionKey &&
+                        optimisticUpdatedAt !== undefined &&
+                        streamUpdatedAt !== undefined &&
+                        streamUpdatedAt >= optimisticUpdatedAt;
+
+                    return !isSameSendProvisionalRuntimeStream;
+                })
+            );
+        });
+    };
 
     const sortedSessions = useMemo(
         () => sortSessionsByTypeAndActivity(sessions),
@@ -374,73 +598,98 @@ export function Chat() {
     const sessionsForSelectedAgent = selectedAgentId
         ? sortedSessions.filter((session) => getChatAgentId(session) === selectedAgentId)
         : sortedSessions;
-    const selectedStream = selectedSessionKey
-        ? activeStreams[selectedSessionKey]
-        : undefined;
-    const selectedStreamText = selectedStream?.text || "";
-    const selectedStreamMessage = selectedStream?.message;
+    const selectedStreams = selectedSessionKey
+        ? Object.entries(activeStreams)
+              .filter(([, stream]) =>
+                  isSameSessionKey(stream.sessionKey, selectedSessionKey)
+              )
+              .toSorted(([leftKey], [rightKey]) => {
+                  if (leftKey === selectedSessionKey) {
+                      return -1;
+                  }
+                  if (rightKey === selectedSessionKey) {
+                      return 1;
+                  }
+                  return leftKey.localeCompare(rightKey);
+              })
+        : [];
+    const selectedStreamsText = selectedStreams
+        .map(([, stream]) => activeStreamRenderableText(stream))
+        .filter(Boolean)
+        .join("\n");
     const chatVisibility = createChatVisibility(showThinkingOutput, showToolOutput);
     const visibleMessagesForRows = dedupeMessages(messages).filter(
         (message) =>
             !deletedMessageKeys.has(messageDeleteKey(message)) &&
             isRenderableChatHistoryMessage(message, chatVisibility)
     );
-    const selectedStreamUpdatedAt = sessionTimestampMs(selectedStream?.updatedAt);
-    const isSelectedStreamIsQuiet =
-        selectedStreamUpdatedAt === undefined ||
-        Date.now() - selectedStreamUpdatedAt >= ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
-    const isSelectedStreamIsRecoveredInMessages = Boolean(
-        selectedStreamText.trim() &&
-        visibleMessagesForRows.some((message) => {
-            if (message.role.toLowerCase() !== "assistant") {
-                return false;
-            }
+    /** Returns whether active stream text is already represented in history. */
+    function isStreamRecoveredInMessages(stream: ActiveChatStream): boolean {
+        return isActiveStreamRecoveredInMessages(
+            stream,
+            visibleMessagesForRows,
+            Date.now()
+        );
+    }
 
-            if (message.text.trim() === selectedStreamText.trim()) {
-                return true;
-            }
-
-            return (
-                isSelectedStreamIsQuiet &&
-                isRecoveredAssistantText(message.text, selectedStreamText)
-            );
-        })
-    );
-    const shouldShowSelectedStreamRow =
-        !isSelectedStreamIsRecoveredInMessages &&
-        shouldRenderStreamRow(selectedStreamText, selectedStreamMessage, chatVisibility);
-    const shouldShowTypingIndicator = Boolean(
-        selectedStream &&
-        !isSelectedStreamIsRecoveredInMessages &&
-        (selectedStream.statusText || !shouldShowSelectedStreamRow)
-    );
     const chatRows: ChatRow[] = visibleMessagesForRows.map((message) => ({
         key: messageDeleteKey(message),
         kind: "message",
         message,
     }));
+    let latestTypingStream:
+        | { key: string; statusText: string; updatedAt?: string }
+        | undefined;
 
-    if (shouldShowSelectedStreamRow) {
-        chatRows.push({
-            key: `stream-${selectedSessionKey}`,
-            kind: "stream",
-            message: selectedStreamMessage || {
-                role: "assistant",
-                content: selectedStreamText,
-                text: selectedStreamText,
-            },
-        });
+    for (const [streamKey, stream] of selectedStreams) {
+        const streamText = stream.text || "";
+        const streamMessage = stream.message;
+        const isStreamRecoveredInHistory = isStreamRecoveredInMessages(stream);
+        const shouldShowStreamRow =
+            !isStreamRecoveredInHistory &&
+            shouldRenderStreamRow(streamText, streamMessage, chatVisibility);
+        const shouldShowTypingIndicator = Boolean(
+            !isStreamRecoveredInHistory && !shouldShowStreamRow && stream.statusText
+        );
+
+        if (shouldShowStreamRow) {
+            chatRows.push({
+                key: `stream-${streamKey}`,
+                kind: "stream",
+                message: streamMessage || {
+                    role: "assistant",
+                    content: streamText,
+                    text: streamText,
+                },
+            });
+        }
+
+        if (shouldShowTypingIndicator) {
+            const statusText = stream.statusText || "Thinking";
+            const previousUpdatedAt = sessionTimestampMs(latestTypingStream?.updatedAt);
+            const nextUpdatedAt = sessionTimestampMs(stream.updatedAt);
+            if (
+                !latestTypingStream ||
+                previousUpdatedAt === undefined ||
+                (nextUpdatedAt !== undefined && nextUpdatedAt >= previousUpdatedAt)
+            ) {
+                latestTypingStream = {
+                    key: streamKey,
+                    statusText,
+                    updatedAt: stream.updatedAt,
+                };
+            }
+        }
     }
 
-    if (shouldShowTypingIndicator) {
-        const typingStream = selectedStream!;
+    if (latestTypingStream) {
         chatRows.push({
-            key: `typing-${selectedSessionKey}-${typingStream.statusText || "working"}`,
+            key: `typing-${latestTypingStream.key}-${latestTypingStream.statusText}`,
             kind: "typing",
             message: {
                 role: "assistant",
-                content: typingStream.statusText || "Thinking",
-                text: typingStream.statusText || "Thinking",
+                content: latestTypingStream.statusText,
+                text: latestTypingStream.statusText,
             },
         });
     }
@@ -640,40 +889,58 @@ export function Chat() {
                     result.messages,
                     createChatVisibility(showThinkingOutput, showToolOutput)
                 );
-                const activeStream = activeStreamsReference.current[requestSessionKey];
-                const activeStreamUpdatedAt = sessionTimestampMs(activeStream?.updatedAt);
-                const isActiveStreamIsQuiet =
-                    activeStreamUpdatedAt === undefined ||
-                    Date.now() - activeStreamUpdatedAt >=
-                        ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
-                const isRecoveredStreamInHistory = Boolean(
-                    activeStream &&
-                    isActiveStreamIsQuiet &&
-                    ((activeStream.text &&
-                        hasRecoveredStreamHistory(nextMessages, activeStream.text)) ||
-                        hasNewerAssistantMessageInHistory(
-                            nextMessages,
-                            activeStream.updatedAt
-                        ))
+                const recoveredStreamKeys = Object.entries(activeStreamsReference.current)
+                    .filter(([, stream]) =>
+                        isSameSessionKey(stream.sessionKey, requestSessionKey)
+                    )
+                    .filter(([, stream]) => {
+                        const streamText = activeStreamRenderableText(stream);
+                        const activeStreamUpdatedAt = sessionTimestampMs(
+                            stream.updatedAt
+                        );
+                        const isActiveStreamIsQuiet =
+                            activeStreamUpdatedAt === undefined ||
+                            Date.now() - activeStreamUpdatedAt >=
+                                ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
+                        const streamMessageIsRenderable = stream.message
+                            ? isRenderableChatHistoryMessage(
+                                  stream.message,
+                                  createChatVisibility(showThinkingOutput, showToolOutput)
+                              )
+                            : false;
+                        const isStatusOnlyStream =
+                            !stream.message || !streamMessageIsRenderable;
+                        return Boolean(
+                            isActiveStreamIsQuiet &&
+                            (isActiveStreamRecoveredInMessages(stream, nextMessages) ||
+                                (streamText &&
+                                    hasRecoveredStreamHistory(
+                                        nextMessages,
+                                        streamText
+                                    )) ||
+                                (isStatusOnlyStream &&
+                                    hasNewerAssistantMessageInHistory(
+                                        nextMessages,
+                                        stream.updatedAt
+                                    )))
+                        );
+                    })
+                    .map(([key]) => key);
+                const isRecoveredStreamInHistory = recoveredStreamKeys.length > 0;
+                setMessages((wasPrevious) =>
+                    nextRefreshedChatMessages(
+                        wasPrevious,
+                        nextMessages,
+                        isRecoveredStreamInHistory
+                    )
                 );
-                setMessages((wasPrevious) => {
-                    const previousLast = wasPrevious.at(-1)?.timestamp;
-                    const nextLast = nextMessages.at(-1)?.timestamp;
-
-                    if (
-                        wasPrevious.length === nextMessages.length &&
-                        previousLast === nextLast
-                    ) {
-                        return wasPrevious;
-                    }
-
-                    return mergeWithRecentOptimisticMessages(wasPrevious, nextMessages);
-                });
                 setIsAtBottom(shouldStickToBottomReference.current);
                 if (isRecoveredStreamInHistory) {
                     updateActiveStreams((wasPrevious) => {
                         const next = { ...wasPrevious };
-                        delete next[requestSessionKey];
+                        for (const key of recoveredStreamKeys) {
+                            delete next[key];
+                        }
                         return next;
                     });
                 }
@@ -738,19 +1005,9 @@ export function Chat() {
                     createChatVisibility(showThinkingOutput, showToolOutput)
                 );
 
-                setMessages((wasPrevious) => {
-                    const previousLast = wasPrevious.at(-1)?.timestamp;
-                    const nextLast = nextMessages.at(-1)?.timestamp;
-
-                    if (
-                        wasPrevious.length === nextMessages.length &&
-                        previousLast === nextLast
-                    ) {
-                        return wasPrevious;
-                    }
-
-                    return mergeWithRecentOptimisticMessages(wasPrevious, nextMessages);
-                });
+                setMessages((wasPrevious) =>
+                    nextRefreshedChatMessages(wasPrevious, nextMessages)
+                );
 
                 setIsAtBottom(shouldStickToBottomReference.current);
                 setHistoryLoadVersion((wasPrevious) => wasPrevious + 1);
@@ -871,11 +1128,11 @@ export function Chat() {
             previousSelectedSessionKeyReference.current !== selectedSessionKey;
         const isRowsWereAdded = chatRows.length > previousChatRowsLengthReference.current;
         const isStreamTextChanged =
-            previousSelectedStreamTextReference.current !== selectedStreamText;
+            previousSelectedStreamTextReference.current !== selectedStreamsText;
 
         previousSelectedSessionKeyReference.current = selectedSessionKey;
         previousChatRowsLengthReference.current = chatRows.length;
-        previousSelectedStreamTextReference.current = selectedStreamText;
+        previousSelectedStreamTextReference.current = selectedStreamsText;
 
         if (chatRows.length === 0) {
             return;
@@ -899,7 +1156,7 @@ export function Chat() {
         const scrollFrame = requestAnimationFrame(scrollMessagesToBottom);
 
         return () => cancelAnimationFrame(scrollFrame);
-    }, [chatRows.length, selectedStreamText, selectedSessionKey]);
+    }, [chatRows.length, selectedStreamsText, selectedSessionKey]);
 
     const sessionOptions = sessionsForSelectedAgent
         .filter((session) => hasSessionKey(session))
@@ -1340,41 +1597,47 @@ export function Chat() {
 
             if (isResetCommand) {
                 setMessages([]);
-                updateActiveStreams((wasPrevious) => {
-                    const next = { ...wasPrevious };
-                    delete next[selectedSessionKey];
-                    return next;
-                });
+                clearActiveStreamsForSession(selectedSessionKey);
             } else {
                 const acknowledgedRunId = result?.runId;
-                if (acknowledgedRunId) {
+                if (acknowledgedRunId && idempotencyKey) {
                     updateActiveStreams((wasPrevious) => {
-                        const existing = wasPrevious[selectedSessionKey];
-                        if (!existing) {
-                            return wasPrevious;
-                        }
+                        let hasChanged = false;
+                        const next = { ...wasPrevious };
+                        for (const [key, stream] of Object.entries(wasPrevious)) {
+                            if (
+                                !isSameSessionKey(
+                                    stream.sessionKey,
+                                    selectedSessionKey
+                                ) ||
+                                (stream.runId !== idempotencyKey &&
+                                    !stream.aliases.includes(idempotencyKey))
+                            ) {
+                                continue;
+                            }
 
-                        return {
-                            ...wasPrevious,
-                            [selectedSessionKey]: {
-                                ...existing,
-                                runId: acknowledgedRunId,
+                            hasChanged = true;
+                            next[key] = {
+                                ...stream,
+                                runId:
+                                    stream.runId === idempotencyKey
+                                        ? acknowledgedRunId
+                                        : stream.runId,
                                 aliases: uniqueStrings([
-                                    ...existing.aliases,
+                                    ...stream.aliases,
+                                    idempotencyKey,
                                     acknowledgedRunId,
                                 ]),
-                            },
-                        };
+                            };
+                        }
+
+                        return hasChanged ? next : wasPrevious;
                     });
                 }
             }
         } catch (error_) {
             setSendError(chatErrorMessage(error_, "Failed to send message"));
-            updateActiveStreams((wasPrevious) => {
-                const next = { ...wasPrevious };
-                delete next[selectedSessionKey];
-                return next;
-            });
+            clearOptimisticSendStream(selectedSessionKey, idempotencyKey);
         } finally {
             endSend(sendEpoch);
         }

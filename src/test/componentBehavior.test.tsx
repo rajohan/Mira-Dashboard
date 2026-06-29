@@ -29,6 +29,13 @@ import {
     previewFromAttachment,
 } from "../components/features/chat/ChatMessagesList";
 import {
+    type ActiveChatStreams,
+    createChatVisibility,
+    mergeStreamMessage,
+} from "../components/features/chat/chatRuntime";
+import { normalizeVisibleChatHistoryMessages } from "../components/features/chat/chatTypes";
+import { mergeWithRecentOptimisticMessages } from "../components/features/chat/chatUtilities";
+import {
     compactStatusText,
     detailFromArguments,
     formatToolName,
@@ -93,6 +100,11 @@ import { ExpandableCard, ReadOnlyField } from "../components/ui/ExpandableCard";
 import { getProgressColor, ProgressBar } from "../components/ui/ProgressBar";
 import { useFileExplorerState } from "../hooks/useFileExplorerState";
 import { useSessionActions } from "../hooks/useSessionActions";
+import {
+    activeStreamRenderableText,
+    isActiveStreamRecoveredInMessages,
+    nextRefreshedChatMessages,
+} from "../pages/Chat";
 
 const originalFetch = fetch;
 const originalAnimationFrame = {
@@ -181,6 +193,10 @@ function createQueryClient() {
             queries: { retry: false, staleTime: Infinity },
         },
     });
+}
+
+function thinkingTexts(stream?: ActiveChatStreams[string]) {
+    return stream?.message?.thinking?.map((block) => block.text) || [];
 }
 
 describe("shared component helpers", () => {
@@ -567,13 +583,43 @@ describe("shared component helpers", () => {
                         text: "answer",
                         thinking: [{ text: "working" }],
                         toolCalls: [
-                            { arguments: { ok: true }, id: "tool-1", name: "run" },
+                            {
+                                arguments: { ok: true },
+                                id: "tool-1",
+                                name: "run",
+                                toolResult: {
+                                    content: "tool output",
+                                    id: "tool-1",
+                                    name: "run",
+                                },
+                            },
                             { id: "tool-2", name: "empty" },
                         ],
                         toolResult: {
-                            content: "tool output",
+                            content: "standalone output",
                             isError: true,
                             name: "run",
+                        },
+                    }}
+                />
+                <ChatMessageDetails
+                    visibility={{ shouldShowThinking: true, shouldShowTools: true }}
+                    message={{
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [
+                            {
+                                arguments: { command: "older call" },
+                                name: "functions.exec_command",
+                            },
+                        ],
+                        toolResult: {
+                            content: "late id output",
+                            id: "late-result-id",
+                            name: "functions.exec_command",
                         },
                     }}
                 />
@@ -596,9 +642,12 @@ describe("shared component helpers", () => {
         expect(onToggleTools).toHaveBeenCalledTimes(1);
         expect(screen.getByText(/Thinking: high/)).toBeInTheDocument();
         expect(screen.getByText("Thinking / working")).toBeInTheDocument();
-        expect(screen.getByText("Tool call · run")).toBeInTheDocument();
+        expect(screen.getByText("Run")).toBeInTheDocument();
+        expect(screen.getAllByText("Tool input")).toHaveLength(3);
+        expect(screen.getByText("Tool output")).toBeInTheDocument();
+        expect(screen.getByText("Tool result · Bash")).toBeInTheDocument();
+        expect(screen.getByText("late id output")).toBeInTheDocument();
         expect(screen.getByText("No arguments")).toBeInTheDocument();
-        expect(screen.getByText("Tool result · run")).toBeInTheDocument();
     });
 
     it("drives chat composer attachments, slash suggestions, emoji, and submit controls", async () => {
@@ -789,6 +838,48 @@ describe("shared component helpers", () => {
             })
         ).toBe("Todo: write tests");
         expect(
+            runtimeProgressText("session.event", "item", "start", {
+                kind: "preamble",
+                progressText: "Codex preamble text",
+                source: "codex-app-server",
+                title: "Preamble",
+            })
+        ).toBeUndefined();
+        expect(
+            runtimeProgressText("session.event", "item", "start", {
+                itemId: "reasoning",
+                itemKind: "analysis",
+                progressText: "reasoning snapshot",
+                title: "Reasoning",
+            })
+        ).toBeUndefined();
+        expect(
+            runtimeProgressText("session.event", "item", "start", {
+                itemId: "rs_123",
+                kind: "analysis",
+                status: "running",
+                title: "Reasoning",
+            })
+        ).toBeUndefined();
+        expect(
+            runtimeProgressText("session.event", "item", "start", {
+                kind: "command",
+                meta: "git status (repo)",
+                name: "bash",
+                suppressChannelProgress: true,
+                title: "Command",
+            })
+        ).toBeUndefined();
+        expect(
+            runtimeProgressText("session.event", "item", "start", {
+                item: {
+                    kind: "reasoning",
+                    summary: "full nested reasoning snapshot",
+                    type: "analysis",
+                },
+            })
+        ).toBeUndefined();
+        expect(
             runtimeProgressText("session.event", "plan", "start", {
                 explanation: "Update plan",
             })
@@ -813,6 +904,11 @@ describe("shared component helpers", () => {
             "Thinking"
         );
         expect(
+            runtimeProgressText("session.event", "thinking", "delta", {
+                delta: "x".repeat(200),
+            })
+        ).toBe("Thinking");
+        expect(
             runtimeProgressText("session.event", "unknown", "start", {})
         ).toBeUndefined();
 
@@ -821,6 +917,28 @@ describe("shared component helpers", () => {
         expect(isRuntimeWorkEvent("session.tool", "tool", "start", "Tool")).toBe(true);
         expect(isRuntimeWorkEvent("session.tool", "tool", "start")).toBe(false);
         expect(isRuntimeWorkEvent("session.event", "lifecycle", "start")).toBe(true);
+        expect(
+            mergeStreamMessage(
+                {
+                    attachments: [],
+                    content: [],
+                    images: [],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "first" }, { text: "second" }],
+                },
+                {
+                    attachments: [],
+                    content: [],
+                    images: [],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: " update" }],
+                },
+                "",
+                "run-1"
+            ).thinking?.map((block) => block.text)
+        ).toEqual(["first update", "second"]);
     });
 
     it("drives chat runtime event subscription, stream buffering, and refreshes", async () => {
@@ -849,7 +967,7 @@ describe("shared component helpers", () => {
             }
             return {} as T;
         };
-        let activeStreams = {};
+        let activeStreams: ActiveChatStreams = {};
         const activeStreamsReference = { current: activeStreams };
         const liveHistoryRefreshTimerReference = { current: undefined };
         const shouldStickToBottomReference = { current: true };
@@ -915,6 +1033,66 @@ describe("shared component helpers", () => {
         await waitFor(() => {
             expect(activeStreamsReference.current).toHaveProperty("agent:main:main");
         });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: " ",
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "world",
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe(
+                "Hello world"
+            );
+        });
+        for (const delta of ["hel", "l", "o"]) {
+            act(() => {
+                listener?.({
+                    event: "agent",
+                    payload: {
+                        data: { delta },
+                        runId: "assistant-deltas",
+                        sessionKey: "agent:main:main",
+                        stream: "assistant",
+                    },
+                    type: "event",
+                });
+            });
+        }
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current[
+                    "agent:main:main::assistant-deltas::assistant"
+                ]?.text
+            ).toBe("hello");
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "assistant-deltas",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
 
         act(() => {
             listener?.({
@@ -924,7 +1102,1769 @@ describe("shared component helpers", () => {
                         args: { command: "bun test" },
                         name: "functions.exec_command",
                         phase: "end",
-                        result: { ok: true },
+                        result: { output: "ok" },
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) => toolCall.name === "functions.exec_command"
+                    ) &&
+                    "toolResult" in message &&
+                    typeof message.toolResult === "object" &&
+                    message.toolResult !== null &&
+                    "content" in message.toolResult &&
+                    typeof message.toolResult.content === "string" &&
+                    message.toolResult.content.includes("ok")
+            )
+        ).toBe(true);
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "tool" &&
+                    "toolResult" in message &&
+                    typeof message.toolResult === "object" &&
+                    message.toolResult !== null &&
+                    "content" in message.toolResult &&
+                    typeof message.toolResult.content === "string" &&
+                    message.toolResult.content.includes("ok")
+            )
+        ).toBe(false);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "checking files",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const stream =
+                activeStreamsReference.current["agent:main:main::run-1::thinking"];
+            expect(stream?.message?.thinking?.[0]?.text).toContain("checking files");
+            expect(stream?.statusText).toBeUndefined();
+        });
+        for (const delta of ["hel", "l", "o"]) {
+            act(() => {
+                listener?.({
+                    event: "agent",
+                    payload: {
+                        data: { delta },
+                        runId: "diagnostic-deltas",
+                        sessionKey: "agent:main:main",
+                        stream: "thinking",
+                    },
+                    type: "event",
+                });
+            });
+        }
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current[
+                    "agent:main:main::diagnostic-deltas::thinking"
+                ]?.message?.thinking?.[0]?.text
+            ).toBe("hello");
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "diagnostic-deltas",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { text: "snapshot checking" },
+                    runId: "thinking-snapshot",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { text: "snapshot checking files" },
+                    runId: "thinking-snapshot",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current[
+                    "agent:main:main::thinking-snapshot::thinking"
+                ]?.message?.thinking?.[0]?.text
+            ).toBe("snapshot checking files");
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "thinking-snapshot",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        args: { path: "src/pages/Chat.tsx" },
+                        name: "functions.read_file",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            toolCall.name === "functions.read_file" &&
+                            toolCall.arguments?.path === "src/pages/Chat.tsx"
+                    )
+            )
+        ).toBe(true);
+        expect(
+            activeStreamsReference.current["agent:main:main::run-1::thinking"]?.message
+                ?.thinking?.[0]?.text
+        ).toContain("checking files");
+
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "merge-args-tool",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "p" },
+                        id: "merge-args-tool",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "pwd" },
+                        id: "merge-args-tool",
+                        name: "functions.exec_command",
+                        phase: "result",
+                        result: "workspace",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "merge-args-tool",
+                        name: "functions.exec_command",
+                        phase: "end",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            toolCall.id === "merge-args-tool" &&
+                            toolCall.arguments?.command === "pwd" &&
+                            toolCall.toolResult?.content === "workspace"
+                    )
+            )
+        ).toBe(true);
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "merge-args-tool",
+                        isError: true,
+                        name: "functions.exec_command",
+                        phase: "error",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            toolCall.id === "merge-args-tool" &&
+                            toolCall.toolResult?.content === "workspace" &&
+                            toolCall.toolResult.isError === true
+                    )
+            )
+        ).toBe(true);
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "run-a" },
+                        id: "shared-result",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "result-run-a",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "run-b" },
+                        id: "shared-result",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "result-run-b",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "shared-result",
+                        name: "functions.exec_command",
+                        phase: "result",
+                        result: "run a output",
+                    },
+                    runId: "result-run-a",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const sharedResultRows = messages.flatMap((message) => {
+                if (
+                    typeof message === "object" &&
+                    message !== null &&
+                    "runId" in message &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some((toolCall) => toolCall.id === "shared-result")
+                ) {
+                    return [
+                        {
+                            runId: message.runId,
+                            result: message.toolCalls.find(
+                                (toolCall) => toolCall.id === "shared-result"
+                            )?.toolResult?.content,
+                        },
+                    ];
+                }
+
+                return [];
+            });
+            expect(
+                sharedResultRows.find((row) => row.runId === "result-run-a")?.result
+            ).toBe("run a output");
+            expect(
+                sharedResultRows.find((row) => row.runId === "result-run-b")?.result
+            ).toBeUndefined();
+        });
+        for (const runId of ["result-run-a", "result-run-b"]) {
+            act(() => {
+                listener?.({
+                    event: "model.completed",
+                    payload: {
+                        runId,
+                        sessionKey: "agent:main:main",
+                    },
+                    type: "event",
+                });
+            });
+        }
+        expect(
+            messages
+                .flatMap((message) => {
+                    if (
+                        typeof message === "object" &&
+                        message !== null &&
+                        "toolCalls" in message &&
+                        Array.isArray(message.toolCalls)
+                    ) {
+                        return message.toolCalls;
+                    }
+
+                    return [];
+                })
+                .filter((toolCall) => toolCall.id === "merge-args-tool")
+        ).toHaveLength(1);
+
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "shared-call",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-a",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "run-b" },
+                        id: "shared-call",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-b",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        const sharedCallRows = messages.flatMap((message) => {
+            if (
+                typeof message === "object" &&
+                message !== null &&
+                "toolCalls" in message &&
+                Array.isArray(message.toolCalls) &&
+                message.toolCalls.some((toolCall) => toolCall.id === "shared-call")
+            ) {
+                return [
+                    {
+                        runId:
+                            "runId" in message && typeof message.runId === "string"
+                                ? message.runId
+                                : undefined,
+                        toolCalls: message.toolCalls,
+                    },
+                ];
+            }
+
+            return [];
+        });
+        expect(sharedCallRows).toHaveLength(2);
+        expect(
+            sharedCallRows.find((row) => row.runId === "run-a")?.toolCalls[0]?.arguments
+        ).toBeUndefined();
+        expect(
+            sharedCallRows.find((row) => row.runId === "run-b")?.toolCalls[0]?.arguments
+        ).toEqual({ command: "run-b" });
+        for (const runId of ["run-a", "run-b"]) {
+            act(() => {
+                listener?.({
+                    event: "model.completed",
+                    payload: {
+                        runId,
+                        sessionKey: "agent:main:main",
+                    },
+                    type: "event",
+                });
+            });
+        }
+
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "sparse-update" },
+                        id: "sparse-update-tool",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "sparse-update-tool",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "sparse-update-tool",
+                        name: "functions.exec_command",
+                        phase: "result",
+                        result: "sparse output",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            toolCall.id === "sparse-update-tool" &&
+                            toolCall.arguments?.command === "sparse-update" &&
+                            toolCall.toolResult?.content === "sparse output"
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "repeat-same" },
+                        name: "functions.exec_command",
+                        phase: "result",
+                        result: "old repeat output",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "repeat-same" },
+                        id: "repeat-same-new",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        const repeatedSameCalls = messages.flatMap((message) => {
+            if (
+                typeof message === "object" &&
+                message !== null &&
+                "toolCalls" in message &&
+                Array.isArray(message.toolCalls)
+            ) {
+                return message.toolCalls.filter(
+                    (toolCall) => toolCall.arguments?.command === "repeat-same"
+                );
+            }
+
+            return [];
+        });
+        expect(repeatedSameCalls).toHaveLength(2);
+        expect(
+            repeatedSameCalls.find((toolCall) => toolCall.id === "repeat-same-new")
+                ?.toolResult
+        ).toBeUndefined();
+
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "late-id" },
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "late-id" },
+                        id: "late-id-tool",
+                        name: "functions.exec_command",
+                        phase: "result",
+                        result: "late id output",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        const lateIdToolCalls = messages.flatMap((message) => {
+            if (
+                typeof message === "object" &&
+                message !== null &&
+                "toolCalls" in message &&
+                Array.isArray(message.toolCalls)
+            ) {
+                return message.toolCalls.filter(
+                    (toolCall) => toolCall.arguments?.command === "late-id"
+                );
+            }
+
+            return [];
+        });
+        expect(lateIdToolCalls).toHaveLength(1);
+        expect(lateIdToolCalls[0]).toMatchObject({
+            id: "late-id-tool",
+            toolResult: { content: "late id output" },
+        });
+
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "late-update-id" },
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "late-update-id" },
+                        id: "late-update-id-tool",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "late-update-id-tool",
+                        name: "functions.exec_command",
+                        phase: "result",
+                        result: "late update id output",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        const lateUpdateToolCalls = messages.flatMap((message) => {
+            if (
+                typeof message === "object" &&
+                message !== null &&
+                "toolCalls" in message &&
+                Array.isArray(message.toolCalls)
+            ) {
+                return message.toolCalls.filter(
+                    (toolCall) => toolCall.arguments?.command === "late-update-id"
+                );
+            }
+
+            return [];
+        });
+        expect(lateUpdateToolCalls).toHaveLength(1);
+        expect(lateUpdateToolCalls[0]).toMatchObject({
+            id: "late-update-id-tool",
+            toolResult: { content: "late update id output" },
+        });
+
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "arg-first" },
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "arg-second" },
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "arg-second" },
+                        name: "functions.exec_command",
+                        phase: "result",
+                        result: "second arg output",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        const argumentMatchedCalls = messages.flatMap((message) => {
+            if (
+                typeof message === "object" &&
+                message !== null &&
+                "toolCalls" in message &&
+                Array.isArray(message.toolCalls)
+            ) {
+                return message.toolCalls.filter((toolCall) =>
+                    ["arg-first", "arg-second"].includes(toolCall.arguments?.command)
+                );
+            }
+
+            return [];
+        });
+        expect(
+            argumentMatchedCalls.find(
+                (toolCall) => toolCall.arguments?.command === "arg-first"
+            )?.toolResult
+        ).toBeUndefined();
+        expect(
+            argumentMatchedCalls.find(
+                (toolCall) => toolCall.arguments?.command === "arg-second"
+            )?.toolResult?.content
+        ).toBe("second arg output");
+
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "id-backed" },
+                        id: "id-backed-call",
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { command: "id-backed" },
+                        name: "functions.exec_command",
+                        phase: "result",
+                        result: "no id output",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        const idBackedToolCalls = messages.flatMap((message) => {
+            if (
+                typeof message === "object" &&
+                message !== null &&
+                "toolCalls" in message &&
+                Array.isArray(message.toolCalls)
+            ) {
+                return message.toolCalls.filter(
+                    (toolCall) => toolCall.id === "id-backed-call"
+                );
+            }
+
+            return [];
+        });
+        expect(idBackedToolCalls[0]?.toolResult).toBeUndefined();
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            !toolCall.id &&
+                            toolCall.arguments?.command === "id-backed" &&
+                            toolCall.toolResult?.content.includes("no id output")
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning",
+                        itemKind: "analysis",
+                        progressText: "reasoning snapshot",
+                        title: "Reasoning",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const stream =
+                activeStreamsReference.current["agent:main:main::run-1::reasoning"];
+            expect(
+                thinkingTexts(stream).some((text) => text.includes("reasoning snapshot"))
+            ).toBe(true);
+            expect(stream?.statusText).toBeUndefined();
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning",
+                        itemKind: "analysis",
+                        progressText: "reading files",
+                        title: "Reasoning",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const stream =
+                activeStreamsReference.current["agent:main:main::run-1::reasoning"];
+            expect(thinkingTexts(stream)).toContain("reading files");
+            expect(thinkingTexts(stream)).not.toContain("reasoning snapshot");
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        item: {
+                            kind: "reasoning",
+                            summary: "nested reasoning snapshot",
+                            type: "analysis",
+                        },
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const stream =
+                activeStreamsReference.current["agent:main:main::run-1::reasoning"];
+            expect(
+                thinkingTexts(stream).some((text) =>
+                    text.includes("nested reasoning snapshot")
+                )
+            ).toBe(true);
+            expect(stream?.statusText).toBeUndefined();
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning-summary",
+                        itemKind: "analysis",
+                        summary: "checking",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning-summary",
+                        itemKind: "analysis",
+                        summary: "checking files",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const stream =
+                activeStreamsReference.current["agent:main:main::run-1::reasoning"];
+            const matches = thinkingTexts(stream).filter((text) =>
+                text.includes("checking")
+            );
+            expect(matches).toContain("checking files");
+            expect(matches).not.toContain("checkingchecking files");
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: " files",
+                        itemId: "reasoning-progress-delta",
+                        itemKind: "analysis",
+                        progressText: "checking files",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const block = activeStreamsReference.current[
+                "agent:main:main::run-1::reasoning"
+            ]?.message?.thinking?.find(
+                (thinkingBlock) => thinkingBlock.id === "reasoning-progress-delta"
+            );
+            expect(block?.text).toBe(" files");
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning-blank-snapshot",
+                        itemKind: "analysis",
+                        progressText: "visible reasoning",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning-blank-snapshot",
+                        itemKind: "analysis",
+                        progressText: " ",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const block = activeStreamsReference.current[
+                "agent:main:main::run-1::reasoning"
+            ]?.message?.thinking?.find(
+                (thinkingBlock) => thinkingBlock.id === "reasoning-blank-snapshot"
+            );
+            expect(block?.text).toBe("visible reasoning");
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        item: {
+                            kind: "preamble",
+                            summary: [{ text: "array reasoning block", type: "text" }],
+                            type: "analysis",
+                        },
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const stream =
+                activeStreamsReference.current["agent:main:main::run-1::reasoning"];
+            expect(
+                thinkingTexts(stream).some((text) =>
+                    text.includes("array reasoning block")
+                )
+            ).toBe(true);
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning-space",
+                        kind: "preamble",
+                        progressText: "checking",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning-space",
+                        kind: "preamble",
+                        progressText: " ",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        itemId: "reasoning-space",
+                        kind: "preamble",
+                        progressText: "files",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const stream =
+                activeStreamsReference.current["agent:main:main::run-1::reasoning"];
+            expect(
+                thinkingTexts(stream).some((text) => text.includes("checking files"))
+            ).toBe(true);
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        kind: "preamble",
+                        itemId: "preamble-1",
+                        phase: "update",
+                        progressText: "Codex preamble should",
+                        source: "codex-app-server",
+                        title: "Preamble",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        kind: "preamble",
+                        itemId: "preamble-1",
+                        phase: "update",
+                        progressText: "Codex preamble should be thinking",
+                        source: "codex-app-server",
+                        title: "Preamble",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const stream =
+                activeStreamsReference.current["agent:main:main::run-1::reasoning"];
+            const matches = thinkingTexts(stream).filter((text) =>
+                text.includes("Codex preamble")
+            );
+            expect(matches).toEqual(["Codex preamble should be thinking"]);
+            expect(stream?.statusText).toBeUndefined();
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "Hello",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: " ",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "world",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current["agent:main:main::run-1::assistant"]?.text
+            ).toBe("Hello world");
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        phase: "end",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            activeStreamsReference.current["agent:main:main::run-1::assistant"]?.text
+        ).toBe("Hello world");
+        expect(
+            activeStreamsReference.current["agent:main:main::run-1::thinking"]
+        ).toBeUndefined();
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "Hello ",
+                    },
+                    runId: "assistant-end-text",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        phase: "end",
+                        text: "world",
+                    },
+                    runId: "assistant-end-text",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "text" in message &&
+                    message.text === "Hello world"
+            )
+        ).toBe(true);
+        expect(
+            activeStreamsReference.current[
+                "agent:main:main::assistant-end-text::assistant"
+            ]
+        ).toBeUndefined();
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        content: "Content stream",
+                    },
+                    runId: "content-run",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current["agent:main:main::content-run::assistant"]
+                    ?.text
+            ).toBe("Content stream");
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        phase: "end",
+                    },
+                    runId: "empty-assistant-end",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            activeStreamsReference.current[
+                "agent:main:main::empty-assistant-end::assistant"
+            ]
+        ).toBeUndefined();
+
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "content-run",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "terminal reasoning",
+                    },
+                    runId: "diagnostic-terminal",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "diagnostic-terminal",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    "local" in message &&
+                    message.local === true &&
+                    message.thinking.some((block) =>
+                        block.text.includes("terminal reasoning")
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "channel ",
+                    },
+                    runId: "thinking-channel-end",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "end chunk",
+                        phase: "end",
+                    },
+                    runId: "thinking-channel-end",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking.some((block) =>
+                        block.text.includes("channel end chunk")
+                    )
+            )
+        ).toBe(true);
+        expect(
+            activeStreamsReference.current[
+                "agent:main:main::thinking-channel-end::thinking"
+            ]
+        ).toBeUndefined();
+        expect(
+            messages.filter(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking.some((block) => block.text.includes("channel"))
+            )
+        ).toHaveLength(1);
+
+        act(() => {
+            listener?.({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: [
+                            { text: "Mixed visible text", type: "text" },
+                            { text: "mixed terminal reasoning", type: "thinking" },
+                        ],
+                        role: "assistant",
+                    },
+                    runId: "mixed-terminal-diagnostic",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "mixed-terminal-diagnostic",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    "text" in message &&
+                    typeof message.text === "string" &&
+                    "local" in message &&
+                    message.local === true &&
+                    message.text.includes("Mixed visible text") &&
+                    message.thinking.some((block) =>
+                        block.text.includes("mixed terminal reasoning")
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    data: {
+                        delta: "whole-run final answer",
+                    },
+                    runId: "whole-run-terminal-assistant-payload",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "text" in message &&
+                    message.text === "whole-run final answer"
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    data: {
+                        delta: "whole-run final reasoning",
+                    },
+                    runId: "whole-run-terminal-thinking-payload",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking.some((block) =>
+                        block.text.includes("whole-run final reasoning")
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: [
+                            { text: "Final payload with media", type: "text" },
+                            { text: "final rich reasoning", type: "thinking" },
+                        ],
+                        role: "assistant",
+                    },
+                    runId: "final-rich-diagnostic",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: {
+                        content: [
+                            { text: "Final payload with media", type: "text" },
+                            {
+                                source: {
+                                    data: "ZmFrZQ==",
+                                    media_type: "image/png",
+                                    type: "base64",
+                                },
+                                type: "image",
+                            },
+                        ],
+                        role: "assistant",
+                    },
+                    runId: "final-rich-diagnostic",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "text" in message &&
+                    message.text === "Final payload with media" &&
+                    "images" in message &&
+                    Array.isArray(message.images) &&
+                    message.images.length === 1 &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking.some((block) =>
+                        block.text.includes("final rich reasoning")
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "chat final reasoning",
+                    },
+                    runId: "chat-final-diagnostic",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: { role: "assistant", text: "" },
+                    runId: "chat-final-diagnostic",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking.some((block) =>
+                        block.text.includes("chat final reasoning")
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "aborted reasoning",
+                    },
+                    runId: "chat-aborted-diagnostic",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "chat-aborted-diagnostic",
+                    sessionKey: "agent:main:main",
+                    state: "aborted",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking.some((block) =>
+                        block.text.includes("aborted reasoning")
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        item: {
+                            id: "codex-tool-1",
+                            input: "await tools.exec_command({cmd:'git status'})",
+                            name: "exec",
+                            type: "custom_tool_call",
+                        },
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            toolCall.id === "codex-tool-1" &&
+                            toolCall.name === "exec" &&
+                            toolCall.arguments ===
+                                "await tools.exec_command({cmd:'git status'})"
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        item: {
+                            call_id: "codex-tool-1",
+                            output: "git clean",
+                            type: "custom_tool_call_output",
+                        },
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            toolCall.id === "codex-tool-1" &&
+                            toolCall.toolResult?.content.includes("git clean")
+                    )
+            )
+        ).toBe(true);
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "tool" &&
+                    "toolResult" in message &&
+                    typeof message.toolResult === "object" &&
+                    message.toolResult !== null &&
+                    "content" in message.toolResult &&
+                    typeof message.toolResult.content === "string" &&
+                    message.toolResult.content.includes("git clean")
+            )
+        ).toBe(false);
+
+        act(() => {
+            listener?.({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        id: "other-call-id",
+                        name: "exec",
+                        phase: "result",
+                        result: "wrong call output",
                     },
                     runId: "run-1",
                     sessionKey: "agent:main:main",
@@ -940,11 +2880,463 @@ describe("shared component helpers", () => {
                     message !== null &&
                     "role" in message &&
                     message.role === "tool" &&
-                    "text" in message &&
-                    typeof message.text === "string" &&
-                    message.text.includes("ok")
+                    "toolResult" in message &&
+                    typeof message.toolResult === "object" &&
+                    message.toolResult !== null &&
+                    "id" in message.toolResult &&
+                    message.toolResult.id === "other-call-id"
             )
         ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        item: {
+                            call_id: "responses-call-1",
+                            id: "responses-item-1",
+                            input: { command: "pwd" },
+                            name: "functions.exec_command",
+                            type: "function_call",
+                        },
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        item: {
+                            call_id: "responses-call-1",
+                            output: "/home/ubuntu/projects/mira-dashboard",
+                            type: "function_call_output",
+                        },
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "item",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            toolCall.id === "responses-call-1" &&
+                            toolCall.toolResult?.content.includes("mira-dashboard")
+                    )
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "text" in message &&
+                    message.text === "Hello world"
+            )
+        ).toBe(true);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "Buffered terminal answer",
+                    },
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current["agent:main:main::assistant"]?.runId
+            ).toBe("agent:main:main");
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: " continued",
+                    },
+                    runId: "real-run-after-provisional",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current[
+                    "agent:main:main::real-run-after-provisional::assistant"
+                ]?.text
+            ).toBe("Buffered terminal answer continued");
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "real-run-after-provisional",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "text" in message &&
+                    message.text === "Buffered terminal answer continued"
+            )
+        ).toBe(true);
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
+        activeStreamsReference.current["agent:main:main"] = {
+            aliases: [],
+            runId: "dashboard-chat-optimistic",
+            sessionKey: "agent:main:main",
+            statusText: "Thinking",
+            text: "Optimistic buffered answer",
+            updatedAt: new Date().toISOString(),
+        };
+        activeStreamsReference.current[
+            "agent:main:main::dashboard-chat-optimistic::assistant"
+        ] = {
+            aliases: ["dashboard-chat-optimistic"],
+            runId: "dashboard-chat-optimistic",
+            sessionKey: "agent:main:main",
+            text: "Optimistic buffered answer",
+            updatedAt: new Date().toISOString(),
+        };
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "real-chat-terminal",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "text" in message &&
+                    message.text === "Optimistic buffered answer"
+            )
+        ).toBe(true);
+        expect(activeStreamsReference.current["agent:main:main"]).toBeUndefined();
+        expect(
+            activeStreamsReference.current[
+                "agent:main:main::dashboard-chat-optimistic::assistant"
+            ]
+        ).toBeUndefined();
+        activeStreamsReference.current = {};
+
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "Hello",
+                    runId: "overlap-run",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "Hello world",
+                    },
+                    runId: "overlap-run",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current["agent:main:main::overlap-run::assistant"]
+                    ?.text
+            ).toBe("Hello world");
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "overlap-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "text" in message &&
+                    message.text === "Hello world"
+            )
+        ).toBe(true);
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "Run A",
+                    },
+                    runId: "overlap-a",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "Run B",
+                    },
+                    runId: "overlap-b",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current["agent:main:main::overlap-a::assistant"]
+                    ?.text
+            ).toBe("Run A");
+            expect(
+                activeStreamsReference.current["agent:main:main::overlap-b::assistant"]
+                    ?.text
+            ).toBe("Run B");
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "overlap-a",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "text" in message &&
+                    message.text === "Run A"
+            )
+        ).toBe(true);
+        expect(
+            activeStreamsReference.current["agent:main:main::overlap-b::assistant"]?.text
+        ).toBe("Run B");
+        activeStreamsReference.current = {};
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "Unscoped A",
+                    },
+                    runId: "unscoped-a",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "Unscoped B",
+                    },
+                    runId: "unscoped-b",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "text" in message &&
+                    (message.text === "Unscoped A" || message.text === "Unscoped B")
+            )
+        ).toBe(false);
+        expect(
+            activeStreamsReference.current["agent:main:main::unscoped-a::assistant"]?.text
+        ).toBe("Unscoped A");
+        expect(
+            activeStreamsReference.current["agent:main:main::unscoped-b::assistant"]?.text
+        ).toBe("Unscoped B");
+        activeStreamsReference.current = {};
+
+        activeStreamsReference.current["agent:main:main"] = {
+            aliases: [],
+            runId: "dashboard-chat-legacy",
+            sessionKey: "agent:main:main",
+            statusText: "Thinking",
+            text: "",
+            updatedAt: new Date().toISOString(),
+        };
+        activeStreamsReference.current["agent:main:main::assistant"] = {
+            aliases: [],
+            runId: "agent:main:main",
+            sessionKey: "agent:main:main",
+            text: "Legacy buffered answer",
+            updatedAt: new Date().toISOString(),
+        };
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "text" in message &&
+                    message.text === "Legacy buffered answer"
+            )
+        ).toBe(true);
+        expect(activeStreamsReference.current["agent:main:main"]).toBeUndefined();
+        expect(
+            activeStreamsReference.current["agent:main:main::assistant"]
+        ).toBeUndefined();
+        activeStreamsReference.current = {};
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "provisional thinking",
+                    },
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current["agent:main:main::thinking"]?.runId
+            ).toBe("agent:main:main");
+        });
+        activeStreamsReference.current["agent:main:main"] = {
+            aliases: [],
+            runId: "dashboard-chat-test",
+            sessionKey: "agent:main:main",
+            statusText: "Thinking",
+            text: "",
+            updatedAt: new Date().toISOString(),
+        };
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "real-runtime-terminal",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            activeStreamsReference.current["agent:main:main::thinking"]
+        ).toBeUndefined();
+        expect(activeStreamsReference.current["agent:main:main"]?.runId).toBe(
+            "dashboard-chat-test"
+        );
+        activeStreamsReference.current = {};
 
         act(() => {
             listener?.({
@@ -972,6 +3364,34 @@ describe("shared component helpers", () => {
 
         act(() => {
             listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "partial before error",
+                    },
+                    runId: "run-2",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "reasoning before error",
+                    },
+                    runId: "run-2",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
                 event: "chat",
                 payload: {
                     errorMessage: "failed",
@@ -983,6 +3403,27 @@ describe("shared component helpers", () => {
             });
         });
         expect(sendError).toBe("failed");
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "text" in message &&
+                    message.text === "partial before error"
+            )
+        ).toBe(true);
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking.some((block) =>
+                        block.text.includes("reasoning before error")
+                    )
+            )
+        ).toBe(true);
 
         await act(async () => {
             await new Promise((resolve) => setTimeout(resolve, 550));
@@ -999,6 +3440,1189 @@ describe("shared component helpers", () => {
 
         unmount();
         expect(unsubscribe).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps thinking status visible when thinking output is hidden", async () => {
+        let listener: ((message: unknown) => void) | undefined;
+        const unsubscribe = jest.fn();
+        const activeStreamsReference: { current: ActiveChatStreams } = { current: {} };
+        let activeStreams: ActiveChatStreams = {};
+        const updateActiveStreams = jest.fn((updater) => {
+            activeStreams = updater(activeStreams);
+            activeStreamsReference.current = activeStreams;
+        });
+        const subscribe = jest.fn((nextListener: (data: unknown) => void) => {
+            listener = nextListener;
+            return unsubscribe;
+        });
+
+        const { unmount } = renderHook(() =>
+            useChatRuntimeEvents({
+                activeStreamsReference,
+                connectionId: 1,
+                isConnected: true,
+                liveHistoryRefreshTimerReference: { current: undefined },
+                request: jest.fn(),
+                selectedSessionKey: "agent:main:main",
+                setHistoryLoadVersion: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages: jest.fn(),
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                showThinkingOutput: false,
+                showToolOutput: true,
+                subscribe,
+                updateActiveStreams,
+            })
+        );
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "hidden reasoning",
+                    },
+                    runId: "hidden-thinking-run",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current[
+                    "agent:main:main::hidden-thinking-run::thinking"
+                ]?.statusText
+            ).toBe("Thinking");
+        });
+
+        unmount();
+        expect(unsubscribe).toHaveBeenCalledTimes(1);
+    });
+
+    it("folds repeated tool results into matching calls without clobbering", () => {
+        const visible = normalizeVisibleChatHistoryMessages(
+            [
+                {
+                    content: [
+                        {
+                            arguments: { command: "first" },
+                            name: "functions.exec_command",
+                            type: "toolCall",
+                        },
+                        {
+                            arguments: { command: "second" },
+                            name: "functions.exec_command",
+                            type: "toolCall",
+                        },
+                    ],
+                    role: "assistant",
+                },
+                {
+                    content: "first output",
+                    role: "tool",
+                    toolName: "functions.exec_command",
+                },
+                {
+                    content: [
+                        {
+                            data: "a",
+                            mimeType: "image/png",
+                            type: "image",
+                        },
+                    ],
+                    role: "tool",
+                    toolName: "functions.exec_command",
+                },
+            ],
+            createChatVisibility(true, true)
+        );
+
+        expect(visible).toHaveLength(1);
+        expect(visible[0]?.toolCalls?.[0]?.toolResult?.content).toBe("first output");
+        expect(visible[0]?.toolCalls?.[1]?.toolResult?.images).toHaveLength(1);
+        expect(visible.some((message) => message.role === "tool")).toBe(false);
+
+        const mediaVisible = normalizeVisibleChatHistoryMessages(
+            [
+                {
+                    content: [
+                        {
+                            arguments: { path: "/tmp/chart.png" },
+                            name: "functions.image",
+                            type: "toolCall",
+                        },
+                    ],
+                    role: "assistant",
+                },
+                {
+                    content: "MEDIA:/tmp/chart.png",
+                    role: "tool",
+                    toolName: "functions.image",
+                },
+            ],
+            createChatVisibility(true, true)
+        );
+
+        expect(mediaVisible).toHaveLength(1);
+        expect(mediaVisible[0]?.toolCalls?.[0]?.toolResult?.content).toContain(
+            "MEDIA:/tmp/chart.png"
+        );
+        expect(mediaVisible[0]?.attachments?.[0]?.fileName).toBe("chart.png");
+
+        const idBearingVisible = normalizeVisibleChatHistoryMessages(
+            [
+                {
+                    content: [
+                        {
+                            arguments: { command: "first" },
+                            id: "call-with-id",
+                            name: "functions.exec_command",
+                            type: "toolCall",
+                        },
+                    ],
+                    role: "assistant",
+                    timestamp: "2026-06-28T10:00:00.000Z",
+                },
+                {
+                    content: "unscoped output",
+                    role: "tool",
+                    timestamp: "2026-06-28T10:01:00.000Z",
+                    toolName: "functions.exec_command",
+                },
+            ],
+            createChatVisibility(true, true)
+        );
+        expect(idBearingVisible).toHaveLength(2);
+        expect(idBearingVisible[0]?.toolCalls?.[0]?.toolResult).toBeUndefined();
+        expect(idBearingVisible[1]?.role).toBe("tool");
+
+        const completedLaterCallVisible = normalizeVisibleChatHistoryMessages(
+            [
+                {
+                    content: [
+                        {
+                            arguments: { command: "later" },
+                            id: "call-1",
+                            name: "functions.exec_command",
+                            type: "toolCall",
+                        },
+                    ],
+                    role: "assistant",
+                    timestamp: "2026-06-28T10:02:00.000Z",
+                },
+                {
+                    content: "later output",
+                    role: "tool",
+                    timestamp: "2026-06-28T10:03:00.000Z",
+                    toolCallId: "call-1",
+                    toolName: "functions.exec_command",
+                },
+                {
+                    content: "older delayed output",
+                    role: "tool",
+                    timestamp: "2026-06-28T10:04:00.000Z",
+                    toolCallId: "call-1",
+                    toolName: "functions.exec_command",
+                },
+            ],
+            createChatVisibility(true, true)
+        );
+        expect(completedLaterCallVisible).toHaveLength(2);
+        expect(completedLaterCallVisible[0]?.toolCalls?.[0]?.toolResult?.content).toBe(
+            "later output"
+        );
+        expect(completedLaterCallVisible[1]?.toolResult?.content).toBe(
+            "older delayed output"
+        );
+
+        const foldedTimestampVisible = normalizeVisibleChatHistoryMessages(
+            [
+                {
+                    content: [
+                        {
+                            arguments: { command: "fresh" },
+                            name: "functions.exec_command",
+                            type: "toolCall",
+                        },
+                    ],
+                    role: "assistant",
+                    timestamp: "2026-06-28T10:00:00.000Z",
+                },
+                {
+                    content: "fresh output",
+                    role: "tool",
+                    timestamp: "2026-06-28T10:02:00.000Z",
+                    toolName: "functions.exec_command",
+                },
+            ],
+            createChatVisibility(true, true)
+        );
+        expect(foldedTimestampVisible).toHaveLength(1);
+        expect(foldedTimestampVisible[0]?.timestamp).toBe("2026-06-28T10:02:00.000Z");
+        expect(foldedTimestampVisible[0]?.toolCalls?.[0]?.toolResult?.content).toBe(
+            "fresh output"
+        );
+    });
+
+    it("keeps live tool results when history briefly lags", () => {
+        const localToolRow = {
+            content: "",
+            local: true,
+            role: "assistant",
+            text: "",
+            timestamp: new Date().toISOString(),
+            runId: "tool-row-run",
+            toolCalls: [
+                {
+                    arguments: { command: "git status" },
+                    id: "call-1",
+                    name: "functions.exec_command",
+                    toolResult: {
+                        content: "clean",
+                        id: "call-1",
+                        name: "functions.exec_command",
+                    },
+                },
+            ],
+        };
+        const staleHistoryRow = {
+            content: "",
+            role: "assistant",
+            text: "",
+            toolCalls: [
+                {
+                    arguments: { command: "git status" },
+                    id: "call-1",
+                    name: "functions.exec_command",
+                },
+            ],
+        };
+
+        const merged = mergeWithRecentOptimisticMessages(
+            [localToolRow],
+            [staleHistoryRow]
+        );
+
+        expect(merged).toHaveLength(1);
+        expect(merged[0]?.toolCalls?.[0]?.id).toBe("call-1");
+        expect(merged[0]?.toolCalls?.[0]?.toolResult?.content).toBe("clean");
+
+        const namedLocalRow = {
+            content: "",
+            local: true,
+            role: "assistant",
+            text: "",
+            timestamp: new Date().toISOString(),
+            runId: "named-tool-row-run",
+            toolCalls: [
+                {
+                    arguments: { command: "git diff" },
+                    name: "functions.exec_command",
+                    toolResult: {
+                        content: "diff output",
+                        name: "functions.exec_command",
+                    },
+                },
+            ],
+        };
+        const namedHistoryRow = {
+            content: "",
+            role: "assistant",
+            text: "",
+            timestamp: new Date().toISOString(),
+            runId: "named-tool-row-run",
+            toolCalls: [
+                {
+                    arguments: { command: "git diff" },
+                    name: "functions.exec_command",
+                },
+            ],
+        };
+        const alreadyEnrichedHistoryRow = {
+            ...namedHistoryRow,
+            toolCalls: [
+                {
+                    arguments: { command: "git diff" },
+                    name: "functions.exec_command",
+                    toolResult: {
+                        content: "history output",
+                        name: "functions.exec_command",
+                    },
+                },
+            ],
+        };
+
+        expect(
+            mergeWithRecentOptimisticMessages([namedLocalRow], [namedHistoryRow])[0]
+                ?.toolCalls?.[0]?.toolResult?.content
+        ).toBe("diff output");
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [namedLocalRow],
+                [alreadyEnrichedHistoryRow]
+            )[0]?.toolCalls?.[0]?.toolResult?.content
+        ).toBe("history output");
+
+        const duplicateNameLocalRow = {
+            content: "same assistant text",
+            local: true,
+            role: "assistant",
+            text: "same assistant text",
+            timestamp: new Date().toISOString(),
+            runId: "duplicate-tool-row-run",
+            toolCalls: [
+                {
+                    arguments: { command: "first" },
+                    name: "functions.exec_command",
+                    toolResult: {
+                        content: "first output",
+                        name: "functions.exec_command",
+                    },
+                },
+                {
+                    arguments: { command: "second" },
+                    name: "functions.exec_command",
+                    toolResult: {
+                        content: "second output",
+                        name: "functions.exec_command",
+                    },
+                },
+            ],
+        };
+        const duplicateNameHistoryRow = {
+            content: "same assistant text",
+            role: "assistant",
+            text: "same assistant text",
+            timestamp: new Date().toISOString(),
+            runId: "duplicate-tool-row-run",
+            toolCalls: [
+                {
+                    arguments: { command: "first" },
+                    name: "functions.exec_command",
+                },
+                {
+                    arguments: { command: "second" },
+                    name: "functions.exec_command",
+                },
+            ],
+        };
+
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [duplicateNameLocalRow],
+                [duplicateNameHistoryRow]
+            )[0]?.toolCalls?.map((toolCall) => toolCall.toolResult?.content)
+        ).toEqual(["first output", "second output"]);
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [duplicateNameLocalRow],
+                [{ ...duplicateNameHistoryRow, runId: "new-duplicate-tool-row-run" }]
+            )[0]?.toolCalls?.some((toolCall) => toolCall.toolResult)
+        ).toBe(false);
+
+        const idlessTextLocalRow = {
+            content: "same assistant text with tools",
+            local: true,
+            role: "assistant",
+            text: "same assistant text with tools",
+            timestamp: new Date().toISOString(),
+            toolCalls: [
+                {
+                    arguments: { command: "first" },
+                    name: "functions.exec_command",
+                    toolResult: {
+                        content: "first live output",
+                        name: "functions.exec_command",
+                    },
+                },
+                {
+                    arguments: { command: "second" },
+                    name: "functions.exec_command",
+                    toolResult: {
+                        content: "second live output",
+                        name: "functions.exec_command",
+                    },
+                },
+            ],
+        };
+        const idlessTextHistoryRow = {
+            content: "same assistant text with tools",
+            role: "assistant",
+            text: "same assistant text with tools",
+            toolCalls: [
+                {
+                    arguments: { command: "first" },
+                    name: "functions.exec_command",
+                },
+                {
+                    arguments: { command: "second" },
+                    name: "functions.exec_command",
+                },
+            ],
+        };
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [idlessTextLocalRow],
+                [idlessTextHistoryRow]
+            )[0]?.toolCalls?.map((toolCall) => toolCall.toolResult?.content)
+        ).toEqual(["first live output", "second live output"]);
+
+        const mixedDiagnosticLocalRow = {
+            content: [
+                { text: "same visible text", type: "text" },
+                { text: "local reasoning", type: "thinking" },
+            ],
+            local: true,
+            role: "assistant",
+            text: "same visible text",
+            thinking: [{ text: "local reasoning" }],
+            timestamp: new Date().toISOString(),
+        };
+        const mixedDiagnosticHistoryRow = {
+            content: "same visible text",
+            role: "assistant",
+            text: "same visible text",
+        };
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [mixedDiagnosticLocalRow],
+                [mixedDiagnosticHistoryRow]
+            )[0]?.thinking?.[0]?.text
+        ).toBe("local reasoning");
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [mixedDiagnosticLocalRow],
+                [
+                    {
+                        ...mixedDiagnosticHistoryRow,
+                        thinking: [{ text: "history reasoning" }],
+                    },
+                ]
+            )[0]?.thinking?.[0]?.text
+        ).toBe("history reasoning");
+
+        const firstDoneDiagnostic = {
+            ...mixedDiagnosticLocalRow,
+            runId: "done-1",
+            text: "Done",
+            thinking: [{ text: "first done reasoning" }],
+        };
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [firstDoneDiagnostic],
+                [{ content: "Done", role: "assistant", runId: "done-2", text: "Done" }]
+            )[0]?.thinking
+        ).toBeUndefined();
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [firstDoneDiagnostic],
+                [{ content: "Done", role: "assistant", runId: "done-1", text: "Done" }]
+            )[0]?.thinking?.[0]?.text
+        ).toBe("first done reasoning");
+    });
+
+    it("forces refreshed chat diagnostics to merge before clearing streams", () => {
+        const previousMessages = [
+            {
+                content: "Done",
+                role: "assistant",
+                text: "Done",
+                timestamp: "2026-06-29T03:00:00.000Z",
+            },
+        ];
+        const diagnosticMessages = [
+            {
+                ...previousMessages[0]!,
+                content: [
+                    { text: "Done", type: "text" },
+                    { text: "recovered reasoning", type: "thinking" },
+                ],
+                thinking: [{ text: "recovered reasoning" }],
+            },
+        ];
+
+        expect(nextRefreshedChatMessages(previousMessages, diagnosticMessages)).toBe(
+            previousMessages
+        );
+        expect(
+            nextRefreshedChatMessages(previousMessages, diagnosticMessages, true)[0]
+                ?.thinking?.[0]?.text
+        ).toBe("recovered reasoning");
+    });
+
+    it("detects recovered thinking-only active streams", () => {
+        const now = Date.now();
+        const recentUpdatedAt = new Date(now - 1000).toISOString();
+        const quietUpdatedAt = new Date(now - 130_000).toISOString();
+        const stream = {
+            aliases: [],
+            message: {
+                attachments: [],
+                content: [{ text: "thinking recovered prefix", type: "thinking" }],
+                images: [],
+                role: "assistant",
+                text: "",
+                thinking: [{ text: "thinking recovered prefix" }],
+            },
+            runId: "run-1",
+            sessionKey: "agent:main:main",
+            text: "",
+            updatedAt: recentUpdatedAt,
+        };
+        const visibleMessages = [
+            {
+                attachments: [],
+                content: [
+                    { text: "thinking recovered prefix and suffix", type: "thinking" },
+                ],
+                images: [],
+                role: "assistant",
+                text: "",
+                thinking: [{ text: "thinking recovered prefix and suffix" }],
+            },
+        ];
+
+        expect(
+            activeStreamRenderableText({
+                ...stream,
+                message: {
+                    content: "Done",
+                    role: "assistant",
+                    text: "Done",
+                },
+                text: "Done",
+            })
+        ).toBe("Done");
+        expect(isActiveStreamRecoveredInMessages(stream, visibleMessages, now)).toBe(
+            false
+        );
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "assistant still streaming",
+                    },
+                    text: "assistant still streaming",
+                },
+                visibleMessages,
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "assistant still streaming",
+                    },
+                    text: "assistant still streaming",
+                },
+                [
+                    {
+                        ...visibleMessages[0]!,
+                        content: [
+                            { text: "assistant still streaming", type: "text" },
+                            {
+                                text: "thinking recovered prefix",
+                                type: "thinking",
+                            },
+                        ],
+                        thinking: [{ text: "thinking recovered prefix" }],
+                        text: "assistant still streaming",
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                { ...stream, updatedAt: quietUpdatedAt },
+                visibleMessages,
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "assistant recovered text",
+                        thinking: undefined,
+                    },
+                    text: "assistant recovered text",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "assistant recovered text",
+                        images: [],
+                        role: "assistant",
+                        text: "assistant recovered text",
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        const mixedTextDiagnosticStream = {
+            ...stream,
+            message: {
+                ...stream.message,
+                text: "assistant recovered text",
+                thinking: [{ text: "still live reasoning" }],
+            },
+            text: "assistant recovered text",
+        };
+        expect(
+            isActiveStreamRecoveredInMessages(
+                mixedTextDiagnosticStream,
+                [
+                    {
+                        attachments: [],
+                        content: "assistant recovered text",
+                        images: [],
+                        role: "assistant",
+                        text: "assistant recovered text",
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                mixedTextDiagnosticStream,
+                [
+                    {
+                        attachments: [],
+                        content: [
+                            { text: "assistant recovered text", type: "text" },
+                            { text: "still live reasoning", type: "thinking" },
+                        ],
+                        images: [],
+                        role: "assistant",
+                        text: "assistant recovered text",
+                        thinking: [{ text: "still live reasoning" }],
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        const parallelToolStream = {
+            ...stream,
+            message: {
+                ...stream.message,
+                text: "",
+                thinking: undefined,
+                toolCalls: [
+                    { arguments: { command: "git status" }, name: "exec" },
+                    { arguments: { command: "git diff" }, name: "exec" },
+                ],
+            },
+            text: "",
+        };
+        expect(
+            isActiveStreamRecoveredInMessages(
+                parallelToolStream,
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [
+                            { arguments: { command: "git status" }, name: "exec" },
+                        ],
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                parallelToolStream,
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [
+                            { arguments: { command: "git status" }, name: "exec" },
+                            { arguments: { command: "git diff" }, name: "exec" },
+                        ],
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        const duplicateToolStream = {
+            ...stream,
+            message: {
+                ...stream.message,
+                text: "",
+                thinking: undefined,
+                toolCalls: [
+                    { arguments: { command: "same" }, name: "exec" },
+                    { arguments: { command: "same" }, name: "exec" },
+                ],
+            },
+            text: "",
+        };
+        expect(
+            isActiveStreamRecoveredInMessages(
+                duplicateToolStream,
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [{ arguments: { command: "same" }, name: "exec" }],
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                duplicateToolStream,
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [
+                            { arguments: { command: "same" }, name: "exec" },
+                            { arguments: { command: "same" }, name: "exec" },
+                        ],
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        const toolCallWithResultStream = {
+            ...stream,
+            message: {
+                ...stream.message,
+                text: "",
+                thinking: undefined,
+                toolCalls: [
+                    {
+                        id: "call-1",
+                        name: "exec",
+                        toolResult: {
+                            content: "ok",
+                            id: "call-1",
+                            name: "exec",
+                        },
+                    },
+                ],
+            },
+            text: "",
+        };
+        expect(
+            isActiveStreamRecoveredInMessages(
+                toolCallWithResultStream,
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [{ id: "call-1", name: "exec" }],
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                toolCallWithResultStream,
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [
+                            {
+                                id: "call-1",
+                                name: "exec",
+                                toolResult: {
+                                    content: "ok",
+                                    id: "call-1",
+                                    name: "exec",
+                                },
+                            },
+                        ],
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        const mixedTextToolStream = {
+            ...stream,
+            message: {
+                ...stream.message,
+                text: "assistant text with tool",
+                thinking: undefined,
+                toolCalls: [{ id: "call-2", name: "exec" }],
+            },
+            text: "assistant text with tool",
+        };
+        expect(
+            isActiveStreamRecoveredInMessages(
+                mixedTextToolStream,
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [{ id: "call-2", name: "exec" }],
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                mixedTextToolStream,
+                [
+                    {
+                        attachments: [],
+                        content: "assistant text with tool",
+                        images: [],
+                        role: "assistant",
+                        text: "assistant text with tool",
+                        toolCalls: [{ id: "call-2", name: "exec" }],
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "",
+                        thinking: undefined,
+                        toolCalls: [
+                            {
+                                arguments: { command: "git status" },
+                                name: "exec",
+                            },
+                        ],
+                    },
+                    text: "",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [
+                            {
+                                arguments: { command: "git diff" },
+                                name: "exec",
+                            },
+                        ],
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "",
+                        thinking: undefined,
+                        toolCalls: [{ name: "exec" }],
+                    },
+                    text: "",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [{ name: "exec" }],
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        thinking: [{ text: "exact thinking recovered" }],
+                    },
+                },
+                [
+                    {
+                        attachments: [],
+                        content: [{ text: "exact thinking recovered", type: "thinking" }],
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        thinking: [{ text: "exact thinking recovered" }],
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "",
+                        thinking: undefined,
+                        toolCalls: [{ id: "call-1", name: "exec" }],
+                    },
+                    text: "",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [{ id: "call-1", name: "exec" }],
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "",
+                        thinking: undefined,
+                        toolResult: {
+                            content: "ok",
+                            id: "call-1",
+                            name: "exec",
+                        },
+                    },
+                    text: "",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolResult: {
+                            content: "ok",
+                            id: "call-1",
+                            name: "exec",
+                        },
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "",
+                        thinking: undefined,
+                        toolResult: {
+                            content: "ok",
+                            name: "exec",
+                        },
+                    },
+                    text: "",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolResult: {
+                            content: "ok",
+                            name: "exec",
+                        },
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "",
+                        thinking: undefined,
+                        toolResult: {
+                            content: "new output",
+                            name: "exec",
+                        },
+                    },
+                    text: "",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolResult: {
+                            content: "old output",
+                            name: "exec",
+                        },
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "",
+                        thinking: undefined,
+                        toolResult: {
+                            content: "",
+                            images: [
+                                {
+                                    data: "new-image",
+                                    mimeType: "image/png",
+                                    type: "image",
+                                },
+                            ],
+                            name: "image_tool",
+                        },
+                    },
+                    text: "",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolResult: {
+                            content: "",
+                            images: [
+                                {
+                                    data: "old-image",
+                                    mimeType: "image/png",
+                                    type: "image",
+                                },
+                            ],
+                            name: "image_tool",
+                        },
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "",
+                        thinking: undefined,
+                        toolResult: {
+                            content: "",
+                            images: [
+                                {
+                                    data: "new-image",
+                                    mimeType: "image/png",
+                                    type: "image",
+                                },
+                            ],
+                            name: "image_tool",
+                        },
+                    },
+                    text: "",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolResult: {
+                            content: "",
+                            images: [
+                                {
+                                    data: "new-image",
+                                    mimeType: "image/png",
+                                    type: "image",
+                                },
+                            ],
+                            name: "image_tool",
+                        },
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                { ...stream, updatedAt: quietUpdatedAt },
+                [
+                    {
+                        attachments: [],
+                        content: "thinking recovered prefix and suffix",
+                        images: [],
+                        role: "user",
+                        text: "thinking recovered prefix and suffix",
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
     });
 
     it("renders chat messages list helpers and primary row actions", async () => {
