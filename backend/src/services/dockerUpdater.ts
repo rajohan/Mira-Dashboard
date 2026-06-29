@@ -1286,6 +1286,147 @@ function setNestedValue(target: JsonRecord, dottedPath: string, value: string) {
     current[lastPart] = value;
 }
 
+function composeImageFieldServiceName(dottedPath: string): string | undefined {
+    const rawParts = dottedPath.split(".");
+    if (rawParts[0] !== "services" || rawParts.at(-1) !== "image") {
+        return undefined;
+    }
+    if (rawParts.length < 3) {
+        return undefined;
+    }
+    return rawParts.slice(1, -1).join(".");
+}
+
+function escapeRegExp(value: string): string {
+    return value.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+}
+
+function leadingWhitespaceLength(value: string): number {
+    return value.match(/^\s*/)?.[0].length ?? 0;
+}
+
+function isBlankOrCommentLine(value: string): boolean {
+    const trimmed = value.trim();
+    return trimmed === "" || trimmed.startsWith("#");
+}
+
+function firstChildIndent(lines: string[], startIndex: number, parentIndent: number) {
+    let childIndent: number | undefined;
+    for (let index = startIndex; index < lines.length; index += 1) {
+        const line = lines[index];
+        if (line === undefined || isBlankOrCommentLine(line)) continue;
+        const indent = leadingWhitespaceLength(line);
+        if (indent <= parentIndent) break;
+        childIndent = indent;
+        break;
+    }
+    return childIndent;
+}
+
+function isComplexYamlScalar(value: string): boolean {
+    const trimmed = value.trimStart();
+    return (
+        trimmed.startsWith(">") ||
+        trimmed.startsWith("|") ||
+        trimmed.startsWith("&") ||
+        trimmed.startsWith("!")
+    );
+}
+
+function updateComposeImageLine(
+    raw: string,
+    composeImageField: string,
+    targetImageReference: string
+): string | undefined {
+    const serviceName = composeImageFieldServiceName(composeImageField);
+    if (!serviceName) return undefined;
+
+    const lineEnding = raw.includes("\r\n") ? "\r\n" : "\n";
+    const hasTrailingLineEnding = raw.endsWith("\n");
+    const lines = raw.split(/\r?\n/);
+    if (hasTrailingLineEnding) lines.pop();
+
+    const servicesLineIndex = lines.findIndex((line) =>
+        /^services\s*:\s*(?:#.*)?$/.test(line)
+    );
+    if (servicesLineIndex === -1) return undefined;
+
+    const servicesLine = lines[servicesLineIndex];
+    if (servicesLine === undefined) return undefined;
+    const servicesIndent = leadingWhitespaceLength(servicesLine);
+    const serviceChildIndent = firstChildIndent(
+        lines,
+        servicesLineIndex + 1,
+        servicesIndent
+    );
+    if (serviceChildIndent === undefined) return undefined;
+    const escapedServiceName = escapeRegExp(serviceName);
+    const serviceLinePattern = new RegExp(
+        String.raw`^(\s*)(?:"${escapedServiceName}"|'${escapedServiceName}'|${escapedServiceName})\s*:\s*(?:#.*)?$`
+    );
+    let serviceLineIndex = -1;
+    let serviceIndent = -1;
+    for (let index = servicesLineIndex + 1; index < lines.length; index += 1) {
+        const line = lines[index];
+        if (line === undefined) continue;
+        if (isBlankOrCommentLine(line)) continue;
+        const indent = leadingWhitespaceLength(line);
+        if (indent <= servicesIndent) break;
+        if (indent !== serviceChildIndent) continue;
+        const match = line.match(serviceLinePattern);
+        if (!match) continue;
+        serviceLineIndex = index;
+        serviceIndent = match[1]?.length ?? 0;
+        break;
+    }
+    if (serviceLineIndex === -1) return undefined;
+    const servicePropertyIndent = firstChildIndent(
+        lines,
+        serviceLineIndex + 1,
+        serviceIndent
+    );
+    if (servicePropertyIndent === undefined) return undefined;
+
+    for (let index = serviceLineIndex + 1; index < lines.length; index += 1) {
+        const line = lines[index];
+        if (line === undefined) continue;
+        if (isBlankOrCommentLine(line)) continue;
+        const indent = leadingWhitespaceLength(line);
+        if (indent <= serviceIndent) break;
+        if (indent !== servicePropertyIndent) continue;
+        const match = line.match(
+            /^(\s*image\s*:\s*)(?:(['"])(.*?)\2|([^#]*?))(\s*(?:#.*)?)$/
+        );
+        if (!match) continue;
+        const prefix = match[1];
+        const quote = match[2] ?? "";
+        const unquotedValue = match[4] ?? "";
+        if (!quote && isComplexYamlScalar(unquotedValue)) {
+            return undefined;
+        }
+        const suffix = match[5] ?? "";
+        const nextValue = quote
+            ? `${quote}${targetImageReference}${quote}`
+            : targetImageReference;
+        lines[index] = `${prefix}${nextValue}${suffix}`;
+        return `${lines.join(lineEnding)}${hasTrailingLineEnding ? lineEnding : ""}`;
+    }
+
+    return undefined;
+}
+
+function serializeComposeUpdate(
+    raw: string,
+    document: JsonRecord,
+    composeImageField: string,
+    targetImageReference: string
+): string {
+    return (
+        updateComposeImageLine(raw, composeImageField, targetImageReference) ??
+        YAML.stringify(document)
+    );
+}
+
 function writeFileWithMetadata(
     targetPath: string,
     content: string,
@@ -1484,7 +1625,16 @@ async function applyComposeUpdateUnlocked(
     );
     try {
         writeFileWithMetadata(rollbackTemporaryPath, raw, originalStats);
-        writeFileWithMetadata(temporaryPath, YAML.stringify(document), originalStats);
+        writeFileWithMetadata(
+            temporaryPath,
+            serializeComposeUpdate(
+                raw,
+                document,
+                composeImageField,
+                targetImageReference
+            ),
+            originalStats
+        );
         fs.renameSync(temporaryPath, composePath);
         for (const commandComposePath of commandComposePaths) {
             const realCommandComposePath = fs.realpathSync(commandComposePath);
@@ -1514,7 +1664,12 @@ async function applyComposeUpdateUnlocked(
             });
             writeFileWithMetadata(
                 commandTemporaryPath,
-                YAML.stringify(commandDocument),
+                serializeComposeUpdate(
+                    commandRaw,
+                    commandDocument,
+                    commandImageField,
+                    targetImageReference
+                ),
                 commandStats
             );
             fs.renameSync(commandTemporaryPath, realCommandComposePath);
