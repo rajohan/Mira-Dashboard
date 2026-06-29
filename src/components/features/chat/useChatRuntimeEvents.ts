@@ -952,6 +952,19 @@ function hasActiveStreamContent(message: ChatHistoryMessage): boolean {
     );
 }
 
+/** Returns a session-scoped cache key for a runtime run. */
+function toolErrorRunKey(sessionKey: string, runId: string): string {
+    return `${sessionKey}\u{0}${runId}`;
+}
+
+/** Returns whether a diagnostic row contains a failed tool result. */
+function hasFailedToolDiagnostic(message: ChatHistoryMessage): boolean {
+    return Boolean(
+        message.toolResult?.isError ||
+        message.toolCalls?.some((toolCall) => toolCall.toolResult?.isError)
+    );
+}
+
 /** Represents use chat runtime events paramilliseconds. */
 interface UseChatRuntimeEventsParameters {
     connectionId: number;
@@ -999,6 +1012,7 @@ export function useChatRuntimeEvents({
     const selectedSessionKeyReference = useRef(selectedSessionKey);
     const updateActiveStreamsReference = useRef(updateActiveStreams);
     const requestReference = useRef(request);
+    const toolErrorRunKeysReference = useRef(new Set<string>());
 
     updateActiveStreamsReference.current = updateActiveStreams;
     requestReference.current = request;
@@ -1552,6 +1566,14 @@ export function useChatRuntimeEvents({
             if ((eventName === "session.tool" || stream === "tool") && showToolOutput) {
                 const toolMessages = runtimeToolMessages(data, eventRunId);
                 if (toolMessages.length > 0) {
+                    if (
+                        eventRunId &&
+                        toolMessages.some((message) => hasFailedToolDiagnostic(message))
+                    ) {
+                        toolErrorRunKeysReference.current.add(
+                            toolErrorRunKey(selectedSessionKey, eventRunId)
+                        );
+                    }
                     setMessages((wasPrevious) =>
                         mergeRuntimeToolMessages(wasPrevious, toolMessages)
                     );
@@ -1561,6 +1583,14 @@ export function useChatRuntimeEvents({
             if (stream === "item" && showToolOutput) {
                 const toolMessages = runtimeItemToolMessages(data, eventRunId);
                 if (toolMessages.length > 0) {
+                    if (
+                        eventRunId &&
+                        toolMessages.some((message) => hasFailedToolDiagnostic(message))
+                    ) {
+                        toolErrorRunKeysReference.current.add(
+                            toolErrorRunKey(selectedSessionKey, eventRunId)
+                        );
+                    }
                     setMessages((wasPrevious) =>
                         mergeRuntimeToolMessages(wasPrevious, toolMessages)
                     );
@@ -2081,7 +2111,28 @@ export function useChatRuntimeEvents({
                         dedupeMessages([...wasPrevious, ...messagesToAppend])
                     );
                 }
-                if (eventMatchesSelected) {
+                const hasToolErrorDiagnostics =
+                    showToolOutput &&
+                    diagnosticMessages.some((message) =>
+                        hasFailedToolDiagnostic(message)
+                    );
+                const hasToolErrorForRun = Boolean(
+                    showToolOutput &&
+                    payload.runId &&
+                    toolErrorRunKeysReference.current.has(
+                        toolErrorRunKey(streamSessionKey, payload.runId)
+                    )
+                );
+                if (payload.runId && TERMINAL_CHAT_STATES.has(payload.state || "")) {
+                    toolErrorRunKeysReference.current.delete(
+                        toolErrorRunKey(streamSessionKey, payload.runId)
+                    );
+                }
+                if (
+                    eventMatchesSelected &&
+                    !hasToolErrorDiagnostics &&
+                    !hasToolErrorForRun
+                ) {
                     setSendError(payload.errorMessage || "Chat request failed");
                 }
                 clearActiveStreamsForRun(streamSessionKey, payload.runId);

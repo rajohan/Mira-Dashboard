@@ -3425,6 +3425,89 @@ describe("shared component helpers", () => {
             )
         ).toBe(true);
 
+        sendError = undefined;
+        setSendError.mockClear();
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        args: { cmd: "sqlite3 backend/data/mira-dashboard.db" },
+                        error: "database is locked",
+                        isError: true,
+                        name: "functions.exec_command",
+                        phase: "error",
+                    },
+                    runId: "run-3",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    errorMessage: "tool call failed",
+                    runId: "run-3",
+                    sessionKey: "agent:main:main",
+                    state: "error",
+                },
+                type: "event",
+            });
+        });
+        expect(setSendError).not.toHaveBeenCalled();
+        expect(sendError).toBeUndefined();
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "toolCalls" in message &&
+                    Array.isArray(message.toolCalls) &&
+                    message.toolCalls.some(
+                        (toolCall) =>
+                            toolCall.name === "functions.exec_command" &&
+                            toolCall.toolResult?.isError === true &&
+                            toolCall.toolResult.content.includes("database is locked")
+                    )
+            )
+        ).toBe(true);
+
+        sendError = undefined;
+        setSendError.mockClear();
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        args: { cmd: "still running" },
+                        name: "functions.exec_command",
+                        phase: "start",
+                    },
+                    runId: "run-4",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    errorMessage: "model failed after pending tool",
+                    runId: "run-4",
+                    sessionKey: "agent:main:main",
+                    state: "error",
+                },
+                type: "event",
+            });
+        });
+        expect(setSendError).toHaveBeenLastCalledWith("model failed after pending tool");
+        expect(sendError ?? "").toBe("model failed after pending tool");
+
         await act(async () => {
             await new Promise((resolve) => setTimeout(resolve, 550));
         });
@@ -3440,6 +3523,164 @@ describe("shared component helpers", () => {
 
         unmount();
         expect(unsubscribe).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows the global chat error when tool output is hidden before terminal error", async () => {
+        let listener: ((data: unknown) => void) | undefined;
+        const unsubscribe = jest.fn();
+        const subscribe = jest.fn((nextListener: (data: unknown) => void) => {
+            listener = nextListener;
+            return unsubscribe;
+        });
+        let sendError: string | undefined;
+        const setSendError = jest.fn((updater) => {
+            sendError = typeof updater === "function" ? updater(sendError) : updater;
+        });
+        const activeStreamsReference: { current: ActiveChatStreams } = { current: {} };
+        const updateActiveStreams = jest.fn((updater) => {
+            activeStreamsReference.current = updater(activeStreamsReference.current);
+        });
+
+        const { rerender, unmount } = renderHook(
+            ({ showToolOutput }) =>
+                useChatRuntimeEvents({
+                    activeStreamsReference,
+                    connectionId: 1,
+                    isConnected: true,
+                    liveHistoryRefreshTimerReference: { current: undefined },
+                    request: jest.fn(),
+                    selectedSessionKey: "agent:main:main",
+                    setHistoryLoadVersion: jest.fn(),
+                    setIsAtBottom: jest.fn(),
+                    setMessages: jest.fn(),
+                    setSendError,
+                    shouldStickToBottomReference: { current: true },
+                    showThinkingOutput: true,
+                    showToolOutput,
+                    subscribe,
+                    updateActiveStreams,
+                }),
+            { initialProps: { showToolOutput: true } }
+        );
+
+        await waitFor(() => {
+            expect(subscribe).toHaveBeenCalledTimes(1);
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        error: "database is locked",
+                        isError: true,
+                        name: "functions.exec_command",
+                        phase: "error",
+                    },
+                    runId: "run-hidden-tool-error",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+
+        rerender({ showToolOutput: false });
+
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    errorMessage: "tool call failed",
+                    runId: "run-hidden-tool-error",
+                    sessionKey: "agent:main:main",
+                    state: "error",
+                },
+                type: "event",
+            });
+        });
+
+        expect(sendError).toBe("tool call failed");
+        unmount();
+    });
+
+    it("scopes cached tool errors to the selected chat session", async () => {
+        let listener: ((data: unknown) => void) | undefined;
+        const unsubscribe = jest.fn();
+        const subscribe = jest.fn((nextListener: (data: unknown) => void) => {
+            listener = nextListener;
+            return unsubscribe;
+        });
+        let sendError: string | undefined;
+        const setSendError = jest.fn((updater) => {
+            sendError = typeof updater === "function" ? updater(sendError) : updater;
+        });
+        const activeStreamsReference: { current: ActiveChatStreams } = { current: {} };
+        const updateActiveStreams = jest.fn((updater) => {
+            activeStreamsReference.current = updater(activeStreamsReference.current);
+        });
+
+        const { rerender, unmount } = renderHook(
+            ({ selectedSessionKey }) =>
+                useChatRuntimeEvents({
+                    activeStreamsReference,
+                    connectionId: 1,
+                    isConnected: true,
+                    liveHistoryRefreshTimerReference: { current: undefined },
+                    request: jest.fn(),
+                    selectedSessionKey,
+                    setHistoryLoadVersion: jest.fn(),
+                    setIsAtBottom: jest.fn(),
+                    setMessages: jest.fn(),
+                    setSendError,
+                    shouldStickToBottomReference: { current: true },
+                    showThinkingOutput: true,
+                    showToolOutput: true,
+                    subscribe,
+                    updateActiveStreams,
+                }),
+            { initialProps: { selectedSessionKey: "agent:main:first" } }
+        );
+
+        await waitFor(() => {
+            expect(subscribe).toHaveBeenCalledTimes(1);
+        });
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        error: "first session tool failed",
+                        isError: true,
+                        name: "functions.exec_command",
+                        phase: "error",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:first",
+                    stream: "tool",
+                },
+                type: "event",
+            });
+        });
+
+        rerender({ selectedSessionKey: "agent:main:second" });
+
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    errorMessage: "second session model failed",
+                    runId: "run-1",
+                    sessionKey: "agent:main:second",
+                    state: "error",
+                },
+                type: "event",
+            });
+        });
+
+        expect(sendError).toBe("second session model failed");
+        unmount();
     });
 
     it("keeps thinking status visible when thinking output is hidden", async () => {
