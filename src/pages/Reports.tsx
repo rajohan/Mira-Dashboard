@@ -55,6 +55,12 @@ function reportTimestamp(report: ReportItem): number {
     return Number.isNaN(createdAt) ? 0 : createdAt;
 }
 
+function shouldShowReportSummary(report: ReportItem): boolean {
+    const summary = report.summary.trim();
+    if (!summary) return false;
+    return summary !== report.bodyMd.trim();
+}
+
 interface ReportListProperties {
     reports: ReportItem[];
     selectedId: number | undefined;
@@ -141,6 +147,7 @@ function ReportDetails({ report, onDelete, deletePending }: ReportDetailsPropert
             </Card>
         );
     }
+    const shouldShowSummary = shouldShowReportSummary(report);
 
     return (
         <Card variant="bordered" className="min-w-0">
@@ -172,7 +179,7 @@ function ReportDetails({ report, onDelete, deletePending }: ReportDetailsPropert
                 </Button>
             </div>
 
-            {report.summary ? (
+            {shouldShowSummary ? (
                 <p className="border-primary-700 text-primary-200 bg-primary-900/40 mb-4 rounded-lg border p-3 text-sm">
                     {report.summary}
                 </p>
@@ -268,7 +275,7 @@ export function Reports() {
 
             {reportsQuery.isLoading ? (
                 <LoadingState message="Loading reports..." />
-            ) : reportsQuery.isError ? (
+            ) : reportsQuery.isError && !reportsQuery.data ? (
                 <Card variant="bordered">
                     <p className="text-red-300">Failed to load reports.</p>
                 </Card>
