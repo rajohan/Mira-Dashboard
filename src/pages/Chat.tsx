@@ -638,8 +638,7 @@ export function Chat() {
         message,
     }));
     let latestTypingStream:
-        | { key: string; statusText: string; updatedAt?: string }
-        | undefined;
+        { key: string; statusText: string; updatedAt?: string } | undefined;
 
     for (const [streamKey, stream] of selectedStreams) {
         const streamText = stream.text || "";
