@@ -1,0 +1,118 @@
+# Gateway And Chat Runtime
+
+Dashboard has two WebSocket layers:
+
+```text
+Browser /ws
+  |
+  v
+Dashboard backend
+  |
+  v
+OpenClaw Gateway WebSocket
+```
+
+The backend owns the long-lived OpenClaw Gateway connection. Browsers never
+connect to OpenClaw directly; they connect to Dashboard `/ws` after Dashboard
+auth.
+
+## Startup Token Selection
+
+On backend startup, the Gateway token is selected in this order:
+
+1. `OPENCLAW_GATEWAY_TOKEN`
+2. `OPENCLAW_TOKEN`
+3. persisted `app_config.gateway_token`
+
+Environment tokens win over the persisted database token. This is intentional:
+production should prefer Doppler-managed state over older bootstrap state.
+
+## Bootstrap Validation
+
+First-user bootstrap validates the submitted Gateway token before publishing the
+Dashboard user:
+
+1. Reject immediately if bootstrap is already closed.
+2. Serialize overlapping first-user attempts in the backend process.
+3. Persist and switch to the submitted token.
+4. Wait for an authenticated Gateway hello with `gateway.initAndWait(...)`.
+5. Create the first user only after Gateway validation succeeds.
+6. Roll back the submitted token and user/session state if validation or user
+   creation fails.
+7. On failure, restore the previously active token afterward, or shut Gateway
+   down if there was no previous token.
+
+Invalid Gateway auth returns `401`. Rollback failures return `500` because the
+server may need manual inspection.
+
+## Gateway Health
+
+`GET /api/health` reports:
+
+| Field | Meaning |
+| --- | --- |
+| `status` | Backend health state. |
+| `gatewayConnected` | Whether the backend Gateway client is authenticated and connected. |
+| `sessionCount` | Gateway session count known to Dashboard. |
+| `backendCommit` | Git commit served by the backend when available. |
+
+If `gatewayConnected:false`, check:
+
+- `mira-dashboard.service` logs;
+- `openclaw-gateway.service` status;
+- token mismatch messages;
+- token precedence from Doppler and `app_config`.
+
+## Browser WebSocket
+
+The browser `/ws` upgrade requires:
+
+- allowed origin;
+- authenticated Dashboard session cookie;
+- Dashboard route policy accepting the request.
+
+The WebSocket is used for Gateway state, chat runtime events, live tool
+diagnostics, and selected operational updates. Treat browser WebSocket failures
+as Dashboard session/origin/Gateway health issues before debugging React state.
+
+## Chat Runtime Model
+
+The chat UI combines several event sources into one visible conversation:
+
+- historical session messages;
+- live assistant deltas;
+- runtime events;
+- tool call diagnostics;
+- tool result diagnostics;
+- terminal chat state events.
+
+Tool-call failures should render as tool diagnostics, not as the global chat
+error banner. The global error banner is reserved for send failures, Gateway
+disconnects, and terminal chat/runtime failures that are not already represented
+by a visible failed tool result.
+
+When changing chat event handling, test these cases:
+
+- streaming text merges with final assistant messages;
+- live tool result updates merge into the matching row;
+- failed tool results stay visible when tool output is enabled;
+- hiding tool output does not also hide a real terminal chat error;
+- run IDs are scoped by session, not treated as globally unique.
+
+## Local Debug Commands
+
+```bash
+curl http://127.0.0.1:3100/api/health
+systemctl --user status mira-dashboard.service --no-pager
+systemctl --user status openclaw-gateway.service --no-pager
+journalctl --user -u mira-dashboard.service -n 160 --no-pager
+openclaw status
+```
+
+Do not print Gateway token values while debugging. Inspect length/metadata only:
+
+```bash
+cd backend
+sqlite3 "${MIRA_DASHBOARD_DB_PATH:-data/mira-dashboard.db}" \
+  "SELECT key, length(value), updated_at FROM app_config WHERE key='gateway_token';"
+```

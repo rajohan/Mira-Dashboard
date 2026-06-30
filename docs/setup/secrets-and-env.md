@@ -40,6 +40,9 @@ token in `app_config.gateway_token`. Environment token precedence is:
 | `MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH` | Optional | disabled unless set | Enables loopback auth bypass when set to `1`. |
 | `OPENCLAW_GATEWAY_URL` | Optional | `ws://127.0.0.1:18789` | Gateway WebSocket URL. |
 
+See [Auth and trust boundaries](../security/auth-and-trust-boundaries.md) for
+route auth, loopback bypass, proxy trust, bootstrap, and token handling.
+
 ## GitHub And PR Operations
 
 | Variable | Required for | Purpose |
