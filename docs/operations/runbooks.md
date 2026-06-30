@@ -1,5 +1,8 @@
 # Operations Runbooks
 
+For symptom-oriented triage, see [Troubleshooting](troubleshooting.md). For
+Docker image update behavior, see [Docker updater](docker-updater.md).
+
 ## Check Dashboard Health
 
 ```bash

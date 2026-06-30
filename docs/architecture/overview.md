@@ -110,6 +110,9 @@ The Dashboard WebSocket at `/ws` requires:
 - allowed origin;
 - authenticated Dashboard user.
 
+See [Gateway and chat runtime](gateway-and-chat.md) for bootstrap validation,
+token recovery, browser WebSocket behavior, and chat event handling.
+
 ## Background Jobs
 
 When `MIRA_DASHBOARD_DISABLE_SCHEDULER` is not set for development/testing,
@@ -125,3 +128,6 @@ startup registers jobs for:
 
 Local development disables scheduler by default through the backend `dev`
 script.
+
+See [Scheduler, cache, and backups](../operations/scheduler-cache-backups.md)
+for job tables, cache entries, backup scripts, and inspection commands.
