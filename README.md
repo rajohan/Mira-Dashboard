@@ -9,6 +9,12 @@
 
 Mira Dashboard is Raymond's local control surface for Mira/OpenClaw operations. It combines a React frontend with a Bun-native backend that mirrors OpenClaw Gateway state, serves operational APIs, and persists dashboard-owned state in SQLite.
 
+## Documentation
+
+The full repo-native wiki lives in [docs/index.md](docs/index.md). Start there
+for new VPS setup, production deployment, env vars, architecture, API
+reference, operations runbooks, reports delivery, and development workflow.
+
 ## What it includes
 
 - Authenticated dashboard routes for chat, sessions, agents, tasks, logs, files, cron, Docker updater state, database checks, Moltbook, terminal access, and settings.
@@ -90,7 +96,7 @@ Frontend and backend tests run directly with Bun. Coverage LCOV files are upload
 - Frontend builds and the local frontend dev server use Bun's HTML bundler with Babel React Compiler and Bun Tailwind plugins.
 - Dev server listens on all addresses so the dashboard can be reached over Tailscale when needed.
 - Auth is enforced by the backend request policy for API routes except `/api/auth/*` and `/api/health`; route modules should assume authenticated access unless explicitly public.
-- If `MIRA_DASHBOARD_TRUSTED_PROXY_IPS` is configured, the trusted proxy must overwrite or strip inbound `X-Real-IP` and `X-Forwarded-For` headers from untrusted clients before forwarding to the backend. These headers are used only for proxied client identity such as rate-limit buckets; localhost auth bypass is granted only to immediate loopback peers.
+- If `MIRA_DASHBOARD_TRUSTED_PROXY_IPS` is configured, the trusted proxy must overwrite or strip inbound `X-Real-IP` and `X-Forwarded-For` headers from untrusted clients before forwarding to the backend. These headers are used only for proxied client identity such as rate-limit buckets; optional loopback auth bypass requires `MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH=1` and is granted only to immediate loopback peers without forwarded-client headers.
 
 ## Production checkout and PR worktrees
 
