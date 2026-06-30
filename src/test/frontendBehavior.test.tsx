@@ -3694,6 +3694,63 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(screen.getByText("Raymond review queue")).toBeInTheDocument();
     });
 
+    it("keeps task board ordering aligned with triage priority", async () => {
+        const tasks = [
+            task({
+                number: 20,
+                title: "Low priority newer",
+                labels: [{ name: "priority-low" }, { name: "in-progress" }],
+                updatedAt: "2026-06-23T12:00:00.000Z",
+            }),
+            task({
+                number: 21,
+                title: "High priority older",
+                labels: [{ name: "priority-high" }, { name: "in-progress" }],
+                updatedAt: "2026-06-23T08:00:00.000Z",
+            }),
+            task({
+                number: 22,
+                title: "Medium priority middle",
+                labels: [{ name: "priority-medium" }, { name: "in-progress" }],
+                updatedAt: "2026-06-23T10:00:00.000Z",
+            }),
+            task({
+                number: 23,
+                title: "Done newer low",
+                labels: [{ name: "priority-low" }, { name: "done" }],
+                state: "CLOSED",
+                updatedAt: "2026-06-24T08:00:00.000Z",
+            }),
+            task({
+                number: 24,
+                title: "Done older high",
+                labels: [{ name: "priority-high" }, { name: "done" }],
+                state: "CLOSED",
+                updatedAt: "2026-06-22T08:00:00.000Z",
+            }),
+        ];
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: createApi(tasks),
+            writable: true,
+        });
+
+        renderWithQueryClient(createElement(Tasks));
+
+        await screen.findByText("High priority older");
+
+        const taskOpenLabels = screen
+            .getAllByRole("button", { name: /Open task #/u })
+            .map((button) => button.getAttribute("aria-label"));
+        expect(taskOpenLabels).toEqual([
+            "Open task #21: High priority older",
+            "Open task #22: Medium priority middle",
+            "Open task #20: Low priority newer",
+            "Open task #23: Done newer low",
+            "Open task #24: Done older high",
+        ]);
+    });
+
     it("renders empty and retry states for the task board", async () => {
         const user = userEvent.setup();
         const fetchMock = jest
