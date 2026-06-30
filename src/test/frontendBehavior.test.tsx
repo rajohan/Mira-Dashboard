@@ -3153,7 +3153,13 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(getSyntaxClass("config.yaml")).toBe("text-purple-400");
 
         expect(isCronExpressionValid("*/15 0-23 * * 1-5")).toBe(true);
+        expect(isCronExpressionValid("0,30 9,18 * 1-12 0,7")).toBe(true);
+        expect(isCronExpressionValid("5-55/10 * * * *")).toBe(true);
+        expect(isCronExpressionValid("* * * *")).toBe(false);
         expect(isCronExpressionValid("60 * * * *")).toBe(false);
+        expect(isCronExpressionValid("*/0 * * * *")).toBe(false);
+        expect(isCronExpressionValid("30-10 * * * *")).toBe(false);
+        expect(isCronExpressionValid("0,,30 * * * *")).toBe(false);
         const sortedCronJobs = sortCronJobs([
             { id: "b", name: "Beta", enabled: false },
             { jobId: "a", name: "Alpha", enabled: true },
@@ -3168,7 +3174,11 @@ describe("Mira Dashboard frontend behavior", () => {
         ).toBe("ok");
         expect(formatCronTimestamp("bad")).toBe("—");
         expect(formatCronLastStatus(" success ")).toBe("SUCCESS");
+        expect(formatCronLastStatus(undefined)).toBe("UNKNOWN");
+        expect(getCronStatusVariant("completed")).toBe("success");
+        expect(getCronStatusVariant("in_progress")).toBe("warning");
         expect(getCronStatusVariant("failed")).toBe("error");
+        expect(getCronStatusVariant("not-started")).toBe("default");
 
         const sortedSessions = sortSessionsByTypeAndActivity([
             {
