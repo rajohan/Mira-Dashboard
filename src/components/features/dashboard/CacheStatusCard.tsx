@@ -67,6 +67,7 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProperties) {
                     const refreshToken = refreshKeys.join(",");
                     const isRefreshing =
                         refreshCache.isPending && refreshCache.variables === refreshToken;
+                    const refreshLabel = `Force update ${item.label}`;
 
                     return (
                         <div
@@ -106,9 +107,11 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProperties) {
                                 </div>
                                 <button
                                     type="button"
+                                    aria-label={refreshLabel}
                                     className="border-primary-600 text-primary-100 hover:border-primary-400 inline-flex w-full items-center justify-center gap-1 rounded-md border px-2 py-1 transition disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                                     disabled={isRefreshing}
                                     onClick={() => refreshCache.mutate(refreshToken)}
+                                    title={refreshLabel}
                                 >
                                     {isRefreshing ? (
                                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
