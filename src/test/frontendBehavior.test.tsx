@@ -7,7 +7,15 @@ import {
     Outlet,
     RouterProvider,
 } from "@tanstack/react-router";
-import { act, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import {
+    act,
+    fireEvent,
+    render,
+    renderHook,
+    screen,
+    waitFor,
+    within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
@@ -3580,6 +3588,85 @@ describe("Mira Dashboard frontend behavior", () => {
 
         await user.click(screen.getByRole("button", { name: "Close task details" }));
         expect(onClose).toHaveBeenCalled();
+    }, 10_000);
+
+    it("restores task detail action buttons when callbacks fail", async () => {
+        const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+        const assignError = new Error("assign failed");
+        const deleteError = new Error("delete failed");
+        const assignDeferred = Promise.withResolvers<void>();
+        const deleteDeferred = Promise.withResolvers<void>();
+        const onAssign = jest.fn(() => assignDeferred.promise);
+        const onDelete = jest.fn(() => deleteDeferred.promise);
+
+        try {
+            render(
+                createElement(TaskDetailModal, {
+                    task: task({
+                        number: 8,
+                        title: "Action failure task",
+                        labels: [{ name: "priority-medium" }, { name: "todo" }],
+                        assignees: [{ login: "mira-2026", name: "Mira" }],
+                    }),
+                    onClose: jest.fn(),
+                    onMove: jest.fn(async () => {}),
+                    onAssign,
+                    onDelete,
+                    onUpdate: jest.fn(async () =>
+                        task({ number: 8, title: "Action failure task" })
+                    ),
+                    updates: [],
+                    onAddUpdate: jest.fn(async () => {}),
+                    onEditUpdate: jest.fn(async () => {}),
+                    onDeleteUpdate: jest.fn(async () => {}),
+                })
+            );
+
+            const assignButton = screen.getByRole("button", {
+                name: "Assign to Raymond",
+            });
+            act(() => {
+                fireEvent.click(assignButton);
+            });
+            expect(assignButton).toBeDisabled();
+
+            await act(async () => {
+                assignDeferred.reject(assignError);
+                try {
+                    await assignDeferred.promise;
+                } catch {
+                    // Expected rejection path for the loading-state regression.
+                }
+            });
+            await waitFor(() => expect(assignButton).not.toBeDisabled());
+
+            const deleteButton = screen.getByRole("button", { name: "Delete" });
+            act(() => {
+                fireEvent.click(deleteButton);
+            });
+            expect(deleteButton).toBeDisabled();
+
+            await act(async () => {
+                deleteDeferred.reject(deleteError);
+                try {
+                    await deleteDeferred.promise;
+                } catch {
+                    // Expected rejection path for the loading-state regression.
+                }
+            });
+            await waitFor(() => expect(deleteButton).not.toBeDisabled());
+
+            expect(consoleError).toHaveBeenCalledWith(
+                "Failed to assign task:",
+                assignError
+            );
+            expect(consoleError).toHaveBeenCalledWith(
+                "Failed to delete task:",
+                deleteError
+            );
+        } finally {
+            consoleError.mockRestore();
+        }
     }, 10_000);
 
     it("renders shared UI controls with accessible confirm, search, and badge behavior", async () => {

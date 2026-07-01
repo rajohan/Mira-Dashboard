@@ -194,15 +194,25 @@ export function TaskDetailModal({
     /** Assigns the task to the selected assignee. */
     const handleAssign = async (assignee: TaskAssigneeId) => {
         setIsAssigning(true);
-        await onAssign(assignee);
-        setIsAssigning(false);
+        try {
+            await onAssign(assignee);
+        } catch (error_) {
+            console.error("Failed to assign task:", error_);
+        } finally {
+            setIsAssigning(false);
+        }
     };
 
     /** Deletes the current task. */
     const handleDeleteTask = async () => {
         setIsDeleting(true);
-        await onDelete();
-        setIsDeleting(false);
+        try {
+            await onDelete();
+        } catch (error_) {
+            console.error("Failed to delete task:", error_);
+        } finally {
+            setIsDeleting(false);
+        }
     };
 
     /** Persists task edits, including priority and automation metadata. */
