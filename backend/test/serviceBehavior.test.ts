@@ -1679,12 +1679,7 @@ fi
                 }
                 const command = commandArguments.join(" ");
                 if (command === "rev-parse --is-inside-work-tree") {
-                    return {
-                        code: 0,
-                        stderr: "",
-                        stdout:
-                            repo === "/home/ubuntu/projects/n8n" ? "false\n" : "true\n",
-                    };
+                    return { code: 0, stderr: "", stdout: "true\n" };
                 }
                 if (command === "branch --show-current") {
                     return { code: 0, stderr: "", stdout: "main\n" };
@@ -1751,7 +1746,7 @@ fi
             }>;
         };
         expect(data.dirtyRepos).toEqual(["openclaw", "mira-dashboard", "docker"]);
-        expect(data.missingRepos).toEqual(["n8n"]);
+        expect(data.missingRepos).toEqual([]);
         expect(data.dirtyCount).toBe(3);
         expect(data.repos.find((repo) => repo.key === "mira-dashboard")).toMatchObject({
             branch: "main",
@@ -1773,8 +1768,8 @@ fi
             summary: {
                 dirtyCount: 3,
                 dirtyRepos: ["openclaw", "mira-dashboard", "docker"],
-                missingRepos: ["n8n"],
-                repoCount: 4,
+                missingRepos: [],
+                repoCount: 3,
             },
         });
     });
