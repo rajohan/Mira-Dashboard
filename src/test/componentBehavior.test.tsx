@@ -971,7 +971,7 @@ describe("shared component helpers", () => {
         let activeStreams: ActiveChatStreams = {};
         const activeStreamsReference = { current: activeStreams };
         const liveHistoryRefreshTimerReference = { current: undefined };
-        const shouldStickToBottomReference = { current: true };
+        const stickToBottomReference = { current: true };
         let messages: unknown[] = [];
         let sendError: string | undefined;
         let isAtBottom = false;
@@ -1006,7 +1006,7 @@ describe("shared component helpers", () => {
                 setIsAtBottom,
                 setMessages,
                 setSendError,
-                shouldStickToBottomReference,
+                shouldStickToBottomReference: stickToBottomReference,
                 showThinkingOutput: true,
                 showToolOutput: true,
                 subscribe,

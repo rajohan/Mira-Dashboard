@@ -202,7 +202,7 @@ export function Logs() {
 
     // Subscribe to log stream once per connection
     useEffect(() => {
-        if (!(isConnected && subscribedConnectionIdReference.current !== connectionId)) {
+        if (!isConnected || subscribedConnectionIdReference.current === connectionId) {
             return;
         }
 

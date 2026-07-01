@@ -154,9 +154,9 @@ export function isActiveStreamRecoveredInMessages(
                 streamThinkingText.trim() &&
                 thinkingText.trim() === streamThinkingText.trim()
             ) {
-                return !(
-                    stream.message?.text.trim() &&
-                    message.text.trim() !== stream.message.text.trim()
+                return (
+                    !stream.message?.text.trim() ||
+                    message.text.trim() === stream.message.text.trim()
                 );
             }
 
@@ -346,27 +346,27 @@ export function hasNewerAssistantMessageInHistory(
 
 /** Returns refreshed messages, preserving previous state when history is unchanged. */
 export function nextRefreshedChatMessages(
-    wasPrevious: ChatHistoryMessage[],
+    previousMessages: ChatHistoryMessage[],
     nextMessages: ChatHistoryMessage[],
     shouldForceMerge = false
 ): ChatHistoryMessage[] {
-    const previousLast = wasPrevious.at(-1)?.timestamp;
+    const previousLast = previousMessages.at(-1)?.timestamp;
     const nextLast = nextMessages.at(-1)?.timestamp;
 
     if (
         !shouldForceMerge &&
-        wasPrevious.length === nextMessages.length &&
+        previousMessages.length === nextMessages.length &&
         previousLast === nextLast
     ) {
-        return wasPrevious;
+        return previousMessages;
     }
 
-    return mergeWithRecentOptimisticMessages(wasPrevious, nextMessages);
+    return mergeWithRecentOptimisticMessages(previousMessages, nextMessages);
 }
 
 /** Returns the next history-load bottom-following state. */
 export function nextHistoryBottomState(
-    wasPrevious: boolean,
+    wasAtBottom: boolean,
     isNewSession: boolean,
     shouldStickToBottom: boolean
 ) {
@@ -374,17 +374,17 @@ export function nextHistoryBottomState(
         return true;
     }
 
-    return wasPrevious;
+    return wasAtBottom;
 }
 
 /** Returns the next send error after a history load failure. */
 export function nextHistoryLoadSendError(
-    wasPrevious: string | undefined,
+    previousError: string | undefined,
     wasCanceled: boolean,
     historyLoadError: string
 ) {
     if (wasCanceled) {
-        return wasPrevious;
+        return previousError;
     }
 
     return historyLoadError;

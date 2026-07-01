@@ -923,10 +923,7 @@ function isGzipArchivePath(filePath: string): boolean {
     return filePath.endsWith(".gz");
 }
 
-async function isSameResolvedPath(
-    firstPath: string,
-    secondPath: string
-): Promise<boolean> {
+async function sameResolvedPath(firstPath: string, secondPath: string): Promise<boolean> {
     if (path.resolve(firstPath) === path.resolve(secondPath)) {
         return true;
     }
@@ -990,11 +987,11 @@ async function addConfiguredArchiveIfInRetentionScope(
     policy: LogRotationPolicy,
     approvedRoots: string[]
 ): Promise<void> {
-    if (!(
-        isArchiveMatchRetentionScope(filePath, archivePath, policy) &&
-        (await assertSafePath(archivePath, approvedRoots)) &&
-        !(await isSameResolvedPath(archivePath, filePath))
-    )) {
+    if (
+        !isArchiveMatchRetentionScope(filePath, archivePath, policy) ||
+        !(await assertSafePath(archivePath, approvedRoots)) ||
+        (await sameResolvedPath(archivePath, filePath))
+    ) {
         return;
     }
 
@@ -1160,13 +1157,13 @@ async function applyArchiveOnlyRetention(
     const compressed: string[] = [];
     const deleted: string[] = [];
     const warnings: string[] = [];
-    let isChecked = 0;
+    let checkedCount = 0;
 
     const listed = await listArchiveOnlyArchives(policy, approvedRoots);
     warnings.push(...listed.warnings);
 
     for (const archive of listed.archives) {
-        isChecked += 1;
+        checkedCount += 1;
         const key = archiveRetentionKey(archive.path, policy);
         const scoped = archivesByScope.get(key) || [];
         scoped.push(archive);
@@ -1213,7 +1210,7 @@ async function applyArchiveOnlyRetention(
         }
     }
 
-    return { isChecked, compressed, deleted, warnings };
+    return { isChecked: checkedCount, compressed, deleted, warnings };
 }
 
 function hasRotatedInCadence(

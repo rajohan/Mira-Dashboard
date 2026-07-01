@@ -596,10 +596,10 @@ function matchingToolCallUpdateIndex(
 
 /** Merges tool result rows into their matching tool call row when possible. */
 function mergeRuntimeToolMessages(
-    wasPrevious: ChatHistoryMessage[],
+    previousMessages: ChatHistoryMessage[],
     incoming: ChatHistoryMessage[]
 ): ChatHistoryMessage[] {
-    const next = [...wasPrevious];
+    const next = [...previousMessages];
     const unmerged: ChatHistoryMessage[] = [];
 
     for (const message of incoming) {
