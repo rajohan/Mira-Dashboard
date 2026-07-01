@@ -96,12 +96,6 @@ const gitRepos = [
         path: "/opt/docker",
         category: "infra",
     },
-    {
-        key: "n8n",
-        name: "n8n",
-        path: "/home/ubuntu/projects/n8n",
-        category: "project",
-    },
 ];
 
 function nowIso(): string {
