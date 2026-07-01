@@ -50,6 +50,7 @@ import { useChatSlashCommands } from "../components/features/chat/useChatSlashCo
 import { CronJobDetails } from "../components/features/cron/CronJobDetails";
 import { CronJobList } from "../components/features/cron/CronJobList";
 import { BackupOverviewCard } from "../components/features/dashboard/BackupOverviewCard";
+import { CacheStatusCard } from "../components/features/dashboard/CacheStatusCard";
 import { CronOverviewCard } from "../components/features/dashboard/CronOverviewCard";
 import { LogRotationCard } from "../components/features/dashboard/LogRotationCard";
 import { QuotaOverviewCard } from "../components/features/dashboard/QuotaOverviewCard";
@@ -6417,6 +6418,116 @@ describe("shared component helpers", () => {
         });
         idleView.unmount();
         idleView.queryClient.clear();
+    });
+
+    it("labels cache refresh controls by entry and refreshes grouped keys", async () => {
+        const user = userEvent.setup();
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/cache/heartbeat" && method === "GET") {
+                    return Response.json({
+                        count: 2,
+                        entries: [
+                            {
+                                consecutiveFailures: 0,
+                                data: {},
+                                errorCode: undefined,
+                                errorMessage: undefined,
+                                expiresAt: undefined,
+                                key: "weather.spydeberg",
+                                lastAttemptAt: undefined,
+                                meta: {},
+                                source: "weather",
+                                status: "fresh",
+                                updatedAt: "2026-06-24T08:00:00.000Z",
+                            },
+                            {
+                                consecutiveFailures: 0,
+                                data: {},
+                                errorCode: undefined,
+                                errorMessage: undefined,
+                                expiresAt: undefined,
+                                key: "moltbook.home",
+                                lastAttemptAt: undefined,
+                                meta: {},
+                                source: "moltbook",
+                                status: "stale",
+                                updatedAt: "2026-06-24T07:00:00.000Z",
+                            },
+                        ],
+                        generatedAt: "2026-06-24T08:01:00.000Z",
+                    });
+                }
+
+                if (url.startsWith("/api/cache/") && url.endsWith("/refresh")) {
+                    return Response.json({
+                        entry: {
+                            key: decodeURIComponent(
+                                url.replace("/api/cache/", "").replace("/refresh", "")
+                            ),
+                        },
+                        isOk: true,
+                    });
+                }
+
+                throw new Error(`Unexpected cache card fetch: ${method} ${url}`);
+            }
+        );
+
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const view = renderWithQueryClient(
+            <CacheStatusCard
+                title="Cache controls"
+                items={[
+                    {
+                        key: "weather.spydeberg",
+                        label: "Weather",
+                    },
+                    {
+                        key: "moltbook.home",
+                        label: "Moltbook",
+                        refreshKeys: ["moltbook.home", "moltbook.feed.hot"],
+                    },
+                ]}
+            />
+        );
+
+        const weatherRefresh = await screen.findByRole("button", {
+            name: /force update weather/i,
+        });
+        expect(
+            screen.getByRole("button", { name: /force update moltbook/i })
+        ).toHaveAttribute("title", "Force update Moltbook");
+
+        await user.click(weatherRefresh);
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/cache/weather.spydeberg/refresh",
+                expect.objectContaining({ method: "POST" })
+            );
+        });
+
+        await user.click(screen.getByRole("button", { name: /force update moltbook/i }));
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/cache/moltbook.home/refresh",
+                expect.objectContaining({ method: "POST" })
+            );
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/cache/moltbook.feed.hot/refresh",
+                expect.objectContaining({ method: "POST" })
+            );
+        });
+        view.unmount();
+        view.queryClient.clear();
     });
 
     it("drives service action confirmation, exec polling, and cache refresh", async () => {
