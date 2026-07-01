@@ -39,11 +39,12 @@ function failedDiscoveryAppSlugs(register: DockerUpdaterStepResult): Set<string>
             failed?: Array<{ appSlug?: unknown; blocking?: unknown }>;
         };
         return new Set(
-            (parsed.failed ?? []).flatMap((failure) =>
-                typeof failure.appSlug === "string" && failure.blocking !== false
-                    ? [failure.appSlug]
-                    : []
-            )
+            (parsed.failed ?? [])
+                .filter(
+                    (failure) =>
+                        typeof failure.appSlug === "string" && failure.blocking !== false
+                )
+                .map((failure) => failure.appSlug as string)
         );
     } catch {
         return new Set(["*"]);
@@ -2125,7 +2126,7 @@ export async function pollDockerUpdaterRegistries(
                   )
                   .all(serviceId) as unknown as ManagedServiceRow[])
     );
-    const isChecked: string[] = [];
+    const checkedServices: string[] = [];
     const updates: string[] = [];
     const newUpdates: string[] = [];
     const skipped: Array<{ service: string; reason: string }> = [];
@@ -2171,7 +2172,7 @@ export async function pollDockerUpdaterRegistries(
                     isUpdateAvailable ? "update_available" : "current",
                     service.id
                 );
-            isChecked.push(serviceLabel(service));
+            checkedServices.push(serviceLabel(service));
             if (isUpdateAvailable) {
                 updates.push(serviceLabel(service));
                 if (isUpdateChanged) {
@@ -2206,14 +2207,14 @@ export async function pollDockerUpdaterRegistries(
         );
     }
     const isOk =
-        failures.length === 0 || (serviceId === undefined && isChecked.length > 0);
+        failures.length === 0 || (serviceId === undefined && checkedServices.length > 0);
     return {
         step: "poll",
         isOk: isOk,
         stdout: JSON.stringify({
             isOk: isOk,
             checkedAt: timestamp,
-            isChecked,
+            isChecked: checkedServices,
             skipped,
             updates,
         }),

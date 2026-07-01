@@ -136,14 +136,14 @@ function getState(provider: ProviderKey, bucket: number): { is_armed: number } {
 }
 
 /** Performs set state. */
-function setState(provider: ProviderKey, bucket: number, isArmed: number): void {
+function setState(provider: ProviderKey, bucket: number, armedValue: number): void {
     database
         .prepare(
             `UPDATE quota_alert_state
          SET is_armed = ?, updated_at = ?
          WHERE provider = ? AND bucket = ?`
         )
-        .run(isArmed, dateToISOString(new Date()), provider, bucket);
+        .run(armedValue, dateToISOString(new Date()), provider, bucket);
 }
 
 /** Performs insert notification. */
@@ -198,9 +198,9 @@ function handleQuotaBucket(
     ensureStateRow(provider, bucket);
     const state = getState(provider, bucket);
 
-    let isArmed = state.is_armed;
+    let armedValue = state.is_armed;
 
-    if (isArmed === 1 && percent >= bucket) {
+    if (armedValue === 1 && percent >= bucket) {
         insertNotification(
             provider,
             bucket,
@@ -209,12 +209,12 @@ function handleQuotaBucket(
             payload.title,
             payload.description
         );
-        isArmed = 0;
+        armedValue = 0;
     } else if (percent < bucket - HYSTERESIS) {
-        isArmed = 1;
+        armedValue = 1;
     }
 
-    setState(provider, bucket, isArmed);
+    setState(provider, bucket, armedValue);
 }
 
 const quotaNotificationState = { isRunning: false };

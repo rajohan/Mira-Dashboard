@@ -41,7 +41,7 @@ function randomHex(byteLength: number): string {
 }
 
 /** Verifies a password with Bun's runtime password hashing API. */
-export async function isPasswordVerified(
+export async function verifyPassword(
     password: string,
     storedHash: string
 ): Promise<boolean> {

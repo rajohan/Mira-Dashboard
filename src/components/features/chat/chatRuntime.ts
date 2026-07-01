@@ -24,24 +24,24 @@ export interface ActiveChatStream {
 export type ActiveChatStreams = Record<string, ActiveChatStream>;
 
 /** Performs merge stream text. */
-export function mergeStreamText(wasPrevious: string, next: string): string {
+export function mergeStreamText(previousText: string, next: string): string {
     if (next.length === 0) {
-        return wasPrevious;
+        return previousText;
     }
 
-    if (!wasPrevious) {
+    if (!previousText) {
         return next;
     }
 
-    if (next.startsWith(wasPrevious)) {
+    if (next.startsWith(previousText)) {
         return next;
     }
 
-    if (wasPrevious.endsWith(next)) {
-        return wasPrevious;
+    if (previousText.endsWith(next)) {
+        return previousText;
     }
 
-    return `${wasPrevious}${next}`;
+    return `${previousText}${next}`;
 }
 
 /** Merges thinking blocks from stream events. */

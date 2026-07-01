@@ -379,17 +379,15 @@ describe("backend service behavior", () => {
             getAuthUserFromSessionId,
             getPersistedGatewayToken,
             hashPassword,
-            isPasswordVerified,
+            verifyPassword,
             persistGatewayToken,
         } = await import("../src/auth.ts");
 
         try {
             const hash = await hashPassword("correct horse battery staple");
-            expect(await isPasswordVerified("correct horse battery staple", hash)).toBe(
-                true
-            );
-            expect(await isPasswordVerified("wrong password", hash)).toBe(false);
-            expect(await isPasswordVerified("password", "not-a-valid-hash")).toBe(false);
+            expect(await verifyPassword("correct horse battery staple", hash)).toBe(true);
+            expect(await verifyPassword("wrong password", hash)).toBe(false);
+            expect(await verifyPassword("password", "not-a-valid-hash")).toBe(false);
 
             const user = await createUser(username, "test-password");
             expect(user).toMatchObject({ username: normalizedUsername });

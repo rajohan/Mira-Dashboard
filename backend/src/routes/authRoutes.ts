@@ -8,8 +8,8 @@ import {
     findUserByUsername,
     getPersistedGatewayToken,
     isBootstrapRequired,
-    isPasswordVerified,
     persistGatewayToken,
+    verifyPassword,
 } from "../auth.ts";
 import { database } from "../database.ts";
 import gateway from "../gateway.ts";
@@ -300,7 +300,7 @@ export const authRoutes = {
                 );
             }
             const user = findUserByUsername(username);
-            if (!user || !(await isPasswordVerified(password, user.password_hash))) {
+            if (!user || !(await verifyPassword(password, user.password_hash))) {
                 return json({ error: "Invalid username or password" }, { status: 401 });
             }
             const sessionId = createSession(user.id);
