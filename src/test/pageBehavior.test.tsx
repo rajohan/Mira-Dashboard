@@ -712,7 +712,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
             },
             databases: [
                 {
-                    datname: "n8n",
+                    datname: "metabase",
                     size_pretty: "1 MB",
                     size_bytes: "1024",
                     numbackends: "2",
@@ -1562,7 +1562,7 @@ describe("Mira Dashboard pages", () => {
         const pages: Array<[ReactNode, string, { withSocket?: boolean }?]> = [
             [createElement(Agents), "Active (1)"],
             [createElement(Dashboard), "Spydeberg", { withSocket: true }],
-            [createElement(Database), "n8n"],
+            [createElement(Database), "metabase"],
             [createElement(Docker), "dashboard"],
             [createElement(Files), "README.md"],
             [createElement(Jobs), "Heartbeat"],
