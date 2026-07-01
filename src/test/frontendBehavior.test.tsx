@@ -2671,6 +2671,10 @@ describe("Mira Dashboard frontend behavior", () => {
         ).resolves.toMatchObject({ title: "Assigned task" });
 
         const createUpdate = renderHookWithQueryClient(() => useCreateTaskUpdate());
+        const createUpdateInvalidateQueries = jest.spyOn(
+            createUpdate.queryClient,
+            "invalidateQueries"
+        );
         await expect(
             createUpdate.result.current.mutateAsync({
                 taskId: 1,
@@ -2678,8 +2682,18 @@ describe("Mira Dashboard frontend behavior", () => {
                 messageMd: "Progress",
             })
         ).resolves.toMatchObject({ id: 8, messageMd: "Progress" });
+        expect(createUpdateInvalidateQueries).toHaveBeenCalledWith({
+            queryKey: taskKeys.updates(1),
+        });
+        expect(createUpdateInvalidateQueries).toHaveBeenCalledWith({
+            queryKey: taskKeys.list(),
+        });
 
         const editUpdate = renderHookWithQueryClient(() => useUpdateTaskUpdate());
+        const editUpdateInvalidateQueries = jest.spyOn(
+            editUpdate.queryClient,
+            "invalidateQueries"
+        );
         await expect(
             editUpdate.result.current.mutateAsync({
                 taskId: 1,
@@ -2688,11 +2702,27 @@ describe("Mira Dashboard frontend behavior", () => {
                 messageMd: "Edited",
             })
         ).resolves.toMatchObject({ author: "rajohan", messageMd: "Edited" });
+        expect(editUpdateInvalidateQueries).toHaveBeenCalledWith({
+            queryKey: taskKeys.updates(1),
+        });
+        expect(editUpdateInvalidateQueries).toHaveBeenCalledWith({
+            queryKey: taskKeys.list(),
+        });
 
         const deleteUpdate = renderHookWithQueryClient(() => useDeleteTaskUpdate());
+        const deleteUpdateInvalidateQueries = jest.spyOn(
+            deleteUpdate.queryClient,
+            "invalidateQueries"
+        );
         await expect(
             deleteUpdate.result.current.mutateAsync({ taskId: 1, updateId: 7 })
         ).resolves.toBeUndefined();
+        expect(deleteUpdateInvalidateQueries).toHaveBeenCalledWith({
+            queryKey: taskKeys.updates(1),
+        });
+        expect(deleteUpdateInvalidateQueries).toHaveBeenCalledWith({
+            queryKey: taskKeys.list(),
+        });
 
         const deleteTask = renderHookWithQueryClient(() => useDeleteTask());
         await expect(
