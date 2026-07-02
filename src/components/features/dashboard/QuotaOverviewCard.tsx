@@ -189,6 +189,11 @@ function formatOpenRouterQuotaAmount(value: number): string {
     return `$${value.toFixed(3)}`;
 }
 
+/** Formats configured OpenRouter quota limits without noisy trailing zeroes. */
+function formatOpenRouterQuotaLimit(value: number): string {
+    return `$${value.toFixed(3).replace(/\.?0+$/, "")}`;
+}
+
 /** Renders the quota overview card UI. */
 export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
     if (!quotas) {
@@ -208,7 +213,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
                 ? quotas.openrouter.status.replaceAll("_", " ")
                 : quotas.openrouter.limit !== undefined &&
                     quotas.openrouter.limitRemaining !== undefined
-                  ? `${formatOpenRouterQuotaAmount(quotas.openrouter.limitRemaining)} left / ${formatOpenRouterQuotaAmount(quotas.openrouter.limit)} ${formatOpenRouterLimitReset(quotas.openrouter.limitReset)}`
+                  ? `${formatOpenRouterQuotaAmount(quotas.openrouter.limitRemaining)} left / ${formatOpenRouterQuotaLimit(quotas.openrouter.limit)} ${formatOpenRouterLimitReset(quotas.openrouter.limitReset)}`
                   : `$${quotas.openrouter.remaining.toFixed(2)} balance`,
             line2: hasQuotaStatus(quotas.openrouter)
                 ? quotas.openrouter.note || ""
