@@ -50,21 +50,21 @@ export function GitOverviewCard() {
     return (
         <Card>
             <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="text-primary-300 text-sm font-semibold tracking-wide uppercase">
+                <h3 className="text-sm font-semibold tracking-wide text-primary-300 uppercase">
                     Git workspace
                 </h3>
-                <GitBranch className="text-primary-400 h-4 w-4" />
+                <GitBranch className="size-4 text-primary-400" />
             </div>
 
             {isLoading ? (
-                <div className="text-primary-300 text-sm">Loading git cache…</div>
+                <div className="text-sm text-primary-300">Loading git cache…</div>
             ) : isError || !git ? (
                 <div className="text-sm text-rose-300">Git cache unavailable.</div>
             ) : (
-                <div className="text-primary-200 space-y-3 text-sm">
+                <div className="space-y-3 text-sm text-primary-200">
                     <div className="flex items-center justify-between">
                         <span>Repos tracked</span>
-                        <span className="text-primary-50 font-semibold">
+                        <span className="font-semibold text-primary-50">
                             {repos.length}
                         </span>
                     </div>
@@ -99,11 +99,11 @@ export function GitOverviewCard() {
                         {repos.map((repo) => (
                             <div
                                 key={repo.key}
-                                className="border-primary-700 bg-primary-800/40 rounded-lg border px-3 py-2"
+                                className="rounded-lg border border-primary-700 bg-primary-800/40 px-3 py-2"
                             >
                                 <div className="mb-1 flex items-start justify-between gap-2">
-                                    <div className="text-primary-100 inline-flex min-w-0 items-center gap-2 text-sm">
-                                        <GitCommitHorizontal className="text-primary-400 h-3.5 w-3.5 shrink-0" />
+                                    <div className="inline-flex min-w-0 items-center gap-2 text-sm text-primary-100">
+                                        <GitCommitHorizontal className="size-3.5 shrink-0 text-primary-400" />
                                         <span className="truncate">{repo.name}</span>
                                     </div>
                                     <div className="flex shrink-0 flex-wrap justify-end gap-1">
@@ -117,7 +117,7 @@ export function GitOverviewCard() {
                                         </Badge>
                                     </div>
                                 </div>
-                                <div className="text-primary-400 text-xs break-words">
+                                <div className="text-xs wrap-break-word text-primary-400">
                                     {repo.branch || "unknown branch"}
                                     {repo.statusSummary.total > 0
                                         ? ` · ${repo.statusSummary.total} change${repo.statusSummary.total === 1 ? "" : "s"}`

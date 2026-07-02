@@ -25,7 +25,7 @@ export function SearchInput({
         <div className="relative max-w-md flex-1">
             <Search
                 aria-hidden="true"
-                className="text-primary-400 absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2"
+                className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-primary-400"
             />
             <input
                 type="text"
@@ -33,16 +33,16 @@ export function SearchInput({
                 placeholder={placeholder}
                 value={value}
                 onChange={(event) => onChange(event.target.value)}
-                className="border-primary-600 bg-primary-700 text-primary-100 focus:border-accent-500 w-full rounded-lg border py-2 pr-10 pl-10 text-sm focus:outline-none"
+                className="w-full rounded-lg border border-primary-600 bg-primary-700 px-10 py-2 text-sm text-primary-100 focus:border-accent-500 focus:outline-none"
             />
             {value ? (
                 <button
                     type="button"
                     aria-label={clearLabel ?? `Clear ${accessibleLabel.toLowerCase()}`}
                     onClick={() => onChange("")}
-                    className="text-primary-400 hover:text-primary-100 focus:ring-accent-400 absolute top-1/2 right-2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md focus:ring-2 focus:outline-none"
+                    className="absolute top-1/2 right-2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-primary-400 hover:text-primary-100 focus:ring-2 focus:ring-accent-400 focus:outline-none"
                 >
-                    <X aria-hidden="true" className="h-4 w-4" />
+                    <X aria-hidden="true" className="size-4" />
                 </button>
             ) : undefined}
         </div>

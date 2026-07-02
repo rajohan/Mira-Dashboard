@@ -27,13 +27,13 @@ export function AgentCard({
     const modelShort = model.split("/").pop() || model;
 
     return (
-        <Card className="border-primary-700 bg-primary-900 relative flex h-full flex-col overflow-hidden border">
+        <Card className="relative flex h-full flex-col overflow-hidden border border-primary-700 bg-primary-900">
             <div className="mb-4 flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-3">
                     <StatusIndicator status={status} />
                     <div className="min-w-0">
-                        <h3 className="text-primary-50 truncate font-semibold">{id}</h3>
-                        <p className="text-primary-400 truncate text-xs">{modelShort}</p>
+                        <h3 className="truncate font-semibold text-primary-50">{id}</h3>
+                        <p className="truncate text-xs text-primary-400">{modelShort}</p>
                     </div>
                 </div>
                 <Badge
@@ -52,10 +52,10 @@ export function AgentCard({
 
             {currentTask && (
                 <div className="mb-3">
-                    <div className="text-primary-500 text-xs tracking-wide uppercase">
+                    <div className="text-xs tracking-wide text-primary-500 uppercase">
                         Task
                     </div>
-                    <div className={"mt-1 text-sm break-words " + colors.text}>
+                    <div className={"mt-1 text-sm wrap-break-word " + colors.text}>
                         {currentTask}
                     </div>
                 </div>
@@ -63,10 +63,10 @@ export function AgentCard({
 
             {currentActivity && (
                 <div className="mb-3">
-                    <div className="text-primary-500 text-xs tracking-wide uppercase">
+                    <div className="text-xs tracking-wide text-primary-500 uppercase">
                         Activity
                     </div>
-                    <div className="text-primary-300 mt-1 text-sm break-words">
+                    <div className="mt-1 text-sm wrap-break-word text-primary-300">
                         {currentActivity}
                     </div>
                 </div>
@@ -74,15 +74,15 @@ export function AgentCard({
 
             {!currentTask && !currentActivity && (
                 <div className="mb-3">
-                    <div className="text-primary-500 text-sm italic">No active task</div>
+                    <div className="text-sm text-primary-500 italic">No active task</div>
                 </div>
             )}
 
-            <div className="text-primary-400 mt-auto flex items-center justify-between text-xs">
+            <div className="mt-auto flex items-center justify-between text-xs text-primary-400">
                 <div className="flex min-w-0 flex-wrap items-center gap-1">
                     {channel && (
                         <>
-                            <span className="bg-primary-700 max-w-full truncate rounded px-1.5 py-0.5">
+                            <span className="max-w-full truncate rounded bg-primary-700 px-1.5 py-0.5">
                                 {channel}
                             </span>
                             <span className="text-primary-600">•</span>

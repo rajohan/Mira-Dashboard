@@ -84,7 +84,7 @@ function ReportList({ reports, selectedId, onSelect }: ReportListProperties) {
             variant="bordered"
             className="flex min-w-0 flex-col p-0 xl:max-h-[calc(100vh-10rem)]"
         >
-            <div className="border-primary-700 text-primary-200 border-b px-4 py-3 text-sm font-semibold">
+            <div className="border-b border-primary-700 px-4 py-3 text-sm font-semibold text-primary-200">
                 Reports
             </div>
             <div className="min-h-0 flex-1 overflow-visible p-2 xl:overflow-auto">
@@ -104,10 +104,10 @@ function ReportList({ reports, selectedId, onSelect }: ReportListProperties) {
                         >
                             <div className="flex min-w-0 items-start justify-between gap-2">
                                 <div className="min-w-0">
-                                    <div className="text-primary-100 truncate text-sm font-medium">
+                                    <div className="truncate text-sm font-medium text-primary-100">
                                         {report.title}
                                     </div>
-                                    <div className="text-primary-400 mt-1 truncate text-xs">
+                                    <div className="mt-1 truncate text-xs text-primary-400">
                                         {report.summary || typeLabel(report.type)}
                                     </div>
                                 </div>
@@ -118,7 +118,7 @@ function ReportList({ reports, selectedId, onSelect }: ReportListProperties) {
                                     {report.status}
                                 </Badge>
                             </div>
-                            <div className="text-primary-400 mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-primary-400">
                                 <span>{typeLabel(report.type)}</span>
                                 <span>{formatDate(report.occurredAt)}</span>
                             </div>
@@ -160,8 +160,8 @@ function ReportDetails({ report, onDelete, deletePending }: ReportDetailsPropert
                         </Badge>
                         {report.source ? <Badge>{report.source}</Badge> : undefined}
                     </div>
-                    <CardTitle className="break-words">{report.title}</CardTitle>
-                    <div className="text-primary-400 mt-1 text-sm">
+                    <CardTitle className="wrap-break-word">{report.title}</CardTitle>
+                    <div className="mt-1 text-sm text-primary-400">
                         {formatDate(reportTimestamp(report))}
                         {report.sourceJobId ? ` · ${report.sourceJobId}` : ""}
                     </div>
@@ -175,18 +175,18 @@ function ReportDetails({ report, onDelete, deletePending }: ReportDetailsPropert
                     disabled={deletePending}
                     aria-label={`Delete ${report.title}`}
                 >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="size-4" />
                     <span className="hidden sm:inline">Delete</span>
                 </Button>
             </div>
 
             {shouldShowSummary ? (
-                <p className="border-primary-700 text-primary-200 bg-primary-900/40 mb-4 rounded-lg border p-3 text-sm">
+                <p className="mb-4 rounded-lg border border-primary-700 bg-primary-900/40 p-3 text-sm text-primary-200">
                     {report.summary}
                 </p>
             ) : undefined}
 
-            <div className="prose prose-invert prose-sm max-w-none break-words">
+            <div className="prose prose-sm max-w-none wrap-break-word prose-invert">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{report.bodyMd}</ReactMarkdown>
             </div>
         </Card>
@@ -268,7 +268,7 @@ export function Reports() {
                         size="sm"
                         onClick={() => setFilter(item.value)}
                     >
-                        <item.icon className="h-4 w-4" />
+                        <item.icon className="size-4" />
                         {item.label}
                     </Button>
                 ))}

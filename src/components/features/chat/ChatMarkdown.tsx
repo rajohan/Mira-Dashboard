@@ -103,7 +103,7 @@ function ChatCodeBlock({ code, language }: { code: string; language: string }) {
     if (parsedJson) {
         return (
             <div className="my-1.5 max-w-full overflow-hidden rounded-lg border border-white/10 bg-black/25">
-                <div className="text-primary-400 border-b border-white/10 px-2 py-0.5 text-[10px] tracking-wide uppercase">
+                <div className="border-b border-white/10 px-2 py-0.5 text-[10px] tracking-wide text-primary-400 uppercase">
                     {JSON_LANGUAGES.has(language) ? language : "json"}
                 </div>
                 <div className="max-w-full overflow-x-auto p-2">
@@ -128,7 +128,7 @@ function ChatCodeBlock({ code, language }: { code: string; language: string }) {
 
     return (
         <div className="my-1.5 max-w-full overflow-hidden rounded-lg border border-white/10 bg-black/25">
-            <div className="text-primary-400 border-b border-white/10 px-2 py-0.5 text-[10px] tracking-wide uppercase">
+            <div className="border-b border-white/10 px-2 py-0.5 text-[10px] tracking-wide text-primary-400 uppercase">
                 {language}
             </div>
             <SyntaxHighlighter
@@ -287,8 +287,8 @@ export function ChatMarkdown({ text }: { text: string }) {
     return (
         <div
             className={cn(
-                "prose prose-invert max-w-none text-sm leading-normal break-words whitespace-pre-wrap text-inherit",
-                "prose-headings:mb-1 prose-headings:mt-1.5 prose-headings:text-inherit prose-p:my-1 prose-ol:my-1 prose-ul:my-1 prose-li:m-0 prose-li:p-0",
+                "prose max-w-none text-sm leading-normal wrap-break-word whitespace-pre-wrap text-inherit prose-invert",
+                "prose-headings:mt-1.5 prose-headings:mb-1 prose-headings:text-inherit prose-p:my-1 prose-ol:my-1 prose-ul:my-1 prose-li:m-0 prose-li:p-0",
                 "[&_li+li]:mt-0 [&_li>p]:my-0 [&_ol]:space-y-0 [&_ol]:whitespace-normal [&_ul]:space-y-0 [&_ul]:whitespace-normal",
                 "prose-strong:text-inherit prose-code:text-inherit prose-code:before:content-none prose-code:after:content-none prose-pre:bg-transparent prose-pre:p-0",
                 "[&_pre_code]:rounded-none [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit"

@@ -70,9 +70,9 @@ export function DatabaseTableShell<T extends object>({
                                     role={onRowClick ? "button" : undefined}
                                     tabIndex={onRowClick ? 0 : undefined}
                                     className={[
-                                        "border-primary-700 bg-primary-900/40 rounded-lg border p-3",
+                                        "rounded-lg border border-primary-700 bg-primary-900/40 p-3",
                                         onRowClick
-                                            ? "hover:bg-primary-800/50 cursor-pointer"
+                                            ? "cursor-pointer hover:bg-primary-800/50"
                                             : "",
                                     ].join(" ")}
                                     onClick={
@@ -106,8 +106,8 @@ export function DatabaseTableShell<T extends object>({
                         ].join(" ")}
                         style={{ maxHeight }}
                     >
-                        <table className="min-w-[760px] text-sm lg:min-w-full">
-                            <thead className="bg-primary-900/95 text-primary-300 sticky top-0 z-10 text-left backdrop-blur">
+                        <table className="min-w-190 text-sm lg:min-w-full">
+                            <thead className="sticky top-0 z-10 bg-primary-900/95 text-left text-primary-300 backdrop-blur">
                                 {table.getHeaderGroups().map((headerGroup) => (
                                     <tr key={headerGroup.id}>
                                         {headerGroup.headers.map((header) => (
@@ -118,7 +118,7 @@ export function DatabaseTableShell<T extends object>({
                                                 {header.column.getCanSort() ? (
                                                     <button
                                                         type="button"
-                                                        className="hover:text-primary-100 flex items-center gap-1 select-none"
+                                                        className="flex items-center gap-1 select-none hover:text-primary-100"
                                                         onClick={header.column.getToggleSortingHandler()}
                                                     >
                                                         {flexRender(
@@ -129,10 +129,10 @@ export function DatabaseTableShell<T extends object>({
                                                         <span className="text-primary-500">
                                                             {header.column.getIsSorted() ===
                                                             "asc" ? (
-                                                                <ChevronDown className="h-3 w-3" />
+                                                                <ChevronDown className="size-3" />
                                                             ) : header.column.getIsSorted() ===
                                                               "desc" ? (
-                                                                <ChevronDown className="h-3 w-3 rotate-180" />
+                                                                <ChevronDown className="size-3 rotate-180" />
                                                             ) : undefined}
                                                         </span>
                                                     </button>
@@ -156,7 +156,7 @@ export function DatabaseTableShell<T extends object>({
                                         key={row.id}
                                         tabIndex={onRowClick ? 0 : undefined}
                                         className={[
-                                            "border-primary-700/50 hover:bg-primary-700/30 border-b",
+                                            "border-b border-primary-700/50 hover:bg-primary-700/30",
                                             onRowClick ? "cursor-pointer" : "",
                                         ].join(" ")}
                                         onClick={

@@ -452,6 +452,9 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     usageMonthly: 1,
                     remaining: 9,
                     totalCredits: 10,
+                    limit: 10,
+                    limitRemaining: 9,
+                    limitReset: "monthly",
                     percentUsed: 10,
                 },
                 elevenlabs: {

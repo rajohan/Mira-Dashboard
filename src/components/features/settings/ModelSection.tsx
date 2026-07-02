@@ -58,7 +58,7 @@ export function ModelSection({
                     />
                 </div>
 
-                <div className="border-primary-800 bg-primary-900/50 rounded-lg border px-3 py-2">
+                <div className="rounded-lg border border-primary-800 bg-primary-900/50 px-3 py-2">
                     <ReadOnlyField label="Image model" value={imageModel || "Not set"} />
                     <ReadOnlyField
                         label="Image generation model"
@@ -80,12 +80,12 @@ export function ModelSection({
                     >
                         {saving ? (
                             <>
-                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <Loader2 className="size-4 animate-spin" />
                                 Saving...
                             </>
                         ) : (
                             <>
-                                <Check className="h-4 w-4" />
+                                <Check className="size-4" />
                                 Save model settings
                             </>
                         )}

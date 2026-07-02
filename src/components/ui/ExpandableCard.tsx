@@ -23,14 +23,14 @@ export function ExpandableCard({
             <Disclosure defaultOpen={defaultExpanded} as="div">
                 <DisclosureButton className="flex w-full items-center justify-between gap-3 py-1 text-left">
                     <div className="flex min-w-0 items-center gap-2">
-                        <Icon size={18} className="text-accent-400 shrink-0" />
+                        <Icon size={18} className="shrink-0 text-accent-400" />
                         <CardTitle className="min-w-0 truncate text-base sm:text-lg">
                             {title}
                         </CardTitle>
                     </div>
-                    <ChevronDown className="h-[18px] w-[18px] shrink-0 transition-transform data-[open]:rotate-180" />
+                    <ChevronDown className="size-4.5 shrink-0 transition-transform data-open:rotate-180" />
                 </DisclosureButton>
-                <DisclosurePanel className="border-primary-700 mt-3 border-t pt-3 sm:mt-4 sm:pt-4">
+                <DisclosurePanel className="mt-3 border-t border-primary-700 pt-3 sm:mt-4 sm:pt-4">
                     {children}
                 </DisclosurePanel>
             </Disclosure>
@@ -48,8 +48,8 @@ export function ReadOnlyField({
 }) {
     return (
         <div className="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-            <span className="text-primary-400 text-sm">{label}</span>
-            <span className="text-primary-100 font-mono text-sm break-all sm:text-right">
+            <span className="text-sm text-primary-400">{label}</span>
+            <span className="font-mono text-sm break-all text-primary-100 sm:text-right">
                 {value === undefined ? "—" : String(value)}
             </span>
         </div>

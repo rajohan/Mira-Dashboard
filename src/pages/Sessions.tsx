@@ -66,7 +66,7 @@ export function Sessions() {
 
             {!isConnected && !error && (
                 <div className="py-8 text-center">
-                    <WifiOff className="text-primary-400 mx-auto mb-4 h-12 w-12" />
+                    <WifiOff className="mx-auto mb-4 size-12 text-primary-400" />
                     <p className="text-primary-300">Connecting to OpenClaw...</p>
                 </div>
             )}

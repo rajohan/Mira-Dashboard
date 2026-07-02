@@ -25,22 +25,22 @@ export function FilesSidebar({
     onToggle,
 }: FilesSidebarProperties) {
     return (
-        <div className="w-full lg:w-72 lg:flex-shrink-0">
+        <div className="w-full lg:w-72 lg:shrink-0">
             <Card
                 variant="bordered"
                 className="flex max-h-96 min-h-0 flex-col overflow-hidden p-0 lg:h-full lg:max-h-none"
             >
-                <div className="border-primary-700 border-b p-3">
+                <div className="border-b border-primary-700 p-3">
                     <CardTitle className="flex items-center gap-2 text-sm">
                         <Folder size={14} />
                         Workspace
                     </CardTitle>
                 </div>
-                <div className="border-primary-700 min-h-0 flex-1 overflow-auto border-b p-2">
+                <div className="min-h-0 flex-1 overflow-auto border-b border-primary-700 p-2">
                     {rootLoading && files.length === 0 ? (
-                        <div className="text-primary-400 p-2 text-sm">Loading...</div>
+                        <div className="p-2 text-sm text-primary-400">Loading...</div>
                     ) : files.length === 0 ? (
-                        <div className="text-primary-400 p-2 text-sm">No files found</div>
+                        <div className="p-2 text-sm text-primary-400">No files found</div>
                     ) : (
                         files
                             .toSorted((a, b) => {
@@ -60,8 +60,8 @@ export function FilesSidebar({
                             ))
                     )}
                 </div>
-                <div className="border-primary-700 max-h-44 flex-shrink-0 border-t lg:max-h-none">
-                    <div className="border-primary-700 border-b p-3">
+                <div className="max-h-44 shrink-0 border-t border-primary-700 lg:max-h-none">
+                    <div className="border-b border-primary-700 p-3">
                         <CardTitle className="flex items-center gap-2 text-sm">
                             <Settings size={14} />
                             Config

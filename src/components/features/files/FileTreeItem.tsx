@@ -16,7 +16,7 @@ interface FileTreeItemProperties {
 /** Returns file icon. */
 function getFileIcon(filename: string, type: "file" | "directory") {
     if (type === "directory")
-        return <Folder size={16} className="flex-shrink-0 text-yellow-400" />;
+        return <Folder size={16} className="shrink-0 text-yellow-400" />;
 
     const extension = getFileExtension(filename);
     const iconMap: Record<string, { icon: string; color: string }> = {
@@ -52,7 +52,7 @@ function getFileIcon(filename: string, type: "file" | "directory") {
         return (
             <span
                 className={
-                    "flex h-4 w-4 flex-shrink-0 items-center justify-center text-[10px] font-bold " +
+                    "flex h-4 w-4 shrink-0 items-center justify-center text-[10px] font-bold " +
                     iconInfo.color
                 }
             >
@@ -61,7 +61,7 @@ function getFileIcon(filename: string, type: "file" | "directory") {
         );
     }
 
-    return <File size={16} className="text-primary-400 flex-shrink-0" />;
+    return <File size={16} className="shrink-0 text-primary-400" />;
 }
 
 /** Renders the file tree item UI. */
@@ -95,7 +95,7 @@ export function FileTreeItem({
                 aria-current={isSelected ? "true" : undefined}
                 aria-expanded={node.type === "directory" ? isExpanded : undefined}
                 className={
-                    "hover:bg-primary-700/50 focus:ring-accent-400 flex w-full min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1.5 text-left focus:ring-2 focus:outline-none sm:py-1 " +
+                    "flex w-full min-w-0 cursor-pointer items-center gap-1 rounded px-2 py-1.5 text-left hover:bg-primary-700/50 focus:ring-2 focus:ring-accent-400 focus:outline-none sm:py-1 " +
                     (isSelected ? "bg-accent-500/20 text-accent-400" : "text-primary-200")
                 }
                 style={{ paddingLeft: depth * 12 + 8 }}
@@ -113,18 +113,18 @@ export function FileTreeItem({
                             isExpanded ? (
                                 <ChevronDown
                                     size={14}
-                                    className="text-primary-400 shrink-0"
+                                    className="shrink-0 text-primary-400"
                                 />
                             ) : (
                                 <ChevronRight
                                     size={14}
-                                    className="text-primary-400 shrink-0"
+                                    className="shrink-0 text-primary-400"
                                 />
                             )
                         ) : isLoading ? (
                             <RefreshCw
                                 size={14}
-                                className="text-primary-400 shrink-0 animate-spin"
+                                className="shrink-0 animate-spin text-primary-400"
                             />
                         ) : (
                             <span className="w-3.5 shrink-0" />

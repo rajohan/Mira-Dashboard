@@ -92,7 +92,7 @@ export function ToolSection({
                         placeholder="full"
                     />
                     <div>
-                        <div className="text-primary-300 mb-1.5 block text-sm font-medium">
+                        <div className="mb-1.5 block text-sm font-medium text-primary-300">
                             Exec security
                         </div>
                         <Select
@@ -113,7 +113,7 @@ export function ToolSection({
                         />
                     </div>
                     <div>
-                        <div className="text-primary-300 mb-1.5 block text-sm font-medium">
+                        <div className="mb-1.5 block text-sm font-medium text-primary-300">
                             Exec approval
                         </div>
                         <Select
@@ -146,7 +146,7 @@ export function ToolSection({
                         }
                         label="Web search"
                         description="Allow web_search with the configured provider"
-                        className="border-primary-800 bg-primary-900/50 rounded-lg border p-3"
+                        className="rounded-lg border border-primary-800 bg-primary-900/50 p-3"
                     />
                     <Switch
                         isChecked={draft.webFetchEnabled}
@@ -158,7 +158,7 @@ export function ToolSection({
                         }
                         label="Web fetch"
                         description="Allow fetching and extracting URLs"
-                        className="border-primary-800 bg-primary-900/50 rounded-lg border p-3"
+                        className="rounded-lg border border-primary-800 bg-primary-900/50 p-3"
                     />
                     <Switch
                         isChecked={draft.elevatedEnabled}
@@ -170,7 +170,7 @@ export function ToolSection({
                         }
                         label="Elevated tools"
                         description="Allow privileged/elevated command surfaces"
-                        className="border-primary-800 bg-primary-900/50 rounded-lg border p-3"
+                        className="rounded-lg border border-primary-800 bg-primary-900/50 p-3"
                     />
                     <Switch
                         isChecked={draft.agentToAgentEnabled}
@@ -182,7 +182,7 @@ export function ToolSection({
                         }
                         label="Agent-to-agent"
                         description="Allow agents to communicate with other sessions"
-                        className="border-primary-800 bg-primary-900/50 rounded-lg border p-3"
+                        className="rounded-lg border border-primary-800 bg-primary-900/50 p-3"
                     />
                 </div>
 
@@ -220,12 +220,12 @@ export function ToolSection({
                     >
                         {saving ? (
                             <>
-                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <Loader2 className="size-4 animate-spin" />
                                 Saving...
                             </>
                         ) : (
                             <>
-                                <Check className="h-4 w-4" />
+                                <Check className="size-4" />
                                 Save tool settings
                             </>
                         )}

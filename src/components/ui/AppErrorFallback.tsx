@@ -7,29 +7,29 @@ import { Button } from "./Button";
 export function AppErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
     return (
         <div className="flex min-h-screen items-center justify-center p-6">
-            <div className="bg-primary-900 text-primary-100 w-full max-w-xl rounded-xl border border-red-500/40 p-6">
+            <div className="w-full max-w-xl rounded-xl border border-red-500/40 bg-primary-900 p-6 text-primary-100">
                 <div className="mb-3 flex items-center gap-2 text-red-300">
-                    <AlertTriangle className="h-5 w-5" />
+                    <AlertTriangle className="size-5" />
                     <h1 className="text-lg font-semibold">
                         Something went wrong in the dashboard
                     </h1>
                 </div>
 
-                <p className="text-primary-300 mb-4 text-sm">
+                <p className="mb-4 text-sm text-primary-300">
                     Try reloading this view. If the error persists, check the console.
                 </p>
 
-                <pre className="bg-primary-950/70 mb-4 max-h-40 overflow-auto rounded p-3 text-xs text-red-200">
+                <pre className="mb-4 max-h-40 overflow-auto rounded bg-primary-950/70 p-3 text-xs text-red-200">
                     {error instanceof Error ? error.message : "Unknown error"}
                 </pre>
 
                 <div className="flex gap-2">
                     <Button variant="secondary" onClick={resetErrorBoundary}>
-                        <RotateCw className="h-4 w-4" />
+                        <RotateCw className="size-4" />
                         Try again
                     </Button>
                     <Button variant="ghost" onClick={() => location.reload()}>
-                        <RefreshCw className="h-4 w-4" />
+                        <RefreshCw className="size-4" />
                         Full reload
                     </Button>
                 </div>

@@ -21,11 +21,11 @@ export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnPropert
     if (!config) return;
 
     return (
-        <div className="flex min-w-0 flex-col lg:min-w-[280px] lg:flex-1">
+        <div className="flex min-w-0 flex-col lg:min-w-70 lg:flex-1">
             <div className="mb-2 flex items-center gap-2">
                 <div className={"h-2 w-2 rounded-full " + config.dotColor} />
-                <h2 className="text-primary-300 text-sm font-medium">{config.title}</h2>
-                <span className="bg-primary-700/50 text-primary-400 rounded px-1.5 py-0.5 text-xs">
+                <h2 className="text-sm font-medium text-primary-300">{config.title}</h2>
+                <span className="rounded bg-primary-700/50 px-1.5 py-0.5 text-xs text-primary-400">
                     {tasks.length}
                 </span>
             </div>
@@ -33,7 +33,7 @@ export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnPropert
                 ref={setNodeRef}
                 data-column={id}
                 className={
-                    "flex min-h-28 flex-col gap-2 rounded-lg border-2 border-dashed p-2 transition-colors lg:min-h-[400px] lg:flex-1 " +
+                    "flex min-h-28 flex-col gap-2 rounded-lg border-2 border-dashed p-2 transition-colors lg:min-h-100 lg:flex-1 " +
                     (isOver
                         ? "border-accent-500/50 bg-accent-500/5"
                         : "border-primary-700/50 bg-primary-800/30")
@@ -53,7 +53,7 @@ export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnPropert
                         ))}
                     </SortableContext>
                 ) : (
-                    <div className="text-primary-500 flex flex-1 items-center justify-center text-sm">
+                    <div className="flex flex-1 items-center justify-center text-sm text-primary-500">
                         No tasks
                     </div>
                 )}

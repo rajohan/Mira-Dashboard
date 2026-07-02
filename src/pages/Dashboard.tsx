@@ -98,23 +98,23 @@ function WeatherTimeCard({ className }: WeatherTimeCardProperties) {
         <Card className={className}>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
-                    <div className="text-primary-400 mb-1 flex items-center gap-2 text-xs tracking-wide uppercase">
-                        <Clock className="h-3.5 w-3.5" />
+                    <div className="mb-1 flex items-center gap-2 text-xs tracking-wide text-primary-400 uppercase">
+                        <Clock className="size-3.5" />
                         {weather?.location || "Spydeberg"}
                     </div>
-                    <div className="text-primary-50 text-2xl font-semibold">
+                    <div className="text-2xl font-semibold text-primary-50">
                         {localTime}
                     </div>
-                    <div className="text-primary-300 text-sm">{localDate}</div>
+                    <div className="text-sm text-primary-300">{localDate}</div>
                 </div>
 
-                <div className="border-primary-700 bg-primary-900/30 flex items-center gap-3 rounded-lg border p-3 sm:border-0 sm:bg-transparent sm:p-0">
-                    <CurrentWeatherIcon className="h-7 w-7 text-amber-300" />
+                <div className="flex items-center gap-3 rounded-lg border border-primary-700 bg-primary-900/30 p-3 sm:border-0 sm:bg-transparent sm:p-0">
+                    <CurrentWeatherIcon className="size-7 text-amber-300" />
                     <div className="min-w-0">
-                        <div className="text-primary-50 text-2xl font-semibold">
+                        <div className="text-2xl font-semibold text-primary-50">
                             {formatTemporary(weather?.temperatureC)}°C
                         </div>
-                        <div className="text-primary-300 truncate text-xs">
+                        <div className="truncate text-xs text-primary-300">
                             {isLoading
                                 ? "Loading weather..."
                                 : weather?.description || "Unknown"}
@@ -123,19 +123,19 @@ function WeatherTimeCard({ className }: WeatherTimeCardProperties) {
                 </div>
             </div>
 
-            <div className="text-primary-200 mt-3 grid grid-cols-3 gap-1 text-xs sm:gap-2 xl:grid-cols-1 2xl:grid-cols-3">
-                <span className="border-primary-700 bg-primary-800/40 inline-flex min-w-0 items-center justify-center gap-1 rounded-md border px-1 py-1">
-                    <Cloud className="text-primary-400 h-4 w-4 shrink-0" />
+            <div className="mt-3 grid grid-cols-3 gap-1 text-xs text-primary-200 sm:gap-2 xl:grid-cols-1 2xl:grid-cols-3">
+                <span className="inline-flex min-w-0 items-center justify-center gap-1 rounded-md border border-primary-700 bg-primary-800/40 p-1">
+                    <Cloud className="size-4 shrink-0 text-primary-400" />
                     <span className="truncate">
                         Feels {formatTemporary(weather?.feelsLikeC)}°
                     </span>
                 </span>
-                <span className="border-primary-700 bg-primary-800/40 inline-flex min-w-0 items-center justify-center gap-1 rounded-md border px-1 py-1">
-                    <Droplets className="text-accent-300 h-4 w-4 shrink-0" />
+                <span className="inline-flex min-w-0 items-center justify-center gap-1 rounded-md border border-primary-700 bg-primary-800/40 p-1">
+                    <Droplets className="size-4 shrink-0 text-accent-300" />
                     <span className="truncate">{weather?.humidityPercent ?? "--"}%</span>
                 </span>
-                <span className="border-primary-700 bg-primary-800/40 inline-flex min-w-0 items-center justify-center gap-1 rounded-md border px-1 py-1">
-                    <Wind className="text-primary-400 h-4 w-4 shrink-0" />
+                <span className="inline-flex min-w-0 items-center justify-center gap-1 rounded-md border border-primary-700 bg-primary-800/40 p-1">
+                    <Wind className="size-4 shrink-0 text-primary-400" />
                     <span className="truncate">{weather?.windKph ?? "--"} km/h</span>
                 </span>
             </div>
@@ -154,13 +154,13 @@ function WeatherTimeCard({ className }: WeatherTimeCardProperties) {
                     return (
                         <div
                             key={day.date}
-                            className="border-primary-700 bg-primary-800/40 flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-md border px-1 py-1 text-center text-xs sm:px-2"
+                            className="flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-md border border-primary-700 bg-primary-800/40 p-1 text-center text-xs sm:px-2"
                         >
-                            <span className="text-primary-400 whitespace-nowrap">
+                            <span className="whitespace-nowrap text-primary-400">
                                 {index === 0 ? "Today" : dayLabel}
                             </span>
-                            <span className="text-primary-100 inline-flex min-w-0 items-center gap-0.5 text-[11px] leading-none whitespace-nowrap tabular-nums sm:gap-1 sm:text-xs">
-                                <ForecastIcon className="text-primary-300 h-4 w-4 shrink-0" />
+                            <span className="inline-flex min-w-0 items-center gap-0.5 text-[11px] leading-none whitespace-nowrap text-primary-100 tabular-nums sm:gap-1 sm:text-xs">
+                                <ForecastIcon className="size-4 shrink-0 text-primary-300" />
                                 {formatTemporary(day.maxTempC)}°/
                                 {formatTemporary(day.minTempC)}°
                             </span>
@@ -189,7 +189,7 @@ export function Dashboard() {
                     subtitle={metrics ? formatLoad(metrics.cpu.loadAvg) : "Loading..."}
                     percent={metrics?.cpu.loadPercent}
                     showValue={false}
-                    icon={<Cpu className="h-5 w-5" />}
+                    icon={<Cpu className="size-5" />}
                 />
                 <MetricCard
                     title="Memory"
@@ -203,7 +203,7 @@ export function Dashboard() {
                     }
                     percent={metrics?.memory.percent}
                     showValue={false}
-                    icon={<MemoryStick className="h-5 w-5" />}
+                    icon={<MemoryStick className="size-5" />}
                 />
                 <MetricCard
                     title="Disk"
@@ -217,14 +217,14 @@ export function Dashboard() {
                     }
                     percent={metrics?.disk.percent}
                     showValue={false}
-                    icon={<HardDrive className="h-5 w-5" />}
+                    icon={<HardDrive className="size-5" />}
                 />
                 <MetricCard
                     title="Uptime"
                     value={metrics ? formatUptime(metrics.system.uptime) : "—"}
                     subtitle={metrics ? metrics.system.hostname : "Loading..."}
                     color="green"
-                    icon={<Clock className="h-5 w-5" />}
+                    icon={<Clock className="size-5" />}
                 />
                 <MetricCard
                     title="Download"
@@ -235,7 +235,7 @@ export function Dashboard() {
                     }
                     subtitle="Current throughput"
                     color="blue"
-                    icon={<ArrowDown className="h-5 w-5" />}
+                    icon={<ArrowDown className="size-5" />}
                 />
                 <MetricCard
                     title="Upload"
@@ -246,7 +246,7 @@ export function Dashboard() {
                     }
                     subtitle="Current throughput"
                     color="blue"
-                    icon={<ArrowUp className="h-5 w-5" />}
+                    icon={<ArrowUp className="size-5" />}
                 />
             </div>
 

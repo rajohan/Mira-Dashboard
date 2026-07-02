@@ -14,9 +14,9 @@ export const Card = forwardRef<HTMLDivElement, CardProperties>(
             <div
                 ref={reference}
                 className={cn(
-                    "bg-primary-800 rounded-lg p-4",
+                    "rounded-lg bg-primary-800 p-4",
                     {
-                        "border-primary-700 border": variant === "bordered",
+                        "border border-primary-700": variant === "bordered",
                     },
                     className
                 )}
@@ -38,7 +38,7 @@ export const CardTitle = forwardRef<
     return (
         <h3
             ref={reference}
-            className={cn("text-primary-50 text-lg font-semibold", className)}
+            className={cn("text-lg font-semibold text-primary-50", className)}
             {...properties}
         >
             {children}

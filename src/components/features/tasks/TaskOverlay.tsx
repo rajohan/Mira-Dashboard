@@ -7,9 +7,9 @@ export function TaskOverlay({ task }: { task: Task }) {
     const priority = getPriority(task.labels);
 
     return (
-        <div className="border-accent-500/50 bg-primary-800 w-72 rounded-lg border p-3 shadow-xl">
+        <div className="w-72 rounded-lg border border-accent-500/50 bg-primary-800 p-3 shadow-xl">
             <div className="mb-1.5 flex flex-wrap items-center gap-2">
-                <span className="text-primary-500 text-xs">#{task.number}</span>
+                <span className="text-xs text-primary-500">#{task.number}</span>
                 <span
                     className={
                         "rounded border px-1.5 py-0.5 text-[10px] font-medium " +
@@ -24,7 +24,7 @@ export function TaskOverlay({ task }: { task: Task }) {
                     </Badge>
                 )}
             </div>
-            <h3 className="text-primary-200 line-clamp-2 text-sm font-medium">
+            <h3 className="line-clamp-2 text-sm font-medium text-primary-200">
                 {task.title}
             </h3>
         </div>

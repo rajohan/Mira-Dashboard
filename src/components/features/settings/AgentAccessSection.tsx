@@ -114,7 +114,7 @@ export function AgentAccessSection({
                                 onClick={() => setActiveAgentId(agent.id)}
                                 aria-pressed={activeAgent?.id === agent.id}
                                 className={cn(
-                                    "rounded-xl border px-3 py-3 text-left transition sm:px-4",
+                                    "rounded-xl border p-3 text-left transition sm:px-4",
                                     activeAgent?.id === agent.id
                                         ? "border-accent-500 bg-accent-500/10 text-accent-200"
                                         : "border-primary-700 bg-primary-900/40 text-primary-300 hover:border-primary-600"
@@ -135,10 +135,10 @@ export function AgentAccessSection({
                     <div className="space-y-4">
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                             <div>
-                                <h4 className="text-primary-100 text-lg font-semibold">
+                                <h4 className="text-lg font-semibold text-primary-100">
                                     Tool toggles
                                 </h4>
-                                <p className="text-primary-400 text-sm">
+                                <p className="text-sm text-primary-400">
                                     Turning a tool off adds it to this agent’s deny list.
                                     Turning it back on clears that deny entry.
                                 </p>
@@ -174,32 +174,32 @@ export function AgentAccessSection({
                                             riskStyles[risk]
                                         )}
                                     >
-                                        <div className="flex items-center justify-between border-b border-current/10 px-3 py-3 sm:px-4">
+                                        <div className="flex items-center justify-between border-b border-current/10 p-3 sm:px-4">
                                             <div>
-                                                <h5 className="text-primary-100 font-semibold">
+                                                <h5 className="font-semibold text-primary-100">
                                                     {TOOL_RISK_LABELS[risk]}
-                                                    <span className="bg-primary-800 ml-2 rounded-full px-2 py-0.5 text-sm text-current">
+                                                    <span className="ml-2 rounded-full bg-primary-800 px-2 py-0.5 text-sm text-current">
                                                         {enabledCount}/{riskTools.length}
                                                     </span>
                                                 </h5>
                                             </div>
                                         </div>
-                                        <div className="divide-primary-800 bg-primary-950/30 divide-y">
+                                        <div className="divide-y divide-primary-800 bg-primary-950/30">
                                             {riskTools.map((tool) => {
                                                 const Icon = tool.icon;
                                                 return (
                                                     <div
                                                         key={tool.id}
-                                                        className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:px-4"
+                                                        className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:px-4"
                                                     >
-                                                        <div className="bg-primary-800 text-accent-300 self-start rounded-lg p-2 sm:self-auto">
-                                                            <Icon className="h-5 w-5" />
+                                                        <div className="self-start rounded-lg bg-primary-800 p-2 text-accent-300 sm:self-auto">
+                                                            <Icon className="size-5" />
                                                         </div>
                                                         <div className="min-w-0 flex-1">
-                                                            <div className="text-primary-100 font-medium break-words">
+                                                            <div className="font-medium wrap-break-word text-primary-100">
                                                                 {tool.label}
                                                             </div>
-                                                            <div className="text-primary-500 text-sm break-words">
+                                                            <div className="text-sm wrap-break-word text-primary-500">
                                                                 {tool.description}
                                                             </div>
                                                         </div>
@@ -241,12 +241,12 @@ export function AgentAccessSection({
                     >
                         {saving ? (
                             <>
-                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <Loader2 className="size-4 animate-spin" />
                                 Saving...
                             </>
                         ) : (
                             <>
-                                <Check className="h-4 w-4" />
+                                <Check className="size-4" />
                                 Save access control
                             </>
                         )}

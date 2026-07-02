@@ -29,7 +29,7 @@ export function RefreshButton({
             aria-label={label || "Refresh"}
             disabled={disabled || isLoading}
         >
-            <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`size-4 ${isLoading ? "animate-spin" : ""}`} />
             {label ? <span>{label}</span> : undefined}
         </Button>
     );

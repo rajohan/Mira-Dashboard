@@ -5,6 +5,9 @@ export interface OpenRouterQuota {
     usage: number;
     totalCredits: number;
     remaining: number;
+    limit: number | undefined;
+    limitRemaining: number | undefined;
+    limitReset: string | undefined;
     usageMonthly: number;
     percentUsed: number | undefined;
 }

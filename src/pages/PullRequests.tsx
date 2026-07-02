@@ -281,10 +281,10 @@ function deploymentCommitLabel(deployment: DeploymentJob): ReactNode {
 
     return (
         <>
-            <span className="line-clamp-2 min-w-0 flex-1 break-words">
+            <span className="line-clamp-2 min-w-0 flex-1 wrap-break-word">
                 {deployment.commitTitle}
             </span>
-            <span className="text-primary-500 shrink-0 whitespace-nowrap">
+            <span className="shrink-0 whitespace-nowrap text-primary-500">
                 ({commit})
             </span>
         </>
@@ -422,8 +422,8 @@ function PullRequestDescription({ body }: { body: string }) {
     const normalizedBody = normalizePullRequestBody(body);
 
     return (
-        <div className="border-primary-700 bg-primary-900/50 max-h-80 overflow-auto rounded border p-3 sm:p-4">
-            <div className="prose prose-invert prose-p:my-2 prose-headings:my-3 prose-ol:my-2 prose-ul:my-2 prose-li:my-0.5 prose-table:my-3 prose-th:border-primary-700 prose-td:border-primary-700 prose-th:p-2 prose-td:p-2 prose-code:before:content-none prose-code:after:content-none max-w-none text-sm break-words">
+        <div className="max-h-80 overflow-auto rounded border border-primary-700 bg-primary-900/50 p-3 sm:p-4">
+            <div className="prose max-w-none text-sm wrap-break-word prose-invert prose-headings:my-3 prose-p:my-2 prose-code:before:content-none prose-code:after:content-none prose-ol:my-2 prose-ul:my-2 prose-li:my-0.5 prose-table:my-3 prose-th:border-primary-700 prose-th:p-2 prose-td:border-primary-700 prose-td:p-2">
                 <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeRaw, rehypeSanitize]}
@@ -459,7 +459,7 @@ function PullRequestCard({
         <Card variant="bordered" className="space-y-3">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0">
-                    <div className="text-primary-400 text-xs">
+                    <div className="text-xs text-primary-400">
                         #{pr.number} · {pr.headRefName} → {pr.baseRefName}
                     </div>
                     <CardTitle className="mt-1 text-base">
@@ -472,7 +472,7 @@ function PullRequestCard({
                             {pr.title}
                         </a>
                     </CardTitle>
-                    <div className="text-primary-500 mt-1 text-xs">
+                    <div className="mt-1 text-xs text-primary-500">
                         {authorLabel(pr)} · Updated {formatDate(pr.updatedAt)} ·{" "}
                         <span className="text-green-400">+{pr.additions ?? 0}</span>{" "}
                         <span className="text-red-400">-{pr.deletions ?? 0}</span> across{" "}
@@ -510,7 +510,7 @@ function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
         <Card variant="bordered" className="h-fit space-y-3">
             <CardTitle className="text-base">Recent deploys</CardTitle>
             {deployments.length === 0 ? (
-                <p className="text-primary-400 text-sm">
+                <p className="text-sm text-primary-400">
                     No dashboard deploy jobs recorded yet.
                 </p>
             ) : (
@@ -518,27 +518,27 @@ function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
                     {deployments.map((deployment) => (
                         <div
                             key={deployment.id}
-                            className="border-primary-700 bg-primary-900/40 rounded border p-3"
+                            className="rounded border border-primary-700 bg-primary-900/40 p-3"
                         >
                             <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0">
-                                    <div className="text-primary-300 text-sm font-medium">
+                                    <div className="text-sm font-medium text-primary-300">
                                         {deployment.commitUrl ? (
                                             <a
                                                 href={deployment.commitUrl}
                                                 target="_blank"
                                                 rel="noreferrer"
-                                                className="text-primary-400 hover:text-primary-100 flex max-w-full min-w-0 items-baseline gap-1"
+                                                className="flex max-w-full min-w-0 items-baseline gap-1 text-primary-400 hover:text-primary-100"
                                             >
                                                 {deploymentCommitLabel(deployment)}
                                             </a>
                                         ) : (
-                                            <span className="text-primary-400 flex max-w-full min-w-0 items-baseline gap-1">
+                                            <span className="flex max-w-full min-w-0 items-baseline gap-1 text-primary-400">
                                                 {deploymentCommitLabel(deployment)}
                                             </span>
                                         )}
                                     </div>
-                                    <div className="text-primary-500 text-xs">
+                                    <div className="text-xs text-primary-500">
                                         {formatDate(deployment.updatedAt)}
                                     </div>
                                 </div>
@@ -550,7 +550,7 @@ function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
                                 </Badge>
                             </div>
                             {deployment.note ? (
-                                <p className="text-primary-400 mt-2 text-xs">
+                                <p className="mt-2 text-xs text-primary-400">
                                     {deployment.note}
                                 </p>
                             ) : undefined}
@@ -693,7 +693,7 @@ export function PullRequests() {
                 {mergeDisabledReason ? (
                     <p
                         id={mergeDisabledReasonId}
-                        className="text-primary-400 text-xs sm:basis-full"
+                        className="text-xs text-primary-400 sm:basis-full"
                     >
                         {mergeDisabledReason}
                     </p>
@@ -704,7 +704,7 @@ export function PullRequests() {
                         onClick={() => setPendingAction({ type: "review-approve", pr })}
                         disabled={isActionPending}
                     >
-                        <CheckCircle className="h-4 w-4" />
+                        <CheckCircle className="size-4" />
                         Approve PR
                     </Button>
                 ) : undefined}
@@ -728,7 +728,7 @@ export function PullRequests() {
                         }}
                         disabled={isActionPending}
                     >
-                        <GitBranch className="h-4 w-4" />
+                        <GitBranch className="size-4" />
                         {updatePullRequestBranch.isPending
                             ? "Updating..."
                             : "Update branch"}
@@ -740,7 +740,7 @@ export function PullRequests() {
                     disabled={mergeDisabled}
                     aria-describedby={mergeDisabledReasonId}
                 >
-                    <Rocket className="h-4 w-4" />
+                    <Rocket className="size-4" />
                     Merge + Deploy
                 </Button>
                 <Button
@@ -749,7 +749,7 @@ export function PullRequests() {
                     disabled={mergeDisabled}
                     aria-describedby={mergeDisabledReasonId}
                 >
-                    <GitMerge className="h-4 w-4" />
+                    <GitMerge className="size-4" />
                     Merge only
                 </Button>
                 <Button
@@ -757,7 +757,7 @@ export function PullRequests() {
                     onClick={() => setPendingAction({ type: "reject", pr })}
                     disabled={isActionPending}
                 >
-                    <XCircle className="h-4 w-4" />
+                    <XCircle className="size-4" />
                     Reject
                 </Button>
             </>
@@ -782,11 +782,11 @@ export function PullRequests() {
             <div className="space-y-4 p-3 sm:p-4 lg:p-6">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div>
-                        <h2 className="text-primary-100 flex items-center gap-2 text-xl font-semibold">
-                            <GitPullRequest className="h-5 w-5" />
+                        <h2 className="flex items-center gap-2 text-xl font-semibold text-primary-100">
+                            <GitPullRequest className="size-5" />
                             Pull requests
                         </h2>
-                        <p className="text-primary-400 mt-1 max-w-2xl text-sm">
+                        <p className="mt-1 max-w-2xl text-sm text-primary-400">
                             Review open rajohan/Mira-Dashboard pull requests. Dashboard
                             merge actions are enabled after review approval, passing CI,
                             and a safe production checkout.
@@ -798,7 +798,7 @@ export function PullRequests() {
                             onClick={() => setPendingAction({ type: "deploy" })}
                             disabled={isActionPending || isProductionActionBlocked}
                         >
-                            <Rocket className="h-4 w-4" />
+                            <Rocket className="size-4" />
                             {`Deploy latest ${DEFAULT_BASE}`}
                         </Button>
                     </div>
@@ -827,7 +827,7 @@ export function PullRequests() {
                             <CardTitle className="text-base">
                                 Production checkout
                             </CardTitle>
-                            <p className="text-primary-400 mt-1 text-sm">
+                            <p className="mt-1 text-sm text-primary-400">
                                 {checkoutMessage(
                                     productionCheckout,
                                     productionCheckoutError ?? undefined
@@ -862,7 +862,7 @@ export function PullRequests() {
                         </div>
                     </div>
                     {productionCheckout ? (
-                        <div className="text-primary-500 grid gap-1 text-xs lg:grid-cols-2">
+                        <div className="grid gap-1 text-xs text-primary-500 lg:grid-cols-2">
                             <div className="truncate">
                                 Production: {productionCheckout.root}
                             </div>
@@ -880,7 +880,7 @@ export function PullRequests() {
                         {pullRequests.length === 0 ? (
                             <Card variant="bordered">
                                 <CardTitle>No open PRs waiting</CardTitle>
-                                <p className="text-primary-400 mt-2 text-sm">
+                                <p className="mt-2 text-sm text-primary-400">
                                     New dashboard and dependency PRs will appear here for
                                     review.
                                 </p>
@@ -893,7 +893,7 @@ export function PullRequests() {
                                     <CardTitle className="text-base">
                                         Mira-authored PRs
                                     </CardTitle>
-                                    <p className="text-primary-400 mt-1 text-sm">
+                                    <p className="mt-1 text-sm text-primary-400">
                                         These can be merged, rejected, or merged and
                                         deployed from the dashboard.
                                     </p>
@@ -919,7 +919,7 @@ export function PullRequests() {
                                     <CardTitle className="text-base">
                                         Dependency / external PRs
                                     </CardTitle>
-                                    <p className="text-primary-400 mt-1 text-sm">
+                                    <p className="mt-1 text-sm text-primary-400">
                                         These can be merged after the same review, CI, and
                                         checkout gates as Mira-authored PRs.
                                     </p>

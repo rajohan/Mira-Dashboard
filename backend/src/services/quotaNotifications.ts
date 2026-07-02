@@ -66,9 +66,17 @@ function getNotificationPayload(
     quotas: Awaited<ReturnType<typeof fetchCachedQuotas>>
 ) {
     if (provider === "openrouter" && !hasQuotaStatus(quotas.openrouter)) {
+        const limitRemaining = quotas.openrouter.limitRemaining;
+        const limitReset = quotas.openrouter.limitReset;
+        const quotaLabel =
+            limitReset && limitReset !== "never" ? `${limitReset} quota` : "quota";
+        const quotaRemaining =
+            limitRemaining === undefined
+                ? `${quotaLabel} remaining unknown`
+                : `$${limitRemaining.toFixed(2)} ${quotaLabel} remaining`;
         return {
             title: `OpenRouter usage high (${bucket}%)`,
-            description: `${quotas.openrouter.percentUsed}% used ($${quotas.openrouter.remaining.toFixed(2)} remaining)`,
+            description: `${quotas.openrouter.percentUsed}% used (${quotaRemaining} · $${quotas.openrouter.remaining.toFixed(2)} balance)`,
         };
     }
 

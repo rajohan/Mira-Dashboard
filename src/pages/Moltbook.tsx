@@ -15,18 +15,18 @@ import { LoadingState } from "../components/ui/LoadingState";
 import { useMoltbookData } from "../hooks";
 
 const TAB_OPTIONS = [
-    { value: "feed", label: "Feed", icon: <Newspaper className="h-4 w-4" /> },
-    { value: "posts", label: "Posts", icon: <MessageSquare className="h-4 w-4" /> },
+    { value: "feed", label: "Feed", icon: <Newspaper className="size-4" /> },
+    { value: "posts", label: "Posts", icon: <MessageSquare className="size-4" /> },
     {
         value: "comments",
         label: "Comments",
-        icon: <MessageCircle className="h-4 w-4" />,
+        icon: <MessageCircle className="size-4" />,
     },
 ] as const;
 
 const SORT_OPTIONS = [
-    { value: "hot", label: "Hot", icon: <Flame className="h-4 w-4" /> },
-    { value: "new", label: "New", icon: <Newspaper className="h-4 w-4" /> },
+    { value: "hot", label: "Hot", icon: <Flame className="size-4" /> },
+    { value: "new", label: "New", icon: <Newspaper className="size-4" /> },
 ] as const;
 
 /** Renders the moltbook UI. */
@@ -46,7 +46,7 @@ export function Moltbook() {
             <div className="flex h-64 flex-col items-center justify-center gap-4 p-3 sm:p-4 lg:p-6">
                 <p className="text-red-400">{error}</p>
                 <Button variant="secondary" size="sm" onClick={() => refetch()}>
-                    <RefreshCw className="h-4 w-4" />
+                    <RefreshCw className="size-4" />
                     Retry
                 </Button>
             </div>

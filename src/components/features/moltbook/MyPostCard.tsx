@@ -13,7 +13,7 @@ interface MyPostCardProperties {
 export function MyPostCard({ post }: MyPostCardProperties) {
     return (
         <Card className="p-3 sm:p-4">
-            <div className="text-primary-500 mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+            <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-primary-500">
                 <a
                     href={getMoltbookUrl("/m/" + post.submolt.name)}
                     target="_blank"
@@ -31,10 +31,10 @@ export function MyPostCard({ post }: MyPostCardProperties) {
                 rel="noopener noreferrer"
                 className="group block"
             >
-                <h3 className="text-primary-100 line-clamp-3 text-base font-medium break-words transition group-hover:text-indigo-300 sm:line-clamp-2">
+                <h3 className="line-clamp-3 text-base font-medium wrap-break-word text-primary-100 transition group-hover:text-indigo-300 sm:line-clamp-2">
                     {post.title}
                 </h3>
-                <p className="text-primary-400 group-hover:text-primary-300 mt-1 line-clamp-3 text-sm break-words transition sm:line-clamp-2">
+                <p className="mt-1 line-clamp-3 text-sm wrap-break-word text-primary-400 transition group-hover:text-primary-300 sm:line-clamp-2">
                     {post.content_preview}
                 </p>
             </a>
@@ -45,9 +45,9 @@ export function MyPostCard({ post }: MyPostCardProperties) {
                     href={getMoltbookUrl("/post/" + post.id)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-primary-400 hover:text-primary-200 flex items-center gap-1"
+                    className="flex items-center gap-1 text-primary-400 hover:text-primary-200"
                 >
-                    <MessageSquare className="h-3 w-3" />
+                    <MessageSquare className="size-3" />
                     {post.comment_count}
                 </a>
             </div>

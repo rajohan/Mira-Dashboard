@@ -1283,15 +1283,26 @@ async function checkOpenRouterQuota() {
             Authorization: `Bearer ${apiKey}`,
         }) as Promise<JsonRecord>,
     ]);
-    const usage = toNumber(asRecord(keyInfo.data).usage);
+    const keyData = asRecord(keyInfo.data);
+    const usage = toNumber(keyData.usage);
     const totalCredits = toNumber(asRecord(creditsInfo.data).total_credits);
+    const limit = toOptionalNumber(keyData.limit);
+    const limitRemaining = toOptionalNumber(keyData.limit_remaining);
     return {
         usage,
         totalCredits,
         remaining: Math.max(totalCredits - usage, 0),
-        usageMonthly: toNumber(asRecord(keyInfo.data).usage_monthly),
+        limit,
+        limitRemaining,
+        limitReset:
+            typeof keyData.limit_reset === "string" ? keyData.limit_reset : undefined,
+        usageMonthly: toNumber(keyData.usage_monthly),
         percentUsed:
-            totalCredits > 0 ? Math.round((usage / totalCredits) * 100) : undefined,
+            limit !== undefined && limit > 0 && limitRemaining !== undefined
+                ? Number((((limit - limitRemaining) / limit) * 100).toFixed(1))
+                : totalCredits > 0
+                  ? Math.round((usage / totalCredits) * 100)
+                  : undefined,
     };
 }
 

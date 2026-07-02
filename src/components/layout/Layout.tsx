@@ -69,18 +69,18 @@ export function Layout({ children }: LayoutProperties) {
         <aside
             id={sidebarId}
             className={cn(
-                "border-primary-700 bg-primary-950 fixed inset-y-0 left-0 z-40 flex w-72 max-w-[85vw] flex-col overflow-y-auto border-r shadow-2xl shadow-black/40 transition-transform duration-200 ease-out md:static md:z-auto md:w-64 md:max-w-none md:translate-x-0 md:shadow-none",
+                "fixed inset-y-0 left-0 z-40 flex w-72 max-w-[85vw] flex-col overflow-y-auto border-r border-primary-700 bg-primary-950 shadow-2xl shadow-black/40 transition-transform duration-200 ease-out md:static md:z-auto md:w-64 md:max-w-none md:translate-x-0 md:shadow-none",
                 isSidebarOpen ? "translate-x-0" : "-translate-x-full"
             )}
         >
-            <div className="border-primary-700 flex items-center justify-between gap-3 border-b p-4">
+            <div className="flex items-center justify-between gap-3 border-b border-primary-700 p-4">
                 <h1 className="flex items-center gap-2 text-lg font-bold sm:text-xl">
                     <span className="text-2xl">👩‍💻</span>
                     <span>Mira Dashboard</span>
                 </h1>
                 <button
                     type="button"
-                    className="text-primary-300 hover:bg-primary-800 hover:text-primary-50 rounded-lg p-2 transition-colors md:hidden"
+                    className="rounded-lg p-2 text-primary-300 transition-colors hover:bg-primary-800 hover:text-primary-50 md:hidden"
                     aria-label="Close navigation menu"
                     onClick={() => setIsSidebarOpen(false)}
                 >
@@ -123,8 +123,8 @@ export function Layout({ children }: LayoutProperties) {
                 })}
             </nav>
 
-            <div className="border-primary-700 border-t p-4">
-                <div className="text-primary-400 text-xs">
+            <div className="border-t border-primary-700 p-4">
+                <div className="text-xs text-primary-400">
                     <div>OpenClaw</div>
                     <div className="text-primary-500">
                         {openClawVersion ? `v${openClawVersion}` : "Version unknown"}
@@ -135,7 +135,7 @@ export function Layout({ children }: LayoutProperties) {
     );
 
     return (
-        <div className="bg-primary-900 text-primary-50 flex h-screen overflow-hidden">
+        <div className="flex h-screen overflow-hidden bg-primary-900 text-primary-50">
             {sidebar}
             {isSidebarOpen && (
                 <button
@@ -146,7 +146,7 @@ export function Layout({ children }: LayoutProperties) {
                 />
             )}
 
-            <main className="bg-primary-900 flex min-w-0 flex-1 flex-col overflow-hidden">
+            <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-primary-900">
                 <AppHeader
                     title={
                         navItems.find((item) => item.to === location.pathname)?.label ||

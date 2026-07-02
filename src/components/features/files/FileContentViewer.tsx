@@ -55,14 +55,14 @@ export function FileContentViewer({
         <div className="flex h-full min-h-0 flex-col">
             {largeFileWarning && (
                 <div className="flex items-start gap-2 border-b border-yellow-500/50 bg-yellow-500/20 px-3 py-2 text-sm text-yellow-400 sm:items-center sm:px-4">
-                    <AlertTriangle size={14} className="mt-0.5 flex-shrink-0 sm:mt-0" />
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0 sm:mt-0" />
                     Large file ({formatSize(fileContent.size)}) - preview only, editing
                     disabled
                 </div>
             )}
 
             {fileContent.isBinary && !fileContent.isImage ? (
-                <div className="text-primary-400 flex h-full items-center justify-center">
+                <div className="flex h-full items-center justify-center text-primary-400">
                     <div className="text-center">
                         <File size={48} className="mx-auto mb-2 opacity-50" />
                         <p>Binary file</p>
@@ -85,7 +85,7 @@ export function FileContentViewer({
             ) : isMarkdownFile(fileContent.path) && markdownPreview ? (
                 <Suspense
                     fallback={
-                        <div className="text-primary-400 p-4">Loading preview...</div>
+                        <div className="p-4 text-primary-400">Loading preview...</div>
                     }
                 >
                     <MarkdownPreview content={editedContent} />
@@ -93,7 +93,7 @@ export function FileContentViewer({
             ) : isJsonFile(fileContent.path) && jsonPreview ? (
                 <Suspense
                     fallback={
-                        <div className="text-primary-400 p-4">Loading preview...</div>
+                        <div className="p-4 text-primary-400">Loading preview...</div>
                     }
                 >
                     <JsonPreview content={editedContent} />
@@ -110,7 +110,7 @@ export function FileContentViewer({
                 ) : (
                     <Suspense
                         fallback={
-                            <div className="text-primary-400 p-4">Loading preview...</div>
+                            <div className="p-4 text-primary-400">Loading preview...</div>
                         }
                     >
                         <CodePreview
@@ -130,7 +130,7 @@ export function FileContentViewer({
             ) : (
                 <pre
                     className={
-                        "overflow-auto p-3 font-mono text-xs break-words whitespace-pre-wrap sm:p-4 sm:text-sm " +
+                        "overflow-auto p-3 font-mono text-xs wrap-break-word whitespace-pre-wrap sm:p-4 sm:text-sm " +
                         syntaxClass
                     }
                 >

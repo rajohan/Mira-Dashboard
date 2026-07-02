@@ -121,7 +121,7 @@ function ScheduledJobList({
             variant="bordered"
             className="flex min-w-0 flex-col p-0 xl:max-h-[calc(100vh-10rem)]"
         >
-            <div className="border-primary-700 text-primary-200 border-b px-3 py-2 text-sm font-semibold sm:px-4 sm:py-3">
+            <div className="border-b border-primary-700 px-3 py-2 text-sm font-semibold text-primary-200 sm:px-4 sm:py-3">
                 Dashboard jobs
             </div>
             <div className="min-h-0 flex-1 overflow-visible p-2 xl:overflow-auto">
@@ -143,10 +143,10 @@ function ScheduledJobList({
                         >
                             <div className="flex w-full min-w-0 items-start justify-between gap-2">
                                 <div className="min-w-0">
-                                    <div className="text-primary-100 truncate text-sm font-medium">
+                                    <div className="truncate text-sm font-medium text-primary-100">
                                         {job.name}
                                     </div>
-                                    <div className="text-primary-400 mt-1 truncate text-xs">
+                                    <div className="mt-1 truncate text-xs text-primary-400">
                                         {job.id}
                                     </div>
                                 </div>
@@ -157,7 +157,7 @@ function ScheduledJobList({
                                     {scheduledJobStatusLabel(job)}
                                 </Badge>
                             </div>
-                            <div className="text-primary-400 mt-2 grid w-full grid-cols-1 gap-x-2 gap-y-1 text-[11px] sm:grid-cols-2">
+                            <div className="mt-2 grid w-full grid-cols-1 gap-x-2 gap-y-1 text-[11px] text-primary-400 sm:grid-cols-2">
                                 <span>Schedule: {formatScheduledJobSchedule(job)}</span>
                                 <span>
                                     Next:{" "}
@@ -236,9 +236,9 @@ function ScheduledJobDetails({
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                     <CardTitle className="text-base">{job.name}</CardTitle>
-                    <p className="text-primary-400 mt-1 text-xs break-all">{job.id}</p>
+                    <p className="mt-1 text-xs break-all text-primary-400">{job.id}</p>
                     {job.description ? (
-                        <p className="text-primary-300 mt-2 text-sm">{job.description}</p>
+                        <p className="mt-2 text-sm text-primary-300">{job.description}</p>
                     ) : undefined}
                 </div>
                 <Badge
@@ -249,8 +249,8 @@ function ScheduledJobDetails({
                 </Badge>
             </div>
 
-            <div className="border-primary-700 bg-primary-900/40 rounded-lg border p-3">
-                <div className="text-primary-300 mb-2 text-xs font-semibold tracking-wide uppercase">
+            <div className="rounded-lg border border-primary-700 bg-primary-900/40 p-3">
+                <div className="mb-2 text-xs font-semibold tracking-wide text-primary-300 uppercase">
                     Controls
                 </div>
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -259,7 +259,7 @@ function ScheduledJobDetails({
                         onChange={onToggle}
                         label="Enabled"
                         disabled={updatePending}
-                        className="border-primary-700 bg-primary-800/60 rounded-lg border px-3 py-2 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0"
+                        className="rounded-lg border border-primary-700 bg-primary-800/60 px-3 py-2 sm:border-0 sm:bg-transparent sm:p-0"
                     />
                     <Button
                         size="sm"
@@ -279,13 +279,13 @@ function ScheduledJobDetails({
                 </div>
             </div>
 
-            <div className="border-primary-700 bg-primary-900/40 rounded-lg border p-3">
-                <div className="text-primary-300 mb-3 text-xs font-semibold tracking-wide uppercase">
+            <div className="rounded-lg border border-primary-700 bg-primary-900/40 p-3">
+                <div className="mb-3 text-xs font-semibold tracking-wide text-primary-300 uppercase">
                     Schedule
                 </div>
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(12rem,16rem)_1fr_auto] lg:items-end">
                     <div>
-                        <div className="text-primary-300 mb-1 block text-xs">Type</div>
+                        <div className="mb-1 block text-xs text-primary-300">Type</div>
                         <Select
                             value={scheduleTypeDraft}
                             options={scheduleTypeOptions}
@@ -308,7 +308,7 @@ function ScheduledJobDetails({
                     ) : undefined}
                     {scheduleTypeDraft === "daily" ? (
                         <div>
-                            <div className="text-primary-300 mb-1 block text-xs">
+                            <div className="mb-1 block text-xs text-primary-300">
                                 Time of day
                             </div>
                             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
@@ -322,7 +322,7 @@ function ScheduledJobDetails({
                                     width="w-full"
                                     menuWidth="w-24"
                                 />
-                                <span className="text-primary-400 text-sm">:</span>
+                                <span className="text-sm text-primary-400">:</span>
                                 <Select
                                     ariaLabel="Time of day minute"
                                     value={timeMinute}
@@ -350,7 +350,7 @@ function ScheduledJobDetails({
                         onClick={onSave}
                         className="h-9 w-full lg:w-auto"
                     >
-                        <Save className="h-4 w-4" />
+                        <Save className="size-4" />
                         {updatePending ? "Saving..." : "Save schedule"}
                     </Button>
                 </div>
@@ -375,51 +375,51 @@ function ScheduledJobDetails({
             </div>
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <Card className="bg-primary-900/40 min-w-0 p-3">
-                    <div className="text-primary-400 text-xs">Action</div>
-                    <div className="text-primary-100 mt-1 text-sm break-all">
+                <Card className="min-w-0 bg-primary-900/40 p-3">
+                    <div className="text-xs text-primary-400">Action</div>
+                    <div className="mt-1 text-sm break-all text-primary-100">
                         {job.actionKey}
                     </div>
                 </Card>
-                <Card className="bg-primary-900/40 min-w-0 p-3">
-                    <div className="text-primary-400 text-xs">Next run</div>
-                    <div className="text-primary-100 mt-1 text-sm">
+                <Card className="min-w-0 bg-primary-900/40 p-3">
+                    <div className="text-xs text-primary-400">Next run</div>
+                    <div className="mt-1 text-sm text-primary-100">
                         {job.nextRunAt ? formatDate(job.nextRunAt) : "Not scheduled"}
                     </div>
                 </Card>
-                <Card className="bg-primary-900/40 min-w-0 p-3">
-                    <div className="text-primary-400 text-xs">Last run</div>
-                    <div className="text-primary-100 mt-1 text-sm">
+                <Card className="min-w-0 bg-primary-900/40 p-3">
+                    <div className="text-xs text-primary-400">Last run</div>
+                    <div className="mt-1 text-sm text-primary-100">
                         {job.lastRun ? formatDate(job.lastRun.startedAt) : "Never"}
                     </div>
                 </Card>
-                <Card className="bg-primary-900/40 min-w-0 p-3">
-                    <div className="text-primary-400 text-xs">Updated</div>
-                    <div className="text-primary-100 mt-1 text-sm">
+                <Card className="min-w-0 bg-primary-900/40 p-3">
+                    <div className="text-xs text-primary-400">Updated</div>
+                    <div className="mt-1 text-sm text-primary-100">
                         {formatDate(job.updatedAt)}
                     </div>
                 </Card>
             </div>
 
-            <Card className="bg-primary-900/40 min-w-0 p-3 sm:p-4">
-                <div className="text-primary-300 mb-2 text-xs font-semibold tracking-wide uppercase">
+            <Card className="min-w-0 bg-primary-900/40 p-3 sm:p-4">
+                <div className="mb-2 text-xs font-semibold tracking-wide text-primary-300 uppercase">
                     Run logs
                 </div>
                 {runs.isLoading ? (
-                    <div className="text-primary-400 text-sm">Loading runs...</div>
+                    <div className="text-sm text-primary-400">Loading runs...</div>
                 ) : runs.data && runs.data.length > 0 ? (
                     <div className="space-y-3">
                         {runs.data.map((run) => (
                             <div
                                 key={run.id}
-                                className="border-primary-700 rounded-lg border p-3"
+                                className="rounded-lg border border-primary-700 p-3"
                             >
                                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                                     <div className="min-w-0">
-                                        <div className="text-primary-100 text-sm font-medium">
+                                        <div className="text-sm font-medium text-primary-100">
                                             {run.triggerType} run #{run.id}
                                         </div>
-                                        <div className="text-primary-400 mt-1 text-xs">
+                                        <div className="mt-1 text-xs text-primary-400">
                                             Started {formatDate(run.startedAt)}
                                             {run.finishedAt
                                                 ? ` · finished ${formatDate(run.finishedAt)}`
@@ -444,14 +444,14 @@ function ScheduledJobDetails({
                                         {run.status}
                                     </Badge>
                                 </div>
-                                <pre className="text-primary-200 mt-2 max-h-48 overflow-auto rounded bg-black/30 p-2 text-xs whitespace-pre-wrap">
+                                <pre className="mt-2 max-h-48 overflow-auto rounded bg-black/30 p-2 text-xs whitespace-pre-wrap text-primary-200">
                                     {formatRunOutput(run.output)}
                                 </pre>
                             </div>
                         ))}
                     </div>
                 ) : (
-                    <div className="text-primary-400 text-sm">No run logs yet.</div>
+                    <div className="text-sm text-primary-400">No run logs yet.</div>
                 )}
             </Card>
         </Card>
@@ -734,14 +734,14 @@ export function Jobs() {
                 <div className="flex min-h-80 flex-col items-center justify-center gap-4">
                     <p className="text-red-400">{error.message}</p>
                     <Button variant="secondary" onClick={retryActiveView}>
-                        <RotateCw className="h-4 w-4" />
+                        <RotateCw className="size-4" />
                         Retry
                     </Button>
                 </div>
             ) : isEmpty ? (
                 <Card variant="bordered">
                     <CardTitle>No jobs found</CardTitle>
-                    <p className="text-primary-300 mt-2 text-sm">
+                    <p className="mt-2 text-sm text-primary-300">
                         {view === "scheduled"
                             ? "Dashboard scheduled jobs will appear here."
                             : "OpenClaw cron jobs will appear here."}

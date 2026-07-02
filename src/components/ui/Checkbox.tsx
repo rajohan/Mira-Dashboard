@@ -33,21 +33,21 @@ export function Checkbox({
                 checked={isChecked}
                 onChange={onChange}
                 className={cn(
-                    "flex h-5 w-5 items-center justify-center rounded border",
+                    "flex size-5 items-center justify-center rounded border",
                     "transition-colors",
                     "data-checked:border-accent-500 data-checked:bg-accent-500",
                     "data-unchecked:border-primary-600 data-unchecked:bg-primary-800",
-                    "data-focus:ring-accent-500 data-focus:ring-offset-primary-900 data-focus:ring-2 data-focus:ring-offset-2",
+                    "data-focus:ring-2 data-focus:ring-accent-500 data-focus:ring-offset-2 data-focus:ring-offset-primary-900",
                     "data-disabled:cursor-not-allowed data-disabled:opacity-50"
                 )}
             >
-                {isChecked && <Check className="h-4 w-4 text-white" strokeWidth={3} />}
+                {isChecked && <Check className="size-4 text-white" strokeWidth={3} />}
             </HeadlessCheckbox>
             {(label || description) && (
                 <div className="flex flex-col">
-                    {label && <Label className="text-primary-300 text-sm">{label}</Label>}
+                    {label && <Label className="text-sm text-primary-300">{label}</Label>}
                     {description && (
-                        <Description className="text-primary-400 text-xs">
+                        <Description className="text-xs text-primary-400">
                             {description}
                         </Description>
                     )}

@@ -203,14 +203,14 @@ export function ChatComposer({
             ref={(element) => {
                 composerReference.current = element ?? undefined;
             }}
-            className="border-primary-700 mt-3 border-t pt-3 sm:mt-4 sm:pt-4"
+            className="mt-3 border-t border-primary-700 pt-3 sm:mt-4 sm:pt-4"
         >
             {attachments.length > 0 ? (
                 <div className="mb-3 flex flex-wrap gap-2">
                     {attachments.map((attachment) => (
                         <div
                             key={attachment.id}
-                            className="group border-primary-700 bg-primary-800 text-primary-100 hover:border-primary-500 hover:bg-primary-700 flex max-w-full min-w-0 items-center gap-1 rounded-lg border p-1 text-left text-xs"
+                            className="group flex max-w-full min-w-0 items-center gap-1 rounded-lg border border-primary-700 bg-primary-800 p-1 text-left text-xs text-primary-100 hover:border-primary-500 hover:bg-primary-700"
                         >
                             <button
                                 type="button"
@@ -229,16 +229,16 @@ export function ChatComposer({
                                         sizeBytes: attachment.sizeBytes,
                                     })
                                 }
-                                className="focus:ring-accent-500 flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-0.5 text-left focus:ring-2 focus:outline-none"
+                                className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-0.5 text-left focus:ring-2 focus:ring-accent-500 focus:outline-none"
                             >
                                 {attachment.kind === "image" && attachment.dataUrl ? (
                                     <img
                                         src={attachment.dataUrl}
                                         alt=""
-                                        className="h-8 w-8 shrink-0 rounded object-cover"
+                                        className="size-8 shrink-0 rounded object-cover"
                                     />
                                 ) : (
-                                    <Paperclip className="text-primary-400 h-4 w-4" />
+                                    <Paperclip className="size-4 text-primary-400" />
                                 )}
                                 <div className="min-w-0 flex-1">
                                     <div className="truncate">{attachment.fileName}</div>
@@ -250,10 +250,10 @@ export function ChatComposer({
                             <button
                                 type="button"
                                 onClick={() => onRemoveAttachment(attachment.id)}
-                                className="text-primary-400 hover:bg-primary-700 hover:text-primary-100 focus:ring-accent-500 rounded p-1 focus:ring-2 focus:outline-none"
+                                className="rounded p-1 text-primary-400 hover:bg-primary-700 hover:text-primary-100 focus:ring-2 focus:ring-accent-500 focus:outline-none"
                                 aria-label={`Remove ${attachment.fileName}`}
                             >
-                                <X className="h-3.5 w-3.5" />
+                                <X className="size-3.5" />
                             </button>
                         </div>
                     ))}
@@ -272,8 +272,8 @@ export function ChatComposer({
                 />
                 <div className="relative min-w-0 flex-1">
                     {visibleSlashCommandSuggestions.length > 0 ? (
-                        <div className="border-primary-700 bg-primary-900 absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border shadow-2xl">
-                            <div className="border-primary-700 text-primary-400 border-b px-3 py-2 text-xs font-medium tracking-wide uppercase">
+                        <div className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-primary-700 bg-primary-900 shadow-2xl">
+                            <div className="border-b border-primary-700 px-3 py-2 text-xs font-medium tracking-wide text-primary-400 uppercase">
                                 Slash commands
                             </div>
                             <div className="max-h-72 overflow-y-auto py-1">
@@ -284,13 +284,13 @@ export function ChatComposer({
                                         onClick={() =>
                                             onApplySlashSuggestion(suggestion.value)
                                         }
-                                        className="hover:bg-primary-800 focus:bg-primary-800 flex w-full items-start gap-3 px-3 py-2 text-left focus:outline-none"
+                                        className="flex w-full items-start gap-3 px-3 py-2 text-left hover:bg-primary-800 focus:bg-primary-800 focus:outline-none"
                                     >
                                         <span className="min-w-0 flex-1">
-                                            <span className="text-primary-100 block truncate font-mono text-sm">
+                                            <span className="block truncate font-mono text-sm text-primary-100">
                                                 {suggestion.title}
                                             </span>
-                                            <span className="text-primary-400 mt-0.5 block truncate text-xs">
+                                            <span className="mt-0.5 block truncate text-xs text-primary-400">
                                                 {suggestion.description}
                                             </span>
                                         </span>
@@ -300,16 +300,16 @@ export function ChatComposer({
                         </div>
                     ) : undefined}
                     {showEmojiPicker ? (
-                        <div className="border-primary-700 bg-primary-900 absolute right-0 bottom-full left-0 z-30 mb-2 rounded-xl border p-2 shadow-2xl sm:left-auto sm:w-80">
-                            <div className="text-primary-400 mb-2 flex items-center justify-between px-1 text-xs font-medium tracking-wide uppercase">
+                        <div className="absolute inset-x-0 bottom-full z-30 mb-2 rounded-xl border border-primary-700 bg-primary-900 p-2 shadow-2xl sm:left-auto sm:w-80">
+                            <div className="mb-2 flex items-center justify-between px-1 text-xs font-medium tracking-wide text-primary-400 uppercase">
                                 <span>Emoji</span>
                                 <button
                                     type="button"
                                     onClick={() => setShowEmojiPicker(false)}
-                                    className="text-primary-400 hover:bg-primary-800 hover:text-primary-100 rounded p-1"
+                                    className="rounded p-1 text-primary-400 hover:bg-primary-800 hover:text-primary-100"
                                     aria-label="Close emoji picker"
                                 >
-                                    <X className="h-4 w-4" />
+                                    <X className="size-4" />
                                 </button>
                             </div>
                             <div className="grid max-h-52 grid-cols-6 gap-1 overflow-y-auto sm:max-h-64">
@@ -318,7 +318,7 @@ export function ChatComposer({
                                         key={emoji}
                                         type="button"
                                         onClick={() => insertEmoji(emoji)}
-                                        className="hover:bg-primary-800 focus:bg-primary-800 rounded-lg p-2.5 text-xl focus:outline-none"
+                                        className="rounded-lg p-2.5 text-xl hover:bg-primary-800 focus:bg-primary-800 focus:outline-none"
                                         aria-label={`Insert ${emoji}`}
                                     >
                                         {emoji}
@@ -367,11 +367,11 @@ export function ChatComposer({
                         type="button"
                         onClick={() => setShowEmojiPicker((wasPrevious) => !wasPrevious)}
                         disabled={!isConnected || !selectedSessionKey || isSending}
-                        className="text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 absolute right-2 bottom-2 rounded-full p-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+                        className="absolute right-2 bottom-2 rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
                         title="Insert emoji"
                         aria-label="Insert emoji"
                     >
-                        <Smile className="h-5 w-5" />
+                        <Smile className="size-5" />
                     </button>
                 </div>
                 <div className="grid grid-cols-3 gap-2 md:flex md:flex-col">
@@ -389,9 +389,9 @@ export function ChatComposer({
                         className="w-full px-2 sm:px-4"
                     >
                         {isRecording ? (
-                            <Square className="h-4 w-4" />
+                            <Square className="size-4" />
                         ) : (
-                            <Mic className="h-4 w-4" />
+                            <Mic className="size-4" />
                         )}
                         {isRecording ? "Stop" : isTranscribing ? "STT…" : "Voice"}
                     </Button>
@@ -409,7 +409,7 @@ export function ChatComposer({
                         title="Attach files"
                         className="w-full px-2 sm:px-4"
                     >
-                        <Paperclip className="h-4 w-4" />
+                        <Paperclip className="size-4" />
                         Attach
                     </Button>
                     <Button
@@ -419,7 +419,7 @@ export function ChatComposer({
                         disabled={!canSend || isRecording || isTranscribing}
                         className="w-full px-2 sm:px-4"
                     >
-                        <Send className="h-4 w-4" />
+                        <Send className="size-4" />
                         Send
                     </Button>
                 </div>

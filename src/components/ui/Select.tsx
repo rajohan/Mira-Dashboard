@@ -32,7 +32,7 @@ export function Select({
     icon,
     ariaLabel,
     className,
-    width = "min-w-[180px]",
+    width = "min-w-45",
     menuWidth,
 }: SelectProperties) {
     const selectedOption = options.find((opt) => opt.value === value);
@@ -47,20 +47,20 @@ export function Select({
             <MenuButton
                 aria-label={buttonLabel}
                 className={cn(
-                    "border-primary-700 bg-primary-800 flex h-9 items-center gap-2 rounded-lg border px-3 text-sm transition-colors outline-none",
-                    "hover:bg-primary-700 hover:border-accent-500 data-[focus]:border-accent-500 focus:outline-none data-[focus]:outline-none",
+                    "flex h-9 items-center gap-2 rounded-lg border border-primary-700 bg-primary-800 px-3 text-sm transition-colors outline-none",
+                    "hover:border-accent-500 hover:bg-primary-700 focus:outline-none data-focus:border-accent-500 data-focus:outline-none",
                     width,
                     className
                 )}
             >
-                {icon && <span className="text-primary-400 flex-shrink-0">{icon}</span>}
+                {icon && <span className="shrink-0 text-primary-400">{icon}</span>}
                 <span className="flex-1 truncate text-left">{selectedLabel}</span>
-                <ChevronDown className="text-primary-400 h-4 w-4 flex-shrink-0 transition-transform data-[open]:rotate-180" />
+                <ChevronDown className="size-4 shrink-0 text-primary-400 transition-transform data-open:rotate-180" />
             </MenuButton>
             <MenuItems
                 anchor={{ to: "bottom start", gap: 8 }}
                 className={cn(
-                    "border-primary-700 bg-primary-900 z-10 max-h-60 max-w-[min(36rem,calc(100vw-2rem))] min-w-[var(--button-width)] overflow-y-auto rounded-lg border shadow-xl ring-1 shadow-black/30 ring-black/20 outline-none focus:outline-none data-[focus]:outline-none",
+                    "z-10 max-h-60 max-w-[min(36rem,calc(100vw-2rem))] min-w-(--button-width) overflow-y-auto rounded-lg border border-primary-700 bg-primary-900 shadow-xl ring-1 shadow-black/30 ring-black/20 outline-none focus:outline-none data-focus:outline-none",
                     menuWidth || "w-max"
                 )}
             >
@@ -70,14 +70,14 @@ export function Select({
                             onClick={() => onChange(option.value)}
                             className={cn(
                                 "flex w-full flex-col px-3 py-2 text-left text-sm transition-colors outline-none",
-                                "hover:bg-primary-700 data-[focus]:bg-primary-700 focus:outline-none data-[focus]:outline-none",
+                                "hover:bg-primary-700 focus:outline-none data-focus:bg-primary-700 data-focus:outline-none",
                                 value === option.value &&
                                     "bg-accent-500/10 text-accent-300"
                             )}
                         >
                             <span>{option.label}</span>
                             {option.description && (
-                                <span className="text-primary-500 text-xs">
+                                <span className="text-xs text-primary-500">
                                     {option.description}
                                 </span>
                             )}
