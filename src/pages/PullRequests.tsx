@@ -274,6 +274,11 @@ function deploymentStatusLabel(status: DeploymentJob["status"]) {
     return status === "isOk" ? "ok" : status;
 }
 
+/** Formats pull request count copy. */
+function pullRequestCountLabel(count: number): string {
+    return `${count} ${count === 1 ? "PR" : "PRs"}`;
+}
+
 /** Renders the deployment commit title and commit reference. */
 function deploymentCommitLabel(deployment: DeploymentJob): ReactNode {
     const commit = deployment.commit || deployment.id;
@@ -890,9 +895,16 @@ export function PullRequests() {
                         {miraPullRequests.length > 0 ? (
                             <section className="space-y-3" aria-label="Mira-authored PRs">
                                 <div>
-                                    <CardTitle className="text-base">
-                                        Mira-authored PRs
-                                    </CardTitle>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <CardTitle className="text-base">
+                                            Mira-authored PRs
+                                        </CardTitle>
+                                        <Badge variant="info">
+                                            {pullRequestCountLabel(
+                                                miraPullRequests.length
+                                            )}
+                                        </Badge>
+                                    </div>
                                     <p className="text-primary-400 mt-1 text-sm">
                                         These can be merged, rejected, or merged and
                                         deployed from the dashboard.
@@ -916,9 +928,16 @@ export function PullRequests() {
                                 aria-label="Dependency and external PRs"
                             >
                                 <div>
-                                    <CardTitle className="text-base">
-                                        Dependency / external PRs
-                                    </CardTitle>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <CardTitle className="text-base">
+                                            Dependency / external PRs
+                                        </CardTitle>
+                                        <Badge variant="default">
+                                            {pullRequestCountLabel(
+                                                externalPullRequests.length
+                                            )}
+                                        </Badge>
+                                    </div>
                                     <p className="text-primary-400 mt-1 text-sm">
                                         These can be merged after the same review, CI, and
                                         checkout gates as Mira-authored PRs.
