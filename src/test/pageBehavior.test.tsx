@@ -1777,6 +1777,7 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getByText("Bump dashboard dependency")).toBeInTheDocument();
             expect(screen.getByText("Deploy dashboard")).toBeInTheDocument();
         });
+        expect(screen.getAllByText("1 PR")).toHaveLength(2);
         expect(screen.getByText("Coverage body")).toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: "Approve PR" }));
