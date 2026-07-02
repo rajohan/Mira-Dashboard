@@ -36,7 +36,7 @@ export function ProgressBar({
         <div
             className={twMerge(
                 clsx(
-                    "bg-primary-700 overflow-hidden rounded-full",
+                    "overflow-hidden rounded-full bg-primary-700",
                     sizeStyles[size],
                     className
                 )

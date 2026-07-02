@@ -446,7 +446,7 @@ export function Logs() {
                         label: f.name,
                     }))}
                     placeholder="Select file..."
-                    icon={<FileText className="h-4 w-4" />}
+                    icon={<FileText className="size-4" />}
                     width="w-full"
                 />
 
@@ -477,7 +477,7 @@ export function Logs() {
             </div>
 
             <div className="mb-3 flex flex-col gap-3 sm:mb-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-primary-400 text-sm">
+                <div className="text-sm text-primary-400">
                     {isLoadingContent
                         ? "Loading..."
                         : formatLogEntryCount(filteredLogs.length, liveLogs.length)}
@@ -520,21 +520,21 @@ export function Logs() {
                         logContainerReference.current = element ?? undefined;
                     }}
                     onScroll={handleScroll}
-                    className="bg-primary-900/50 relative h-full overflow-y-auto font-mono text-[11px] sm:text-xs"
+                    className="relative h-full overflow-y-auto bg-primary-900/50 font-mono text-[11px] sm:text-xs"
                     style={{ overflowAnchor: "none" }}
                 >
                     {!isAtBottom && filteredLogs.length > 0 && (
                         <button
                             type="button"
                             onClick={scrollToBottom}
-                            className="bg-accent-500 hover:bg-accent-600 sticky top-2 z-10 float-right mr-2 mb-2 rounded-full px-3 py-1 text-xs text-white shadow-lg"
+                            className="sticky top-2 z-10 float-right mr-2 mb-2 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600"
                         >
                             ↓ Follow
                         </button>
                     )}
 
                     {filteredLogs.length === 0 ? (
-                        <div className="text-primary-400 py-8 text-center">
+                        <div className="py-8 text-center text-primary-400">
                             {liveLogs.length === 0
                                 ? "Waiting for logs..."
                                 : "No logs match your filter."}

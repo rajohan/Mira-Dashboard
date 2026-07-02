@@ -41,7 +41,7 @@ export function Modal({
                 <DialogPanel
                     transition
                     className={cn(
-                        "border-primary-700 bg-primary-800 w-full rounded-lg border shadow-xl",
+                        "w-full rounded-lg border border-primary-700 bg-primary-800 shadow-xl",
                         "flex flex-col",
                         "max-h-[90vh]",
                         "data-closed:scale-95 data-closed:opacity-0 data-enter:scale-100 data-enter:opacity-100",
@@ -50,8 +50,8 @@ export function Modal({
                     )}
                 >
                     {title && (
-                        <div className="border-primary-700 flex flex-shrink-0 items-center justify-between border-b px-4 py-3">
-                            <DialogTitle className="text-primary-100 text-lg font-semibold">
+                        <div className="flex shrink-0 items-center justify-between border-b border-primary-700 px-4 py-3">
+                            <DialogTitle className="text-lg font-semibold text-primary-100">
                                 {title}
                             </DialogTitle>
                             <Button

@@ -53,12 +53,12 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProperties) {
     return (
         <Card>
             <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="text-primary-300 text-sm font-semibold tracking-wide uppercase">
+                <h3 className="text-sm font-semibold tracking-wide text-primary-300 uppercase">
                     {title}
                 </h3>
             </div>
 
-            <div className="max-h-[400px] space-y-3 overflow-y-auto pr-2">
+            <div className="max-h-100 space-y-3 overflow-y-auto pr-2">
                 {entries.map(({ item, entry }) => {
                     const refreshKeys =
                         item.refreshKeys && item.refreshKeys.length > 0
@@ -72,14 +72,14 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProperties) {
                     return (
                         <div
                             key={item.key}
-                            className="border-primary-700 bg-primary-900/30 rounded-lg border p-3"
+                            className="rounded-lg border border-primary-700 bg-primary-900/30 p-3"
                         >
                             <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
-                                    <div className="text-primary-100 text-sm font-medium">
+                                    <div className="text-sm font-medium text-primary-100">
                                         {item.label}
                                     </div>
-                                    <div className="text-primary-400 mt-1 text-xs">
+                                    <div className="mt-1 text-xs text-primary-400">
                                         {item.description || item.key}
                                     </div>
                                 </div>
@@ -88,7 +88,7 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProperties) {
                                 </Badge>
                             </div>
 
-                            <div className="text-primary-300 mt-3 flex flex-col gap-3 text-xs sm:flex-row sm:items-center sm:justify-between">
+                            <div className="mt-3 flex flex-col gap-3 text-xs text-primary-300 sm:flex-row sm:items-center sm:justify-between">
                                 <div className="min-w-0">
                                     <div>
                                         Last update:{" "}
@@ -108,15 +108,15 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProperties) {
                                 <button
                                     type="button"
                                     aria-label={refreshLabel}
-                                    className="border-primary-600 text-primary-100 hover:border-primary-400 inline-flex w-full items-center justify-center gap-1 rounded-md border px-2 py-1 transition disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                                    className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-primary-600 px-2 py-1 text-primary-100 transition hover:border-primary-400 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                                     disabled={isRefreshing}
                                     onClick={() => refreshCache.mutate(refreshToken)}
                                     title={refreshLabel}
                                 >
                                     {isRefreshing ? (
-                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        <Loader2 className="size-3.5 animate-spin" />
                                     ) : (
-                                        <RefreshCw className="h-3.5 w-3.5" />
+                                        <RefreshCw className="size-3.5" />
                                     )}
                                     Force update
                                 </button>

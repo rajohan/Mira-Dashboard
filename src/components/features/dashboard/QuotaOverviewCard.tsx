@@ -175,12 +175,26 @@ function formatSyntheticWeeklyRemaining(
     return `${Math.round(weeklyTokenLimit.percentRemaining)}% left`;
 }
 
+/** Formats the OpenRouter key limit period. */
+function formatOpenRouterLimitReset(value: string | undefined): string {
+    if (!value || value === "never") {
+        return "quota";
+    }
+
+    return `${value} quota`;
+}
+
+/** Formats small OpenRouter quota balances without rounding real usage away. */
+function formatOpenRouterQuotaRemaining(value: number): string {
+    return `$${value.toFixed(3)}`;
+}
+
 /** Renders the quota overview card UI. */
 export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
     if (!quotas) {
         return (
             <Card>
-                <div className="text-primary-300 text-sm">Loading usage limits…</div>
+                <div className="text-sm text-primary-300">Loading usage limits…</div>
             </Card>
         );
     }
@@ -189,13 +203,16 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
         {
             key: "openrouter",
             label: "OpenRouter",
-            icon: <Waves className="h-4 w-4" />,
+            icon: <Waves className="size-4" />,
             line1: hasQuotaStatus(quotas.openrouter)
                 ? quotas.openrouter.status.replaceAll("_", " ")
-                : `$${quotas.openrouter.usage.toFixed(2)} used / $${quotas.openrouter.totalCredits.toFixed(2)}`,
+                : quotas.openrouter.limit !== undefined &&
+                    quotas.openrouter.limitRemaining !== undefined
+                  ? `${formatOpenRouterQuotaRemaining(quotas.openrouter.limitRemaining)} left / $${quotas.openrouter.limit.toFixed(2)} ${formatOpenRouterLimitReset(quotas.openrouter.limitReset)}`
+                  : `$${quotas.openrouter.remaining.toFixed(2)} balance`,
             line2: hasQuotaStatus(quotas.openrouter)
                 ? quotas.openrouter.note || ""
-                : `$${quotas.openrouter.remaining.toFixed(2)} remaining`,
+                : `$${quotas.openrouter.remaining.toFixed(2)} balance · $${quotas.openrouter.usageMonthly.toFixed(4)} this month`,
             percent:
                 !hasQuotaStatus(quotas.openrouter) &&
                 quotas.openrouter.percentUsed !== undefined
@@ -205,7 +222,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
         {
             key: "elevenlabs",
             label: "ElevenLabs",
-            icon: <Zap className="h-4 w-4" />,
+            icon: <Zap className="size-4" />,
             line1: hasQuotaStatus(quotas.elevenlabs)
                 ? quotas.elevenlabs.status.replaceAll("_", " ")
                 : `${Math.max(100 - (quotas.elevenlabs.percentUsed ?? 0), 0)}% left`,
@@ -221,7 +238,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
         {
             key: "synthetic",
             label: "Synthetic.new",
-            icon: <Zap className="h-4 w-4" />,
+            icon: <Zap className="size-4" />,
             line1: hasQuotaStatus(quotas.synthetic)
                 ? quotas.synthetic.status.replaceAll("_", " ")
                 : `5h ${Math.round(Math.max(100 - (quotas.synthetic.rollingFiveHourLimit.percentUsed ?? 0), 0))}% left · weekly ${formatSyntheticWeeklyRemaining(quotas.synthetic.weeklyTokenLimit)}`,
@@ -240,7 +257,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
         {
             key: "openai",
             label: "OpenAI / Codex",
-            icon: <DollarSign className="h-4 w-4" />,
+            icon: <DollarSign className="size-4" />,
             line1: hasQuotaStatus(quotas.openai)
                 ? quotas.openai.status.replaceAll("_", " ")
                 : `5h ${quotas.openai.fiveHourLeftPercent}% left · weekly ${quotas.openai.weeklyLeftPercent}% left`,
@@ -256,7 +273,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
     return (
         <Card>
             <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="text-primary-300 text-sm font-semibold tracking-wide uppercase">
+                <h3 className="text-sm font-semibold tracking-wide text-primary-300 uppercase">
                     Usage Limits
                 </h3>
             </div>
@@ -265,24 +282,24 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
                 {providers.map((provider) => (
                     <div
                         key={provider.key}
-                        className="border-primary-700 bg-primary-800/40 rounded-lg border px-3 py-2"
+                        className="rounded-lg border border-primary-700 bg-primary-800/40 px-3 py-2"
                     >
                         <div className="mb-1 flex items-start justify-between gap-2">
-                            <div className="text-primary-100 inline-flex min-w-0 items-center gap-2 text-sm">
+                            <div className="inline-flex min-w-0 items-center gap-2 text-sm text-primary-100">
                                 {provider.icon}
                                 <span className="truncate">{provider.label}</span>
                             </div>
                             {provider.percent !== undefined && (
                                 <Badge variant={getSeverity(provider.percent)}>
-                                    {provider.percent}%
+                                    {formatPercent(provider.percent)}%
                                 </Badge>
                             )}
                         </div>
-                        <div className="text-primary-300 text-xs break-words">
+                        <div className="text-xs wrap-break-word text-primary-300">
                             {provider.line1}
                         </div>
                         {provider.line2 && (
-                            <div className="text-primary-400 text-xs break-words">
+                            <div className="text-xs wrap-break-word text-primary-400">
                                 {provider.line2}
                             </div>
                         )}

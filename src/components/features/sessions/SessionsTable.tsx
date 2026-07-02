@@ -71,7 +71,7 @@ export function SessionsTable({
                 header: "Name",
                 /** Renders the best available session display name. */
                 cell: (info) => (
-                    <span className="text-primary-200 block max-w-xs truncate text-sm">
+                    <span className="block max-w-xs truncate text-sm text-primary-200">
                         {info.getValue()?.slice(0, 40) || "unknown"}
                     </span>
                 ),
@@ -81,7 +81,7 @@ export function SessionsTable({
             header: "Model",
             /** Renders the model name fallback for sparse session rows. */
             cell: (info) => (
-                <span className="text-primary-300 text-sm">
+                <span className="text-sm text-primary-300">
                     {info.getValue() || "Unknown"}
                 </span>
             ),
@@ -95,7 +95,7 @@ export function SessionsTable({
                 const percent = getTokenPercent(current, max);
                 return (
                     <div className="flex items-center gap-2">
-                        <span className="text-primary-300 text-sm">
+                        <span className="text-sm text-primary-300">
                             {formatTokens(current, max)}
                         </span>
                         <ProgressBar percent={percent} size="sm" className="w-16" />
@@ -107,7 +107,7 @@ export function SessionsTable({
             header: "Last Active",
             /** Renders the relative session activity age. */
             cell: (info) => (
-                <span className="text-primary-400 text-sm">
+                <span className="text-sm text-primary-400">
                     {formatDuration(info.getValue())}
                 </span>
             ),
@@ -156,14 +156,14 @@ export function SessionsTable({
                     return (
                         <div
                             key={row.id}
-                            className="border-primary-700 bg-primary-900/60 rounded-lg border p-3"
+                            className="rounded-lg border border-primary-700 bg-primary-900/60 p-3"
                         >
                             <div className="mb-2 flex items-start justify-between gap-3">
                                 <div className="min-w-0 space-y-1">
                                     <Badge variant={getSessionTypeVariant(session.type)}>
                                         {formatSessionType(session)}
                                     </Badge>
-                                    <div className="text-primary-100 line-clamp-2 text-sm font-medium break-words">
+                                    <div className="line-clamp-2 text-sm font-medium wrap-break-word text-primary-100">
                                         {name}
                                     </div>
                                 </div>
@@ -177,7 +177,7 @@ export function SessionsTable({
                                 </div>
                             </div>
 
-                            <div className="text-primary-400 space-y-2 text-xs">
+                            <div className="space-y-2 text-xs text-primary-400">
                                 <div className="min-w-0 truncate">
                                     Model: {session.model || "Unknown"}
                                 </div>
@@ -196,7 +196,7 @@ export function SessionsTable({
             </div>
 
             <div className="hidden overflow-x-auto md:block">
-                <table className="w-full min-w-[760px]">
+                <table className="w-full min-w-190">
                     <thead className="bg-primary-800/50">
                         {table.getHeaderGroups().map((headerGroup) => (
                             <tr key={headerGroup.id}>
@@ -204,9 +204,9 @@ export function SessionsTable({
                                     <th
                                         key={header.id}
                                         className={
-                                            "text-primary-400 px-4 py-3 text-xs font-medium uppercase " +
+                                            "px-4 py-3 text-xs font-medium text-primary-400 uppercase " +
                                             (header.column.getCanSort()
-                                                ? "hover:text-primary-200 cursor-pointer select-none"
+                                                ? "cursor-pointer select-none hover:text-primary-200"
                                                 : "") +
                                             (header.id === "actions"
                                                 ? " text-right"
@@ -223,10 +223,10 @@ export function SessionsTable({
                                                 <span className="text-primary-500">
                                                     {header.column.getIsSorted() ===
                                                     "asc" ? (
-                                                        <ChevronDown className="h-3 w-3" />
+                                                        <ChevronDown className="size-3" />
                                                     ) : header.column.getIsSorted() ===
                                                       "desc" ? (
-                                                        <ChevronDown className="h-3 w-3 rotate-180" />
+                                                        <ChevronDown className="size-3 rotate-180" />
                                                     ) : undefined}
                                                 </span>
                                             )}
@@ -238,7 +238,7 @@ export function SessionsTable({
                     </thead>
                     <tbody>
                         {table.getRowModel().rows.map((row) => (
-                            <tr key={row.id} className="border-primary-700/50 border-b">
+                            <tr key={row.id} className="border-b border-primary-700/50">
                                 {row.getVisibleCells().map((cell) => (
                                     <td key={cell.id} className="px-4 py-3">
                                         {flexRender(

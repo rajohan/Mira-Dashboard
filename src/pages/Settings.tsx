@@ -386,18 +386,18 @@ export function Settings() {
                     >
                         {createBackup.isPending ? (
                             <>
-                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <Loader2 className="size-4 animate-spin" />
                                 Backing up...
                             </>
                         ) : (
                             <>
-                                <Download className="h-4 w-4" />
+                                <Download className="size-4" />
                                 Backup
                             </>
                         )}
                     </Button>
                     <Button variant="danger" onClick={() => setShowRestartModal(true)}>
-                        <RefreshCw className="h-4 w-4" />
+                        <RefreshCw className="size-4" />
                         Restart
                     </Button>
                 </div>
@@ -464,27 +464,27 @@ export function Settings() {
             />
 
             {/* Server Info */}
-            <div className="border-primary-700 bg-primary-800/50 rounded-lg border p-3 sm:p-4">
+            <div className="rounded-lg border border-primary-700 bg-primary-800/50 p-3 sm:p-4">
                 <div className="mb-2 flex items-center gap-2">
-                    <Server className="text-accent-400 h-4 w-4" />
-                    <h3 className="text-primary-200 text-sm font-medium">Server</h3>
+                    <Server className="size-4 text-accent-400" />
+                    <h3 className="text-sm font-medium text-primary-200">Server</h3>
                 </div>
                 <div className="space-y-2">
                     <div className="flex flex-col gap-1 py-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                        <span className="text-primary-400 text-sm">Version</span>
-                        <span className="text-primary-100 font-mono text-sm break-all sm:text-right">
+                        <span className="text-sm text-primary-400">Version</span>
+                        <span className="font-mono text-sm break-all text-primary-100 sm:text-right">
                             {serverInfo.version}
                         </span>
                     </div>
                     <div className="flex flex-col gap-1 py-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                        <span className="text-primary-400 text-sm">Config hash</span>
-                        <span className="text-primary-100 font-mono text-sm break-all sm:text-right">
+                        <span className="text-sm text-primary-400">Config hash</span>
+                        <span className="font-mono text-sm break-all text-primary-100 sm:text-right">
                             {serverInfo.configHash}
                         </span>
                     </div>
                     <div className="flex flex-col gap-1 py-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                        <span className="text-primary-400 text-sm">Last touched</span>
-                        <span className="text-primary-100 font-mono text-sm break-all sm:text-right">
+                        <span className="text-sm text-primary-400">Last touched</span>
+                        <span className="font-mono text-sm break-all text-primary-100 sm:text-right">
                             {serverInfo.lastTouched}
                         </span>
                     </div>
@@ -499,7 +499,7 @@ export function Settings() {
                 size="sm"
             >
                 <div className="space-y-4">
-                    <p className="text-primary-300 text-sm">
+                    <p className="text-sm text-primary-300">
                         Are you sure you want to restart the gateway? This will
                         temporarily disconnect all sessions.
                     </p>
@@ -518,7 +518,7 @@ export function Settings() {
                         >
                             {restartGateway.isPending ? (
                                 <>
-                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    <Loader2 className="size-4 animate-spin" />
                                     Restarting...
                                 </>
                             ) : (

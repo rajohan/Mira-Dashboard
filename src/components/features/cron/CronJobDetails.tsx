@@ -93,7 +93,7 @@ export function CronJobDetails({
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                     <CardTitle className="text-base">{getCronJobName(job)}</CardTitle>
-                    <p className="text-primary-400 mt-1 text-xs break-all">
+                    <p className="mt-1 text-xs break-all text-primary-400">
                         {getCronJobId(job)}
                     </p>
                 </div>
@@ -105,8 +105,8 @@ export function CronJobDetails({
                 </Badge>
             </div>
 
-            <div className="border-primary-700 bg-primary-900/40 rounded-lg border p-3">
-                <div className="text-primary-300 mb-2 text-xs font-semibold tracking-wide uppercase">
+            <div className="rounded-lg border border-primary-700 bg-primary-900/40 p-3">
+                <div className="mb-2 text-xs font-semibold tracking-wide text-primary-300 uppercase">
                     Controls
                 </div>
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -115,7 +115,7 @@ export function CronJobDetails({
                         onChange={(isEnabled) => onToggle(job, isEnabled)}
                         label="Enabled"
                         disabled={togglePending}
-                        className="border-primary-700 bg-primary-800/60 rounded-lg border px-3 py-2 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0"
+                        className="rounded-lg border border-primary-700 bg-primary-800/60 px-3 py-2 sm:border-0 sm:bg-transparent sm:p-0"
                     />
                     <Button
                         size="sm"
@@ -139,38 +139,38 @@ export function CronJobDetails({
                         onClick={() => onDelete(job)}
                         className="w-full sm:w-auto"
                     >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="size-4" />
                         {deletePending ? "Deleting..." : "Delete"}
                     </Button>
                     {runPending ? (
-                        <span className="text-primary-400 text-xs">Running job...</span>
+                        <span className="text-xs text-primary-400">Running job...</span>
                     ) : lastTriggeredAt ? (
-                        <span className="text-primary-400 text-xs">
+                        <span className="text-xs text-primary-400">
                             Triggered {formatDate(lastTriggeredAt)}
                         </span>
                     ) : undefined}
                 </div>
             </div>
 
-            <div className="border-primary-700 bg-primary-900/40 rounded-lg border p-3">
-                <div className="text-primary-300 mb-2 text-xs font-semibold tracking-wide uppercase">
+            <div className="rounded-lg border border-primary-700 bg-primary-900/40 p-3">
+                <div className="mb-2 text-xs font-semibold tracking-wide text-primary-300 uppercase">
                     Last / next run
                 </div>
-                <div className="text-primary-200 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 text-sm text-primary-200 sm:grid-cols-3">
                     <div>
-                        <div className="text-primary-400 text-xs">Last run</div>
+                        <div className="text-xs text-primary-400">Last run</div>
                         <div>
                             {formatCronTimestamp(getCronStateValue(job, "lastRunAtMs"))}
                         </div>
                     </div>
                     <div>
-                        <div className="text-primary-400 text-xs">Next run</div>
+                        <div className="text-xs text-primary-400">Next run</div>
                         <div>
                             {formatCronTimestamp(getCronStateValue(job, "nextRunAtMs"))}
                         </div>
                     </div>
                     <div>
-                        <div className="text-primary-400 text-xs">Last status</div>
+                        <div className="text-xs text-primary-400">Last status</div>
                         <div className="mt-1">
                             <Badge
                                 variant={getCronStatusVariant(
@@ -188,9 +188,9 @@ export function CronJobDetails({
                 </div>
             </div>
 
-            <div className="border-primary-700 bg-primary-900/40 space-y-3 rounded-lg border p-3">
+            <div className="space-y-3 rounded-lg border border-primary-700 bg-primary-900/40 p-3">
                 <div className="flex items-center justify-between gap-2">
-                    <div className="text-primary-300 text-xs font-semibold tracking-wide uppercase">
+                    <div className="text-xs font-semibold tracking-wide text-primary-300 uppercase">
                         Job config
                     </div>
                     <div className="flex items-center gap-2">
@@ -233,7 +233,7 @@ export function CronJobDetails({
                     <>
                         <div>
                             <label
-                                className="text-primary-300 mb-1 block text-xs"
+                                className="mb-1 block text-xs text-primary-300"
                                 htmlFor={nameInputId}
                             >
                                 Name
@@ -251,7 +251,7 @@ export function CronJobDetails({
                         <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
                             <div>
                                 <label
-                                    className="text-primary-300 mb-1 block text-xs"
+                                    className="mb-1 block text-xs text-primary-300"
                                     htmlFor={scheduleTextareaId}
                                 >
                                     Schedule (JSON)
@@ -278,7 +278,7 @@ export function CronJobDetails({
                             </div>
                             <div>
                                 <label
-                                    className="text-primary-300 mb-1 block text-xs"
+                                    className="mb-1 block text-xs text-primary-300"
                                     htmlFor={payloadTextareaId}
                                 >
                                     Payload (JSON)
@@ -305,7 +305,7 @@ export function CronJobDetails({
                             </div>
                             <div>
                                 <label
-                                    className="text-primary-300 mb-1 block text-xs"
+                                    className="mb-1 block text-xs text-primary-300"
                                     htmlFor={deliveryTextareaId}
                                 >
                                     Delivery (JSON)
@@ -334,27 +334,27 @@ export function CronJobDetails({
                     </>
                 ) : (
                     <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
-                        <Card className="bg-primary-900/40 min-w-0 p-3 sm:p-4">
-                            <div className="text-primary-300 mb-1 text-xs font-semibold tracking-wide uppercase">
+                        <Card className="min-w-0 bg-primary-900/40 p-3 sm:p-4">
+                            <div className="mb-1 text-xs font-semibold tracking-wide text-primary-300 uppercase">
                                 Schedule
                             </div>
-                            <pre className="text-primary-200 text-xs break-words whitespace-pre-wrap">
+                            <pre className="text-xs wrap-break-word whitespace-pre-wrap text-primary-200">
                                 {JSON.stringify(job.schedule || {}, undefined, 2)}
                             </pre>
                         </Card>
-                        <Card className="bg-primary-900/40 min-w-0 p-3 sm:p-4">
-                            <div className="text-primary-300 mb-1 text-xs font-semibold tracking-wide uppercase">
+                        <Card className="min-w-0 bg-primary-900/40 p-3 sm:p-4">
+                            <div className="mb-1 text-xs font-semibold tracking-wide text-primary-300 uppercase">
                                 Payload
                             </div>
-                            <pre className="text-primary-200 text-xs break-words whitespace-pre-wrap">
+                            <pre className="text-xs wrap-break-word whitespace-pre-wrap text-primary-200">
                                 {JSON.stringify(job.payload || {}, undefined, 2)}
                             </pre>
                         </Card>
-                        <Card className="bg-primary-900/40 min-w-0 p-3 sm:p-4">
-                            <div className="text-primary-300 mb-1 text-xs font-semibold tracking-wide uppercase">
+                        <Card className="min-w-0 bg-primary-900/40 p-3 sm:p-4">
+                            <div className="mb-1 text-xs font-semibold tracking-wide text-primary-300 uppercase">
                                 Delivery
                             </div>
-                            <pre className="text-primary-200 text-xs break-words whitespace-pre-wrap">
+                            <pre className="text-xs wrap-break-word whitespace-pre-wrap text-primary-200">
                                 {JSON.stringify(job.delivery || {}, undefined, 2)}
                             </pre>
                         </Card>

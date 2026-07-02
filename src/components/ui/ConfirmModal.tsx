@@ -31,12 +31,12 @@ export function ConfirmModal({
     return (
         <Modal isOpen={isOpen} onClose={onCancel} title={title} size="md">
             <div className="space-y-4">
-                <p className="text-primary-300 text-sm break-words whitespace-pre-wrap">
+                <p className="text-sm wrap-break-word whitespace-pre-wrap text-primary-300">
                     {message}
                 </p>
                 <div className="flex justify-end gap-2">
                     <Button variant="secondary" onClick={onCancel} disabled={loading}>
-                        <X className="h-4 w-4" />
+                        <X className="size-4" />
                         Cancel
                     </Button>
                     <Button
@@ -46,12 +46,12 @@ export function ConfirmModal({
                     >
                         {loading ? (
                             <>
-                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <Loader2 className="size-4 animate-spin" />
                                 {confirmLoadingLabel || `${confirmLabel}...`}
                             </>
                         ) : (
                             <>
-                                <Check className="h-4 w-4" />
+                                <Check className="size-4" />
                                 {confirmLabel}
                             </>
                         )}

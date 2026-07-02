@@ -63,9 +63,9 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProperties) {
             ref={setNodeRef}
             style={style}
             className={
-                "group border-primary-700 bg-primary-800 relative rounded-lg border p-3 transition-all " +
+                "group relative rounded-lg border border-primary-700 bg-primary-800 p-3 transition-all " +
                 "hover:border-primary-600 " +
-                (isDragging ? "border-accent-500 cursor-grabbing opacity-90" : "")
+                (isDragging ? "cursor-grabbing border-accent-500 opacity-90" : "")
             }
         >
             <button
@@ -74,20 +74,20 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProperties) {
                 {...attributes}
                 {...listeners}
                 aria-label={`Drag task #${task.number}`}
-                className="text-primary-500 hover:text-primary-300 focus:ring-accent-400 md:text-primary-600 absolute top-1/2 left-1.5 -translate-y-1/2 cursor-grab rounded transition-opacity focus:opacity-100 focus:ring-2 focus:outline-none md:opacity-0 md:group-hover:opacity-100"
+                className="absolute top-1/2 left-1.5 -translate-y-1/2 cursor-grab rounded text-primary-500 transition-opacity hover:text-primary-300 focus:opacity-100 focus:ring-2 focus:ring-accent-400 focus:outline-none md:text-primary-600 md:opacity-0 md:group-hover:opacity-100"
                 onClick={(event_) => event_.stopPropagation()}
             >
-                <GripVertical className="h-4 w-4" />
+                <GripVertical className="size-4" />
             </button>
 
             <button
                 type="button"
                 aria-label={`Open task #${task.number}: ${task.title}`}
-                className="focus:ring-accent-400 ml-3 block min-w-0 cursor-pointer rounded text-left focus:ring-2 focus:outline-none"
+                className="ml-3 block min-w-0 cursor-pointer rounded text-left focus:ring-2 focus:ring-accent-400 focus:outline-none"
                 onClick={onClick}
             >
                 <span className="mb-1.5 flex min-w-0 flex-wrap items-center gap-2">
-                    <span className="text-primary-500 shrink-0 text-xs">
+                    <span className="shrink-0 text-xs text-primary-500">
                         #{task.number}
                     </span>
                     <span
@@ -116,13 +116,13 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProperties) {
                 <span
                     role="heading"
                     aria-level={3}
-                    className="text-primary-200 mb-1.5 line-clamp-2 text-sm font-medium break-words"
+                    className="mb-1.5 line-clamp-2 text-sm font-medium wrap-break-word text-primary-200"
                 >
                     {task.title}
                 </span>
 
                 <span className="flex items-center justify-between gap-2">
-                    <span className="text-primary-500 truncate text-xs">
+                    <span className="truncate text-xs text-primary-500">
                         {formatDuration(timestampFromDateString(task.updatedAt))}
                     </span>
                     {assignee && (
@@ -131,10 +131,10 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProperties) {
                                 <img
                                     src={assignee.avatar_url}
                                     alt={assignee.login || "Avatar"}
-                                    className="h-5 w-5 rounded-full"
+                                    className="size-5 rounded-full"
                                 />
                             ) : (
-                                <span className="bg-primary-700 text-primary-300 flex h-5 w-5 items-center justify-center rounded-full text-[10px]">
+                                <span className="flex size-5 items-center justify-center rounded-full bg-primary-700 text-[10px] text-primary-300">
                                     {(assignee.login || assignee.name || "?")
                                         .charAt(0)
                                         .toUpperCase()}

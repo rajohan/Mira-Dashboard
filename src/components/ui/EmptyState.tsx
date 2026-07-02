@@ -12,7 +12,7 @@ export function EmptyState({
     children,
 }: EmptyStateProperties) {
     return (
-        <Card className="text-primary-400 p-6 text-center">
+        <Card className="p-6 text-center text-primary-400">
             <p>{message}</p>
             {children}
         </Card>

@@ -31,12 +31,12 @@ export function Switch({
             {(label || description) && (
                 <div className="flex min-w-0 flex-1 flex-col">
                     {label && (
-                        <Label className="text-primary-200 text-sm font-medium break-words">
+                        <Label className="text-sm font-medium wrap-break-word text-primary-200">
                             {label}
                         </Label>
                     )}
                     {description && (
-                        <Description className="text-primary-400 text-xs break-words">
+                        <Description className="text-xs wrap-break-word text-primary-400">
                             {description}
                         </Description>
                     )}
@@ -48,7 +48,7 @@ export function Switch({
                 aria-label={label ? undefined : ariaLabel}
                 className={cn(
                     "inline-flex h-6 w-11 shrink-0 items-center rounded-full transition focus:outline-none",
-                    "data-focus:ring-accent-500 ring-offset-primary-800 ring-offset-2 data-focus:ring-2",
+                    "ring-offset-2 ring-offset-primary-800 data-focus:ring-2 data-focus:ring-accent-500",
                     isChecked ? "bg-accent-500" : "bg-primary-600",
                     disabled ? "cursor-not-allowed opacity-50" : ""
                 )}

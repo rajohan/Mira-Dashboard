@@ -41,10 +41,10 @@ export function DockerImagesTable({
                 const image = info.row.original;
                 return (
                     <div className="min-w-0">
-                        <div className="text-primary-50 font-medium break-all">
+                        <div className="font-medium break-all text-primary-50">
                             {image.repository}
                         </div>
-                        <div className="text-primary-400 text-xs break-all">
+                        <div className="text-xs break-all text-primary-400">
                             tag: {image.tag || "<none>"}
                         </div>
                     </div>
@@ -63,7 +63,7 @@ export function DockerImagesTable({
             cell: (info) => {
                 const image = info.row.original;
                 return (
-                    <div className="text-primary-300 text-xs break-words">
+                    <div className="text-xs wrap-break-word text-primary-300">
                         {image.inUseBy.length > 0 ? image.inUseBy.join(", ") : "Unused"}
                     </div>
                 );
@@ -87,7 +87,7 @@ export function DockerImagesTable({
                             onDelete(image.id, label);
                         }}
                     >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="size-4" />
                     </Button>
                 );
             },
@@ -107,14 +107,14 @@ export function DockerImagesTable({
 
     return images.length === 0 ? (
         <Card className="overflow-hidden">
-            <div className="border-primary-700 border-b px-3 py-3 text-lg font-semibold sm:px-4">
+            <div className="border-b border-primary-700 p-3 text-lg font-semibold sm:px-4">
                 Images
             </div>
             <EmptyState message="No images found." />
         </Card>
     ) : (
         <Card className="overflow-hidden">
-            <div className="border-primary-700 flex flex-col gap-3 border-b px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+            <div className="flex flex-col gap-3 border-b border-primary-700 p-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
                 <div className="text-lg font-semibold">Images</div>
                 <Button
                     size="sm"
@@ -123,7 +123,7 @@ export function DockerImagesTable({
                     disabled={isPruning}
                     className="w-full sm:w-auto"
                 >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="size-4" />
                     {isPruning ? "Removing unused..." : `Remove unused (${unusedCount})`}
                 </Button>
             </div>
@@ -135,14 +135,14 @@ export function DockerImagesTable({
                     return (
                         <Card key={row.id} className="p-3">
                             <div className="min-w-0">
-                                <div className="text-primary-50 font-medium break-all">
+                                <div className="font-medium break-all text-primary-50">
                                     {image.repository}
                                 </div>
-                                <div className="text-primary-400 mt-1 text-xs break-all">
+                                <div className="mt-1 text-xs break-all text-primary-400">
                                     tag: {image.tag || "<none>"}
                                 </div>
                             </div>
-                            <div className="text-primary-300 mt-3 grid grid-cols-2 gap-2 text-xs">
+                            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-primary-300">
                                 <div>
                                     <div className="text-primary-500">Size</div>
                                     {formatBytes(image.size)}
@@ -155,7 +155,7 @@ export function DockerImagesTable({
                                 </div>
                             </div>
                             {image.inUseBy.length > 0 ? (
-                                <div className="text-primary-400 mt-2 text-xs break-words">
+                                <div className="mt-2 text-xs wrap-break-word text-primary-400">
                                     {image.inUseBy.join(", ")}
                                 </div>
                             ) : undefined}
@@ -167,7 +167,7 @@ export function DockerImagesTable({
                                 onClick={() => onDelete(image.id, label)}
                                 className="mt-3 w-full"
                             >
-                                <Trash2 className="h-4 w-4" />
+                                <Trash2 className="size-4" />
                                 Delete
                             </Button>
                         </Card>
@@ -175,9 +175,9 @@ export function DockerImagesTable({
                 })}
             </div>
 
-            <div className="hidden max-h-[420px] overflow-auto md:block">
-                <table className="min-w-[640px] text-sm lg:min-w-full">
-                    <thead className="bg-primary-900/95 text-primary-300 sticky top-0 z-10 text-left backdrop-blur">
+            <div className="hidden max-h-105 overflow-auto md:block">
+                <table className="min-w-160 text-sm lg:min-w-full">
+                    <thead className="sticky top-0 z-10 bg-primary-900/95 text-left text-primary-300 backdrop-blur">
                         {table.getHeaderGroups().map((headerGroup) => (
                             <tr key={headerGroup.id}>
                                 {headerGroup.headers.map((header) => (
@@ -186,7 +186,7 @@ export function DockerImagesTable({
                                         className={
                                             "px-4 py-3 align-top " +
                                             (header.column.getCanSort()
-                                                ? "hover:text-primary-100 cursor-pointer select-none"
+                                                ? "cursor-pointer select-none hover:text-primary-100"
                                                 : "")
                                         }
                                         onClick={header.column.getToggleSortingHandler()}
@@ -200,10 +200,10 @@ export function DockerImagesTable({
                                                 <span className="text-primary-500">
                                                     {header.column.getIsSorted() ===
                                                     "asc" ? (
-                                                        <ChevronDown className="h-3 w-3" />
+                                                        <ChevronDown className="size-3" />
                                                     ) : header.column.getIsSorted() ===
                                                       "desc" ? (
-                                                        <ChevronDown className="h-3 w-3 rotate-180" />
+                                                        <ChevronDown className="size-3 rotate-180" />
                                                     ) : undefined}
                                                 </span>
                                             ) : undefined}
@@ -217,7 +217,7 @@ export function DockerImagesTable({
                         {table.getRowModel().rows.map((row) => (
                             <tr
                                 key={row.id}
-                                className="border-primary-700/50 hover:bg-primary-700/30 border-b align-top"
+                                className="border-b border-primary-700/50 align-top hover:bg-primary-700/30"
                             >
                                 {row.getVisibleCells().map((cell) => (
                                     <td key={cell.id} className="px-4 py-3">

@@ -145,7 +145,7 @@ function ThinkingBlocks({ blocks }: { blocks: ChatHistoryMessage["thinking"] }) 
             {blocks?.map((block, index) => (
                 <pre
                     key={block.id || `thinking-${index}`}
-                    className="text-primary-200 font-mono text-[11px] leading-normal break-words whitespace-pre-wrap"
+                    className="font-mono text-[11px] leading-normal wrap-break-word whitespace-pre-wrap text-primary-200"
                 >
                     {block.text}
                 </pre>
@@ -249,7 +249,7 @@ export function ChatMessageDetails({
                               ) : undefined}
                               <ToolSection label="Tool input">
                                   {formattedArguments ? (
-                                      <pre className="max-h-64 overflow-auto font-mono text-[11px] leading-normal break-words whitespace-pre-wrap">
+                                      <pre className="max-h-64 overflow-auto font-mono text-[11px] leading-normal wrap-break-word whitespace-pre-wrap">
                                           {formattedArguments}
                                       </pre>
                                   ) : (
@@ -261,7 +261,7 @@ export function ChatMessageDetails({
                               {toolResult ? (
                                   <ToolSection label="Tool output">
                                       {toolResult.content.trim() ? (
-                                          <pre className="max-h-72 overflow-auto font-mono text-[11px] leading-normal break-words whitespace-pre-wrap">
+                                          <pre className="max-h-72 overflow-auto font-mono text-[11px] leading-normal wrap-break-word whitespace-pre-wrap">
                                               {toolResult.content}
                                           </pre>
                                       ) : (
@@ -283,7 +283,7 @@ export function ChatMessageDetails({
                     tone={message.toolResult?.isError ? "danger" : "default"}
                 >
                     {message.toolResult?.content.trim() ? (
-                        <pre className="max-h-72 overflow-auto font-mono text-[11px] leading-normal break-words whitespace-pre-wrap">
+                        <pre className="max-h-72 overflow-auto font-mono text-[11px] leading-normal wrap-break-word whitespace-pre-wrap">
                             {message.toolResult.content}
                         </pre>
                     ) : (

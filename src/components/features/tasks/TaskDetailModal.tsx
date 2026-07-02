@@ -321,7 +321,7 @@ export function TaskDetailModal({
                                     rows={4}
                                 />
                                 <fieldset>
-                                    <legend className="text-primary-300 mb-1.5 block text-sm font-medium">
+                                    <legend className="mb-1.5 block text-sm font-medium text-primary-300">
                                         Priority
                                     </legend>
                                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -342,12 +342,12 @@ export function TaskDetailModal({
                                         ))}
                                     </div>
                                 </fieldset>
-                                <div className="border-primary-700 bg-primary-900/30 space-y-3 rounded-lg border p-3">
+                                <div className="space-y-3 rounded-lg border border-primary-700 bg-primary-900/30 p-3">
                                     <div>
-                                        <h3 className="text-primary-200 text-sm font-semibold">
+                                        <h3 className="text-sm font-semibold text-primary-200">
                                             Recurring automation
                                         </h3>
-                                        <p className="text-primary-500 text-xs">
+                                        <p className="text-xs text-primary-500">
                                             Link this task to an OpenClaw cron job for
                                             live run state.
                                         </p>
@@ -381,7 +381,7 @@ export function TaskDetailModal({
                                 </div>
                             </div>
                         ) : (
-                            <h2 className="text-primary-100 text-lg font-semibold break-words">
+                            <h2 className="text-lg font-semibold wrap-break-word text-primary-100">
                                 #{task.number}: {task.title}
                             </h2>
                         )}
@@ -392,11 +392,11 @@ export function TaskDetailModal({
                         aria-label="Close task details"
                         onClick={onClose}
                     >
-                        <X className="h-5 w-5" />
+                        <X className="size-5" />
                     </Button>
                 </div>
 
-                <div className="text-primary-400 flex flex-col gap-1 text-sm sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+                <div className="flex flex-col gap-1 text-sm text-primary-400 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
                     {assigneeLogin && (
                         <span>
                             Assigned:{" "}
@@ -420,13 +420,13 @@ export function TaskDetailModal({
                 </div>
 
                 {automation && !isEditingTask && (
-                    <div className="border-primary-700 bg-primary-800/50 rounded-lg border p-4">
+                    <div className="rounded-lg border border-primary-700 bg-primary-800/50 p-4">
                         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                             <div>
-                                <h3 className="text-primary-300 text-sm font-semibold">
+                                <h3 className="text-sm font-semibold text-primary-300">
                                     Backed by OpenClaw cron
                                 </h3>
-                                <p className="text-primary-500 mt-1 text-xs">
+                                <p className="mt-1 text-xs text-primary-500">
                                     This task tracks a recurring automation job.
                                 </p>
                             </div>
@@ -438,10 +438,10 @@ export function TaskDetailModal({
                         </div>
                         <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
                             <div>
-                                <dt className="text-primary-500 text-xs tracking-wide uppercase">
+                                <dt className="text-xs tracking-wide text-primary-500 uppercase">
                                     Cron job
                                 </dt>
-                                <dd className="text-primary-200 break-all">
+                                <dd className="break-all text-primary-200">
                                     <a
                                         href={`/jobs?view=openclaw&job=${encodeURIComponent(automation.cronJobId)}`}
                                         className="hover:text-primary-100"
@@ -451,7 +451,7 @@ export function TaskDetailModal({
                                 </dd>
                             </div>
                             <div>
-                                <dt className="text-primary-500 text-xs tracking-wide uppercase">
+                                <dt className="text-xs tracking-wide text-primary-500 uppercase">
                                     Schedule
                                 </dt>
                                 <dd className="text-primary-200">
@@ -459,7 +459,7 @@ export function TaskDetailModal({
                                 </dd>
                             </div>
                             <div>
-                                <dt className="text-primary-500 text-xs tracking-wide uppercase">
+                                <dt className="text-xs tracking-wide text-primary-500 uppercase">
                                     Next run
                                 </dt>
                                 <dd className="text-primary-200">
@@ -467,7 +467,7 @@ export function TaskDetailModal({
                                 </dd>
                             </div>
                             <div>
-                                <dt className="text-primary-500 text-xs tracking-wide uppercase">
+                                <dt className="text-xs tracking-wide text-primary-500 uppercase">
                                     Last run
                                 </dt>
                                 <dd className="text-primary-200">
@@ -475,15 +475,15 @@ export function TaskDetailModal({
                                 </dd>
                             </div>
                             <div>
-                                <dt className="text-primary-500 text-xs tracking-wide uppercase">
+                                <dt className="text-xs tracking-wide text-primary-500 uppercase">
                                     Session
                                 </dt>
-                                <dd className="text-primary-200 break-all">
+                                <dd className="break-all text-primary-200">
                                     {automation.sessionTarget || "—"}
                                 </dd>
                             </div>
                             <div>
-                                <dt className="text-primary-500 text-xs tracking-wide uppercase">
+                                <dt className="text-xs tracking-wide text-primary-500 uppercase">
                                     Runtime
                                 </dt>
                                 <dd className="text-primary-200">
@@ -494,7 +494,7 @@ export function TaskDetailModal({
                             </div>
                             {automation.lastDurationMs !== undefined && (
                                 <div>
-                                    <dt className="text-primary-500 text-xs tracking-wide uppercase">
+                                    <dt className="text-xs tracking-wide text-primary-500 uppercase">
                                         Last duration
                                     </dt>
                                     <dd className="text-primary-200">
@@ -503,7 +503,7 @@ export function TaskDetailModal({
                                 </div>
                             )}
                             <div>
-                                <dt className="text-primary-500 text-xs tracking-wide uppercase">
+                                <dt className="text-xs tracking-wide text-primary-500 uppercase">
                                     Source
                                 </dt>
                                 <dd className="text-primary-200">
@@ -517,11 +517,11 @@ export function TaskDetailModal({
                 )}
 
                 {task.body && !isEditingTask && (
-                    <div className="border-primary-700 bg-primary-800/50 rounded-lg border p-4">
-                        <h3 className="text-primary-300 mb-2 text-sm font-semibold">
+                    <div className="rounded-lg border border-primary-700 bg-primary-800/50 p-4">
+                        <h3 className="mb-2 text-sm font-semibold text-primary-300">
                             Description
                         </h3>
-                        <div className="prose prose-invert prose-p:my-1 max-w-none text-sm">
+                        <div className="prose max-w-none text-sm prose-invert prose-p:my-1">
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                 {task.body}
                             </ReactMarkdown>
@@ -529,13 +529,13 @@ export function TaskDetailModal({
                     </div>
                 )}
 
-                <div className="border-primary-700 bg-primary-800/30 rounded-lg border p-4">
-                    <h3 className="text-primary-300 mb-2 text-sm font-semibold">
+                <div className="rounded-lg border border-primary-700 bg-primary-800/30 p-4">
+                    <h3 className="mb-2 text-sm font-semibold text-primary-300">
                         Progress updates
                     </h3>
                     <div className="mb-3 space-y-2">
                         {updates.length === 0 ? (
-                            <p className="text-primary-500 text-sm">No updates yet.</p>
+                            <p className="text-sm text-primary-500">No updates yet.</p>
                         ) : (
                             updates.map((update) => {
                                 const authorMeta =
@@ -549,10 +549,10 @@ export function TaskDetailModal({
                                 return (
                                     <div
                                         key={update.id}
-                                        className="border-primary-700 bg-primary-900/40 rounded border p-2"
+                                        className="rounded border border-primary-700 bg-primary-900/40 p-2"
                                     >
-                                        <div className="text-primary-500 mb-1 flex flex-col gap-2 text-xs sm:flex-row sm:items-center sm:justify-between">
-                                            <span className="min-w-0 break-words">
+                                        <div className="mb-1 flex flex-col gap-2 text-xs text-primary-500 sm:flex-row sm:items-center sm:justify-between">
+                                            <span className="min-w-0 wrap-break-word">
                                                 <a
                                                     href={authorMeta.githubUrl}
                                                     target="_blank"
@@ -625,7 +625,7 @@ export function TaskDetailModal({
                                                 </div>
                                             </div>
                                         ) : (
-                                            <div className="prose prose-invert prose-p:my-1 max-w-none text-sm">
+                                            <div className="prose max-w-none text-sm prose-invert prose-p:my-1">
                                                 <ReactMarkdown
                                                     remarkPlugins={[remarkGfm]}
                                                 >
@@ -653,7 +653,7 @@ export function TaskDetailModal({
                             disabled={!trimmedProgressMessage}
                             className="w-full sm:w-auto"
                         >
-                            <Plus className="h-4 w-4" />
+                            <Plus className="size-4" />
                             Add Update
                         </Button>
                     </div>
@@ -666,7 +666,7 @@ export function TaskDetailModal({
                                 variant="secondary"
                                 onClick={() => handleMove("todo")}
                             >
-                                <ArrowRight className="h-4 w-4" />
+                                <ArrowRight className="size-4" />
                                 Move to New
                             </Button>
                         )}
@@ -675,7 +675,7 @@ export function TaskDetailModal({
                                 variant="secondary"
                                 onClick={() => handleMove("in-progress")}
                             >
-                                <ArrowRight className="h-4 w-4" />
+                                <ArrowRight className="size-4" />
                                 Move to In Progress
                             </Button>
                         )}
@@ -684,30 +684,30 @@ export function TaskDetailModal({
                                 variant="secondary"
                                 onClick={() => handleMove("blocked")}
                             >
-                                <ArrowRight className="h-4 w-4" />
+                                <ArrowRight className="size-4" />
                                 Move to Blocked
                             </Button>
                         )}
                         {currentColumn !== "done" && (
                             <Button variant="primary" onClick={() => handleMove("done")}>
-                                <Check className="h-4 w-4" />
+                                <Check className="size-4" />
                                 Mark Done
                             </Button>
                         )}
                     </div>
 
-                    <div className="border-primary-700 grid grid-cols-1 gap-2 border-t pt-3 sm:flex sm:flex-wrap">
+                    <div className="grid grid-cols-1 gap-2 border-t border-primary-700 pt-3 sm:flex sm:flex-wrap">
                         {isEditingTask ? (
                             <>
                                 <Button variant="primary" onClick={handleSaveTask}>
-                                    <Save className="h-4 w-4" />
+                                    <Save className="size-4" />
                                     Save Changes
                                 </Button>
                                 <Button
                                     variant="secondary"
                                     onClick={() => setIsEditingTask(false)}
                                 >
-                                    <X className="h-4 w-4" />
+                                    <X className="size-4" />
                                     Cancel Edit
                                 </Button>
                             </>
@@ -716,7 +716,7 @@ export function TaskDetailModal({
                                 variant="secondary"
                                 onClick={() => setIsEditingTask(true)}
                             >
-                                <Pencil className="h-4 w-4" />
+                                <Pencil className="size-4" />
                                 Edit
                             </Button>
                         )}
@@ -727,7 +727,7 @@ export function TaskDetailModal({
                                 onClick={() => handleAssign(TASK_ASSIGNEES.mira.id)}
                                 disabled={isAssigning}
                             >
-                                <UserPlus className="h-4 w-4" />
+                                <UserPlus className="size-4" />
                                 Assign to Mira
                             </Button>
                         )}
@@ -737,7 +737,7 @@ export function TaskDetailModal({
                                 onClick={() => handleAssign(TASK_ASSIGNEES.raymond.id)}
                                 disabled={isAssigning}
                             >
-                                <UserPlus className="h-4 w-4" />
+                                <UserPlus className="size-4" />
                                 Assign to Raymond
                             </Button>
                         )}
@@ -748,7 +748,7 @@ export function TaskDetailModal({
                             disabled={isDeleting}
                             className="w-full sm:ml-auto sm:w-auto"
                         >
-                            <Trash2 className="h-4 w-4" />
+                            <Trash2 className="size-4" />
                             Delete
                         </Button>
                     </div>

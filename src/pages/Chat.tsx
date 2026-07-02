@@ -1690,8 +1690,8 @@ export function Chat() {
 
                     {(sendError || error) && (
                         <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200 sm:mt-4 sm:text-sm">
-                            <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-                            <span className="min-w-0 break-words">
+                            <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                            <span className="min-w-0 wrap-break-word">
                                 {sendError || error}
                             </span>
                         </div>

@@ -5,6 +5,7 @@ import eslintPluginPrettierRecommended from "eslint-plugin-prettier/recommended"
 import reactPlugin from "eslint-plugin-react";
 import reactHooks from "eslint-plugin-react-hooks";
 import simpleImportSort from "eslint-plugin-simple-import-sort";
+import tailwindcss from "eslint-plugin-tailwindcss";
 import unicorn from "eslint-plugin-unicorn";
 import globals from "globals";
 import tsEslint from "typescript-eslint";
@@ -27,9 +28,17 @@ const eslintConfig = defineConfig(
     eslintConfigs.configs.recommended,
     tsEslint.configs.recommended,
     reactPlugin.configs.flat["jsx-runtime"],
+    {
+        ...tailwindcss.configs.recommended,
+        settings: {
+            tailwindcss: {
+                cssConfigPath: "src/index.css",
+            },
+        },
+    },
     unicorn.configs.recommended,
     {
-        files: ["**/*.{jsx,tsx}"],
+        files: ["**/*.{js,mjs,cjs,jsx,ts,tsx}"],
         ...jsxA11y.flatConfigs.recommended,
         languageOptions: {
             ...jsxA11y.flatConfigs.recommended.languageOptions,
@@ -64,6 +73,17 @@ const eslintConfig = defineConfig(
                         camelCase: true,
                         pascalCase: true,
                     },
+                },
+            ],
+        },
+    },
+    {
+        files: ["**/*.{js,mjs,cjs,jsx,ts,tsx}"],
+        rules: {
+            "tailwindcss/no-custom-classname": [
+                "warn",
+                {
+                    whitelist: ["className", "classValues", "language-.*"],
                 },
             ],
         },

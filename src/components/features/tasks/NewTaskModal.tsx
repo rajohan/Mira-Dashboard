@@ -69,7 +69,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProperti
                 className="space-y-4"
             >
                 <div className="flex items-center justify-between">
-                    <h2 className="text-primary-100 text-lg font-semibold">New Task</h2>
+                    <h2 className="text-lg font-semibold text-primary-100">New Task</h2>
                     <Button
                         variant="ghost"
                         size="sm"
@@ -78,7 +78,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProperti
                         onClick={onClose}
                         className="text-primary-400 hover:text-primary-200"
                     >
-                        <X className="h-5 w-5" />
+                        <X className="size-5" />
                     </Button>
                 </div>
 
@@ -110,7 +110,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProperti
                 <form.Field name="priority">
                     {(field) => (
                         <fieldset>
-                            <legend className="text-primary-300 mb-1.5 block text-sm font-medium">
+                            <legend className="mb-1.5 block text-sm font-medium text-primary-300">
                                 Priority
                             </legend>
                             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -142,7 +142,7 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProperti
                 <form.Field name="assignee">
                     {(field) => (
                         <fieldset>
-                            <legend className="text-primary-300 mb-1.5 block text-sm font-medium">
+                            <legend className="mb-1.5 block text-sm font-medium text-primary-300">
                                 Assignee
                             </legend>
                             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -179,12 +179,12 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProperti
                     )}
                 </form.Field>
 
-                <div className="border-primary-700 bg-primary-900/30 space-y-3 rounded-lg border p-3">
+                <div className="space-y-3 rounded-lg border border-primary-700 bg-primary-900/30 p-3">
                     <div>
-                        <h3 className="text-primary-200 text-sm font-semibold">
+                        <h3 className="text-sm font-semibold text-primary-200">
                             Recurring automation (optional)
                         </h3>
-                        <p className="text-primary-500 text-xs">
+                        <p className="text-xs text-primary-500">
                             Link the task to an OpenClaw cron job so cards and details can
                             show live run state.
                         </p>
@@ -250,12 +250,12 @@ export function NewTaskModal({ isOpen, onClose, onSubmit }: NewTaskModalProperti
                                 >
                                     {isSubmitting ? (
                                         <>
-                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                            <Loader2 className="size-4 animate-spin" />
                                             Creating...
                                         </>
                                     ) : (
                                         <>
-                                            <Plus className="h-4 w-4" />
+                                            <Plus className="size-4" />
                                             Create Task
                                         </>
                                     )}

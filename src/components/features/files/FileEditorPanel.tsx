@@ -61,13 +61,13 @@ export function FileEditorPanel({
     return (
         <Card
             variant="bordered"
-            className="flex min-h-[32rem] min-w-0 flex-1 flex-col overflow-hidden p-0 lg:min-h-0"
+            className="flex min-h-128 min-w-0 flex-1 flex-col overflow-hidden p-0 lg:min-h-0"
         >
             {selectedPath ? (
                 <>
-                    <div className="border-primary-700 flex flex-col gap-3 border-b p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                    <div className="flex flex-col gap-3 border-b border-primary-700 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                         <div className="flex min-w-0 items-center gap-2">
-                            <File size={16} className="text-primary-400 flex-shrink-0" />
+                            <File size={16} className="shrink-0 text-primary-400" />
                             <span
                                 className="min-w-0 font-mono text-xs break-all sm:truncate sm:text-sm"
                                 title={selectedPath}
@@ -75,12 +75,12 @@ export function FileEditorPanel({
                                 {selectedPath}
                             </span>
                             {fileContent && (
-                                <span className="text-primary-400 flex-shrink-0 text-xs">
+                                <span className="shrink-0 text-xs text-primary-400">
                                     {formatSize(fileContent.size)}
                                 </span>
                             )}
                         </div>
-                        <div className="flex flex-wrap items-center gap-2 sm:flex-shrink-0 sm:justify-end">
+                        <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
                             {fileContent &&
                                 isMarkdownFile(fileContent.path) &&
                                 isEditable && (
@@ -149,7 +149,7 @@ export function FileEditorPanel({
 
                     <div className="flex-1 overflow-hidden">
                         {contentLoading ? (
-                            <div className="text-primary-400 flex h-full items-center justify-center">
+                            <div className="flex h-full items-center justify-center text-primary-400">
                                 Loading...
                             </div>
                         ) : fileContent ? (
@@ -165,15 +165,15 @@ export function FileEditorPanel({
                                 syntaxClass={syntaxClass}
                             />
                         ) : (
-                            <div className="text-primary-400 flex h-full items-center justify-center">
+                            <div className="flex h-full items-center justify-center text-primary-400">
                                 Failed to load file
                             </div>
                         )}
                     </div>
 
                     {fileContent && (
-                        <div className="border-primary-700 text-primary-400 flex items-center justify-between border-t px-4 py-2 text-xs">
-                            <span className="break-words">
+                        <div className="flex items-center justify-between border-t border-primary-700 px-4 py-2 text-xs text-primary-400">
+                            <span className="wrap-break-word">
                                 Modified:{" "}
                                 {fileContent.modified
                                     ? formatDate(fileContent.modified)
@@ -183,7 +183,7 @@ export function FileEditorPanel({
                     )}
                 </>
             ) : (
-                <div className="text-primary-400 flex h-full items-center justify-center">
+                <div className="flex h-full items-center justify-center text-primary-400">
                     Select a file to view
                 </div>
             )}

@@ -43,14 +43,14 @@ interface ChatMessagesListProperties {
 /** Renders the attachment icon UI. */
 export function AttachmentIcon({ attachment }: { attachment: ChatAttachmentDisplay }) {
     if (attachment.kind === "image") {
-        return <ImageIcon className="h-4 w-4" />;
+        return <ImageIcon className="size-4" />;
     }
 
     if (attachment.kind === "text") {
-        return <FileText className="h-4 w-4" />;
+        return <FileText className="size-4" />;
     }
 
-    return <Paperclip className="h-4 w-4" />;
+    return <Paperclip className="size-4" />;
 }
 
 /** Decodes base64 text attachments without throwing during rendering. */
@@ -110,7 +110,7 @@ function AttachmentList({
                         <AttachmentIcon attachment={attachment} />
                         <span className="truncate">{attachment.fileName}</span>
                         {attachment.sizeBytes ? (
-                            <span className="text-primary-400 shrink-0">
+                            <span className="shrink-0 text-primary-400">
                                 {formatSize(attachment.sizeBytes)}
                             </span>
                         ) : undefined}
@@ -121,7 +121,7 @@ function AttachmentList({
                     return (
                         <div
                             key={attachment.id}
-                            className="border-primary-600 bg-primary-900/60 text-primary-100 flex max-w-full min-w-0 items-center gap-2 rounded-lg border px-2 py-1 text-xs"
+                            className="flex max-w-full min-w-0 items-center gap-2 rounded-lg border border-primary-600 bg-primary-900/60 px-2 py-1 text-xs text-primary-100"
                             title={attachment.mimeType}
                         >
                             {content}
@@ -134,7 +134,7 @@ function AttachmentList({
                         key={attachment.id}
                         type="button"
                         onClick={() => onPreview(preview)}
-                        className="border-primary-600 bg-primary-900/60 text-primary-100 hover:border-primary-500 hover:bg-primary-800 flex max-w-full min-w-0 items-center gap-2 rounded-lg border px-2 py-1 text-left text-xs"
+                        className="flex max-w-full min-w-0 items-center gap-2 rounded-lg border border-primary-600 bg-primary-900/60 px-2 py-1 text-left text-xs text-primary-100 hover:border-primary-500 hover:bg-primary-800"
                         title={attachment.mimeType}
                     >
                         {content}
@@ -161,7 +161,7 @@ function DeleteMessageButton({
             title="Delete message from this chat view"
             aria-label="Delete your message"
         >
-            <Trash2 className="h-3.5 w-3.5" />
+            <Trash2 className="size-3.5" />
         </button>
     );
 }
@@ -192,16 +192,16 @@ function TtsButton({
             type="button"
             onClick={() => onSpeak(messageKey, text)}
             disabled={isLoading}
-            className="text-primary-300 hover:bg-primary-700 hover:text-primary-100 rounded p-1 opacity-75 transition hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded p-1 text-primary-300 opacity-75 transition hover:bg-primary-700 hover:text-primary-100 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
             title={isPlaying ? "Stop reading aloud" : "Read aloud"}
             aria-label={isPlaying ? "Stop reading aloud" : "Read assistant message aloud"}
         >
             {isLoading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Loader2 className="size-3.5 animate-spin" />
             ) : isPlaying ? (
-                <Square className="h-3.5 w-3.5" />
+                <Square className="size-3.5" />
             ) : (
-                <Volume2 className="h-3.5 w-3.5" />
+                <Volume2 className="size-3.5" />
             )}
         </button>
     );
@@ -211,19 +211,19 @@ function TtsButton({
 function TypingIndicator({ text = "Thinking" }: { text?: string }) {
     return (
         <div className="flex justify-start pb-3">
-            <div className="border-primary-700 bg-primary-800 text-primary-100 rounded-2xl border px-3 py-2 text-sm shadow-sm">
+            <div className="rounded-2xl border border-primary-700 bg-primary-800 px-3 py-2 text-sm text-primary-100 shadow-sm">
                 <div className="mb-0.5 text-[11px] tracking-wide uppercase opacity-70">
                     assistant
                 </div>
-                <div className="text-primary-300 flex items-center gap-2">
-                    <span className="min-w-0 break-words">{text || "Thinking"}</span>
+                <div className="flex items-center gap-2 text-primary-300">
+                    <span className="min-w-0 wrap-break-word">{text || "Thinking"}</span>
                     <span
                         className="flex shrink-0 gap-1"
                         aria-label="Assistant is working"
                     >
-                        <span className="bg-primary-300 h-1.5 w-1.5 animate-bounce rounded-full [animation-delay:-0.24s]" />
-                        <span className="bg-primary-300 h-1.5 w-1.5 animate-bounce rounded-full [animation-delay:-0.12s]" />
-                        <span className="bg-primary-300 h-1.5 w-1.5 animate-bounce rounded-full" />
+                        <span className="size-1.5 animate-bounce rounded-full bg-primary-300 [animation-delay:-0.24s]" />
+                        <span className="size-1.5 animate-bounce rounded-full bg-primary-300 [animation-delay:-0.12s]" />
+                        <span className="size-1.5 animate-bounce rounded-full bg-primary-300" />
                     </span>
                 </div>
             </div>
@@ -392,15 +392,15 @@ export function ChatMessagesList({
                 <button
                     type="button"
                     onClick={onFollow}
-                    className="bg-accent-500 hover:bg-accent-600 sticky top-2 z-10 float-right mb-2 rounded-full px-3 py-1 text-xs text-white shadow-lg sm:mr-2"
+                    className="sticky top-2 z-10 float-right mb-2 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600 sm:mr-2"
                 >
                     ↓ Follow
                 </button>
             ) : undefined}
 
             {isLoadingHistory && chatRows.length === 0 ? (
-                <div className="text-primary-400 flex items-center justify-center gap-1.5 py-10">
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                <div className="flex items-center justify-center gap-1.5 py-10 text-primary-400">
+                    <Loader2 className="size-4 animate-spin" />
                     Loading chat…
                 </div>
             ) : chatRows.length === 0 ? (
@@ -464,7 +464,7 @@ export function ChatMessagesList({
                                             "max-w-[94%] min-w-0 rounded-2xl px-3 py-2 text-sm shadow-sm sm:max-w-[86%] lg:max-w-[80%]",
                                             isUser
                                                 ? "bg-accent-500 text-white"
-                                                : "border-primary-700 bg-primary-800 text-primary-100 border",
+                                                : "border border-primary-700 bg-primary-800 text-primary-100",
                                         ].join(" ")}
                                     >
                                         <div className="mb-0.5 flex items-center justify-between gap-2 text-[11px] tracking-wide uppercase opacity-70">
@@ -526,7 +526,7 @@ export function ChatMessagesList({
                                                                         url: imageUrl,
                                                                     })
                                                                 }
-                                                                className="focus:ring-accent-400 rounded-lg text-left hover:opacity-90 focus:ring-2 focus:outline-none"
+                                                                className="rounded-lg text-left hover:opacity-90 focus:ring-2 focus:ring-accent-400 focus:outline-none"
                                                                 title="Open image preview"
                                                                 aria-label={
                                                                     imagePreviewLabel
@@ -538,7 +538,7 @@ export function ChatMessagesList({
                                                                     onLoad={
                                                                         onDynamicContentLoad
                                                                     }
-                                                                    className="border-primary-700 max-h-48 max-w-full rounded-lg border object-contain sm:max-h-56"
+                                                                    className="max-h-48 max-w-full rounded-lg border border-primary-700 object-contain sm:max-h-56"
                                                                 />
                                                             </button>
                                                         );
@@ -569,7 +569,7 @@ export function ChatMessagesList({
                                                                     )!
                                                                 );
                                                             }}
-                                                            className="focus:ring-accent-400 rounded-lg text-left hover:opacity-90 focus:ring-2 focus:outline-none"
+                                                            className="rounded-lg text-left hover:opacity-90 focus:ring-2 focus:ring-accent-400 focus:outline-none"
                                                             title={`Open ${attachment.fileName}`}
                                                             aria-label={`Open ${attachment.fileName} preview`}
                                                         >
@@ -579,7 +579,7 @@ export function ChatMessagesList({
                                                                 onLoad={
                                                                     onDynamicContentLoad
                                                                 }
-                                                                className="border-primary-700 max-h-48 max-w-full rounded-lg border object-contain sm:max-h-56"
+                                                                className="max-h-48 max-w-full rounded-lg border border-primary-700 object-contain sm:max-h-56"
                                                             />
                                                         </button>
                                                     ))}

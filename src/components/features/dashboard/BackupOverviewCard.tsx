@@ -139,7 +139,7 @@ export function BackupOverviewCard() {
             <div className="mb-4 flex items-start justify-between gap-3">
                 <div>
                     <CardTitle>Backups</CardTitle>
-                    <div className="text-primary-400 mt-1 text-sm">
+                    <div className="mt-1 text-sm text-primary-400">
                         Kopia snapshots grouped by source
                     </div>
                 </div>
@@ -155,13 +155,13 @@ export function BackupOverviewCard() {
             </div>
 
             <div className="mb-4 space-y-3">
-                <div className="border-primary-700 bg-primary-900/30 rounded-lg border p-3">
+                <div className="rounded-lg border border-primary-700 bg-primary-900/30 p-3">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
-                            <div className="text-primary-100 text-sm font-medium">
+                            <div className="text-sm font-medium text-primary-100">
                                 Run Postgres backup
                             </div>
-                            <div className="text-primary-400 mt-1 text-xs">
+                            <div className="mt-1 text-xs text-primary-400">
                                 Creates a new Postgres backup and prunes older backup data
                                 kept by WAL-G.
                             </div>
@@ -177,12 +177,12 @@ export function BackupOverviewCard() {
                         >
                             {isWalgRunning ? (
                                 <>
-                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    <Loader2 className="size-4 animate-spin" />
                                     Running...
                                 </>
                             ) : (
                                 <>
-                                    <Play className="h-4 w-4" />
+                                    <Play className="size-4" />
                                     Run Postgres backup
                                 </>
                             )}
@@ -190,13 +190,13 @@ export function BackupOverviewCard() {
                     </div>
                 </div>
 
-                <div className="border-primary-700 bg-primary-900/30 rounded-lg border p-3">
+                <div className="rounded-lg border border-primary-700 bg-primary-900/30 p-3">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
-                            <div className="text-primary-100 text-sm font-medium">
+                            <div className="text-sm font-medium text-primary-100">
                                 Run Kopia filesystem backup
                             </div>
-                            <div className="text-primary-400 mt-1 text-xs">
+                            <div className="mt-1 text-xs text-primary-400">
                                 Snapshots Docker, Projects, and OpenClaw files. Postgres
                                 data is not included here.
                             </div>
@@ -210,12 +210,12 @@ export function BackupOverviewCard() {
                         >
                             {isRunning ? (
                                 <>
-                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    <Loader2 className="size-4 animate-spin" />
                                     Running...
                                 </>
                             ) : (
                                 <>
-                                    <Play className="h-4 w-4" />
+                                    <Play className="size-4" />
                                     Run filesystem backup
                                 </>
                             )}
@@ -225,16 +225,16 @@ export function BackupOverviewCard() {
             </div>
 
             {runningWalgJob ? (
-                <div className="border-accent-500/30 bg-accent-500/10 text-accent-100 mb-4 rounded-lg border p-3 text-sm">
+                <div className="mb-4 rounded-lg border border-accent-500/30 bg-accent-500/10 p-3 text-sm text-accent-100">
                     <div className="flex items-center gap-2 font-medium">
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Loader2 className="size-4 animate-spin" />
                         Postgres backup is running
                     </div>
-                    <div className="text-accent-100/80 mt-1">
+                    <div className="mt-1 text-accent-100/80">
                         Started {formatDuration(runningWalgJob.startedAt)}
                     </div>
                     {runningWalgJob.stdout ? (
-                        <div className="bg-primary-950/50 text-primary-200 mt-2 max-h-24 overflow-y-auto rounded p-2 font-mono text-xs">
+                        <div className="mt-2 max-h-24 overflow-y-auto rounded bg-primary-950/50 p-2 font-mono text-xs text-primary-200">
                             <pre className="whitespace-pre-wrap">
                                 {runningWalgJob.stdout}
                             </pre>
@@ -248,7 +248,7 @@ export function BackupOverviewCard() {
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
                             <div className="flex items-center gap-2 font-medium">
-                                <AlertTriangle className="h-4 w-4" />
+                                <AlertTriangle className="size-4" />
                                 Postgres backup needs attention
                             </div>
                             <div className="mt-1 text-yellow-100/80">
@@ -269,7 +269,7 @@ export function BackupOverviewCard() {
                         </Button>
                     </div>
                     {attentionWalgJob.stderr ? (
-                        <div className="bg-primary-950/50 text-primary-200 mt-2 max-h-24 overflow-y-auto rounded p-2 font-mono text-xs">
+                        <div className="mt-2 max-h-24 overflow-y-auto rounded bg-primary-950/50 p-2 font-mono text-xs text-primary-200">
                             <pre className="whitespace-pre-wrap">
                                 {attentionWalgJob.stderr}
                             </pre>
@@ -279,16 +279,16 @@ export function BackupOverviewCard() {
             ) : undefined}
 
             {runningJob ? (
-                <div className="border-accent-500/30 bg-accent-500/10 text-accent-100 mb-4 rounded-lg border p-3 text-sm">
+                <div className="mb-4 rounded-lg border border-accent-500/30 bg-accent-500/10 p-3 text-sm text-accent-100">
                     <div className="flex items-center gap-2 font-medium">
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Loader2 className="size-4 animate-spin" />
                         Backup is running
                     </div>
-                    <div className="text-accent-100/80 mt-1">
+                    <div className="mt-1 text-accent-100/80">
                         Started {formatDuration(runningJob.startedAt)}
                     </div>
                     {runningJob.stdout ? (
-                        <div className="bg-primary-950/50 text-primary-200 mt-2 max-h-24 overflow-y-auto rounded p-2 font-mono text-xs">
+                        <div className="mt-2 max-h-24 overflow-y-auto rounded bg-primary-950/50 p-2 font-mono text-xs text-primary-200">
                             <pre className="whitespace-pre-wrap">{runningJob.stdout}</pre>
                         </div>
                     ) : undefined}
@@ -300,7 +300,7 @@ export function BackupOverviewCard() {
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
                             <div className="flex items-center gap-2 font-medium">
-                                <AlertTriangle className="h-4 w-4" />
+                                <AlertTriangle className="size-4" />
                                 Backup needs attention
                             </div>
                             <div className="mt-1 text-yellow-100/80">
@@ -321,7 +321,7 @@ export function BackupOverviewCard() {
                         </Button>
                     </div>
                     {attentionJob.stderr ? (
-                        <div className="bg-primary-950/50 text-primary-200 mt-2 max-h-24 overflow-y-auto rounded p-2 font-mono text-xs">
+                        <div className="mt-2 max-h-24 overflow-y-auto rounded bg-primary-950/50 p-2 font-mono text-xs text-primary-200">
                             <pre className="whitespace-pre-wrap">
                                 {attentionJob.stderr}
                             </pre>
@@ -331,31 +331,31 @@ export function BackupOverviewCard() {
             ) : undefined}
 
             <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="border-primary-700 bg-primary-900/30 rounded-lg border p-3">
-                    <div className="text-primary-400 text-xs tracking-wide uppercase">
+                <div className="rounded-lg border border-primary-700 bg-primary-900/30 p-3">
+                    <div className="text-xs tracking-wide text-primary-400 uppercase">
                         Sources
                     </div>
-                    <div className="text-primary-50 mt-1 text-2xl font-semibold">
+                    <div className="mt-1 text-2xl font-semibold text-primary-50">
                         {snapshotGroups.length}
                     </div>
                 </div>
-                <div className="border-primary-700 bg-primary-900/30 rounded-lg border p-3">
-                    <div className="text-primary-400 text-xs tracking-wide uppercase">
+                <div className="rounded-lg border border-primary-700 bg-primary-900/30 p-3">
+                    <div className="text-xs tracking-wide text-primary-400 uppercase">
                         Snapshots
                     </div>
-                    <div className="text-primary-50 mt-1 text-2xl font-semibold">
+                    <div className="mt-1 text-2xl font-semibold text-primary-50">
                         {totalSnapshots}
                     </div>
                 </div>
             </div>
 
-            <div className="border-primary-700 bg-primary-900/30 mb-4 rounded-lg border p-3">
+            <div className="mb-4 rounded-lg border border-primary-700 bg-primary-900/30 p-3">
                 <div className="mb-2 flex items-center justify-between gap-3">
                     <div>
-                        <div className="text-primary-100 text-sm font-medium">
+                        <div className="text-sm font-medium text-primary-100">
                             Postgres backup
                         </div>
-                        <div className="text-primary-400 mt-1 text-xs">
+                        <div className="mt-1 text-xs text-primary-400">
                             Daily Postgres backup status stored through WAL-G.
                         </div>
                     </div>
@@ -375,9 +375,9 @@ export function BackupOverviewCard() {
                         {walgEntry.errorMessage}
                     </div>
                 ) : walgEntry?.data?.latest ? (
-                    <div className="text-primary-200 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-2 text-sm text-primary-200 sm:grid-cols-2">
                         <div>
-                            <div className="text-primary-400 text-xs tracking-wide uppercase">
+                            <div className="text-xs tracking-wide text-primary-400 uppercase">
                                 Latest Postgres backup
                             </div>
                             <div className="mt-1 font-mono text-xs break-all">
@@ -385,7 +385,7 @@ export function BackupOverviewCard() {
                             </div>
                         </div>
                         <div>
-                            <div className="text-primary-400 text-xs tracking-wide uppercase">
+                            <div className="text-xs tracking-wide text-primary-400 uppercase">
                                 Finished
                             </div>
                             <div className="mt-1">
@@ -395,7 +395,7 @@ export function BackupOverviewCard() {
                             </div>
                         </div>
                         <div>
-                            <div className="text-primary-400 text-xs tracking-wide uppercase">
+                            <div className="text-xs tracking-wide text-primary-400 uppercase">
                                 WAL file
                             </div>
                             <div className="mt-1 font-mono text-xs break-all">
@@ -403,14 +403,14 @@ export function BackupOverviewCard() {
                             </div>
                         </div>
                         <div>
-                            <div className="text-primary-400 text-xs tracking-wide uppercase">
+                            <div className="text-xs tracking-wide text-primary-400 uppercase">
                                 Backup count
                             </div>
                             <div className="mt-1">{walgEntry.data.backupCount ?? 0}</div>
                         </div>
                     </div>
                 ) : (
-                    <div className="text-primary-400 text-sm">
+                    <div className="text-sm text-primary-400">
                         No Postgres backup cache data yet
                     </div>
                 )}
@@ -423,25 +423,25 @@ export function BackupOverviewCard() {
             ) : undefined}
 
             {isLoading ? (
-                <div className="text-primary-400 flex min-h-[22rem] items-center justify-center">
+                <div className="flex min-h-88 items-center justify-center text-primary-400">
                     Loading backup status...
                 </div>
             ) : snapshotGroups.length > 0 ? (
-                <div className="max-h-[28rem] min-h-[22rem] space-y-4 overflow-y-auto pr-2">
+                <div className="max-h-112 min-h-88 space-y-4 overflow-y-auto pr-2">
                     {snapshotGroups.map((group) => {
                         const isStale = stale.some((item) => item.path === group.path);
 
                         return (
                             <div
                                 key={group.path || "unknown-source"}
-                                className="border-primary-700 bg-primary-900/30 rounded-lg border p-3"
+                                className="rounded-lg border border-primary-700 bg-primary-900/30 p-3"
                             >
                                 <div className="flex items-start justify-between gap-3">
                                     <div>
-                                        <div className="text-primary-100 text-sm font-medium">
+                                        <div className="text-sm font-medium text-primary-100">
                                             {formatPath(group.path)}
                                         </div>
-                                        <div className="text-primary-400 mt-1 text-xs">
+                                        <div className="mt-1 text-xs text-primary-400">
                                             {group.snapshotCount} snapshot
                                             {group.snapshotCount === 1 ? "" : "s"}
                                         </div>
@@ -449,14 +449,14 @@ export function BackupOverviewCard() {
                                     <div className="flex items-center gap-1 text-xs">
                                         {isStale ? (
                                             <>
-                                                <AlertTriangle className="h-3.5 w-3.5 text-yellow-300" />
+                                                <AlertTriangle className="size-3.5 text-yellow-300" />
                                                 <span className="text-yellow-300">
                                                     Stale
                                                 </span>
                                             </>
                                         ) : (
                                             <>
-                                                <CheckCircle2 className="h-3.5 w-3.5 text-green-300" />
+                                                <CheckCircle2 className="size-3.5 text-green-300" />
                                                 <span className="text-green-300">OK</span>
                                             </>
                                         )}
@@ -470,16 +470,16 @@ export function BackupOverviewCard() {
                                                 snapshot.id ||
                                                 `${group.path}-${snapshot.endTime}`
                                             }
-                                            className="border-primary-800/80 bg-primary-950/40 rounded-md border p-2"
+                                            className="rounded-md border border-primary-800/80 bg-primary-950/40 p-2"
                                         >
                                             <div className="flex items-start justify-between gap-3 text-xs">
                                                 <div className="min-w-0 flex-1">
-                                                    <div className="text-primary-100 truncate">
+                                                    <div className="truncate text-primary-100">
                                                         {snapshot.description ||
                                                             snapshot.id ||
                                                             "Unnamed snapshot"}
                                                     </div>
-                                                    <div className="text-primary-400 mt-1">
+                                                    <div className="mt-1 text-primary-400">
                                                         Finished:{" "}
                                                         {snapshot.endTime
                                                             ? formatDate(snapshot.endTime)
@@ -492,7 +492,7 @@ export function BackupOverviewCard() {
                                                                 (reason) => (
                                                                     <span
                                                                         key={`${snapshot.id || snapshot.endTime}-${reason}`}
-                                                                        className="border-primary-700 bg-primary-900/60 text-primary-200 rounded-full border px-2 py-0.5 text-[11px]"
+                                                                        className="rounded-full border border-primary-700 bg-primary-900/60 px-2 py-0.5 text-[11px] text-primary-200"
                                                                     >
                                                                         {reason}
                                                                     </span>
@@ -501,7 +501,7 @@ export function BackupOverviewCard() {
                                                         </div>
                                                     ) : undefined}
                                                 </div>
-                                                <div className="text-primary-300 text-right">
+                                                <div className="text-right text-primary-300">
                                                     <div>
                                                         {typeof snapshot.totalSize ===
                                                         "number"
@@ -510,7 +510,7 @@ export function BackupOverviewCard() {
                                                               )
                                                             : "Unknown"}
                                                     </div>
-                                                    <div className="text-primary-400 mt-1">
+                                                    <div className="mt-1 text-primary-400">
                                                         {snapshot.fileCount ?? "Unknown"}{" "}
                                                         files
                                                     </div>
@@ -524,7 +524,7 @@ export function BackupOverviewCard() {
                     })}
                 </div>
             ) : (
-                <div className="text-primary-400 flex min-h-[22rem] items-center justify-center">
+                <div className="flex min-h-88 items-center justify-center text-primary-400">
                     No backup cache data yet
                 </div>
             )}

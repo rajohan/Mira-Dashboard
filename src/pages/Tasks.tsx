@@ -328,7 +328,7 @@ export function Tasks() {
                                 onClick={() => setIsNewTaskOpen(true)}
                                 className="w-full sm:w-auto"
                             >
-                                <Plus className="h-4 w-4" />
+                                <Plus className="size-4" />
                                 New Task
                             </Button>
                             <RefreshButton
@@ -341,14 +341,14 @@ export function Tasks() {
                     </div>
 
                     {filteredTasks.length === 0 && (
-                        <div className="border-primary-700 bg-primary-800/60 mb-4 flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="mb-4 flex flex-col gap-3 rounded-lg border border-primary-700 bg-primary-800/60 p-4 sm:flex-row sm:items-center sm:justify-between">
                             <div className="min-w-0">
-                                <p className="text-primary-100 text-sm font-medium">
+                                <p className="text-sm font-medium text-primary-100">
                                     {hasActiveFilters
                                         ? "No tasks match the current filters."
                                         : "No tasks yet."}
                                 </p>
-                                <p className="text-primary-300 mt-1 text-xs">
+                                <p className="mt-1 text-xs text-primary-300">
                                     {hasActiveFilters
                                         ? "Clear search and assignee filters to return to the full board."
                                         : "Create a task when there is new work to track."}

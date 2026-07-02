@@ -22,12 +22,12 @@ export function SessionActionsDropdown({
     const items: DropdownItem[] = [
         {
             label: "Compact",
-            icon: <Database className="text-primary-400 h-4 w-4" />,
+            icon: <Database className="size-4 text-primary-400" />,
             onClick: onCompact,
         },
         {
             label: "Reset",
-            icon: <RotateCcw className="text-primary-400 h-4 w-4" />,
+            icon: <RotateCcw className="size-4 text-primary-400" />,
             onClick: onReset,
         },
     ];
@@ -35,7 +35,7 @@ export function SessionActionsDropdown({
     if (showDelete && onDelete) {
         items.push({
             label: "Delete",
-            icon: <Trash2 className="h-4 w-4" />,
+            icon: <Trash2 className="size-4" />,
             variant: "danger",
             onClick: onDelete,
         });
@@ -44,7 +44,7 @@ export function SessionActionsDropdown({
     return (
         <Dropdown
             ariaLabel={ariaLabel}
-            icon={<MoreVertical className="h-4 w-4" />}
+            icon={<MoreVertical className="size-4" />}
             variant="ghost"
             items={items}
         />

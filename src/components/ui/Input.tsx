@@ -17,19 +17,19 @@ export const Input = forwardRef<HTMLInputElement, InputProperties>(
         return (
             <Field>
                 {label && (
-                    <Label className="text-primary-300 mb-1 block text-sm font-medium">
+                    <Label className="mb-1 block text-sm font-medium text-primary-300">
                         {label}
                     </Label>
                 )}
                 {description && (
-                    <Description className="text-primary-400 mb-1 text-xs">
+                    <Description className="mb-1 text-xs text-primary-400">
                         {description}
                     </Description>
                 )}
                 <HeadlessInput
                     ref={reference}
                     className={cn(
-                        "border-primary-600 bg-primary-900 w-full rounded-lg border px-3 py-2",
+                        "w-full rounded-lg border border-primary-600 bg-primary-900 px-3 py-2",
                         "text-primary-50 placeholder-primary-400",
                         "data-focus:border-accent-500 data-focus:outline-none",
                         "data-hover:border-primary-500",

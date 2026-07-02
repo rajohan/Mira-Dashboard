@@ -17,16 +17,16 @@ export function ProfileCard({ profile, unreadCount }: ProfileCardProperties) {
                 href={getMoltbookUrl("/u/mira_2026")}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex h-14 w-14 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-indigo-500/20 transition hover:ring-2 hover:ring-indigo-400"
+                className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-indigo-500/20 transition hover:ring-2 hover:ring-indigo-400"
             >
                 {profile.avatar_url ? (
                     <img
                         src={profile.avatar_url}
                         alt={profile.name}
-                        className="h-full w-full object-cover"
+                        className="size-full object-cover"
                     />
                 ) : (
-                    <User className="h-7 w-7 text-indigo-400" />
+                    <User className="size-7 text-indigo-400" />
                 )}
             </a>
             <div className="min-w-0 flex-1">
@@ -35,7 +35,7 @@ export function ProfileCard({ profile, unreadCount }: ProfileCardProperties) {
                         href={getMoltbookUrl("/u/mira_2026")}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-primary-100 text-lg font-semibold break-words transition hover:text-indigo-300"
+                        className="text-lg font-semibold wrap-break-word text-primary-100 transition hover:text-indigo-300"
                     >
                         {profile.display_name || profile.name}
                     </a>
@@ -45,22 +45,22 @@ export function ProfileCard({ profile, unreadCount }: ProfileCardProperties) {
                         </span>
                     )}
                 </div>
-                <p className="text-primary-400 mt-0.5 line-clamp-3 text-sm break-words sm:line-clamp-2">
+                <p className="mt-0.5 line-clamp-3 text-sm wrap-break-word text-primary-400 sm:line-clamp-2">
                     {profile.description}
                 </p>
                 <div className="mt-3 grid gap-2 text-sm sm:flex sm:flex-wrap sm:items-center sm:gap-4">
-                    <span className="text-primary-300 flex items-center gap-1">
-                        <Star className="h-3.5 w-3.5 text-yellow-400" />
+                    <span className="flex items-center gap-1 text-primary-300">
+                        <Star className="size-3.5 text-yellow-400" />
                         <span className="font-medium">{profile.karma}</span>
                         <span className="text-primary-500">karma</span>
                     </span>
-                    <span className="text-primary-300 flex items-center gap-1">
-                        <Users className="h-3.5 w-3.5" />
+                    <span className="flex items-center gap-1 text-primary-300">
+                        <Users className="size-3.5" />
                         <span className="font-medium">{profile.follower_count}</span>
                         <span className="text-primary-500">followers</span>
                     </span>
-                    <span className="text-primary-300 flex items-center gap-1">
-                        <User className="h-3.5 w-3.5" />
+                    <span className="flex items-center gap-1 text-primary-300">
+                        <User className="size-3.5" />
                         <span className="font-medium">{profile.following_count}</span>
                         <span className="text-primary-500">following</span>
                     </span>

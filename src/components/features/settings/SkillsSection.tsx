@@ -57,7 +57,7 @@ export function SkillsSection({ skills, onToggle }: SkillsSectionProperties) {
         <ExpandableCard title="Skills" icon={Users}>
             <div className="space-y-4">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="text-primary-400 text-sm">
+                    <div className="text-sm text-primary-400">
                         {enabledCount}/{skills.length} enabled
                     </div>
                     <Input
@@ -118,19 +118,19 @@ export function SkillsSection({ skills, onToggle }: SkillsSectionProperties) {
 
                 <div className="space-y-2">
                     {filteredSkills.length === 0 ? (
-                        <p className="text-primary-400 text-sm">No skills found</p>
+                        <p className="text-sm text-primary-400">No skills found</p>
                     ) : (
                         filteredSkills.map((skill) => (
                             <div
                                 key={skill.name}
-                                className="border-primary-800 bg-primary-900/40 flex flex-col gap-3 rounded-lg border px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                                className="flex flex-col gap-3 rounded-lg border border-primary-800 bg-primary-900/40 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
                             >
                                 <div className="min-w-0">
                                     <div className="flex flex-wrap items-center gap-2">
-                                        <p className="text-primary-200 text-sm font-medium break-all sm:truncate">
+                                        <p className="text-sm font-medium break-all text-primary-200 sm:truncate">
                                             {skill.name}
                                         </p>
-                                        <span className="bg-primary-800 text-primary-400 rounded-full px-2 py-0.5 text-xs">
+                                        <span className="rounded-full bg-primary-800 px-2 py-0.5 text-xs text-primary-400">
                                             {sourceLabels[
                                                 (skill.source || "extra") as Exclude<
                                                     SkillSourceFilter,
@@ -140,7 +140,7 @@ export function SkillsSection({ skills, onToggle }: SkillsSectionProperties) {
                                         </span>
                                     </div>
                                     {skill.description && (
-                                        <p className="text-primary-400 mt-0.5 line-clamp-2 text-xs">
+                                        <p className="mt-0.5 line-clamp-2 text-xs text-primary-400">
                                             {skill.description}
                                         </p>
                                     )}

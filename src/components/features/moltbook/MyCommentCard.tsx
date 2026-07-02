@@ -11,13 +11,13 @@ interface MyCommentCardProperties {
 export function MyCommentCard({ comment }: MyCommentCardProperties) {
     return (
         <Card className="p-3 sm:p-4">
-            <div className="text-primary-500 mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+            <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-primary-500">
                 <span>Commented on</span>
                 <a
                     href={getMoltbookUrl("/post/" + comment.post.id)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="min-w-0 break-words text-indigo-400 hover:text-indigo-300"
+                    className="min-w-0 wrap-break-word text-indigo-400 hover:text-indigo-300"
                 >
                     {comment.post.title}
                 </a>
@@ -32,11 +32,11 @@ export function MyCommentCard({ comment }: MyCommentCardProperties) {
                 rel="noopener noreferrer"
                 className="group block"
             >
-                <p className="text-primary-300 text-sm break-words transition group-hover:text-white">
+                <p className="text-sm wrap-break-word text-primary-300 transition group-hover:text-white">
                     {truncate(comment.content, 300)}
                 </p>
             </a>
-            <div className="text-primary-500 mt-3 flex flex-wrap items-center gap-4 text-sm">
+            <div className="mt-3 flex flex-wrap items-center gap-4 text-sm text-primary-500">
                 <span className="text-orange-400">↑ {comment.upvotes}</span>
                 <span>↓ {comment.downvotes}</span>
             </div>

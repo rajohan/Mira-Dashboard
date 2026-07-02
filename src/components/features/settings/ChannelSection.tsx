@@ -33,12 +33,12 @@ export function ChannelSection({ channels, onSave, saving }: ChannelSectionPrope
     return (
         <ExpandableCard title="Channels" icon={MessageSquare}>
             <div className="space-y-4">
-                <p className="text-primary-400 text-sm">
+                <p className="text-sm text-primary-400">
                     {enabledCount}/{draftChannels.length} configured channels enabled
                 </p>
 
                 {draftChannels.length === 0 ? (
-                    <div className="border-primary-800 bg-primary-900/50 text-primary-400 rounded-lg border p-3 text-sm">
+                    <div className="rounded-lg border border-primary-800 bg-primary-900/50 p-3 text-sm text-primary-400">
                         No channels configured in OpenClaw config.
                     </div>
                 ) : (
@@ -62,7 +62,7 @@ export function ChannelSection({ channels, onSave, saving }: ChannelSectionPrope
                                         .filter(Boolean)
                                         .join(" · ") || "Configured channel"
                                 }
-                                className="border-primary-800 bg-primary-900/50 rounded-lg border p-3"
+                                className="rounded-lg border border-primary-800 bg-primary-900/50 p-3"
                             />
                         ))}
                     </div>
@@ -77,12 +77,12 @@ export function ChannelSection({ channels, onSave, saving }: ChannelSectionPrope
                     >
                         {saving ? (
                             <>
-                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <Loader2 className="size-4 animate-spin" />
                                 Saving...
                             </>
                         ) : (
                             <>
-                                <Check className="h-4 w-4" />
+                                <Check className="size-4" />
                                 Save channels
                             </>
                         )}

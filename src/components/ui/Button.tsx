@@ -22,13 +22,13 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProperties>(
                     "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors",
                     "cursor-pointer outline-none",
                     {
-                        "bg-accent-500 hover:bg-accent-600 active:bg-accent-700 data-[active]:bg-accent-700 data-[hover]:bg-accent-600 text-white":
+                        "bg-accent-500 text-white hover:bg-accent-600 active:bg-accent-700 data-active:bg-accent-700 data-hover:bg-accent-600":
                             variant === "primary",
-                        "bg-primary-700 text-primary-100 hover:bg-primary-600 active:bg-primary-500 data-[active]:bg-primary-500 data-[hover]:bg-primary-600":
+                        "bg-primary-700 text-primary-100 hover:bg-primary-600 active:bg-primary-500 data-active:bg-primary-500 data-hover:bg-primary-600":
                             variant === "secondary",
-                        "bg-red-500 text-white hover:bg-red-600 active:bg-red-700 data-[active]:bg-red-700 data-[hover]:bg-red-600":
+                        "bg-red-500 text-white hover:bg-red-600 active:bg-red-700 data-active:bg-red-700 data-hover:bg-red-600":
                             variant === "danger",
-                        "text-primary-300 hover:bg-primary-700 active:bg-primary-600 data-[active]:bg-primary-600 data-[hover]:bg-primary-700 bg-transparent":
+                        "bg-transparent text-primary-300 hover:bg-primary-700 active:bg-primary-600 data-active:bg-primary-600 data-hover:bg-primary-700":
                             variant === "ghost",
                     },
                     {
@@ -36,7 +36,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProperties>(
                         "px-4 py-2 text-sm": size === "md",
                         "px-6 py-3 text-base": size === "lg",
                     },
-                    "disabled:cursor-not-allowed disabled:opacity-50 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
+                    "disabled:cursor-not-allowed disabled:opacity-50 data-disabled:cursor-not-allowed data-disabled:opacity-50",
                     className
                 )}
                 {...properties}

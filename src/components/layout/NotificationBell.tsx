@@ -79,27 +79,27 @@ export function NotificationBell() {
             icon={
                 <span className="relative inline-flex">
                     {unreadCount > 0 ? (
-                        <BellRing className="h-5 w-5" />
+                        <BellRing className="size-5" />
                     ) : (
-                        <Bell className="h-5 w-5" />
+                        <Bell className="size-5" />
                     )}
                     {unreadCount > 0 && (
-                        <span className="bg-accent-500 absolute -top-2 -right-2 rounded-full px-1.5 text-[10px] font-semibold text-white">
+                        <span className="absolute -top-2 -right-2 rounded-full bg-accent-500 px-1.5 text-[10px] font-semibold text-white">
                             {unreadCount}
                         </span>
                     )}
                 </span>
             }
             content={
-                <div className="w-[380px] p-2">
+                <div className="w-95 p-2">
                     <div className="mb-2 flex items-center justify-between gap-2">
-                        <h2 className="text-primary-300 text-sm font-semibold tracking-wide uppercase">
+                        <h2 className="text-sm font-semibold tracking-wide text-primary-300 uppercase">
                             Notifications
                         </h2>
                         <div className="flex items-center gap-2">
                             <button
                                 type="button"
-                                className="border-primary-600 text-primary-200 hover:bg-primary-700 rounded-md border px-2 py-1 text-xs"
+                                className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
                                 onClick={() => clearRead.mutate()}
                                 disabled={readCount === 0}
                             >
@@ -107,7 +107,7 @@ export function NotificationBell() {
                             </button>
                             <button
                                 type="button"
-                                className="border-primary-600 text-primary-200 hover:bg-primary-700 rounded-md border px-2 py-1 text-xs"
+                                className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
                                 onClick={() => markAllRead.mutate()}
                                 disabled={unreadCount === 0}
                             >
@@ -130,7 +130,7 @@ export function NotificationBell() {
                                 className={`rounded-md px-2 py-1 text-xs ${
                                     filter === value
                                         ? "bg-accent-500 text-white"
-                                        : "border-primary-600 text-primary-300 hover:bg-primary-700 border"
+                                        : "border border-primary-600 text-primary-300 hover:bg-primary-700"
                                 }`}
                                 role="menuitemradio"
                                 aria-checked={filter === value}
@@ -143,14 +143,14 @@ export function NotificationBell() {
 
                     <div className="max-h-80 space-y-2 overflow-y-auto">
                         {filteredItems.length === 0 ? (
-                            <p className="text-primary-400 text-sm">
+                            <p className="text-sm text-primary-400">
                                 No notifications for this filter.
                             </p>
                         ) : (
                             filteredItems.map((notification) => (
                                 <div
                                     key={notification.id}
-                                    className="border-primary-700 bg-primary-800/30 w-full rounded-lg border px-3 py-2 text-left"
+                                    className="w-full rounded-lg border border-primary-700 bg-primary-800/30 px-3 py-2 text-left"
                                 >
                                     <div className="mb-1 flex items-center justify-between gap-2">
                                         <div className="inline-flex items-center gap-2">
@@ -167,20 +167,20 @@ export function NotificationBell() {
                                                 <Badge variant="success">unread</Badge>
                                             )}
                                         </div>
-                                        <span className="text-primary-500 text-xs">
+                                        <span className="text-xs text-primary-500">
                                             {formatNotificationTime(notification)}
                                         </span>
                                     </div>
-                                    <div className="text-primary-100 text-sm">
+                                    <div className="text-sm text-primary-100">
                                         {notification.title}
                                     </div>
-                                    <div className="text-primary-300 line-clamp-2 text-xs">
+                                    <div className="line-clamp-2 text-xs text-primary-300">
                                         {notification.description}
                                     </div>
                                     <div className="mt-2 flex items-center gap-2">
                                         {reportIdFromNotification(notification) ? (
                                             <Link
-                                                className="border-primary-600 text-primary-200 hover:bg-primary-700 rounded-md border px-2 py-1 text-xs"
+                                                className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
                                                 to="/reports"
                                                 search={{
                                                     reportId:
@@ -195,7 +195,7 @@ export function NotificationBell() {
                                         {!notification.isRead && (
                                             <button
                                                 type="button"
-                                                className="border-primary-600 text-primary-200 hover:bg-primary-700 rounded-md border px-2 py-1 text-xs"
+                                                className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
                                                 onClick={() =>
                                                     markNotificationRead.mutate(
                                                         notification.id
@@ -207,7 +207,7 @@ export function NotificationBell() {
                                         )}
                                         <button
                                             type="button"
-                                            className="border-primary-600 text-primary-200 hover:bg-primary-700 rounded-md border px-2 py-1 text-xs"
+                                            className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
                                             onClick={() =>
                                                 deleteNotification.mutate(notification.id)
                                             }
