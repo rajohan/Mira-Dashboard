@@ -1300,7 +1300,9 @@ async function checkOpenRouterQuota() {
         percentUsed:
             limit !== undefined && limit > 0 && limitRemaining !== undefined
                 ? Number((((limit - limitRemaining) / limit) * 100).toFixed(1))
-                : undefined,
+                : totalCredits > 0
+                  ? Math.round((usage / totalCredits) * 100)
+                  : undefined,
     };
 }
 
