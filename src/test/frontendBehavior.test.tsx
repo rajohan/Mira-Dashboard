@@ -3543,6 +3543,7 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(screen.getByText("#7: Detail task")).toBeInTheDocument();
         expect(screen.getByText("Backed by OpenClaw cron")).toBeInTheDocument();
         expect(screen.getByText("2m 5s")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Add Update" })).toBeDisabled();
 
         await user.click(screen.getByRole("button", { name: "Mark Done" }));
         expect(onMove).toHaveBeenCalledWith("done");
@@ -3564,18 +3565,23 @@ describe("Mira Dashboard frontend behavior", () => {
         );
 
         await user.type(screen.getByLabelText("Add progress update"), "More progress");
-        await user.click(screen.getByRole("button", { name: "Add Update" }));
+        const addUpdateButton = screen.getByRole("button", { name: "Add Update" });
+        expect(addUpdateButton).toBeEnabled();
+        await user.click(addUpdateButton);
         expect(onAddUpdate).toHaveBeenCalledWith("More progress");
 
         await user.click(
             screen.getByRole("button", { name: "Edit progress update #11" })
         );
         await user.clear(screen.getByLabelText("Message for progress update #11"));
+        const saveUpdateButton = screen.getByRole("button", { name: "Save" });
+        expect(saveUpdateButton).toBeDisabled();
         await user.type(
             screen.getByLabelText("Message for progress update #11"),
             "Edited progress"
         );
-        await user.click(screen.getByRole("button", { name: "Save" }));
+        expect(saveUpdateButton).toBeEnabled();
+        await user.click(saveUpdateButton);
         expect(onEditUpdate).toHaveBeenCalledWith(11, "Edited progress");
 
         await user.click(

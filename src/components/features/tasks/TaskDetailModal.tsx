@@ -178,6 +178,8 @@ export function TaskDetailModal({
         : automation?.enabled === false
           ? "default"
           : getCronStatusVariant(automation?.lastRunStatus || "");
+    const trimmedProgressMessage = progressMessage.trim();
+    const trimmedEditingUpdateMessage = editingUpdateMessage.trim();
 
     const assigneeProfileUrl =
         assigneeLogin === TASK_ASSIGNEES.mira.id
@@ -251,11 +253,11 @@ export function TaskDetailModal({
 
     /** Adds a new progress update when the message is non-empty. */
     const handleAddUpdate = async () => {
-        if (!progressMessage.trim()) {
+        if (!trimmedProgressMessage) {
             return;
         }
 
-        await onAddUpdate(progressMessage.trim());
+        await onAddUpdate(trimmedProgressMessage);
         setProgressMessage("");
     };
 
@@ -267,11 +269,11 @@ export function TaskDetailModal({
 
     /** Saves the in-progress edit for a progress update. */
     const saveUpdateEdit = async () => {
-        if (!editingUpdateId || !editingUpdateMessage.trim()) {
+        if (!editingUpdateId || !trimmedEditingUpdateMessage) {
             return;
         }
 
-        await onEditUpdate(editingUpdateId, editingUpdateMessage.trim());
+        await onEditUpdate(editingUpdateId, trimmedEditingUpdateMessage);
 
         setEditingUpdateId(undefined);
         setEditingUpdateMessage("");
@@ -603,6 +605,9 @@ export function TaskDetailModal({
                                                         size="sm"
                                                         variant="primary"
                                                         onClick={saveUpdateEdit}
+                                                        disabled={
+                                                            !trimmedEditingUpdateMessage
+                                                        }
                                                     >
                                                         <Save size={14} />
                                                         Save
@@ -645,6 +650,7 @@ export function TaskDetailModal({
                         <Button
                             variant="secondary"
                             onClick={handleAddUpdate}
+                            disabled={!trimmedProgressMessage}
                             className="w-full sm:w-auto"
                         >
                             <Plus className="h-4 w-4" />
