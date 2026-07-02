@@ -274,6 +274,29 @@ function deploymentStatusLabel(status: DeploymentJob["status"]) {
     return status === "isOk" ? "ok" : status;
 }
 
+/** Formats pull request count copy. */
+function pullRequestCountLabel(count: number): string {
+    return `${count} ${count === 1 ? "PR" : "PRs"}`;
+}
+
+/** Renders pull request section title and count badge. */
+function SectionHeader({
+    title,
+    count,
+    badgeVariant,
+}: {
+    title: string;
+    count: number;
+    badgeVariant: Parameters<typeof Badge>[0]["variant"];
+}) {
+    return (
+        <div className="flex flex-wrap items-center gap-2">
+            <CardTitle className="text-base">{title}</CardTitle>
+            <Badge variant={badgeVariant}>{pullRequestCountLabel(count)}</Badge>
+        </div>
+    );
+}
+
 /** Renders the deployment commit title and commit reference. */
 function deploymentCommitLabel(deployment: DeploymentJob): ReactNode {
     const commit = deployment.commit || deployment.id;
@@ -890,9 +913,11 @@ export function PullRequests() {
                         {miraPullRequests.length > 0 ? (
                             <section className="space-y-3" aria-label="Mira-authored PRs">
                                 <div>
-                                    <CardTitle className="text-base">
-                                        Mira-authored PRs
-                                    </CardTitle>
+                                    <SectionHeader
+                                        title="Mira-authored PRs"
+                                        count={miraPullRequests.length}
+                                        badgeVariant="info"
+                                    />
                                     <p className="mt-1 text-sm text-primary-400">
                                         These can be merged, rejected, or merged and
                                         deployed from the dashboard.
@@ -916,9 +941,11 @@ export function PullRequests() {
                                 aria-label="Dependency and external PRs"
                             >
                                 <div>
-                                    <CardTitle className="text-base">
-                                        Dependency / external PRs
-                                    </CardTitle>
+                                    <SectionHeader
+                                        title="Dependency / external PRs"
+                                        count={externalPullRequests.length}
+                                        badgeVariant="default"
+                                    />
                                     <p className="mt-1 text-sm text-primary-400">
                                         These can be merged after the same review, CI, and
                                         checkout gates as Mira-authored PRs.
