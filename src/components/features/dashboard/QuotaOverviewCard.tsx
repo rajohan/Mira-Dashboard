@@ -184,8 +184,8 @@ function formatOpenRouterLimitReset(value: string | undefined): string {
     return `${value} quota`;
 }
 
-/** Formats small OpenRouter quota balances without rounding real usage away. */
-function formatOpenRouterQuotaRemaining(value: number): string {
+/** Formats small OpenRouter quota amounts without rounding real usage away. */
+function formatOpenRouterQuotaAmount(value: number): string {
     return `$${value.toFixed(3)}`;
 }
 
@@ -208,7 +208,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
                 ? quotas.openrouter.status.replaceAll("_", " ")
                 : quotas.openrouter.limit !== undefined &&
                     quotas.openrouter.limitRemaining !== undefined
-                  ? `${formatOpenRouterQuotaRemaining(quotas.openrouter.limitRemaining)} left / $${quotas.openrouter.limit.toFixed(2)} ${formatOpenRouterLimitReset(quotas.openrouter.limitReset)}`
+                  ? `${formatOpenRouterQuotaAmount(quotas.openrouter.limitRemaining)} left / ${formatOpenRouterQuotaAmount(quotas.openrouter.limit)} ${formatOpenRouterLimitReset(quotas.openrouter.limitReset)}`
                   : `$${quotas.openrouter.remaining.toFixed(2)} balance`,
             line2: hasQuotaStatus(quotas.openrouter)
                 ? quotas.openrouter.note || ""

@@ -18,6 +18,9 @@ import { Dropdown } from "../ui/Dropdown";
 /** Defines notification filter. */
 type NotificationFilter = "all" | "unread" | "warning";
 
+const NOTIFICATION_ACTION_CLASS =
+    "rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700";
+
 /** Returns a sortable timestamp for notifications with graceful fallbacks. */
 function getNotificationTimestamp(notification: NotificationItem): number {
     const occurredAt = Date.parse(notification.occurredAt);
@@ -99,7 +102,7 @@ export function NotificationBell() {
                         <div className="flex items-center gap-2">
                             <button
                                 type="button"
-                                className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
+                                className={NOTIFICATION_ACTION_CLASS}
                                 onClick={() => clearRead.mutate()}
                                 disabled={readCount === 0}
                             >
@@ -107,7 +110,7 @@ export function NotificationBell() {
                             </button>
                             <button
                                 type="button"
-                                className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
+                                className={NOTIFICATION_ACTION_CLASS}
                                 onClick={() => markAllRead.mutate()}
                                 disabled={unreadCount === 0}
                             >
@@ -180,7 +183,7 @@ export function NotificationBell() {
                                     <div className="mt-2 flex items-center gap-2">
                                         {reportIdFromNotification(notification) ? (
                                             <Link
-                                                className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
+                                                className={NOTIFICATION_ACTION_CLASS}
                                                 to="/reports"
                                                 search={{
                                                     reportId:
@@ -195,7 +198,7 @@ export function NotificationBell() {
                                         {!notification.isRead && (
                                             <button
                                                 type="button"
-                                                className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
+                                                className={NOTIFICATION_ACTION_CLASS}
                                                 onClick={() =>
                                                     markNotificationRead.mutate(
                                                         notification.id
@@ -207,7 +210,7 @@ export function NotificationBell() {
                                         )}
                                         <button
                                             type="button"
-                                            className="rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700"
+                                            className={NOTIFICATION_ACTION_CLASS}
                                             onClick={() =>
                                                 deleteNotification.mutate(notification.id)
                                             }

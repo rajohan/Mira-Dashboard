@@ -336,7 +336,7 @@ export function TaskDetailModal({
                                                 }
                                                 onClick={() => setEditPriority(p)}
                                             >
-                                                <Circle size={14} />
+                                                <Circle className="size-4" />
                                                 {p}
                                             </Button>
                                         ))}
@@ -571,7 +571,7 @@ export function TaskDetailModal({
                                                         startEditUpdate(update)
                                                     }
                                                 >
-                                                    <Pencil size={14} />
+                                                    <Pencil className="size-4" />
                                                     Edit
                                                 </Button>
                                                 <Button
@@ -582,7 +582,7 @@ export function TaskDetailModal({
                                                         onDeleteUpdate(update.id)
                                                     }
                                                 >
-                                                    <Trash2 size={14} />
+                                                    <Trash2 className="size-4" />
                                                     Delete
                                                 </Button>
                                             </div>
@@ -609,7 +609,7 @@ export function TaskDetailModal({
                                                             !trimmedEditingUpdateMessage
                                                         }
                                                     >
-                                                        <Save size={14} />
+                                                        <Save className="size-4" />
                                                         Save
                                                     </Button>
                                                     <Button
@@ -619,7 +619,7 @@ export function TaskDetailModal({
                                                             setEditingUpdateId(undefined)
                                                         }
                                                     >
-                                                        <X size={14} />
+                                                        <X className="size-4" />
                                                         Cancel
                                                     </Button>
                                                 </div>
