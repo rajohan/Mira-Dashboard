@@ -910,6 +910,16 @@ export function PullRequests() {
                             </Card>
                         ) : undefined}
 
+                        {pullRequests.length > 0 && miraPullRequests.length === 0 ? (
+                            <Card variant="bordered">
+                                <CardTitle>No Mira-authored PRs waiting</CardTitle>
+                                <p className="mt-2 text-sm text-primary-400">
+                                    Autopilot changes will appear here when Mira opens a
+                                    dashboard PR for Raymond to review.
+                                </p>
+                            </Card>
+                        ) : undefined}
+
                         {miraPullRequests.length > 0 ? (
                             <section className="space-y-3" aria-label="Mira-authored PRs">
                                 <div>
