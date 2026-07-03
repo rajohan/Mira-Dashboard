@@ -368,7 +368,7 @@ export function Tasks() {
                                 </p>
                                 <p className="mt-1 text-xs text-primary-300">
                                     {hasActiveFilters
-                                        ? "Clear search and assignee filters to return to the full board."
+                                        ? "Clear search, assignee, and automation filters to return to the full board."
                                         : "Create a task when there is new work to track."}
                                 </p>
                             </div>
