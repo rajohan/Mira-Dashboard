@@ -1825,6 +1825,58 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
+    it("shows when the Mira-authored pull request queue is clear", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                if (url === "/api/pull-requests") {
+                    return Response.json({
+                        pullRequests: [
+                            {
+                                number: 191,
+                                title: "Bump dashboard dependency",
+                                url: "https://github.com/rajohan/Mira-Dashboard/pull/191",
+                                headRefName: "dependabot/npm-and-yarn/pkg",
+                                baseRefName: "main",
+                                author: { login: "app/dependabot" },
+                                createdAt: "2026-06-24T09:00:00.000Z",
+                                updatedAt: "2026-06-24T09:05:00.000Z",
+                                isDraft: false,
+                                reviewDecision: "REVIEW_REQUIRED",
+                                mergeStateStatus: "BEHIND",
+                                mergeable: "MERGEABLE",
+                                statusCheckRollup: [
+                                    { status: "COMPLETED", conclusion: "SUCCESS" },
+                                ],
+                                additions: 4,
+                                deletions: 1,
+                                changedFiles: 1,
+                                canReviewerApprove: true,
+                                body: "Dependency update",
+                            },
+                        ],
+                    });
+                }
+
+                const method = init?.method ?? "GET";
+                return apiResponse(url, method, init);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(PullRequests));
+
+        await waitFor(() => {
+            expect(screen.getByText("No Mira-authored PRs waiting")).toBeInTheDocument();
+            expect(screen.getByText("Bump dashboard dependency")).toBeInTheDocument();
+        });
+        expect(screen.getByText("Dependency / external PRs")).toBeInTheDocument();
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("drives logs page loading, searching, level filtering, and clearing", async () => {
         const user = userEvent.setup();
         const exportedBlobs: Blob[] = [];
