@@ -3803,6 +3803,17 @@ describe("Mira Dashboard frontend behavior", () => {
                 assignees: [{ login: "rajohan", name: "Raymond" }],
                 labels: [{ name: "blocked" }],
             }),
+            task({
+                number: 12,
+                title: "Recurring cron check",
+                assignees: [{ login: "mira-2026", name: "Mira" }],
+                labels: [{ name: "priority-medium" }],
+                automation: {
+                    type: "cron",
+                    recurring: true,
+                    cronJobId: "cron-check",
+                },
+            }),
         ];
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
@@ -3815,10 +3826,22 @@ describe("Mira Dashboard frontend behavior", () => {
 
         expect(await screen.findByText("Mira backend follow-up")).toBeInTheDocument();
         expect(screen.getByText("Raymond review queue")).toBeInTheDocument();
+        expect(screen.getByText("Recurring cron check")).toBeInTheDocument();
 
-        await user.click(screen.getByRole("button", { name: "Raymond" }));
+        await user.click(screen.getByRole("button", { name: "Recurring" }));
         expect(screen.queryByText("Mira backend follow-up")).not.toBeInTheDocument();
+        expect(screen.queryByText("Raymond review queue")).not.toBeInTheDocument();
+        expect(screen.getByText("Recurring cron check")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Manual" }));
+        expect(screen.getByText("Mira backend follow-up")).toBeInTheDocument();
         expect(screen.getByText("Raymond review queue")).toBeInTheDocument();
+        expect(screen.queryByText("Recurring cron check")).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Mira" }));
+        expect(screen.getByText("Mira backend follow-up")).toBeInTheDocument();
+        expect(screen.queryByText("Raymond review queue")).not.toBeInTheDocument();
+        expect(screen.queryByText("Recurring cron check")).not.toBeInTheDocument();
 
         await user.type(screen.getByPlaceholderText("Search tasks..."), "nothing");
         expect(
@@ -3828,6 +3851,7 @@ describe("Mira Dashboard frontend behavior", () => {
         await user.click(screen.getByRole("button", { name: "Clear filters" }));
         expect(await screen.findByText("Mira backend follow-up")).toBeInTheDocument();
         expect(screen.getByText("Raymond review queue")).toBeInTheDocument();
+        expect(screen.getByText("Recurring cron check")).toBeInTheDocument();
     });
 
     it("keeps task board ordering aligned with triage priority", async () => {

@@ -49,6 +49,12 @@ const ASSIGNMENT_FILTERS = [
     { value: TASK_ASSIGNEES.raymond.id, label: TASK_ASSIGNEES.raymond.label },
 ] as const;
 
+const AUTOMATION_FILTERS = [
+    { value: "all", label: "All tasks" },
+    { value: "recurring", label: "Recurring" },
+    { value: "manual", label: "Manual" },
+] as const;
+
 /** Renders the tasks UI. */
 export function Tasks() {
     const { data: tasks = [], isLoading, error, refetch } = useTasks();
@@ -63,6 +69,8 @@ export function Tasks() {
 
     const [search, setSearch] = useState("");
     const [filter, setFilter] = useState<"all" | TaskAssigneeId>("all");
+    const [automationFilter, setAutomationFilter] =
+        useState<(typeof AUTOMATION_FILTERS)[number]["value"]>("all");
     const [activeId, setActiveId] = useState<string | undefined>(undefined);
     const [overId, setOverId] = useState<ColumnId | undefined>(undefined);
     const [selectedTask, setSelectedTask] = useState<Task | undefined>(undefined);
@@ -84,10 +92,15 @@ export function Tasks() {
         const matchesFilter =
             filter === "all" ||
             task.assignees.some((a) => (a.login || a.name) === filter);
+        const isAutomationFilterMatch =
+            automationFilter === "all" ||
+            (automationFilter === "recurring" && task.automation?.recurring === true) ||
+            (automationFilter === "manual" && task.automation?.recurring !== true);
         const matchesSearch = isTaskMatchSearch(task, search);
-        return matchesFilter && matchesSearch;
+        return matchesFilter && isAutomationFilterMatch && matchesSearch;
     });
-    const hasActiveFilters = search.trim().length > 0 || filter !== "all";
+    const hasActiveFilters =
+        search.trim().length > 0 || filter !== "all" || automationFilter !== "all";
 
     const tasksByColumn: Record<ColumnId, Task[]> = {
         todo: [],
@@ -319,6 +332,11 @@ export function Tasks() {
                                 value={filter}
                                 onChange={setFilter}
                             />
+                            <FilterButtonGroup
+                                options={AUTOMATION_FILTERS}
+                                value={automationFilter}
+                                onChange={setAutomationFilter}
+                            />
                         </div>
 
                         <div className="grid grid-cols-[1fr_auto] items-center gap-2 sm:flex sm:justify-end">
@@ -361,6 +379,7 @@ export function Tasks() {
                                     onClick={() => {
                                         setSearch("");
                                         setFilter("all");
+                                        setAutomationFilter("all");
                                     }}
                                     className="w-full sm:w-auto"
                                 >
