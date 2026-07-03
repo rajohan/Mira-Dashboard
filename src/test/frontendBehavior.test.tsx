@@ -3838,9 +3838,9 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(screen.getByText("Raymond review queue")).toBeInTheDocument();
         expect(screen.queryByText("Recurring cron check")).not.toBeInTheDocument();
 
-        await user.click(screen.getByRole("button", { name: "Raymond" }));
-        expect(screen.queryByText("Mira backend follow-up")).not.toBeInTheDocument();
-        expect(screen.getByText("Raymond review queue")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Mira" }));
+        expect(screen.getByText("Mira backend follow-up")).toBeInTheDocument();
+        expect(screen.queryByText("Raymond review queue")).not.toBeInTheDocument();
         expect(screen.queryByText("Recurring cron check")).not.toBeInTheDocument();
 
         await user.type(screen.getByPlaceholderText("Search tasks..."), "nothing");
