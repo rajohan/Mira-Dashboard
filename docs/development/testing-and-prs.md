@@ -89,11 +89,15 @@ Apply useful labels. Common Dashboard labels:
 
 ## Production Checkout
 
-After PR work, return production checkout to clean `main`:
+Feature and autopilot PR work must not edit, build, or pull inside the
+production checkout. Do the implementation and verification in a separate
+worktree, then finish with a read-only check that production is still clean
+`main`:
 
 ```bash
 cd /home/ubuntu/projects/mira-dashboard
-git switch main
-git pull --ff-only
 git status --short --branch
 ```
+
+Syncing the production checkout with `git pull --ff-only` belongs in the
+approved deploy workflow, not in background PR preparation.
