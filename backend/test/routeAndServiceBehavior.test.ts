@@ -1017,6 +1017,27 @@ describe("backend route and service behavior", () => {
         expect(update.status).toBe(201);
         const updateBody = await responseJson(update);
         const updateId = Number(updateBody.id);
+        expect(updateBody).toMatchObject({
+            author: "mira-2026",
+            messageMd: "Progress update",
+            taskId: id,
+        });
+        expect(typeof updateBody.createdAt).toBe("string");
+
+        const listedUpdates = await taskRoutes["/api/tasks/:id/updates"].GET(
+            requestWithParameters(`/api/tasks/${id}/updates`, { id: String(id) })
+        );
+        await expect(listedUpdates.json()).resolves.toContainEqual({
+            ...updateBody,
+            id: updateId,
+        });
+
+        const taskAfterProgress = await taskRoutes["/api/tasks/:id"].GET(
+            requestWithParameters(`/api/tasks/${id}`, { id: String(id) })
+        );
+        await expect(taskAfterProgress.json()).resolves.toMatchObject({
+            updatedAt: updateBody.createdAt,
+        });
 
         const patchUpdate = await taskRoutes["/api/tasks/:id/updates/:updateId"].PATCH(
             requestWithParameters(
