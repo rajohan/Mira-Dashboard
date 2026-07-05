@@ -1053,7 +1053,7 @@ describe("backend route and service behavior", () => {
             )
         );
         await expect(patchUpdate.json()).resolves.toMatchObject({
-            author: "rajohan",
+            author: "mira-2026",
             messageMd: "Raymond update",
         });
 
