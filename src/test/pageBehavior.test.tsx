@@ -1877,6 +1877,69 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
+    it("summarizes pull request checks from the latest record per check", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                if (url === "/api/pull-requests") {
+                    return Response.json({
+                        pullRequests: [
+                            {
+                                number: 192,
+                                title: "Refresh stale check handling",
+                                url: "https://github.com/rajohan/Mira-Dashboard/pull/192",
+                                headRefName: "mira/stale-check-handling",
+                                baseRefName: "main",
+                                author: { login: "mira-2026" },
+                                createdAt: "2026-06-24T10:00:00.000Z",
+                                updatedAt: "2026-06-24T10:10:00.000Z",
+                                isDraft: false,
+                                reviewDecision: "APPROVED",
+                                mergeStateStatus: "CLEAN",
+                                mergeable: "MERGEABLE",
+                                statusCheckRollup: [
+                                    {
+                                        name: "Dashboard checks",
+                                        status: "COMPLETED",
+                                        conclusion: "FAILURE",
+                                        completedAt: "2026-06-24T10:03:00.000Z",
+                                    },
+                                    {
+                                        name: "Dashboard checks",
+                                        status: "COMPLETED",
+                                        conclusion: "SUCCESS",
+                                        completedAt: "2026-06-24T10:08:00.000Z",
+                                    },
+                                ],
+                                additions: 5,
+                                deletions: 1,
+                                changedFiles: 1,
+                                reviewerApproved: true,
+                                body: "Latest rerun passed.",
+                            },
+                        ],
+                    });
+                }
+
+                const method = init?.method ?? "GET";
+                return apiResponse(url, method, init);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(PullRequests));
+
+        await waitFor(() => {
+            expect(screen.getByText("Refresh stale check handling")).toBeInTheDocument();
+            expect(screen.getByText("Checks passed")).toBeInTheDocument();
+        });
+        expect(screen.queryByText("Checks failed")).not.toBeInTheDocument();
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("drives logs page loading, searching, level filtering, and clearing", async () => {
         const user = userEvent.setup();
         const exportedBlobs: Blob[] = [];
