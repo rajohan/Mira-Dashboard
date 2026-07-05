@@ -695,21 +695,13 @@ export const taskRoutes = {
         PATCH: async (request: ParametersRequest<"id" | "updateId">) => {
             const id = safeId(request.params.id);
             const updateId = safeId(request.params.updateId);
-            const body = await readTaskJson<{ author?: Assignee; messageMd?: string }>(
-                request
-            );
+            const body = await readTaskJson<{ messageMd?: string }>(request);
             if (body instanceof Response) return body;
             try {
                 const messageMd = optionalString(body.messageMd, "Message")?.trim();
-                if (
-                    id === undefined ||
-                    updateId === undefined ||
-                    !isValidAssignee(body.author) ||
-                    !messageMd
-                ) {
+                if (id === undefined || updateId === undefined || !messageMd) {
                     return json({ error: "Invalid update payload" }, { status: 400 });
                 }
-                const author = body.author;
                 const existing = database
                     .prepare("SELECT id FROM task_updates WHERE id = ? AND task_id = ?")
                     .get(updateId, id);
@@ -718,9 +710,9 @@ export const taskRoutes = {
                 database.transaction(() => {
                     database
                         .prepare(
-                            "UPDATE task_updates SET author = ?, message_md = ? WHERE id = ? AND task_id = ?"
+                            "UPDATE task_updates SET message_md = ? WHERE id = ? AND task_id = ?"
                         )
-                        .run(author, messageMd, updateId, id);
+                        .run(messageMd, updateId, id);
                     database
                         .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
                         .run(nowIso(), id);
