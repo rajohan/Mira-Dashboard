@@ -1877,6 +1877,58 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
+    it("explains when deploy actions are blocked by the production checkout", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                if (url === "/api/pull-requests/production-checkout") {
+                    return Response.json({
+                        checkout: {
+                            root: "/home/ubuntu/projects/mira-dashboard",
+                            expectedRoot: "/home/ubuntu/projects/mira-dashboard",
+                            worktreeRoot:
+                                "/home/ubuntu/projects/mira-dashboard-worktrees",
+                            branch: "main",
+                            expectedBranch: "main",
+                            head: "abc123",
+                            isClean: false,
+                            isProductionRoot: true,
+                            isSafeForDeploy: false,
+                            statusShort: " M src/App.tsx",
+                        },
+                    });
+                }
+
+                const method = init?.method ?? "GET";
+                return apiResponse(url, method, init);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(PullRequests));
+
+        await waitFor(() => {
+            expect(screen.getByText("Dirty checkout")).toBeInTheDocument();
+        });
+        const deployButton = screen.getByRole("button", {
+            name: "Deploy latest main",
+        });
+        expect(deployButton).toBeDisabled();
+        expect(deployButton).toHaveAttribute(
+            "aria-describedby",
+            "deploy-checkout-disabled-reason"
+        );
+        expect(
+            screen.getAllByText(
+                "Deploy and merge are blocked until local changes in the production checkout are resolved."
+            ).length
+        ).toBeGreaterThan(1);
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("summarizes pull request checks from the latest record per check", async () => {
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
