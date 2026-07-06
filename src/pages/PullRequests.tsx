@@ -611,6 +611,12 @@ export function PullRequests() {
         updatePullRequestBranch.isPending ||
         deployDashboard.isPending;
     const isProductionActionBlocked = !productionCheckout?.isSafeForDeploy;
+    const productionActionBlockedMessage = isProductionActionBlocked
+        ? checkoutMessage(productionCheckout, productionCheckoutError ?? undefined)
+        : undefined;
+    const deployBlockedReasonId = productionActionBlockedMessage
+        ? "deploy-checkout-disabled-reason"
+        : undefined;
     const miraPullRequests = pullRequests.filter((pr) => isMiraPullRequest(pr));
     const externalPullRequests = pullRequests.filter((pr) => !isMiraPullRequest(pr));
 
@@ -696,10 +702,7 @@ export function PullRequests() {
                     mergeDisabledReason =
                         "GitHub reports this pull request is blocked from merging";
                 } else if (isProductionActionBlocked) {
-                    mergeDisabledReason = checkoutMessage(
-                        productionCheckout,
-                        productionCheckoutError ?? undefined
-                    );
+                    mergeDisabledReason = productionActionBlockedMessage;
                 }
             } else {
                 mergeDisabledReason = "Approve the PR before merging from the dashboard";
@@ -815,15 +818,24 @@ export function PullRequests() {
                             and a safe production checkout.
                         </p>
                     </div>
-                    <div className="grid grid-cols-1 gap-2 sm:flex">
+                    <div className="grid grid-cols-1 gap-2 sm:justify-items-end">
                         <Button
                             variant="primary"
                             onClick={() => setPendingAction({ type: "deploy" })}
                             disabled={isActionPending || isProductionActionBlocked}
+                            aria-describedby={deployBlockedReasonId}
                         >
                             <Rocket className="size-4" />
                             {`Deploy latest ${DEFAULT_BASE}`}
                         </Button>
+                        {productionActionBlockedMessage ? (
+                            <p
+                                id={deployBlockedReasonId}
+                                className="max-w-sm text-xs text-primary-400 lg:text-right"
+                            >
+                                {productionActionBlockedMessage}
+                            </p>
+                        ) : undefined}
                     </div>
                 </div>
 
