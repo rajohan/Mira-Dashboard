@@ -702,10 +702,7 @@ export function PullRequests() {
                     mergeDisabledReason =
                         "GitHub reports this pull request is blocked from merging";
                 } else if (isProductionActionBlocked) {
-                    mergeDisabledReason = checkoutMessage(
-                        productionCheckout,
-                        productionCheckoutError ?? undefined
-                    );
+                    mergeDisabledReason = productionActionBlockedMessage;
                 }
             } else {
                 mergeDisabledReason = "Approve the PR before merging from the dashboard";
