@@ -1262,6 +1262,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     isDraft: false,
                     reviewDecision: "APPROVED",
                     mergeStateStatus: "CLEAN",
+                    mergeable: "isOk",
                     statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }],
                     additions: 12,
                     deletions: 3,
@@ -1813,6 +1814,7 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getByText(/Merged PR #190/)).toBeInTheDocument();
             expect(screen.getByText(/Cleaned worktree/)).toBeInTheDocument();
         });
+        expect(screen.getByText("isOk")).toHaveClass("text-green-400");
 
         await user.click(screen.getAllByRole("button", { name: "Reject" })[0]!);
         expect(screen.getByRole("heading", { name: "Reject PR" })).toBeInTheDocument();

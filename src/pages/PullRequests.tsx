@@ -98,7 +98,7 @@ function authorLabel(pr: PullRequestSummary): string {
 /** Performs status variant. */
 function statusVariant(value: string | undefined) {
     const normalized = (value || "").toLowerCase();
-    if (["mergeable", "clean", "isOk", "success"].includes(normalized)) {
+    if (["mergeable", "clean", "isok", "success"].includes(normalized)) {
         return "success" as const;
     }
 
