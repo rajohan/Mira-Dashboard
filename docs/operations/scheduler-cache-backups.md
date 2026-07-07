@@ -36,6 +36,7 @@ When enabled, startup registers jobs for:
 - backup refresh/status;
 - cache refresh;
 - Docker update checks;
+- OpenClaw workspace git sync for known safe generated workspace state;
 - log rotation;
 - quota notifications;
 - OpenClaw update notifications;
@@ -54,9 +55,14 @@ Common cache groups include:
 - Moltbook feed/profile/content;
 - backups;
 - weather;
-- git repository state;
+- git repository state, refreshed hourly by default for new installs;
 - quota/provider checks;
 - OpenClaw status.
+
+OpenRouter quota checks use `/api/v1/key` monthly key limit fields
+(`limit`, `limit_remaining`, and `limit_reset`) for warning thresholds. The
+account balance from `/api/v1/credits` is displayed as supporting context and
+must not be treated as the monthly quota.
 
 External cache refreshes may require these env vars:
 

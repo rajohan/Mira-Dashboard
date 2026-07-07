@@ -582,6 +582,7 @@ export interface DockerUpdaterStepResult {
     isOk: boolean;
     stdout: string;
     stderr: string;
+    changedPaths?: string[];
     code?: "NOT_FOUND" | "DISABLED" | "CONFLICT" | "UNSUPPORTED_REGISTRY";
 }
 
@@ -1703,7 +1704,14 @@ async function applyComposeUpdateUnlocked(
                 // Extra compose rollbacks are best-effort after success too.
             }
         }
-        return { stdout: String(stdout), stderr: String(stderr) };
+        return {
+            changedPaths: [
+                composePath,
+                ...commandRollbacks.map((rollback) => rollback.composePath),
+            ],
+            stdout: String(stdout),
+            stderr: String(stderr),
+        };
     } catch (error) {
         try {
             fs.unlinkSync(temporaryPath);
@@ -2332,6 +2340,7 @@ async function applyServiceUpdate(
             );
             return {
                 step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
+                changedPaths: result.changedPaths,
                 isOk: true,
                 stdout: result.stdout,
                 stderr: result.stderr,
@@ -2394,8 +2403,24 @@ async function syncDockerUpdaterChangesBestEffort(
     if (steps.every((step) => !(step.isOk && step.step.includes("-update:")))) {
         return;
     }
+    const changedPaths = steps
+        .filter((step) => step.isOk && step.step.includes("-update:"))
+        .flatMap((step) => step.changedPaths ?? []);
+    if (changedPaths.length === 0) {
+        steps.push({
+            step: "git-sync:docker",
+            isOk: true,
+            stdout: JSON.stringify({
+                changedPaths: [],
+                pushed: false,
+                skippedReason: "no updated compose paths",
+            }),
+            stderr: "",
+        });
+        return;
+    }
     try {
-        const result = await syncDockerUpdaterChanges();
+        const result = await syncDockerUpdaterChanges(changedPaths);
         steps.push({
             step: "git-sync:docker",
             isOk: true,

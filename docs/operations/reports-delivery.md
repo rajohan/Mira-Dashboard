@@ -24,6 +24,12 @@ After the Dashboard reports cutover:
 - warning/error heartbeats are stored as reports and create Dashboard
   notifications.
 
+Heartbeat alert policy should use the structured Dashboard cache state rather
+than raw provider prose. For OpenRouter, warnings should be based on monthly key
+quota usage from `/api/v1/key`; low account balance text from `/api/v1/credits`
+is informational unless quota calls fail or the key quota itself crosses the
+warning thresholds.
+
 ## Heartbeat Dedupe Keys
 
 OK heartbeats use run-time history keys with minute precision:

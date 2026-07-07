@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { runProcess } from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 import {
@@ -20,10 +22,15 @@ interface GitCommandOptions {
 }
 
 const WORKSPACE_SYNC_JOB_ID = "git.openclaw.workspace-sync";
-const GIT_SYNC_TIMEOUT_MS = 120_000;
+const OPENCLAW_SYNC_COMMIT_MESSAGE = "chore: sync OpenClaw workspace state";
+const DOCKER_SYNC_COMMIT_MESSAGE = "chore: update managed app images";
+const GIT_SYNC_TIMEOUT_MS = 30_000;
+const GIT_PUSH_TIMEOUT_MS = 60_000;
+const GIT_WORKSPACE_SYNC_TIMEOUT_MS = 10 * 60 * 1000;
 const GIT_SAFE_STATUS_RE = /^(?:[ MADRCU?!]{2}) (.+)$/u;
+const gitSyncLocks = new Map<string, { promise: Promise<void> }>();
 const DOCKER_COMPOSE_FILE_RE =
-    /^apps\/[^/]+\/(?:compose|docker-compose)(?:\.override)?\.ya?ml$/u;
+    /^[^/]+\/(?:compose|docker-compose)(?:\.override)?\.ya?ml$/u;
 const OPENCLAW_SAFE_PATHS = [
     "workspace/MEMORY.md",
     "workspace/DREAMS.md",
@@ -42,6 +49,21 @@ function getOpenClawRoot(): string {
 
 function getDockerRoot(): string {
     return nonEmptyEnvironmentFallback("MIRA_DOCKER_ROOT", "/opt/docker");
+}
+
+function getDockerAppsRoot(): string {
+    return nonEmptyEnvironmentFallback("MIRA_DOCKER_APPS_ROOT", "/opt/docker/apps");
+}
+
+function toGitPath(value: string): string {
+    return value.split(path.sep).join("/");
+}
+
+function relativePath(basePath: string, targetPath: string): string | undefined {
+    const relative = toGitPath(path.relative(basePath, targetPath));
+    if (relative === "") return ".";
+    if (relative === ".." || relative.startsWith("../")) return undefined;
+    return relative;
 }
 
 function normalizeStatusPath(value: string): string {
@@ -87,8 +109,36 @@ function isOpenClawSafePath(path_: string): boolean {
     );
 }
 
-function isDockerUpdaterSafePath(path_: string): boolean {
-    return DOCKER_COMPOSE_FILE_RE.test(path_);
+function isDockerUpdaterSafePath(path_: string, appsPath: string): boolean {
+    const relativeToApps =
+        appsPath === "."
+            ? path_
+            : path_.startsWith(`${appsPath}/`)
+              ? path_.slice(appsPath.length + 1)
+              : undefined;
+    return relativeToApps !== undefined && DOCKER_COMPOSE_FILE_RE.test(relativeToApps);
+}
+
+async function resolveDockerGitScope(): Promise<{ appsPath: string; repoPath: string }> {
+    const appsRoot = getDockerAppsRoot();
+    const repoPath = await git(["rev-parse", "--show-toplevel"], { cwd: appsRoot });
+    const appsPath = relativePath(repoPath, appsRoot);
+    if (!appsPath) {
+        throw new Error(`Docker apps root is outside git repository: ${appsRoot}`);
+    }
+    return { appsPath, repoPath };
+}
+
+function normalizeDockerChangedPaths(
+    repoPath: string,
+    paths: string[] | undefined
+): string[] | undefined {
+    if (!paths) return undefined;
+    return paths
+        .map((path_) =>
+            path.isAbsolute(path_) ? relativePath(repoPath, path.resolve(path_)) : path_
+        )
+        .filter((path_): path_ is string => Boolean(path_));
 }
 
 async function commitAndPushPaths(
@@ -102,11 +152,15 @@ async function commitAndPushPaths(
     }
 
     await git(["add", "--", ...changedPaths], { cwd: repoPath });
-    const stagedDiff = await runProcess("git", ["diff", "--cached", "--quiet"], {
-        cwd: repoPath,
-        env: process.env,
-        timeoutMs: GIT_SYNC_TIMEOUT_MS,
-    });
+    const stagedDiff = await runProcess(
+        "git",
+        ["diff", "--cached", "--quiet", "--", ...changedPaths],
+        {
+            cwd: repoPath,
+            env: process.env,
+            timeoutMs: GIT_SYNC_TIMEOUT_MS,
+        }
+    );
     if (stagedDiff.code === 0) {
         return { changedPaths, pushed: false, skippedReason: "no staged changes" };
     }
@@ -118,39 +172,113 @@ async function commitAndPushPaths(
         );
     }
 
-    await git(["commit", "-m", message], { cwd: repoPath });
+    await git(["commit", "--only", "-m", message, "--", ...changedPaths], {
+        cwd: repoPath,
+    });
     const commit = await git(["rev-parse", "--short", "HEAD"], { cwd: repoPath });
-    await git(["push"], { cwd: repoPath, timeoutMs: 180_000 });
+    await git(["push"], { cwd: repoPath, timeoutMs: GIT_PUSH_TIMEOUT_MS });
     return { changedPaths, commit, pushed: true };
+}
+
+async function pushPendingAutomationCommits(
+    repoPath: string,
+    allowedMessages: string[]
+): Promise<GitSyncResult | undefined> {
+    const upstream = await runProcess(
+        "git",
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        {
+            cwd: repoPath,
+            env: process.env,
+            timeoutMs: GIT_SYNC_TIMEOUT_MS,
+        }
+    );
+    if (upstream.code !== 0) return undefined;
+
+    const subjects = await git(
+        ["log", "--format=%s", `${upstream.stdout.trim()}..HEAD`],
+        {
+            cwd: repoPath,
+        }
+    );
+    const pendingSubjects = subjects.split("\n").filter(Boolean);
+    if (
+        pendingSubjects.length === 0 ||
+        pendingSubjects.some((subject) => !allowedMessages.includes(subject))
+    ) {
+        return undefined;
+    }
+
+    await git(["push"], { cwd: repoPath, timeoutMs: GIT_PUSH_TIMEOUT_MS });
+    const commit = await git(["rev-parse", "--short", "HEAD"], { cwd: repoPath });
+    return { changedPaths: [], commit, pushed: true };
+}
+
+async function withGitSyncLock<T>(
+    repoPath: string,
+    action: () => Promise<T>
+): Promise<T> {
+    const wasPrevious = gitSyncLocks.get(repoPath)?.promise ?? Promise.resolve();
+    const current = Promise.withResolvers<void>();
+    const release = current.resolve;
+    async function waitForCurrent(): Promise<void> {
+        await wasPrevious;
+        await current.promise;
+    }
+    const next = { promise: waitForCurrent() };
+    gitSyncLocks.set(repoPath, next);
+    await wasPrevious;
+    try {
+        return await action();
+    } finally {
+        release();
+        if (gitSyncLocks.get(repoPath) === next) {
+            gitSyncLocks.delete(repoPath);
+        }
+    }
 }
 
 export async function syncOpenClawWorkspaceSafePaths(): Promise<GitSyncResult> {
     const repoPath = getOpenClawRoot();
-    const status = await git(["status", "--porcelain"], { cwd: repoPath });
-    const changedPaths = parseStatusPaths(status);
-    const safePaths = changedPaths.filter((path_) => isOpenClawSafePath(path_));
-    if (safePaths.length === 0) {
-        return { changedPaths: [], pushed: false, skippedReason: "no safe changes" };
-    }
-    return commitAndPushPaths(
-        repoPath,
-        safePaths,
-        "chore: sync OpenClaw workspace state"
-    );
+    return withGitSyncLock(repoPath, async () => {
+        const status = await git(["status", "--porcelain"], { cwd: repoPath });
+        const changedPaths = parseStatusPaths(status);
+        const safePaths = changedPaths.filter((path_) => isOpenClawSafePath(path_));
+        if (safePaths.length === 0) {
+            const pushedPending = await pushPendingAutomationCommits(repoPath, [
+                OPENCLAW_SYNC_COMMIT_MESSAGE,
+            ]);
+            if (pushedPending) return pushedPending;
+            return { changedPaths: [], pushed: false, skippedReason: "no safe changes" };
+        }
+        return commitAndPushPaths(repoPath, safePaths, OPENCLAW_SYNC_COMMIT_MESSAGE);
+    });
 }
 
-export async function syncDockerUpdaterChanges(): Promise<GitSyncResult> {
-    const repoPath = getDockerRoot();
-    const status = await git(["status", "--porcelain", "--", "apps"], {
-        cwd: repoPath,
+export async function syncDockerUpdaterChanges(paths?: string[]): Promise<GitSyncResult> {
+    const scope = process.env.MIRA_DOCKER_APPS_ROOT?.trim()
+        ? await resolveDockerGitScope()
+        : { appsPath: "apps", repoPath: getDockerRoot() };
+    const { appsPath, repoPath } = scope;
+    return withGitSyncLock(repoPath, async () => {
+        const statusPathspecs = normalizeDockerChangedPaths(repoPath, paths) ?? [
+            appsPath,
+        ];
+        const status = await git(["status", "--porcelain", "--", ...statusPathspecs], {
+            cwd: repoPath,
+        });
+        const safePaths = parseStatusPaths(status).filter((path_) =>
+            isDockerUpdaterSafePath(path_, appsPath)
+        );
+        if (safePaths.length === 0) {
+            const pushedPending = await pushPendingAutomationCommits(repoPath, [
+                DOCKER_SYNC_COMMIT_MESSAGE,
+            ]);
+            if (pushedPending) return pushedPending;
+            return { changedPaths: [], pushed: false, skippedReason: "no safe changes" };
+        }
+        return commitAndPushPaths(repoPath, safePaths, DOCKER_SYNC_COMMIT_MESSAGE);
     });
-    const safePaths = parseStatusPaths(status).filter((path_) =>
-        isDockerUpdaterSafePath(path_)
-    );
-    if (safePaths.length === 0) {
-        return { changedPaths: [], pushed: false, skippedReason: "no safe changes" };
-    }
-    return commitAndPushPaths(repoPath, safePaths, "chore: update managed app images");
 }
 
 export function registerGitHygieneScheduledJobs(): void {
@@ -164,10 +292,14 @@ export function registerGitHygieneScheduledJobs(): void {
         actionKey: "git.openclaw.workspace-sync",
         actionPayload: {},
     } as const;
-    registerScheduledJobAction("git.openclaw.workspace-sync", async () => {
-        const result = await syncOpenClawWorkspaceSafePaths();
-        return { ...result };
-    });
+    registerScheduledJobAction(
+        "git.openclaw.workspace-sync",
+        async () => {
+            const result = await syncOpenClawWorkspaceSafePaths();
+            return { ...result };
+        },
+        { timeoutMs: GIT_WORKSPACE_SYNC_TIMEOUT_MS }
+    );
     removeScheduledJobsNotInAction("git.openclaw.workspace-sync", [job.id]);
     const existing = getScheduledJob(job.id);
     upsertScheduledJob({
