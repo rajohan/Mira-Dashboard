@@ -6,7 +6,7 @@ import { YAML } from "bun";
 import { database, sqlNullable } from "../database.ts";
 import { runProcess } from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
-import { syncDockerUpdaterChanges } from "./gitHygiene.ts";
+import { dirtyDockerUpdaterPaths, syncDockerUpdaterChanges } from "./gitHygiene.ts";
 import type { ScheduledJob } from "./scheduledJobs.ts";
 import {
     getScheduledJob,
@@ -1608,6 +1608,7 @@ async function applyComposeUpdateUnlocked(
     const configuredComposePath = service.compose_path;
     const composePath = fs.realpathSync(configuredComposePath);
     const commandComposePaths = getComposeCommandPaths(configuredComposePath);
+    const dirtyBefore = await dirtyDockerUpdaterPaths(commandComposePaths);
     const raw = fs.readFileSync(composePath, "utf8");
     const originalStats = fs.statSync(composePath);
     const document = YAML.parse(raw) as JsonRecord;
@@ -1708,7 +1709,7 @@ async function applyComposeUpdateUnlocked(
             changedPaths: [
                 composePath,
                 ...commandRollbacks.map((rollback) => rollback.composePath),
-            ],
+            ].filter((changedPath) => !dirtyBefore.has(path.resolve(changedPath))),
             stdout: String(stdout),
             stderr: String(stderr),
         };
@@ -2641,7 +2642,10 @@ export function registerDockerUpdaterScheduledJobs(): void {
         async () => {
             const steps = await runDockerUpdaterService();
             const failed = steps.filter(
-                (step) => !step.isOk && !isNonblockingRegistrationFailure(step)
+                (step) =>
+                    !step.isOk &&
+                    !isNonblockingRegistrationFailure(step) &&
+                    step.step !== "git-sync:docker"
             );
             if (failed.length > 0) {
                 throw new Error(

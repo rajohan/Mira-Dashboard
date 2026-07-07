@@ -27,24 +27,44 @@ const DOCKER_SYNC_COMMIT_MESSAGE = "chore: update managed app images";
 const GIT_SYNC_TIMEOUT_MS = 30_000;
 const GIT_PUSH_TIMEOUT_MS = 60_000;
 const GIT_WORKSPACE_SYNC_TIMEOUT_MS = 10 * 60 * 1000;
-const GIT_SAFE_STATUS_RE = /^(?:[ MADRCU?!]{2}) (.+)$/u;
 const gitSyncLocks = new Map<string, { promise: Promise<void> }>();
 const DOCKER_COMPOSE_FILE_RE =
-    /^[^/]+\/(?:compose|docker-compose)(?:\.override)?\.ya?ml$/u;
+    /^(?:[^/]+\/)?(?:compose|docker-compose)(?:\.override)?\.ya?ml$/u;
 const OPENCLAW_SAFE_PATHS = [
+    "workspace/AGENTS.md",
     "workspace/MEMORY.md",
     "workspace/DREAMS.md",
     "workspace/HEARTBEAT.md",
+    "workspace/IDENTITY.md",
+    "workspace/SOUL.md",
     "workspace/TOOLS.md",
+    "workspace/USER.md",
+    "workspace/WORKFLOW_AUTO.md",
     "workspace/memory/",
     "workspace/wiki/",
+    "workspace/agents/",
+    "workspace/subagents/",
+    "workspace/main/",
     "workspace/coder/memory/",
+    "workspace/coder/agents/",
+    "workspace/coder/subagents/",
     "workspace/communicator/memory/",
+    "workspace/communicator/agents/",
+    "workspace/communicator/subagents/",
     "workspace/researcher/memory/",
+    "workspace/researcher/agents/",
+    "workspace/researcher/subagents/",
 ] as const;
 
 function getOpenClawRoot(): string {
-    return nonEmptyEnvironmentFallback("MIRA_OPENCLAW_ROOT", "/home/ubuntu/.openclaw");
+    return (
+        process.env.MIRA_OPENCLAW_ROOT?.trim() ||
+        process.env.OPENCLAW_HOME?.trim() ||
+        nonEmptyEnvironmentFallback(
+            "MIRA_DASHBOARD_OPENCLAW_HOME",
+            "/home/ubuntu/.openclaw"
+        )
+    );
 }
 
 function getDockerRoot(): string {
@@ -66,20 +86,19 @@ function relativePath(basePath: string, targetPath: string): string | undefined 
     return relative;
 }
 
-function normalizeStatusPath(value: string): string {
-    const renamedPath = value.match(/^(.+) -> (.+)$/u);
-    return (renamedPath?.[2] ?? value).trim().replaceAll(/^"|"$/gu, "");
-}
-
 function parseStatusPaths(output: string): string[] {
-    return output
-        .split("\n")
-        .map((line) => {
-            const match = line.match(GIT_SAFE_STATUS_RE);
-            const statusPath = match?.[1];
-            return statusPath ? normalizeStatusPath(statusPath) : undefined;
-        })
-        .filter((path_): path_ is string => Boolean(path_));
+    const entries = output.split("\0").filter(Boolean);
+    const paths: string[] = [];
+    for (let index = 0; index < entries.length; index += 1) {
+        const entry = entries[index] ?? "";
+        if (entry.length < 4) continue;
+        paths.push(entry.slice(3));
+        const status = entry.slice(0, 2);
+        if (status.includes("R") || status.includes("C")) {
+            index += 1;
+        }
+    }
+    return paths;
 }
 
 function uniqueSorted(values: string[]): string[] {
@@ -127,6 +146,27 @@ async function resolveDockerGitScope(): Promise<{ appsPath: string; repoPath: st
         throw new Error(`Docker apps root is outside git repository: ${appsRoot}`);
     }
     return { appsPath, repoPath };
+}
+
+export async function dirtyDockerUpdaterPaths(paths: string[]): Promise<Set<string>> {
+    try {
+        const scope = process.env.MIRA_DOCKER_APPS_ROOT?.trim()
+            ? await resolveDockerGitScope()
+            : { appsPath: "apps", repoPath: getDockerRoot() };
+        const statusPathspecs = normalizeDockerChangedPaths(scope.repoPath, paths) ?? [];
+        if (statusPathspecs.length === 0) return new Set();
+        const status = await git(
+            ["status", "--porcelain=v1", "-z", "--", ...statusPathspecs],
+            { cwd: scope.repoPath }
+        );
+        return new Set(
+            parseStatusPaths(status).map((statusPath) =>
+                path.resolve(scope.repoPath, statusPath)
+            )
+        );
+    } catch {
+        return new Set();
+    }
 }
 
 function normalizeDockerChangedPaths(
@@ -241,7 +281,7 @@ async function withGitSyncLock<T>(
 export async function syncOpenClawWorkspaceSafePaths(): Promise<GitSyncResult> {
     const repoPath = getOpenClawRoot();
     return withGitSyncLock(repoPath, async () => {
-        const status = await git(["status", "--porcelain"], { cwd: repoPath });
+        const status = await git(["status", "--porcelain=v1", "-z"], { cwd: repoPath });
         const changedPaths = parseStatusPaths(status);
         const safePaths = changedPaths.filter((path_) => isOpenClawSafePath(path_));
         if (safePaths.length === 0) {
@@ -264,9 +304,12 @@ export async function syncDockerUpdaterChanges(paths?: string[]): Promise<GitSyn
         const statusPathspecs = normalizeDockerChangedPaths(repoPath, paths) ?? [
             appsPath,
         ];
-        const status = await git(["status", "--porcelain", "--", ...statusPathspecs], {
-            cwd: repoPath,
-        });
+        const status = await git(
+            ["status", "--porcelain=v1", "-z", "--", ...statusPathspecs],
+            {
+                cwd: repoPath,
+            }
+        );
         const safePaths = parseStatusPaths(status).filter((path_) =>
             isDockerUpdaterSafePath(path_, appsPath)
         );

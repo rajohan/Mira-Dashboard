@@ -806,6 +806,7 @@ describe("Docker updater tag patterns", () => {
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
         const runProcessCalls: Array<{ arguments_: readonly string[]; file: string }> =
             [];
+        let gitStatusCalls = 0;
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
             .mockImplementation((async (file, arguments_) => {
@@ -815,11 +816,18 @@ describe("Docker updater tag patterns", () => {
                     if (command === "rev-parse --show-toplevel") {
                         return { code: 0, stderr: "", stdout: `${appsRoot}\n` };
                     }
-                    if (command === "status --porcelain -- unit-auto-app/compose.yaml") {
+                    if (
+                        command ===
+                        "status --porcelain=v1 -z -- unit-auto-app/compose.yaml"
+                    ) {
+                        gitStatusCalls += 1;
                         return {
                             code: 0,
                             stderr: "",
-                            stdout: " M unit-auto-app/compose.yaml\n",
+                            stdout:
+                                gitStatusCalls === 1
+                                    ? ""
+                                    : " M unit-auto-app/compose.yaml\0",
                         };
                     }
                     if (
@@ -942,6 +950,7 @@ describe("Docker updater tag patterns", () => {
             return new Response("not found", { status: 404 });
         }) as typeof fetch);
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        let gitStatusCalls = 0;
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
             .mockImplementation((async (file, arguments_) => {
@@ -952,12 +961,16 @@ describe("Docker updater tag patterns", () => {
                     }
                     if (
                         command ===
-                        "status --porcelain -- unit-git-sync-fail-app/compose.yaml"
+                        "status --porcelain=v1 -z -- unit-git-sync-fail-app/compose.yaml"
                     ) {
+                        gitStatusCalls += 1;
                         return {
                             code: 0,
                             stderr: "",
-                            stdout: " M unit-git-sync-fail-app/compose.yaml\n",
+                            stdout:
+                                gitStatusCalls === 1
+                                    ? ""
+                                    : " M unit-git-sync-fail-app/compose.yaml\0",
                         };
                     }
                     if (
@@ -995,6 +1008,90 @@ describe("Docker updater tag patterns", () => {
         );
         expect(readFileSync(composePath, "utf8")).toContain(
             "image: ghcr.io/unit/git-sync-fail:1.1.0"
+        );
+    });
+
+    it("skips git sync when the updated compose file was already dirty", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-pre-dirty-");
+        const appRoot = path.join(appsRoot, "unit-pre-dirty-app");
+        const composePath = path.join(appRoot, "compose.yaml");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            composePath,
+            [
+                "services:",
+                "  web:",
+                "    image: ghcr.io/unit/pre-dirty:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'true'",
+                "      mira.updater.track: tag",
+                "      mira.updater.tagPattern: '1.1.0'",
+                "      mira.updater.tagPatternIsRegex: 'false'",
+                "",
+            ].join("\n")
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.endsWith("/v2/unit/pre-dirty/manifests/1.1.0")) {
+                return Response.json(
+                    { digest: "sha256:predirty11" },
+                    { headers: { "docker-content-digest": "sha256:predirty11" } }
+                );
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const runProcessCalls: Array<{ arguments_: readonly string[]; file: string }> =
+            [];
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (file, arguments_) => {
+                runProcessCalls.push({ file, arguments_ });
+                if (file === "git") {
+                    const command = arguments_.join(" ");
+                    if (command === "rev-parse --show-toplevel") {
+                        return { code: 0, stderr: "", stdout: `${appsRoot}\n` };
+                    }
+                    if (
+                        command ===
+                        "status --porcelain=v1 -z -- unit-pre-dirty-app/compose.yaml"
+                    ) {
+                        return {
+                            code: 0,
+                            stderr: "",
+                            stdout: " M unit-pre-dirty-app/compose.yaml\0",
+                        };
+                    }
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+                return { code: 0, stderr: "", stdout: "auto compose ok" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        const steps = await runDockerUpdaterService();
+
+        expect(steps).toContainEqual(
+            expect.objectContaining({
+                isOk: true,
+                step: "git-sync:docker",
+                stdout: expect.stringContaining("no updated compose paths"),
+            })
+        );
+        expect(runProcessCalls).not.toContainEqual(
+            expect.objectContaining({
+                file: "git",
+                arguments_: expect.arrayContaining(["add"]),
+            })
+        );
+        expect(readFileSync(composePath, "utf8")).toContain(
+            "image: ghcr.io/unit/pre-dirty:1.1.0"
         );
     });
 
