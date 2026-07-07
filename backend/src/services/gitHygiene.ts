@@ -32,7 +32,7 @@ const GIT_PUSH_TIMEOUT_MS = 60_000;
 const GIT_WORKSPACE_SYNC_TIMEOUT_MS = 10 * 60 * 1000;
 const gitSyncLocks = new Map<string, { promise: Promise<void> }>();
 const DOCKER_COMPOSE_FILE_RE =
-    /^(?:[^/]+\/)?(?:compose|docker-compose)(?:\.override)?\.ya?ml$/u;
+    /^(?:[^/]+\/)*(?:compose|docker-compose)(?:\.override)?\.ya?ml$/u;
 const OPENCLAW_SAFE_PATHS = [
     "workspace/AGENTS.md",
     "workspace/MEMORY.md",
@@ -160,7 +160,7 @@ async function resolveDockerGitScope(): Promise<{ appsPath: string; repoPath: st
 async function dockerGitScope(): Promise<{ appsPath: string; repoPath: string }> {
     return process.env.MIRA_DOCKER_APPS_ROOT?.trim()
         ? await resolveDockerGitScope()
-        : { appsPath: "apps", repoPath: getDockerRoot() };
+        : { appsPath: "apps", repoPath: realpathSync(getDockerRoot()) };
 }
 
 export async function dirtyDockerUpdaterPaths(

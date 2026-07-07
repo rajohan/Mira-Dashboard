@@ -486,6 +486,55 @@ describe("git hygiene automation", () => {
         );
     });
 
+    it("resolves symlinked default Docker roots before filtering changed paths", async () => {
+        rememberEnvironment("MIRA_DOCKER_ROOT");
+        const root = createTemporaryRoot("mira-docker-symlink-root-");
+        const realRepoPath = path.join(root, "repo");
+        const symlinkRepoPath = path.join(root, "docker-link");
+        mkdirSync(path.join(realRepoPath, "apps", "jackett"), { recursive: true });
+        symlinkSync(realRepoPath, symlinkRepoPath, "dir");
+        process.env.MIRA_DOCKER_ROOT = symlinkRepoPath;
+        const calls: Array<{ arguments_: readonly string[]; cwd: string }> = [];
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (_file, arguments_, options) => {
+                calls.push({ arguments_, cwd: options?.cwd ?? "" });
+                const command = arguments_.join(" ");
+                if (
+                    command ===
+                    "status --porcelain=v1 -z -- :(literal)apps/jackett/compose.yaml"
+                ) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: " M apps/jackett/compose.yaml\0",
+                    };
+                }
+                if (
+                    command ===
+                    "diff --cached --quiet -- :(literal)apps/jackett/compose.yaml"
+                ) {
+                    return { code: 1, stderr: "", stdout: "" };
+                }
+                if (command === "rev-parse --short HEAD") {
+                    return { code: 0, stderr: "", stdout: "def5678\n" };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        await expect(
+            syncDockerUpdaterChanges([
+                path.join(realRepoPath, "apps", "jackett", "compose.yaml"),
+            ])
+        ).resolves.toEqual({
+            changedPaths: ["apps/jackett/compose.yaml"],
+            commit: "def5678",
+            pushed: true,
+        });
+        expect(calls[0]?.cwd).toBe(realRepoPath);
+    });
+
     it("refuses to push unrelated local commits with Docker automation commits", async () => {
         rememberEnvironment("MIRA_DOCKER_ROOT");
         process.env.MIRA_DOCKER_ROOT = createTemporaryRoot("mira-docker-ahead-guard-");
@@ -710,6 +759,50 @@ describe("git hygiene automation", () => {
             syncDockerUpdaterChanges([path.join(repoPath, "stacks", "compose.yaml")])
         ).resolves.toEqual({
             changedPaths: ["stacks/compose.yaml"],
+            commit: "def5678",
+            pushed: true,
+        });
+    });
+
+    it("includes explicit multi-level ancestor compose files", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        const repoPath = createTemporaryRoot("mira-docker-deep-parent-sync-");
+        const appsRoot = path.join(repoPath, "env", "prod", "apps");
+        mkdirSync(appsRoot, { recursive: true });
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (_file, arguments_) => {
+                const command = arguments_.join(" ");
+                if (command === "rev-parse --show-toplevel") {
+                    return { code: 0, stderr: "", stdout: `${repoPath}\n` };
+                }
+                if (
+                    command ===
+                    "status --porcelain=v1 -z -- :(literal)env/prod/compose.yaml"
+                ) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: " M env/prod/compose.yaml\0",
+                    };
+                }
+                if (
+                    command === "diff --cached --quiet -- :(literal)env/prod/compose.yaml"
+                ) {
+                    return { code: 1, stderr: "", stdout: "" };
+                }
+                if (command === "rev-parse --short HEAD") {
+                    return { code: 0, stderr: "", stdout: "def5678\n" };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        await expect(
+            syncDockerUpdaterChanges([path.join(repoPath, "env", "prod", "compose.yaml")])
+        ).resolves.toEqual({
+            changedPaths: ["env/prod/compose.yaml"],
             commit: "def5678",
             pushed: true,
         });
