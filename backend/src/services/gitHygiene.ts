@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { database } from "../database.ts";
 import { runProcess } from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 import {
@@ -139,11 +140,15 @@ async function resolveDockerGitScope(): Promise<{ appsPath: string; repoPath: st
     return { appsPath, repoPath };
 }
 
+async function dockerGitScope(): Promise<{ appsPath: string; repoPath: string }> {
+    return process.env.MIRA_DOCKER_APPS_ROOT?.trim()
+        ? await resolveDockerGitScope()
+        : { appsPath: "apps", repoPath: getDockerRoot() };
+}
+
 export async function dirtyDockerUpdaterPaths(paths: string[]): Promise<Set<string>> {
     try {
-        const scope = process.env.MIRA_DOCKER_APPS_ROOT?.trim()
-            ? await resolveDockerGitScope()
-            : { appsPath: "apps", repoPath: getDockerRoot() };
+        const scope = await dockerGitScope();
         const statusPathspecs = normalizeDockerChangedPaths(scope.repoPath, paths) ?? [];
         if (statusPathspecs.length === 0) return new Set();
         const status = await git(
@@ -203,6 +208,7 @@ async function commitAndPushPaths(
         );
     }
 
+    await assertPendingCommitsAreAutomation(repoPath, [message]);
     await git(["commit", "--only", "-m", message, "--", ...changedPaths], {
         cwd: repoPath,
     });
@@ -211,10 +217,7 @@ async function commitAndPushPaths(
     return { changedPaths, commit, pushed: true };
 }
 
-async function pushPendingAutomationCommits(
-    repoPath: string,
-    allowedMessages: string[]
-): Promise<GitSyncResult | undefined> {
+async function pendingCommitSubjects(repoPath: string): Promise<string[] | undefined> {
     const upstream = await runProcess(
         "git",
         ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
@@ -232,8 +235,26 @@ async function pushPendingAutomationCommits(
             cwd: repoPath,
         }
     );
-    const pendingSubjects = subjects.split("\n").filter(Boolean);
+    return subjects.split("\n").filter(Boolean);
+}
+
+async function assertPendingCommitsAreAutomation(
+    repoPath: string,
+    allowedMessages: string[]
+): Promise<void> {
+    const pendingSubjects = await pendingCommitSubjects(repoPath);
+    if (pendingSubjects?.some((subject) => !allowedMessages.includes(subject))) {
+        throw new Error("Refusing to push unrelated local commits");
+    }
+}
+
+async function pushPendingAutomationCommits(
+    repoPath: string,
+    allowedMessages: string[]
+): Promise<GitSyncResult | undefined> {
+    const pendingSubjects = await pendingCommitSubjects(repoPath);
     if (
+        pendingSubjects === undefined ||
         pendingSubjects.length === 0 ||
         pendingSubjects.some((subject) => !allowedMessages.includes(subject))
     ) {
@@ -287,23 +308,27 @@ export async function syncOpenClawWorkspaceSafePaths(): Promise<GitSyncResult> {
 }
 
 export async function syncDockerUpdaterChanges(paths?: string[]): Promise<GitSyncResult> {
-    const scope = process.env.MIRA_DOCKER_APPS_ROOT?.trim()
-        ? await resolveDockerGitScope()
-        : { appsPath: "apps", repoPath: getDockerRoot() };
+    const scope = await dockerGitScope();
     const { appsPath, repoPath } = scope;
     return withGitSyncLock(repoPath, async () => {
-        const statusPathspecs = normalizeDockerChangedPaths(repoPath, paths) ?? [
-            appsPath,
-        ];
-        const status = await git(
-            ["status", "--porcelain=v1", "-z", "--", ...statusPathspecs],
-            {
-                cwd: repoPath,
-            }
-        );
-        const safePaths = parseStatusPaths(status).filter((path_) =>
-            isDockerUpdaterSafePath(path_, appsPath)
-        );
+        const statusPathspecs = normalizeDockerChangedPaths(repoPath, paths);
+        const safePaths =
+            statusPathspecs?.length === 0
+                ? []
+                : parseStatusPaths(
+                      await git(
+                          [
+                              "status",
+                              "--porcelain=v1",
+                              "-z",
+                              "--",
+                              ...(statusPathspecs ?? [appsPath]),
+                          ],
+                          {
+                              cwd: repoPath,
+                          }
+                      )
+                  ).filter((path_) => isDockerUpdaterSafePath(path_, appsPath));
         if (safePaths.length === 0) {
             const pushedPending = await pushPendingAutomationCommits(repoPath, [
                 DOCKER_SYNC_COMMIT_MESSAGE,
@@ -334,14 +359,21 @@ export function registerGitHygieneScheduledJobs(): void {
         },
         { timeoutMs: GIT_WORKSPACE_SYNC_TIMEOUT_MS }
     );
-    removeScheduledJobsNotInAction("git.openclaw.workspace-sync", [job.id]);
-    const existing = getScheduledJob(job.id);
-    upsertScheduledJob({
-        ...job,
-        enabled: existing?.enabled ?? true,
-        scheduleType: existing?.scheduleType ?? job.scheduleType,
-        intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
-        timeOfDay: existing?.timeOfDay ?? job.timeOfDay,
-        cronExpression: existing?.cronExpression ?? undefined,
-    });
+    database.run("BEGIN");
+    try {
+        removeScheduledJobsNotInAction("git.openclaw.workspace-sync", [job.id]);
+        const existing = getScheduledJob(job.id);
+        upsertScheduledJob({
+            ...job,
+            enabled: existing?.enabled ?? true,
+            scheduleType: existing?.scheduleType ?? job.scheduleType,
+            intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
+            timeOfDay: existing?.timeOfDay ?? job.timeOfDay,
+            cronExpression: existing?.cronExpression ?? undefined,
+        });
+        database.run("COMMIT");
+    } catch (error) {
+        database.run("ROLLBACK");
+        throw error;
+    }
 }

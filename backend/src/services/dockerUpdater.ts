@@ -1610,7 +1610,9 @@ async function applyComposeUpdateUnlocked(
     const commandComposePaths = getComposeCommandPaths(configuredComposePath);
     const dirtyBefore = await dirtyDockerUpdaterPaths([
         composePath,
-        ...commandComposePaths,
+        ...commandComposePaths.map((commandComposePath) =>
+            fs.realpathSync(commandComposePath)
+        ),
     ]);
     const raw = fs.readFileSync(composePath, "utf8");
     const originalStats = fs.statSync(composePath);
@@ -2405,6 +2407,24 @@ async function syncDockerUpdaterChangesBestEffort(
     steps: DockerUpdaterStepResult[]
 ): Promise<void> {
     if (steps.every((step) => !(step.isOk && step.step.includes("-update:")))) {
+        try {
+            const pendingResult = await syncDockerUpdaterChanges([]);
+            if (pendingResult.pushed) {
+                steps.push({
+                    step: "git-sync:docker",
+                    isOk: true,
+                    stdout: JSON.stringify(pendingResult),
+                    stderr: "",
+                });
+            }
+        } catch (error) {
+            steps.push({
+                step: "git-sync:docker",
+                isOk: false,
+                stdout: "",
+                stderr: caughtMessage(error),
+            });
+        }
         return;
     }
     const changedPaths = steps

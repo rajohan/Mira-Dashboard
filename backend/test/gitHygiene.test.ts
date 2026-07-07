@@ -267,6 +267,76 @@ describe("git hygiene automation", () => {
         );
     });
 
+    it("refuses to push unrelated local commits with Docker automation commits", async () => {
+        rememberEnvironment("MIRA_DOCKER_ROOT");
+        process.env.MIRA_DOCKER_ROOT = createTemporaryRoot("mira-docker-ahead-guard-");
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (_file, arguments_) => {
+                const command = arguments_.join(" ");
+                if (command === "status --porcelain=v1 -z -- apps") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: " M apps/jackett/compose.yaml\0",
+                    };
+                }
+                if (command === "diff --cached --quiet -- apps/jackett/compose.yaml") {
+                    return { code: 1, stderr: "", stdout: "" };
+                }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: "manual operator commit\n",
+                    };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        await expect(syncDockerUpdaterChanges()).rejects.toThrow(
+            "Refusing to push unrelated local commits"
+        );
+    });
+
+    it("retries pending Docker automation commits without scanning dirty paths", async () => {
+        rememberEnvironment("MIRA_DOCKER_ROOT");
+        process.env.MIRA_DOCKER_ROOT = createTemporaryRoot("mira-docker-pending-retry-");
+        const calls: Array<readonly string[]> = [];
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (_file, arguments_) => {
+                calls.push(arguments_);
+                const command = arguments_.join(" ");
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: "chore: update managed app images\n",
+                    };
+                }
+                if (command === "rev-parse --short HEAD") {
+                    return { code: 0, stderr: "", stdout: "def5678\n" };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        await expect(syncDockerUpdaterChanges([])).resolves.toEqual({
+            changedPaths: [],
+            commit: "def5678",
+            pushed: true,
+        });
+        expect(calls).not.toContainEqual(["status", "--porcelain=v1", "-z", "--"]);
+    });
+
     it("includes parent compose files under the Docker apps root", async () => {
         rememberEnvironment("MIRA_DOCKER_ROOT");
         const repoPath = createTemporaryRoot("mira-docker-parent-sync-");
