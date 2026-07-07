@@ -874,7 +874,9 @@ describe("Docker updater tag patterns", () => {
             expect.objectContaining({ arguments_: expect.arrayContaining(["commit"]) })
         );
         expect(gitCalls).not.toContainEqual(
-            expect.objectContaining({ arguments_: ["push"] })
+            expect.objectContaining({
+                arguments_: ["push", "origin", "HEAD:refs/heads/main"],
+            })
         );
     });
 
@@ -951,6 +953,12 @@ describe("Docker updater tag patterns", () => {
                     ) {
                         return { code: 1, stderr: "", stdout: "" };
                     }
+                    if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                        return { code: 0, stderr: "", stdout: "origin/main\n" };
+                    }
+                    if (command === "log --format=%s origin/main..HEAD") {
+                        return { code: 0, stderr: "", stdout: "" };
+                    }
                     if (command === "rev-parse --short HEAD") {
                         return { code: 0, stderr: "", stdout: "abc1234\n" };
                     }
@@ -996,7 +1004,10 @@ describe("Docker updater tag patterns", () => {
                         ":(literal)unit-auto-app/compose.yaml",
                     ],
                 },
-                { file: "git", arguments_: ["push"] },
+                {
+                    file: "git",
+                    arguments_: ["push", "origin", "HEAD:refs/heads/main"],
+                },
             ])
         );
         expect(readFileSync(composePath, "utf8")).toContain(
@@ -1096,10 +1107,16 @@ describe("Docker updater tag patterns", () => {
                     ) {
                         return { code: 1, stderr: "", stdout: "" };
                     }
+                    if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                        return { code: 0, stderr: "", stdout: "origin/main\n" };
+                    }
+                    if (command === "log --format=%s origin/main..HEAD") {
+                        return { code: 0, stderr: "", stdout: "" };
+                    }
                     if (command === "rev-parse --short HEAD") {
                         return { code: 0, stderr: "", stdout: "abc1234\n" };
                     }
-                    if (command === "push") {
+                    if (command === "push origin HEAD:refs/heads/main") {
                         return { code: 1, stderr: "remote rejected", stdout: "" };
                     }
                     return { code: 0, stderr: "", stdout: "" };

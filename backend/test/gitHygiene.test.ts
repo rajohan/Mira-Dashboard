@@ -29,6 +29,13 @@ function createTemporaryRoot(prefix: string): string {
     return root;
 }
 
+function setDockerRootForTest(root: string): void {
+    process.env.MIRA_DOCKER_ROOT = root;
+    rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+    process.env.MIRA_DOCKER_APPS_ROOT = path.join(root, "apps");
+    mkdirSync(process.env.MIRA_DOCKER_APPS_ROOT, { recursive: true });
+}
+
 afterEach(() => {
     while (cleanupCallbacks.length > 0) {
         cleanupCallbacks.pop()?.();
@@ -63,6 +70,14 @@ describe("git hygiene automation", () => {
                 ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+
                 if (command === "rev-parse --short HEAD") {
                     return { code: 0, stderr: "", stdout: "abc1234\n" };
                 }
@@ -92,7 +107,7 @@ describe("git hygiene automation", () => {
                     ":(literal)workspace/MEMORY.md",
                     ":(literal)workspace/memory/2026-07-07.md",
                 ],
-                ["push"],
+                ["push", "origin", "HEAD:refs/heads/main"],
             ])
         );
     });
@@ -124,6 +139,14 @@ describe("git hygiene automation", () => {
                 ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+
                 if (command === "rev-parse --short HEAD") {
                     return { code: 0, stderr: "", stdout: "abc1234\n" };
                 }
@@ -209,6 +232,14 @@ describe("git hygiene automation", () => {
                 ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+
                 if (command === "rev-parse --short HEAD") {
                     return { code: 0, stderr: "", stdout: "abc1234\n" };
                 }
@@ -248,6 +279,14 @@ describe("git hygiene automation", () => {
                 ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+
                 if (command === "rev-parse --short HEAD") {
                     return { code: 0, stderr: "", stdout: "abc1234\n" };
                 }
@@ -336,6 +375,14 @@ describe("git hygiene automation", () => {
                         stdout: "chore: sync OpenClaw workspace state\n",
                     };
                 }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+
                 if (command === "rev-parse --short HEAD") {
                     return { code: 0, stderr: "", stdout: "abc1234\n" };
                 }
@@ -353,14 +400,14 @@ describe("git hygiene automation", () => {
                 ["status", "--porcelain=v1", "-z", "-uall"],
                 ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
                 ["log", "--format=%s", "origin/main..HEAD"],
-                ["push"],
+                ["push", "origin", "HEAD:refs/heads/main"],
             ])
         );
     });
 
     it("commits and pushes only Docker updater compose paths", async () => {
         rememberEnvironment("MIRA_DOCKER_ROOT");
-        process.env.MIRA_DOCKER_ROOT = createTemporaryRoot("mira-docker-sync-");
+        setDockerRootForTest(createTemporaryRoot("mira-docker-sync-"));
         const calls: Array<readonly string[]> = [];
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
@@ -391,6 +438,14 @@ describe("git hygiene automation", () => {
                 ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+
                 if (command === "rev-parse --short HEAD") {
                     return { code: 0, stderr: "", stdout: "def5678\n" };
                 }
@@ -414,7 +469,7 @@ describe("git hygiene automation", () => {
                     "--",
                     ":(literal)apps/jackett/compose.yaml",
                 ],
-                ["push"],
+                ["push", "origin", "HEAD:refs/heads/main"],
             ])
         );
     });
@@ -422,7 +477,7 @@ describe("git hygiene automation", () => {
     it("escapes generated Docker pathspecs as literals", async () => {
         rememberEnvironment("MIRA_DOCKER_ROOT");
         const repoPath = createTemporaryRoot("mira-docker-literal-pathspec-");
-        process.env.MIRA_DOCKER_ROOT = repoPath;
+        setDockerRootForTest(repoPath);
         const calls: Array<readonly string[]> = [];
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
@@ -448,6 +503,14 @@ describe("git hygiene automation", () => {
                 ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+
                 if (command === "rev-parse --short HEAD") {
                     return { code: 0, stderr: "", stdout: "def5678\n" };
                 }
@@ -513,6 +576,14 @@ describe("git hygiene automation", () => {
                 ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+
                 if (command === "rev-parse --short HEAD") {
                     return { code: 0, stderr: "", stdout: "def5678\n" };
                 }
@@ -542,7 +613,7 @@ describe("git hygiene automation", () => {
         const symlinkRepoPath = path.join(root, "docker-link");
         mkdirSync(path.join(realRepoPath, "apps", "jackett"), { recursive: true });
         symlinkSync(realRepoPath, symlinkRepoPath, "dir");
-        process.env.MIRA_DOCKER_ROOT = symlinkRepoPath;
+        setDockerRootForTest(symlinkRepoPath);
         const calls: Array<{ arguments_: readonly string[]; cwd: string }> = [];
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
@@ -568,6 +639,14 @@ describe("git hygiene automation", () => {
                 ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+
                 if (command === "rev-parse --short HEAD") {
                     return { code: 0, stderr: "", stdout: "def5678\n" };
                 }
@@ -584,7 +663,7 @@ describe("git hygiene automation", () => {
             commit: "def5678",
             pushed: true,
         });
-        expect(calls[0]?.cwd).toBe(realRepoPath);
+        expect(calls[0]?.cwd).toBe(path.join(realRepoPath, "apps"));
     });
 
     it("resolves default Docker roots inside a larger git worktree", async () => {
@@ -592,7 +671,7 @@ describe("git hygiene automation", () => {
         const repoPath = createTemporaryRoot("mira-docker-subdir-root-");
         const dockerRoot = path.join(repoPath, "docker");
         mkdirSync(path.join(dockerRoot, "apps", "jackett"), { recursive: true });
-        process.env.MIRA_DOCKER_ROOT = dockerRoot;
+        setDockerRootForTest(dockerRoot);
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
             .mockImplementation((async (_file, arguments_, options) => {
@@ -616,6 +695,14 @@ describe("git hygiene automation", () => {
                 ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+
                 if (command === "rev-parse --short HEAD") {
                     return { code: 0, stderr: "", stdout: "def5678\n" };
                 }
@@ -637,7 +724,7 @@ describe("git hygiene automation", () => {
 
     it("refuses to push unrelated local commits with Docker automation commits", async () => {
         rememberEnvironment("MIRA_DOCKER_ROOT");
-        process.env.MIRA_DOCKER_ROOT = createTemporaryRoot("mira-docker-ahead-guard-");
+        setDockerRootForTest(createTemporaryRoot("mira-docker-ahead-guard-"));
         const calls: Array<readonly string[]> = [];
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
@@ -690,9 +777,7 @@ describe("git hygiene automation", () => {
 
     it("refuses to commit Docker changes when the upstream cannot be inspected", async () => {
         rememberEnvironment("MIRA_DOCKER_ROOT");
-        process.env.MIRA_DOCKER_ROOT = createTemporaryRoot(
-            "mira-docker-no-upstream-guard-"
-        );
+        setDockerRootForTest(createTemporaryRoot("mira-docker-no-upstream-guard-"));
         const calls: Array<readonly string[]> = [];
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
@@ -732,7 +817,7 @@ describe("git hygiene automation", () => {
 
     it("retries pending Docker automation commits without scanning dirty paths", async () => {
         rememberEnvironment("MIRA_DOCKER_ROOT");
-        process.env.MIRA_DOCKER_ROOT = createTemporaryRoot("mira-docker-pending-retry-");
+        setDockerRootForTest(createTemporaryRoot("mira-docker-pending-retry-"));
         const calls: Array<readonly string[]> = [];
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
@@ -756,6 +841,14 @@ describe("git hygiene automation", () => {
                         stdout: "chore: update managed app images\n",
                     };
                 }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+
                 if (command === "rev-parse --short HEAD") {
                     return { code: 0, stderr: "", stdout: "def5678\n" };
                 }
@@ -774,7 +867,7 @@ describe("git hygiene automation", () => {
     it("includes parent compose files under the Docker apps root", async () => {
         rememberEnvironment("MIRA_DOCKER_ROOT");
         const repoPath = createTemporaryRoot("mira-docker-parent-sync-");
-        process.env.MIRA_DOCKER_ROOT = repoPath;
+        setDockerRootForTest(repoPath);
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
             .mockImplementation((async (_file, arguments_) => {
@@ -794,6 +887,14 @@ describe("git hygiene automation", () => {
                 if (command === "diff --cached --quiet -- :(literal)apps/compose.yaml") {
                     return { code: 1, stderr: "", stdout: "" };
                 }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+
                 if (command === "rev-parse --short HEAD") {
                     return { code: 0, stderr: "", stdout: "def5678\n" };
                 }
@@ -813,7 +914,7 @@ describe("git hygiene automation", () => {
     it("includes explicit repo-root parent compose files", async () => {
         rememberEnvironment("MIRA_DOCKER_ROOT");
         const repoPath = createTemporaryRoot("mira-docker-root-parent-sync-");
-        process.env.MIRA_DOCKER_ROOT = repoPath;
+        setDockerRootForTest(repoPath);
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
             .mockImplementation((async (_file, arguments_) => {
@@ -831,6 +932,14 @@ describe("git hygiene automation", () => {
                 if (command === "diff --cached --quiet -- :(literal)compose.yaml") {
                     return { code: 1, stderr: "", stdout: "" };
                 }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+
                 if (command === "rev-parse --short HEAD") {
                     return { code: 0, stderr: "", stdout: "def5678\n" };
                 }
@@ -875,6 +984,14 @@ describe("git hygiene automation", () => {
                 ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+
                 if (command === "rev-parse --short HEAD") {
                     return { code: 0, stderr: "", stdout: "def5678\n" };
                 }
@@ -919,6 +1036,14 @@ describe("git hygiene automation", () => {
                 ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+
                 if (command === "rev-parse --short HEAD") {
                     return { code: 0, stderr: "", stdout: "def5678\n" };
                 }
@@ -937,7 +1062,7 @@ describe("git hygiene automation", () => {
 
     it("surfaces Docker git push failures after staging safe paths", async () => {
         rememberEnvironment("MIRA_DOCKER_ROOT");
-        process.env.MIRA_DOCKER_ROOT = createTemporaryRoot("mira-docker-push-fail-");
+        setDockerRootForTest(createTemporaryRoot("mira-docker-push-fail-"));
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
             .mockImplementation((async (_file, arguments_) => {
@@ -962,10 +1087,18 @@ describe("git hygiene automation", () => {
                 ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+
                 if (command === "rev-parse --short HEAD") {
                     return { code: 0, stderr: "", stdout: "def5678\n" };
                 }
-                if (command === "push") {
+                if (command === "push origin HEAD:refs/heads/main") {
                     return { code: 1, stderr: "remote rejected", stdout: "" };
                 }
                 return { code: 0, stderr: "", stdout: "" };
@@ -977,7 +1110,7 @@ describe("git hygiene automation", () => {
 
     it("unstages Docker paths when commit creation fails", async () => {
         rememberEnvironment("MIRA_DOCKER_ROOT");
-        process.env.MIRA_DOCKER_ROOT = createTemporaryRoot("mira-docker-commit-fail-");
+        setDockerRootForTest(createTemporaryRoot("mira-docker-commit-fail-"));
         const calls: Array<readonly string[]> = [];
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
@@ -1003,6 +1136,12 @@ describe("git hygiene automation", () => {
                     "diff --cached --quiet -- :(literal)apps/jackett/compose.yaml"
                 ) {
                     return { code: 1, stderr: "", stdout: "" };
+                }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+                if (command === "log --format=%s origin/main..HEAD") {
+                    return { code: 0, stderr: "", stdout: "" };
                 }
                 if (
                     command ===

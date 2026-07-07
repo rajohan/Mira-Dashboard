@@ -60,10 +60,6 @@ function getOpenClawRoot(): string {
     );
 }
 
-function getDockerRoot(): string {
-    return nonEmptyEnvironmentFallback("MIRA_DOCKER_ROOT", "/opt/docker");
-}
-
 function getDockerAppsRoot(): string {
     return nonEmptyEnvironmentFallback("MIRA_DOCKER_APPS_ROOT", "/opt/docker/apps");
 }
@@ -157,26 +153,8 @@ async function resolveDockerGitScope(): Promise<{ appsPath: string; repoPath: st
     return { appsPath, repoPath };
 }
 
-async function resolveDockerRootGitScope(): Promise<{
-    appsPath: string;
-    repoPath: string;
-}> {
-    const dockerRoot = realpathSync(getDockerRoot());
-    const repoPath = await git(["rev-parse", "--show-toplevel"], { cwd: dockerRoot });
-    const dockerPath = relativePath(repoPath, dockerRoot);
-    if (!dockerPath) {
-        throw new Error(`Docker root is outside git repository: ${dockerRoot}`);
-    }
-    return {
-        appsPath: dockerPath === "." ? "apps" : `${dockerPath}/apps`,
-        repoPath,
-    };
-}
-
 async function dockerGitScope(): Promise<{ appsPath: string; repoPath: string }> {
-    return process.env.MIRA_DOCKER_APPS_ROOT?.trim()
-        ? await resolveDockerGitScope()
-        : await resolveDockerRootGitScope();
+    return await resolveDockerGitScope();
 }
 
 export async function dirtyDockerUpdaterPaths(
@@ -259,12 +237,25 @@ async function commitAndPushPaths(
         await git(["restore", "--staged", "--", ...changedPathspecs], { cwd: repoPath });
         throw error;
     }
+    const upstream = await inspectUpstream(repoPath);
+    if (!upstream) {
+        throw new Error("Refusing to push without an inspectable upstream");
+    }
     const commit = await git(["rev-parse", "--short", "HEAD"], { cwd: repoPath });
-    await git(["push"], { cwd: repoPath, timeoutMs: GIT_PUSH_TIMEOUT_MS });
+    await git(["push", upstream.remote, upstream.refspec], {
+        cwd: repoPath,
+        timeoutMs: GIT_PUSH_TIMEOUT_MS,
+    });
     return { changedPaths, commit, pushed: true };
 }
 
-async function pendingCommitSubjects(repoPath: string): Promise<string[] | undefined> {
+interface InspectedUpstream {
+    name: string;
+    refspec: string;
+    remote: string;
+}
+
+async function inspectUpstream(repoPath: string): Promise<InspectedUpstream | undefined> {
     const upstream = await runProcess(
         "git",
         ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
@@ -275,25 +266,36 @@ async function pendingCommitSubjects(repoPath: string): Promise<string[] | undef
         }
     );
     if (upstream.code !== 0) return undefined;
+    const upstreamName = upstream.stdout.trim();
+    const separatorIndex = upstreamName.indexOf("/");
+    if (separatorIndex <= 0 || separatorIndex === upstreamName.length - 1) {
+        return undefined;
+    }
+    const remote = upstreamName.slice(0, separatorIndex);
+    const branch = upstreamName.slice(separatorIndex + 1);
+    return { name: upstreamName, refspec: `HEAD:refs/heads/${branch}`, remote };
+}
 
-    const subjects = await git(
-        ["log", "--format=%s", `${upstream.stdout.trim()}..HEAD`],
-        {
-            cwd: repoPath,
-        }
-    );
-    return subjects.split("\n").filter(Boolean);
+async function pendingCommitState(
+    repoPath: string
+): Promise<{ subjects: string[]; upstream: InspectedUpstream } | undefined> {
+    const upstream = await inspectUpstream(repoPath);
+    if (!upstream) return undefined;
+    const subjects = await git(["log", "--format=%s", `${upstream.name}..HEAD`], {
+        cwd: repoPath,
+    });
+    return { subjects: subjects.split("\n").filter(Boolean), upstream };
 }
 
 async function assertPendingCommitsAreAutomation(
     repoPath: string,
     allowedMessages: string[]
 ): Promise<void> {
-    const pendingSubjects = await pendingCommitSubjects(repoPath);
-    if (pendingSubjects === undefined) {
+    const pendingState = await pendingCommitState(repoPath);
+    if (pendingState === undefined) {
         throw new Error("Refusing to push without an inspectable upstream");
     }
-    if (pendingSubjects?.some((subject) => !allowedMessages.includes(subject))) {
+    if (pendingState.subjects.some((subject) => !allowedMessages.includes(subject))) {
         throw new Error("Refusing to push unrelated local commits");
     }
 }
@@ -302,16 +304,19 @@ async function pushPendingAutomationCommits(
     repoPath: string,
     allowedMessages: string[]
 ): Promise<GitSyncResult | undefined> {
-    const pendingSubjects = await pendingCommitSubjects(repoPath);
+    const pendingState = await pendingCommitState(repoPath);
     if (
-        pendingSubjects === undefined ||
-        pendingSubjects.length === 0 ||
-        pendingSubjects.some((subject) => !allowedMessages.includes(subject))
+        pendingState === undefined ||
+        pendingState.subjects.length === 0 ||
+        pendingState.subjects.some((subject) => !allowedMessages.includes(subject))
     ) {
         return undefined;
     }
 
-    await git(["push"], { cwd: repoPath, timeoutMs: GIT_PUSH_TIMEOUT_MS });
+    await git(["push", pendingState.upstream.remote, pendingState.upstream.refspec], {
+        cwd: repoPath,
+        timeoutMs: GIT_PUSH_TIMEOUT_MS,
+    });
     const commit = await git(["rev-parse", "--short", "HEAD"], { cwd: repoPath });
     return { changedPaths: [], commit, pushed: true };
 }
