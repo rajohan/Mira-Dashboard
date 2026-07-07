@@ -2383,6 +2383,7 @@ async function applyServiceUpdate(
             );
             return {
                 step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
+                changedPaths: result.changedPaths,
                 isOk: false,
                 stdout: result.stdout,
                 stderr: `Docker service updated but failed to persist updater state: ${message}`,
@@ -2413,7 +2414,8 @@ async function pruneDanglingImagesBestEffort(): Promise<void> {
 async function syncDockerUpdaterChangesBestEffort(
     steps: DockerUpdaterStepResult[]
 ): Promise<void> {
-    if (steps.every((step) => !(step.isOk && step.step.includes("-update:")))) {
+    const updateSteps = steps.filter((step) => step.step.includes("-update:"));
+    if (updateSteps.length === 0) {
         try {
             const pendingResult = await syncDockerUpdaterChanges([]);
             if (pendingResult.pushed) {
@@ -2434,9 +2436,7 @@ async function syncDockerUpdaterChangesBestEffort(
         }
         return;
     }
-    const changedPaths = steps
-        .filter((step) => step.isOk && step.step.includes("-update:"))
-        .flatMap((step) => step.changedPaths ?? []);
+    const changedPaths = updateSteps.flatMap((step) => step.changedPaths ?? []);
     if (changedPaths.length === 0) {
         steps.push({
             step: "git-sync:docker",

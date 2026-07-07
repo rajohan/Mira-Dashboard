@@ -59,6 +59,11 @@ Common cache groups include:
 - quota/provider checks;
 - OpenClaw status.
 
+Changing a built-in cache job default does not rewrite existing `scheduled_jobs`
+rows, because job registration preserves local schedule overrides. For existing
+installs, update `cache.git` from the Jobs page or with an explicit database
+operation when changing the operational cadence.
+
 OpenRouter quota checks use `/api/v1/key` monthly key limit fields
 (`limit`, `limit_remaining`, and `limit_reset`) for warning thresholds. The
 account balance from `/api/v1/credits` is displayed as supporting context and

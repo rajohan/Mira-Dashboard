@@ -1368,9 +1368,49 @@ describe("Docker updater tag patterns", () => {
             }
             return new Response("not found", { status: 404 });
         }) as typeof fetch);
+        let gitStatusCalls = 0;
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
-            .mockResolvedValue({ code: 0, stderr: "", stdout: "compose applied" });
+            .mockImplementation((async (file, arguments_) => {
+                if (file === "git") {
+                    const command = arguments_.join(" ");
+                    if (command === "rev-parse --show-toplevel") {
+                        return { code: 0, stderr: "", stdout: `${appsRoot}\n` };
+                    }
+                    if (
+                        command.startsWith(
+                            "status --porcelain=v1 -z -- unit-reconcile-app/compose.yaml"
+                        )
+                    ) {
+                        gitStatusCalls += 1;
+                        return {
+                            code: 0,
+                            stderr: "",
+                            stdout:
+                                gitStatusCalls === 1
+                                    ? ""
+                                    : " M unit-reconcile-app/compose.yaml\0",
+                        };
+                    }
+                    if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                        return { code: 0, stderr: "", stdout: "origin/main\n" };
+                    }
+                    if (command === "log --format=%s origin/main..HEAD") {
+                        return { code: 0, stderr: "", stdout: "" };
+                    }
+                    if (
+                        command ===
+                        "diff --cached --quiet -- unit-reconcile-app/compose.yaml"
+                    ) {
+                        return { code: 1, stderr: "", stdout: "" };
+                    }
+                    if (command === "rev-parse --short HEAD") {
+                        return { code: 0, stderr: "", stdout: "abc1234\n" };
+                    }
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+                return { code: 0, stderr: "", stdout: "compose applied" };
+            }) as typeof processModule.runProcess);
         cleanupCallbacks.push(
             () => fetchSpy.mockRestore(),
             () => runProcessSpy.mockRestore(),
@@ -1409,6 +1449,13 @@ describe("Docker updater tag patterns", () => {
                 ),
                 stdout: "compose applied",
                 step: "manual-update:unit-reconcile-app/web",
+            })
+        );
+        expect(steps).toContainEqual(
+            expect.objectContaining({
+                isOk: true,
+                step: "git-sync:docker",
+                stdout: expect.stringContaining('"pushed":true'),
             })
         );
         expect(readFileSync(composePath, "utf8")).toContain(

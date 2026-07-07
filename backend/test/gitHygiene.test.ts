@@ -139,6 +139,58 @@ describe("git hygiene automation", () => {
         );
     });
 
+    it("commits both sides of safe OpenClaw renames", async () => {
+        rememberEnvironment("MIRA_OPENCLAW_ROOT");
+        process.env.MIRA_OPENCLAW_ROOT = createTemporaryRoot(
+            "mira-openclaw-rename-sync-"
+        );
+        const calls: Array<readonly string[]> = [];
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (_file, arguments_) => {
+                calls.push(arguments_);
+                const command = arguments_.join(" ");
+                if (command === "status --porcelain=v1 -z") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: "R  workspace/wiki/new.md\0workspace/wiki/old.md\0",
+                    };
+                }
+                if (
+                    command ===
+                    "diff --cached --quiet -- workspace/wiki/new.md workspace/wiki/old.md"
+                ) {
+                    return { code: 1, stderr: "", stdout: "" };
+                }
+                if (command === "rev-parse --short HEAD") {
+                    return { code: 0, stderr: "", stdout: "abc1234\n" };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        await expect(syncOpenClawWorkspaceSafePaths()).resolves.toEqual({
+            changedPaths: ["workspace/wiki/new.md", "workspace/wiki/old.md"],
+            commit: "abc1234",
+            pushed: true,
+        });
+        expect(calls).toEqual(
+            expect.arrayContaining([
+                ["add", "--", "workspace/wiki/new.md", "workspace/wiki/old.md"],
+                [
+                    "commit",
+                    "--only",
+                    "-m",
+                    "chore: sync OpenClaw workspace state",
+                    "--",
+                    "workspace/wiki/new.md",
+                    "workspace/wiki/old.md",
+                ],
+            ])
+        );
+    });
+
     it("skips OpenClaw sync when only unsafe paths changed", async () => {
         rememberEnvironment("MIRA_OPENCLAW_ROOT");
         process.env.MIRA_OPENCLAW_ROOT = createTemporaryRoot("mira-openclaw-skip-");
@@ -302,6 +354,37 @@ describe("git hygiene automation", () => {
 
         await expect(syncDockerUpdaterChanges()).rejects.toThrow(
             "Refusing to push unrelated local commits"
+        );
+        expect(calls).not.toContainEqual(["add", "--", "apps/jackett/compose.yaml"]);
+    });
+
+    it("refuses to commit Docker changes when the upstream cannot be inspected", async () => {
+        rememberEnvironment("MIRA_DOCKER_ROOT");
+        process.env.MIRA_DOCKER_ROOT = createTemporaryRoot(
+            "mira-docker-no-upstream-guard-"
+        );
+        const calls: Array<readonly string[]> = [];
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (_file, arguments_) => {
+                calls.push(arguments_);
+                const command = arguments_.join(" ");
+                if (command === "status --porcelain=v1 -z -- apps") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: " M apps/jackett/compose.yaml\0",
+                    };
+                }
+                if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
+                    return { code: 1, stderr: "no upstream configured", stdout: "" };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        await expect(syncDockerUpdaterChanges()).rejects.toThrow(
+            "Refusing to push without an inspectable upstream"
         );
         expect(calls).not.toContainEqual(["add", "--", "apps/jackett/compose.yaml"]);
     });

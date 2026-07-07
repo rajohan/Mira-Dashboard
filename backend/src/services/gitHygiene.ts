@@ -87,6 +87,8 @@ function parseStatusPaths(output: string): string[] {
         paths.push(entry.slice(3));
         const status = entry.slice(0, 2);
         if (status.includes("R") || status.includes("C")) {
+            const previousPath = entries[index + 1];
+            if (previousPath) paths.push(previousPath);
             index += 1;
         }
     }
@@ -245,6 +247,9 @@ async function assertPendingCommitsAreAutomation(
     allowedMessages: string[]
 ): Promise<void> {
     const pendingSubjects = await pendingCommitSubjects(repoPath);
+    if (pendingSubjects === undefined) {
+        throw new Error("Refusing to push without an inspectable upstream");
+    }
     if (pendingSubjects?.some((subject) => !allowedMessages.includes(subject))) {
         throw new Error("Refusing to push unrelated local commits");
     }
