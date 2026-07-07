@@ -817,8 +817,9 @@ describe("Docker updater tag patterns", () => {
                         return { code: 0, stderr: "", stdout: `${appsRoot}\n` };
                     }
                     if (
-                        command ===
-                        "status --porcelain=v1 -z -- unit-auto-app/compose.yaml"
+                        command.startsWith(
+                            "status --porcelain=v1 -z -- unit-auto-app/compose.yaml"
+                        )
                     ) {
                         gitStatusCalls += 1;
                         return {
@@ -960,8 +961,9 @@ describe("Docker updater tag patterns", () => {
                         return { code: 0, stderr: "", stdout: `${appsRoot}\n` };
                     }
                     if (
-                        command ===
-                        "status --porcelain=v1 -z -- unit-git-sync-fail-app/compose.yaml"
+                        command.startsWith(
+                            "status --porcelain=v1 -z -- unit-git-sync-fail-app/compose.yaml"
+                        )
                     ) {
                         gitStatusCalls += 1;
                         return {
@@ -1060,8 +1062,9 @@ describe("Docker updater tag patterns", () => {
                         return { code: 0, stderr: "", stdout: `${appsRoot}\n` };
                     }
                     if (
-                        command ===
-                        "status --porcelain=v1 -z -- unit-pre-dirty-app/compose.yaml"
+                        command.startsWith(
+                            "status --porcelain=v1 -z -- unit-pre-dirty-app/compose.yaml"
+                        )
                     ) {
                         return {
                             code: 0,

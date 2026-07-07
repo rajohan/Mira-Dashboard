@@ -1608,7 +1608,10 @@ async function applyComposeUpdateUnlocked(
     const configuredComposePath = service.compose_path;
     const composePath = fs.realpathSync(configuredComposePath);
     const commandComposePaths = getComposeCommandPaths(configuredComposePath);
-    const dirtyBefore = await dirtyDockerUpdaterPaths(commandComposePaths);
+    const dirtyBefore = await dirtyDockerUpdaterPaths([
+        composePath,
+        ...commandComposePaths,
+    ]);
     const raw = fs.readFileSync(composePath, "utf8");
     const originalStats = fs.statSync(composePath);
     const document = YAML.parse(raw) as JsonRecord;

@@ -42,18 +42,9 @@ const OPENCLAW_SAFE_PATHS = [
     "workspace/WORKFLOW_AUTO.md",
     "workspace/memory/",
     "workspace/wiki/",
-    "workspace/agents/",
-    "workspace/subagents/",
-    "workspace/main/",
-    "workspace/coder/memory/",
-    "workspace/coder/agents/",
-    "workspace/coder/subagents/",
-    "workspace/communicator/memory/",
-    "workspace/communicator/agents/",
-    "workspace/communicator/subagents/",
-    "workspace/researcher/memory/",
-    "workspace/researcher/agents/",
-    "workspace/researcher/subagents/",
+    "workspace/coder/",
+    "workspace/communicator/",
+    "workspace/researcher/",
 ] as const;
 
 function getOpenClawRoot(): string {
