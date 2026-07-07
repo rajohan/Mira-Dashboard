@@ -766,8 +766,10 @@ describe("Docker updater tag patterns", () => {
 
     it("auto-applies eligible updates and treats image prune as best effort", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_ROOT");
         rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
-        const appsRoot = createTemporaryRoot("mira-docker-updater-auto-");
+        const dockerRoot = createTemporaryRoot("mira-docker-updater-auto-");
+        const appsRoot = path.join(dockerRoot, "apps");
         const appRoot = path.join(appsRoot, "unit-auto-app");
         const composePath = path.join(appRoot, "compose.yaml");
         mkdirSync(appRoot, { recursive: true });
@@ -786,6 +788,7 @@ describe("Docker updater tag patterns", () => {
                 "",
             ].join("\n")
         );
+        process.env.MIRA_DOCKER_ROOT = dockerRoot;
         process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
         delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
         const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
@@ -801,9 +804,29 @@ describe("Docker updater tag patterns", () => {
             return new Response("not found", { status: 404 });
         }) as typeof fetch);
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const runProcessCalls: Array<{ arguments_: readonly string[]; file: string }> =
+            [];
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
-            .mockImplementation((async (_file, arguments_) => {
+            .mockImplementation((async (file, arguments_) => {
+                runProcessCalls.push({ file, arguments_ });
+                if (file === "git") {
+                    const command = arguments_.join(" ");
+                    if (command === "status --porcelain -- apps") {
+                        return {
+                            code: 0,
+                            stderr: "",
+                            stdout: " M apps/unit-auto-app/compose.yaml\n",
+                        };
+                    }
+                    if (command === "diff --cached --quiet") {
+                        return { code: 1, stderr: "", stdout: "" };
+                    }
+                    if (command === "rev-parse --short HEAD") {
+                        return { code: 0, stderr: "", stdout: "abc1234\n" };
+                    }
+                    return { code: 0, stderr: "", stdout: "" };
+                }
                 if (arguments_[0] === "image") {
                     return { code: 1, stderr: "prune failed", stdout: "" };
                 }
@@ -819,6 +842,26 @@ describe("Docker updater tag patterns", () => {
                 step: "auto-update:unit-auto-app/web",
                 stdout: "auto compose ok",
             })
+        );
+        expect(steps).toContainEqual(
+            expect.objectContaining({
+                isOk: true,
+                step: "git-sync:docker",
+                stdout: expect.stringContaining('"pushed":true'),
+            })
+        );
+        expect(runProcessCalls).toEqual(
+            expect.arrayContaining([
+                {
+                    file: "git",
+                    arguments_: ["add", "--", "apps/unit-auto-app/compose.yaml"],
+                },
+                {
+                    file: "git",
+                    arguments_: ["commit", "-m", "chore: update managed app images"],
+                },
+                { file: "git", arguments_: ["push"] },
+            ])
         );
         expect(readFileSync(composePath, "utf8")).toContain(
             "image: ghcr.io/unit/auto:1.1.0"

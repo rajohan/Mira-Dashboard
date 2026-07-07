@@ -6,6 +6,7 @@ import { YAML } from "bun";
 import { database, sqlNullable } from "../database.ts";
 import { runProcess } from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
+import { syncDockerUpdaterChanges } from "./gitHygiene.ts";
 import type { ScheduledJob } from "./scheduledJobs.ts";
 import {
     getScheduledJob,
@@ -2387,6 +2388,30 @@ async function pruneDanglingImagesBestEffort(): Promise<void> {
     }
 }
 
+async function syncDockerUpdaterChangesBestEffort(
+    steps: DockerUpdaterStepResult[]
+): Promise<void> {
+    if (steps.every((step) => !(step.isOk && step.step.includes("-update:")))) {
+        return;
+    }
+    try {
+        const result = await syncDockerUpdaterChanges();
+        steps.push({
+            step: "git-sync:docker",
+            isOk: true,
+            stdout: JSON.stringify(result),
+            stderr: "",
+        });
+    } catch (error) {
+        steps.push({
+            step: "git-sync:docker",
+            isOk: false,
+            stdout: "",
+            stderr: caughtMessage(error),
+        });
+    }
+}
+
 export async function runDockerUpdaterService(
     serviceId?: number
 ): Promise<DockerUpdaterStepResult[]> {
@@ -2533,7 +2558,9 @@ export async function runDockerUpdaterService(
         if (apply.isOk) {
             await pruneDanglingImagesBestEffort();
         }
-        return [register, poll, apply];
+        const steps = [register, poll, apply];
+        await syncDockerUpdaterChangesBestEffort(steps);
+        return steps;
     }
     const blockedAppSlugs = failedDiscoveryAppSlugs(register);
     const poll = await pollDockerUpdaterRegistries();
@@ -2558,7 +2585,9 @@ export async function runDockerUpdaterService(
     if (applyResults.some((step) => step.isOk)) {
         await pruneDanglingImagesBestEffort();
     }
-    return [register, poll, ...applyResults];
+    const steps = [register, poll, ...applyResults];
+    await syncDockerUpdaterChangesBestEffort(steps);
+    return steps;
 }
 
 function preservedTimeOfDay(

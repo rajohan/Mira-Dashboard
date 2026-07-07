@@ -8,6 +8,7 @@ import {
     waitForLocalCacheSeed,
 } from "./services/cacheRefresh.ts";
 import { registerDockerUpdaterScheduledJobs } from "./services/dockerUpdater.ts";
+import { registerGitHygieneScheduledJobs } from "./services/gitHygiene.ts";
 import { registerLogRotationScheduledJobs } from "./services/logRotation.ts";
 import { registerOpenClawNotificationScheduledJobs } from "./services/openclawNotifications.ts";
 import {
@@ -109,6 +110,7 @@ export function handleServerListening(): void {
             registerBackupScheduledJobs();
             registerCacheRefreshScheduledJobs();
             registerDockerUpdaterScheduledJobs();
+            registerGitHygieneScheduledJobs();
             registerLogRotationScheduledJobs();
             shouldQueueStartupQuotaCheck = shouldRegisterQuotaNotificationScheduledJobs();
             registerOpenClawNotificationScheduledJobs();
