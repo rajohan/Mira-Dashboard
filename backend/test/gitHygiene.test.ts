@@ -598,6 +598,40 @@ describe("git hygiene automation", () => {
         });
     });
 
+    it("includes explicit repo-root parent compose files", async () => {
+        rememberEnvironment("MIRA_DOCKER_ROOT");
+        const repoPath = createTemporaryRoot("mira-docker-root-parent-sync-");
+        process.env.MIRA_DOCKER_ROOT = repoPath;
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (_file, arguments_) => {
+                const command = arguments_.join(" ");
+                if (command === "status --porcelain=v1 -z -- :(literal)compose.yaml") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: " M compose.yaml\0",
+                    };
+                }
+                if (command === "diff --cached --quiet -- :(literal)compose.yaml") {
+                    return { code: 1, stderr: "", stdout: "" };
+                }
+                if (command === "rev-parse --short HEAD") {
+                    return { code: 0, stderr: "", stdout: "def5678\n" };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        await expect(
+            syncDockerUpdaterChanges([path.join(repoPath, "compose.yaml")])
+        ).resolves.toEqual({
+            changedPaths: ["compose.yaml"],
+            commit: "def5678",
+            pushed: true,
+        });
+    });
+
     it("surfaces Docker git push failures after staging safe paths", async () => {
         rememberEnvironment("MIRA_DOCKER_ROOT");
         process.env.MIRA_DOCKER_ROOT = createTemporaryRoot("mira-docker-push-fail-");

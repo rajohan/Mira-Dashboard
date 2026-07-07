@@ -2438,16 +2438,30 @@ async function syncDockerUpdaterChangesBestEffort(
     }
     const changedPaths = updateSteps.flatMap((step) => step.changedPaths ?? []);
     if (changedPaths.length === 0) {
-        steps.push({
-            step: "git-sync:docker",
-            isOk: true,
-            stdout: JSON.stringify({
-                changedPaths: [],
-                pushed: false,
-                skippedReason: "no updated compose paths",
-            }),
-            stderr: "",
-        });
+        try {
+            const pendingResult = await syncDockerUpdaterChanges([]);
+            steps.push({
+                step: "git-sync:docker",
+                isOk: true,
+                stdout: JSON.stringify(
+                    pendingResult.pushed
+                        ? pendingResult
+                        : {
+                              changedPaths: [],
+                              pushed: false,
+                              skippedReason: "no updated compose paths",
+                          }
+                ),
+                stderr: "",
+            });
+        } catch (error) {
+            steps.push({
+                step: "git-sync:docker",
+                isOk: false,
+                stdout: "",
+                stderr: caughtMessage(error),
+            });
+        }
         return;
     }
     try {

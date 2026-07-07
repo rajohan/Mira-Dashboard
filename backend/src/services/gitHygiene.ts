@@ -127,13 +127,19 @@ function isOpenClawSafePath(path_: string): boolean {
     );
 }
 
-function isDockerUpdaterSafePath(path_: string, appsPath: string): boolean {
+function isDockerUpdaterSafePath(
+    path_: string,
+    appsPath: string,
+    shouldAllowRepoRootCompose: boolean
+): boolean {
     const relativeToApps =
         appsPath === "."
             ? path_
             : path_.startsWith(`${appsPath}/`)
               ? path_.slice(appsPath.length + 1)
-              : undefined;
+              : shouldAllowRepoRootCompose && !path_.includes("/")
+                ? path_
+                : undefined;
     return relativeToApps !== undefined && DOCKER_COMPOSE_FILE_RE.test(relativeToApps);
 }
 
@@ -349,7 +355,13 @@ export async function syncDockerUpdaterChanges(paths?: string[]): Promise<GitSyn
                               cwd: repoPath,
                           }
                       )
-                  ).filter((path_) => isDockerUpdaterSafePath(path_, appsPath));
+                  ).filter((path_) =>
+                      isDockerUpdaterSafePath(
+                          path_,
+                          appsPath,
+                          statusPathspecs !== undefined
+                      )
+                  );
         if (safePaths.length === 0) {
             const pushedPending = await pushPendingAutomationCommits(repoPath, [
                 DOCKER_SYNC_COMMIT_MESSAGE,

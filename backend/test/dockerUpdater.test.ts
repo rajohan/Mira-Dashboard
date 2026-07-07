@@ -1208,6 +1208,12 @@ describe("Docker updater tag patterns", () => {
                 arguments_: expect.arrayContaining(["add"]),
             })
         );
+        expect(runProcessCalls).toContainEqual(
+            expect.objectContaining({
+                file: "git",
+                arguments_: ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+            })
+        );
         expect(readFileSync(composePath, "utf8")).toContain(
             "image: ghcr.io/unit/pre-dirty:1.1.0"
         );
