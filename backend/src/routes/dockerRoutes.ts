@@ -594,7 +594,12 @@ async function getDockerUpdaterServiceById(serviceId: number) {
 }
 
 function blockingDockerUpdaterFailures(steps: DockerUpdaterStepResult[]) {
-    return steps.filter((step) => !step.isOk && !isNonblockingRegistrationFailure(step));
+    return steps.filter(
+        (step) =>
+            !step.isOk &&
+            !isNonblockingRegistrationFailure(step) &&
+            step.step !== "git-sync:docker"
+    );
 }
 
 async function getDockerUpdaterEvents(limit: number) {

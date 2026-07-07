@@ -6,6 +6,7 @@ import { YAML } from "bun";
 import { database, sqlNullable } from "../database.ts";
 import { runProcess } from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
+import { dirtyDockerUpdaterPaths, syncDockerUpdaterChanges } from "./gitHygiene.ts";
 import type { ScheduledJob } from "./scheduledJobs.ts";
 import {
     getScheduledJob,
@@ -581,6 +582,7 @@ export interface DockerUpdaterStepResult {
     isOk: boolean;
     stdout: string;
     stderr: string;
+    changedPaths?: string[];
     code?: "NOT_FOUND" | "DISABLED" | "CONFLICT" | "UNSUPPORTED_REGISTRY";
 }
 
@@ -1606,6 +1608,12 @@ async function applyComposeUpdateUnlocked(
     const configuredComposePath = service.compose_path;
     const composePath = fs.realpathSync(configuredComposePath);
     const commandComposePaths = getComposeCommandPaths(configuredComposePath);
+    const dirtyBefore = await dirtyDockerUpdaterPaths([
+        composePath,
+        ...commandComposePaths.map((commandComposePath) =>
+            fs.realpathSync(commandComposePath)
+        ),
+    ]);
     const raw = fs.readFileSync(composePath, "utf8");
     const originalStats = fs.statSync(composePath);
     const document = YAML.parse(raw) as JsonRecord;
@@ -1702,7 +1710,21 @@ async function applyComposeUpdateUnlocked(
                 // Extra compose rollbacks are best-effort after success too.
             }
         }
-        return { stdout: String(stdout), stderr: String(stderr) };
+        const changedPaths = [
+            composePath,
+            ...commandRollbacks.map((rollback) => rollback.composePath),
+        ];
+        return {
+            changedPaths:
+                dirtyBefore &&
+                changedPaths.every(
+                    (changedPath) => !dirtyBefore.has(path.resolve(changedPath))
+                )
+                    ? changedPaths
+                    : [],
+            stdout: String(stdout),
+            stderr: String(stderr),
+        };
     } catch (error) {
         try {
             fs.unlinkSync(temporaryPath);
@@ -2331,6 +2353,7 @@ async function applyServiceUpdate(
             );
             return {
                 step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
+                changedPaths: result.changedPaths,
                 isOk: true,
                 stdout: result.stdout,
                 stderr: result.stderr,
@@ -2360,6 +2383,7 @@ async function applyServiceUpdate(
             );
             return {
                 step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
+                changedPaths: result.changedPaths,
                 isOk: false,
                 stdout: result.stdout,
                 stderr: `Docker service updated but failed to persist updater state: ${message}`,
@@ -2383,6 +2407,77 @@ async function pruneDanglingImagesBestEffort(): Promise<void> {
     } catch (error) {
         console.error("[DockerUpdater] Failed to prune dangling images", {
             error: caughtMessage(error),
+        });
+    }
+}
+
+async function syncDockerUpdaterChangesBestEffort(
+    steps: DockerUpdaterStepResult[]
+): Promise<void> {
+    const updateSteps = steps.filter((step) => step.step.includes("-update:"));
+    if (updateSteps.length === 0) {
+        try {
+            const pendingResult = await syncDockerUpdaterChanges([]);
+            if (pendingResult.pushed) {
+                steps.push({
+                    step: "git-sync:docker",
+                    isOk: true,
+                    stdout: JSON.stringify(pendingResult),
+                    stderr: "",
+                });
+            }
+        } catch (error) {
+            steps.push({
+                step: "git-sync:docker",
+                isOk: false,
+                stdout: "",
+                stderr: caughtMessage(error),
+            });
+        }
+        return;
+    }
+    const changedPaths = updateSteps.flatMap((step) => step.changedPaths ?? []);
+    if (changedPaths.length === 0) {
+        try {
+            const pendingResult = await syncDockerUpdaterChanges([]);
+            steps.push({
+                step: "git-sync:docker",
+                isOk: true,
+                stdout: JSON.stringify(
+                    pendingResult.pushed
+                        ? pendingResult
+                        : {
+                              changedPaths: [],
+                              pushed: false,
+                              skippedReason: "no updated compose paths",
+                          }
+                ),
+                stderr: "",
+            });
+        } catch (error) {
+            steps.push({
+                step: "git-sync:docker",
+                isOk: false,
+                stdout: "",
+                stderr: caughtMessage(error),
+            });
+        }
+        return;
+    }
+    try {
+        const result = await syncDockerUpdaterChanges(changedPaths);
+        steps.push({
+            step: "git-sync:docker",
+            isOk: true,
+            stdout: JSON.stringify(result),
+            stderr: "",
+        });
+    } catch (error) {
+        steps.push({
+            step: "git-sync:docker",
+            isOk: false,
+            stdout: "",
+            stderr: caughtMessage(error),
         });
     }
 }
@@ -2533,7 +2628,9 @@ export async function runDockerUpdaterService(
         if (apply.isOk) {
             await pruneDanglingImagesBestEffort();
         }
-        return [register, poll, apply];
+        const steps = [register, poll, apply];
+        await syncDockerUpdaterChangesBestEffort(steps);
+        return steps;
     }
     const blockedAppSlugs = failedDiscoveryAppSlugs(register);
     const poll = await pollDockerUpdaterRegistries();
@@ -2558,7 +2655,9 @@ export async function runDockerUpdaterService(
     if (applyResults.some((step) => step.isOk)) {
         await pruneDanglingImagesBestEffort();
     }
-    return [register, poll, ...applyResults];
+    const steps = [register, poll, ...applyResults];
+    await syncDockerUpdaterChangesBestEffort(steps);
+    return steps;
 }
 
 function preservedTimeOfDay(
@@ -2587,7 +2686,10 @@ export function registerDockerUpdaterScheduledJobs(): void {
         async () => {
             const steps = await runDockerUpdaterService();
             const failed = steps.filter(
-                (step) => !step.isOk && !isNonblockingRegistrationFailure(step)
+                (step) =>
+                    !step.isOk &&
+                    !isNonblockingRegistrationFailure(step) &&
+                    step.step !== "git-sync:docker"
             );
             if (failed.length > 0) {
                 throw new Error(

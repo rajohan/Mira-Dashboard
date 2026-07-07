@@ -45,6 +45,17 @@ Docker updater state is stored in SQLite:
 The Docker page reads this state and backend registry probes. The scheduled job
 can check for updates in the background when schedulers are enabled.
 
+## Git Sync
+
+After a successful Dashboard-managed image update, the updater attempts a
+best-effort git sync for the compose files changed by that updater run. The sync
+adds, commits, and pushes only those safe compose pathspecs. A git sync failure
+is recorded as a `git-sync:docker` step, but it does not make the Docker update
+itself fail after the container and updater state have already been updated.
+If Compose succeeds but updater state reconciliation fails, the changed compose
+paths are still passed to the same best-effort git sync so the deployed image
+change is not left dirty solely because SQLite reconciliation failed.
+
 ## Compose File Rewrite Rules
 
 The updater preserves human-readable YAML formatting for normal image updates.

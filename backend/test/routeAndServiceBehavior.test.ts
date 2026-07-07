@@ -3932,4 +3932,51 @@ esac
             status: "failed",
         });
     });
+
+    it("registers hourly git cache and daily OpenClaw workspace sync jobs", async () => {
+        const { registerCacheRefreshScheduledJobs } =
+            await import("../src/services/cacheRefresh.ts");
+        const { registerGitHygieneScheduledJobs } =
+            await import("../src/services/gitHygiene.ts");
+
+        registerCacheRefreshScheduledJobs();
+        registerGitHygieneScheduledJobs();
+
+        const rows = database
+            .prepare(
+                "SELECT id, schedule_type, interval_seconds, time_of_day, action_key FROM scheduled_jobs WHERE id IN ('cache.git', 'git.openclaw.workspace-sync') ORDER BY id"
+            )
+            .all() as Array<{
+            action_key: string;
+            id: string;
+            interval_seconds: number;
+            schedule_type: string;
+            time_of_day: string | null;
+        }>;
+        expect(
+            rows.map((row) => ({
+                action_key: row.action_key,
+                id: row.id,
+                interval_seconds: row.interval_seconds,
+                schedule_type: row.schedule_type,
+            }))
+        ).toEqual([
+            {
+                action_key: "cache.refresh",
+                id: "cache.git",
+                interval_seconds: 60 * 60,
+                schedule_type: "interval",
+            },
+            {
+                action_key: "git.openclaw.workspace-sync",
+                id: "git.openclaw.workspace-sync",
+                interval_seconds: 24 * 60 * 60,
+                schedule_type: "daily",
+            },
+        ]);
+        expect(rows.find((row) => row.id === "cache.git")?.time_of_day).toBeNull();
+        expect(
+            rows.find((row) => row.id === "git.openclaw.workspace-sync")?.time_of_day
+        ).toBe("05:20");
+    });
 });
