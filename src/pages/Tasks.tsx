@@ -460,6 +460,8 @@ export function Tasks() {
                             title="Delete task"
                             message={`Are you sure you want to delete task #${pendingDeleteTaskId}?`}
                             confirmLabel="Delete"
+                            confirmLoadingLabel="Deleting..."
+                            loading={deleteTask.isPending}
                             danger
                             onCancel={() => setPendingDeleteTaskId(undefined)}
                             onConfirm={() => {
@@ -474,6 +476,8 @@ export function Tasks() {
                             title="Delete progress update"
                             message="Are you sure you want to delete this progress update?"
                             confirmLabel="Delete"
+                            confirmLoadingLabel="Deleting..."
+                            loading={deleteTaskUpdate.isPending}
                             danger
                             onCancel={() => setPendingDeleteUpdate(undefined)}
                             onConfirm={() => {

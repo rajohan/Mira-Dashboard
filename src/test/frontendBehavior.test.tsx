@@ -178,7 +178,7 @@ import { compareLogEntriesByLineId } from "../pages/Logs";
 import { Reports } from "../pages/Reports";
 import { Tasks } from "../pages/Tasks";
 import { authActions, authStore } from "../stores/authStore";
-import type { Task } from "../types/task";
+import type { Task, TaskUpdate } from "../types/task";
 import {
     formatCronLastStatus,
     formatCronTimestamp,
@@ -255,13 +255,18 @@ function task(overrides: Partial<Task> & Pick<Task, "number" | "title">): Task {
     };
 }
 
-function createApi(tasks: Task[]) {
+function createApi(tasks: Task[], taskUpdates: Record<number, TaskUpdate[]> = {}) {
     return jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         const method = init?.method ?? "GET";
 
         if (url === "/api/tasks" && method === "GET") {
             return Response.json(tasks);
+        }
+
+        const updatesMatch = /^\/api\/tasks\/(\d+)\/updates$/u.exec(url);
+        if (updatesMatch && method === "GET") {
+            return Response.json(taskUpdates[Number(updatesMatch[1])] ?? []);
         }
 
         if (url === "/api/tasks" && method === "POST") {
@@ -3785,6 +3790,88 @@ describe("Mira Dashboard frontend behavior", () => {
             )
         );
         expect(await screen.findByText("Write useful tests")).toBeInTheDocument();
+    });
+
+    it("keeps progress update delete confirmation disabled while deletion is pending", async () => {
+        const tasks = [
+            task({
+                number: 1,
+                title: "Confirm progress delete",
+                labels: [{ name: "priority-high" }, { name: "in-progress" }],
+            }),
+        ];
+        const updates: Record<number, TaskUpdate[]> = {
+            1: [
+                {
+                    id: 11,
+                    taskId: 1,
+                    author: "mira-2026",
+                    messageMd: "Pending delete update",
+                    createdAt: "2026-06-23T08:00:00.000Z",
+                },
+            ],
+        };
+        const deleteDeferred = Promise.withResolvers<Response>();
+        let deleteCalls = 0;
+        const baseFetch = createApi(tasks, updates);
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/tasks/1/updates/11" && method === "DELETE") {
+                    deleteCalls += 1;
+                    return deleteDeferred.promise;
+                }
+
+                return baseFetch(input, init);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+        const user = userEvent.setup();
+
+        renderWithQueryClient(createElement(Tasks));
+
+        await user.click(
+            await screen.findByRole("button", {
+                name: "Open task #1: Confirm progress delete",
+            })
+        );
+        expect(await screen.findByText("Pending delete update")).toBeInTheDocument();
+
+        await user.click(
+            screen.getByRole("button", { name: "Delete progress update #11" })
+        );
+        const dialog = screen.getByRole("dialog", {
+            name: "Delete progress update",
+        });
+        const confirmButton = within(dialog).getByRole("button", { name: "Delete" });
+        act(() => {
+            fireEvent.click(confirmButton);
+        });
+
+        await waitFor(() => {
+            expect(deleteCalls).toBe(1);
+            expect(
+                within(dialog).getByRole("button", { name: "Deleting..." })
+            ).toBeDisabled();
+        });
+
+        updates[1] = [];
+        await act(async () => {
+            deleteDeferred.resolve(Response.json({ isOk: true }));
+            await deleteDeferred.promise;
+        });
+        await waitFor(() => {
+            expect(
+                screen.queryByRole("dialog", { name: "Delete progress update" })
+            ).not.toBeInTheDocument();
+        });
+        expect(deleteCalls).toBe(1);
     });
 
     it("filters the task board by assignee and search text", async () => {
