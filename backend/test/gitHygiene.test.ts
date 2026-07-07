@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -59,7 +59,7 @@ describe("git hygiene automation", () => {
                 }
                 if (
                     command ===
-                    "diff --cached --quiet -- workspace/MEMORY.md workspace/memory/2026-07-07.md"
+                    "diff --cached --quiet -- :(literal)workspace/MEMORY.md :(literal)workspace/memory/2026-07-07.md"
                 ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
@@ -77,15 +77,20 @@ describe("git hygiene automation", () => {
         });
         expect(calls).toEqual(
             expect.arrayContaining([
-                ["add", "--", "workspace/MEMORY.md", "workspace/memory/2026-07-07.md"],
+                [
+                    "add",
+                    "--",
+                    ":(literal)workspace/MEMORY.md",
+                    ":(literal)workspace/memory/2026-07-07.md",
+                ],
                 [
                     "commit",
                     "--only",
                     "-m",
                     "chore: sync OpenClaw workspace state",
                     "--",
-                    "workspace/MEMORY.md",
-                    "workspace/memory/2026-07-07.md",
+                    ":(literal)workspace/MEMORY.md",
+                    ":(literal)workspace/memory/2026-07-07.md",
                 ],
                 ["push"],
             ])
@@ -114,7 +119,9 @@ describe("git hygiene automation", () => {
                         stdout: "?? workspace/wiki/å.md\0",
                     };
                 }
-                if (command === "diff --cached --quiet -- workspace/wiki/å.md") {
+                if (
+                    command === "diff --cached --quiet -- :(literal)workspace/wiki/å.md"
+                ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
                 if (command === "rev-parse --short HEAD") {
@@ -132,7 +139,7 @@ describe("git hygiene automation", () => {
         expect(calls).toEqual(
             expect.arrayContaining([
                 {
-                    arguments_: ["add", "--", "workspace/wiki/å.md"],
+                    arguments_: ["add", "--", ":(literal)workspace/wiki/å.md"],
                     cwd: process.env.OPENCLAW_HOME,
                 },
             ])
@@ -159,7 +166,7 @@ describe("git hygiene automation", () => {
                 }
                 if (
                     command ===
-                    "diff --cached --quiet -- workspace/wiki/new.md workspace/wiki/old.md"
+                    "diff --cached --quiet -- :(literal)workspace/wiki/new.md :(literal)workspace/wiki/old.md"
                 ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
@@ -177,15 +184,20 @@ describe("git hygiene automation", () => {
         });
         expect(calls).toEqual(
             expect.arrayContaining([
-                ["add", "--", "workspace/wiki/new.md", "workspace/wiki/old.md"],
+                [
+                    "add",
+                    "--",
+                    ":(literal)workspace/wiki/new.md",
+                    ":(literal)workspace/wiki/old.md",
+                ],
                 [
                     "commit",
                     "--only",
                     "-m",
                     "chore: sync OpenClaw workspace state",
                     "--",
-                    "workspace/wiki/new.md",
-                    "workspace/wiki/old.md",
+                    ":(literal)workspace/wiki/new.md",
+                    ":(literal)workspace/wiki/old.md",
                 ],
             ])
         );
@@ -277,7 +289,7 @@ describe("git hygiene automation", () => {
             .mockImplementation((async (_file, arguments_) => {
                 calls.push(arguments_);
                 const command = arguments_.join(" ");
-                if (command === "status --porcelain=v1 -z -- apps") {
+                if (command === "status --porcelain=v1 -z -- :(literal)apps") {
                     return {
                         code: 0,
                         stderr: "",
@@ -288,7 +300,10 @@ describe("git hygiene automation", () => {
                         ].join("\0"),
                     };
                 }
-                if (command === "diff --cached --quiet -- apps/jackett/compose.yaml") {
+                if (
+                    command ===
+                    "diff --cached --quiet -- :(literal)apps/jackett/compose.yaml"
+                ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
                 if (command === "rev-parse --short HEAD") {
@@ -305,17 +320,130 @@ describe("git hygiene automation", () => {
         });
         expect(calls).toEqual(
             expect.arrayContaining([
-                ["add", "--", "apps/jackett/compose.yaml"],
+                ["add", "--", ":(literal)apps/jackett/compose.yaml"],
                 [
                     "commit",
                     "--only",
                     "-m",
                     "chore: update managed app images",
                     "--",
-                    "apps/jackett/compose.yaml",
+                    ":(literal)apps/jackett/compose.yaml",
                 ],
                 ["push"],
             ])
+        );
+    });
+
+    it("escapes generated Docker pathspecs as literals", async () => {
+        rememberEnvironment("MIRA_DOCKER_ROOT");
+        const repoPath = createTemporaryRoot("mira-docker-literal-pathspec-");
+        process.env.MIRA_DOCKER_ROOT = repoPath;
+        const calls: Array<readonly string[]> = [];
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (_file, arguments_) => {
+                calls.push(arguments_);
+                const command = arguments_.join(" ");
+                if (
+                    command ===
+                    "status --porcelain=v1 -z -- :(literal)apps/foo*/compose.yaml"
+                ) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: " M apps/foo*/compose.yaml\0",
+                    };
+                }
+                if (
+                    command ===
+                    "diff --cached --quiet -- :(literal)apps/foo*/compose.yaml"
+                ) {
+                    return { code: 1, stderr: "", stdout: "" };
+                }
+                if (command === "rev-parse --short HEAD") {
+                    return { code: 0, stderr: "", stdout: "def5678\n" };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        await expect(
+            syncDockerUpdaterChanges([
+                path.join(repoPath, "apps", "foo*", "compose.yaml"),
+            ])
+        ).resolves.toEqual({
+            changedPaths: ["apps/foo*/compose.yaml"],
+            commit: "def5678",
+            pushed: true,
+        });
+        expect(calls).toEqual(
+            expect.arrayContaining([
+                ["add", "--", ":(literal)apps/foo*/compose.yaml"],
+                [
+                    "commit",
+                    "--only",
+                    "-m",
+                    "chore: update managed app images",
+                    "--",
+                    ":(literal)apps/foo*/compose.yaml",
+                ],
+            ])
+        );
+    });
+
+    it("resolves symlinked Docker apps roots before filtering changed paths", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        const root = createTemporaryRoot("mira-docker-symlink-apps-");
+        const repoPath = path.join(root, "repo");
+        const realAppsRoot = path.join(repoPath, "apps");
+        const symlinkAppsRoot = path.join(root, "apps-link");
+        mkdirSync(realAppsRoot, { recursive: true });
+        symlinkSync(realAppsRoot, symlinkAppsRoot, "dir");
+        process.env.MIRA_DOCKER_APPS_ROOT = symlinkAppsRoot;
+        const calls: Array<{ arguments_: readonly string[]; cwd: string }> = [];
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (_file, arguments_, options) => {
+                calls.push({ arguments_, cwd: options?.cwd ?? "" });
+                const command = arguments_.join(" ");
+                if (command === "rev-parse --show-toplevel") {
+                    return { code: 0, stderr: "", stdout: `${repoPath}\n` };
+                }
+                if (
+                    command ===
+                    "status --porcelain=v1 -z -- :(literal)apps/jackett/compose.yaml"
+                ) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: " M apps/jackett/compose.yaml\0",
+                    };
+                }
+                if (
+                    command ===
+                    "diff --cached --quiet -- :(literal)apps/jackett/compose.yaml"
+                ) {
+                    return { code: 1, stderr: "", stdout: "" };
+                }
+                if (command === "rev-parse --short HEAD") {
+                    return { code: 0, stderr: "", stdout: "def5678\n" };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        await expect(
+            syncDockerUpdaterChanges([path.join(realAppsRoot, "jackett", "compose.yaml")])
+        ).resolves.toEqual({
+            changedPaths: ["apps/jackett/compose.yaml"],
+            commit: "def5678",
+            pushed: true,
+        });
+        expect(calls).toContainEqual(
+            expect.objectContaining({
+                arguments_: ["rev-parse", "--show-toplevel"],
+                cwd: realAppsRoot,
+            })
         );
     });
 
@@ -328,14 +456,17 @@ describe("git hygiene automation", () => {
             .mockImplementation((async (_file, arguments_) => {
                 calls.push(arguments_);
                 const command = arguments_.join(" ");
-                if (command === "status --porcelain=v1 -z -- apps") {
+                if (command === "status --porcelain=v1 -z -- :(literal)apps") {
                     return {
                         code: 0,
                         stderr: "",
                         stdout: " M apps/jackett/compose.yaml\0",
                     };
                 }
-                if (command === "diff --cached --quiet -- apps/jackett/compose.yaml") {
+                if (
+                    command ===
+                    "diff --cached --quiet -- :(literal)apps/jackett/compose.yaml"
+                ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
                 if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
@@ -355,7 +486,11 @@ describe("git hygiene automation", () => {
         await expect(syncDockerUpdaterChanges()).rejects.toThrow(
             "Refusing to push unrelated local commits"
         );
-        expect(calls).not.toContainEqual(["add", "--", "apps/jackett/compose.yaml"]);
+        expect(calls).not.toContainEqual([
+            "add",
+            "--",
+            ":(literal)apps/jackett/compose.yaml",
+        ]);
     });
 
     it("refuses to commit Docker changes when the upstream cannot be inspected", async () => {
@@ -369,7 +504,7 @@ describe("git hygiene automation", () => {
             .mockImplementation((async (_file, arguments_) => {
                 calls.push(arguments_);
                 const command = arguments_.join(" ");
-                if (command === "status --porcelain=v1 -z -- apps") {
+                if (command === "status --porcelain=v1 -z -- :(literal)apps") {
                     return {
                         code: 0,
                         stderr: "",
@@ -386,7 +521,11 @@ describe("git hygiene automation", () => {
         await expect(syncDockerUpdaterChanges()).rejects.toThrow(
             "Refusing to push without an inspectable upstream"
         );
-        expect(calls).not.toContainEqual(["add", "--", "apps/jackett/compose.yaml"]);
+        expect(calls).not.toContainEqual([
+            "add",
+            "--",
+            ":(literal)apps/jackett/compose.yaml",
+        ]);
     });
 
     it("retries pending Docker automation commits without scanning dirty paths", async () => {
@@ -431,14 +570,16 @@ describe("git hygiene automation", () => {
             .spyOn(processModule, "runProcess")
             .mockImplementation((async (_file, arguments_) => {
                 const command = arguments_.join(" ");
-                if (command === "status --porcelain=v1 -z -- apps/compose.yaml") {
+                if (
+                    command === "status --porcelain=v1 -z -- :(literal)apps/compose.yaml"
+                ) {
                     return {
                         code: 0,
                         stderr: "",
                         stdout: " M apps/compose.yaml\0",
                     };
                 }
-                if (command === "diff --cached --quiet -- apps/compose.yaml") {
+                if (command === "diff --cached --quiet -- :(literal)apps/compose.yaml") {
                     return { code: 1, stderr: "", stdout: "" };
                 }
                 if (command === "rev-parse --short HEAD") {
@@ -464,14 +605,17 @@ describe("git hygiene automation", () => {
             .spyOn(processModule, "runProcess")
             .mockImplementation((async (_file, arguments_) => {
                 const command = arguments_.join(" ");
-                if (command === "status --porcelain=v1 -z -- apps") {
+                if (command === "status --porcelain=v1 -z -- :(literal)apps") {
                     return {
                         code: 0,
                         stderr: "",
                         stdout: " M apps/jackett/compose.yaml\0",
                     };
                 }
-                if (command === "diff --cached --quiet -- apps/jackett/compose.yaml") {
+                if (
+                    command ===
+                    "diff --cached --quiet -- :(literal)apps/jackett/compose.yaml"
+                ) {
                     return { code: 1, stderr: "", stdout: "" };
                 }
                 if (command === "rev-parse --short HEAD") {

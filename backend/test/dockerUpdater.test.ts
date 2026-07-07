@@ -817,9 +817,12 @@ describe("Docker updater tag patterns", () => {
             return new Response("not found", { status: 404 });
         }) as typeof fetch);
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const runProcessCalls: Array<{ arguments_: readonly string[]; file: string }> =
+            [];
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
             .mockImplementation((async (file, arguments_) => {
+                runProcessCalls.push({ file, arguments_ });
                 if (file === "git") {
                     const command = arguments_.join(" ");
                     if (command === "rev-parse --show-toplevel") {
@@ -852,6 +855,26 @@ describe("Docker updater tag patterns", () => {
         );
         expect(readFileSync(parentComposePath, "utf8")).toContain(
             "image: ghcr.io/unit/atomic:1.1.0"
+        );
+        const gitCalls = runProcessCalls.filter((call) => call.file === "git");
+        const gitArguments = gitCalls.map((call) => call.arguments_);
+        expect(gitArguments).toEqual(
+            expect.arrayContaining([
+                expect.arrayContaining([
+                    "status",
+                    ":(literal)unit-atomic-dirty-app/compose.yml",
+                    ":(literal)unit-atomic-dirty-app/docker-compose.yaml",
+                ]),
+            ])
+        );
+        expect(gitCalls).not.toContainEqual(
+            expect.objectContaining({ arguments_: expect.arrayContaining(["add"]) })
+        );
+        expect(gitCalls).not.toContainEqual(
+            expect.objectContaining({ arguments_: expect.arrayContaining(["commit"]) })
+        );
+        expect(gitCalls).not.toContainEqual(
+            expect.objectContaining({ arguments_: ["push"] })
         );
     });
 
@@ -909,7 +932,7 @@ describe("Docker updater tag patterns", () => {
                     }
                     if (
                         command.startsWith(
-                            "status --porcelain=v1 -z -- unit-auto-app/compose.yaml"
+                            "status --porcelain=v1 -z -- :(literal)unit-auto-app/compose.yaml"
                         )
                     ) {
                         gitStatusCalls += 1;
@@ -923,7 +946,8 @@ describe("Docker updater tag patterns", () => {
                         };
                     }
                     if (
-                        command === "diff --cached --quiet -- unit-auto-app/compose.yaml"
+                        command ===
+                        "diff --cached --quiet -- :(literal)unit-auto-app/compose.yaml"
                     ) {
                         return { code: 1, stderr: "", stdout: "" };
                     }
@@ -959,7 +983,7 @@ describe("Docker updater tag patterns", () => {
             expect.arrayContaining([
                 {
                     file: "git",
-                    arguments_: ["add", "--", "unit-auto-app/compose.yaml"],
+                    arguments_: ["add", "--", ":(literal)unit-auto-app/compose.yaml"],
                 },
                 {
                     file: "git",
@@ -969,7 +993,7 @@ describe("Docker updater tag patterns", () => {
                         "-m",
                         "chore: update managed app images",
                         "--",
-                        "unit-auto-app/compose.yaml",
+                        ":(literal)unit-auto-app/compose.yaml",
                     ],
                 },
                 { file: "git", arguments_: ["push"] },
@@ -1053,7 +1077,7 @@ describe("Docker updater tag patterns", () => {
                     }
                     if (
                         command.startsWith(
-                            "status --porcelain=v1 -z -- unit-git-sync-fail-app/compose.yaml"
+                            "status --porcelain=v1 -z -- :(literal)unit-git-sync-fail-app/compose.yaml"
                         )
                     ) {
                         gitStatusCalls += 1;
@@ -1068,7 +1092,7 @@ describe("Docker updater tag patterns", () => {
                     }
                     if (
                         command ===
-                        "diff --cached --quiet -- unit-git-sync-fail-app/compose.yaml"
+                        "diff --cached --quiet -- :(literal)unit-git-sync-fail-app/compose.yaml"
                     ) {
                         return { code: 1, stderr: "", stdout: "" };
                     }
@@ -1154,7 +1178,7 @@ describe("Docker updater tag patterns", () => {
                     }
                     if (
                         command.startsWith(
-                            "status --porcelain=v1 -z -- unit-pre-dirty-app/compose.yaml"
+                            "status --porcelain=v1 -z -- :(literal)unit-pre-dirty-app/compose.yaml"
                         )
                     ) {
                         return {
@@ -1239,7 +1263,7 @@ describe("Docker updater tag patterns", () => {
                     }
                     if (
                         command.startsWith(
-                            "status --porcelain=v1 -z -- unit-dirty-check-fail-app/compose.yaml"
+                            "status --porcelain=v1 -z -- :(literal)unit-dirty-check-fail-app/compose.yaml"
                         )
                     ) {
                         return { code: 1, stderr: "index locked", stdout: "" };
@@ -1379,7 +1403,7 @@ describe("Docker updater tag patterns", () => {
                     }
                     if (
                         command.startsWith(
-                            "status --porcelain=v1 -z -- unit-reconcile-app/compose.yaml"
+                            "status --porcelain=v1 -z -- :(literal)unit-reconcile-app/compose.yaml"
                         )
                     ) {
                         gitStatusCalls += 1;
@@ -1400,7 +1424,7 @@ describe("Docker updater tag patterns", () => {
                     }
                     if (
                         command ===
-                        "diff --cached --quiet -- unit-reconcile-app/compose.yaml"
+                        "diff --cached --quiet -- :(literal)unit-reconcile-app/compose.yaml"
                     ) {
                         return { code: 1, stderr: "", stdout: "" };
                     }

@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import path from "node:path";
 
 import { database } from "../database.ts";
@@ -99,6 +100,10 @@ function uniqueSorted(values: string[]): string[] {
     return [...new Set(values)].toSorted((left, right) => left.localeCompare(right));
 }
 
+function literalPathspec(path_: string): string {
+    return `:(literal)${path_}`;
+}
+
 async function git(arguments_: string[], options: GitCommandOptions): Promise<string> {
     const result = await runProcess("git", arguments_, {
         cwd: options.cwd,
@@ -133,7 +138,7 @@ function isDockerUpdaterSafePath(path_: string, appsPath: string): boolean {
 }
 
 async function resolveDockerGitScope(): Promise<{ appsPath: string; repoPath: string }> {
-    const appsRoot = getDockerAppsRoot();
+    const appsRoot = realpathSync(getDockerAppsRoot());
     const repoPath = await git(["rev-parse", "--show-toplevel"], { cwd: appsRoot });
     const appsPath = relativePath(repoPath, appsRoot);
     if (!appsPath) {
@@ -156,7 +161,13 @@ export async function dirtyDockerUpdaterPaths(
         const statusPathspecs = normalizeDockerChangedPaths(scope.repoPath, paths) ?? [];
         if (statusPathspecs.length === 0) return new Set();
         const status = await git(
-            ["status", "--porcelain=v1", "-z", "--", ...statusPathspecs],
+            [
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--",
+                ...statusPathspecs.map((path_) => literalPathspec(path_)),
+            ],
             { cwd: scope.repoPath }
         );
         return new Set(
@@ -192,10 +203,11 @@ async function commitAndPushPaths(
     }
 
     await assertPendingCommitsAreAutomation(repoPath, [message]);
-    await git(["add", "--", ...changedPaths], { cwd: repoPath });
+    const changedPathspecs = changedPaths.map((path_) => literalPathspec(path_));
+    await git(["add", "--", ...changedPathspecs], { cwd: repoPath });
     const stagedDiff = await runProcess(
         "git",
-        ["diff", "--cached", "--quiet", "--", ...changedPaths],
+        ["diff", "--cached", "--quiet", "--", ...changedPathspecs],
         {
             cwd: repoPath,
             env: process.env,
@@ -213,7 +225,7 @@ async function commitAndPushPaths(
         );
     }
 
-    await git(["commit", "--only", "-m", message, "--", ...changedPaths], {
+    await git(["commit", "--only", "-m", message, "--", ...changedPathspecs], {
         cwd: repoPath,
     });
     const commit = await git(["rev-parse", "--short", "HEAD"], { cwd: repoPath });
@@ -329,7 +341,9 @@ export async function syncDockerUpdaterChanges(paths?: string[]): Promise<GitSyn
                               "--porcelain=v1",
                               "-z",
                               "--",
-                              ...(statusPathspecs ?? [appsPath]),
+                              ...(statusPathspecs ?? [appsPath]).map((path_) =>
+                                  literalPathspec(path_)
+                              ),
                           ],
                           {
                               cwd: repoPath,
