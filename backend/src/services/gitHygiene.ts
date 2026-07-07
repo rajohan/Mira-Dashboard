@@ -1,4 +1,5 @@
 import { realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 
 import { database } from "../database.ts";
@@ -50,13 +51,12 @@ const OPENCLAW_SAFE_PATHS = [
 ] as const;
 
 function getOpenClawRoot(): string {
+    const homeDirectory = process.env.HOME?.trim() || homedir().trim();
     return (
         process.env.MIRA_OPENCLAW_ROOT?.trim() ||
         process.env.OPENCLAW_HOME?.trim() ||
-        nonEmptyEnvironmentFallback(
-            "MIRA_DASHBOARD_OPENCLAW_HOME",
-            "/home/ubuntu/.openclaw"
-        )
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim() ||
+        path.join(homeDirectory, ".openclaw")
     );
 }
 
@@ -132,12 +132,16 @@ function isDockerUpdaterSafePath(
     appsPath: string,
     shouldAllowRepoRootCompose: boolean
 ): boolean {
+    const dirname = path.dirname(path_);
+    const isAncestorComposePath =
+        shouldAllowRepoRootCompose &&
+        (dirname === "." || appsPath.startsWith(`${dirname}/`));
     const relativeToApps =
         appsPath === "."
             ? path_
             : path_.startsWith(`${appsPath}/`)
               ? path_.slice(appsPath.length + 1)
-              : shouldAllowRepoRootCompose && !path_.includes("/")
+              : isAncestorComposePath
                 ? path_
                 : undefined;
     return relativeToApps !== undefined && DOCKER_COMPOSE_FILE_RE.test(relativeToApps);

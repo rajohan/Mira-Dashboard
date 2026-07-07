@@ -146,6 +146,45 @@ describe("git hygiene automation", () => {
         );
     });
 
+    it("uses the process home OpenClaw default when no OpenClaw home is configured", async () => {
+        rememberEnvironment("HOME");
+        rememberEnvironment("MIRA_OPENCLAW_ROOT");
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        const homeRoot = createTemporaryRoot("mira-openclaw-home-default-");
+        process.env.HOME = homeRoot;
+        delete process.env.MIRA_OPENCLAW_ROOT;
+        delete process.env.OPENCLAW_HOME;
+        delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        const calls: Array<{ arguments_: readonly string[]; cwd: string }> = [];
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (_file, arguments_, options) => {
+                calls.push({ arguments_, cwd: options?.cwd ?? "" });
+                if (arguments_.join(" ") === "status --porcelain=v1 -z") {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+                if (
+                    arguments_.join(" ") ===
+                    "rev-parse --abbrev-ref --symbolic-full-name @{u}"
+                ) {
+                    return { code: 1, stderr: "no upstream", stdout: "" };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        await expect(syncOpenClawWorkspaceSafePaths()).resolves.toEqual({
+            changedPaths: [],
+            pushed: false,
+            skippedReason: "no safe changes",
+        });
+        expect(calls[0]).toEqual({
+            arguments_: ["status", "--porcelain=v1", "-z"],
+            cwd: path.join(homeRoot, ".openclaw"),
+        });
+    });
+
     it("commits both sides of safe OpenClaw renames", async () => {
         rememberEnvironment("MIRA_OPENCLAW_ROOT");
         process.env.MIRA_OPENCLAW_ROOT = createTemporaryRoot(
@@ -627,6 +666,50 @@ describe("git hygiene automation", () => {
             syncDockerUpdaterChanges([path.join(repoPath, "compose.yaml")])
         ).resolves.toEqual({
             changedPaths: ["compose.yaml"],
+            commit: "def5678",
+            pushed: true,
+        });
+    });
+
+    it("includes explicit nested ancestor compose files", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        const repoPath = createTemporaryRoot("mira-docker-nested-parent-sync-");
+        const appsRoot = path.join(repoPath, "stacks", "apps");
+        mkdirSync(appsRoot, { recursive: true });
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (_file, arguments_) => {
+                const command = arguments_.join(" ");
+                if (command === "rev-parse --show-toplevel") {
+                    return { code: 0, stderr: "", stdout: `${repoPath}\n` };
+                }
+                if (
+                    command ===
+                    "status --porcelain=v1 -z -- :(literal)stacks/compose.yaml"
+                ) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: " M stacks/compose.yaml\0",
+                    };
+                }
+                if (
+                    command === "diff --cached --quiet -- :(literal)stacks/compose.yaml"
+                ) {
+                    return { code: 1, stderr: "", stdout: "" };
+                }
+                if (command === "rev-parse --short HEAD") {
+                    return { code: 0, stderr: "", stdout: "def5678\n" };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        await expect(
+            syncDockerUpdaterChanges([path.join(repoPath, "stacks", "compose.yaml")])
+        ).resolves.toEqual({
+            changedPaths: ["stacks/compose.yaml"],
             commit: "def5678",
             pushed: true,
         });
