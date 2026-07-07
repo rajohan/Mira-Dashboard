@@ -146,7 +146,9 @@ async function dockerGitScope(): Promise<{ appsPath: string; repoPath: string }>
         : { appsPath: "apps", repoPath: getDockerRoot() };
 }
 
-export async function dirtyDockerUpdaterPaths(paths: string[]): Promise<Set<string>> {
+export async function dirtyDockerUpdaterPaths(
+    paths: string[]
+): Promise<Set<string> | undefined> {
     try {
         const scope = await dockerGitScope();
         const statusPathspecs = normalizeDockerChangedPaths(scope.repoPath, paths) ?? [];
@@ -161,7 +163,7 @@ export async function dirtyDockerUpdaterPaths(paths: string[]): Promise<Set<stri
             )
         );
     } catch {
-        return new Set();
+        return undefined;
     }
 }
 

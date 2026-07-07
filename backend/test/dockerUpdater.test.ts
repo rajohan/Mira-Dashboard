@@ -764,6 +764,97 @@ describe("Docker updater tag patterns", () => {
         );
     });
 
+    it("skips the whole git sync when one rewritten compose file was already dirty", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_BIN");
+        rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-atomic-dirty-");
+        const appRoot = path.join(appsRoot, "unit-atomic-dirty-app");
+        const composePath = path.join(appRoot, "compose.yml");
+        const parentComposePath = path.join(appRoot, "docker-compose.yaml");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            composePath,
+            [
+                "services:",
+                "  web:",
+                "    image: ghcr.io/unit/atomic:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'true'",
+                "      mira.updater.track: tag",
+                "      mira.updater.tagPattern: '1.1.0'",
+                "      mira.updater.tagPatternIsRegex: 'false'",
+                "",
+            ].join("\n")
+        );
+        writeFileSync(
+            parentComposePath,
+            [
+                "include:",
+                "  - compose.yml",
+                "services:",
+                "  web:",
+                "    image: ghcr.io/unit/atomic:1.0.0",
+                "",
+            ].join("\n")
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        process.env.MIRA_DOCKER_BIN = "docker";
+        delete process.env.MIRA_DOCKER_COMPOSE_WRAPPER;
+        delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.endsWith("/v2/unit/atomic/manifests/1.1.0")) {
+                return Response.json(
+                    { digest: "sha256:atomic11" },
+                    { headers: { "docker-content-digest": "sha256:atomic11" } }
+                );
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (file, arguments_) => {
+                if (file === "git") {
+                    const command = arguments_.join(" ");
+                    if (command === "rev-parse --show-toplevel") {
+                        return { code: 0, stderr: "", stdout: `${appsRoot}\n` };
+                    }
+                    if (command.startsWith("status --porcelain=v1 -z -- ")) {
+                        return {
+                            code: 0,
+                            stderr: "",
+                            stdout: " M unit-atomic-dirty-app/docker-compose.yaml\0",
+                        };
+                    }
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+                return { code: 0, stderr: "", stdout: "compose atomic ok" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        const steps = await runDockerUpdaterService();
+
+        expect(steps).toContainEqual(
+            expect.objectContaining({
+                isOk: true,
+                step: "git-sync:docker",
+                stdout: expect.stringContaining("no updated compose paths"),
+            })
+        );
+        expect(readFileSync(composePath, "utf8")).toContain(
+            "image: ghcr.io/unit/atomic:1.1.0"
+        );
+        expect(readFileSync(parentComposePath, "utf8")).toContain(
+            "image: ghcr.io/unit/atomic:1.1.0"
+        );
+    });
+
     it("auto-applies eligible updates and treats image prune as best effort", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
         rememberEnvironment("MIRA_DOCKER_ROOT");
@@ -1095,6 +1186,84 @@ describe("Docker updater tag patterns", () => {
         );
         expect(readFileSync(composePath, "utf8")).toContain(
             "image: ghcr.io/unit/pre-dirty:1.1.0"
+        );
+    });
+
+    it("skips git sync when the dirty precheck fails", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-dirty-check-fail-");
+        const appRoot = path.join(appsRoot, "unit-dirty-check-fail-app");
+        const composePath = path.join(appRoot, "compose.yaml");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            composePath,
+            [
+                "services:",
+                "  web:",
+                "    image: ghcr.io/unit/dirty-check-fail:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'true'",
+                "      mira.updater.track: tag",
+                "      mira.updater.tagPattern: '1.1.0'",
+                "      mira.updater.tagPatternIsRegex: 'false'",
+                "",
+            ].join("\n")
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.endsWith("/v2/unit/dirty-check-fail/manifests/1.1.0")) {
+                return Response.json(
+                    { digest: "sha256:dirtycheckfail11" },
+                    { headers: { "docker-content-digest": "sha256:dirtycheckfail11" } }
+                );
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const runProcessCalls: Array<{ arguments_: readonly string[]; file: string }> =
+            [];
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (file, arguments_) => {
+                runProcessCalls.push({ file, arguments_ });
+                if (file === "git") {
+                    const command = arguments_.join(" ");
+                    if (command === "rev-parse --show-toplevel") {
+                        return { code: 0, stderr: "", stdout: `${appsRoot}\n` };
+                    }
+                    if (
+                        command.startsWith(
+                            "status --porcelain=v1 -z -- unit-dirty-check-fail-app/compose.yaml"
+                        )
+                    ) {
+                        return { code: 1, stderr: "index locked", stdout: "" };
+                    }
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+                return { code: 0, stderr: "", stdout: "auto compose ok" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        const steps = await runDockerUpdaterService();
+
+        expect(steps).toContainEqual(
+            expect.objectContaining({
+                isOk: true,
+                step: "git-sync:docker",
+                stdout: expect.stringContaining("no updated compose paths"),
+            })
+        );
+        expect(runProcessCalls).not.toContainEqual(
+            expect.objectContaining({
+                file: "git",
+                arguments_: expect.arrayContaining(["add"]),
+            })
         );
     });
 

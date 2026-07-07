@@ -1710,11 +1710,18 @@ async function applyComposeUpdateUnlocked(
                 // Extra compose rollbacks are best-effort after success too.
             }
         }
+        const changedPaths = [
+            composePath,
+            ...commandRollbacks.map((rollback) => rollback.composePath),
+        ];
         return {
-            changedPaths: [
-                composePath,
-                ...commandRollbacks.map((rollback) => rollback.composePath),
-            ].filter((changedPath) => !dirtyBefore.has(path.resolve(changedPath))),
+            changedPaths:
+                dirtyBefore &&
+                changedPaths.every(
+                    (changedPath) => !dirtyBefore.has(path.resolve(changedPath))
+                )
+                    ? changedPaths
+                    : [],
             stdout: String(stdout),
             stderr: String(stderr),
         };
