@@ -157,10 +157,26 @@ async function resolveDockerGitScope(): Promise<{ appsPath: string; repoPath: st
     return { appsPath, repoPath };
 }
 
+async function resolveDockerRootGitScope(): Promise<{
+    appsPath: string;
+    repoPath: string;
+}> {
+    const dockerRoot = realpathSync(getDockerRoot());
+    const repoPath = await git(["rev-parse", "--show-toplevel"], { cwd: dockerRoot });
+    const dockerPath = relativePath(repoPath, dockerRoot);
+    if (!dockerPath) {
+        throw new Error(`Docker root is outside git repository: ${dockerRoot}`);
+    }
+    return {
+        appsPath: dockerPath === "." ? "apps" : `${dockerPath}/apps`,
+        repoPath,
+    };
+}
+
 async function dockerGitScope(): Promise<{ appsPath: string; repoPath: string }> {
     return process.env.MIRA_DOCKER_APPS_ROOT?.trim()
         ? await resolveDockerGitScope()
-        : { appsPath: "apps", repoPath: realpathSync(getDockerRoot()) };
+        : await resolveDockerRootGitScope();
 }
 
 export async function dirtyDockerUpdaterPaths(

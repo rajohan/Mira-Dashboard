@@ -328,6 +328,13 @@ describe("git hygiene automation", () => {
             .mockImplementation((async (_file, arguments_) => {
                 calls.push(arguments_);
                 const command = arguments_.join(" ");
+                if (command === "rev-parse --show-toplevel") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: `${process.env.MIRA_DOCKER_ROOT}\n`,
+                    };
+                }
                 if (command === "status --porcelain=v1 -z -- :(literal)apps") {
                     return {
                         code: 0,
@@ -383,6 +390,9 @@ describe("git hygiene automation", () => {
             .mockImplementation((async (_file, arguments_) => {
                 calls.push(arguments_);
                 const command = arguments_.join(" ");
+                if (command === "rev-parse --show-toplevel") {
+                    return { code: 0, stderr: "", stdout: `${repoPath}\n` };
+                }
                 if (
                     command ===
                     "status --porcelain=v1 -z -- :(literal)apps/foo*/compose.yaml"
@@ -500,6 +510,9 @@ describe("git hygiene automation", () => {
             .mockImplementation((async (_file, arguments_, options) => {
                 calls.push({ arguments_, cwd: options?.cwd ?? "" });
                 const command = arguments_.join(" ");
+                if (command === "rev-parse --show-toplevel") {
+                    return { code: 0, stderr: "", stdout: `${realRepoPath}\n` };
+                }
                 if (
                     command ===
                     "status --porcelain=v1 -z -- :(literal)apps/jackett/compose.yaml"
@@ -535,6 +548,54 @@ describe("git hygiene automation", () => {
         expect(calls[0]?.cwd).toBe(realRepoPath);
     });
 
+    it("resolves default Docker roots inside a larger git worktree", async () => {
+        rememberEnvironment("MIRA_DOCKER_ROOT");
+        const repoPath = createTemporaryRoot("mira-docker-subdir-root-");
+        const dockerRoot = path.join(repoPath, "docker");
+        mkdirSync(path.join(dockerRoot, "apps", "jackett"), { recursive: true });
+        process.env.MIRA_DOCKER_ROOT = dockerRoot;
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (_file, arguments_, options) => {
+                const command = arguments_.join(" ");
+                if (command === "rev-parse --show-toplevel") {
+                    return { code: 0, stderr: "", stdout: `${repoPath}\n` };
+                }
+                if (
+                    command ===
+                    "status --porcelain=v1 -z -- :(literal)docker/apps/jackett/compose.yaml"
+                ) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: " M docker/apps/jackett/compose.yaml\0",
+                    };
+                }
+                if (
+                    command ===
+                    "diff --cached --quiet -- :(literal)docker/apps/jackett/compose.yaml"
+                ) {
+                    return { code: 1, stderr: "", stdout: "" };
+                }
+                if (command === "rev-parse --short HEAD") {
+                    return { code: 0, stderr: "", stdout: "def5678\n" };
+                }
+                expect(options?.cwd).toBe(repoPath);
+                return { code: 0, stderr: "", stdout: "" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        await expect(
+            syncDockerUpdaterChanges([
+                path.join(dockerRoot, "apps", "jackett", "compose.yaml"),
+            ])
+        ).resolves.toEqual({
+            changedPaths: ["docker/apps/jackett/compose.yaml"],
+            commit: "def5678",
+            pushed: true,
+        });
+    });
+
     it("refuses to push unrelated local commits with Docker automation commits", async () => {
         rememberEnvironment("MIRA_DOCKER_ROOT");
         process.env.MIRA_DOCKER_ROOT = createTemporaryRoot("mira-docker-ahead-guard-");
@@ -544,6 +605,13 @@ describe("git hygiene automation", () => {
             .mockImplementation((async (_file, arguments_) => {
                 calls.push(arguments_);
                 const command = arguments_.join(" ");
+                if (command === "rev-parse --show-toplevel") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: `${process.env.MIRA_DOCKER_ROOT}\n`,
+                    };
+                }
                 if (command === "status --porcelain=v1 -z -- :(literal)apps") {
                     return {
                         code: 0,
@@ -592,6 +660,13 @@ describe("git hygiene automation", () => {
             .mockImplementation((async (_file, arguments_) => {
                 calls.push(arguments_);
                 const command = arguments_.join(" ");
+                if (command === "rev-parse --show-toplevel") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: `${process.env.MIRA_DOCKER_ROOT}\n`,
+                    };
+                }
                 if (command === "status --porcelain=v1 -z -- :(literal)apps") {
                     return {
                         code: 0,
@@ -625,6 +700,13 @@ describe("git hygiene automation", () => {
             .mockImplementation((async (_file, arguments_) => {
                 calls.push(arguments_);
                 const command = arguments_.join(" ");
+                if (command === "rev-parse --show-toplevel") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: `${process.env.MIRA_DOCKER_ROOT}\n`,
+                    };
+                }
                 if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
                     return { code: 0, stderr: "", stdout: "origin/main\n" };
                 }
@@ -658,6 +740,9 @@ describe("git hygiene automation", () => {
             .spyOn(processModule, "runProcess")
             .mockImplementation((async (_file, arguments_) => {
                 const command = arguments_.join(" ");
+                if (command === "rev-parse --show-toplevel") {
+                    return { code: 0, stderr: "", stdout: `${repoPath}\n` };
+                }
                 if (
                     command === "status --porcelain=v1 -z -- :(literal)apps/compose.yaml"
                 ) {
@@ -694,6 +779,9 @@ describe("git hygiene automation", () => {
             .spyOn(processModule, "runProcess")
             .mockImplementation((async (_file, arguments_) => {
                 const command = arguments_.join(" ");
+                if (command === "rev-parse --show-toplevel") {
+                    return { code: 0, stderr: "", stdout: `${repoPath}\n` };
+                }
                 if (command === "status --porcelain=v1 -z -- :(literal)compose.yaml") {
                     return {
                         code: 0,
@@ -815,6 +903,13 @@ describe("git hygiene automation", () => {
             .spyOn(processModule, "runProcess")
             .mockImplementation((async (_file, arguments_) => {
                 const command = arguments_.join(" ");
+                if (command === "rev-parse --show-toplevel") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: `${process.env.MIRA_DOCKER_ROOT}\n`,
+                    };
+                }
                 if (command === "status --porcelain=v1 -z -- :(literal)apps") {
                     return {
                         code: 0,
