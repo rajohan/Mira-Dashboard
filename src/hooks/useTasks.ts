@@ -77,11 +77,9 @@ async function createTaskUpdate(
 async function updateTaskUpdate(
     taskId: number,
     updateId: number,
-    author: TaskAssigneeId,
     messageMd: string
 ): Promise<TaskUpdate> {
     return apiPatchRequired<TaskUpdate>(`/tasks/${taskId}/updates/${updateId}`, {
-        author,
         messageMd,
     });
 }
@@ -242,14 +240,12 @@ export function useUpdateTaskUpdate() {
         mutationFn: ({
             taskId,
             updateId,
-            author,
             messageMd,
         }: {
             taskId: number;
             updateId: number;
-            author: TaskAssigneeId;
             messageMd: string;
-        }) => updateTaskUpdate(taskId, updateId, author, messageMd),
+        }) => updateTaskUpdate(taskId, updateId, messageMd),
         onSuccess: (_result, variables) => {
             void queryClient.invalidateQueries({
                 queryKey: taskKeys.updates(variables.taskId),

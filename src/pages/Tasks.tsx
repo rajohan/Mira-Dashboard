@@ -271,7 +271,6 @@ export function Tasks() {
         await updateTaskUpdate.mutateAsync({
             taskId: task.number,
             updateId,
-            author: TASK_ASSIGNEES.raymond.id,
             messageMd,
         });
     };
