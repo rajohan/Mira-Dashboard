@@ -231,29 +231,34 @@ async function commitAndPushPaths(
     await assertPendingCommitsAreAutomation(repoPath, [message]);
     const changedPathspecs = changedPaths.map((path_) => literalPathspec(path_));
     await git(["add", "--", ...changedPathspecs], { cwd: repoPath });
-    const stagedDiff = await runProcess(
-        "git",
-        ["diff", "--cached", "--quiet", "--", ...changedPathspecs],
-        {
-            cwd: repoPath,
-            env: process.env,
-            timeoutMs: GIT_SYNC_TIMEOUT_MS,
-        }
-    );
-    if (stagedDiff.code === 0) {
-        return { changedPaths, pushed: false, skippedReason: "no staged changes" };
-    }
-    if (stagedDiff.code !== 1) {
-        throw new Error(
-            `git diff --cached --quiet failed with exit code ${stagedDiff.code}: ${
-                stagedDiff.stderr.trim() || stagedDiff.stdout.trim()
-            }`
+    try {
+        const stagedDiff = await runProcess(
+            "git",
+            ["diff", "--cached", "--quiet", "--", ...changedPathspecs],
+            {
+                cwd: repoPath,
+                env: process.env,
+                timeoutMs: GIT_SYNC_TIMEOUT_MS,
+            }
         );
-    }
+        if (stagedDiff.code === 0) {
+            return { changedPaths, pushed: false, skippedReason: "no staged changes" };
+        }
+        if (stagedDiff.code !== 1) {
+            throw new Error(
+                `git diff --cached --quiet failed with exit code ${stagedDiff.code}: ${
+                    stagedDiff.stderr.trim() || stagedDiff.stdout.trim()
+                }`
+            );
+        }
 
-    await git(["commit", "--only", "-m", message, "--", ...changedPathspecs], {
-        cwd: repoPath,
-    });
+        await git(["commit", "--only", "-m", message, "--", ...changedPathspecs], {
+            cwd: repoPath,
+        });
+    } catch (error) {
+        await git(["restore", "--staged", "--", ...changedPathspecs], { cwd: repoPath });
+        throw error;
+    }
     const commit = await git(["rev-parse", "--short", "HEAD"], { cwd: repoPath });
     await git(["push"], { cwd: repoPath, timeoutMs: GIT_PUSH_TIMEOUT_MS });
     return { changedPaths, commit, pushed: true };
@@ -338,7 +343,9 @@ async function withGitSyncLock<T>(
 export async function syncOpenClawWorkspaceSafePaths(): Promise<GitSyncResult> {
     const repoPath = getOpenClawRoot();
     return withGitSyncLock(repoPath, async () => {
-        const status = await git(["status", "--porcelain=v1", "-z"], { cwd: repoPath });
+        const status = await git(["status", "--porcelain=v1", "-z", "-uall"], {
+            cwd: repoPath,
+        });
         const changedPaths = parseStatusPaths(status);
         const safePaths = changedPaths.filter((path_) => isOpenClawSafePath(path_));
         if (safePaths.length === 0) {

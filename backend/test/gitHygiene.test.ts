@@ -45,7 +45,7 @@ describe("git hygiene automation", () => {
             .mockImplementation((async (_file, arguments_) => {
                 calls.push(arguments_);
                 const command = arguments_.join(" ");
-                if (command === "status --porcelain=v1 -z") {
+                if (command === "status --porcelain=v1 -z -uall") {
                     return {
                         code: 0,
                         stderr: "",
@@ -112,7 +112,7 @@ describe("git hygiene automation", () => {
             .mockImplementation((async (_file, arguments_, options) => {
                 calls.push({ arguments_, cwd: options?.cwd ?? "" });
                 const command = arguments_.join(" ");
-                if (command === "status --porcelain=v1 -z") {
+                if (command === "status --porcelain=v1 -z -uall") {
                     return {
                         code: 0,
                         stderr: "",
@@ -161,7 +161,7 @@ describe("git hygiene automation", () => {
             .spyOn(processModule, "runProcess")
             .mockImplementation((async (_file, arguments_, options) => {
                 calls.push({ arguments_, cwd: options?.cwd ?? "" });
-                if (arguments_.join(" ") === "status --porcelain=v1 -z") {
+                if (arguments_.join(" ") === "status --porcelain=v1 -z -uall") {
                     return { code: 0, stderr: "", stdout: "" };
                 }
                 if (
@@ -180,9 +180,48 @@ describe("git hygiene automation", () => {
             skippedReason: "no safe changes",
         });
         expect(calls[0]).toEqual({
-            arguments_: ["status", "--porcelain=v1", "-z"],
+            arguments_: ["status", "--porcelain=v1", "-z", "-uall"],
             cwd: path.join(homeRoot, ".openclaw"),
         });
+    });
+
+    it("lists untracked OpenClaw directory contents before filtering safe paths", async () => {
+        rememberEnvironment("MIRA_OPENCLAW_ROOT");
+        process.env.MIRA_OPENCLAW_ROOT = createTemporaryRoot(
+            "mira-openclaw-untracked-dir-"
+        );
+        const calls: Array<readonly string[]> = [];
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (_file, arguments_) => {
+                calls.push(arguments_);
+                const command = arguments_.join(" ");
+                if (command === "status --porcelain=v1 -z -uall") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: "?? workspace/MEMORY.md\0?? workspace/memory/today.md\0",
+                    };
+                }
+                if (
+                    command ===
+                    "diff --cached --quiet -- :(literal)workspace/MEMORY.md :(literal)workspace/memory/today.md"
+                ) {
+                    return { code: 1, stderr: "", stdout: "" };
+                }
+                if (command === "rev-parse --short HEAD") {
+                    return { code: 0, stderr: "", stdout: "abc1234\n" };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        await expect(syncOpenClawWorkspaceSafePaths()).resolves.toEqual({
+            changedPaths: ["workspace/MEMORY.md", "workspace/memory/today.md"],
+            commit: "abc1234",
+            pushed: true,
+        });
+        expect(calls[0]).toEqual(["status", "--porcelain=v1", "-z", "-uall"]);
     });
 
     it("commits both sides of safe OpenClaw renames", async () => {
@@ -196,7 +235,7 @@ describe("git hygiene automation", () => {
             .mockImplementation((async (_file, arguments_) => {
                 calls.push(arguments_);
                 const command = arguments_.join(" ");
-                if (command === "status --porcelain=v1 -z") {
+                if (command === "status --porcelain=v1 -z -uall") {
                     return {
                         code: 0,
                         stderr: "",
@@ -270,7 +309,7 @@ describe("git hygiene automation", () => {
             skippedReason: "no safe changes",
         });
         expect(calls).toEqual([
-            ["status", "--porcelain=v1", "-z"],
+            ["status", "--porcelain=v1", "-z", "-uall"],
             ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
         ]);
     });
@@ -284,7 +323,7 @@ describe("git hygiene automation", () => {
             .mockImplementation((async (_file, arguments_) => {
                 calls.push(arguments_);
                 const command = arguments_.join(" ");
-                if (command === "status --porcelain=v1 -z") {
+                if (command === "status --porcelain=v1 -z -uall") {
                     return { code: 0, stderr: "", stdout: "" };
                 }
                 if (command === "rev-parse --abbrev-ref --symbolic-full-name @{u}") {
@@ -311,7 +350,7 @@ describe("git hygiene automation", () => {
         });
         expect(calls).toEqual(
             expect.arrayContaining([
-                ["status", "--porcelain=v1", "-z"],
+                ["status", "--porcelain=v1", "-z", "-uall"],
                 ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
                 ["log", "--format=%s", "origin/main..HEAD"],
                 ["push"],
@@ -934,5 +973,53 @@ describe("git hygiene automation", () => {
         cleanupCallbacks.push(() => runProcessSpy.mockRestore());
 
         await expect(syncDockerUpdaterChanges()).rejects.toThrow("remote rejected");
+    });
+
+    it("unstages Docker paths when commit creation fails", async () => {
+        rememberEnvironment("MIRA_DOCKER_ROOT");
+        process.env.MIRA_DOCKER_ROOT = createTemporaryRoot("mira-docker-commit-fail-");
+        const calls: Array<readonly string[]> = [];
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (_file, arguments_) => {
+                calls.push(arguments_);
+                const command = arguments_.join(" ");
+                if (command === "rev-parse --show-toplevel") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: `${process.env.MIRA_DOCKER_ROOT}\n`,
+                    };
+                }
+                if (command === "status --porcelain=v1 -z -- :(literal)apps") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: " M apps/jackett/compose.yaml\0",
+                    };
+                }
+                if (
+                    command ===
+                    "diff --cached --quiet -- :(literal)apps/jackett/compose.yaml"
+                ) {
+                    return { code: 1, stderr: "", stdout: "" };
+                }
+                if (
+                    command ===
+                    "commit --only -m chore: update managed app images -- :(literal)apps/jackett/compose.yaml"
+                ) {
+                    return { code: 1, stderr: "missing identity", stdout: "" };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        await expect(syncDockerUpdaterChanges()).rejects.toThrow("missing identity");
+        expect(calls).toContainEqual([
+            "restore",
+            "--staged",
+            "--",
+            ":(literal)apps/jackett/compose.yaml",
+        ]);
     });
 });
