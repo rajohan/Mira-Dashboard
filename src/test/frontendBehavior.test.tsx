@@ -2627,7 +2627,6 @@ describe("Mira Dashboard frontend behavior", () => {
 
                 if (url === "/api/tasks/1/updates/7" && method === "PATCH") {
                     expect(JSON.parse(String(init?.body))).toEqual({
-                        author: "rajohan",
                         messageMd: "Edited",
                     });
                     return Response.json({
@@ -2709,7 +2708,6 @@ describe("Mira Dashboard frontend behavior", () => {
             editUpdate.result.current.mutateAsync({
                 taskId: 1,
                 updateId: 7,
-                author: "rajohan",
                 messageMd: "Edited",
             })
         ).resolves.toMatchObject({ author: "rajohan", messageMd: "Edited" });
