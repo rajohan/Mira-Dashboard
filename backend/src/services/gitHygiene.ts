@@ -189,6 +189,7 @@ async function commitAndPushPaths(
         return { changedPaths, pushed: false, skippedReason: "no safe changes" };
     }
 
+    await assertPendingCommitsAreAutomation(repoPath, [message]);
     await git(["add", "--", ...changedPaths], { cwd: repoPath });
     const stagedDiff = await runProcess(
         "git",
@@ -210,7 +211,6 @@ async function commitAndPushPaths(
         );
     }
 
-    await assertPendingCommitsAreAutomation(repoPath, [message]);
     await git(["commit", "--only", "-m", message, "--", ...changedPaths], {
         cwd: repoPath,
     });

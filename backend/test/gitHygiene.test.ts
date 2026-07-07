@@ -270,9 +270,11 @@ describe("git hygiene automation", () => {
     it("refuses to push unrelated local commits with Docker automation commits", async () => {
         rememberEnvironment("MIRA_DOCKER_ROOT");
         process.env.MIRA_DOCKER_ROOT = createTemporaryRoot("mira-docker-ahead-guard-");
+        const calls: Array<readonly string[]> = [];
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
             .mockImplementation((async (_file, arguments_) => {
+                calls.push(arguments_);
                 const command = arguments_.join(" ");
                 if (command === "status --porcelain=v1 -z -- apps") {
                     return {
@@ -301,6 +303,7 @@ describe("git hygiene automation", () => {
         await expect(syncDockerUpdaterChanges()).rejects.toThrow(
             "Refusing to push unrelated local commits"
         );
+        expect(calls).not.toContainEqual(["add", "--", "apps/jackett/compose.yaml"]);
     });
 
     it("retries pending Docker automation commits without scanning dirty paths", async () => {
