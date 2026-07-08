@@ -30,6 +30,8 @@ export function Sessions() {
         typeFilter === "ALL"
             ? sortedSessions
             : sortedSessions.filter((s) => (s.type || "").toUpperCase() === typeFilter);
+    const emptyMessage =
+        typeFilter === "ALL" ? "No sessions found" : `No ${typeFilter} sessions found`;
 
     /** Deletes the selected session after confirmation and reports failures inline. */
     const handleDeleteConfirm = async () => {
@@ -74,6 +76,7 @@ export function Sessions() {
             {isConnected && (
                 <SessionsTable
                     sessions={filteredSessions}
+                    emptyMessage={emptyMessage}
                     onCompact={(sessionKey: string) => sessionActions.compact(sessionKey)}
                     onReset={(sessionKey: string) => sessionActions.reset(sessionKey)}
                     onDelete={setDeleteTarget}

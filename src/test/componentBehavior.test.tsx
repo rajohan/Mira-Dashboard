@@ -5968,12 +5968,13 @@ describe("shared component helpers", () => {
         const { rerender } = render(
             <SessionsTable
                 sessions={[]}
+                emptyMessage="No cron sessions found"
                 onCompact={onCompact}
                 onReset={onReset}
                 onDelete={onDelete}
             />
         );
-        expect(screen.getByText("No sessions found")).toBeInTheDocument();
+        expect(screen.getByText("No cron sessions found")).toBeInTheDocument();
 
         rerender(
             <SessionsTable

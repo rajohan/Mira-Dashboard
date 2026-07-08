@@ -2383,6 +2383,7 @@ describe("Mira Dashboard pages", () => {
     });
 
     it("renders sessions page connection state with a socket provider", async () => {
+        const user = userEvent.setup();
         const view = renderPage(createElement(Sessions), { withSocket: true });
 
         await waitFor(() => {
@@ -2398,6 +2399,9 @@ describe("Mira Dashboard pages", () => {
                 screen.queryByText("Connecting to OpenClaw...")
             ).not.toBeInTheDocument()
         );
+        expect(screen.getByText("No sessions found")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "CRON" }));
+        expect(screen.getByText("No CRON sessions found")).toBeInTheDocument();
         await act(async () => {
             FakeWebSocket.instances[0]?.close();
         });

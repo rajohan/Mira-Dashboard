@@ -33,6 +33,7 @@ function getSessionName(session: Session, fallback = "unknown") {
 /** Provides props for sessions table. */
 interface SessionsTableProperties {
     sessions: Session[];
+    emptyMessage?: string;
     onCompact: (key: string) => void;
     onReset: (key: string) => void;
     onDelete: (session: Session) => void;
@@ -41,6 +42,7 @@ interface SessionsTableProperties {
 /** Renders the sessions table UI. */
 export function SessionsTable({
     sessions,
+    emptyMessage = "No sessions found",
     onCompact,
     onReset,
     onDelete,
@@ -141,7 +143,7 @@ export function SessionsTable({
 
     return tableSessions.length === 0 ? (
         <Card className="py-8 text-center">
-            <p className="text-primary-400">No sessions found</p>
+            <p className="text-primary-400">{emptyMessage}</p>
         </Card>
     ) : (
         <Card>
