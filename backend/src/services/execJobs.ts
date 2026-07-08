@@ -36,6 +36,8 @@ export interface ExecStartResponse {
     jobId: string;
 }
 
+type ExecRequestMode = "once" | "start";
+
 export interface ExecJobResponse {
     code: number | undefined;
     endedAt: number | undefined;
@@ -71,15 +73,34 @@ const EXECUTABLE_RE = /^(?:[\w./-]+)$/u;
 const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
 const EXEC_ONCE_TIMEOUT_MS = 60_000;
-// Direct argv execution is intentionally disabled; approved ops use shell mode.
-const ALLOWED_DIRECT_EXECUTABLES = new Set<string>();
+const ALLOWED_DIRECT_EXECUTABLES = new Set<string>(["bash"]);
+const BASH_LOGIN_COMMAND_ARGUMENTS = 2;
 const jobs = new Map<string, ExecJob>();
 
 function trimOutput(text: string): string {
     return text.length <= MAX_OUTPUT_CHARS ? text : text.slice(-MAX_OUTPUT_CHARS);
 }
 
-function validateExecRequest(payload: unknown): ExecRequest {
+function validateBashArguments(arguments_: string[]): void {
+    if (
+        arguments_.length !== BASH_LOGIN_COMMAND_ARGUMENTS ||
+        arguments_[0] !== "-lc" ||
+        typeof arguments_[1] !== "string" ||
+        arguments_[1].length === 0
+    ) {
+        throw new ExecValidationError("bash args must be exactly: -lc <command>");
+    }
+    if (arguments_[1].length > MAX_COMMAND_LENGTH) {
+        throw new ExecValidationError(
+            `command exceeds maximum length of ${MAX_COMMAND_LENGTH}`
+        );
+    }
+    if (SHELL_METACHARACTERS_RE.test(arguments_[1])) {
+        throw new ExecValidationError("command contains disallowed control characters");
+    }
+}
+
+function validateExecRequest(payload: unknown, mode: ExecRequestMode): ExecRequest {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
         throw new ExecValidationError("request body must be a JSON object");
     }
@@ -131,8 +152,15 @@ function validateExecRequest(payload: unknown): ExecRequest {
             }
         }
     }
-    if (args !== undefined && !ALLOWED_DIRECT_EXECUTABLES.has(path.basename(command))) {
+    const executable = path.basename(command);
+    if (args !== undefined && !ALLOWED_DIRECT_EXECUTABLES.has(executable)) {
         throw new ExecValidationError("command executable is not approved");
+    }
+    if (args !== undefined && executable === "bash") {
+        if (mode !== "start") {
+            throw new ExecValidationError("bash argv execution requires job tracking");
+        }
+        validateBashArguments(args);
     }
     if (cwd !== undefined && typeof cwd !== "string") {
         throw new ExecValidationError("cwd must be a string");
@@ -356,7 +384,7 @@ function failExecJob(jobId: string, error: unknown): void {
 }
 
 export async function runExecOnce(payload: unknown): Promise<ExecResponse> {
-    const request = validateExecRequest(payload);
+    const request = validateExecRequest(payload, "once");
     const result = await runExecCommand(
         request,
         Bun.randomUUIDv7(),
@@ -371,7 +399,7 @@ export async function runExecOnce(payload: unknown): Promise<ExecResponse> {
 }
 
 export function startExecJob(payload: unknown): ExecStartResponse {
-    const request = validateExecRequest(payload);
+    const request = validateExecRequest(payload, "start");
     cleanupJobs();
     if (jobs.size >= MAX_JOBS) {
         throw Object.assign(new Error("Too many exec jobs"), { statusCode: 429 });

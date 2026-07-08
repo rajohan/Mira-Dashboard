@@ -4242,6 +4242,9 @@ fi
             "command executable is not approved"
         );
         await expect(
+            runExecOnce({ args: ["-lc", "echo hi"], command: "bash" })
+        ).rejects.toThrow("bash argv execution requires job tracking");
+        await expect(
             runExecOnce({
                 args: "not-array",
                 command: "__mira_dashboard_shell_smoke_test__",
@@ -4291,6 +4294,9 @@ fi
         expect(() => startExecJob({ command: "node" })).toThrow(
             "args are required unless shell mode is enabled"
         );
+        expect(() =>
+            startExecJob({ args: ["-lc", "x".repeat(4097)], command: "bash" })
+        ).toThrow("command exceeds maximum length");
         expect(() => getExecJob("missing-job")).toThrow("Exec job not found");
 
         const invalidPost = await execRoutes["/api/exec"].POST(

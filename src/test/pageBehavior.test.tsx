@@ -72,6 +72,7 @@ const animationFrameState = {
     frames: new Map<number, FrameRequestCallback>(),
 };
 const terminalApiState = {
+    expectedExecCwd: "/tmp",
     wasJobStopped: false,
 };
 const jobsApiState = {
@@ -311,8 +312,9 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
 
     if (method === "POST" && url === "/api/exec/start") {
         const body = parseRequestBody(init);
-        expect(body.command).toBe("echo hello");
-        expect(body.cwd).toBe("/tmp");
+        expect(body.command).toBe("bash");
+        expect(body.args).toEqual(["-lc", "echo hello"]);
+        expect(body.cwd).toBe(terminalApiState.expectedExecCwd);
         return Response.json({ jobId: "job-1" });
     }
 
@@ -563,7 +565,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                         key: "dashboard",
                         name: "Mira Dashboard",
                         branch: "test/broaden-fullstack-coverage",
-                        remote: "origin",
+                        remote: "https://github.com/rajohan/Mira-Dashboard",
                         dirty: true,
                         statusSummary: {
                             staged: 0,
@@ -1483,6 +1485,7 @@ async function flushQueuedTimers() {
 describe("Mira Dashboard pages", () => {
     beforeEach(() => {
         FakeWebSocket.instances = [];
+        terminalApiState.expectedExecCwd = "/tmp";
         terminalApiState.wasJobStopped = false;
         logsApiState.openclawHundredLineRequests = 0;
         logsApiState.simulateOpenclawTruncation = false;
@@ -1585,6 +1588,21 @@ describe("Mira Dashboard pages", () => {
             view.unmount();
             view.queryClient.clear();
         }
+    });
+
+    it("links git workspace repositories to GitHub remotes", async () => {
+        const view = renderPage(createElement(Dashboard), { withSocket: true });
+
+        const dashboardRepoLink = await screen.findByRole("link", {
+            name: /open mira dashboard on github/i,
+        });
+        expect(dashboardRepoLink).toHaveAttribute(
+            "href",
+            "https://github.com/rajohan/Mira-Dashboard"
+        );
+
+        view.unmount();
+        view.queryClient.clear();
     });
 
     it("drives settings backup, restart, skill toggle, and save flows", async () => {
@@ -2435,6 +2453,7 @@ describe("Mira Dashboard pages", () => {
         await flushQueuedTimers();
 
         const stopButton = await screen.findByRole("button", { name: /stop/i });
+        expect(commandInput).toBeDisabled();
         clickElement(stopButton);
         await waitFor(() => {
             expect(screen.getByText("ok")).toBeInTheDocument();
