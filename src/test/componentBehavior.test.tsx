@@ -56,6 +56,7 @@ import { LogRotationCard } from "../components/features/dashboard/LogRotationCar
 import { QuotaOverviewCard } from "../components/features/dashboard/QuotaOverviewCard";
 import { ServiceActionsCard } from "../components/features/dashboard/ServiceActionsCard";
 import { AutovacuumHealthTable } from "../components/features/database/AutovacuumHealthTable";
+import { DatabasesTable } from "../components/features/database/DatabaseSizesTable";
 import { DatabaseTableShell } from "../components/features/database/DatabaseTableShell";
 import { PgBouncerPoolsTable } from "../components/features/database/PgBouncerPoolsTable";
 import { PgBouncerStatsTable } from "../components/features/database/PgBouncerStatsTable";
@@ -6202,6 +6203,39 @@ describe("shared component helpers", () => {
             );
             expect(screen.getAllByText("Avg query").length).toBeGreaterThan(0);
             expect(screen.getAllByText("42").length).toBeGreaterThan(0);
+
+            rerender(
+                <DatabasesTable
+                    databases={[
+                        {
+                            blks_hit: "999",
+                            blks_read: "1",
+                            cache_hit_ratio: "99.9",
+                            datname: "dashboard",
+                            numbackends: "1",
+                            size_bytes: "1048576",
+                            size_pretty: "1024 kB",
+                            xact_commit: "100",
+                            xact_rollback: "0",
+                        },
+                    ]}
+                    pools={[]}
+                    stats={[
+                        {
+                            avg_query_time: "1.2",
+                            avg_xact_time: "3.4",
+                            database: "dashboard",
+                            total_query_count: "1234567",
+                            total_query_time: "50",
+                            total_received: "100",
+                            total_sent: "200",
+                            total_xact_count: "21",
+                            total_xact_time: "30",
+                        },
+                    ]}
+                />
+            );
+            expect(screen.getAllByText("1,234,567").length).toBeGreaterThan(0);
 
             rerender(<TopQueriesTable enabled={false} data={[]} />);
             expect(

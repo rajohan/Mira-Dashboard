@@ -2,6 +2,7 @@ import { createColumnHelper } from "@tanstack/react-table";
 
 import type { DatabaseOverviewResponse } from "../../../hooks/useDatabase";
 import { DatabaseTableShell } from "./DatabaseTableShell";
+import { formatNumber } from "./databaseUtilities";
 
 /** Represents one database row. */
 interface DatabaseRow {
@@ -90,7 +91,7 @@ const columns = [
     columnHelper.accessor((row) => row.total_query_count, {
         id: "queries",
         header: "Queries",
-        cell: (info) => (info.getValue() > 0 ? info.getValue().toLocaleString() : "—"),
+        cell: (info) => (info.getValue() > 0 ? formatNumber(info.getValue()) : "—"),
     }),
 ];
 
@@ -129,7 +130,7 @@ export function DatabasesTable({ databases, pools, stats }: Properties) {
                         <div>
                             <div className="text-primary-500">Queries</div>
                             {row.total_query_count > 0
-                                ? row.total_query_count.toLocaleString()
+                                ? formatNumber(row.total_query_count)
                                 : "—"}
                         </div>
                     </div>
