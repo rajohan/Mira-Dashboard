@@ -1,4 +1,4 @@
-import { GitBranch, GitCommitHorizontal } from "lucide-react";
+import { ExternalLink, GitBranch, GitCommitHorizontal } from "lucide-react";
 
 import { useCacheEntry } from "../../../hooks/useCache";
 import { Badge } from "../../ui/Badge";
@@ -31,6 +31,26 @@ interface GitWorkspaceCache {
     dirtyCount: number;
     missingRepos: string[];
     checkedAt: string;
+}
+
+function repoUrlFromRemote(remote: string | undefined): string | undefined {
+    if (!remote) {
+        return undefined;
+    }
+    const trimmedRemote = remote.trim().replace(/\.git$/u, "");
+    if (!trimmedRemote) {
+        return undefined;
+    }
+    if (trimmedRemote.startsWith("https://github.com/")) {
+        return trimmedRemote;
+    }
+
+    const scpStyleMatch = trimmedRemote.match(/^github\.com:(?<path>[^/\s]+\/[^/\s]+)$/u);
+    if (scpStyleMatch?.groups?.path) {
+        return `https://github.com/${scpStyleMatch.groups.path}`;
+    }
+
+    return undefined;
 }
 
 /** Renders the Git overview card UI. */
@@ -97,37 +117,53 @@ export function GitOverviewCard() {
 
                     <div className="space-y-2">
                         {repos.map((repo) => (
-                            <div
-                                key={repo.key}
-                                className="rounded-lg border border-primary-700 bg-primary-800/40 px-3 py-2"
-                            >
-                                <div className="mb-1 flex items-start justify-between gap-2">
-                                    <div className="inline-flex min-w-0 items-center gap-2 text-sm text-primary-100">
-                                        <GitCommitHorizontal className="size-3.5 shrink-0 text-primary-400" />
-                                        <span className="truncate">{repo.name}</span>
-                                    </div>
-                                    <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                                        {repo.branch && repo.branch !== DEFAULT_BRANCH ? (
-                                            <Badge variant="warning">Off main</Badge>
-                                        ) : undefined}
-                                        <Badge
-                                            variant={repo.dirty ? "warning" : "success"}
-                                        >
-                                            {repo.dirty ? "Dirty" : "Clean"}
-                                        </Badge>
-                                    </div>
-                                </div>
-                                <div className="text-xs wrap-break-word text-primary-400">
-                                    {repo.branch || "unknown branch"}
-                                    {repo.statusSummary.total > 0
-                                        ? ` · ${repo.statusSummary.total} change${repo.statusSummary.total === 1 ? "" : "s"}`
-                                        : " · no changes"}
-                                </div>
-                            </div>
+                            <GitRepoRow key={repo.key} repo={repo} />
                         ))}
                     </div>
                 </div>
             )}
         </Card>
+    );
+}
+
+function GitRepoRow({ repo }: { repo: GitRepoSummary }) {
+    const repoUrl = repoUrlFromRemote(repo.remote);
+
+    return (
+        <div className="rounded-lg border border-primary-700 bg-primary-800/40 px-3 py-2">
+            <div className="mb-1 flex items-start justify-between gap-2">
+                <div className="inline-flex min-w-0 items-center gap-2 text-sm text-primary-100">
+                    <GitCommitHorizontal className="size-3.5 shrink-0 text-primary-400" />
+                    {repoUrl ? (
+                        <a
+                            href={repoUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex min-w-0 items-center gap-1 truncate transition-colors hover:text-primary-50"
+                            aria-label={`Open ${repo.name} on GitHub`}
+                        >
+                            <span className="truncate">{repo.name}</span>
+                            <ExternalLink className="size-3 shrink-0" />
+                        </a>
+                    ) : (
+                        <span className="truncate">{repo.name}</span>
+                    )}
+                </div>
+                <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                    {repo.branch && repo.branch !== DEFAULT_BRANCH ? (
+                        <Badge variant="warning">Off main</Badge>
+                    ) : undefined}
+                    <Badge variant={repo.dirty ? "warning" : "success"}>
+                        {repo.dirty ? "Dirty" : "Clean"}
+                    </Badge>
+                </div>
+            </div>
+            <div className="text-xs wrap-break-word text-primary-400">
+                {repo.branch || "unknown branch"}
+                {repo.statusSummary.total > 0
+                    ? ` · ${repo.statusSummary.total} change${repo.statusSummary.total === 1 ? "" : "s"}`
+                    : " · no changes"}
+            </div>
+        </div>
     );
 }

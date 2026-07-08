@@ -20,6 +20,23 @@ export interface TerminalCommand {
     cwd?: string;
 }
 
+interface TerminalExecRequest {
+    args: string[];
+    command: string;
+    cwd?: string;
+}
+
+function buildTerminalExecRequest({
+    command,
+    cwd,
+}: TerminalCommand): TerminalExecRequest {
+    return {
+        args: ["-lc", command],
+        command: "bash",
+        cwd,
+    };
+}
+
 /** Defines terminal keys. */
 export const terminalKeys = {
     job: (jobId: string | undefined) => ["terminal", "job", jobId] as const,
@@ -32,7 +49,10 @@ export function useStartTerminalCommand() {
 
     return useMutation({
         mutationFn: async (payload: TerminalCommand) =>
-            apiPostRequired<{ jobId: string }>("/exec/start", payload),
+            apiPostRequired<{ jobId: string }>(
+                "/exec/start",
+                buildTerminalExecRequest(payload)
+            ),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: terminalKeys.history });
         },
@@ -43,10 +63,28 @@ export function useStartTerminalCommand() {
 export function useTerminalJob(jobId: string | undefined) {
     return useQuery({
         queryKey: terminalKeys.job(jobId),
-        queryFn: () =>
-            apiFetchRequired<TerminalJobResponse>(
-                `/exec/${encodeURIComponent(jobId || "")}`
-            ),
+        queryFn: async () => {
+            try {
+                return await apiFetchRequired<TerminalJobResponse>(
+                    `/exec/${encodeURIComponent(jobId || "")}`
+                );
+            } catch (error) {
+                if (error instanceof Error && error.message === "Exec job not found") {
+                    const now = Date.now();
+                    const missingJobResponse: TerminalJobResponse = {
+                        code: 1,
+                        endedAt: now,
+                        jobId: jobId || "",
+                        startedAt: now,
+                        status: "done",
+                        stderr: "Terminal job is no longer available",
+                        stdout: "",
+                    };
+                    return missingJobResponse;
+                }
+                throw error;
+            }
+        },
         enabled: Boolean(jobId),
         refetchInterval: (query) => {
             const status = (query.state.data as TerminalJobResponse | undefined)?.status;

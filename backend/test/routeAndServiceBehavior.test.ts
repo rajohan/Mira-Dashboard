@@ -2921,7 +2921,7 @@ describe("backend route and service behavior", () => {
         await expect(runExecOnce({ command: "echo" })).rejects.toThrow(
             "args are required"
         );
-        await expect(runExecOnce({ args: "hi", command: "echo" })).rejects.toThrow(
+        await expect(runExecOnce({ args: "hi", command: "bash" })).rejects.toThrow(
             "args must be an array"
         );
         await expect(runExecOnce({ args: ["hi"], command: "./echo" })).rejects.toThrow(
@@ -2930,6 +2930,18 @@ describe("backend route and service behavior", () => {
         await expect(runExecOnce({ args: ["hi"], command: "echo" })).rejects.toThrow(
             "command executable is not approved"
         );
+        await expect(
+            runExecOnce({ args: ["-lc", "echo hi"], command: "bash" })
+        ).rejects.toThrow("bash argv execution requires job tracking");
+        expect(() => startExecJob({ args: ["-c", "echo hi"], command: "bash" })).toThrow(
+            "bash args must be exactly"
+        );
+        expect(() =>
+            startExecJob({ args: ["-lc", "x".repeat(4097)], command: "bash" })
+        ).toThrow("command exceeds maximum length");
+        expect(() =>
+            startExecJob({ args: ["-lc", "echo\nnope"], command: "bash" })
+        ).toThrow("command contains disallowed control characters");
         await expect(
             runExecOnce({
                 command: "__mira_dashboard_shell_smoke_test__",

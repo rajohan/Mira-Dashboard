@@ -2326,13 +2326,15 @@ describe("Mira Dashboard frontend behavior", () => {
 
                 if (url === "/api/exec/start" && method === "POST") {
                     const body = JSON.parse(String(init?.body)) as {
+                        args?: string[];
                         command?: string;
                         cwd?: string;
                         shell?: boolean;
                     };
-                    if (body.command === "pwd") {
+                    if (body.command === "bash") {
                         expect(body).toEqual({
-                            command: "pwd",
+                            args: ["-lc", "pwd"],
+                            command: "bash",
                             cwd: "/tmp",
                         });
                     } else {
@@ -2354,6 +2356,13 @@ describe("Mira Dashboard frontend behavior", () => {
                         startedAt: 1,
                         endedAt: 2,
                     });
+                }
+
+                if (url === "/api/exec/missing-job" && method === "GET") {
+                    return Response.json(
+                        { error: "Exec job not found" },
+                        { status: 404 }
+                    );
                 }
 
                 if (url === "/api/terminal/complete" && method === "POST") {
@@ -2405,6 +2414,18 @@ describe("Mira Dashboard frontend behavior", () => {
 
         const terminalJob = renderHookWithQueryClient(() => useTerminalJob("job-1"));
         await waitFor(() => expect(terminalJob.result.current.data?.stdout).toBe("/tmp"));
+
+        const missingTerminalJob = renderHookWithQueryClient(() =>
+            useTerminalJob("missing-job")
+        );
+        await waitFor(() =>
+            expect(missingTerminalJob.result.current.data).toMatchObject({
+                code: 1,
+                jobId: "missing-job",
+                status: "done",
+                stderr: "Terminal job is no longer available",
+            })
+        );
 
         await expect(getCompletions("sr", "/tmp")).resolves.toMatchObject({
             commonPrefix: "src",

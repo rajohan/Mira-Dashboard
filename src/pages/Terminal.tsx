@@ -74,6 +74,7 @@ export function Terminal() {
     const startCommand = useStartTerminalCommand();
     const { data: jobData } = useTerminalJob(currentJobId);
     const { history, addCommand, updateCommand, clearHistory } = useTerminalHistory();
+    const hasActiveJob = Boolean(currentJobId && jobData?.status !== "done");
 
     // Stop polling when component unmounts
     useEffect(() => {
@@ -142,6 +143,7 @@ export function Terminal() {
 
         // Refocus input when job completes
         if (jobData.status === "done") {
+            setCurrentJobId(undefined);
             setTimeout(() => inputReference.current?.focus(), 0);
         }
     }, [jobData, currentJobId, history, updateCommand]);
@@ -172,7 +174,7 @@ export function Terminal() {
     /** Responds to submit events. */
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
-        if (!command.trim() || startCommand.isPending) return;
+        if (!command.trim() || startCommand.isPending || hasActiveJob) return;
 
         const trimmedCommand = command.trim();
 
@@ -422,7 +424,7 @@ export function Terminal() {
                                 aria-label="Terminal command"
                                 placeholder="Enter command..."
                                 className="w-full bg-black font-mono text-base sm:text-sm"
-                                disabled={startCommand.isPending}
+                                disabled={startCommand.isPending || hasActiveJob}
                                 autoComplete="off"
                                 autoCorrect="off"
                                 autoCapitalize="off"
@@ -450,7 +452,11 @@ export function Terminal() {
                                 <Button
                                     type="submit"
                                     className="w-full sm:w-auto"
-                                    disabled={!command.trim() || startCommand.isPending}
+                                    disabled={
+                                        !command.trim() ||
+                                        startCommand.isPending ||
+                                        hasActiveJob
+                                    }
                                 >
                                     <Send className="size-4" />
                                     Run
