@@ -4570,6 +4570,89 @@ describe("shared component helpers", () => {
                 now
             )
         ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "shared phrase",
+                        thinking: undefined,
+                    },
+                    text: "shared phrase",
+                    updatedAt: recentUpdatedAt,
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "earlier same-run answer with shared phrase inside",
+                        images: [],
+                        role: "assistant",
+                        runId: "run-1",
+                        text: "earlier same-run answer with shared phrase inside",
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        const mediaStream = {
+            ...stream,
+            message: {
+                ...stream.message,
+                attachments: [
+                    {
+                        fileName: "report.txt",
+                        id: "attachment-1",
+                        kind: "text" as const,
+                        mimeType: "text/plain",
+                        sizeBytes: 12,
+                    },
+                ],
+                images: [
+                    {
+                        data: "image-data",
+                        mimeType: "image/png",
+                        type: "image" as const,
+                    },
+                ],
+                text: "assistant media text",
+                thinking: undefined,
+            },
+            text: "assistant media text",
+            updatedAt: recentUpdatedAt,
+        };
+        expect(
+            isActiveStreamRecoveredInMessages(
+                mediaStream,
+                [
+                    {
+                        attachments: [],
+                        content: "assistant media text",
+                        images: [],
+                        role: "assistant",
+                        runId: "run-1",
+                        text: "assistant media text",
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                mediaStream,
+                [
+                    {
+                        attachments: mediaStream.message.attachments,
+                        content: "assistant media text",
+                        images: mediaStream.message.images,
+                        role: "assistant",
+                        runId: "run-1",
+                        text: "assistant media text",
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
         const mixedTextDiagnosticStream = {
             ...stream,
             message: {

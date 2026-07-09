@@ -115,6 +115,30 @@ function isMatchingToolResult(
     );
 }
 
+/** Returns stable media identity for stream recovery comparisons. */
+function mediaIdentity(
+    images: ChatHistoryMessage["images"] = [],
+    attachments: ChatHistoryMessage["attachments"] = []
+): string {
+    return JSON.stringify({
+        attachments: attachments.map((attachment) => ({
+            contentBase64: attachment.contentBase64 || "",
+            dataUrl: attachment.dataUrl || "",
+            fileName: attachment.fileName,
+            id: attachment.id,
+            kind: attachment.kind,
+            mimeType: attachment.mimeType || "",
+            sizeBytes: attachment.sizeBytes,
+        })),
+        images: images.map((image) => ({
+            data: image.data || image.source?.data || "",
+            mediaType: image.mimeType || image.source?.media_type || "",
+            sourceType: image.source?.type || "",
+            type: image.type,
+        })),
+    });
+}
+
 /** Returns whether an active stream is already represented in visible history. */
 export function isActiveStreamRecoveredInMessages(
     stream: ActiveChatStream,
@@ -128,6 +152,13 @@ export function isActiveStreamRecoveredInMessages(
         stream.message?.toolCalls?.length || stream.message?.toolResult
     );
     const hasDiagnosticDetails = Boolean(streamThinkingText.trim() || hasToolDetails);
+    const hasMediaDetails = Boolean(
+        stream.message?.images?.length || stream.message?.attachments?.length
+    );
+    const streamMediaIdentity = mediaIdentity(
+        stream.message?.images,
+        stream.message?.attachments
+    );
     const streamUpdatedAt = sessionTimestampMs(stream.updatedAt);
     const isStreamQuiet =
         streamUpdatedAt === undefined ||
@@ -144,17 +175,23 @@ export function isActiveStreamRecoveredInMessages(
                 Boolean(stream.runId) &&
                 Boolean(message.runId) &&
                 stream.runId === message.runId;
+            const hasRecoveredMediaDetails =
+                !hasMediaDetails ||
+                mediaIdentity(message.images, message.attachments) ===
+                    streamMediaIdentity;
             if (
                 isSameRun &&
                 streamText.trim() &&
                 !hasDiagnosticDetails &&
-                message.text.trim().includes(streamText.trim())
+                hasRecoveredMediaDetails &&
+                message.text.trim().startsWith(streamText.trim())
             ) {
                 return true;
             }
 
             if (
                 !hasDiagnosticDetails &&
+                hasRecoveredMediaDetails &&
                 stream.message?.text.trim() &&
                 message.text.trim() === stream.message.text.trim()
             ) {
@@ -228,6 +265,7 @@ export function isActiveStreamRecoveredInMessages(
 
             return (
                 isStreamQuiet &&
+                hasRecoveredMediaDetails &&
                 (isRecoveredAssistantText(message.text, streamText) ||
                     isRecoveredAssistantText(thinkingText, streamText))
             );
