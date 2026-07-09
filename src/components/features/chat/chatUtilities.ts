@@ -397,11 +397,13 @@ export function mergeWithRecentOptimisticMessages(
     const nextIdentities = new Set(
         enrichedNextMessages.map((message) => messageIdentity(message))
     );
-    const nextToolCallRowIdentities = new Set(
-        enrichedNextMessages
-            .map((message) => toolCallRowIdentity(message))
-            .filter((identity): identity is string => Boolean(identity))
-    );
+    const nextToolCallRowsByIdentity = new Map<string, ChatHistoryMessage>();
+    for (const message of enrichedNextMessages) {
+        const identity = toolCallRowIdentity(message);
+        if (identity) {
+            nextToolCallRowsByIdentity.set(identity, message);
+        }
+    }
     const nextAssistantTexts = nextMessages
         .filter((message) => message.role.toLowerCase() === "assistant")
         .map((message) => message.text);
@@ -428,8 +430,17 @@ export function mergeWithRecentOptimisticMessages(
         }
 
         const toolCallIdentity = toolCallRowIdentity(message);
-        if (toolCallIdentity && nextToolCallRowIdentities.has(toolCallIdentity)) {
-            return false;
+        const nextToolCallRow = toolCallIdentity
+            ? nextToolCallRowsByIdentity.get(toolCallIdentity)
+            : undefined;
+        if (nextToolCallRow) {
+            const localText = message.text.trim();
+            if (
+                !localText ||
+                isRecoveredAssistantText(message.text, nextToolCallRow.text)
+            ) {
+                return false;
+            }
         }
 
         if (

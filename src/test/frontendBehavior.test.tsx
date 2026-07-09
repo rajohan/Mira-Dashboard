@@ -2322,6 +2322,31 @@ describe("Mira Dashboard frontend behavior", () => {
         await deleteSession.result.current.mutateAsync("session-1");
     });
 
+    it("rejects invalid database summary cache payloads", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+                if (url === "/api/cache/database.summary" && method === "GET") {
+                    return Response.json({
+                        data: "",
+                        key: "database.summary",
+                        status: "error",
+                    });
+                }
+
+                throw new Error(`Unexpected database API call: ${method} ${url}`);
+            }),
+            writable: true,
+        });
+
+        const database = renderHookWithQueryClient(() => useDatabaseOverview());
+
+        await waitFor(() => expect(database.result.current.isSuccess).toBe(true));
+        expect(database.result.current.data).toBeUndefined();
+    });
+
     it("runs terminal and exec operations through hooks", async () => {
         const fetchMock = jest.fn(
             async (input: RequestInfo | URL, init?: RequestInit) => {

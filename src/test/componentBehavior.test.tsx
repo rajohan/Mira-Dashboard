@@ -4117,6 +4117,47 @@ describe("shared component helpers", () => {
             )[0]?.toolCalls?.map((toolCall) => toolCall.toolResult?.content)
         ).toEqual(["first live output", "second live output"]);
 
+        const partialTextLocalToolRow = {
+            content: "visible partial answer",
+            local: true,
+            role: "assistant",
+            text: "visible partial answer",
+            timestamp: new Date().toISOString(),
+            runId: "partial-tool-row-run",
+            toolCalls: [
+                {
+                    arguments: { command: "status" },
+                    id: "call-partial",
+                    name: "functions.exec_command",
+                    toolResult: {
+                        content: "status output",
+                        id: "call-partial",
+                        name: "functions.exec_command",
+                    },
+                },
+            ],
+        };
+        const partialHistoryToolRow = {
+            content: "",
+            role: "assistant",
+            text: "",
+            timestamp: new Date().toISOString(),
+            runId: "partial-tool-row-run",
+            toolCalls: [
+                {
+                    arguments: { command: "status" },
+                    id: "call-partial",
+                    name: "functions.exec_command",
+                },
+            ],
+        };
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [partialTextLocalToolRow],
+                [partialHistoryToolRow]
+            ).some((message) => message.text === "visible partial answer")
+        ).toBe(true);
+
         const mixedDiagnosticLocalRow = {
             content: [
                 { text: "same visible text", type: "text" },

@@ -75,10 +75,28 @@ export interface DatabaseOverviewResponse {
     }>;
 }
 
+function isDatabaseOverviewResponse(value: unknown): value is DatabaseOverviewResponse {
+    if (!value || typeof value !== "object") return false;
+    const candidate = value as Partial<DatabaseOverviewResponse>;
+    return (
+        !!candidate.overview &&
+        typeof candidate.overview === "object" &&
+        Array.isArray(candidate.databases) &&
+        Array.isArray(candidate.deadTuples) &&
+        Array.isArray(candidate.topQueries) &&
+        Array.isArray(candidate.pgbouncerPools) &&
+        Array.isArray(candidate.pgbouncerStats)
+    );
+}
+
 /** Provides database overview. */
 export function useDatabaseOverview() {
     const query = useCacheEntry<DatabaseOverviewResponse>("database.summary", 60_000, {
         refreshOnMissing: true,
     });
-    return { ...query, data: query.data?.data };
+    const data =
+        query.data?.status === "fresh" && isDatabaseOverviewResponse(query.data.data)
+            ? query.data.data
+            : undefined;
+    return { ...query, data };
 }
