@@ -263,13 +263,17 @@ export function useDockerContainers() {
             stats.id ? ([[stats.id, stats]] as const) : []
         )
     );
+    const hasLiveStats = statsQuery.isSuccess;
 
     return {
         ...query,
-        data: (query.data?.data.containers ?? []).map((container) => ({
-            ...container,
-            stats: statsById.get(container.id) ?? container.stats,
-        })),
+        data: (query.data?.data.containers ?? []).map((container) => {
+            const liveStats = statsById.get(container.id);
+            return {
+                ...container,
+                stats: hasLiveStats ? liveStats : (liveStats ?? container.stats),
+            };
+        }),
     };
 }
 

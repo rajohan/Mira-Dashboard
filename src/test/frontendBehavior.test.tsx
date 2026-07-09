@@ -123,6 +123,7 @@ import {
     useUpdateCronJob,
 } from "../hooks/useCron";
 import { useDatabaseOverview } from "../hooks/useDatabase";
+import { useDockerContainers } from "../hooks/useDocker";
 import { useFileContent, useFiles, useSaveFile } from "../hooks/useFiles";
 import { useHealth } from "../hooks/useHealth";
 import { useLogContent, useLogFiles } from "../hooks/useLogs";
@@ -2069,6 +2070,87 @@ describe("Mira Dashboard frontend behavior", () => {
         await expect(
             refreshCache.result.current.mutateAsync(" weather.spydeberg ,, ")
         ).resolves.toMatchObject({ keys: ["weather.spydeberg"] });
+    });
+
+    it("clears cached Docker stats once live stats have loaded without a container row", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = typeof input === "string" ? input : input.toString();
+                const method = init?.method || "GET";
+
+                if (url === "/api/cache/docker.summary" && method === "GET") {
+                    return Response.json({
+                        key: "docker.summary",
+                        source: "docker",
+                        status: "fresh",
+                        consecutiveFailures: 0,
+                        data: {
+                            checkedAt: "2026-07-09T18:00:00.000Z",
+                            containers: [
+                                {
+                                    command: "server",
+                                    createdAt: "2026-07-09T17:00:00.000Z",
+                                    finishedAt: undefined,
+                                    health: "unknown",
+                                    id: "stopped123",
+                                    image: "app:latest",
+                                    imageId: "sha256:image",
+                                    ipAddresses: {},
+                                    mounts: [],
+                                    name: "stopped-app",
+                                    ports: [],
+                                    project: undefined,
+                                    restartCount: 0,
+                                    runningFor: "1 hour",
+                                    service: undefined,
+                                    startedAt: "2026-07-09T17:00:00.000Z",
+                                    state: "exited",
+                                    stats: {
+                                        blockIO: "0 B / 0 B",
+                                        cpu: "12.3%",
+                                        memory: "128 MiB / 1 GiB",
+                                        memoryPercent: "12%",
+                                        netIO: "0 B / 0 B",
+                                        pids: "1",
+                                    },
+                                    status: "Exited",
+                                },
+                            ],
+                            images: [],
+                            updaterEvents: [],
+                            updaterServices: [],
+                            updaterSummary: {
+                                autoPolicy: 0,
+                                enabled: 0,
+                                failed: 0,
+                                notifyPolicy: 0,
+                                total: 0,
+                                updateAvailable: 0,
+                            },
+                            volumes: [],
+                        },
+                        meta: {},
+                    });
+                }
+
+                if (url === "/api/docker/containers/stats" && method === "GET") {
+                    return Response.json({ stats: [] });
+                }
+
+                throw new Error(`Unexpected Docker hook API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const containers = renderHookWithQueryClient(() => useDockerContainers());
+        await waitFor(() => expect(containers.result.current.data).toHaveLength(1));
+        await waitFor(() =>
+            expect(containers.result.current.data?.[0]?.stats).toBeUndefined()
+        );
     });
 
     it("fetches and mutates cron jobs through hooks", async () => {
