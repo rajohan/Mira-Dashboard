@@ -2055,11 +2055,13 @@ export function useChatRuntimeEvents({
                                       Boolean(message.runId) &&
                                       Boolean(finalAssistantMessage.runId) &&
                                       message.runId === finalAssistantMessage.runId;
-                                  const isRecoveredText = isRecoveredAssistantText(
-                                      message.text,
-                                      finalAssistantMessage.text
-                                  );
-                                  if (!isSameRun && !isRecoveredText) {
+                                  const isRecoveredLocalText =
+                                      message.local === true &&
+                                      isRecoveredAssistantText(
+                                          message.text,
+                                          finalAssistantMessage.text
+                                      );
+                                  if (!isSameRun && !isRecoveredLocalText) {
                                       return message;
                                   }
 

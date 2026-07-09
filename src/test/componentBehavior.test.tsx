@@ -3369,11 +3369,12 @@ describe("shared component helpers", () => {
 
         messages = [
             {
-                content: "duplicate final answer",
+                content:
+                    "duplicate final answer that is still streaming from a local row",
                 local: true,
                 role: "assistant",
-                runId: "duplicate-final-run",
-                text: "duplicate final answer",
+                runId: "local-duplicate-final-run",
+                text: "duplicate final answer that is still streaming from a local row",
                 timestamp: new Date().toISOString(),
             },
         ];
@@ -3381,8 +3382,11 @@ describe("shared component helpers", () => {
             listener?.({
                 event: "chat",
                 payload: {
-                    message: { role: "assistant", text: "duplicate final answer" },
-                    runId: "duplicate-final-run",
+                    message: {
+                        role: "assistant",
+                        text: "duplicate final answer that is still streaming from a local row and has now finished",
+                    },
+                    runId: "final-duplicate-run",
                     sessionKey: "agent:main:main",
                     state: "final",
                 },
@@ -3397,7 +3401,8 @@ describe("shared component helpers", () => {
                     "role" in message &&
                     message.role === "assistant" &&
                     "text" in message &&
-                    message.text === "duplicate final answer"
+                    typeof message.text === "string" &&
+                    message.text.includes("duplicate final answer")
             )
         ).toHaveLength(1);
 
