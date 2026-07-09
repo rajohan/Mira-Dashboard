@@ -4503,6 +4503,32 @@ describe("shared component helpers", () => {
                     ...stream,
                     message: {
                         ...stream.message,
+                        text: "Here",
+                        thinking: undefined,
+                    },
+                    text: "Here",
+                    updatedAt: recentUpdatedAt,
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "Here is a completed same-run answer",
+                        images: [],
+                        role: "assistant",
+                        runId: "run-1",
+                        text: "Here is a completed same-run answer",
+                        timestamp: new Date(now - 2000).toISOString(),
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
                         text: "assistant recovered text",
                         thinking: undefined,
                     },

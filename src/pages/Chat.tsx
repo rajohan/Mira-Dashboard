@@ -63,6 +63,7 @@ const CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY =
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
 const LIVE_HISTORY_POLL_MS = 2000;
 const ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS = 120_000;
+const ACTIVE_STREAM_HISTORY_TIMESTAMP_TOLERANCE_MS = 10_000;
 const NO_CHAT_SCROLL_ELEMENT = JSON.parse("null") as HTMLDivElement | null;
 
 /** Returns visible text carried by active stream message details. */
@@ -188,7 +189,8 @@ export function isActiveStreamRecoveredInMessages(
                 (messageTimestamp === undefined ||
                     streamUpdatedAt === undefined ||
                     !isSameRun ||
-                    messageTimestamp >= streamUpdatedAt);
+                    messageTimestamp + ACTIVE_STREAM_HISTORY_TIMESTAMP_TOLERANCE_MS >=
+                        streamUpdatedAt);
             const hasRecoveredMediaDetails =
                 !hasMediaDetails ||
                 streamMediaIdentities.every((identity) =>
