@@ -51,9 +51,10 @@ import { CronJobDetails } from "../components/features/cron/CronJobDetails";
 import { CronJobList } from "../components/features/cron/CronJobList";
 import { BackupOverviewCard } from "../components/features/dashboard/BackupOverviewCard";
 import { CacheStatusCard } from "../components/features/dashboard/CacheStatusCard";
-import { CronOverviewCard } from "../components/features/dashboard/CronOverviewCard";
+import { JobsOverviewCard } from "../components/features/dashboard/JobsOverviewCard";
 import { LogRotationCard } from "../components/features/dashboard/LogRotationCard";
 import { QuotaOverviewCard } from "../components/features/dashboard/QuotaOverviewCard";
+import { ReportsOverviewCard } from "../components/features/dashboard/ReportsOverviewCard";
 import { ServiceActionsCard } from "../components/features/dashboard/ServiceActionsCard";
 import { AutovacuumHealthTable } from "../components/features/database/AutovacuumHealthTable";
 import { DatabasesTable } from "../components/features/database/DatabaseSizesTable";
@@ -5343,11 +5344,42 @@ describe("shared component helpers", () => {
                                 id: "ops.log-rotation",
                                 intervalSeconds: 86_400,
                                 isRunning: false,
+                                lastRun: {
+                                    id: 1,
+                                    jobId: "ops.log-rotation",
+                                    status: "success",
+                                    triggerType: "schedule",
+                                    startedAt: "2026-06-24T09:59:00.000Z",
+                                    finishedAt: "2026-06-24T10:00:00.000Z",
+                                    output: {},
+                                },
                                 name: "Log rotation",
                                 nextRunAt: "2026-06-24T22:30:00.000Z",
                                 scheduleType: "cron",
                                 cronExpression: "30 22 * * *",
                                 updatedAt: "2026-06-24T08:00:00.000Z",
+                            },
+                        ],
+                    });
+                }
+
+                if (url === "/api/reports") {
+                    return Response.json({
+                        items: [
+                            {
+                                bodyMd: "Heartbeat looks good.",
+                                createdAt: "2026-06-24T10:05:00.000Z",
+                                dedupeKey: "heartbeat:ok",
+                                id: 1,
+                                metadata: {},
+                                occurredAt: "2026-06-24T10:05:00.000Z",
+                                source: "openclaw",
+                                sourceJobId: "heartbeat",
+                                status: "ok",
+                                summary: "Heartbeat looks good.",
+                                title: "Heartbeat report",
+                                type: "heartbeat",
+                                updatedAt: "2026-06-24T10:05:00.000Z",
                             },
                         ],
                     });
@@ -5457,7 +5489,8 @@ describe("shared component helpers", () => {
         render(
             <QueryClientProvider client={queryClient}>
                 <LogRotationCard />
-                <CronOverviewCard />
+                <JobsOverviewCard />
+                <ReportsOverviewCard />
                 <QuotaOverviewCard
                     quotas={{
                         cacheAgeMs: 0,
@@ -5586,7 +5619,9 @@ describe("shared component helpers", () => {
 
         await waitFor(() => {
             expect(screen.getByText("Log rotation")).toBeInTheDocument();
-            expect(screen.getByText("Cron jobs")).toBeInTheDocument();
+            expect(screen.getByText("Jobs")).toBeInTheDocument();
+            expect(screen.getByText("OpenClaw cron")).toBeInTheDocument();
+            expect(screen.getByText("Reports")).toBeInTheDocument();
         });
 
         await user.click(screen.getByRole("button", { name: "hooks" }));

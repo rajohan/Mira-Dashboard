@@ -82,81 +82,77 @@ export function LogRotationCard() {
     );
 
     return (
-        <Card className="overflow-hidden">
-            <div className="border-b border-primary-700 px-4 py-3">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
-                        <div className="flex items-center gap-2 text-lg font-semibold">
-                            <RotateCw className="size-4 text-accent-400" />
-                            Log rotation
-                        </div>
-                        <div className="text-xs text-primary-400">
-                            Dashboard scheduled job for approved file logs under
-                            /opt/docker/data.
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
-                        <Button
-                            size="sm"
-                            onClick={() => isDryRun.mutate()}
-                            disabled={isDryRun.isPending || realRun.isPending}
-                            className="w-full sm:w-auto"
-                        >
-                            <FlaskConical className="size-4" />
-                            {isDryRun.isPending ? "Running..." : "Run dry-run now"}
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant="danger"
-                            onClick={() => realRun.mutate()}
-                            disabled={isDryRun.isPending || realRun.isPending}
-                            className="w-full sm:w-auto"
-                        >
-                            <Play className="size-4" />
-                            {realRun.isPending ? "Running..." : "Run real now"}
-                        </Button>
-                    </div>
-                </div>
+        <Card>
+            <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold tracking-wide text-primary-300 uppercase">
+                    Log rotation
+                </h3>
+                <RotateCw className="size-4 text-primary-400" />
             </div>
 
-            <div className="grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-5">
-                <Card className="p-4">
-                    <div className="text-sm text-primary-400">Workflow</div>
-                    <div className="mt-2 text-lg font-semibold">Scheduled real</div>
-                </Card>
-                <Card className="p-4">
-                    <div className="text-sm text-primary-400">Schedule</div>
-                    <div className="mt-2 text-lg font-semibold">
+            <div className="space-y-2 text-sm text-primary-200">
+                <div className="flex items-center justify-between gap-2">
+                    <span>Workflow</span>
+                    <span className="text-primary-100">Scheduled real</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                    <span>Schedule</span>
+                    <span className="min-w-0 truncate text-right text-primary-100">
                         {formatSchedule(logRotationJob)}
-                    </div>
-                </Card>
-                <Card className="p-4">
-                    <div className="text-sm text-primary-400">Retention</div>
-                    <div className="mt-2 text-lg font-semibold">3 archives</div>
-                </Card>
-                <Card className="p-4">
-                    <div className="text-sm text-primary-400">Rotate at</div>
-                    <div className="mt-2 text-lg font-semibold">10 MB / daily</div>
-                </Card>
-                <Card className="p-4">
-                    <div className="text-sm text-primary-400">Last run</div>
-                    <div className="mt-2 text-lg font-semibold">
+                    </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                    <span>Retention</span>
+                    <span className="text-primary-100">3 archives</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                    <span>Rotate at</span>
+                    <span className="text-primary-100">10 MB / daily</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                    <span className="shrink-0">Last run</span>
+                    <span className="min-w-0 truncate text-right text-primary-100">
                         {lastRun?.finishedAt
                             ? formatDate(new Date(lastRun.finishedAt))
                             : "—"}
-                    </div>
-                    <div className="mt-1 text-xs text-primary-400">
+                    </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                    <span>Result</span>
+                    <span className="min-w-0 truncate text-right text-primary-100">
                         {lastRun
                             ? `${lastRun.rotatedFiles} rotated · ${lastRun.errors.length} errors`
                             : status.isLoading
                               ? "Loading..."
                               : "No recorded run yet"}
-                    </div>
-                </Card>
+                    </span>
+                </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-2">
+                <Button
+                    size="sm"
+                    onClick={() => isDryRun.mutate()}
+                    disabled={isDryRun.isPending || realRun.isPending}
+                    className="w-full justify-center"
+                >
+                    <FlaskConical className="size-4" />
+                    {isDryRun.isPending ? "Running..." : "Run dry-run now"}
+                </Button>
+                <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={() => realRun.mutate()}
+                    disabled={isDryRun.isPending || realRun.isPending}
+                    className="w-full justify-center"
+                >
+                    <Play className="size-4" />
+                    {realRun.isPending ? "Running..." : "Run real now"}
+                </Button>
             </div>
 
             {lastAction ? (
-                <div className="border-t border-primary-700 px-4 py-3">
+                <div className="mt-4 border-t border-primary-700 pt-3">
                     <div className="mb-2 text-xs font-semibold tracking-wide text-primary-400 uppercase">
                         Last {lastAction.result?.isDryRun ? "dry-run" : "real run"} output
                     </div>

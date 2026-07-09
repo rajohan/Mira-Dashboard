@@ -1035,7 +1035,6 @@ describe("Mira Dashboard backend integration", () => {
         expect(
             heartbeat.body.entries.find((entry) => entry.key === "moltbook.home")
         ).toMatchObject({
-            data: { posts: [{ id: "post-1" }] },
             errorCode: "",
             errorMessage: "",
             meta: { provider: "moltbook" },
@@ -1046,7 +1045,6 @@ describe("Mira Dashboard backend integration", () => {
             heartbeat.body.entries.find((entry) => entry.key === "quota.openai")
         ).toMatchObject({
             consecutiveFailures: 2,
-            data: "",
             errorCode: "rate_limited",
             errorMessage: "Quota API failed",
             status: "error",
@@ -1055,14 +1053,12 @@ describe("Mira Dashboard backend integration", () => {
         expect(
             heartbeat.body.entries.find((entry) => entry.key === "weather.expired")
         ).toMatchObject({
-            data: { location: "Expired" },
             status: "stale",
             updatedAt: "2026-06-23T08:00:00.000Z",
         });
         expect(
             heartbeat.body.entries.find((entry) => entry.key === "git.status")
         ).toMatchObject({
-            data: { branch: "main" },
             meta: { producer: "preserve" },
             status: "fresh",
         });
@@ -1070,7 +1066,6 @@ describe("Mira Dashboard backend integration", () => {
             heartbeat.body.entries.find((entry) => entry.key === "weather.failure")
         ).toMatchObject({
             consecutiveFailures: 1,
-            data: "",
             errorCode: "check_failed",
             errorMessage: "Weather offline",
             status: "error",
@@ -1082,7 +1077,6 @@ describe("Mira Dashboard backend integration", () => {
             )
         ).toMatchObject({
             consecutiveFailures: 1,
-            data: { lastGood: true },
             errorCode: "check_failed",
             errorMessage: "Weather refresh failed",
             status: "error",

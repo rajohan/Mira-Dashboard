@@ -1477,12 +1477,17 @@ describe("backend route and service behavior", () => {
         });
 
         const cacheHeartbeat = await cacheRoutes["/api/cache/heartbeat"].GET();
-        await expect(cacheHeartbeat.json()).resolves.toMatchObject({
+        const cacheHeartbeatText = await cacheHeartbeat.text();
+        const cacheHeartbeatJson = JSON.parse(cacheHeartbeatText) as {
+            count: number;
+            entries: Record<string, { data?: unknown; key?: string }>;
+        };
+        expect(cacheHeartbeatText).toContain('"data":null');
+        expect(cacheHeartbeatJson).toMatchObject({
             count: expect.any(Number),
             entries: expect.arrayContaining([
                 expect.objectContaining({
                     consecutiveFailures: 2,
-                    data: "raw-value",
                     key: "route.string",
                     meta: {},
                 }),
@@ -3875,6 +3880,8 @@ esac
             ["cache.moltbook", "moltbook"],
             ["cache.backup.kopia", "backup.kopia.status"],
             ["cache.backup.walg", "backup.walg.status"],
+            ["cache.docker.summary", "docker.summary"],
+            ["cache.database.summary", "database.summary"],
         ] as const;
 
         for (const [id, key] of jobs) {

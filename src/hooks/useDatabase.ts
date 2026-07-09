@@ -1,9 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
-
-import { apiFetchRequired } from "./useApi";
+import { useCacheEntry } from "./useCache";
 
 /** Represents the database overview API response. */
 export interface DatabaseOverviewResponse {
+    checkedAt?: string;
     overview: {
         totalDatabaseSizeBytes: number;
         totalBackends: number;
@@ -78,11 +77,8 @@ export interface DatabaseOverviewResponse {
 
 /** Provides database overview. */
 export function useDatabaseOverview() {
-    return useQuery({
-        queryKey: ["database", "overview"],
-        queryFn: () => apiFetchRequired<DatabaseOverviewResponse>("/database/overview"),
-        refetchInterval: 15_000,
-        staleTime: 5000,
-        refetchOnWindowFocus: false,
+    const query = useCacheEntry<DatabaseOverviewResponse>("database.summary", 60_000, {
+        refreshOnMissing: true,
     });
+    return { ...query, data: query.data?.data };
 }

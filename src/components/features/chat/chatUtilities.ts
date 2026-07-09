@@ -397,6 +397,11 @@ export function mergeWithRecentOptimisticMessages(
     const nextIdentities = new Set(
         enrichedNextMessages.map((message) => messageIdentity(message))
     );
+    const nextToolCallRowIdentities = new Set(
+        enrichedNextMessages
+            .map((message) => toolCallRowIdentity(message))
+            .filter((identity): identity is string => Boolean(identity))
+    );
     const nextAssistantTexts = nextMessages
         .filter((message) => message.role.toLowerCase() === "assistant")
         .map((message) => message.text);
@@ -419,6 +424,11 @@ export function mergeWithRecentOptimisticMessages(
         }
 
         if (nextIdentities.has(messageIdentity(message))) {
+            return false;
+        }
+
+        const toolCallIdentity = toolCallRowIdentity(message);
+        if (toolCallIdentity && nextToolCallRowIdentities.has(toolCallIdentity)) {
             return false;
         }
 

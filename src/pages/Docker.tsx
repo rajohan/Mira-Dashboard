@@ -38,6 +38,7 @@ import {
     useDockerUpdaterEvents,
     useDockerUpdaterServices,
     useDockerVolumes,
+    useRefreshDockerSummary,
     useRunDockerUpdater,
 } from "../hooks/useDocker";
 /** Renders the Docker UI. */
@@ -89,6 +90,7 @@ export function Docker() {
     const dockerPrune = useDockerPrune();
     const dockerManualUpdate = useDockerManualUpdate();
     const runDockerUpdater = useRunDockerUpdater();
+    const refreshDockerSummary = useRefreshDockerSummary();
 
     const containers = containersQuery.data || [];
     const images = imagesQuery.data || [];
@@ -165,6 +167,7 @@ export function Docker() {
             if (!response.ok) {
                 throw new Error(result.error || "Failed to restart stack");
             }
+            await refreshDockerSummary();
             showActionOutput(result.output || "Docker stack restart completed.");
         } catch (error) {
             showActionOutput(

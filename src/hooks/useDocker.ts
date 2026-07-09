@@ -1,11 +1,7 @@
-import {
-    keepPreviousData,
-    useMutation,
-    useQuery,
-    useQueryClient,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiDeleteRequired, apiFetchRequired, apiPostRequired } from "./useApi";
+import { cacheKeys, useCacheEntry } from "./useCache";
 
 /** Represents Docker container. */
 export interface DockerContainer {
@@ -184,6 +180,16 @@ export interface DockerUpdaterRunResult {
     steps: DockerUpdaterRunStep[];
 }
 
+export interface DockerSummaryCache {
+    checkedAt: string;
+    containers: DockerContainer[];
+    images: DockerImage[];
+    volumes: DockerVolume[];
+    updaterServices: DockerUpdaterService[];
+    updaterEvents: DockerUpdaterEvent[];
+    updaterSummary: DockerUpdaterSummary;
+}
+
 /** Defines Docker keys. */
 export const dockerKeys = {
     containers: ["docker", "containers"] as const,
@@ -197,12 +203,18 @@ export const dockerKeys = {
     updaterEvents: (limit: number) => ["docker", "updater", "events", limit] as const,
 };
 
-/** Fetches containers. */
-async function fetchContainers(): Promise<DockerContainer[]> {
-    const data = await apiFetchRequired<{ containers: DockerContainer[] }>(
-        "/docker/containers"
-    );
-    return data.containers || [];
+function invalidateDockerSummary(queryClient: ReturnType<typeof useQueryClient>) {
+    return queryClient.invalidateQueries({ queryKey: cacheKeys.entry("docker.summary") });
+}
+
+async function refreshDockerSummary(queryClient: ReturnType<typeof useQueryClient>) {
+    try {
+        await apiPostRequired("/cache/docker.summary/refresh");
+    } catch (error) {
+        console.warn("[Docker] Failed to refresh Docker summary cache:", error);
+    }
+
+    await invalidateDockerSummary(queryClient);
 }
 
 /** Fetches container. */
@@ -220,52 +232,17 @@ async function fetchContainerLogs(containerId: string, tail: number): Promise<st
     return data.content || "";
 }
 
-/** Fetches images. */
-async function fetchImages(): Promise<DockerImage[]> {
-    const data = await apiFetchRequired<{ images: DockerImage[] }>("/docker/images");
-    return data.images || [];
-}
-
-/** Fetches volumes. */
-async function fetchVolumes(): Promise<DockerVolume[]> {
-    const data = await apiFetchRequired<{ volumes: DockerVolume[] }>("/docker/volumes");
-    return data.volumes || [];
-}
-
 /** Fetches Docker exec job. */
 async function fetchDockerExecJob(jobId: string): Promise<DockerExecJob> {
     return apiFetchRequired<DockerExecJob>(`/docker/exec/${encodeURIComponent(jobId)}`);
 }
 
-/** Fetches Docker updater services. */
-async function fetchDockerUpdaterServices(): Promise<{
-    services: DockerUpdaterService[];
-    summary: DockerUpdaterSummary;
-}> {
-    return apiFetchRequired<{
-        services: DockerUpdaterService[];
-        summary: DockerUpdaterSummary;
-    }>("/docker/updater/services");
-}
-
-/** Fetches Docker updater events. */
-async function fetchDockerUpdaterEvents(limit: number): Promise<DockerUpdaterEvent[]> {
-    const data = await apiFetchRequired<{ events: DockerUpdaterEvent[] }>(
-        `/docker/updater/events?limit=${limit}`
-    );
-    return data.events || [];
-}
-
 /** Provides Docker containers. */
 export function useDockerContainers() {
-    return useQuery({
-        queryKey: dockerKeys.containers,
-        queryFn: fetchContainers,
-        placeholderData: keepPreviousData,
-        staleTime: 5000,
-        refetchInterval: 10_000,
-        refetchOnWindowFocus: false,
+    const query = useCacheEntry<DockerSummaryCache>("docker.summary", 30_000, {
+        refreshOnMissing: true,
     });
+    return { ...query, data: query.data?.data.containers ?? [] };
 }
 
 /** Provides Docker container. */
@@ -294,26 +271,18 @@ export function useDockerContainerLogs(
 
 /** Provides Docker images. */
 export function useDockerImages() {
-    return useQuery({
-        queryKey: dockerKeys.images,
-        queryFn: fetchImages,
-        placeholderData: keepPreviousData,
-        staleTime: 10_000,
-        refetchInterval: 30_000,
-        refetchOnWindowFocus: false,
+    const query = useCacheEntry<DockerSummaryCache>("docker.summary", 30_000, {
+        refreshOnMissing: true,
     });
+    return { ...query, data: query.data?.data.images ?? [] };
 }
 
 /** Provides Docker volumes. */
 export function useDockerVolumes() {
-    return useQuery({
-        queryKey: dockerKeys.volumes,
-        queryFn: fetchVolumes,
-        placeholderData: keepPreviousData,
-        staleTime: 10_000,
-        refetchInterval: 30_000,
-        refetchOnWindowFocus: false,
+    const query = useCacheEntry<DockerSummaryCache>("docker.summary", 30_000, {
+        refreshOnMissing: true,
     });
+    return { ...query, data: query.data?.data.volumes ?? [] };
 }
 
 /** Provides Docker exec job. */
@@ -331,24 +300,37 @@ export function useDockerExecJob(jobId: string | undefined) {
 
 /** Provides Docker updater services. */
 export function useDockerUpdaterServices() {
-    return useQuery({
-        queryKey: dockerKeys.updaterServices,
-        queryFn: fetchDockerUpdaterServices,
-        refetchInterval: 30_000,
-        staleTime: 10_000,
-        refetchOnWindowFocus: false,
+    const query = useCacheEntry<DockerSummaryCache>("docker.summary", 30_000, {
+        refreshOnMissing: true,
     });
+    return {
+        ...query,
+        data: {
+            services: query.data?.data.updaterServices ?? [],
+            summary: query.data?.data.updaterSummary ?? {
+                autoPolicy: 0,
+                enabled: 0,
+                failed: 0,
+                notifyPolicy: 0,
+                total: 0,
+                updateAvailable: 0,
+            },
+        },
+    };
 }
 
 /** Provides Docker updater events. */
-export function useDockerUpdaterEvents(limit = 50) {
-    return useQuery({
-        queryKey: dockerKeys.updaterEvents(limit),
-        queryFn: () => fetchDockerUpdaterEvents(limit),
-        refetchInterval: 30_000,
-        staleTime: 10_000,
-        refetchOnWindowFocus: false,
+export function useDockerUpdaterEvents(limit = 25) {
+    const query = useCacheEntry<DockerSummaryCache>("docker.summary", 30_000, {
+        refreshOnMissing: true,
     });
+    return { ...query, data: (query.data?.data.updaterEvents ?? []).slice(0, limit) };
+}
+
+/** Provides Docker summary refresh. */
+export function useRefreshDockerSummary() {
+    const queryClient = useQueryClient();
+    return () => refreshDockerSummary(queryClient);
 }
 
 /** Provides Docker action. */
@@ -365,6 +347,7 @@ export function useDockerAction() {
             ),
         onSuccess: async () => {
             await Promise.all([
+                refreshDockerSummary(queryClient),
                 queryClient.invalidateQueries({ queryKey: dockerKeys.containers }),
                 queryClient.invalidateQueries({ queryKey: dockerKeys.images }),
                 queryClient.invalidateQueries({ queryKey: dockerKeys.volumes }),
@@ -384,6 +367,7 @@ export function useDockerManualUpdate() {
             ),
         onSuccess: async () => {
             await Promise.all([
+                refreshDockerSummary(queryClient),
                 queryClient.invalidateQueries({ queryKey: dockerKeys.containers }),
                 queryClient.invalidateQueries({ queryKey: dockerKeys.images }),
                 queryClient.invalidateQueries({ queryKey: dockerKeys.volumes }),
@@ -404,6 +388,7 @@ export function useRunDockerUpdater() {
         mutationFn: () => apiPostRequired<DockerUpdaterRunResult>("/docker/updater/run"),
         onSuccess: async () => {
             await Promise.all([
+                refreshDockerSummary(queryClient),
                 queryClient.invalidateQueries({ queryKey: dockerKeys.containers }),
                 queryClient.invalidateQueries({ queryKey: dockerKeys.images }),
                 queryClient.invalidateQueries({ queryKey: dockerKeys.volumes }),
@@ -426,7 +411,10 @@ export function useDeleteDockerImage() {
                 `/docker/images/${encodeURIComponent(imageId)}`
             ),
         onSuccess: async () => {
-            await queryClient.invalidateQueries({ queryKey: dockerKeys.images });
+            await Promise.all([
+                refreshDockerSummary(queryClient),
+                queryClient.invalidateQueries({ queryKey: dockerKeys.images }),
+            ]);
         },
     });
 }
@@ -441,7 +429,10 @@ export function useDeleteDockerVolume() {
                 `/docker/volumes/${encodeURIComponent(volumeName)}`
             ),
         onSuccess: async () => {
-            await queryClient.invalidateQueries({ queryKey: dockerKeys.volumes });
+            await Promise.all([
+                refreshDockerSummary(queryClient),
+                queryClient.invalidateQueries({ queryKey: dockerKeys.volumes }),
+            ]);
         },
     });
 }
@@ -456,6 +447,7 @@ export function useDockerPrune() {
                 target,
             }),
         onSuccess: async (_, target) => {
+            await refreshDockerSummary(queryClient);
             if (target === "images") {
                 await queryClient.invalidateQueries({ queryKey: dockerKeys.images });
             } else if (target === "volumes") {

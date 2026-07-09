@@ -13,7 +13,16 @@ import os from "node:os";
 import { database } from "../database.ts";
 import { runProcess } from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
+import {
+    getContainers,
+    getDockerUpdaterEvents,
+    getDockerUpdaterServices,
+    getDockerUpdaterSummary,
+    getImages,
+    getVolumes,
+} from "../routes/dockerRoutes.ts";
 import { writeCacheSuccess } from "./cacheEntryWriter.ts";
+import { getDatabaseOverview } from "./databaseOverview.ts";
 import {
     getScheduledJob,
     registerScheduledJobAction,
@@ -76,6 +85,8 @@ const MOLTBOOK_CACHE_KEY_LIST = [
 type MoltbookCacheKey = (typeof MOLTBOOK_CACHE_KEY_LIST)[number];
 const MOLTBOOK_CACHE_KEYS = new Set<string>(MOLTBOOK_CACHE_KEY_LIST);
 const LOG_ROTATION_STATE_KEY = "log_rotation.state";
+const DOCKER_SUMMARY_KEY = "docker.summary";
+const DATABASE_SUMMARY_KEY = "database.summary";
 
 const gitRepos = [
     {
@@ -1782,6 +1793,58 @@ async function refreshLogRotationStateCache() {
     return { refreshed: [LOG_ROTATION_STATE_KEY] };
 }
 
+async function refreshDockerSummaryCache() {
+    const containers = await getContainers();
+    const [images, volumes, updaterServices, updaterEvents] = await Promise.all([
+        getImages(containers),
+        getVolumes(containers),
+        getDockerUpdaterServices(),
+        getDockerUpdaterEvents(25),
+    ]);
+    const payload = {
+        checkedAt: nowIso(),
+        containers,
+        images,
+        volumes,
+        updaterServices,
+        updaterEvents,
+        updaterSummary: getDockerUpdaterSummary(updaterServices),
+    };
+    writeCacheSuccess({
+        key: DOCKER_SUMMARY_KEY,
+        data: payload,
+        source: "backend",
+        ttl: 45,
+        ttlUnit: "minutes",
+        metadata: {
+            producer: "refreshCacheProducer",
+            workflow: "Cache Foundation - Docker Summary",
+            refreshIntervalMinutes: 30,
+        },
+    });
+    return { refreshed: [DOCKER_SUMMARY_KEY] };
+}
+
+async function refreshDatabaseSummaryCache() {
+    const payload = {
+        checkedAt: nowIso(),
+        ...(await getDatabaseOverview()),
+    };
+    writeCacheSuccess({
+        key: DATABASE_SUMMARY_KEY,
+        data: payload,
+        source: "backend",
+        ttl: 90,
+        ttlUnit: "minutes",
+        metadata: {
+            producer: "refreshCacheProducer",
+            workflow: "Cache Foundation - Database Summary",
+            refreshIntervalMinutes: 60,
+        },
+    });
+    return { refreshed: [DATABASE_SUMMARY_KEY] };
+}
+
 function redactOpenAiQuotaAccount(openai: Awaited<ReturnType<typeof checkOpenAiQuota>>) {
     if (!openai || typeof openai !== "object" || !("account" in openai)) {
         return openai;
@@ -1814,6 +1877,8 @@ function isSupportedCacheProducerKey(key: string): boolean {
         key === "backup.kopia.status" ||
         key === "backup.walg.status" ||
         key === "quotas.summary" ||
+        key === DOCKER_SUMMARY_KEY ||
+        key === DATABASE_SUMMARY_KEY ||
         key === LOG_ROTATION_STATE_KEY
     );
 }
@@ -1895,6 +1960,12 @@ async function refreshCacheProducerUnlocked(key: string) {
     }
     if (key === "quotas.summary") {
         return refreshCacheWithFailureRecord(key, refreshQuotasCache);
+    }
+    if (key === DOCKER_SUMMARY_KEY) {
+        return refreshCacheWithFailureRecord(key, refreshDockerSummaryCache);
+    }
+    if (key === DATABASE_SUMMARY_KEY) {
+        return refreshCacheWithFailureRecord(key, refreshDatabaseSummaryCache);
     }
     if (key === LOG_ROTATION_STATE_KEY) {
         return refreshCacheWithFailureRecord(key, refreshLogRotationStateCache);
@@ -2087,6 +2158,24 @@ const cacheRefreshScheduledJobs = [
         intervalSeconds: 60 * 60,
         actionKey: "cache.refresh",
         actionPayload: { key: "backup.walg.status" },
+    },
+    {
+        id: "cache.docker.summary",
+        name: "Docker summary cache",
+        description: "Refresh Docker overview cache.",
+        scheduleType: "interval",
+        intervalSeconds: 30 * 60,
+        actionKey: "cache.refresh",
+        actionPayload: { key: DOCKER_SUMMARY_KEY },
+    },
+    {
+        id: "cache.database.summary",
+        name: "Database summary cache",
+        description: "Refresh database overview cache.",
+        scheduleType: "interval",
+        intervalSeconds: 60 * 60,
+        actionKey: "cache.refresh",
+        actionPayload: { key: DATABASE_SUMMARY_KEY },
     },
 ] as const;
 

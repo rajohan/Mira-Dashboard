@@ -275,6 +275,10 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
         });
     }
 
+    if (method === "POST" && url === "/api/cache/docker.summary/refresh") {
+        return Response.json({ entry: { key: "docker.summary" }, isOk: true });
+    }
+
     if (method === "POST" && url === "/api/docker/exec/start") {
         expect(parseRequestBody(init)).toMatchObject({
             command: "echo hello",
@@ -502,7 +506,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     if (url === "/api/cache/heartbeat") {
         return Response.json({
             generatedAt: "2026-06-24T08:00:00.000Z",
-            count: 5,
+            count: 7,
             entries: [
                 {
                     key: "weather.spydeberg",
@@ -543,6 +547,24 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                 {
                     key: "system.host",
                     source: "system",
+                    status: "fresh",
+                    updatedAt: "2026-06-24T08:00:00.000Z",
+                    consecutiveFailures: 0,
+                    data: {},
+                    meta: {},
+                },
+                {
+                    key: "docker.summary",
+                    source: "backend",
+                    status: "fresh",
+                    updatedAt: "2026-06-24T08:00:00.000Z",
+                    consecutiveFailures: 0,
+                    data: {},
+                    meta: {},
+                },
+                {
+                    key: "database.summary",
+                    source: "backend",
                     status: "fresh",
                     updatedAt: "2026-06-24T08:00:00.000Z",
                     consecutiveFailures: 0,
@@ -697,6 +719,63 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
         });
     }
 
+    if (url === "/api/cache/database.summary") {
+        return Response.json({
+            key: "database.summary",
+            status: "fresh",
+            source: "backend",
+            consecutiveFailures: 0,
+            updatedAt: "2026-06-24T08:00:00.000Z",
+            meta: {},
+            data: {
+                checkedAt: "2026-06-24T08:00:00.000Z",
+                overview: {
+                    totalDatabaseSizeBytes: 1024,
+                    totalBackends: 2,
+                    averageCacheHitRatio: 99,
+                    connections: { active: 1, idle: 1 },
+                    pgStatStatementsEnabled: true,
+                    torrentCounts: { comet: 1, bitmagnet: 1 },
+                    pgbouncer: {
+                        clientConnections: 1,
+                        serverConnections: 1,
+                        waitingClients: 0,
+                        maxWait: 0,
+                        avgQueryTime: 1,
+                        avgTransactionTime: 1,
+                    },
+                },
+                databases: [
+                    {
+                        datname: "metabase",
+                        size_pretty: "1 MB",
+                        size_bytes: "1024",
+                        numbackends: "2",
+                        xact_commit: "10",
+                        xact_rollback: "0",
+                        blks_hit: "100",
+                        blks_read: "1",
+                        cache_hit_ratio: "99",
+                    },
+                ],
+                deadTuples: [],
+                topQueries: [
+                    {
+                        query: "select 1",
+                        calls: "1",
+                        total_exec_time: "1",
+                        mean_exec_time: "1",
+                        rows: "1",
+                        shared_blks_hit: "1",
+                        shared_blks_read: "0",
+                    },
+                ],
+                pgbouncerPools: [],
+                pgbouncerStats: [],
+            },
+        });
+    }
+
     if (url === "/api/database/overview") {
         return Response.json({
             overview: {
@@ -742,6 +821,139 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
             ],
             pgbouncerPools: [],
             pgbouncerStats: [],
+        });
+    }
+
+    if (url === "/api/cache/docker.summary") {
+        return Response.json({
+            key: "docker.summary",
+            status: "fresh",
+            source: "backend",
+            consecutiveFailures: 0,
+            updatedAt: "2026-06-24T08:00:00.000Z",
+            meta: {},
+            data: {
+                checkedAt: "2026-06-24T08:00:00.000Z",
+                containers: [
+                    {
+                        command: "node server.js",
+                        createdAt: "2026-06-24T08:00:00.000Z",
+                        finishedAt: undefined,
+                        health: "healthy",
+                        id: "abc123",
+                        image: "mira-dashboard:latest",
+                        imageId: "sha256:image",
+                        ipAddresses: { mira: "172.20.0.2" },
+                        mounts: [],
+                        name: "dashboard",
+                        ports: ["3100/tcp"],
+                        project: "mira",
+                        restartCount: 0,
+                        runningFor: "2 hours",
+                        service: "dashboard",
+                        startedAt: "2026-06-24T08:00:00.000Z",
+                        state: "running",
+                        stats: {
+                            blockIO: "0 B / 0 B",
+                            cpu: "3.5%",
+                            memory: "128 MiB / 1 GiB",
+                            memoryPercent: "12%",
+                            netIO: "1 KB / 2 KB",
+                            pids: "8",
+                        },
+                        status: "Up",
+                    },
+                ],
+                images: [
+                    {
+                        containerName: "dashboard",
+                        createdAt: "2026-06-24T08:00:00.000Z",
+                        id: "img1",
+                        inUseBy: ["dashboard"],
+                        lastTagTime: "2026-06-24T08:00:00.000Z",
+                        platform: "linux/amd64",
+                        repository: "mira-dashboard",
+                        size: 1024,
+                        tag: "latest",
+                    },
+                    {
+                        containerName: "",
+                        createdAt: "2026-06-24T08:00:00.000Z",
+                        id: "img-unused",
+                        inUseBy: [],
+                        lastTagTime: "2026-06-24T08:00:00.000Z",
+                        platform: "linux/amd64",
+                        repository: "unused",
+                        size: 2048,
+                        tag: "",
+                    },
+                ],
+                volumes: [
+                    {
+                        name: "dashboard-data",
+                        driver: "local",
+                        mountpoint: "/var/lib/docker/volumes/dashboard-data",
+                        labels: {},
+                        scope: "local",
+                        size: "1 KiB",
+                        usedBy: ["dashboard"],
+                    },
+                    {
+                        name: "unused-volume",
+                        driver: "local",
+                        mountpoint: "/var/lib/docker/volumes/unused-volume",
+                        labels: {},
+                        scope: "local",
+                        size: "2 KiB",
+                        usedBy: [],
+                    },
+                ],
+                updaterServices: [
+                    {
+                        id: 1,
+                        appSlug: "dashboard",
+                        composeImageRef: "mira-dashboard:latest",
+                        currentDigest: "sha256:old",
+                        currentTag: "1.0.0",
+                        enabled: true,
+                        imageRepo: "mira-dashboard",
+                        lastCheckedAt: "2026-06-24T08:00:00.000Z",
+                        lastStatus: "update_available",
+                        lastUpdatedAt: undefined,
+                        latestDigest: "sha256:new",
+                        latestTag: "1.0.1",
+                        metadata: {},
+                        pinMode: "tag",
+                        policy: "notify",
+                        serviceName: "dashboard",
+                        updateAvailable: true,
+                    },
+                ],
+                updaterEvents: [
+                    {
+                        appSlug: "dashboard",
+                        createdAt: "2026-06-24T08:10:00.000Z",
+                        details: {},
+                        eventType: "update_available",
+                        fromDigest: "sha256:old",
+                        fromTag: "1.0.0",
+                        id: 1,
+                        managedServiceId: 1,
+                        message: "update available",
+                        serviceName: "dashboard",
+                        toDigest: "sha256:new",
+                        toTag: "1.0.1",
+                    },
+                ],
+                updaterSummary: {
+                    autoPolicy: 0,
+                    enabled: 1,
+                    failed: 0,
+                    notifyPolicy: 1,
+                    total: 1,
+                    updateAvailable: 1,
+                },
+            },
         });
     }
 
@@ -989,7 +1201,30 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     actionPayload: {},
                     createdAt: "2026-06-24T08:00:00.000Z",
                     updatedAt: "2026-06-24T08:00:00.000Z",
+                    lastRun: jobsApiState.heartbeatRuns[0],
                     isRunning: false,
+                },
+            ],
+        });
+    }
+
+    if (url === "/api/reports") {
+        return Response.json({
+            items: [
+                {
+                    bodyMd: "Heartbeat looks good.",
+                    createdAt: "2026-06-24T08:05:00.000Z",
+                    dedupeKey: "heartbeat:ok",
+                    id: 1,
+                    metadata: {},
+                    occurredAt: "2026-06-24T08:05:00.000Z",
+                    source: "openclaw",
+                    sourceJobId: "heartbeat",
+                    status: "ok",
+                    summary: "Heartbeat looks good.",
+                    title: "Heartbeat report",
+                    type: "heartbeat",
+                    updatedAt: "2026-06-24T08:05:00.000Z",
                 },
             ],
         });

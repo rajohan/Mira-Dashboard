@@ -21,10 +21,13 @@ import { useEffect, useState } from "react";
 import {
     BackupOverviewCard,
     CacheStatusCard,
-    CronOverviewCard,
+    DatabaseOverviewCard,
+    DockerOverviewCard,
     GitOverviewCard,
+    JobsOverviewCard,
     LogRotationCard,
     QuotaOverviewCard,
+    ReportsOverviewCard,
     ServiceActionsCard,
 } from "../components/features/dashboard";
 import { Alert } from "../components/ui/Alert";
@@ -253,7 +256,10 @@ export function Dashboard() {
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4 xl:gap-6">
                 <QuotaOverviewCard quotas={quotas} />
                 <GitOverviewCard />
-                <CronOverviewCard />
+                <JobsOverviewCard />
+                <ReportsOverviewCard />
+                <DockerOverviewCard />
+                <DatabaseOverviewCard />
                 <CacheStatusCard
                     title="Cache controls"
                     items={[
@@ -290,16 +296,25 @@ export function Dashboard() {
                             label: "Host",
                             description: "Disk, memory and host warnings",
                         },
+                        {
+                            key: "docker.summary",
+                            label: "Docker",
+                            description: "Containers, images, volumes, and update cache",
+                        },
+                        {
+                            key: "database.summary",
+                            label: "Database",
+                            description: "Postgres and PgBouncer metrics cache",
+                        },
                     ]}
                 />
+                <LogRotationCard />
             </div>
 
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:gap-6">
                 <BackupOverviewCard />
                 <ServiceActionsCard />
             </div>
-
-            <LogRotationCard />
         </div>
     );
 }

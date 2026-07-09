@@ -2259,29 +2259,33 @@ describe("Mira Dashboard frontend behavior", () => {
                 const url = String(input);
                 const method = init?.method ?? "GET";
 
-                if (url === "/api/database/overview" && method === "GET") {
+                if (url === "/api/cache/database.summary" && method === "GET") {
                     return Response.json({
-                        overview: {
-                            totalDatabaseSizeBytes: 1024,
-                            totalBackends: 2,
-                            averageCacheHitRatio: 99,
-                            connections: {},
-                            pgStatStatementsEnabled: true,
-                            torrentCounts: { comet: 1, bitmagnet: 2 },
-                            pgbouncer: {
-                                clientConnections: 1,
-                                serverConnections: 1,
-                                waitingClients: 0,
-                                maxWait: 0,
-                                avgQueryTime: 1,
-                                avgTransactionTime: 2,
+                        key: "database.summary",
+                        data: {
+                            overview: {
+                                totalDatabaseSizeBytes: 1024,
+                                totalBackends: 2,
+                                averageCacheHitRatio: 99,
+                                connections: {},
+                                pgStatStatementsEnabled: true,
+                                torrentCounts: { comet: 1, bitmagnet: 2 },
+                                pgbouncer: {
+                                    clientConnections: 1,
+                                    serverConnections: 1,
+                                    waitingClients: 0,
+                                    maxWait: 0,
+                                    avgQueryTime: 1,
+                                    avgTransactionTime: 2,
+                                },
                             },
+                            databases: [],
+                            deadTuples: [],
+                            topQueries: [],
+                            pgbouncerPools: [],
+                            pgbouncerStats: [],
                         },
-                        databases: [],
-                        deadTuples: [],
-                        topQueries: [],
-                        pgbouncerPools: [],
-                        pgbouncerStats: [],
+                        status: "fresh",
                     });
                 }
 
