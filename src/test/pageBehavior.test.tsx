@@ -992,6 +992,22 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
         });
     }
 
+    if (url === "/api/docker/containers/stats") {
+        return Response.json({
+            stats: [
+                {
+                    blockIO: "4 KB / 8 KB",
+                    cpu: "8.5%",
+                    id: "abc123",
+                    memory: "256 MiB / 1 GiB",
+                    memoryPercent: "25%",
+                    netIO: "3 KB / 6 KB",
+                    pids: "9",
+                },
+            ],
+        });
+    }
+
     if (url === "/api/docker/containers/abc123") {
         return Response.json({
             command: "node server.js",
@@ -2752,6 +2768,10 @@ describe("Mira Dashboard pages", () => {
         await waitFor(() => {
             expect(screen.getByText("Updater overview")).toBeInTheDocument();
         });
+        await waitFor(() => {
+            expect(screen.getAllByText("8.5%").length).toBeGreaterThan(0);
+            expect(screen.getAllByText("268 MB").length).toBeGreaterThan(0);
+        });
 
         clickElement(screen.getByRole("button", { name: /run updater now/i }));
         await waitFor(() => {
@@ -2797,9 +2817,8 @@ describe("Mira Dashboard pages", () => {
         clickElement(screen.getAllByLabelText(/open console for dashboard/i)[0]!);
         await user.type(
             screen.getByPlaceholderText(/command to run inside container/i),
-            "echo hello"
+            "echo hello{enter}"
         );
-        clickElement(screen.getByRole("button", { name: /^run$/i }));
         await waitFor(() => {
             expect(fetchMock).toHaveBeenCalledWith(
                 "/api/docker/exec/start",

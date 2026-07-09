@@ -1,5 +1,5 @@
 import { Boxes, History, Play, RefreshCw, Square, X } from "lucide-react";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, KeyboardEvent } from "react";
 import { useRef, useState } from "react";
 
 import { DockerContainersTable } from "../components/features/docker/DockerContainersTable";
@@ -53,6 +53,7 @@ export function Docker() {
     const [logsTail, setLogsTail] = useState(200);
     const [consoleCommand, setConsoleCommand] = useState("");
     const [consoleJobId, setConsoleJobId] = useState<string | undefined>(undefined);
+    const [isStartingConsoleJob, setIsStartingConsoleJob] = useState(false);
     const [dangerousDelete, setDangerousDelete] = useState<
         | undefined
         | { type: "image"; id: string; label: string }
@@ -241,8 +242,29 @@ export function Docker() {
 
     /** Starts an interactive Docker console job for the selected container. */
     async function handleStartConsole(containerId: string) {
-        const result = await startDockerExec(containerId, consoleCommand);
-        setConsoleJobId(result.jobId);
+        const command = consoleCommand.trim();
+        if (!command || isStartingConsoleJob) {
+            return;
+        }
+
+        setIsStartingConsoleJob(true);
+        try {
+            const result = await startDockerExec(containerId, command);
+            setConsoleJobId(result.jobId);
+            setConsoleCommand("");
+        } finally {
+            setIsStartingConsoleJob(false);
+        }
+    }
+
+    /** Handles console command keys. */
+    function handleConsoleCommandKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+        if (event.key !== "Enter" || !selectedConsoleContainer) {
+            return;
+        }
+
+        event.preventDefault();
+        void handleStartConsole(selectedConsoleContainer.id);
     }
 
     if (isInitialLoading) {
@@ -714,33 +736,43 @@ export function Docker() {
                 }
                 size="3xl"
             >
-                <div className="mb-3 flex flex-col gap-3 sm:mb-4 sm:flex-row sm:items-center">
+                <div className="mb-3 flex flex-col gap-3 sm:mb-4 sm:flex-row sm:items-start">
                     <Input
+                        aria-label="Docker console command"
                         value={consoleCommand}
                         onChange={(event: ChangeEvent<HTMLInputElement>) =>
                             setConsoleCommand(event.target.value)
                         }
+                        onKeyDown={handleConsoleCommandKeyDown}
                         placeholder="Command to run inside container"
-                        className="min-w-0 flex-1"
+                        className="min-w-0 flex-1 font-mono"
                     />
-                    <Button
-                        onClick={() =>
-                            void handleStartConsole(selectedConsoleContainer!.id)
-                        }
-                        disabled={!selectedConsoleContainer || !consoleCommand.trim()}
-                    >
-                        <Play className="size-4" />
-                        Run
-                    </Button>
-                    {consoleJobId && execJobQuery.data?.status === "running" ? (
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                         <Button
-                            variant="danger"
-                            onClick={() => void stopDockerExec(consoleJobId)}
+                            onClick={() =>
+                                void handleStartConsole(selectedConsoleContainer!.id)
+                            }
+                            disabled={
+                                !selectedConsoleContainer ||
+                                !consoleCommand.trim() ||
+                                isStartingConsoleJob
+                            }
+                            className="w-full sm:w-auto"
                         >
-                            <Square className="size-4" />
-                            Stop
+                            <Play className="size-4" />
+                            {isStartingConsoleJob ? "Sending..." : "Send"}
                         </Button>
-                    ) : undefined}
+                        {consoleJobId && execJobQuery.data?.status === "running" ? (
+                            <Button
+                                variant="danger"
+                                onClick={() => void stopDockerExec(consoleJobId)}
+                                className="w-full sm:w-auto"
+                            >
+                                <Square className="size-4" />
+                                Stop
+                            </Button>
+                        ) : undefined}
+                    </div>
                 </div>
                 <pre className="max-h-[70vh] overflow-auto rounded-lg bg-black p-3 text-xs text-primary-100 sm:p-4">
                     {execJobQuery.data

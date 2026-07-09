@@ -30,16 +30,18 @@ export interface DockerContainer {
         readOnly: boolean;
         name?: string;
     }>;
-    stats:
-        | undefined
-        | {
-              cpu: string;
-              memory: string;
-              memoryPercent: string;
-              netIO: string;
-              blockIO: string;
-              pids: string;
-          };
+    stats: undefined | DockerContainerStats;
+}
+
+/** Represents Docker container live stats. */
+export interface DockerContainerStats {
+    blockIO: string;
+    cpu: string;
+    id?: string;
+    memory: string;
+    memoryPercent: string;
+    netIO: string;
+    pids: string;
 }
 
 /** Represents Docker container details. */
@@ -201,6 +203,7 @@ export const dockerKeys = {
     execJob: (jobId: string | undefined) => ["docker", "exec", jobId] as const,
     updaterServices: ["docker", "updater", "services"] as const,
     updaterEvents: (limit: number) => ["docker", "updater", "events", limit] as const,
+    containerStats: ["docker", "containers", "stats"] as const,
 };
 
 function invalidateDockerSummary(queryClient: ReturnType<typeof useQueryClient>) {
@@ -237,12 +240,37 @@ async function fetchDockerExecJob(jobId: string): Promise<DockerExecJob> {
     return apiFetchRequired<DockerExecJob>(`/docker/exec/${encodeURIComponent(jobId)}`);
 }
 
+async function fetchDockerContainerStats(): Promise<DockerContainerStats[]> {
+    const data = await apiFetchRequired<{ stats: DockerContainerStats[] }>(
+        "/docker/containers/stats"
+    );
+    return data.stats;
+}
+
 /** Provides Docker containers. */
 export function useDockerContainers() {
     const query = useCacheEntry<DockerSummaryCache>("docker.summary", 30_000, {
         refreshOnMissing: true,
     });
-    return { ...query, data: query.data?.data.containers ?? [] };
+    const statsQuery = useQuery({
+        queryKey: dockerKeys.containerStats,
+        queryFn: fetchDockerContainerStats,
+        refetchInterval: 5000,
+        staleTime: 1000,
+    });
+    const statsById = new Map(
+        (statsQuery.data ?? []).flatMap((stats) =>
+            stats.id ? ([[stats.id, stats]] as const) : []
+        )
+    );
+
+    return {
+        ...query,
+        data: (query.data?.data.containers ?? []).map((container) => ({
+            ...container,
+            stats: statsById.get(container.id) ?? container.stats,
+        })),
+    };
 }
 
 /** Provides Docker container. */
@@ -251,7 +279,7 @@ export function useDockerContainer(containerId: string | undefined) {
         queryKey: dockerKeys.container(containerId || ""),
         queryFn: () => fetchContainer(containerId!),
         enabled: Boolean(containerId),
-        refetchInterval: 15_000,
+        refetchInterval: 5000,
     });
 }
 
