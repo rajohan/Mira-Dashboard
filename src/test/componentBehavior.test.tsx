@@ -4545,6 +4545,31 @@ describe("shared component helpers", () => {
                 now
             )
         ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "assistant same run prefix with newly streamed tail",
+                        thinking: undefined,
+                    },
+                    text: "assistant same run prefix with newly streamed tail",
+                    updatedAt: recentUpdatedAt,
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "assistant same run prefix",
+                        images: [],
+                        role: "assistant",
+                        runId: "run-1",
+                        text: "assistant same run prefix",
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
         const mixedTextDiagnosticStream = {
             ...stream,
             message: {
@@ -4563,6 +4588,25 @@ describe("shared component helpers", () => {
                         content: "assistant recovered text",
                         images: [],
                         role: "assistant",
+                        text: "assistant recovered text",
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...mixedTextDiagnosticStream,
+                    runId: "run-1",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "assistant recovered text",
+                        images: [],
+                        role: "assistant",
+                        runId: "run-1",
                         text: "assistant recovered text",
                     },
                 ],

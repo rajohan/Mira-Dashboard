@@ -147,7 +147,8 @@ export function isActiveStreamRecoveredInMessages(
             if (
                 isSameRun &&
                 streamText.trim() &&
-                isRecoveredAssistantText(message.text, streamText)
+                !hasDiagnosticDetails &&
+                message.text.trim().includes(streamText.trim())
             ) {
                 return true;
             }
