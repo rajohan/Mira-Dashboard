@@ -165,7 +165,7 @@ export function isActiveStreamRecoveredInMessages(
         now - streamUpdatedAt >= ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
 
     return Boolean(
-        (streamText.trim() || hasToolDetails) &&
+        (streamText.trim() || hasToolDetails || hasMediaDetails) &&
         visibleMessages.some((message) => {
             if (message.role.toLowerCase() !== "assistant") {
                 return false;
@@ -179,6 +179,15 @@ export function isActiveStreamRecoveredInMessages(
                 !hasMediaDetails ||
                 mediaIdentity(message.images, message.attachments) ===
                     streamMediaIdentity;
+            if (
+                hasMediaDetails &&
+                hasRecoveredMediaDetails &&
+                !streamText.trim() &&
+                !hasDiagnosticDetails
+            ) {
+                return true;
+            }
+
             if (
                 isSameRun &&
                 streamText.trim() &&
@@ -205,8 +214,9 @@ export function isActiveStreamRecoveredInMessages(
                 thinkingText.trim() === streamThinkingText.trim()
             ) {
                 return (
-                    !stream.message?.text.trim() ||
-                    message.text.trim() === stream.message.text.trim()
+                    hasRecoveredMediaDetails &&
+                    (!stream.message?.text.trim() ||
+                        message.text.trim() === stream.message.text.trim())
                 );
             }
 
@@ -250,16 +260,19 @@ export function isActiveStreamRecoveredInMessages(
                 );
 
                 if (hasRecoveredToolCalls) {
-                    return stream.message.text.trim()
-                        ? message.text.trim() === stream.message.text.trim()
-                        : true;
+                    return (
+                        hasRecoveredMediaDetails &&
+                        (stream.message.text.trim()
+                            ? message.text.trim() === stream.message.text.trim()
+                            : true)
+                    );
                 }
             }
 
             if (stream.message?.toolResult && message.toolResult) {
-                return isMatchingToolResult(
-                    stream.message.toolResult,
-                    message.toolResult
+                return (
+                    hasRecoveredMediaDetails &&
+                    isMatchingToolResult(stream.message.toolResult, message.toolResult)
                 );
             }
 

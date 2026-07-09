@@ -4653,6 +4653,30 @@ describe("shared component helpers", () => {
                 now
             )
         ).toBe(true);
+        const mediaOnlyStream = {
+            ...mediaStream,
+            message: {
+                ...mediaStream.message,
+                text: "",
+            },
+            text: "",
+        };
+        expect(
+            isActiveStreamRecoveredInMessages(
+                mediaOnlyStream,
+                [
+                    {
+                        attachments: mediaOnlyStream.message.attachments,
+                        content: "",
+                        images: mediaOnlyStream.message.images,
+                        role: "assistant",
+                        runId: "run-1",
+                        text: "",
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
         const mixedTextDiagnosticStream = {
             ...stream,
             message: {
@@ -4672,6 +4696,34 @@ describe("shared component helpers", () => {
                         images: [],
                         role: "assistant",
                         text: "assistant recovered text",
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...mixedTextDiagnosticStream,
+                    message: {
+                        ...mixedTextDiagnosticStream.message,
+                        attachments: mediaStream.message.attachments,
+                        images: mediaStream.message.images,
+                    },
+                    runId: "run-1",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: [
+                            { text: "assistant recovered text", type: "text" },
+                            { text: "still live reasoning", type: "thinking" },
+                        ],
+                        images: [],
+                        role: "assistant",
+                        runId: "run-1",
+                        text: "assistant recovered text",
+                        thinking: [{ text: "still live reasoning" }],
                     },
                 ],
                 now
