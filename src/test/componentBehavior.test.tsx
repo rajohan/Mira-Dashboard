@@ -3519,6 +3519,47 @@ describe("shared component helpers", () => {
             thinking: [{ text: "diagnostic after text" }],
         });
 
+        messages = [
+            {
+                content: "Hi",
+                role: "assistant",
+                runId: "same-run-short-current-echo",
+                text: "Hi",
+                timestamp: new Date().toISOString(),
+            },
+            {
+                content: "",
+                role: "assistant",
+                runId: "same-run-short-current-echo",
+                text: "",
+                thinking: [{ text: "short diagnostic after text" }],
+                timestamp: new Date().toISOString(),
+            },
+        ];
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: {
+                        role: "assistant",
+                        text: "Hi there",
+                    },
+                    runId: "same-run-short-current-echo",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(messages).toHaveLength(2);
+        expect(messages[0]).toMatchObject({
+            text: "Hi there",
+        });
+        expect(messages[1]).toMatchObject({
+            text: "",
+            thinking: [{ text: "short diagnostic after text" }],
+        });
+
         const stableFinalText =
             "Fikset reviewen og pushet til PR #246: 8590a3f.\n\nVerifisert mot kode:\n\nGyldig: recovered-text merge kunne treffe eldre ikke-lokale history-rader.";
         messages = [

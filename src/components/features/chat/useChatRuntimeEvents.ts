@@ -2096,10 +2096,9 @@ export function useChatRuntimeEvents({
                                       message.local !== true &&
                                       messageIndex === lastAssistantMessageIndex &&
                                       isRecentChatRuntimeMessage(message) &&
-                                      isRecoveredAssistantText(
-                                          message.text,
-                                          finalAssistantMessage.text
-                                      );
+                                      finalAssistantMessage.text
+                                          .trim()
+                                          .startsWith(message.text.trim());
                                   const isSameRunLocalFinalTarget =
                                       isSameRun &&
                                       hasPrimaryText &&
