@@ -2090,8 +2090,12 @@ export function useChatRuntimeEvents({
                                           message.text,
                                           finalAssistantMessage.text
                                       );
+                                  const isSameRunLocalFinalTarget =
+                                      isSameRun &&
+                                      hasPrimaryText &&
+                                      message.local === true;
                                   if (
-                                      !(isSameRun && hasPrimaryText) &&
+                                      !isSameRunLocalFinalTarget &&
                                       !isRecoveredLocalText &&
                                       !isRecoveredRecentFinalEcho
                                   ) {

@@ -3446,6 +3446,38 @@ describe("shared component helpers", () => {
             thinking: [{ text: "diagnostic details" }],
         });
 
+        messages = [
+            {
+                content: "older same-run assistant text",
+                role: "assistant",
+                runId: "same-run-history-final",
+                text: "older same-run assistant text",
+                timestamp: new Date(Date.now() - 60_000).toISOString(),
+            },
+        ];
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: {
+                        role: "assistant",
+                        text: "current final text must append",
+                    },
+                    runId: "same-run-history-final",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(messages).toHaveLength(2);
+        expect(messages[0]).toMatchObject({
+            text: "older same-run assistant text",
+        });
+        expect(messages[1]).toMatchObject({
+            text: "current final text must append",
+        });
+
         const stableFinalText =
             "Fikset reviewen og pushet til PR #246: 8590a3f.\n\nVerifisert mot kode:\n\nGyldig: recovered-text merge kunne treffe eldre ikke-lokale history-rader.";
         messages = [
@@ -4512,6 +4544,31 @@ describe("shared component helpers", () => {
                 [
                     {
                         attachments: [],
+                        content: "Here is an undated older same-run answer",
+                        images: [],
+                        role: "assistant",
+                        runId: "run-1",
+                        text: "Here is an undated older same-run answer",
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "Here",
+                        thinking: undefined,
+                    },
+                    text: "Here",
+                    updatedAt: recentUpdatedAt,
+                },
+                [
+                    {
+                        attachments: [],
                         content: "Here is a completed same-run answer",
                         images: [],
                         role: "assistant",
@@ -4617,6 +4674,7 @@ describe("shared component helpers", () => {
                         role: "assistant",
                         runId: "run-1",
                         text: "final response still streaming and now complete",
+                        timestamp: new Date(now - 2000).toISOString(),
                     },
                 ],
                 now
@@ -4712,6 +4770,7 @@ describe("shared component helpers", () => {
                         role: "assistant",
                         runId: "run-1",
                         text: "assistant media text",
+                        timestamp: new Date(now - 2000).toISOString(),
                     },
                 ],
                 now
@@ -4734,6 +4793,38 @@ describe("shared component helpers", () => {
                         role: "assistant",
                         runId: "run-1",
                         text: "assistant media text",
+                        timestamp: new Date(now - 2000).toISOString(),
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                mediaStream,
+                [
+                    {
+                        attachments: [
+                            {
+                                fileName: "report.txt",
+                                id: "path-0",
+                                kind: "text" as const,
+                                mimeType: "text/plain",
+                                sizeBytes: 99,
+                            },
+                        ],
+                        content: "assistant media text",
+                        images: [
+                            {
+                                data: "image-data",
+                                mimeType: "image/png",
+                                type: "image" as const,
+                            },
+                        ],
+                        role: "assistant",
+                        runId: "run-1",
+                        text: "assistant media text",
+                        timestamp: new Date(now - 2000).toISOString(),
                     },
                 ],
                 now
@@ -4766,6 +4857,7 @@ describe("shared component helpers", () => {
                         role: "assistant",
                         runId: "run-1",
                         text: "assistant media text",
+                        timestamp: new Date(now - 2000).toISOString(),
                     },
                 ],
                 now
@@ -4790,6 +4882,7 @@ describe("shared component helpers", () => {
                         role: "assistant",
                         runId: "run-1",
                         text: "",
+                        timestamp: new Date(now - 2000).toISOString(),
                     },
                 ],
                 now

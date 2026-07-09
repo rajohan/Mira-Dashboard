@@ -125,12 +125,9 @@ function mediaIdentities(
         ...attachments.map((attachment) =>
             JSON.stringify({
                 contentBase64: attachment.contentBase64 || "",
-                dataUrl: attachment.dataUrl || "",
                 fileName: attachment.fileName,
-                id: attachment.id,
                 kind: attachment.kind,
                 mimeType: attachment.mimeType || "",
-                sizeBytes: attachment.sizeBytes,
                 type: "attachment",
             })
         ),
@@ -186,11 +183,11 @@ export function isActiveStreamRecoveredInMessages(
             const messageTimestamp = sessionTimestampMs(message.timestamp);
             const isCurrentStreamRow =
                 !hasRunConflict &&
-                (messageTimestamp === undefined ||
+                (!isSameRun ||
                     streamUpdatedAt === undefined ||
-                    !isSameRun ||
-                    messageTimestamp + ACTIVE_STREAM_HISTORY_TIMESTAMP_TOLERANCE_MS >=
-                        streamUpdatedAt);
+                    (messageTimestamp !== undefined &&
+                        messageTimestamp + ACTIVE_STREAM_HISTORY_TIMESTAMP_TOLERANCE_MS >=
+                            streamUpdatedAt));
             const hasRecoveredMediaDetails =
                 !hasMediaDetails ||
                 streamMediaIdentities.every((identity) =>
