@@ -108,6 +108,7 @@ import { useSessionActions } from "../hooks/useSessionActions";
 import {
     activeStreamRenderableText,
     isActiveStreamRecoveredInMessages,
+    isActiveStreamRenderedByLatestMessage,
     nextRefreshedChatMessages,
 } from "../pages/Chat";
 
@@ -4591,6 +4592,59 @@ describe("shared component helpers", () => {
                 text: "Done",
             })
         ).toBe("Done");
+        expect(
+            isActiveStreamRenderedByLatestMessage(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "final text still streaming",
+                        thinking: undefined,
+                    },
+                    runId: "agent:main:main",
+                    text: "final text still streaming",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "final text still streaming and complete",
+                        images: [],
+                        role: "assistant",
+                        runId: "real-run",
+                        text: "final text still streaming and complete",
+                    },
+                ]
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRenderedByLatestMessage(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "new answer",
+                        thinking: undefined,
+                    },
+                    text: "new answer",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "previous answer",
+                        images: [],
+                        role: "assistant",
+                        text: "previous answer",
+                    },
+                    {
+                        attachments: [],
+                        content: "new question",
+                        images: [],
+                        role: "user",
+                        text: "new question",
+                    },
+                ]
+            )
+        ).toBe(false);
         expect(isActiveStreamRecoveredInMessages(stream, visibleMessages, now)).toBe(
             false
         );

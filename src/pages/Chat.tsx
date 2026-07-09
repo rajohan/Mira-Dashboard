@@ -148,6 +148,45 @@ function isProvisionalActiveStreamRun(stream: ActiveChatStream): boolean {
     );
 }
 
+/** Returns whether a transcript row can represent an active stream run. */
+function isCompatibleActiveStreamMessage(
+    stream: ActiveChatStream,
+    message: ChatHistoryMessage
+): boolean {
+    if (!message.runId) {
+        return true;
+    }
+
+    return (
+        stream.runId === message.runId ||
+        stream.aliases.includes(message.runId) ||
+        isProvisionalActiveStreamRun(stream)
+    );
+}
+
+/** Returns whether the latest visible transcript row already renders a stream. */
+export function isActiveStreamRenderedByLatestMessage(
+    stream: ActiveChatStream,
+    visibleMessages: ChatHistoryMessage[]
+): boolean {
+    const latestMessage = visibleMessages.at(-1);
+    if (!latestMessage || latestMessage.role.toLowerCase() !== "assistant") {
+        return false;
+    }
+
+    if (!isCompatibleActiveStreamMessage(stream, latestMessage)) {
+        return false;
+    }
+
+    const streamText = activeStreamRenderableText(stream).trim();
+    const latestText = latestMessage.text.trim();
+    return Boolean(
+        streamText &&
+        latestText &&
+        (latestText.startsWith(streamText) || streamText.startsWith(latestText))
+    );
+}
+
 /** Returns whether an active stream is already represented in visible history. */
 export function isActiveStreamRecoveredInMessages(
     stream: ActiveChatStream,
@@ -180,15 +219,7 @@ export function isActiveStreamRecoveredInMessages(
                 return false;
             }
 
-            const isSameRun =
-                Boolean(stream.runId) &&
-                Boolean(message.runId) &&
-                stream.runId === message.runId;
-            const isCompatibleRun =
-                !message.runId ||
-                isSameRun ||
-                stream.aliases.includes(message.runId) ||
-                isProvisionalActiveStreamRun(stream);
+            const isCompatibleRun = isCompatibleActiveStreamMessage(stream, message);
             const hasRunConflict = Boolean(
                 stream.runId && message.runId && !isCompatibleRun
             );
@@ -718,10 +749,9 @@ export function Chat() {
     );
     /** Returns whether active stream text is already represented in history. */
     function isStreamRecoveredInMessages(stream: ActiveChatStream): boolean {
-        return isActiveStreamRecoveredInMessages(
-            stream,
-            visibleMessagesForRows,
-            Date.now()
+        return (
+            isActiveStreamRenderedByLatestMessage(stream, visibleMessagesForRows) ||
+            isActiveStreamRecoveredInMessages(stream, visibleMessagesForRows, Date.now())
         );
     }
 
