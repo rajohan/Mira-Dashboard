@@ -688,6 +688,17 @@ function mergeRuntimeToolMessages(
 
     return dedupeMessages([...next, ...unmerged]);
 }
+
+/** Returns whether a message timestamp is recent enough to be an event echo. */
+function isRecentChatRuntimeMessage(message: ChatHistoryMessage): boolean {
+    if (!message.timestamp) {
+        return false;
+    }
+
+    const timestampMs = Date.parse(message.timestamp);
+    return Number.isFinite(timestampMs) && Math.abs(Date.now() - timestampMs) < 30_000;
+}
+
 /** Returns a record nested in common runtime event fields. */
 function nestedRuntimeRecord(data: Record<string, unknown>): Record<string, unknown> {
     for (const key of ["item", "payload", "message"]) {
@@ -2042,8 +2053,15 @@ export function useChatRuntimeEvents({
                             finalMessageToAppend.text.trim()
                                 ? finalMessageToAppend
                                 : undefined;
+                        const lastAssistantMessageIndex = finalAssistantMessage
+                            ? wasPrevious.findLastIndex(
+                                  (message) =>
+                                      message.role.toLowerCase() === "assistant" &&
+                                      message.text.trim()
+                              )
+                            : -1;
                         const nextPrevious = finalAssistantMessage
-                            ? wasPrevious.map((message) => {
+                            ? wasPrevious.map((message, messageIndex) => {
                                   if (
                                       didMergeFinalMessage ||
                                       message.role.toLowerCase() !== "assistant"
@@ -2061,11 +2079,27 @@ export function useChatRuntimeEvents({
                                           message.text,
                                           finalAssistantMessage.text
                                       );
-                                  if (!isSameRun && !isRecoveredLocalText) {
+                                  const isRecoveredRecentFinalEcho =
+                                      message.local !== true &&
+                                      messageIndex === lastAssistantMessageIndex &&
+                                      isRecentChatRuntimeMessage(message) &&
+                                      isRecoveredAssistantText(
+                                          message.text,
+                                          finalAssistantMessage.text
+                                      );
+                                  if (
+                                      !isSameRun &&
+                                      !isRecoveredLocalText &&
+                                      !isRecoveredRecentFinalEcho
+                                  ) {
                                       return message;
                                   }
 
                                   didMergeFinalMessage = true;
+                                  if (isRecoveredRecentFinalEcho && !isSameRun) {
+                                      return message;
+                                  }
+
                                   const thinking = (
                                       finalAssistantMessage.thinking?.length
                                           ? finalAssistantMessage

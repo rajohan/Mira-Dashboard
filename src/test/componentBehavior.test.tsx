@@ -3406,6 +3406,46 @@ describe("shared component helpers", () => {
             )
         ).toHaveLength(1);
 
+        const stableFinalText =
+            "Fikset reviewen og pushet til PR #246: 8590a3f.\n\nVerifisert mot kode:\n\nGyldig: recovered-text merge kunne treffe eldre ikke-lokale history-rader.";
+        messages = [
+            {
+                content: stableFinalText,
+                role: "assistant",
+                text: stableFinalText,
+                timestamp: new Date().toISOString(),
+            },
+        ];
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: {
+                        role: "assistant",
+                        text: `${stableFinalText}\n\nFikset: isRecoveredAssistantText(...) brukes nå bare når message.local === true treffe eldre ikke-lokale history-rader.`,
+                    },
+                    runId: "late-corrupt-final-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        const stableFinalRows = messages.filter(
+            (message) =>
+                typeof message === "object" &&
+                message !== null &&
+                "role" in message &&
+                message.role === "assistant" &&
+                "text" in message &&
+                typeof message.text === "string" &&
+                message.text.includes("Fikset reviewen og pushet")
+        );
+        expect(stableFinalRows).toHaveLength(1);
+        expect(stableFinalRows[0]).toMatchObject({
+            text: stableFinalText,
+        });
+
         act(() => {
             listener?.({
                 event: "agent",
