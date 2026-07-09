@@ -2921,6 +2921,58 @@ describe("Mira Dashboard pages", () => {
         ).toBeInTheDocument();
     });
 
+    it("clears stale Docker detail stats when live container stats are absent", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/cache/docker.summary" && method === "GET") {
+                    const response = await apiResponse(url, method, init);
+                    const payload = (await response.json()) as Record<string, unknown>;
+                    const data = payload.data as {
+                        containers: Array<Record<string, unknown>>;
+                    };
+                    return Response.json({
+                        ...payload,
+                        data: {
+                            ...data,
+                            containers: data.containers.map((container) => ({
+                                ...container,
+                                stats: undefined,
+                            })),
+                        },
+                    });
+                }
+
+                if (url === "/api/docker/containers/stats" && method === "GET") {
+                    return Response.json({ stats: [] });
+                }
+
+                return apiResponse(url, method, init);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        renderPage(createElement(Docker));
+
+        await waitFor(() => {
+            expect(screen.getByText("Updater overview")).toBeInTheDocument();
+        });
+
+        clickElement(screen.getByLabelText(/open details for dashboard/i));
+
+        const detailsDialog = await screen.findByRole("dialog", {
+            name: /dashboard/i,
+        });
+        expect(within(detailsDialog).getByText("CPU: —")).toBeInTheDocument();
+        expect(within(detailsDialog).getByText("Memory: —")).toBeInTheDocument();
+    });
+
     it("keeps chat page storage and history helpers deterministic", () => {
         expect(readDeletedMessageKeys("agent:main:main")).toEqual(new Set());
 

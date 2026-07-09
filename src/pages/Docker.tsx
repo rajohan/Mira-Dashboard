@@ -108,10 +108,14 @@ export function Docker() {
         containers.find((container) => container.id === logsContainerId) || undefined;
     const selectedConsoleContainer =
         containers.find((container) => container.id === consoleContainerId) || undefined;
+    const selectedContainerStats =
+        selectedContainer === undefined
+            ? containerDetailsQuery.data?.stats
+            : selectedContainer.stats;
     const containerDetails = containerDetailsQuery.data
         ? {
               ...containerDetailsQuery.data,
-              stats: selectedContainer?.stats ?? containerDetailsQuery.data.stats,
+              stats: selectedContainerStats,
               status: selectedContainer?.status ?? containerDetailsQuery.data.status,
           }
         : undefined;
