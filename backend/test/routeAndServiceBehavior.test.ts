@@ -868,6 +868,7 @@ describe("backend route and service behavior", () => {
             gateway.request = originalRequest;
             gateway.sendSessionMessage = originalSendSessionMessage;
         });
+        const taskNotifications: string[] = [];
         gateway.request = async () => ({
             jobs: [
                 {
@@ -881,7 +882,9 @@ describe("backend route and service behavior", () => {
                 },
             ],
         });
-        gateway.sendSessionMessage = async () => {};
+        gateway.sendSessionMessage = async (_sessionKey, message) => {
+            taskNotifications.push(message);
+        };
 
         const { taskRoutes } = await import("../src/routes/taskRoutes.ts");
         const invalidCreate = await taskRoutes["/api/tasks"].POST(
@@ -970,6 +973,9 @@ describe("backend route and service behavior", () => {
         await expect(assign.json()).resolves.toMatchObject({
             assignees: [{ login: "mira-2026", name: "mira-2026" }],
         });
+        expect(taskNotifications.at(-1)).toBe(
+            `Task assigned: #${id} Coverage route task updated. This task is assigned to Mira and may need attention when the current work is clear.`
+        );
 
         const invalidMove = await taskRoutes["/api/tasks/:id/move"].POST(
             requestWithParameters(
@@ -1022,6 +1028,9 @@ describe("backend route and service behavior", () => {
             messageMd: "Progress update",
             taskId: id,
         });
+        expect(taskNotifications.at(-1)).toBe(
+            `Task progress: #${id} Coverage route task updated. This existing Mira task has new progress and may need attention when the current work is clear.`
+        );
         expect(typeof updateBody.createdAt).toBe("string");
 
         const listedUpdates = await taskRoutes["/api/tasks/:id/updates"].GET(
@@ -1069,6 +1078,9 @@ describe("backend route and service behavior", () => {
             requestWithParameters(`/api/tasks/${id}`, { id: String(id) })
         );
         expect(await responseJson(deleteTask)).toEqual({ isOk: true });
+        expect(taskNotifications.at(-1)).toBe(
+            `Task deleted: #${id} Coverage route task updated. This Mira-assigned task changed and may need attention when the current work is clear.`
+        );
     });
 
     it("file route listing, hidden path rejection, text writes, binary reads, and directory errors", async () => {

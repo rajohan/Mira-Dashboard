@@ -296,11 +296,33 @@ function recordEvent(taskId: number, eventType: string, payload: unknown) {
         .run(taskId, eventType, serializeTaskEventPayload(payload), nowIso());
 }
 
-async function notifyMira(eventType: string, task: { id: number; title: string }) {
+type MiraTaskNotificationEvent =
+    "assigned" | "created" | "deleted" | "progress" | "updated";
+
+function miraTaskNotificationMessage(
+    eventType: MiraTaskNotificationEvent,
+    task: { id: number; title: string }
+): string {
+    const taskLabel = `#${task.id} ${task.title}`;
+    if (eventType === "progress") {
+        return `Task ${eventType}: ${taskLabel}. This existing Mira task has new progress and may need attention when the current work is clear.`;
+    }
+
+    if (eventType === "created" || eventType === "assigned") {
+        return `Task ${eventType}: ${taskLabel}. This task is assigned to Mira and may need attention when the current work is clear.`;
+    }
+
+    return `Task ${eventType}: ${taskLabel}. This Mira-assigned task changed and may need attention when the current work is clear.`;
+}
+
+async function notifyMira(
+    eventType: MiraTaskNotificationEvent,
+    task: { id: number; title: string }
+) {
     try {
         await gateway.sendSessionMessage(
             "main",
-            `Task ${eventType}: #${task.id} ${task.title}. Reminder: this is a new/updated task assigned to Mira.`
+            miraTaskNotificationMessage(eventType, task)
         );
     } catch (error) {
         console.error("[Tasks] Failed to notify Mira:", error);
