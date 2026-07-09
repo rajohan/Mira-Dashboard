@@ -53,6 +53,9 @@ export function Docker() {
     const [logsTail, setLogsTail] = useState(200);
     const [consoleCommand, setConsoleCommand] = useState("");
     const [consoleJobId, setConsoleJobId] = useState<string | undefined>(undefined);
+    const [consoleStartError, setConsoleStartError] = useState<string | undefined>(
+        undefined
+    );
     const [isStartingConsoleJob, setIsStartingConsoleJob] = useState(false);
     const [dangerousDelete, setDangerousDelete] = useState<
         | undefined
@@ -75,13 +78,7 @@ export function Docker() {
     const containersQuery = useDockerContainers();
     const imagesQuery = useDockerImages();
     const volumesQuery = useDockerVolumes();
-    const selectedContainer =
-        containersQuery.data?.find((container) => container.id === selectedContainerId) ||
-        undefined;
-    const containerDetailsQuery = useDockerContainer(
-        selectedContainerId,
-        selectedContainer
-    );
+    const containerDetailsQuery = useDockerContainer(selectedContainerId);
     const logsQuery = useDockerContainerLogs(
         logsContainerId,
         logsTail,
@@ -105,10 +102,19 @@ export function Docker() {
     const isInitialLoading =
         containersQuery.isLoading || imagesQuery.isLoading || volumesQuery.isLoading;
 
+    const selectedContainer =
+        containers.find((container) => container.id === selectedContainerId) || undefined;
     const selectedLogsContainer =
         containers.find((container) => container.id === logsContainerId) || undefined;
     const selectedConsoleContainer =
         containers.find((container) => container.id === consoleContainerId) || undefined;
+    const containerDetails = containerDetailsQuery.data
+        ? {
+              ...containerDetailsQuery.data,
+              stats: selectedContainer?.stats ?? containerDetailsQuery.data.stats,
+              status: selectedContainer?.status ?? containerDetailsQuery.data.status,
+          }
+        : undefined;
 
     const summary = {
         running: containers.filter((container) => container.state === "running").length,
@@ -252,14 +258,15 @@ export function Docker() {
         }
 
         setIsStartingConsoleJob(true);
+        setConsoleStartError(undefined);
         try {
             const result = await startDockerExec(containerId, command);
             setConsoleJobId(result.jobId);
             setConsoleCommand("");
         } catch (error) {
-            showActionOutput(
-                `Failed to start Docker console.\n\n${formatActionError(error)}`
-            );
+            const message = `Failed to start Docker console.\n\n${formatActionError(error)}`;
+            setConsoleStartError(message);
+            showActionOutput(message);
         } finally {
             setIsStartingConsoleJob(false);
         }
@@ -614,43 +621,29 @@ export function Docker() {
             >
                 {containerDetailsQuery.isLoading ? (
                     <LoadingState message="Loading container details..." size="md" />
-                ) : containerDetailsQuery.data ? (
+                ) : containerDetails ? (
                     <div className="space-y-3 text-sm sm:space-y-4">
                         <div className="grid gap-3 sm:gap-4 md:grid-cols-2">
                             <Card className="p-3 sm:p-4">
                                 <div className="mb-2 font-semibold">Runtime</div>
                                 <div>
-                                    Created:{" "}
-                                    {formatTimestamp(
-                                        containerDetailsQuery.data.createdAt
-                                    )}
+                                    Created: {formatTimestamp(containerDetails.createdAt)}
                                 </div>
                                 <div>
-                                    Started:{" "}
-                                    {formatTimestamp(
-                                        containerDetailsQuery.data.startedAt
-                                    )}
+                                    Started: {formatTimestamp(containerDetails.startedAt)}
                                 </div>
-                                <div>Status: {containerDetailsQuery.data.status}</div>
+                                <div>Status: {containerDetails.status}</div>
                             </Card>
                             <Card className="p-3 sm:p-4">
                                 <div className="mb-2 font-semibold">Resources</div>
-                                <div>
-                                    CPU: {containerDetailsQuery.data.stats?.cpu || "—"}
-                                </div>
+                                <div>CPU: {containerDetails.stats?.cpu || "—"}</div>
                                 <div>
                                     Memory:{" "}
-                                    {formatDockerMemory(
-                                        containerDetailsQuery.data.stats?.memory
-                                    )}
+                                    {formatDockerMemory(containerDetails.stats?.memory)}
                                 </div>
+                                <div>Net I/O: {containerDetails.stats?.netIO || "—"}</div>
                                 <div>
-                                    Net I/O:{" "}
-                                    {containerDetailsQuery.data.stats?.netIO || "—"}
-                                </div>
-                                <div>
-                                    Block I/O:{" "}
-                                    {containerDetailsQuery.data.stats?.blockIO || "—"}
+                                    Block I/O: {containerDetails.stats?.blockIO || "—"}
                                 </div>
                             </Card>
                         </div>
@@ -658,7 +651,7 @@ export function Docker() {
                         <Card className="p-3 sm:p-4">
                             <div className="mb-2 font-semibold">Networks</div>
                             <div className="space-y-2 text-xs text-primary-300">
-                                {containerDetailsQuery.data.networks.map((network) => (
+                                {containerDetails.networks.map((network) => (
                                     <div
                                         key={network.name}
                                         className="rounded bg-primary-900/50 p-2 break-all"
@@ -677,7 +670,7 @@ export function Docker() {
                         <Card className="p-3 sm:p-4">
                             <div className="mb-2 font-semibold">Mounts</div>
                             <div className="space-y-2 text-xs text-primary-300">
-                                {containerDetailsQuery.data.mounts.map((mount) => (
+                                {containerDetails.mounts.map((mount) => (
                                     <div
                                         key={`${mount.source}:${mount.destination}`}
                                         className="rounded bg-primary-900/50 p-2 break-all"
@@ -736,6 +729,7 @@ export function Docker() {
                 onClose={() => {
                     setConsoleContainerId(undefined);
                     setConsoleJobId(undefined);
+                    setConsoleStartError(undefined);
                 }}
                 title={
                     selectedConsoleContainer
@@ -783,9 +777,10 @@ export function Docker() {
                     </div>
                 </div>
                 <pre className="max-h-[70vh] overflow-auto rounded-lg bg-black p-3 text-xs text-primary-100 sm:p-4">
-                    {execJobQuery.data
-                        ? `${execJobQuery.data.stdout}${execJobQuery.data.stderr ? `\n${execJobQuery.data.stderr}` : ""}`
-                        : "Run a command to see output."}
+                    {consoleStartError ||
+                        (execJobQuery.data
+                            ? `${execJobQuery.data.stdout}${execJobQuery.data.stderr ? `\n${execJobQuery.data.stderr}` : ""}`
+                            : "Run a command to see output.")}
                 </pre>
             </Modal>
 

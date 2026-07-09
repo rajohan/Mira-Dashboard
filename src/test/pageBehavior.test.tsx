@@ -1,5 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+    act,
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+    within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
@@ -2834,11 +2842,7 @@ describe("Mira Dashboard pages", () => {
 
         clickElement(screen.getByLabelText(/open details for dashboard/i));
         expect(await screen.findByText("Networks")).toBeInTheDocument();
-        expect(screen.getByText("IP: 172.20.0.2")).toBeInTheDocument();
-        expect(fetchMock).not.toHaveBeenCalledWith(
-            "/api/docker/containers/abc123",
-            expect.anything()
-        );
+        expect(screen.getByText("MAC: 02:42:ac:14:00:02")).toBeInTheDocument();
         clickElement(screen.getByLabelText(/close dashboard/i));
 
         clickElement(screen.getAllByRole("button", { name: /remove unused/i })[0]!);
@@ -2908,10 +2912,13 @@ describe("Mira Dashboard pages", () => {
             "echo hello{enter}"
         );
 
+        const consoleDialog = screen.getByRole("dialog", { name: /dashboard console/i });
         expect(
-            await screen.findByText(/Failed to start Docker console/i)
+            within(consoleDialog).getByText(/Failed to start Docker console/i)
         ).toBeInTheDocument();
-        expect(screen.getByText(/console unavailable/i)).toBeInTheDocument();
+        expect(
+            within(consoleDialog).getByText(/console unavailable/i)
+        ).toBeInTheDocument();
     });
 
     it("keeps chat page storage and history helpers deterministic", () => {

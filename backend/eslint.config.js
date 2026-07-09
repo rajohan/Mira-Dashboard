@@ -6,12 +6,23 @@ import unicorn from "eslint-plugin-unicorn";
 import globals from "globals";
 import tsEslint from "typescript-eslint";
 
+const tsEslintRecommended = tsEslint.configs.recommended.map((config) => ({
+    ...config,
+    languageOptions: {
+        ...config.languageOptions,
+        parserOptions: {
+            ...config.languageOptions?.parserOptions,
+            tsconfigRootDir: import.meta.dirname,
+        },
+    },
+}));
+
 const eslintConfig = defineConfig(
     {
         ignores: ["node_modules/**", "coverage/**", "dist/**", "eslint.config.js"],
     },
     eslintConfigs.configs.recommended,
-    tsEslint.configs.recommended,
+    tsEslintRecommended,
     unicorn.configs.recommended,
     {
         files: ["**/*.ts"],
