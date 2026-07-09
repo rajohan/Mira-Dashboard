@@ -27,6 +27,7 @@ import {
 import {
     CHAT_HISTORY_LIMIT,
     dedupeMessages,
+    isRecoveredAssistantText,
     mergeWithRecentOptimisticMessages,
 } from "./chatUtilities";
 
@@ -2034,9 +2035,65 @@ export function useChatRuntimeEvents({
                     ...(finalMessageToAppend ? [finalMessageToAppend] : []),
                 ];
                 if (messagesToAppend.length > 0 && eventMatchesSelected) {
-                    setMessages((wasPrevious) =>
-                        dedupeMessages([...wasPrevious, ...messagesToAppend])
-                    );
+                    setMessages((wasPrevious) => {
+                        let didMergeFinalMessage = false;
+                        const finalAssistantMessage =
+                            finalMessageToAppend?.role.toLowerCase() === "assistant" &&
+                            finalMessageToAppend.text.trim()
+                                ? finalMessageToAppend
+                                : undefined;
+                        const nextPrevious = finalAssistantMessage
+                            ? wasPrevious.map((message) => {
+                                  if (
+                                      didMergeFinalMessage ||
+                                      message.role.toLowerCase() !== "assistant"
+                                  ) {
+                                      return message;
+                                  }
+
+                                  const isSameRun =
+                                      Boolean(message.runId) &&
+                                      Boolean(finalAssistantMessage.runId) &&
+                                      message.runId === finalAssistantMessage.runId;
+                                  const isRecoveredText = isRecoveredAssistantText(
+                                      message.text,
+                                      finalAssistantMessage.text
+                                  );
+                                  if (!isSameRun && !isRecoveredText) {
+                                      return message;
+                                  }
+
+                                  didMergeFinalMessage = true;
+                                  const thinking = (
+                                      finalAssistantMessage.thinking?.length
+                                          ? finalAssistantMessage
+                                          : message
+                                  ).thinking;
+                                  const toolCalls = (
+                                      finalAssistantMessage.toolCalls?.length
+                                          ? finalAssistantMessage
+                                          : message
+                                  ).toolCalls;
+                                  return {
+                                      ...message,
+                                      ...finalAssistantMessage,
+                                      thinking,
+                                      toolCalls,
+                                      toolResult:
+                                          finalAssistantMessage.toolResult ||
+                                          message.toolResult,
+                                  };
+                              })
+                            : wasPrevious;
+
+                        return dedupeMessages([
+                            ...nextPrevious,
+                            ...remainingDiagnosticMessages,
+                            ...(finalMessageToAppend && !didMergeFinalMessage
+                                ? [finalMessageToAppend]
+                                : []),
+                        ]);
+                    });
                 }
 
                 clearActiveStreamsForRun(streamSessionKey, payload.runId);

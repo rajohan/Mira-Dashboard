@@ -3367,6 +3367,40 @@ describe("shared component helpers", () => {
             )
         ).toBe(true);
 
+        messages = [
+            {
+                content: "duplicate final answer",
+                local: true,
+                role: "assistant",
+                runId: "duplicate-final-run",
+                text: "duplicate final answer",
+                timestamp: new Date().toISOString(),
+            },
+        ];
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: { role: "assistant", text: "duplicate final answer" },
+                    runId: "duplicate-final-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.filter(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "text" in message &&
+                    message.text === "duplicate final answer"
+            )
+        ).toHaveLength(1);
+
         act(() => {
             listener?.({
                 event: "agent",
