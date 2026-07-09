@@ -75,7 +75,13 @@ export function Docker() {
     const containersQuery = useDockerContainers();
     const imagesQuery = useDockerImages();
     const volumesQuery = useDockerVolumes();
-    const containerDetailsQuery = useDockerContainer(selectedContainerId);
+    const selectedContainer =
+        containersQuery.data?.find((container) => container.id === selectedContainerId) ||
+        undefined;
+    const containerDetailsQuery = useDockerContainer(
+        selectedContainerId,
+        selectedContainer
+    );
     const logsQuery = useDockerContainerLogs(
         logsContainerId,
         logsTail,
@@ -99,8 +105,6 @@ export function Docker() {
     const isInitialLoading =
         containersQuery.isLoading || imagesQuery.isLoading || volumesQuery.isLoading;
 
-    const selectedContainer =
-        containers.find((container) => container.id === selectedContainerId) || undefined;
     const selectedLogsContainer =
         containers.find((container) => container.id === logsContainerId) || undefined;
     const selectedConsoleContainer =
@@ -252,6 +256,10 @@ export function Docker() {
             const result = await startDockerExec(containerId, command);
             setConsoleJobId(result.jobId);
             setConsoleCommand("");
+        } catch (error) {
+            showActionOutput(
+                `Failed to start Docker console.\n\n${formatActionError(error)}`
+            );
         } finally {
             setIsStartingConsoleJob(false);
         }

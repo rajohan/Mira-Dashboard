@@ -2834,7 +2834,11 @@ describe("Mira Dashboard pages", () => {
 
         clickElement(screen.getByLabelText(/open details for dashboard/i));
         expect(await screen.findByText("Networks")).toBeInTheDocument();
-        expect(screen.getByText("MAC: 02:42:ac:14:00:02")).toBeInTheDocument();
+        expect(screen.getByText("IP: 172.20.0.2")).toBeInTheDocument();
+        expect(fetchMock).not.toHaveBeenCalledWith(
+            "/api/docker/containers/abc123",
+            expect.anything()
+        );
         clickElement(screen.getByLabelText(/close dashboard/i));
 
         clickElement(screen.getAllByRole("button", { name: /remove unused/i })[0]!);
@@ -2869,6 +2873,46 @@ describe("Mira Dashboard pages", () => {
         view.unmount();
         view.queryClient.clear();
     }, 10_000);
+
+    it("shows Docker console start failures in the action output pane", async () => {
+        const user = userEvent.setup();
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+                if (method === "POST" && url === "/api/docker/exec/start") {
+                    return Response.json(
+                        { error: "console unavailable" },
+                        { status: 503 }
+                    );
+                }
+
+                return apiResponse(url, method, init);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        renderPage(createElement(Docker));
+
+        await waitFor(() => {
+            expect(screen.getByText("Updater overview")).toBeInTheDocument();
+        });
+
+        clickElement(screen.getAllByLabelText(/open console for dashboard/i)[0]!);
+        await user.type(
+            screen.getByPlaceholderText(/command to run inside container/i),
+            "echo hello{enter}"
+        );
+
+        expect(
+            await screen.findByText(/Failed to start Docker console/i)
+        ).toBeInTheDocument();
+        expect(screen.getByText(/console unavailable/i)).toBeInTheDocument();
+    });
 
     it("keeps chat page storage and history helpers deterministic", () => {
         expect(readDeletedMessageKeys("agent:main:main")).toEqual(new Set());

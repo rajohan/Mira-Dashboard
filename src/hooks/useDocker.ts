@@ -227,6 +227,20 @@ async function fetchContainer(containerId: string): Promise<DockerContainerDetai
     );
 }
 
+function containerSummaryToDetails(container: DockerContainer): DockerContainerDetails {
+    return {
+        ...container,
+        env: [],
+        labels: {},
+        networks: Object.entries(container.ipAddresses).map(([name, ipAddress]) => ({
+            gateway: "",
+            ipAddress,
+            macAddress: "",
+            name,
+        })),
+    };
+}
+
 /** Fetches container logs. */
 async function fetchContainerLogs(containerId: string, tail: number): Promise<string> {
     const data = await apiFetchRequired<{ content: string }>(
@@ -278,13 +292,28 @@ export function useDockerContainers() {
 }
 
 /** Provides Docker container. */
-export function useDockerContainer(containerId: string | undefined) {
-    return useQuery({
+export function useDockerContainer(
+    containerId: string | undefined,
+    container: DockerContainer | undefined
+) {
+    const query = useQuery({
         queryKey: dockerKeys.container(containerId || ""),
         queryFn: () => fetchContainer(containerId!),
-        enabled: Boolean(containerId),
-        refetchInterval: 5000,
+        enabled: Boolean(containerId) && !container,
+        refetchInterval: 15_000,
     });
+
+    if (!container) {
+        return query;
+    }
+
+    return {
+        ...query,
+        data: containerSummaryToDetails(container),
+        error: undefined,
+        isError: false,
+        isLoading: false,
+    };
 }
 
 /** Provides Docker container logs. */
