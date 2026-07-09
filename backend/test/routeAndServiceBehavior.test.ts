@@ -1482,12 +1482,12 @@ describe("backend route and service behavior", () => {
             count: number;
             entries: Record<string, { data?: unknown; key?: string }>;
         };
-        expect(cacheHeartbeatText).toContain('"data":null');
         expect(cacheHeartbeatJson).toMatchObject({
             count: expect.any(Number),
             entries: expect.arrayContaining([
                 expect.objectContaining({
                     consecutiveFailures: 2,
+                    data: "raw-value",
                     key: "route.string",
                     meta: {},
                 }),

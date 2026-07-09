@@ -9,13 +9,25 @@ const SLOW_QUERY_MEAN_MS = 500;
 const HIGH_DEAD_TUPLE_PERCENT = 20;
 const HIGH_DEAD_TUPLE_MINIMUM = 1000;
 
+function isDatabaseOverviewResponse(value: unknown): value is DatabaseOverviewResponse {
+    if (!value || typeof value !== "object") return false;
+    const candidate = value as Partial<DatabaseOverviewResponse>;
+    return (
+        !!candidate.overview &&
+        typeof candidate.overview === "object" &&
+        Array.isArray(candidate.databases) &&
+        Array.isArray(candidate.deadTuples) &&
+        Array.isArray(candidate.topQueries)
+    );
+}
+
 /** Renders the database overview card UI. */
 export function DatabaseOverviewCard() {
     const { data, isError, isLoading } = useCacheEntry<DatabaseOverviewResponse>(
         "database.summary",
         60_000
     );
-    const database = data?.data;
+    const database = isDatabaseOverviewResponse(data?.data) ? data.data : undefined;
     const overview = database?.overview;
     const waitingClients = overview?.pgbouncer.waitingClients ?? 0;
     const slowQueries = database?.topQueries.filter(

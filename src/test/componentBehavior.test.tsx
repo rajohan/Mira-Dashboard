@@ -51,6 +51,8 @@ import { CronJobDetails } from "../components/features/cron/CronJobDetails";
 import { CronJobList } from "../components/features/cron/CronJobList";
 import { BackupOverviewCard } from "../components/features/dashboard/BackupOverviewCard";
 import { CacheStatusCard } from "../components/features/dashboard/CacheStatusCard";
+import { DatabaseOverviewCard } from "../components/features/dashboard/DatabaseOverviewCard";
+import { DockerOverviewCard } from "../components/features/dashboard/DockerOverviewCard";
 import { JobsOverviewCard } from "../components/features/dashboard/JobsOverviewCard";
 import { LogRotationCard } from "../components/features/dashboard/LogRotationCard";
 import { QuotaOverviewCard } from "../components/features/dashboard/QuotaOverviewCard";
@@ -6599,6 +6601,54 @@ describe("shared component helpers", () => {
                 expect.objectContaining({ method: "POST" })
             );
         });
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("shows Docker cache unavailable when the cached payload is invalid", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () =>
+                Response.json({
+                    consecutiveFailures: 1,
+                    data: "",
+                    key: "docker.summary",
+                    meta: {},
+                    source: "backend",
+                    status: "error",
+                })
+            ),
+            writable: true,
+        });
+
+        const view = renderWithQueryClient(<DockerOverviewCard />);
+
+        expect(await screen.findByText("Docker cache unavailable.")).toBeInTheDocument();
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("shows database cache unavailable when the cached payload is invalid", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () =>
+                Response.json({
+                    consecutiveFailures: 1,
+                    data: "",
+                    key: "database.summary",
+                    meta: {},
+                    source: "backend",
+                    status: "error",
+                })
+            ),
+            writable: true,
+        });
+
+        const view = renderWithQueryClient(<DatabaseOverviewCard />);
+
+        expect(
+            await screen.findByText("Database cache unavailable.")
+        ).toBeInTheDocument();
         view.unmount();
         view.queryClient.clear();
     });

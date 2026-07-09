@@ -5,13 +5,25 @@ import { type DockerSummaryCache } from "../../../hooks/useDocker";
 import { Card } from "../../ui/Card";
 import { formatBytes } from "../docker/dockerFormatters";
 
+function isDockerSummaryCache(value: unknown): value is DockerSummaryCache {
+    if (!value || typeof value !== "object") return false;
+    const candidate = value as Partial<DockerSummaryCache>;
+    return (
+        Array.isArray(candidate.containers) &&
+        Array.isArray(candidate.images) &&
+        Array.isArray(candidate.volumes) &&
+        !!candidate.updaterSummary &&
+        typeof candidate.updaterSummary === "object"
+    );
+}
+
 /** Renders the Docker overview card UI. */
 export function DockerOverviewCard() {
     const { data, isError, isLoading } = useCacheEntry<DockerSummaryCache>(
         "docker.summary",
         30_000
     );
-    const docker = data?.data;
+    const docker = isDockerSummaryCache(data?.data) ? data.data : undefined;
     const containers = docker?.containers ?? [];
     const images = docker?.images ?? [];
     const volumes = docker?.volumes ?? [];
@@ -21,7 +33,7 @@ export function DockerOverviewCard() {
     const unhealthy = containers.filter(
         (container) => container.health === "unhealthy"
     ).length;
-    const updateAvailable = docker?.updaterSummary.updateAvailable ?? 0;
+    const updateAvailable = docker?.updaterSummary?.updateAvailable ?? 0;
     const totalImageSize = images.reduce((sum, image) => sum + image.size, 0);
 
     return (

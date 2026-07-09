@@ -67,9 +67,7 @@ export const cacheRoutes = {
     "/api/cache/heartbeat": {
         GET: async () => {
             const rows = await getAllCacheEntries();
-            const entries = rows.map((row) =>
-                mapCacheRowForResponse(row, { includeData: false })
-            );
+            const entries = rows.map((row) => mapCacheRowForResponse(row));
             return json({
                 count: entries.length,
                 entries,
