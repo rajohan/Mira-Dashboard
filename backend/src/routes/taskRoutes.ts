@@ -296,8 +296,11 @@ function recordEvent(taskId: number, eventType: string, payload: unknown) {
         .run(taskId, eventType, serializeTaskEventPayload(payload), nowIso());
 }
 
+type MiraTaskNotificationEvent =
+    "assigned" | "created" | "deleted" | "progress" | "updated";
+
 function miraTaskNotificationMessage(
-    eventType: string,
+    eventType: MiraTaskNotificationEvent,
     task: { id: number; title: string }
 ): string {
     const taskLabel = `#${task.id} ${task.title}`;
@@ -312,7 +315,10 @@ function miraTaskNotificationMessage(
     return `Task ${eventType}: ${taskLabel}. This Mira-assigned task changed and may need attention when the current work is clear.`;
 }
 
-async function notifyMira(eventType: string, task: { id: number; title: string }) {
+async function notifyMira(
+    eventType: MiraTaskNotificationEvent,
+    task: { id: number; title: string }
+) {
     try {
         await gateway.sendSessionMessage(
             "main",
