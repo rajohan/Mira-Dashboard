@@ -352,7 +352,7 @@ async function getContainerInspectMap(containerIds: string[]) {
     return map;
 }
 
-async function getContainers() {
+export async function getContainers() {
     const psRows = parseJsonLines<DockerPsRow>(
         await runDocker(["ps", "-a", "--format", "{{json .}}"])
     );
@@ -478,18 +478,20 @@ async function readDockerJson<T>(request: Request): Promise<T | Response> {
     }
 }
 
-async function getImages() {
+export async function getImages(
+    containers?: Awaited<ReturnType<typeof getContainers>> | undefined
+) {
     const images = parseJsonLines<DockerImageRow>(
         await runDocker(["image", "ls", "--format", "{{json .}}", "--no-trunc"])
     );
-    const containers = await getContainers();
+    const imageContainers = containers ?? (await getContainers());
     return images.map((image) => {
         const imageReference = `${image.Repository}:${image.Tag}`;
         return {
             containerName: image.ContainerName || "",
             createdAt: image.Created || image.CreatedAt || image.CreatedSince || "",
             id: image.ID,
-            inUseBy: containers
+            inUseBy: imageContainers
                 .filter(
                     (container) =>
                         container.imageId.includes(image.ID) ||
@@ -509,11 +511,13 @@ async function getImages() {
     });
 }
 
-async function getVolumes() {
+export async function getVolumes(
+    containers?: Awaited<ReturnType<typeof getContainers>> | undefined
+) {
     const volumeRows = parseJsonLines<DockerVolumeRow>(
         await runDocker(["volume", "ls", "--format", "{{json .}}"])
     );
-    const containers = await getContainers();
+    const volumeContainers = containers ?? (await getContainers());
     return volumeRows.map((volume) => ({
         driver: volume.Driver,
         labels: parseLabels(volume.Labels),
@@ -521,7 +525,7 @@ async function getVolumes() {
         name: volume.Name,
         scope: volume.Scope,
         size: volume.Size,
-        usedBy: containers
+        usedBy: volumeContainers
             .filter((container) =>
                 container.mounts.some(
                     (mount) =>
@@ -570,7 +574,7 @@ function mapDockerUpdaterRow(row: DockerUpdaterServiceRow) {
     };
 }
 
-async function getDockerUpdaterServices() {
+export async function getDockerUpdaterServices() {
     const rows = database
         .prepare(
             `SELECT ${dockerUpdaterProjection}
@@ -602,7 +606,7 @@ function blockingDockerUpdaterFailures(steps: DockerUpdaterStepResult[]) {
     );
 }
 
-async function getDockerUpdaterEvents(limit: number) {
+export async function getDockerUpdaterEvents(limit: number) {
     const boundedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
     const rows = database
         .prepare(
@@ -640,6 +644,20 @@ async function getDockerUpdaterEvents(limit: number) {
         toDigest: nullableString(row.to_digest),
         toTag: nullableString(row.to_tag),
     }));
+}
+
+export function getDockerUpdaterSummary(
+    services: Awaited<ReturnType<typeof getDockerUpdaterServices>>
+) {
+    return {
+        autoPolicy: services.filter((service) => service.policy === "auto").length,
+        enabled: services.filter((service) => service.enabled).length,
+        failed: services.filter((service) => service.lastStatus === "auto_update_failed")
+            .length,
+        notifyPolicy: services.filter((service) => service.policy === "notify").length,
+        total: services.length,
+        updateAvailable: services.filter((service) => service.updateAvailable).length,
+    };
 }
 
 function parseServiceId(request: Request): number | undefined {
@@ -1061,20 +1079,7 @@ export const dockerRoutes = {
             const services = await getDockerUpdaterServices();
             return json({
                 services,
-                summary: {
-                    autoPolicy: services.filter((service) => service.policy === "auto")
-                        .length,
-                    enabled: services.filter((service) => service.enabled).length,
-                    failed: services.filter(
-                        (service) => service.lastStatus === "auto_update_failed"
-                    ).length,
-                    notifyPolicy: services.filter(
-                        (service) => service.policy === "notify"
-                    ).length,
-                    total: services.length,
-                    updateAvailable: services.filter((service) => service.updateAvailable)
-                        .length,
-                },
+                summary: getDockerUpdaterSummary(services),
             });
         },
     },

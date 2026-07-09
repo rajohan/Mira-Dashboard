@@ -42,11 +42,30 @@ export function useCacheHeartbeat(refreshInterval: number | false = false) {
 }
 
 /** Provides cache entry. */
-export function useCacheEntry<T>(key: string, refreshInterval: number | false = false) {
+export function useCacheEntry<T>(
+    key: string,
+    refreshInterval: number | false = false,
+    options: { refreshOnMissing?: boolean } = {}
+) {
     return useQuery({
         queryKey: cacheKeys.entry(key),
-        queryFn: () =>
-            apiFetchRequired<CacheEnvelope<T>>(`/cache/${encodeURIComponent(key)}`),
+        queryFn: async () => {
+            try {
+                return await apiFetchRequired<CacheEnvelope<T>>(
+                    `/cache/${encodeURIComponent(key)}`
+                );
+            } catch (error) {
+                if (!options.refreshOnMissing) {
+                    throw error;
+                }
+
+                const response = await apiPostRequired<{
+                    isOk: boolean;
+                    entry: CacheEnvelope<T>;
+                }>(`/cache/${encodeURIComponent(key)}/refresh`);
+                return response.entry;
+            }
+        },
         refetchInterval: refreshInterval,
         staleTime: 2000,
     });

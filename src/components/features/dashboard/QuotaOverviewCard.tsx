@@ -1,4 +1,4 @@
-import { DollarSign, Waves, Zap } from "lucide-react";
+import { DollarSign, Gauge, Waves, Zap } from "lucide-react";
 
 import {
     hasQuotaStatus,
@@ -281,6 +281,7 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
                 <h3 className="text-sm font-semibold tracking-wide text-primary-300 uppercase">
                     Usage Limits
                 </h3>
+                <Gauge className="size-4 text-primary-400" />
             </div>
 
             <div className="space-y-2">

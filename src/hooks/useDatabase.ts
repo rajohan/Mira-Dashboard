@@ -1,9 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
-
-import { apiFetchRequired } from "./useApi";
+import { useCacheEntry } from "./useCache";
 
 /** Represents the database overview API response. */
 export interface DatabaseOverviewResponse {
+    checkedAt?: string;
     overview: {
         totalDatabaseSizeBytes: number;
         totalBackends: number;
@@ -76,13 +75,28 @@ export interface DatabaseOverviewResponse {
     }>;
 }
 
+function isDatabaseOverviewResponse(value: unknown): value is DatabaseOverviewResponse {
+    if (!value || typeof value !== "object") return false;
+    const candidate = value as Partial<DatabaseOverviewResponse>;
+    return (
+        !!candidate.overview &&
+        typeof candidate.overview === "object" &&
+        Array.isArray(candidate.databases) &&
+        Array.isArray(candidate.deadTuples) &&
+        Array.isArray(candidate.topQueries) &&
+        Array.isArray(candidate.pgbouncerPools) &&
+        Array.isArray(candidate.pgbouncerStats)
+    );
+}
+
 /** Provides database overview. */
 export function useDatabaseOverview() {
-    return useQuery({
-        queryKey: ["database", "overview"],
-        queryFn: () => apiFetchRequired<DatabaseOverviewResponse>("/database/overview"),
-        refetchInterval: 15_000,
-        staleTime: 5000,
-        refetchOnWindowFocus: false,
+    const query = useCacheEntry<DatabaseOverviewResponse>("database.summary", 60_000, {
+        refreshOnMissing: true,
     });
+    const data =
+        query.data?.status === "fresh" && isDatabaseOverviewResponse(query.data.data)
+            ? query.data.data
+            : undefined;
+    return { ...query, data };
 }

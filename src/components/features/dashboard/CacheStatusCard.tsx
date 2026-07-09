@@ -1,4 +1,4 @@
-import { Loader2, RefreshCw } from "lucide-react";
+import { DatabaseZap, Loader2, RefreshCw } from "lucide-react";
 
 import { useCacheHeartbeat, useRefreshCacheEntry } from "../../../hooks";
 import { formatDate } from "../../../utils/format";
@@ -56,6 +56,7 @@ export function CacheStatusCard({ title, items }: CacheStatusCardProperties) {
                 <h3 className="text-sm font-semibold tracking-wide text-primary-300 uppercase">
                     {title}
                 </h3>
+                <DatabaseZap className="size-4 text-primary-400" />
             </div>
 
             <div className="max-h-100 space-y-3 overflow-y-auto pr-2">

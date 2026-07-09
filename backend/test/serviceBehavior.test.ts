@@ -804,7 +804,7 @@ describe("backend service behavior", () => {
         const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
             input: Request | string | URL
         ) => {
-            const url = String(input);
+            const url = input instanceof Request ? input.url : String(input);
             if (url.startsWith("https://wttr.in/Spydeberg")) {
                 return Response.json({
                     current_condition: [

@@ -2259,29 +2259,33 @@ describe("Mira Dashboard frontend behavior", () => {
                 const url = String(input);
                 const method = init?.method ?? "GET";
 
-                if (url === "/api/database/overview" && method === "GET") {
+                if (url === "/api/cache/database.summary" && method === "GET") {
                     return Response.json({
-                        overview: {
-                            totalDatabaseSizeBytes: 1024,
-                            totalBackends: 2,
-                            averageCacheHitRatio: 99,
-                            connections: {},
-                            pgStatStatementsEnabled: true,
-                            torrentCounts: { comet: 1, bitmagnet: 2 },
-                            pgbouncer: {
-                                clientConnections: 1,
-                                serverConnections: 1,
-                                waitingClients: 0,
-                                maxWait: 0,
-                                avgQueryTime: 1,
-                                avgTransactionTime: 2,
+                        key: "database.summary",
+                        data: {
+                            overview: {
+                                totalDatabaseSizeBytes: 1024,
+                                totalBackends: 2,
+                                averageCacheHitRatio: 99,
+                                connections: {},
+                                pgStatStatementsEnabled: true,
+                                torrentCounts: { comet: 1, bitmagnet: 2 },
+                                pgbouncer: {
+                                    clientConnections: 1,
+                                    serverConnections: 1,
+                                    waitingClients: 0,
+                                    maxWait: 0,
+                                    avgQueryTime: 1,
+                                    avgTransactionTime: 2,
+                                },
                             },
+                            databases: [],
+                            deadTuples: [],
+                            topQueries: [],
+                            pgbouncerPools: [],
+                            pgbouncerStats: [],
                         },
-                        databases: [],
-                        deadTuples: [],
-                        topQueries: [],
-                        pgbouncerPools: [],
-                        pgbouncerStats: [],
+                        status: "fresh",
                     });
                 }
 
@@ -2316,6 +2320,31 @@ describe("Mira Dashboard frontend behavior", () => {
 
         const deleteSession = renderHookWithQueryClient(() => useDeleteSession());
         await deleteSession.result.current.mutateAsync("session-1");
+    });
+
+    it("rejects invalid database summary cache payloads", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+                if (url === "/api/cache/database.summary" && method === "GET") {
+                    return Response.json({
+                        data: "",
+                        key: "database.summary",
+                        status: "error",
+                    });
+                }
+
+                throw new Error(`Unexpected database API call: ${method} ${url}`);
+            }),
+            writable: true,
+        });
+
+        const database = renderHookWithQueryClient(() => useDatabaseOverview());
+
+        await waitFor(() => expect(database.result.current.isSuccess).toBe(true));
+        expect(database.result.current.data).toBeUndefined();
     });
 
     it("runs terminal and exec operations through hooks", async () => {

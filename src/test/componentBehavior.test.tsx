@@ -51,9 +51,12 @@ import { CronJobDetails } from "../components/features/cron/CronJobDetails";
 import { CronJobList } from "../components/features/cron/CronJobList";
 import { BackupOverviewCard } from "../components/features/dashboard/BackupOverviewCard";
 import { CacheStatusCard } from "../components/features/dashboard/CacheStatusCard";
-import { CronOverviewCard } from "../components/features/dashboard/CronOverviewCard";
+import { DatabaseOverviewCard } from "../components/features/dashboard/DatabaseOverviewCard";
+import { DockerOverviewCard } from "../components/features/dashboard/DockerOverviewCard";
+import { JobsOverviewCard } from "../components/features/dashboard/JobsOverviewCard";
 import { LogRotationCard } from "../components/features/dashboard/LogRotationCard";
 import { QuotaOverviewCard } from "../components/features/dashboard/QuotaOverviewCard";
+import { ReportsOverviewCard } from "../components/features/dashboard/ReportsOverviewCard";
 import { ServiceActionsCard } from "../components/features/dashboard/ServiceActionsCard";
 import { AutovacuumHealthTable } from "../components/features/database/AutovacuumHealthTable";
 import { DatabasesTable } from "../components/features/database/DatabaseSizesTable";
@@ -4114,6 +4117,47 @@ describe("shared component helpers", () => {
             )[0]?.toolCalls?.map((toolCall) => toolCall.toolResult?.content)
         ).toEqual(["first live output", "second live output"]);
 
+        const partialTextLocalToolRow = {
+            content: "visible partial answer",
+            local: true,
+            role: "assistant",
+            text: "visible partial answer",
+            timestamp: new Date().toISOString(),
+            runId: "partial-tool-row-run",
+            toolCalls: [
+                {
+                    arguments: { command: "status" },
+                    id: "call-partial",
+                    name: "functions.exec_command",
+                    toolResult: {
+                        content: "status output",
+                        id: "call-partial",
+                        name: "functions.exec_command",
+                    },
+                },
+            ],
+        };
+        const partialHistoryToolRow = {
+            content: "",
+            role: "assistant",
+            text: "",
+            timestamp: new Date().toISOString(),
+            runId: "partial-tool-row-run",
+            toolCalls: [
+                {
+                    arguments: { command: "status" },
+                    id: "call-partial",
+                    name: "functions.exec_command",
+                },
+            ],
+        };
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [partialTextLocalToolRow],
+                [partialHistoryToolRow]
+            ).some((message) => message.text === "visible partial answer")
+        ).toBe(true);
+
         const mixedDiagnosticLocalRow = {
             content: [
                 { text: "same visible text", type: "text" },
@@ -5343,11 +5387,42 @@ describe("shared component helpers", () => {
                                 id: "ops.log-rotation",
                                 intervalSeconds: 86_400,
                                 isRunning: false,
+                                lastRun: {
+                                    id: 1,
+                                    jobId: "ops.log-rotation",
+                                    status: "success",
+                                    triggerType: "schedule",
+                                    startedAt: "2026-06-24T09:59:00.000Z",
+                                    finishedAt: "2026-06-24T10:00:00.000Z",
+                                    output: {},
+                                },
                                 name: "Log rotation",
                                 nextRunAt: "2026-06-24T22:30:00.000Z",
                                 scheduleType: "cron",
                                 cronExpression: "30 22 * * *",
                                 updatedAt: "2026-06-24T08:00:00.000Z",
+                            },
+                        ],
+                    });
+                }
+
+                if (url === "/api/reports") {
+                    return Response.json({
+                        items: [
+                            {
+                                bodyMd: "Heartbeat looks good.",
+                                createdAt: "2026-06-24T10:05:00.000Z",
+                                dedupeKey: "heartbeat:ok",
+                                id: 1,
+                                metadata: {},
+                                occurredAt: "2026-06-24T10:05:00.000Z",
+                                source: "openclaw",
+                                sourceJobId: "heartbeat",
+                                status: "ok",
+                                summary: "Heartbeat looks good.",
+                                title: "Heartbeat report",
+                                type: "heartbeat",
+                                updatedAt: "2026-06-24T10:05:00.000Z",
                             },
                         ],
                     });
@@ -5457,7 +5532,8 @@ describe("shared component helpers", () => {
         render(
             <QueryClientProvider client={queryClient}>
                 <LogRotationCard />
-                <CronOverviewCard />
+                <JobsOverviewCard />
+                <ReportsOverviewCard />
                 <QuotaOverviewCard
                     quotas={{
                         cacheAgeMs: 0,
@@ -5586,7 +5662,9 @@ describe("shared component helpers", () => {
 
         await waitFor(() => {
             expect(screen.getByText("Log rotation")).toBeInTheDocument();
-            expect(screen.getByText("Cron jobs")).toBeInTheDocument();
+            expect(screen.getByText("Jobs")).toBeInTheDocument();
+            expect(screen.getByText("OpenClaw cron")).toBeInTheDocument();
+            expect(screen.getByText("Reports")).toBeInTheDocument();
         });
 
         await user.click(screen.getByRole("button", { name: "hooks" }));
@@ -6564,6 +6642,54 @@ describe("shared component helpers", () => {
                 expect.objectContaining({ method: "POST" })
             );
         });
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("shows Docker cache unavailable when the cached payload is invalid", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () =>
+                Response.json({
+                    consecutiveFailures: 1,
+                    data: "",
+                    key: "docker.summary",
+                    meta: {},
+                    source: "backend",
+                    status: "error",
+                })
+            ),
+            writable: true,
+        });
+
+        const view = renderWithQueryClient(<DockerOverviewCard />);
+
+        expect(await screen.findByText("Docker cache unavailable.")).toBeInTheDocument();
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("shows database cache unavailable when the cached payload is invalid", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () =>
+                Response.json({
+                    consecutiveFailures: 1,
+                    data: "",
+                    key: "database.summary",
+                    meta: {},
+                    source: "backend",
+                    status: "error",
+                })
+            ),
+            writable: true,
+        });
+
+        const view = renderWithQueryClient(<DatabaseOverviewCard />);
+
+        expect(
+            await screen.findByText("Database cache unavailable.")
+        ).toBeInTheDocument();
         view.unmount();
         view.queryClient.clear();
     });

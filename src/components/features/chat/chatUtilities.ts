@@ -397,6 +397,13 @@ export function mergeWithRecentOptimisticMessages(
     const nextIdentities = new Set(
         enrichedNextMessages.map((message) => messageIdentity(message))
     );
+    const nextToolCallRowsByIdentity = new Map<string, ChatHistoryMessage>();
+    for (const message of enrichedNextMessages) {
+        const identity = toolCallRowIdentity(message);
+        if (identity) {
+            nextToolCallRowsByIdentity.set(identity, message);
+        }
+    }
     const nextAssistantTexts = nextMessages
         .filter((message) => message.role.toLowerCase() === "assistant")
         .map((message) => message.text);
@@ -420,6 +427,20 @@ export function mergeWithRecentOptimisticMessages(
 
         if (nextIdentities.has(messageIdentity(message))) {
             return false;
+        }
+
+        const toolCallIdentity = toolCallRowIdentity(message);
+        const nextToolCallRow = toolCallIdentity
+            ? nextToolCallRowsByIdentity.get(toolCallIdentity)
+            : undefined;
+        if (nextToolCallRow) {
+            const localText = message.text.trim();
+            if (
+                !localText ||
+                isRecoveredAssistantText(message.text, nextToolCallRow.text)
+            ) {
+                return false;
+            }
         }
 
         if (
