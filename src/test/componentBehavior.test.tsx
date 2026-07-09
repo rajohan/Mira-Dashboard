@@ -3367,6 +3367,168 @@ describe("shared component helpers", () => {
             )
         ).toBe(true);
 
+        messages = [
+            {
+                content:
+                    "duplicate final answer that is still streaming from a local row",
+                local: true,
+                role: "assistant",
+                runId: "local-duplicate-final-run",
+                text: "duplicate final answer that is still streaming from a local row",
+                timestamp: new Date().toISOString(),
+            },
+        ];
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: {
+                        role: "assistant",
+                        text: "duplicate final answer that is still streaming from a local row and has now finished",
+                    },
+                    runId: "final-duplicate-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.filter(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "text" in message &&
+                    typeof message.text === "string" &&
+                    message.text.includes("duplicate final answer")
+            )
+        ).toHaveLength(1);
+        expect((messages[0] as { local?: boolean } | undefined)?.local).toBeUndefined();
+
+        messages = [
+            {
+                content: "",
+                role: "assistant",
+                runId: "diagnostic-final-run",
+                text: "",
+                thinking: [{ text: "diagnostic details" }],
+                timestamp: new Date().toISOString(),
+            },
+        ];
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: {
+                        role: "assistant",
+                        text: "final text must not overwrite a diagnostic-only row",
+                    },
+                    runId: "diagnostic-final-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.filter(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant"
+            )
+        ).toHaveLength(2);
+        expect(messages[0]).toMatchObject({
+            text: "",
+            thinking: [{ text: "diagnostic details" }],
+        });
+
+        const stableFinalText =
+            "Fikset reviewen og pushet til PR #246: 8590a3f.\n\nVerifisert mot kode:\n\nGyldig: recovered-text merge kunne treffe eldre ikke-lokale history-rader.";
+        messages = [
+            {
+                content: stableFinalText,
+                role: "assistant",
+                text: stableFinalText,
+                timestamp: new Date().toISOString(),
+            },
+        ];
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: {
+                        role: "assistant",
+                        text: `${stableFinalText}\n\nFikset: isRecoveredAssistantText(...) brukes nå bare når message.local === true treffe eldre ikke-lokale history-rader.`,
+                    },
+                    runId: "late-corrupt-final-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        const stableFinalRows = messages.filter(
+            (message) =>
+                typeof message === "object" &&
+                message !== null &&
+                "role" in message &&
+                message.role === "assistant" &&
+                "text" in message &&
+                typeof message.text === "string" &&
+                message.text.includes("Fikset reviewen og pushet")
+        );
+        expect(stableFinalRows).toHaveLength(1);
+        expect(stableFinalRows[0]).toMatchObject({
+            text: stableFinalText,
+        });
+
+        messages = [
+            {
+                content: stableFinalText,
+                role: "assistant",
+                text: stableFinalText,
+                timestamp: new Date().toISOString(),
+            },
+            {
+                content: "Repeat that with edits",
+                local: true,
+                role: "user",
+                text: "Repeat that with edits",
+                timestamp: new Date().toISOString(),
+            },
+        ];
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: {
+                        role: "assistant",
+                        text: `${stableFinalText}\n\nAdditional edited follow-up content.`,
+                    },
+                    runId: "legitimate-follow-up-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.filter(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "text" in message &&
+                    typeof message.text === "string" &&
+                    message.text.includes("Fikset reviewen og pushet")
+            )
+        ).toHaveLength(2);
+
         act(() => {
             listener?.({
                 event: "agent",

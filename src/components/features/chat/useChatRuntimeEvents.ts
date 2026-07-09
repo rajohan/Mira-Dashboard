@@ -27,6 +27,7 @@ import {
 import {
     CHAT_HISTORY_LIMIT,
     dedupeMessages,
+    isRecoveredAssistantText,
     mergeWithRecentOptimisticMessages,
 } from "./chatUtilities";
 
@@ -687,6 +688,17 @@ function mergeRuntimeToolMessages(
 
     return dedupeMessages([...next, ...unmerged]);
 }
+
+/** Returns whether a message timestamp is recent enough to be an event echo. */
+function isRecentChatRuntimeMessage(message: ChatHistoryMessage): boolean {
+    if (!message.timestamp) {
+        return false;
+    }
+
+    const timestampMs = Date.parse(message.timestamp);
+    return Number.isFinite(timestampMs) && Math.abs(Date.now() - timestampMs) < 30_000;
+}
+
 /** Returns a record nested in common runtime event fields. */
 function nestedRuntimeRecord(data: Record<string, unknown>): Record<string, unknown> {
     for (const key of ["item", "payload", "message"]) {
@@ -2034,9 +2046,93 @@ export function useChatRuntimeEvents({
                     ...(finalMessageToAppend ? [finalMessageToAppend] : []),
                 ];
                 if (messagesToAppend.length > 0 && eventMatchesSelected) {
-                    setMessages((wasPrevious) =>
-                        dedupeMessages([...wasPrevious, ...messagesToAppend])
-                    );
+                    setMessages((wasPrevious) => {
+                        let didMergeFinalMessage = false;
+                        const finalAssistantMessage =
+                            finalMessageToAppend?.role.toLowerCase() === "assistant" &&
+                            finalMessageToAppend.text.trim()
+                                ? finalMessageToAppend
+                                : undefined;
+                        const lastAssistantMessageIndex = finalAssistantMessage
+                            ? wasPrevious.findLastIndex(
+                                  (message) =>
+                                      message.role.toLowerCase() === "assistant" &&
+                                      message.text.trim()
+                              )
+                            : -1;
+                        const nextPrevious = finalAssistantMessage
+                            ? wasPrevious.map((message, messageIndex) => {
+                                  if (
+                                      didMergeFinalMessage ||
+                                      message.role.toLowerCase() !== "assistant"
+                                  ) {
+                                      return message;
+                                  }
+
+                                  const isSameRun =
+                                      Boolean(message.runId) &&
+                                      Boolean(finalAssistantMessage.runId) &&
+                                      message.runId === finalAssistantMessage.runId;
+                                  const hasPrimaryText = Boolean(message.text.trim());
+                                  const isRecoveredLocalText =
+                                      message.local === true &&
+                                      isRecoveredAssistantText(
+                                          message.text,
+                                          finalAssistantMessage.text
+                                      );
+                                  const isRecoveredRecentFinalEcho =
+                                      message.local !== true &&
+                                      messageIndex === wasPrevious.length - 1 &&
+                                      messageIndex === lastAssistantMessageIndex &&
+                                      isRecentChatRuntimeMessage(message) &&
+                                      isRecoveredAssistantText(
+                                          message.text,
+                                          finalAssistantMessage.text
+                                      );
+                                  if (
+                                      !(isSameRun && hasPrimaryText) &&
+                                      !isRecoveredLocalText &&
+                                      !isRecoveredRecentFinalEcho
+                                  ) {
+                                      return message;
+                                  }
+
+                                  didMergeFinalMessage = true;
+                                  if (isRecoveredRecentFinalEcho && !isSameRun) {
+                                      return message;
+                                  }
+
+                                  const thinking = (
+                                      finalAssistantMessage.thinking?.length
+                                          ? finalAssistantMessage
+                                          : message
+                                  ).thinking;
+                                  const toolCalls = (
+                                      finalAssistantMessage.toolCalls?.length
+                                          ? finalAssistantMessage
+                                          : message
+                                  ).toolCalls;
+                                  return {
+                                      ...message,
+                                      ...finalAssistantMessage,
+                                      thinking,
+                                      toolCalls,
+                                      toolResult:
+                                          finalAssistantMessage.toolResult ||
+                                          message.toolResult,
+                                      local: undefined,
+                                  };
+                              })
+                            : wasPrevious;
+
+                        return dedupeMessages([
+                            ...nextPrevious,
+                            ...remainingDiagnosticMessages,
+                            ...(finalMessageToAppend && !didMergeFinalMessage
+                                ? [finalMessageToAppend]
+                                : []),
+                        ]);
+                    });
                 }
 
                 clearActiveStreamsForRun(streamSessionKey, payload.runId);
