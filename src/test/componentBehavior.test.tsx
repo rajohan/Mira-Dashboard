@@ -4653,6 +4653,38 @@ describe("shared component helpers", () => {
                 now
             )
         ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                mediaStream,
+                [
+                    {
+                        attachments: [
+                            ...mediaStream.message.attachments,
+                            {
+                                fileName: "extra.log",
+                                id: "attachment-extra",
+                                kind: "text" as const,
+                                mimeType: "text/plain",
+                                sizeBytes: 6,
+                            },
+                        ],
+                        content: "assistant media text",
+                        images: [
+                            ...mediaStream.message.images,
+                            {
+                                data: "extra-image-data",
+                                mimeType: "image/png",
+                                type: "image" as const,
+                            },
+                        ],
+                        role: "assistant",
+                        runId: "run-1",
+                        text: "assistant media text",
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
         const mediaOnlyStream = {
             ...mediaStream,
             message: {
@@ -4677,6 +4709,22 @@ describe("shared component helpers", () => {
                 now
             )
         ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                mediaOnlyStream,
+                [
+                    {
+                        attachments: mediaOnlyStream.message.attachments,
+                        content: "",
+                        images: mediaOnlyStream.message.images,
+                        role: "assistant",
+                        runId: "older-run",
+                        text: "",
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
         const mixedTextDiagnosticStream = {
             ...stream,
             message: {

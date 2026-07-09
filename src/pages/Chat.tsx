@@ -115,28 +115,33 @@ function isMatchingToolResult(
     );
 }
 
-/** Returns stable media identity for stream recovery comparisons. */
-function mediaIdentity(
+/** Returns stable media identities for stream recovery comparisons. */
+function mediaIdentities(
     images: ChatHistoryMessage["images"] = [],
     attachments: ChatHistoryMessage["attachments"] = []
-): string {
-    return JSON.stringify({
-        attachments: attachments.map((attachment) => ({
-            contentBase64: attachment.contentBase64 || "",
-            dataUrl: attachment.dataUrl || "",
-            fileName: attachment.fileName,
-            id: attachment.id,
-            kind: attachment.kind,
-            mimeType: attachment.mimeType || "",
-            sizeBytes: attachment.sizeBytes,
-        })),
-        images: images.map((image) => ({
-            data: image.data || image.source?.data || "",
-            mediaType: image.mimeType || image.source?.media_type || "",
-            sourceType: image.source?.type || "",
-            type: image.type,
-        })),
-    });
+): string[] {
+    return [
+        ...attachments.map((attachment) =>
+            JSON.stringify({
+                contentBase64: attachment.contentBase64 || "",
+                dataUrl: attachment.dataUrl || "",
+                fileName: attachment.fileName,
+                id: attachment.id,
+                kind: attachment.kind,
+                mimeType: attachment.mimeType || "",
+                sizeBytes: attachment.sizeBytes,
+                type: "attachment",
+            })
+        ),
+        ...images.map((image) =>
+            JSON.stringify({
+                data: image.data || image.source?.data || "",
+                mediaType: image.mimeType || image.source?.media_type || "",
+                sourceType: image.source?.type || "",
+                type: image.type,
+            })
+        ),
+    ];
 }
 
 /** Returns whether an active stream is already represented in visible history. */
@@ -155,7 +160,7 @@ export function isActiveStreamRecoveredInMessages(
     const hasMediaDetails = Boolean(
         stream.message?.images?.length || stream.message?.attachments?.length
     );
-    const streamMediaIdentity = mediaIdentity(
+    const streamMediaIdentities = mediaIdentities(
         stream.message?.images,
         stream.message?.attachments
     );
@@ -177,9 +182,13 @@ export function isActiveStreamRecoveredInMessages(
                 stream.runId === message.runId;
             const hasRecoveredMediaDetails =
                 !hasMediaDetails ||
-                mediaIdentity(message.images, message.attachments) ===
-                    streamMediaIdentity;
+                streamMediaIdentities.every((identity) =>
+                    mediaIdentities(message.images, message.attachments).includes(
+                        identity
+                    )
+                );
             if (
+                isSameRun &&
                 hasMediaDetails &&
                 hasRecoveredMediaDetails &&
                 !streamText.trim() &&
