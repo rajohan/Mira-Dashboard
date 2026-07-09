@@ -126,6 +126,7 @@ export interface RawChatHistoryMessage {
     content?: unknown;
     text?: string;
     timestamp?: string | number;
+    runId?: string;
     command?: boolean;
     toolCallId?: string;
     tool_call_id?: string;
@@ -510,6 +511,7 @@ export function normalizeChatHistoryMessage(
             typeof message.timestamp === "number"
                 ? isoStringFromDate(message.timestamp)
                 : message.timestamp,
+        runId: message.runId,
     };
 }
 

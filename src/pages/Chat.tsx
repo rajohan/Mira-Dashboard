@@ -180,6 +180,12 @@ export function isActiveStreamRecoveredInMessages(
                 Boolean(stream.runId) &&
                 Boolean(message.runId) &&
                 stream.runId === message.runId;
+            const messageTimestamp = sessionTimestampMs(message.timestamp);
+            const isCurrentSameRunRow =
+                isSameRun &&
+                (messageTimestamp === undefined ||
+                    streamUpdatedAt === undefined ||
+                    messageTimestamp >= streamUpdatedAt);
             const hasRecoveredMediaDetails =
                 !hasMediaDetails ||
                 streamMediaIdentities.every((identity) =>
@@ -188,7 +194,7 @@ export function isActiveStreamRecoveredInMessages(
                     )
                 );
             if (
-                isSameRun &&
+                isCurrentSameRunRow &&
                 hasMediaDetails &&
                 hasRecoveredMediaDetails &&
                 !streamText.trim() &&
@@ -198,7 +204,7 @@ export function isActiveStreamRecoveredInMessages(
             }
 
             if (
-                isSameRun &&
+                isCurrentSameRunRow &&
                 streamText.trim() &&
                 !hasDiagnosticDetails &&
                 hasRecoveredMediaDetails &&
