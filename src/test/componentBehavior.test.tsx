@@ -3478,6 +3478,47 @@ describe("shared component helpers", () => {
             text: "current final text must append",
         });
 
+        messages = [
+            {
+                content: "current same-run buffered text",
+                role: "assistant",
+                runId: "same-run-current-echo",
+                text: "current same-run buffered text",
+                timestamp: new Date().toISOString(),
+            },
+            {
+                content: "",
+                role: "assistant",
+                runId: "same-run-current-echo",
+                text: "",
+                thinking: [{ text: "diagnostic after text" }],
+                timestamp: new Date().toISOString(),
+            },
+        ];
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: {
+                        role: "assistant",
+                        text: "current same-run buffered text with final suffix",
+                    },
+                    runId: "same-run-current-echo",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(messages).toHaveLength(2);
+        expect(messages[0]).toMatchObject({
+            text: "current same-run buffered text with final suffix",
+        });
+        expect(messages[1]).toMatchObject({
+            text: "",
+            thinking: [{ text: "diagnostic after text" }],
+        });
+
         const stableFinalText =
             "Fikset reviewen og pushet til PR #246: 8590a3f.\n\nVerifisert mot kode:\n\nGyldig: recovered-text merge kunne treffe eldre ikke-lokale history-rader.";
         messages = [
@@ -4736,6 +4777,7 @@ describe("shared component helpers", () => {
                 ...stream.message,
                 attachments: [
                     {
+                        dataUrl: "/api/media?path=%2Ftmp%2Fcurrent%2Freport.txt",
                         fileName: "report.txt",
                         id: "attachment-1",
                         kind: "text" as const,
@@ -4806,6 +4848,7 @@ describe("shared component helpers", () => {
                     {
                         attachments: [
                             {
+                                dataUrl: "/api/media?path=%2Ftmp%2Fcurrent%2Freport.txt",
                                 fileName: "report.txt",
                                 id: "path-0",
                                 kind: "text" as const,
@@ -4830,6 +4873,38 @@ describe("shared component helpers", () => {
                 now
             )
         ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                mediaStream,
+                [
+                    {
+                        attachments: [
+                            {
+                                dataUrl: "/api/media?path=%2Ftmp%2Fother%2Freport.txt",
+                                fileName: "report.txt",
+                                id: "path-0",
+                                kind: "text" as const,
+                                mimeType: "text/plain",
+                                sizeBytes: 99,
+                            },
+                        ],
+                        content: "assistant media text",
+                        images: [
+                            {
+                                data: "image-data",
+                                mimeType: "image/png",
+                                type: "image" as const,
+                            },
+                        ],
+                        role: "assistant",
+                        runId: "run-1",
+                        text: "assistant media text",
+                        timestamp: new Date(now - 2000).toISOString(),
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
         expect(
             isActiveStreamRecoveredInMessages(
                 mediaStream,

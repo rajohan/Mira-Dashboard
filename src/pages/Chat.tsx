@@ -124,7 +124,7 @@ function mediaIdentities(
     return [
         ...attachments.map((attachment) =>
             JSON.stringify({
-                contentBase64: attachment.contentBase64 || "",
+                contentSource: attachment.contentBase64 || attachment.dataUrl || "",
                 fileName: attachment.fileName,
                 kind: attachment.kind,
                 mimeType: attachment.mimeType || "",
