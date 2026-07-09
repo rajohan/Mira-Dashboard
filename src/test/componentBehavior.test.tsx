@@ -3367,6 +3367,37 @@ describe("shared component helpers", () => {
             )
         ).toBe(true);
 
+        activeStreamsReference.current = {};
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "pending duplicate",
+                    runId: "pending-final-run",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: {
+                        role: "assistant",
+                        text: "pending duplicate final",
+                    },
+                    runId: "pending-final-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        });
+        expect(activeStreamsReference.current["agent:main:main"]).toBeUndefined();
+
         messages = [
             {
                 content:

@@ -1191,21 +1191,49 @@ export function useChatRuntimeEvents({
 
         /** Clears active streams belonging to a finished chat run. */
         const clearActiveStreamsForRun = (sessionKey: string, runId?: string) => {
-            updateActiveStreamsReference.current((wasPrevious) => {
-                const next = { ...wasPrevious };
-                for (const [key, streamEntry] of Object.entries(wasPrevious)) {
-                    if (!isSameSessionKey(streamEntry.sessionKey, sessionKey)) {
-                        continue;
-                    }
-
-                    if (!isActiveStreamMatchingRun(sessionKey, streamEntry, runId)) {
-                        continue;
-                    }
-
-                    delete next[key];
+            for (const [key, pending] of Object.entries(
+                pendingDeltaUpdatesReference.current
+            )) {
+                if (!isSameSessionKey(key, sessionKey)) {
+                    continue;
                 }
-                return next;
-            });
+
+                if (
+                    runId &&
+                    pending.runId !== runId &&
+                    !pending.aliases.includes(runId)
+                ) {
+                    continue;
+                }
+
+                delete pendingDeltaUpdatesReference.current[key];
+            }
+
+            if (
+                pendingDeltaFlushTimerReference.current !== undefined &&
+                Object.keys(pendingDeltaUpdatesReference.current).length === 0
+            ) {
+                clearTimeout(pendingDeltaFlushTimerReference.current);
+                pendingDeltaFlushTimerReference.current = undefined;
+            }
+
+            const next = { ...activeStreamsReference.current };
+            for (const [key, streamEntry] of Object.entries(
+                activeStreamsReference.current
+            )) {
+                if (!isSameSessionKey(streamEntry.sessionKey, sessionKey)) {
+                    continue;
+                }
+
+                if (!isActiveStreamMatchingRun(sessionKey, streamEntry, runId)) {
+                    continue;
+                }
+
+                delete next[key];
+            }
+
+            activeStreamsReference.current = next;
+            updateActiveStreamsReference.current(() => next);
         };
 
         /** Adds a canonical run alias to active optimistic streams for one send. */
