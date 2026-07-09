@@ -3,6 +3,7 @@ import {
     type CacheEntryRow,
     getAllCacheEntries,
     getCacheEntry,
+    getCacheStatusEntries,
     parseJsonField,
 } from "../lib/cacheStore.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
@@ -77,7 +78,7 @@ export const cacheRoutes = {
     },
     "/api/cache/status": {
         GET: async () => {
-            const rows = await getAllCacheEntries();
+            const rows = await getCacheStatusEntries();
             const entries = rows.map((row) =>
                 mapCacheRowForResponse(row, { includeData: false })
             );

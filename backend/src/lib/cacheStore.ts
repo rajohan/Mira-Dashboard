@@ -135,3 +135,29 @@ export async function getAllCacheEntries(): Promise<CacheEntryRow[]> {
         .map((row) => mapCacheEntry(row))
         .filter((row): row is CacheEntryRow => row !== undefined);
 }
+
+/** Returns all cache entries without loading payload data. */
+export async function getCacheStatusEntries(): Promise<CacheEntryRow[]> {
+    const rows = database
+        .prepare(
+            `SELECT
+                key,
+                '' AS data_json,
+                source,
+                updated_at,
+                last_attempt_at,
+                expires_at,
+                status,
+                error_code,
+                error_message,
+                consecutive_failures,
+                metadata_json
+             FROM cache_entries
+             ORDER BY key ASC`
+        )
+        .all() as unknown as SqliteCacheEntryRow[];
+
+    return rows
+        .map((row) => mapCacheEntry(row))
+        .filter((row): row is CacheEntryRow => row !== undefined);
+}
