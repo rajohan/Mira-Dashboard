@@ -2045,6 +2045,7 @@ export function useChatRuntimeEvents({
                     ...remainingDiagnosticMessages,
                     ...(finalMessageToAppend ? [finalMessageToAppend] : []),
                 ];
+                clearActiveStreamsForRun(streamSessionKey, payload.runId);
                 if (messagesToAppend.length > 0 && eventMatchesSelected) {
                     setMessages((wasPrevious) => {
                         let didMergeFinalMessage = false;
@@ -2135,7 +2136,6 @@ export function useChatRuntimeEvents({
                     });
                 }
 
-                clearActiveStreamsForRun(streamSessionKey, payload.runId);
                 refreshHistoryAfterTerminalEvent(streamSessionKey);
                 return;
             }

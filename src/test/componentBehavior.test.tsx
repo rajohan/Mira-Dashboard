@@ -4520,6 +4520,31 @@ describe("shared component helpers", () => {
                 now
             )
         ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
+                        text: "final response still streaming",
+                        thinking: undefined,
+                    },
+                    text: "final response still streaming",
+                    updatedAt: recentUpdatedAt,
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "final response still streaming and now complete",
+                        images: [],
+                        role: "assistant",
+                        runId: "run-1",
+                        text: "final response still streaming and now complete",
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
         const mixedTextDiagnosticStream = {
             ...stream,
             message: {

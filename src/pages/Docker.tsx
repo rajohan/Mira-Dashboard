@@ -742,7 +742,7 @@ export function Docker() {
                 }
                 size="3xl"
             >
-                <div className="mb-3 flex flex-col gap-3 sm:mb-4 sm:flex-row sm:items-start">
+                <div className="mb-3 grid w-full grid-cols-1 gap-3 sm:mb-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
                     <Input
                         aria-label="Docker console command"
                         value={consoleCommand}
@@ -751,7 +751,7 @@ export function Docker() {
                         }
                         onKeyDown={handleConsoleCommandKeyDown}
                         placeholder="Command to run inside container"
-                        className="min-w-0 flex-1 font-mono"
+                        className="w-full min-w-0 font-mono"
                     />
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                         <Button

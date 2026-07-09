@@ -140,6 +140,18 @@ export function isActiveStreamRecoveredInMessages(
                 return false;
             }
 
+            const isSameRun =
+                Boolean(stream.runId) &&
+                Boolean(message.runId) &&
+                stream.runId === message.runId;
+            if (
+                isSameRun &&
+                streamText.trim() &&
+                isRecoveredAssistantText(message.text, streamText)
+            ) {
+                return true;
+            }
+
             if (
                 !hasDiagnosticDetails &&
                 stream.message?.text.trim() &&
