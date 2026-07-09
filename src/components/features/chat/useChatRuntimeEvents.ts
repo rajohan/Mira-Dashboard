@@ -2073,6 +2073,7 @@ export function useChatRuntimeEvents({
                                       Boolean(message.runId) &&
                                       Boolean(finalAssistantMessage.runId) &&
                                       message.runId === finalAssistantMessage.runId;
+                                  const hasPrimaryText = Boolean(message.text.trim());
                                   const isRecoveredLocalText =
                                       message.local === true &&
                                       isRecoveredAssistantText(
@@ -2081,6 +2082,7 @@ export function useChatRuntimeEvents({
                                       );
                                   const isRecoveredRecentFinalEcho =
                                       message.local !== true &&
+                                      messageIndex === wasPrevious.length - 1 &&
                                       messageIndex === lastAssistantMessageIndex &&
                                       isRecentChatRuntimeMessage(message) &&
                                       isRecoveredAssistantText(
@@ -2088,7 +2090,7 @@ export function useChatRuntimeEvents({
                                           finalAssistantMessage.text
                                       );
                                   if (
-                                      !isSameRun &&
+                                      !(isSameRun && hasPrimaryText) &&
                                       !isRecoveredLocalText &&
                                       !isRecoveredRecentFinalEcho
                                   ) {
@@ -2118,6 +2120,7 @@ export function useChatRuntimeEvents({
                                       toolResult:
                                           finalAssistantMessage.toolResult ||
                                           message.toolResult,
+                                      local: undefined,
                                   };
                               })
                             : wasPrevious;
