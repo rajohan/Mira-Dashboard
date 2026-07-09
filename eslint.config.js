@@ -10,6 +10,17 @@ import unicorn from "eslint-plugin-unicorn";
 import globals from "globals";
 import tsEslint from "typescript-eslint";
 
+const tsEslintRecommended = tsEslint.configs.recommended.map((config) => ({
+    ...config,
+    languageOptions: {
+        ...config.languageOptions,
+        parserOptions: {
+            ...config.languageOptions?.parserOptions,
+            tsconfigRootDir: import.meta.dirname,
+        },
+    },
+}));
+
 const eslintConfig = defineConfig(
     {
         ignores: [
@@ -26,7 +37,7 @@ const eslintConfig = defineConfig(
         ],
     },
     eslintConfigs.configs.recommended,
-    tsEslint.configs.recommended,
+    tsEslintRecommended,
     reactPlugin.configs.flat["jsx-runtime"],
     {
         ...tailwindcss.configs.recommended,

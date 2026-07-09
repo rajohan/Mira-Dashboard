@@ -1,5 +1,5 @@
 import { Boxes, History, Play, RefreshCw, Square, X } from "lucide-react";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, KeyboardEvent } from "react";
 import { useRef, useState } from "react";
 
 import { DockerContainersTable } from "../components/features/docker/DockerContainersTable";
@@ -53,6 +53,10 @@ export function Docker() {
     const [logsTail, setLogsTail] = useState(200);
     const [consoleCommand, setConsoleCommand] = useState("");
     const [consoleJobId, setConsoleJobId] = useState<string | undefined>(undefined);
+    const [consoleStartError, setConsoleStartError] = useState<string | undefined>(
+        undefined
+    );
+    const [isStartingConsoleJob, setIsStartingConsoleJob] = useState(false);
     const [dangerousDelete, setDangerousDelete] = useState<
         | undefined
         | { type: "image"; id: string; label: string }
@@ -104,6 +108,17 @@ export function Docker() {
         containers.find((container) => container.id === logsContainerId) || undefined;
     const selectedConsoleContainer =
         containers.find((container) => container.id === consoleContainerId) || undefined;
+    const selectedContainerStats =
+        selectedContainer === undefined
+            ? containerDetailsQuery.data?.stats
+            : selectedContainer.stats;
+    const containerDetails = containerDetailsQuery.data
+        ? {
+              ...containerDetailsQuery.data,
+              stats: selectedContainerStats,
+              status: selectedContainer?.status ?? containerDetailsQuery.data.status,
+          }
+        : undefined;
 
     const summary = {
         running: containers.filter((container) => container.state === "running").length,
@@ -241,8 +256,34 @@ export function Docker() {
 
     /** Starts an interactive Docker console job for the selected container. */
     async function handleStartConsole(containerId: string) {
-        const result = await startDockerExec(containerId, consoleCommand);
-        setConsoleJobId(result.jobId);
+        const command = consoleCommand.trim();
+        if (!command || isStartingConsoleJob) {
+            return;
+        }
+
+        setIsStartingConsoleJob(true);
+        setConsoleStartError(undefined);
+        try {
+            const result = await startDockerExec(containerId, command);
+            setConsoleJobId(result.jobId);
+            setConsoleCommand("");
+        } catch (error) {
+            const message = `Failed to start Docker console.\n\n${formatActionError(error)}`;
+            setConsoleStartError(message);
+            showActionOutput(message);
+        } finally {
+            setIsStartingConsoleJob(false);
+        }
+    }
+
+    /** Handles console command keys. */
+    function handleConsoleCommandKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+        if (event.key !== "Enter" || !selectedConsoleContainer) {
+            return;
+        }
+
+        event.preventDefault();
+        void handleStartConsole(selectedConsoleContainer.id);
     }
 
     if (isInitialLoading) {
@@ -584,43 +625,29 @@ export function Docker() {
             >
                 {containerDetailsQuery.isLoading ? (
                     <LoadingState message="Loading container details..." size="md" />
-                ) : containerDetailsQuery.data ? (
+                ) : containerDetails ? (
                     <div className="space-y-3 text-sm sm:space-y-4">
                         <div className="grid gap-3 sm:gap-4 md:grid-cols-2">
                             <Card className="p-3 sm:p-4">
                                 <div className="mb-2 font-semibold">Runtime</div>
                                 <div>
-                                    Created:{" "}
-                                    {formatTimestamp(
-                                        containerDetailsQuery.data.createdAt
-                                    )}
+                                    Created: {formatTimestamp(containerDetails.createdAt)}
                                 </div>
                                 <div>
-                                    Started:{" "}
-                                    {formatTimestamp(
-                                        containerDetailsQuery.data.startedAt
-                                    )}
+                                    Started: {formatTimestamp(containerDetails.startedAt)}
                                 </div>
-                                <div>Status: {containerDetailsQuery.data.status}</div>
+                                <div>Status: {containerDetails.status}</div>
                             </Card>
                             <Card className="p-3 sm:p-4">
                                 <div className="mb-2 font-semibold">Resources</div>
-                                <div>
-                                    CPU: {containerDetailsQuery.data.stats?.cpu || "—"}
-                                </div>
+                                <div>CPU: {containerDetails.stats?.cpu || "—"}</div>
                                 <div>
                                     Memory:{" "}
-                                    {formatDockerMemory(
-                                        containerDetailsQuery.data.stats?.memory
-                                    )}
+                                    {formatDockerMemory(containerDetails.stats?.memory)}
                                 </div>
+                                <div>Net I/O: {containerDetails.stats?.netIO || "—"}</div>
                                 <div>
-                                    Net I/O:{" "}
-                                    {containerDetailsQuery.data.stats?.netIO || "—"}
-                                </div>
-                                <div>
-                                    Block I/O:{" "}
-                                    {containerDetailsQuery.data.stats?.blockIO || "—"}
+                                    Block I/O: {containerDetails.stats?.blockIO || "—"}
                                 </div>
                             </Card>
                         </div>
@@ -628,7 +655,7 @@ export function Docker() {
                         <Card className="p-3 sm:p-4">
                             <div className="mb-2 font-semibold">Networks</div>
                             <div className="space-y-2 text-xs text-primary-300">
-                                {containerDetailsQuery.data.networks.map((network) => (
+                                {containerDetails.networks.map((network) => (
                                     <div
                                         key={network.name}
                                         className="rounded bg-primary-900/50 p-2 break-all"
@@ -647,7 +674,7 @@ export function Docker() {
                         <Card className="p-3 sm:p-4">
                             <div className="mb-2 font-semibold">Mounts</div>
                             <div className="space-y-2 text-xs text-primary-300">
-                                {containerDetailsQuery.data.mounts.map((mount) => (
+                                {containerDetails.mounts.map((mount) => (
                                     <div
                                         key={`${mount.source}:${mount.destination}`}
                                         className="rounded bg-primary-900/50 p-2 break-all"
@@ -706,6 +733,7 @@ export function Docker() {
                 onClose={() => {
                     setConsoleContainerId(undefined);
                     setConsoleJobId(undefined);
+                    setConsoleStartError(undefined);
                 }}
                 title={
                     selectedConsoleContainer
@@ -714,38 +742,53 @@ export function Docker() {
                 }
                 size="3xl"
             >
-                <div className="mb-3 flex flex-col gap-3 sm:mb-4 sm:flex-row sm:items-center">
+                <div className="mb-3 flex flex-col gap-3 sm:mb-4 sm:flex-row sm:items-start">
                     <Input
+                        aria-label="Docker console command"
                         value={consoleCommand}
                         onChange={(event: ChangeEvent<HTMLInputElement>) =>
                             setConsoleCommand(event.target.value)
                         }
+                        onKeyDown={handleConsoleCommandKeyDown}
                         placeholder="Command to run inside container"
-                        className="min-w-0 flex-1"
+                        className="min-w-0 flex-1 font-mono"
                     />
-                    <Button
-                        onClick={() =>
-                            void handleStartConsole(selectedConsoleContainer!.id)
-                        }
-                        disabled={!selectedConsoleContainer || !consoleCommand.trim()}
-                    >
-                        <Play className="size-4" />
-                        Run
-                    </Button>
-                    {consoleJobId && execJobQuery.data?.status === "running" ? (
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                         <Button
-                            variant="danger"
-                            onClick={() => void stopDockerExec(consoleJobId)}
+                            onClick={() => {
+                                if (!selectedConsoleContainer) {
+                                    return;
+                                }
+
+                                void handleStartConsole(selectedConsoleContainer.id);
+                            }}
+                            disabled={
+                                !selectedConsoleContainer ||
+                                !consoleCommand.trim() ||
+                                isStartingConsoleJob
+                            }
+                            className="w-full sm:w-auto"
                         >
-                            <Square className="size-4" />
-                            Stop
+                            <Play className="size-4" />
+                            {isStartingConsoleJob ? "Sending..." : "Send"}
                         </Button>
-                    ) : undefined}
+                        {consoleJobId && execJobQuery.data?.status === "running" ? (
+                            <Button
+                                variant="danger"
+                                onClick={() => void stopDockerExec(consoleJobId)}
+                                className="w-full sm:w-auto"
+                            >
+                                <Square className="size-4" />
+                                Stop
+                            </Button>
+                        ) : undefined}
+                    </div>
                 </div>
                 <pre className="max-h-[70vh] overflow-auto rounded-lg bg-black p-3 text-xs text-primary-100 sm:p-4">
-                    {execJobQuery.data
-                        ? `${execJobQuery.data.stdout}${execJobQuery.data.stderr ? `\n${execJobQuery.data.stderr}` : ""}`
-                        : "Run a command to see output."}
+                    {consoleStartError ||
+                        (execJobQuery.data
+                            ? `${execJobQuery.data.stdout}${execJobQuery.data.stderr ? `\n${execJobQuery.data.stderr}` : ""}`
+                            : "Run a command to see output.")}
                 </pre>
             </Modal>
 

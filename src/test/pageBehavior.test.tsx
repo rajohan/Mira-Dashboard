@@ -1,5 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+    act,
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+    within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
@@ -987,6 +995,22 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                         pids: "8",
                     },
                     status: "Up",
+                },
+            ],
+        });
+    }
+
+    if (url === "/api/docker/containers/stats") {
+        return Response.json({
+            stats: [
+                {
+                    blockIO: "4 KB / 8 KB",
+                    cpu: "8.5%",
+                    id: "abc123",
+                    memory: "256 MiB / 1 GiB",
+                    memoryPercent: "25%",
+                    netIO: "3 KB / 6 KB",
+                    pids: "9",
                 },
             ],
         });
@@ -2752,6 +2776,10 @@ describe("Mira Dashboard pages", () => {
         await waitFor(() => {
             expect(screen.getByText("Updater overview")).toBeInTheDocument();
         });
+        await waitFor(() => {
+            expect(screen.getAllByText("8.5%").length).toBeGreaterThan(0);
+            expect(screen.getAllByText("268 MB").length).toBeGreaterThan(0);
+        });
 
         clickElement(screen.getByRole("button", { name: /run updater now/i }));
         await waitFor(() => {
@@ -2797,9 +2825,8 @@ describe("Mira Dashboard pages", () => {
         clickElement(screen.getAllByLabelText(/open console for dashboard/i)[0]!);
         await user.type(
             screen.getByPlaceholderText(/command to run inside container/i),
-            "echo hello"
+            "echo hello{enter}"
         );
-        clickElement(screen.getByRole("button", { name: /^run$/i }));
         await waitFor(() => {
             expect(fetchMock).toHaveBeenCalledWith(
                 "/api/docker/exec/start",
@@ -2850,6 +2877,117 @@ describe("Mira Dashboard pages", () => {
         view.unmount();
         view.queryClient.clear();
     }, 10_000);
+
+    it("shows Docker console start failures in the action output pane", async () => {
+        const user = userEvent.setup();
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+                if (method === "POST" && url === "/api/docker/exec/start") {
+                    return Response.json(
+                        { error: "console unavailable" },
+                        { status: 503 }
+                    );
+                }
+
+                return apiResponse(url, method, init);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const view = renderPage(createElement(Docker));
+
+        await waitFor(() => {
+            expect(screen.getByText("Updater overview")).toBeInTheDocument();
+        });
+        await waitFor(() => {
+            expect(screen.getAllByText("8.5%").length).toBeGreaterThan(0);
+            expect(screen.getAllByText("268 MB").length).toBeGreaterThan(0);
+        });
+
+        clickElement(screen.getAllByLabelText(/open console for dashboard/i)[0]!);
+        await user.type(
+            screen.getByPlaceholderText(/command to run inside container/i),
+            "echo hello{enter}"
+        );
+
+        const consoleDialog = screen.getByRole("dialog", { name: /dashboard console/i });
+        expect(
+            within(consoleDialog).getByText(/Failed to start Docker console/i)
+        ).toBeInTheDocument();
+        expect(
+            within(consoleDialog).getByText(/console unavailable/i)
+        ).toBeInTheDocument();
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("clears stale Docker detail stats when live container stats are absent", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/cache/docker.summary" && method === "GET") {
+                    const response = await apiResponse(url, method, init);
+                    const payload = (await response.json()) as Record<string, unknown>;
+                    const data = payload.data as {
+                        containers: Array<Record<string, unknown>>;
+                    };
+                    return Response.json({
+                        ...payload,
+                        data: {
+                            ...data,
+                            containers: data.containers.map((container) => ({
+                                ...container,
+                                stats: undefined,
+                            })),
+                        },
+                    });
+                }
+
+                if (url === "/api/docker/containers/stats" && method === "GET") {
+                    return Response.json({ stats: [] });
+                }
+
+                return apiResponse(url, method, init);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const view = renderPage(createElement(Docker));
+
+        await waitFor(() => {
+            expect(screen.getByText("Updater overview")).toBeInTheDocument();
+        });
+        await waitFor(() => {
+            expect(
+                fetchMock.mock.calls.some(
+                    ([url]) => String(url) === "/api/docker/containers/stats"
+                )
+            ).toBe(true);
+        });
+        await flushQueuedTimers();
+
+        clickElement(screen.getByLabelText(/open details for dashboard/i));
+
+        const detailsDialog = await screen.findByRole("dialog", {
+            name: /dashboard/i,
+        });
+        expect(within(detailsDialog).getByText("CPU: —")).toBeInTheDocument();
+        expect(within(detailsDialog).getByText("Memory: —")).toBeInTheDocument();
+        view.unmount();
+        view.queryClient.clear();
+    });
 
     it("keeps chat page storage and history helpers deterministic", () => {
         expect(readDeletedMessageKeys("agent:main:main")).toEqual(new Set());

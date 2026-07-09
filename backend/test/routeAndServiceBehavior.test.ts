@@ -2580,6 +2580,17 @@ describe("backend route and service behavior", () => {
             ],
         });
 
+        const containerStats = await dockerRoutes["/api/docker/containers/stats"].GET();
+        await expect(containerStats.json()).resolves.toMatchObject({
+            stats: [
+                {
+                    cpu: "1.00%",
+                    id: "abc123def456",
+                    memory: "10MiB / 1GiB",
+                },
+            ],
+        });
+
         const details = await dockerRoutes["/api/docker/containers/:containerId"].GET(
             requestWithParameters("/api/docker/containers/demo", { containerId: "demo" })
         );

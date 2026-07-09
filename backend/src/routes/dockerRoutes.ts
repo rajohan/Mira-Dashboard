@@ -356,9 +356,7 @@ export async function getContainers() {
     const psRows = parseJsonLines<DockerPsRow>(
         await runDocker(["ps", "-a", "--format", "{{json .}}"])
     );
-    const statsRows = parseJsonLines<DockerStatsRow>(
-        await runDocker(["stats", "--no-stream", "--format", "{{json .}}"])
-    );
+    const statsRows = await getContainerStatsRows();
     const statsById = new Map(statsRows.map((row) => [row.ID, row]));
     const inspectMap = await getContainerInspectMap(psRows.map((row) => row.ID));
 
@@ -412,6 +410,12 @@ export async function getContainers() {
             status: row.Status,
         };
     });
+}
+
+export async function getContainerStatsRows() {
+    return parseJsonLines<DockerStatsRow>(
+        await runDocker(["stats", "--no-stream", "--format", "{{json .}}"])
+    );
 }
 
 async function getContainerDetails(containerId: string) {
@@ -822,6 +826,22 @@ function settleDockerExecJob(containerId: string, command: string, jobId: string
 export const dockerRoutes = {
     "/api/docker/containers": {
         GET: async () => json({ containers: await getContainers() }),
+    },
+    "/api/docker/containers/stats": {
+        GET: async () => {
+            const rows = await getContainerStatsRows();
+            return json({
+                stats: rows.map((row) => ({
+                    blockIO: row.BlockIO,
+                    cpu: row.CPUPerc,
+                    id: row.ID,
+                    memory: row.MemUsage,
+                    memoryPercent: row.MemPerc,
+                    netIO: row.NetIO,
+                    pids: row.PIDs,
+                })),
+            });
+        },
     },
     "/api/docker/containers/:containerId": {
         GET: async (request: Request) => {
