@@ -24,10 +24,18 @@ export interface CacheHeartbeatResponse {
     entries: CacheEnvelope<unknown>[];
 }
 
+/** Represents the lightweight cache status API response. */
+export interface CacheStatusResponse {
+    generatedAt: string;
+    count: number;
+    entries: CacheEnvelope<null>[];
+}
+
 /** Defines cache keys. */
 export const cacheKeys = {
     all: ["cache"] as const,
     heartbeat: () => [...cacheKeys.all, "heartbeat"] as const,
+    status: () => [...cacheKeys.all, "status"] as const,
     entry: (key: string) => [...cacheKeys.all, key] as const,
 };
 
@@ -36,6 +44,16 @@ export function useCacheHeartbeat(refreshInterval: number | false = false) {
     return useQuery({
         queryKey: cacheKeys.heartbeat(),
         queryFn: () => apiFetchRequired<CacheHeartbeatResponse>("/cache/heartbeat"),
+        refetchInterval: refreshInterval,
+        staleTime: 2000,
+    });
+}
+
+/** Provides lightweight cache status. */
+export function useCacheStatus(refreshInterval: number | false = false) {
+    return useQuery({
+        queryKey: cacheKeys.status(),
+        queryFn: () => apiFetchRequired<CacheStatusResponse>("/cache/status"),
         refetchInterval: refreshInterval,
         staleTime: 2000,
     });
@@ -109,6 +127,7 @@ export function useRefreshCacheEntry() {
 
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
+                queryClient.invalidateQueries({ queryKey: cacheKeys.status() }),
                 ...keys.map((key) =>
                     queryClient.invalidateQueries({ queryKey: cacheKeys.entry(key) })
                 ),

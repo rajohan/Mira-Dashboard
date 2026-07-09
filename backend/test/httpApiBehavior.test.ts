@@ -1051,6 +1051,25 @@ describe("Mira Dashboard backend integration", () => {
             updatedAt: missingValue,
         });
         expect(
+            heartbeat.body.entries.find((entry) => entry.key === "moltbook.home")?.data
+        ).toMatchObject({ posts: [{ id: "post-1" }] });
+        const status = await api<{
+            count: number;
+            entries: Array<{
+                data: unknown;
+                key: string;
+                status: string;
+            }>;
+        }>("/api/cache/status");
+        expect(status.status).toBe(200);
+        expect(status.body.count).toBeGreaterThanOrEqual(2);
+        expect(
+            status.body.entries.find((entry) => entry.key === "moltbook.home")
+        ).toMatchObject({
+            data: missingValue,
+            status: "fresh",
+        });
+        expect(
             heartbeat.body.entries.find((entry) => entry.key === "weather.expired")
         ).toMatchObject({
             status: "stale",

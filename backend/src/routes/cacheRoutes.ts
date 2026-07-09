@@ -75,6 +75,19 @@ export const cacheRoutes = {
             });
         },
     },
+    "/api/cache/status": {
+        GET: async () => {
+            const rows = await getAllCacheEntries();
+            const entries = rows.map((row) =>
+                mapCacheRowForResponse(row, { includeData: false })
+            );
+            return json({
+                count: entries.length,
+                entries,
+                generatedAt: new Date().toISOString(),
+            });
+        },
+    },
     "/api/cache/:key": {
         GET: async (request: ParametersRequest<"key">) => {
             const key = stringFallback(request.params.key).trim();

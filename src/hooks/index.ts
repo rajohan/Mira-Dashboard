@@ -18,6 +18,7 @@ export {
     cacheKeys,
     useCacheEntry,
     useCacheHeartbeat,
+    useCacheStatus,
     useRefreshCacheEntry,
 } from "./useCache";
 export {
