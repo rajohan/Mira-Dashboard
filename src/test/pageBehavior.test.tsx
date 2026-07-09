@@ -1590,6 +1590,34 @@ describe("Mira Dashboard pages", () => {
         }
     });
 
+    it("shows the agents error state without the configured-agents empty state", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/agents/status" && method === "GET") {
+                    return Response.json(
+                        { error: "Agents status unavailable" },
+                        { status: 503 }
+                    );
+                }
+
+                return apiResponse(url, method, init);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(Agents));
+
+        expect(await screen.findByText("Agents status unavailable")).toBeInTheDocument();
+        expect(screen.queryByText(/No agents configured/u)).not.toBeInTheDocument();
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("links git workspace repositories to GitHub remotes", async () => {
         const view = renderPage(createElement(Dashboard), { withSocket: true });
 

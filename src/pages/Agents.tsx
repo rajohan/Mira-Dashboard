@@ -100,7 +100,7 @@ export function Agents() {
                                 </div>
                             )}
 
-                            {agents.length === 0 && (
+                            {!error && agents.length === 0 && (
                                 <Card className="py-8 text-center">
                                     <p className="text-primary-400">
                                         No agents configured. Check{" "}
