@@ -6543,7 +6543,7 @@ describe("shared component helpers", () => {
                 const url = String(input);
                 const method = init?.method ?? "GET";
 
-                if (url === "/api/cache/heartbeat" && method === "GET") {
+                if (url === "/api/cache/status" && method === "GET") {
                     return Response.json({
                         count: 2,
                         entries: [

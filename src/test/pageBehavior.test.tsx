@@ -503,7 +503,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
         });
     }
 
-    if (url === "/api/cache/heartbeat") {
+    if (url === "/api/cache/heartbeat" || url === "/api/cache/status") {
         return Response.json({
             generatedAt: "2026-06-24T08:00:00.000Z",
             count: 7,

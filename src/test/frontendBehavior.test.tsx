@@ -103,6 +103,7 @@ import {
 import {
     useCacheEntry,
     useCacheHeartbeat,
+    useCacheStatus,
     useRefreshCacheEntry,
 } from "../hooks/useCache";
 import {
@@ -1822,6 +1823,26 @@ describe("Mira Dashboard frontend behavior", () => {
                     });
                 }
 
+                if (url === "/api/cache/status" && method === "GET") {
+                    return Response.json({
+                        generatedAt: "2026-06-23T08:00:00.000Z",
+                        count: 1,
+                        entries: [
+                            {
+                                key: "weather.spydeberg",
+                                source: "weather",
+                                status: "fresh",
+                                updatedAt: "2026-06-23T08:00:00.000Z",
+                                lastAttemptAt: "2026-06-23T08:00:00.000Z",
+                                expiresAt: "2026-06-23T09:00:00.000Z",
+                                consecutiveFailures: 0,
+                                data: JSON.parse("null") as null,
+                                meta: {},
+                            },
+                        ],
+                    });
+                }
+
                 if (url === "/api/cache/weather.spydeberg" && method === "GET") {
                     return Response.json({
                         key: "weather.spydeberg",
@@ -1989,6 +2010,13 @@ describe("Mira Dashboard frontend behavior", () => {
 
         const cacheHeartbeat = renderHookWithQueryClient(() => useCacheHeartbeat());
         await waitFor(() => expect(cacheHeartbeat.result.current.data?.count).toBe(1));
+        expect(cacheHeartbeat.result.current.data?.entries[0]?.data).toEqual({
+            location: "Spydeberg",
+        });
+
+        const cacheStatus = renderHookWithQueryClient(() => useCacheStatus());
+        await waitFor(() => expect(cacheStatus.result.current.data?.count).toBe(1));
+        expect(cacheStatus.result.current.data?.entries[0]?.data).toBeNull();
 
         const weatherEntry = renderHookWithQueryClient(() =>
             useCacheEntry<{ location: string }>("weather.spydeberg")

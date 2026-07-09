@@ -1,6 +1,6 @@
 import { DatabaseZap, Loader2, RefreshCw } from "lucide-react";
 
-import { useCacheHeartbeat, useRefreshCacheEntry } from "../../../hooks";
+import { useCacheStatus, useRefreshCacheEntry } from "../../../hooks";
 import { formatDate } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
@@ -42,7 +42,7 @@ function formatCacheUpdateTime(value?: string | undefined): string {
 
 /** Renders the cache status card UI. */
 export function CacheStatusCard({ title, items }: CacheStatusCardProperties) {
-    const { data } = useCacheHeartbeat(30_000);
+    const { data } = useCacheStatus(30_000);
     const refreshCache = useRefreshCacheEntry();
 
     const entries = items.map((item) => ({

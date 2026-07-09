@@ -1493,6 +1493,19 @@ describe("backend route and service behavior", () => {
                 }),
             ]),
         });
+        const missingValue = JSON.parse("null") as null;
+        const cacheStatus = await cacheRoutes["/api/cache/status"].GET();
+        await expect(cacheStatus.json()).resolves.toMatchObject({
+            count: expect.any(Number),
+            entries: expect.arrayContaining([
+                expect.objectContaining({
+                    consecutiveFailures: 2,
+                    data: missingValue,
+                    key: "route.string",
+                    meta: {},
+                }),
+            ]),
+        });
 
         const missingCache = await cacheRoutes["/api/cache/:key"].GET(
             requestWithParameters("/api/cache/", { key: "" })
