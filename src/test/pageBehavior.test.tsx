@@ -2900,10 +2900,14 @@ describe("Mira Dashboard pages", () => {
             writable: true,
         });
 
-        renderPage(createElement(Docker));
+        const view = renderPage(createElement(Docker));
 
         await waitFor(() => {
             expect(screen.getByText("Updater overview")).toBeInTheDocument();
+        });
+        await waitFor(() => {
+            expect(screen.getAllByText("8.5%").length).toBeGreaterThan(0);
+            expect(screen.getAllByText("268 MB").length).toBeGreaterThan(0);
         });
 
         clickElement(screen.getAllByLabelText(/open console for dashboard/i)[0]!);
@@ -2919,6 +2923,8 @@ describe("Mira Dashboard pages", () => {
         expect(
             within(consoleDialog).getByText(/console unavailable/i)
         ).toBeInTheDocument();
+        view.unmount();
+        view.queryClient.clear();
     });
 
     it("clears stale Docker detail stats when live container stats are absent", async () => {
@@ -2958,11 +2964,19 @@ describe("Mira Dashboard pages", () => {
             writable: true,
         });
 
-        renderPage(createElement(Docker));
+        const view = renderPage(createElement(Docker));
 
         await waitFor(() => {
             expect(screen.getByText("Updater overview")).toBeInTheDocument();
         });
+        await waitFor(() => {
+            expect(
+                fetchMock.mock.calls.some(
+                    ([url]) => String(url) === "/api/docker/containers/stats"
+                )
+            ).toBe(true);
+        });
+        await flushQueuedTimers();
 
         clickElement(screen.getByLabelText(/open details for dashboard/i));
 
@@ -2971,6 +2985,8 @@ describe("Mira Dashboard pages", () => {
         });
         expect(within(detailsDialog).getByText("CPU: —")).toBeInTheDocument();
         expect(within(detailsDialog).getByText("Memory: —")).toBeInTheDocument();
+        view.unmount();
+        view.queryClient.clear();
     });
 
     it("keeps chat page storage and history helpers deterministic", () => {

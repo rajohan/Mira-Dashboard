@@ -283,6 +283,7 @@ export function useDockerContainer(containerId: string | undefined) {
         queryKey: dockerKeys.container(containerId || ""),
         queryFn: () => fetchContainer(containerId!),
         enabled: Boolean(containerId),
+        refetchInterval: 60_000,
         refetchOnWindowFocus: false,
         staleTime: 60_000,
     });
