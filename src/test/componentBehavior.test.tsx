@@ -4503,6 +4503,31 @@ describe("shared component helpers", () => {
                     ...stream,
                     message: {
                         ...stream.message,
+                        text: "assistant recovered text",
+                        thinking: undefined,
+                    },
+                    runId: "current-run",
+                    text: "assistant recovered text",
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "assistant recovered text",
+                        images: [],
+                        role: "assistant",
+                        runId: "previous-run",
+                        text: "assistant recovered text",
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        ...stream.message,
                         text: "Here",
                         thinking: undefined,
                     },
@@ -4636,8 +4661,11 @@ describe("shared component helpers", () => {
                 ],
                 images: [
                     {
-                        data: "image-data",
-                        mimeType: "image/png",
+                        source: {
+                            data: "image-data",
+                            media_type: "image/png",
+                            type: "base64",
+                        },
                         type: "image" as const,
                     },
                 ],
@@ -4670,7 +4698,13 @@ describe("shared component helpers", () => {
                     {
                         attachments: mediaStream.message.attachments,
                         content: "assistant media text",
-                        images: mediaStream.message.images,
+                        images: [
+                            {
+                                data: "image-data",
+                                mimeType: "image/png",
+                                type: "image" as const,
+                            },
+                        ],
                         role: "assistant",
                         runId: "run-1",
                         text: "assistant media text",

@@ -137,7 +137,6 @@ function mediaIdentities(
             JSON.stringify({
                 data: image.data || image.source?.data || "",
                 mediaType: image.mimeType || image.source?.media_type || "",
-                sourceType: image.source?.type || "",
                 type: image.type,
             })
         ),
@@ -180,11 +179,15 @@ export function isActiveStreamRecoveredInMessages(
                 Boolean(stream.runId) &&
                 Boolean(message.runId) &&
                 stream.runId === message.runId;
+            const hasRunConflict = Boolean(
+                stream.runId && message.runId && stream.runId !== message.runId
+            );
             const messageTimestamp = sessionTimestampMs(message.timestamp);
-            const isCurrentSameRunRow =
-                isSameRun &&
+            const isCurrentStreamRow =
+                !hasRunConflict &&
                 (messageTimestamp === undefined ||
                     streamUpdatedAt === undefined ||
+                    !isSameRun ||
                     messageTimestamp >= streamUpdatedAt);
             const hasRecoveredMediaDetails =
                 !hasMediaDetails ||
@@ -194,7 +197,8 @@ export function isActiveStreamRecoveredInMessages(
                     )
                 );
             if (
-                isCurrentSameRunRow &&
+                isCurrentStreamRow &&
+                isSameRun &&
                 hasMediaDetails &&
                 hasRecoveredMediaDetails &&
                 !streamText.trim() &&
@@ -204,7 +208,8 @@ export function isActiveStreamRecoveredInMessages(
             }
 
             if (
-                isCurrentSameRunRow &&
+                isCurrentStreamRow &&
+                isSameRun &&
                 streamText.trim() &&
                 !hasDiagnosticDetails &&
                 hasRecoveredMediaDetails &&
@@ -214,6 +219,7 @@ export function isActiveStreamRecoveredInMessages(
             }
 
             if (
+                isCurrentStreamRow &&
                 !hasDiagnosticDetails &&
                 hasRecoveredMediaDetails &&
                 stream.message?.text.trim() &&
@@ -225,6 +231,7 @@ export function isActiveStreamRecoveredInMessages(
             const thinkingText =
                 message.thinking?.map((block) => block.text).join("\n") || "";
             if (
+                isCurrentStreamRow &&
                 streamThinkingText.trim() &&
                 thinkingText.trim() === streamThinkingText.trim()
             ) {
@@ -235,7 +242,7 @@ export function isActiveStreamRecoveredInMessages(
                 );
             }
 
-            if (stream.message?.toolCalls?.length) {
+            if (isCurrentStreamRow && stream.message?.toolCalls?.length) {
                 const unmatchedToolCalls = [...(message.toolCalls || [])];
                 const hasRecoveredToolCalls = stream.message.toolCalls.every(
                     (streamToolCall) => {
@@ -284,7 +291,7 @@ export function isActiveStreamRecoveredInMessages(
                 }
             }
 
-            if (stream.message?.toolResult && message.toolResult) {
+            if (isCurrentStreamRow && stream.message?.toolResult && message.toolResult) {
                 return (
                     hasRecoveredMediaDetails &&
                     isMatchingToolResult(stream.message.toolResult, message.toolResult)
@@ -293,6 +300,7 @@ export function isActiveStreamRecoveredInMessages(
 
             return (
                 isStreamQuiet &&
+                isCurrentStreamRow &&
                 hasRecoveredMediaDetails &&
                 (isRecoveredAssistantText(message.text, streamText) ||
                     isRecoveredAssistantText(thinkingText, streamText))
