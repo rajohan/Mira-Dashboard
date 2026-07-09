@@ -141,6 +141,13 @@ function mediaIdentities(
     ];
 }
 
+/** Returns whether an active stream run id is provisional. */
+function isProvisionalActiveStreamRun(stream: ActiveChatStream): boolean {
+    return (
+        stream.runId === stream.sessionKey || stream.runId.startsWith("dashboard-chat-")
+    );
+}
+
 /** Returns whether an active stream is already represented in visible history. */
 export function isActiveStreamRecoveredInMessages(
     stream: ActiveChatStream,
@@ -177,13 +184,19 @@ export function isActiveStreamRecoveredInMessages(
                 Boolean(stream.runId) &&
                 Boolean(message.runId) &&
                 stream.runId === message.runId;
+            const isCompatibleRun =
+                !message.runId ||
+                isSameRun ||
+                stream.aliases.includes(message.runId) ||
+                isProvisionalActiveStreamRun(stream);
             const hasRunConflict = Boolean(
-                stream.runId && message.runId && stream.runId !== message.runId
+                stream.runId && message.runId && !isCompatibleRun
             );
             const messageTimestamp = sessionTimestampMs(message.timestamp);
             const isCurrentStreamRow =
                 !hasRunConflict &&
-                (!isSameRun ||
+                (!message.runId ||
+                    !isCompatibleRun ||
                     streamUpdatedAt === undefined ||
                     (messageTimestamp !== undefined &&
                         messageTimestamp + ACTIVE_STREAM_HISTORY_TIMESTAMP_TOLERANCE_MS >=
@@ -197,7 +210,7 @@ export function isActiveStreamRecoveredInMessages(
                 );
             if (
                 isCurrentStreamRow &&
-                isSameRun &&
+                isCompatibleRun &&
                 hasMediaDetails &&
                 hasRecoveredMediaDetails &&
                 !streamText.trim() &&
@@ -208,7 +221,7 @@ export function isActiveStreamRecoveredInMessages(
 
             if (
                 isCurrentStreamRow &&
-                isSameRun &&
+                isCompatibleRun &&
                 streamText.trim() &&
                 !hasDiagnosticDetails &&
                 hasRecoveredMediaDetails &&

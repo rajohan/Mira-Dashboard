@@ -4612,6 +4612,34 @@ describe("shared component helpers", () => {
             isActiveStreamRecoveredInMessages(
                 {
                     ...stream,
+                    aliases: ["real-history-run"],
+                    message: {
+                        ...stream.message,
+                        text: "alias recovered text",
+                        thinking: undefined,
+                    },
+                    runId: "agent:main:main",
+                    text: "alias recovered text",
+                    updatedAt: recentUpdatedAt,
+                },
+                [
+                    {
+                        attachments: [],
+                        content: "alias recovered text and completed",
+                        images: [],
+                        role: "assistant",
+                        runId: "real-history-run",
+                        text: "alias recovered text and completed",
+                        timestamp: new Date(now - 2000).toISOString(),
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
                     message: {
                         ...stream.message,
                         text: "assistant still streaming",
