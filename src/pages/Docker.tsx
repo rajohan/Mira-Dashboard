@@ -755,9 +755,13 @@ export function Docker() {
                     />
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                         <Button
-                            onClick={() =>
-                                void handleStartConsole(selectedConsoleContainer!.id)
-                            }
+                            onClick={() => {
+                                if (!selectedConsoleContainer) {
+                                    return;
+                                }
+
+                                void handleStartConsole(selectedConsoleContainer.id);
+                            }}
                             disabled={
                                 !selectedConsoleContainer ||
                                 !consoleCommand.trim() ||
