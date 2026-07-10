@@ -125,12 +125,13 @@ export function isTaskMatchSearch(task: Task, search: string): boolean {
         return true;
     }
 
+    const priority = getPriority(task.labels);
     const searchableValues = [
         ...getTaskNumberSearchValues(task.number),
         task.title,
         task.body,
-        getPriority(task.labels),
-        `priority-${getPriority(task.labels)}`,
+        priority,
+        `priority-${priority}`,
         ...getTaskColumnSearchValues(task),
         ...task.labels.map((label) => getTaskLabelSearchValue(label)),
         ...task.assignees.flatMap((assignee) => getTaskAssigneeSearchValues(assignee)),
