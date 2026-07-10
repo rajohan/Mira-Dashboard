@@ -4185,8 +4185,14 @@ describe("Mira Dashboard frontend behavior", () => {
         const unlabelled = task({ number: 2, title: "Default priority" });
         const lowPriority = task({
             number: 4,
-            title: "Low priority task",
+            title: "Triage database cleanup",
             labels: [{ name: "priority-low" }],
+        });
+        const completed = task({
+            number: 5,
+            title: "Merged dashboard PR",
+            labels: [],
+            state: "CLOSED",
         });
         const blocked = task({
             number: 3,
@@ -4203,6 +4209,10 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(getPriority(unlabelled.labels)).toBe("medium");
         expect(getPriority(lowPriority.labels)).toBe("low");
         expect(getColumnId(blocked)).toBe("blocked");
+        expect(isTaskMatchSearch(unlabelled, "medium")).toBe(true);
+        expect(isTaskMatchSearch(unlabelled, "new")).toBe(true);
+        expect(isTaskMatchSearch(lowPriority, "priority-low")).toBe(true);
+        expect(isTaskMatchSearch(completed, "done")).toBe(true);
         expect(isTaskMatchSearch(blocked, "daily-check")).toBe(true);
         expect(isTaskMatchSearch(blocked, "#3")).toBe(true);
         expect(isTaskMatchSearch(blocked, "not-present")).toBe(false);
