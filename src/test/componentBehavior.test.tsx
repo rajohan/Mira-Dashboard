@@ -3383,6 +3383,68 @@ describe("shared component helpers", () => {
         });
         expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
 
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: {
+                        content: [
+                            { text: "Distinct media caption", type: "text" },
+                            {
+                                data: "distinct-caption-image",
+                                mimeType: "image/png",
+                                type: "image",
+                            },
+                        ],
+                        role: "assistant",
+                    },
+                    runId: "distinct-media-text-run",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Different final answer",
+                    runId: "distinct-media-text-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "text" in message &&
+                    message.text === "Distinct media caption" &&
+                    "images" in message &&
+                    Array.isArray(message.images) &&
+                    message.images.some(
+                        (image) =>
+                            typeof image === "object" &&
+                            image !== null &&
+                            "data" in image &&
+                            image.data === "distinct-caption-image"
+                    )
+            )
+        ).toBe(true);
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "text" in message &&
+                    message.text === "Different final answer"
+            )
+        ).toBe(true);
+
         messages = [
             ...messages,
             {
@@ -3575,6 +3637,15 @@ describe("shared component helpers", () => {
             });
         });
         expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "text" in message &&
+                    message.text === "Runtime-only terminal answer"
+            )
+        ).toBe(true);
 
         act(() => {
             listener?.({
@@ -3652,11 +3723,7 @@ describe("shared component helpers", () => {
                 type: "event",
             });
         });
-        await waitFor(() => {
-            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe(
-                "No-run final-only chat answer"
-            );
-        });
+        expect(activeStreamsReference.current["agent:main:main"]?.text).toBe("");
         act(() => {
             listener?.({
                 event: "model.completed",
@@ -5426,6 +5493,22 @@ describe("shared component helpers", () => {
         expect(isActiveStreamRecoveredInMessages(stream, visibleMessages, now)).toBe(
             false
         );
+        expect(
+            isActiveStreamRecoveredInMessages(
+                stream,
+                [
+                    {
+                        attachments: [],
+                        content: "Previous answer",
+                        images: [],
+                        role: "assistant",
+                        text: "Previous answer",
+                    },
+                ],
+                now,
+                false
+            )
+        ).toBe(false);
         expect(
             isActiveStreamRecoveredInMessages(
                 {

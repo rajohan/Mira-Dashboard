@@ -330,8 +330,8 @@ export function isActiveStreamRecoveredInMessages(
             const thinkingText =
                 message.thinking?.map((block) => block.text).join("\n") || "";
             const hasRecoveredThinking =
-                !shouldRequireThinking ||
                 !streamThinkingText.trim() ||
+                (!shouldRequireThinking && Boolean(stream.message?.text.trim())) ||
                 thinkingText.trim() === streamThinkingText.trim();
             if (streamThinkingText.trim() && hasRecoveredThinking && !hasToolDetails) {
                 return (

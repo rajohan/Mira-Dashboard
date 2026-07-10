@@ -1250,27 +1250,48 @@ export function useChatRuntimeEvents({
             return existingSource === source;
         };
 
+        /** Resolves an omitted terminal run id when only one concrete run exists. */
+        const resolvedActiveAssistantRunId = (
+            sessionKey: string,
+            runId?: string
+        ): string | undefined => {
+            if (runId) {
+                return runId;
+            }
+
+            const recordedProvisionalRunId =
+                provisionalAssistantRunIdsReference.current.get(sessionKey);
+            const sessionStreams = Object.values(activeStreamsReference.current).filter(
+                (streamEntry) => isSameSessionKey(streamEntry.sessionKey, sessionKey)
+            );
+            if (
+                recordedProvisionalRunId &&
+                sessionStreams.some(
+                    (streamEntry) =>
+                        streamEntry.runId === recordedProvisionalRunId ||
+                        streamEntry.aliases.includes(recordedProvisionalRunId)
+                )
+            ) {
+                return recordedProvisionalRunId;
+            }
+
+            const concreteRunIds = uniqueStrings(
+                sessionStreams
+                    .filter(
+                        (streamEntry) =>
+                            !isProvisionalRunId(sessionKey, streamEntry.runId) &&
+                            !isOptimisticRunId(streamEntry.runId)
+                    )
+                    .map((streamEntry) => streamEntry.runId)
+            );
+            return concreteRunIds.length === 1 ? concreteRunIds[0] : undefined;
+        };
+
         /** Clears active streams belonging to a finished chat run. */
         const clearActiveStreamsForRun = (sessionKey: string, runId?: string) => {
             const recordedProvisionalRunId =
                 provisionalAssistantRunIdsReference.current.get(sessionKey);
-            const concreteAssistantRunIds = uniqueStrings(
-                Object.entries(activeStreamsReference.current)
-                    .filter(
-                        ([, streamEntry]) =>
-                            isSameSessionKey(streamEntry.sessionKey, sessionKey) &&
-                            Boolean(streamEntry.text) &&
-                            !isProvisionalRunId(sessionKey, streamEntry.runId) &&
-                            !isOptimisticRunId(streamEntry.runId)
-                    )
-                    .map(([, streamEntry]) => streamEntry.runId)
-            );
-            const resolvedRunId =
-                runId ||
-                recordedProvisionalRunId ||
-                (concreteAssistantRunIds.length === 1
-                    ? concreteAssistantRunIds[0]
-                    : undefined);
+            const resolvedRunId = resolvedActiveAssistantRunId(sessionKey, runId);
             if (!runId) {
                 assistantTextSourcesReference.current.delete(
                     `${sessionKey}::${resolvedRunId || "provisional"}`
@@ -1348,13 +1369,18 @@ export function useChatRuntimeEvents({
             sessionKey: string,
             runId?: string
         ): string => {
+            const resolvedRunId = resolvedActiveAssistantRunId(sessionKey, runId);
             const matchingTexts = Object.values(activeStreamsReference.current)
                 .filter((streamEntry) => {
                     if (!isSameSessionKey(streamEntry.sessionKey, sessionKey)) {
                         return false;
                     }
 
-                    return isActiveStreamMatchingRun(sessionKey, streamEntry, runId);
+                    return isActiveStreamMatchingRun(
+                        sessionKey,
+                        streamEntry,
+                        resolvedRunId
+                    );
                 })
                 .map((streamEntry) => streamEntry.text)
                 .filter((text) => text.trim());
@@ -1375,13 +1401,18 @@ export function useChatRuntimeEvents({
             runId?: string
         ): ChatHistoryMessage[] => {
             const visibility = createChatVisibility(showThinkingOutput, showToolOutput);
+            const resolvedRunId = resolvedActiveAssistantRunId(sessionKey, runId);
             return Object.values(activeStreamsReference.current)
                 .filter((streamEntry) => {
                     if (!isSameSessionKey(streamEntry.sessionKey, sessionKey)) {
                         return false;
                     }
 
-                    return isActiveStreamMatchingRun(sessionKey, streamEntry, runId);
+                    return isActiveStreamMatchingRun(
+                        sessionKey,
+                        streamEntry,
+                        resolvedRunId
+                    );
                 })
                 .map((streamEntry) => streamEntry.message)
                 .filter((message): message is ChatHistoryMessage =>
@@ -1446,21 +1477,16 @@ export function useChatRuntimeEvents({
                         : undefined;
             const completedAssistantText =
                 completedAssistantTextsReference.current.get(selectedSessionKey);
-            const pendingBaseStream = activeStreamsReference.current[selectedSessionKey];
-            const hasPendingNewOptimisticRun = Boolean(
-                pendingBaseStream &&
-                isOptimisticRunId(pendingBaseStream.runId) &&
-                !completedAssistantText?.runIds.some(
-                    (runId) =>
-                        pendingBaseStream.runId === runId ||
-                        pendingBaseStream.aliases.includes(runId)
-                )
-            );
             const isMatchingCompletedRun = Boolean(
                 eventRunId && completedAssistantText?.runIds.includes(eventRunId)
             );
             const isUnscopedCompletedEcho = Boolean(
-                completedAssistantText && !eventRunId && !hasPendingNewOptimisticRun
+                completedAssistantText && !eventRunId
+            );
+            const hasUnscopedSessionMessageText = Boolean(
+                eventName === "session.message" &&
+                !eventRunId &&
+                runtimeMessage?.text.trim()
             );
             const isCompletedSessionMessageEcho = Boolean(
                 eventName === "session.message" &&
@@ -1468,15 +1494,23 @@ export function useChatRuntimeEvents({
                 runtimeMessage.text.trim() === completedAssistantText?.text &&
                 (isMatchingCompletedRun || isUnscopedCompletedEcho)
             );
-            if (runtimeMessage?.text.trim() && !isCompletedSessionMessageEcho) {
+            if (
+                runtimeMessage?.text.trim() &&
+                !isCompletedSessionMessageEcho &&
+                !hasUnscopedSessionMessageText
+            ) {
                 completedAssistantTextsReference.current.delete(selectedSessionKey);
             }
             const shouldIgnoreRuntimeAssistantText = Boolean(
                 (stream === "assistant" || eventName === "session.message") &&
                 runtimeMessage?.text.length &&
-                (isCompletedSessionMessageEcho ||
+                (hasUnscopedSessionMessageText ||
+                    isCompletedSessionMessageEcho ||
                     !canUseAssistantTextSource(selectedSessionKey, eventRunId, "runtime"))
             );
+            if (hasUnscopedSessionMessageText) {
+                refreshSelectedHistorySoon(150);
+            }
             const runtimeMessageToConsider =
                 shouldIgnoreRuntimeAssistantText && runtimeMessage
                     ? { ...runtimeMessage, content: [], text: "" }
@@ -2185,7 +2219,7 @@ export function useChatRuntimeEvents({
                                     (diagnosticText === finalText ||
                                         diagnosticText.includes(finalText) ||
                                         finalText.includes(diagnosticText))) ||
-                                    hasMedia)
+                                    (hasMedia && !diagnosticText))
                             );
                         }
                     );
