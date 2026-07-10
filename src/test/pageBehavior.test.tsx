@@ -2874,10 +2874,18 @@ describe("Mira Dashboard pages", () => {
         });
 
         clickElement(screen.getAllByLabelText(/open console for dashboard/i)[0]!);
-        await user.type(
-            screen.getByPlaceholderText(/command to run inside container/i),
-            "echo hello{enter}"
+        const consoleCommandInput = screen.getByPlaceholderText(
+            /command to run inside container/i
         );
+        expect(consoleCommandInput.parentElement?.parentElement).toHaveClass(
+            "min-w-0",
+            "flex-1"
+        );
+        expect(screen.getByRole("button", { name: "Send" }).parentElement).toHaveClass(
+            "sm:min-w-44",
+            "sm:items-center"
+        );
+        await user.type(consoleCommandInput, "echo hello{enter}");
         await waitFor(() => {
             expect(fetchMock).toHaveBeenCalledWith(
                 "/api/docker/exec/start",

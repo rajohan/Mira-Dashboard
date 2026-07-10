@@ -742,18 +742,20 @@ export function Docker() {
                 }
                 size="3xl"
             >
-                <div className="mb-3 flex flex-col gap-3 sm:mb-4 sm:flex-row sm:items-start">
-                    <Input
-                        aria-label="Docker console command"
-                        value={consoleCommand}
-                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                            setConsoleCommand(event.target.value)
-                        }
-                        onKeyDown={handleConsoleCommandKeyDown}
-                        placeholder="Command to run inside container"
-                        className="min-w-0 flex-1 font-mono"
-                    />
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <div className="mb-3 flex flex-col gap-3 sm:mb-4 sm:flex-row sm:items-center">
+                    <div className="min-w-0 flex-1">
+                        <Input
+                            aria-label="Docker console command"
+                            value={consoleCommand}
+                            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                setConsoleCommand(event.target.value)
+                            }
+                            onKeyDown={handleConsoleCommandKeyDown}
+                            placeholder="Command to run inside container"
+                            className="font-mono"
+                        />
+                    </div>
+                    <div className="flex flex-col gap-2 sm:min-w-44 sm:flex-row sm:items-center sm:justify-end">
                         <Button
                             onClick={() => {
                                 if (!selectedConsoleContainer) {
