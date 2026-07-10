@@ -985,7 +985,7 @@ export function PullRequests() {
                             </section>
                         ) : undefined}
                     </div>
-                    <div className={pullRequests.length > 0 ? "xl:pt-[60px]" : undefined}>
+                    <div className={pullRequests.length > 0 ? "xl:pt-15" : undefined}>
                         <RecentDeploysCard deployments={deployments} />
                     </div>
                 </div>
