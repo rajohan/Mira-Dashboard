@@ -34,7 +34,10 @@ import {
     mergeStreamMessage,
 } from "../components/features/chat/chatRuntime";
 import { normalizeVisibleChatHistoryMessages } from "../components/features/chat/chatTypes";
-import { mergeWithRecentOptimisticMessages } from "../components/features/chat/chatUtilities";
+import {
+    mergeWithRecentOptimisticMessages,
+    messageIdentity,
+} from "../components/features/chat/chatUtilities";
 import {
     compactStatusText,
     detailFromArguments,
@@ -108,6 +111,7 @@ import { useSessionActions } from "../hooks/useSessionActions";
 import {
     activeStreamRenderableText,
     hasExactCurrentAssistantMessage,
+    insertIndexedStreamRows,
     isActiveStreamRecoveredInMessages,
     nextRefreshedChatMessages,
     orderCurrentResponseRows,
@@ -3197,6 +3201,14 @@ describe("shared component helpers", () => {
         ).toBe(true);
         expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
 
+        activeStreamsReference.current["agent:main:main"] = {
+            aliases: ["dashboard-chat-runtime-first"],
+            runId: "dashboard-chat-runtime-first",
+            sessionKey: "agent:main:main",
+            statusText: "Thinking",
+            text: "",
+            updatedAt: new Date().toISOString(),
+        };
         act(() => {
             listener?.({
                 event: "agent",
@@ -3242,7 +3254,6 @@ describe("shared component helpers", () => {
                         MediaType: "text/plain",
                         role: "assistant",
                     },
-                    runId: "runtime-first-run",
                     sessionKey: "agent:main:main",
                     state: "delta",
                 },
@@ -3286,6 +3297,18 @@ describe("shared component helpers", () => {
             });
         });
         expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+        expect(
+            messages.some((message) => {
+                const mediaMessage = message as {
+                    attachments?: Array<{ fileName?: string }>;
+                    images?: Array<{ data?: string }>;
+                };
+                return (
+                    mediaMessage.images?.[0]?.data === "generated-image" &&
+                    mediaMessage.attachments?.[0]?.fileName === "generated.txt"
+                );
+            })
+        ).toBe(true);
         expect(
             messages.some(
                 (message) =>
@@ -4331,9 +4354,9 @@ describe("shared component helpers", () => {
 
     it("keeps live tool results when history briefly lags", () => {
         const optimisticUserMessage = {
-            content: "One submitted prompt",
+            content: "One submitted prompt\n\n\nWith review details",
             role: "user",
-            text: "One submitted prompt",
+            text: "One submitted prompt\n\n\nWith review details",
             timestamp: "2026-07-10T14:59:59.000Z",
         };
         expect(
@@ -4341,12 +4364,60 @@ describe("shared component helpers", () => {
                 [optimisticUserMessage],
                 [
                     {
-                        content: "One submitted prompt",
+                        content: "One submitted prompt\n\nWith review details",
                         role: "user",
-                        text: "One submitted prompt",
+                        text: "One submitted prompt\n\nWith review details",
                         timestamp: "2026-07-10T15:00:00.000Z",
                     },
                 ]
+            )
+        ).toHaveLength(1);
+        expect(
+            messageIdentity({
+                content: "```text\nfirst\n\n\nsecond\n```",
+                role: "user",
+                text: "```text\nfirst\n\n\nsecond\n```",
+            })
+        ).not.toBe(
+            messageIdentity({
+                content: "```text\nfirst\n\nsecond\n```",
+                role: "user",
+                text: "```text\nfirst\n\nsecond\n```",
+            })
+        );
+
+        const localMediaMessage = {
+            attachments: [
+                {
+                    fileName: "generated.txt",
+                    id: "generated-media",
+                    kind: "text" as const,
+                },
+            ],
+            content: "",
+            images: [{ data: "generated-image", type: "image" as const }],
+            local: true,
+            role: "assistant",
+            text: "",
+            timestamp: "2026-07-10T15:00:00.000Z",
+        };
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [localMediaMessage],
+                [
+                    {
+                        content: "Final answer",
+                        role: "assistant",
+                        text: "Final answer",
+                        timestamp: "2026-07-10T15:00:01.000Z",
+                    },
+                ]
+            ).some((message) => message.images?.[0]?.data === "generated-image")
+        ).toBe(true);
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [localMediaMessage],
+                [{ ...localMediaMessage, local: undefined }]
             )
         ).toHaveLength(1);
 
@@ -5417,6 +5488,26 @@ describe("shared component helpers", () => {
                 activeStream
             )
         ).toBe(false);
+        expect(
+            hasExactCurrentAssistantMessage(
+                [
+                    previousAssistant,
+                    {
+                        attachments: [
+                            {
+                                fileName: "prompt.txt",
+                                id: "prompt-attachment",
+                                kind: "text",
+                            },
+                        ],
+                        content: "",
+                        role: "user",
+                        text: "",
+                    },
+                ],
+                activeStream
+            )
+        ).toBe(false);
         expect(hasExactCurrentAssistantMessage([currentFinal], activeStream)).toBe(false);
         expect(
             hasExactCurrentAssistantMessage(
@@ -5460,6 +5551,19 @@ describe("shared component helpers", () => {
                 },
             ])
         ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                diagnosticStream,
+                [
+                    {
+                        ...currentFinal,
+                        toolCalls: diagnosticStream.message.toolCalls,
+                    },
+                ],
+                Date.now(),
+                false
+            )
+        ).toBe(true);
         expect(
             isActiveStreamRecoveredInMessages(diagnosticStream, [
                 {
@@ -5546,6 +5650,15 @@ describe("shared component helpers", () => {
                 timestamp: "2026-07-10T15:00:04.000Z",
             },
         };
+        const activityRow = {
+            key: "activity",
+            kind: "typing" as const,
+            message: {
+                content: "Thinking",
+                role: "assistant",
+                text: "Thinking",
+            },
+        };
 
         expect(
             orderCurrentResponseRows([
@@ -5554,8 +5667,9 @@ describe("shared component helpers", () => {
                 toolRow,
                 finalStreamRow,
                 thinkingRow,
+                activityRow,
             ]).map((row) => row.key)
-        ).toEqual(["user", "preamble", "tool", "thinking", "final-stream"]);
+        ).toEqual(["user", "preamble", "tool", "thinking", "final-stream", "activity"]);
 
         const finalHistoryRow = {
             ...finalStreamRow,
@@ -5584,6 +5698,16 @@ describe("shared component helpers", () => {
                 thinkingRow,
             ]).map((row) => row.key)
         ).toEqual(["user", "preamble", "thinking", "final-stream"]);
+
+        expect(
+            insertIndexedStreamRows(
+                [userRow, toolRow, finalHistoryRow],
+                [
+                    { beforeMessageIndex: 2, row: activityRow },
+                    { beforeMessageIndex: 1, row: thinkingRow },
+                ]
+            ).map((row) => row.key)
+        ).toEqual(["user", "thinking", "tool", "activity", "final-history"]);
     });
 
     it("renders chat messages list helpers and primary row actions", async () => {

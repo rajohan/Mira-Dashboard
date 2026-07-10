@@ -1199,7 +1199,20 @@ export function useChatRuntimeEvents({
             runId: string | undefined,
             source: AssistantTextSource
         ): boolean => {
-            const activeRunId = activeStreamsReference.current[sessionKey]?.runId;
+            const runtimeAssistantRunId = Object.entries(activeStreamsReference.current)
+                .filter(
+                    ([key, streamEntry]) =>
+                        key.endsWith("::assistant") &&
+                        isSameSessionKey(streamEntry.sessionKey, sessionKey) &&
+                        Boolean(streamEntry.text)
+                )
+                .toSorted((left, right) =>
+                    (right[1].updatedAt || "").localeCompare(left[1].updatedAt || "")
+                )
+                .at(0)?.[1].runId;
+            const activeRunId =
+                runtimeAssistantRunId ||
+                activeStreamsReference.current[sessionKey]?.runId;
             if (!runId && activeRunId && activeRunId !== sessionKey) {
                 provisionalAssistantRunIdsReference.current.set(sessionKey, activeRunId);
             }
@@ -1335,7 +1348,9 @@ export function useChatRuntimeEvents({
                         message &&
                         ((message.thinking?.length || 0) > 0 ||
                             (message.toolCalls?.length || 0) > 0 ||
-                            message.toolResult) &&
+                            message.toolResult ||
+                            (message.images?.length || 0) > 0 ||
+                            (message.attachments?.length || 0) > 0) &&
                         isRenderableChatHistoryMessage(message, visibility)
                     )
                 )
@@ -1907,11 +1922,7 @@ export function useChatRuntimeEvents({
                 );
                 const nextText = deltaMessage.text;
 
-                if (
-                    nextText.length > 0 ||
-                    deltaMessage.thinking?.length ||
-                    deltaMessage.toolCalls?.length
-                ) {
+                if (hasActiveStreamContent(deltaMessage)) {
                     const hasCompetingTextSource =
                         nextText.length > 0 &&
                         !canUseAssistantTextSource(
@@ -1935,7 +1946,13 @@ export function useChatRuntimeEvents({
                     const textToApply = deltaMessageToApply.text;
 
                     const existing = activeStreamsReference.current[streamSessionKey];
-                    const runId = payload.runId || existing?.runId || streamSessionKey;
+                    const runId =
+                        payload.runId ||
+                        provisionalAssistantRunIdsReference.current.get(
+                            streamSessionKey
+                        ) ||
+                        existing?.runId ||
+                        streamSessionKey;
                     if (
                         !hasCompetingTextSource &&
                         payload.replace === true &&

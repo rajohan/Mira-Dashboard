@@ -127,7 +127,13 @@ function exactCurrentAssistantMessageIndex(
     }
 
     const lastUserMessageIndex = messages.findLastIndex(
-        (message) => message.role.toLowerCase() === "user" && message.text.trim()
+        (message) =>
+            message.role.toLowerCase() === "user" &&
+            Boolean(
+                message.text.trim() ||
+                message.images?.length ||
+                message.attachments?.length
+            )
     );
     if (lastUserMessageIndex === -1) {
         return -1;
@@ -179,6 +185,7 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
     }
 
     const responseRows = rows.slice(lastUserRowIndex + 1);
+    const activityRows = responseRows.filter((row) => row.kind === "typing");
     const thinkingRows = responseRows.filter(
         (row) =>
             row.message.role.toLowerCase() === "assistant" &&
@@ -212,7 +219,11 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
         );
     });
     const finalRow = finalRowIndex === -1 ? undefined : responseRows[finalRowIndex];
-    const extractedRows = new Set([...thinkingRows, ...(finalRow ? [finalRow] : [])]);
+    const extractedRows = new Set([
+        ...activityRows,
+        ...thinkingRows,
+        ...(finalRow ? [finalRow] : []),
+    ]);
     const stableRows = responseRows.filter((row) => !extractedRows.has(row));
     const lastToolRowIndex = stableRows.findLastIndex((row) => {
         const role = row.message.role.toLowerCase();
@@ -236,14 +247,31 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
         ...thinkingRows,
         ...(finalRow ? [finalRow] : []),
         ...stableRows.slice(insertionIndex),
+        ...activityRows,
     ];
+}
+
+/** Inserts stream rows at message indexes without shifting later insertions. */
+export function insertIndexedStreamRows(
+    rows: ChatRow[],
+    insertions: Array<{ beforeMessageIndex: number; row: ChatRow }>
+): ChatRow[] {
+    const nextRows = [...rows];
+    const orderedInsertions = insertions.toSorted(
+        (left, right) => left.beforeMessageIndex - right.beforeMessageIndex
+    );
+    for (const [offset, insertion] of orderedInsertions.entries()) {
+        nextRows.splice(insertion.beforeMessageIndex + offset, 0, insertion.row);
+    }
+    return nextRows;
 }
 
 /** Returns whether an active stream is already represented in visible history. */
 export function isActiveStreamRecoveredInMessages(
     stream: ActiveChatStream,
     visibleMessages: ChatHistoryMessage[],
-    now = Date.now()
+    now = Date.now(),
+    shouldRequireThinking = true
 ): boolean {
     const streamText = activeStreamRenderableText(stream);
     const streamThinkingText =
@@ -275,6 +303,7 @@ export function isActiveStreamRecoveredInMessages(
             const thinkingText =
                 message.thinking?.map((block) => block.text).join("\n") || "";
             const hasRecoveredThinking =
+                !shouldRequireThinking ||
                 !streamThinkingText.trim() ||
                 thinkingText.trim() === streamThinkingText.trim();
             if (streamThinkingText.trim() && hasRecoveredThinking && !hasToolDetails) {
@@ -748,7 +777,8 @@ export function Chat() {
         return isActiveStreamRecoveredInMessages(
             stream,
             visibleMessagesForRows,
-            Date.now()
+            Date.now(),
+            chatVisibility.shouldShowThinking
         );
     }
 
@@ -759,6 +789,10 @@ export function Chat() {
     }));
     let latestTypingStream:
         { key: string; statusText: string; updatedAt?: string } | undefined;
+    const indexedStreamRows: Array<{
+        beforeMessageIndex: number;
+        row: ChatRow;
+    }> = [];
 
     for (const [streamKey, stream] of selectedStreams) {
         const isStreamRecoveredInHistory = isStreamRecoveredInMessages(stream);
@@ -790,11 +824,10 @@ export function Chat() {
             if (visibleStreamContent.beforeMessageIndex === undefined) {
                 unorderedChatRows.push(streamRow);
             } else {
-                unorderedChatRows.splice(
-                    visibleStreamContent.beforeMessageIndex,
-                    0,
-                    streamRow
-                );
+                indexedStreamRows.push({
+                    beforeMessageIndex: visibleStreamContent.beforeMessageIndex,
+                    row: streamRow,
+                });
             }
         }
 
@@ -816,8 +849,12 @@ export function Chat() {
         }
     }
 
+    const rowsWithIndexedStreams = insertIndexedStreamRows(
+        unorderedChatRows,
+        indexedStreamRows
+    );
     if (latestTypingStream) {
-        unorderedChatRows.push({
+        rowsWithIndexedStreams.push({
             key: `typing-${latestTypingStream.key}-${latestTypingStream.statusText}`,
             kind: "typing",
             message: {
@@ -827,7 +864,7 @@ export function Chat() {
             },
         });
     }
-    const chatRows = orderCurrentResponseRows(unorderedChatRows);
+    const chatRows = orderCurrentResponseRows(rowsWithIndexedStreams);
 
     useEffect(() => {
         if (sortedSessions.length === 0) {
@@ -1047,7 +1084,12 @@ export function Chat() {
                             !stream.message || !streamMessageIsRenderable;
                         return Boolean(
                             isActiveStreamIsQuiet &&
-                            (isActiveStreamRecoveredInMessages(stream, nextMessages) ||
+                            (isActiveStreamRecoveredInMessages(
+                                stream,
+                                nextMessages,
+                                Date.now(),
+                                showThinkingOutput
+                            ) ||
                                 (streamText &&
                                     hasRecoveredStreamHistory(
                                         nextMessages,

@@ -77,6 +77,22 @@ function diagnosticMessageIdentity(message: ChatHistoryMessage): string | undefi
         );
     }
 
+    if (message.images?.length || message.attachments?.length) {
+        return [
+            "media",
+            ...(message.images || []).map((image) => {
+                const data = image.data || image.source?.data || "";
+                return [
+                    image.mimeType || image.source?.media_type || "image",
+                    data.length,
+                    data.slice(0, 32),
+                    data.slice(-32),
+                ].join(":");
+            }),
+            ...(message.attachments || []).map((attachment) => attachment.id),
+        ].join("::");
+    }
+
     return undefined;
 }
 
@@ -104,8 +120,36 @@ function hasDiagnosticDetails(message: ChatHistoryMessage): boolean {
     return Boolean(
         (message.thinking?.length || 0) > 0 ||
         (message.toolCalls?.length || 0) > 0 ||
-        message.toolResult
+        message.toolResult ||
+        (message.images?.length || 0) > 0 ||
+        (message.attachments?.length || 0) > 0
     );
+}
+
+/** Returns user text normalized to the whitespace rendered by Markdown. */
+function userMessageTextIdentity(text: string): string {
+    const lines = text
+        .replaceAll(/\r\n?/g, "\n")
+        .split("\n")
+        .map((line) => line.trimEnd());
+    const identityLines: string[] = [];
+    let isInCodeFence = false;
+    let wasBlankLine = false;
+
+    for (const line of lines) {
+        const isFenceDelimiter = /^\s*(?:```|~~~)/u.test(line);
+        const isCollapsibleBlankLine = !isInCodeFence && line.length === 0;
+        if (!isCollapsibleBlankLine || !wasBlankLine) {
+            identityLines.push(line);
+        }
+        wasBlankLine = isCollapsibleBlankLine;
+        if (isFenceDelimiter) {
+            isInCodeFence = !isInCodeFence;
+            wasBlankLine = false;
+        }
+    }
+
+    return identityLines.join("\n").trim();
 }
 
 /** Carries local tool results onto matching history tool calls. */
@@ -205,7 +249,8 @@ function mergeDiagnosticDetails(
 export function messageIdentity(message: ChatHistoryMessage): string {
     const role = message.role.toLowerCase();
     const diagnosticIdentity = diagnosticMessageIdentity(message);
-    const textIdentity = message.text.trim();
+    const textIdentity =
+        role === "user" ? userMessageTextIdentity(message.text) : message.text.trim();
     const isToolResultRole = TOOL_ROLE_VARIANTS.includes(role);
     const identity = isToolResultRole
         ? diagnosticIdentity || textIdentity
