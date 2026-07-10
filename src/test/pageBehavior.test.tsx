@@ -2031,6 +2031,15 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getByText("Run logs")).toBeInTheDocument();
         });
 
+        const dashboardJobsButton = screen.getByRole("button", {
+            name: /dashboard jobs/i,
+        });
+        const openClawCronButton = screen.getByRole("button", {
+            name: /openclaw cron/i,
+        });
+        expect(dashboardJobsButton).toHaveAttribute("aria-pressed", "true");
+        expect(openClawCronButton).toHaveAttribute("aria-pressed", "false");
+
         await user.clear(screen.getByLabelText("Interval seconds"));
         await user.type(screen.getByLabelText("Interval seconds"), "3600");
         await user.click(screen.getByRole("button", { name: /save schedule/i }));
@@ -2044,11 +2053,13 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getByText(/manual ok/)).toBeInTheDocument();
         });
 
-        await user.click(screen.getByRole("button", { name: /openclaw cron/i }));
+        await user.click(openClawCronButton);
         await waitFor(() => {
             expect(screen.queryAllByText("heartbeat").length).toBeGreaterThan(0);
             expect(screen.getByText("Job config")).toBeInTheDocument();
         });
+        expect(dashboardJobsButton).toHaveAttribute("aria-pressed", "false");
+        expect(openClawCronButton).toHaveAttribute("aria-pressed", "true");
 
         await user.click(screen.getByRole("button", { name: /trigger now/i }));
         await waitFor(() => {
@@ -2611,6 +2622,46 @@ describe("Mira Dashboard pages", () => {
                     "Message, attach files, or use / commands (try /help)"
                 )
             ).toHaveValue("");
+        });
+
+        const fileInput = view.container.querySelector<HTMLInputElement>(
+            'input[type="file"][multiple]'
+        );
+        expect(fileInput).not.toBeNull();
+        fireEvent.change(fileInput!, {
+            target: {
+                files: [
+                    new File(["failed attachment"], "failed.txt", {
+                        type: "text/plain",
+                    }),
+                ],
+            },
+        });
+        await flushQueuedTimers();
+        await waitFor(() => {
+            expect(screen.getByText("failed.txt")).toBeInTheDocument();
+        });
+        await user.click(screen.getByRole("button", { name: "Send" }));
+
+        await waitFor(() => {
+            expect(
+                socket.sent.filter((entry) => entry.includes('"method":"sessions.patch"'))
+            ).toHaveLength(2);
+        });
+        await respondToSocketRequest(socket, "sessions.patch", {});
+        await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(
+                socket.sent.filter((entry) => entry.includes('"method":"chat.send"'))
+            ).toHaveLength(2);
+        });
+        await respondToSocketRequest(socket, "chat.send", undefined, false);
+        await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(screen.queryByText("failed.txt")).not.toBeInTheDocument();
+            expect(screen.getByText("Failed to send message")).toBeInTheDocument();
         });
 
         view.unmount();
