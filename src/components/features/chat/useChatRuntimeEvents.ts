@@ -986,6 +986,15 @@ function hasFailedToolDiagnostic(message: ChatHistoryMessage): boolean {
     );
 }
 
+/** Returns whether a terminal chat error is a surfaced tool-execution diagnostic. */
+function isToolExecutionErrorMessage(errorMessage: string | undefined): boolean {
+    const normalizedMessage = errorMessage?.trim() || "";
+    return (
+        normalizedMessage.startsWith("⚠️ 🛠️") ||
+        /^tool (?:call|execution) failed\b/i.test(normalizedMessage)
+    );
+}
+
 /** Represents use chat runtime events paramilliseconds. */
 interface UseChatRuntimeEventsParameters {
     connectionId: number;
@@ -2162,23 +2171,6 @@ export function useChatRuntimeEvents({
             if (payload.state === "final") {
                 flushPendingDeltaUpdates();
                 const finalMessage = finalMessageFromPayload(payload);
-                if (
-                    finalMessage.role.toLowerCase() === "assistant" &&
-                    finalMessage.text.trim()
-                ) {
-                    completedAssistantTextsReference.current.set(streamSessionKey, {
-                        runIds: uniqueStrings([
-                            payload.runId,
-                            streamForRun?.runId,
-                            ...(streamForRun?.aliases || []),
-                            ...(!payload.runId || shouldAliasOptimisticTerminal
-                                ? selectedStreamRunIds
-                                : []),
-                        ]),
-                        text: finalMessage.text.trim(),
-                    });
-                    canUseAssistantTextSource(streamSessionKey, payload.runId, "chat");
-                }
                 const bufferedText = activeAssistantTextForRun(
                     streamSessionKey,
                     payload.runId
@@ -2205,6 +2197,24 @@ export function useChatRuntimeEvents({
                               runId: payload.runId,
                           }
                         : undefined;
+                const completedAssistantText =
+                    messageToAppend?.role.toLowerCase() === "assistant"
+                        ? messageToAppend.text.trim()
+                        : "";
+                if (completedAssistantText) {
+                    completedAssistantTextsReference.current.set(streamSessionKey, {
+                        runIds: uniqueStrings([
+                            payload.runId,
+                            streamForRun?.runId,
+                            ...(streamForRun?.aliases || []),
+                            ...(!payload.runId || shouldAliasOptimisticTerminal
+                                ? selectedStreamRunIds
+                                : []),
+                        ]),
+                        text: completedAssistantText,
+                    });
+                    canUseAssistantTextSource(streamSessionKey, payload.runId, "chat");
+                }
 
                 let finalMessageToAppend = messageToAppend;
                 const remainingDiagnosticMessages = [...diagnosticMessages];
@@ -2413,13 +2423,10 @@ export function useChatRuntimeEvents({
                         dedupeMessages([...wasPrevious, ...messagesToAppend])
                     );
                 }
-                const hasToolErrorDiagnostics =
-                    showToolOutput &&
-                    diagnosticMessages.some((message) =>
-                        hasFailedToolDiagnostic(message)
-                    );
+                const hasToolErrorDiagnostics = diagnosticMessages.some((message) =>
+                    hasFailedToolDiagnostic(message)
+                );
                 const hasToolErrorForRun = Boolean(
-                    showToolOutput &&
                     payload.runId &&
                     toolErrorRunKeysReference.current.has(
                         toolErrorRunKey(streamSessionKey, payload.runId)
@@ -2433,7 +2440,8 @@ export function useChatRuntimeEvents({
                 if (
                     eventMatchesSelected &&
                     !hasToolErrorDiagnostics &&
-                    !hasToolErrorForRun
+                    !hasToolErrorForRun &&
+                    !isToolExecutionErrorMessage(payload.errorMessage)
                 ) {
                     setSendError(payload.errorMessage || "Chat request failed");
                 }

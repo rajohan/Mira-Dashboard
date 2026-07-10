@@ -3573,6 +3573,90 @@ describe("shared component helpers", () => {
         });
         expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
 
+        activeStreams = {
+            "agent:main:main": {
+                aliases: ["dashboard-chat-buffered-final"],
+                runId: "dashboard-chat-buffered-final",
+                sessionKey: "agent:main:main",
+                statusText: "Thinking",
+                text: "",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        activeStreamsReference.current = activeStreams;
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "Buffered no-run final answer",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+        activeStreamsReference.current["agent:main:main"] = {
+            aliases: ["dashboard-chat-after-buffered-final"],
+            runId: "dashboard-chat-after-buffered-final",
+            sessionKey: "agent:main:main",
+            statusText: "Thinking",
+            text: "",
+            updatedAt: new Date().toISOString(),
+        };
+        act(() => {
+            listener?.({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: "Buffered no-run final answer",
+                        role: "assistant",
+                    },
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        expect(activeStreamsReference.current["agent:main:main"]?.text).toBe("");
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "Answer after buffered final echo",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe(
+                "Answer after buffered final echo"
+            );
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Answer after buffered final echo",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
         activeStreamsReference.current["agent:main:main"] = {
             aliases: ["dashboard-chat-pending-runtime-only"],
             runId: "dashboard-chat-pending-runtime-only",
@@ -4452,7 +4536,7 @@ describe("shared component helpers", () => {
         expect(unsubscribe).toHaveBeenCalledTimes(1);
     });
 
-    it("shows the global chat error when tool output is hidden before terminal error", async () => {
+    it("keeps tool execution errors out of the global chat error", async () => {
         let listener: ((data: unknown) => void) | undefined;
         const unsubscribe = jest.fn();
         const subscribe = jest.fn((nextListener: (data: unknown) => void) => {
@@ -4527,7 +4611,22 @@ describe("shared component helpers", () => {
             });
         });
 
-        expect(sendError).toBe("tool call failed");
+        expect(sendError).toBeUndefined();
+
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    errorMessage:
+                        "⚠️ 🛠️ `run lint → run format:check` failed: lint exited with code 1",
+                    sessionKey: "agent:main:main",
+                    state: "error",
+                },
+                type: "event",
+            });
+        });
+
+        expect(sendError).toBeUndefined();
         unmount();
     });
 
