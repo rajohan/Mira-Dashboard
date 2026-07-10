@@ -487,22 +487,18 @@ export function mergeWithRecentOptimisticMessages(
         enrichedNextMessages.map((message) => messageIdentity(message))
     );
     const nextIdentityCounts = new Map<string, number>();
-    const unmatchedNextTextlessMediaCounts = new Map<string, number>();
+    const unmatchedNextMediaCounts = new Map<string, number>();
     for (const message of enrichedNextMessages) {
         const identity = messageIdentity(message);
         nextIdentityCounts.set(identity, (nextIdentityCounts.get(identity) || 0) + 1);
 
         const mediaIdentity = messageMediaIdentity(message);
         const role = message.role.toLowerCase();
-        if (
-            (role === "user" || role === "assistant") &&
-            !message.text.trim() &&
-            mediaIdentity
-        ) {
+        if ((role === "user" || role === "assistant") && mediaIdentity) {
             const mediaKey = `${role}::${mediaIdentity}`;
-            unmatchedNextTextlessMediaCounts.set(
+            unmatchedNextMediaCounts.set(
                 mediaKey,
-                (unmatchedNextTextlessMediaCounts.get(mediaKey) || 0) + 1
+                (unmatchedNextMediaCounts.get(mediaKey) || 0) + 1
             );
         }
     }
@@ -526,8 +522,8 @@ export function mergeWithRecentOptimisticMessages(
 
         nextIdentityCounts.set(identity, identityCount - 1);
         const mediaKey = `${role}::${mediaIdentity}`;
-        const mediaCount = unmatchedNextTextlessMediaCounts.get(mediaKey) || 0;
-        unmatchedNextTextlessMediaCounts.set(mediaKey, Math.max(0, mediaCount - 1));
+        const mediaCount = unmatchedNextMediaCounts.get(mediaKey) || 0;
+        unmatchedNextMediaCounts.set(mediaKey, Math.max(0, mediaCount - 1));
     }
     const nextToolCallRowsByIdentity = new Map<string, ChatHistoryMessage>();
     for (const message of enrichedNextMessages) {
@@ -564,7 +560,7 @@ export function mergeWithRecentOptimisticMessages(
         const mediaIdentity = messageMediaIdentity(message);
         const mediaKey = `${role}::${mediaIdentity || ""}`;
         const unmatchedMediaCount = mediaIdentity
-            ? unmatchedNextTextlessMediaCounts.get(mediaKey) || 0
+            ? unmatchedNextMediaCounts.get(mediaKey) || 0
             : 0;
         if (
             (role === "user" || role === "assistant") &&
@@ -573,7 +569,7 @@ export function mergeWithRecentOptimisticMessages(
             mediaIdentity &&
             unmatchedMediaCount > 0
         ) {
-            unmatchedNextTextlessMediaCounts.set(mediaKey, unmatchedMediaCount - 1);
+            unmatchedNextMediaCounts.set(mediaKey, unmatchedMediaCount - 1);
             return false;
         }
 

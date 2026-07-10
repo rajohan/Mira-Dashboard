@@ -118,6 +118,7 @@ import {
     isActiveStreamRecoveredInMessages,
     nextRefreshedChatMessages,
     orderCurrentResponseRows,
+    rollbackFailedOptimisticMessage,
     visibleActiveStreamContent,
 } from "../pages/Chat";
 
@@ -3572,6 +3573,14 @@ describe("shared component helpers", () => {
         });
         expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
 
+        activeStreamsReference.current["agent:main:main"] = {
+            aliases: ["dashboard-chat-pending-runtime-only"],
+            runId: "dashboard-chat-pending-runtime-only",
+            sessionKey: "agent:main:main",
+            statusText: "Thinking",
+            text: "",
+            updatedAt: "2026-07-10T15:00:00.000Z",
+        };
         act(() => {
             listener?.({
                 event: "session.message",
@@ -3646,6 +3655,41 @@ describe("shared component helpers", () => {
                     message.text === "Runtime-only terminal answer"
             )
         ).toBe(true);
+
+        activeStreamsReference.current["agent:main:main"] = {
+            aliases: ["dashboard-chat-no-run-runtime-only"],
+            runId: "dashboard-chat-no-run-runtime-only",
+            sessionKey: "agent:main:main",
+            statusText: "Thinking",
+            text: "",
+            updatedAt: new Date().toISOString(),
+        };
+        act(() => {
+            listener?.({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: "No-run runtime-only answer",
+                        role: "assistant",
+                    },
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe(
+                "No-run runtime-only answer"
+            );
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: { sessionKey: "agent:main:main" },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
 
         act(() => {
             listener?.({
@@ -5013,6 +5057,20 @@ describe("shared component helpers", () => {
         );
         expect(reconciledAssistantMediaHistory).toHaveLength(1);
         expect(reconciledAssistantMediaHistory[0]?.local).toBeUndefined();
+        const mediaRecoveredOnTextFinal = mergeWithRecentOptimisticMessages(
+            [localMediaMessage],
+            [
+                {
+                    ...localMediaMessage,
+                    content: "Generated file",
+                    local: undefined,
+                    text: "Generated file",
+                    timestamp: "2026-07-10T15:00:01.000Z",
+                },
+            ]
+        );
+        expect(mediaRecoveredOnTextFinal).toHaveLength(1);
+        expect(mediaRecoveredOnTextFinal[0]?.text).toBe("Generated file");
         const localUserMediaMessage = {
             ...localMediaMessage,
             role: "user",
@@ -6372,7 +6430,7 @@ describe("shared component helpers", () => {
             orderCurrentResponseRows([userRow, preambleRow, toolRow, thinkingRow]).map(
                 (row) => row.key
             )
-        ).toEqual(["user", "preamble", "tool", "thinking"]);
+        ).toEqual(["user", "tool", "thinking", "preamble"]);
         expect(
             orderCurrentResponseRows([
                 userRow,
@@ -6419,6 +6477,31 @@ describe("shared component helpers", () => {
                 (row) => row.key
             )
         ).toEqual(["user", "tool", "final-history"]);
+        const lateThinkingRow = {
+            ...thinkingRow,
+            key: "late-thinking",
+            message: {
+                ...thinkingRow.message,
+                runId: "late-thinking-run",
+                timestamp: "2026-07-10T15:00:05.000Z",
+            },
+        };
+        const earlierHistoryFinalRow = {
+            ...finalHistoryRow,
+            key: "earlier-history-final",
+            message: {
+                ...finalHistoryRow.message,
+                runId: "late-thinking-run",
+                timestamp: "2026-07-10T15:00:04.000Z",
+            },
+        };
+        expect(
+            orderCurrentResponseRows([
+                userRow,
+                earlierHistoryFinalRow,
+                lateThinkingRow,
+            ]).map((row) => row.key)
+        ).toEqual(["user", "late-thinking", "earlier-history-final"]);
 
         expect(
             insertIndexedStreamRows(
@@ -6429,6 +6512,24 @@ describe("shared component helpers", () => {
                 ]
             ).map((row) => row.key)
         ).toEqual(["user", "thinking", "tool", "activity", "final-history"]);
+    });
+
+    it("restores a prior same-identity prompt when an optimistic retry fails", () => {
+        const previousMessage = {
+            content: "Retry this",
+            role: "user",
+            text: "Retry this",
+            timestamp: "2026-07-10T15:00:00.000Z",
+        };
+        const failedMessage = {
+            ...previousMessage,
+            timestamp: "2026-07-10T15:01:00.000Z",
+        };
+        expect(
+            rollbackFailedOptimisticMessage([failedMessage], failedMessage, [
+                { index: 0, message: previousMessage },
+            ])
+        ).toEqual([previousMessage]);
     });
 
     it("renders chat messages list helpers and primary row actions", async () => {

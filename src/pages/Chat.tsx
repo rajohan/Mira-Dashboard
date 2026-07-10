@@ -42,6 +42,7 @@ import {
     MAX_ATTACHMENTS,
     mergeWithRecentOptimisticMessages,
     messageDeleteKey,
+    messageIdentity,
     readFileAsDataUrl,
 } from "../components/features/chat/chatUtilities";
 import { buildSlashCommandSuggestions } from "../components/features/chat/slashCommands";
@@ -185,35 +186,12 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
     }
 
     const responseRows = rows.slice(lastUserRowIndex + 1);
-    const allThinkingRows = responseRows.filter(
+    const finalRowIndex = responseRows.findLastIndex(
         (row) =>
-            row.message.role.toLowerCase() === "assistant" &&
-            !row.message.text.trim() &&
-            Boolean(row.message.thinking?.length)
-    );
-    let latestThinkingTimestamp: number | undefined;
-    for (const row of allThinkingRows) {
-        const timestamp = sessionTimestampMs(row.message.timestamp);
-        if (timestamp !== undefined) {
-            latestThinkingTimestamp =
-                latestThinkingTimestamp === undefined
-                    ? timestamp
-                    : Math.max(latestThinkingTimestamp, timestamp);
-        }
-    }
-    const finalRowIndex = responseRows.findLastIndex((row) => {
-        const timestamp = sessionTimestampMs(row.message.timestamp);
-        return (
             row.kind !== "typing" &&
             row.message.role.toLowerCase() === "assistant" &&
-            Boolean(row.message.text.trim()) &&
-            (allThinkingRows.length === 0 ||
-                row.kind === "stream" ||
-                (latestThinkingTimestamp !== undefined &&
-                    timestamp !== undefined &&
-                    timestamp >= latestThinkingTimestamp))
-        );
-    });
+            Boolean(row.message.text.trim())
+    );
     if (finalRowIndex === -1) {
         return rows;
     }
@@ -291,6 +269,25 @@ export function insertIndexedStreamRows(
         nextRows.splice(insertion.beforeMessageIndex + offset, 0, insertion.row);
     }
     return nextRows;
+}
+
+/** Removes a failed optimistic row and restores same-identity rows it replaced. */
+export function rollbackFailedOptimisticMessage(
+    messages: ChatHistoryMessage[],
+    failedMessage: ChatHistoryMessage,
+    replacedMessages: Array<{ index: number; message: ChatHistoryMessage }>
+): ChatHistoryMessage[] {
+    const restoredMessages = messages.filter((message) => message !== failedMessage);
+    for (const replaced of replacedMessages) {
+        if (!restoredMessages.includes(replaced.message)) {
+            restoredMessages.splice(
+                Math.min(replaced.index, restoredMessages.length),
+                0,
+                replaced.message
+            );
+        }
+    }
+    return restoredMessages;
 }
 
 /** Returns whether an active stream is already represented in visible history. */
@@ -1744,9 +1741,21 @@ export function Chat() {
             local: messageText ? undefined : true,
             timestamp: currentIsoString(),
         };
+        const optimisticIdentity = messageIdentity(userMessage);
+        let messagesReplacedByOptimistic: Array<{
+            index: number;
+            message: ChatHistoryMessage;
+        }> = [];
 
         if (shouldAppendOptimisticMessage) {
-            setMessages((wasPrevious) => dedupeMessages([...wasPrevious, userMessage]));
+            setMessages((wasPrevious) => {
+                messagesReplacedByOptimistic = wasPrevious.flatMap((message, index) =>
+                    messageIdentity(message) === optimisticIdentity
+                        ? [{ index, message }]
+                        : []
+                );
+                return dedupeMessages([...wasPrevious, userMessage]);
+            });
         }
         setDraft("");
         setAttachments([]);
@@ -1845,7 +1854,11 @@ export function Chat() {
             clearOptimisticSendStream(selectedSessionKey, idempotencyKey);
             if (shouldAppendOptimisticMessage) {
                 setMessages((wasPrevious) =>
-                    wasPrevious.filter((message) => message !== userMessage)
+                    rollbackFailedOptimisticMessage(
+                        wasPrevious,
+                        userMessage,
+                        messagesReplacedByOptimistic
+                    )
                 );
             }
         } finally {
