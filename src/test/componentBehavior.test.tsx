@@ -110,6 +110,7 @@ import {
     hasExactCurrentAssistantMessage,
     isActiveStreamRecoveredInMessages,
     nextRefreshedChatMessages,
+    orderCurrentResponseRows,
     visibleActiveStreamContent,
 } from "../pages/Chat";
 
@@ -3226,12 +3227,19 @@ describe("shared component helpers", () => {
                             { text: " with chat continuation", type: "text" },
                             { text: "Chat-only thinking", type: "thinking" },
                             {
+                                data: "generated-image",
+                                mimeType: "image/png",
+                                type: "image",
+                            },
+                            {
                                 arguments: { command: "status" },
                                 id: "chat-only-tool",
                                 name: "functions.exec_command",
                                 type: "toolCall",
                             },
                         ],
+                        MediaPath: "/tmp/generated.txt",
+                        MediaType: "text/plain",
                         role: "assistant",
                     },
                     runId: "runtime-first-run",
@@ -3255,6 +3263,14 @@ describe("shared component helpers", () => {
                 activeStreamsReference.current["agent:main:main"]?.message?.toolCalls?.[0]
                     ?.id
             ).toBe("chat-only-tool");
+            expect(
+                activeStreamsReference.current["agent:main:main"]?.message?.images?.[0]
+                    ?.data
+            ).toBe("generated-image");
+            expect(
+                activeStreamsReference.current["agent:main:main"]?.message
+                    ?.attachments?.[0]?.fileName
+            ).toBe("generated.txt");
             expect(activeStreamsReference.current["agent:main:main"]?.text).toBe("");
         });
         act(() => {
@@ -3342,6 +3358,35 @@ describe("shared component helpers", () => {
             listener?.({
                 event: "model.completed",
                 payload: { sessionKey: "agent:main:main" },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "Third no-run answer",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe(
+                "Third no-run answer"
+            );
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Third no-run answer",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
                 type: "event",
             });
         });
@@ -4285,6 +4330,26 @@ describe("shared component helpers", () => {
     });
 
     it("keeps live tool results when history briefly lags", () => {
+        const optimisticUserMessage = {
+            content: "One submitted prompt",
+            role: "user",
+            text: "One submitted prompt",
+            timestamp: "2026-07-10T14:59:59.000Z",
+        };
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [optimisticUserMessage],
+                [
+                    {
+                        content: "One submitted prompt",
+                        role: "user",
+                        text: "One submitted prompt",
+                        timestamp: "2026-07-10T15:00:00.000Z",
+                    },
+                ]
+            )
+        ).toHaveLength(1);
+
         const localToolRow = {
             content: "",
             local: true,
@@ -5426,6 +5491,99 @@ describe("shared component helpers", () => {
                 },
             ])
         ).toBe(true);
+    });
+
+    it("keeps current thinking after tools and before final text", () => {
+        const userRow = {
+            key: "user",
+            kind: "message" as const,
+            message: {
+                content: "Run a check",
+                role: "user",
+                text: "Run a check",
+                timestamp: "2026-07-10T15:00:00.000Z",
+            },
+        };
+        const preambleRow = {
+            key: "preamble",
+            kind: "message" as const,
+            message: {
+                content: "Checking now",
+                role: "assistant",
+                text: "Checking now",
+                timestamp: "2026-07-10T15:00:01.000Z",
+            },
+        };
+        const toolRow = {
+            key: "tool",
+            kind: "message" as const,
+            message: {
+                content: "",
+                role: "assistant",
+                text: "",
+                timestamp: "2026-07-10T15:00:02.000Z",
+                toolCalls: [{ id: "tool-1", name: "bash" }],
+            },
+        };
+        const thinkingRow = {
+            key: "thinking",
+            kind: "stream" as const,
+            message: {
+                content: [{ text: "Reviewing output", type: "thinking" }],
+                role: "assistant",
+                text: "",
+                thinking: [{ text: "Reviewing output" }],
+                timestamp: "2026-07-10T15:00:03.000Z",
+            },
+        };
+        const finalStreamRow = {
+            key: "final-stream",
+            kind: "stream" as const,
+            message: {
+                content: "Everything passed",
+                role: "assistant",
+                text: "Everything passed",
+                timestamp: "2026-07-10T15:00:04.000Z",
+            },
+        };
+
+        expect(
+            orderCurrentResponseRows([
+                userRow,
+                preambleRow,
+                toolRow,
+                finalStreamRow,
+                thinkingRow,
+            ]).map((row) => row.key)
+        ).toEqual(["user", "preamble", "tool", "thinking", "final-stream"]);
+
+        const finalHistoryRow = {
+            ...finalStreamRow,
+            key: "final-history",
+            kind: "message" as const,
+        };
+        expect(
+            orderCurrentResponseRows([
+                userRow,
+                preambleRow,
+                thinkingRow,
+                toolRow,
+                finalHistoryRow,
+            ]).map((row) => row.key)
+        ).toEqual(["user", "preamble", "tool", "thinking", "final-history"]);
+        expect(
+            orderCurrentResponseRows([userRow, preambleRow, toolRow, thinkingRow]).map(
+                (row) => row.key
+            )
+        ).toEqual(["user", "preamble", "tool", "thinking"]);
+        expect(
+            orderCurrentResponseRows([
+                userRow,
+                preambleRow,
+                finalStreamRow,
+                thinkingRow,
+            ]).map((row) => row.key)
+        ).toEqual(["user", "preamble", "thinking", "final-stream"]);
     });
 
     it("renders chat messages list helpers and primary row actions", async () => {

@@ -28,6 +28,7 @@ import {
     isRenderableChatHistoryMessage,
     optimisticAttachmentDisplay,
     type RawChatHistoryMessage,
+    TOOL_ROLE_VARIANTS,
 } from "../components/features/chat/chatTypes";
 import {
     CHAT_HISTORY_LIMIT,
@@ -166,6 +167,76 @@ export function visibleActiveStreamContent(
             : undefined,
         text: "",
     };
+}
+
+/** Keeps current response diagnostics between its tools and final assistant text. */
+export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
+    const lastUserRowIndex = rows.findLastIndex(
+        (row) => row.message.role.toLowerCase() === "user"
+    );
+    if (lastUserRowIndex === -1) {
+        return rows;
+    }
+
+    const responseRows = rows.slice(lastUserRowIndex + 1);
+    const thinkingRows = responseRows.filter(
+        (row) =>
+            row.message.role.toLowerCase() === "assistant" &&
+            !row.message.text.trim() &&
+            Boolean(row.message.thinking?.length)
+    );
+    if (thinkingRows.length === 0) {
+        return rows;
+    }
+
+    let latestThinkingTimestamp: number | undefined;
+    for (const row of thinkingRows) {
+        const timestamp = sessionTimestampMs(row.message.timestamp);
+        if (timestamp !== undefined) {
+            latestThinkingTimestamp =
+                latestThinkingTimestamp === undefined
+                    ? timestamp
+                    : Math.max(latestThinkingTimestamp, timestamp);
+        }
+    }
+    const finalRowIndex = responseRows.findLastIndex((row) => {
+        const timestamp = sessionTimestampMs(row.message.timestamp);
+        return (
+            row.kind !== "typing" &&
+            (row.kind === "stream" ||
+                (latestThinkingTimestamp !== undefined &&
+                    timestamp !== undefined &&
+                    timestamp >= latestThinkingTimestamp)) &&
+            row.message.role.toLowerCase() === "assistant" &&
+            Boolean(row.message.text.trim())
+        );
+    });
+    const finalRow = finalRowIndex === -1 ? undefined : responseRows[finalRowIndex];
+    const extractedRows = new Set([...thinkingRows, ...(finalRow ? [finalRow] : [])]);
+    const stableRows = responseRows.filter((row) => !extractedRows.has(row));
+    const lastToolRowIndex = stableRows.findLastIndex((row) => {
+        const role = row.message.role.toLowerCase();
+        return Boolean(
+            TOOL_ROLE_VARIANTS.includes(role) ||
+            row.message.toolCalls?.length ||
+            row.message.toolResult
+        );
+    });
+    const rowsBeforeFinal = finalRow
+        ? responseRows.slice(0, finalRowIndex)
+        : responseRows;
+    const stableRowsBeforeFinal = rowsBeforeFinal.filter(
+        (row) => !extractedRows.has(row)
+    ).length;
+    const insertionIndex = Math.max(lastToolRowIndex + 1, stableRowsBeforeFinal);
+
+    return [
+        ...rows.slice(0, lastUserRowIndex + 1),
+        ...stableRows.slice(0, insertionIndex),
+        ...thinkingRows,
+        ...(finalRow ? [finalRow] : []),
+        ...stableRows.slice(insertionIndex),
+    ];
 }
 
 /** Returns whether an active stream is already represented in visible history. */
@@ -681,7 +752,7 @@ export function Chat() {
         );
     }
 
-    const chatRows: ChatRow[] = visibleMessagesForRows.map((message) => ({
+    const unorderedChatRows: ChatRow[] = visibleMessagesForRows.map((message) => ({
         key: messageDeleteKey(message),
         kind: "message",
         message,
@@ -717,9 +788,13 @@ export function Chat() {
                 },
             };
             if (visibleStreamContent.beforeMessageIndex === undefined) {
-                chatRows.push(streamRow);
+                unorderedChatRows.push(streamRow);
             } else {
-                chatRows.splice(visibleStreamContent.beforeMessageIndex, 0, streamRow);
+                unorderedChatRows.splice(
+                    visibleStreamContent.beforeMessageIndex,
+                    0,
+                    streamRow
+                );
             }
         }
 
@@ -742,7 +817,7 @@ export function Chat() {
     }
 
     if (latestTypingStream) {
-        chatRows.push({
+        unorderedChatRows.push({
             key: `typing-${latestTypingStream.key}-${latestTypingStream.statusText}`,
             kind: "typing",
             message: {
@@ -752,6 +827,7 @@ export function Chat() {
             },
         });
     }
+    const chatRows = orderCurrentResponseRows(unorderedChatRows);
 
     useEffect(() => {
         if (sortedSessions.length === 0) {

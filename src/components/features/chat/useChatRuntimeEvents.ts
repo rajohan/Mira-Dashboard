@@ -1605,29 +1605,7 @@ export function useChatRuntimeEvents({
                         dedupeMessages([...wasPrevious, ...messagesToAppend])
                     );
                 }
-                updateActiveStreamsReference.current((wasPrevious) => {
-                    const next = { ...wasPrevious };
-                    for (const [key, streamEntry] of Object.entries(wasPrevious)) {
-                        if (
-                            !isSameSessionKey(streamEntry.sessionKey, selectedSessionKey)
-                        ) {
-                            continue;
-                        }
-
-                        if (
-                            !isActiveStreamMatchingRun(
-                                selectedSessionKey,
-                                streamEntry,
-                                eventRunId
-                            )
-                        ) {
-                            continue;
-                        }
-
-                        delete next[key];
-                    }
-                    return next;
-                });
+                clearActiveStreamsForRun(selectedSessionKey, eventRunId);
                 refreshSelectedHistorySoon(150);
                 return;
             }
@@ -1941,19 +1919,18 @@ export function useChatRuntimeEvents({
                             payload.runId,
                             "chat"
                         );
-                    const hasDiagnostics = Boolean(
-                        deltaMessage.thinking?.length || deltaMessage.toolCalls?.length
-                    );
-                    if (hasCompetingTextSource && !hasDiagnostics) {
+                    const nonTextDeltaMessage = {
+                        ...deltaMessage,
+                        content: [],
+                        text: "",
+                    };
+                    const hasNonTextContent = hasActiveStreamContent(nonTextDeltaMessage);
+                    if (hasCompetingTextSource && !hasNonTextContent) {
                         return;
                     }
 
                     const deltaMessageToApply = hasCompetingTextSource
-                        ? {
-                              ...deltaMessage,
-                              content: [],
-                              text: "",
-                          }
+                        ? nonTextDeltaMessage
                         : deltaMessage;
                     const textToApply = deltaMessageToApply.text;
 
