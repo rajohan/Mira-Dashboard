@@ -458,8 +458,13 @@ describe("shared component helpers", () => {
             </>
         );
 
-        fireEvent.click(screen.getByRole("button", { name: /preview file/i }));
-        fireEvent.click(screen.getByRole("button", { name: /raw file/i }));
+        const previewButton = screen.getByRole("button", { name: /preview file/i });
+        const rawButton = screen.getByRole("button", { name: /raw file/i });
+        expect(previewButton).toHaveAttribute("aria-pressed", "false");
+        expect(rawButton).toHaveAttribute("aria-pressed", "true");
+
+        fireEvent.click(previewButton);
+        fireEvent.click(rawButton);
         expect(onToggle).toHaveBeenNthCalledWith(1, true);
         expect(onToggle).toHaveBeenNthCalledWith(2, false);
 

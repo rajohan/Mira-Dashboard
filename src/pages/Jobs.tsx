@@ -710,6 +710,7 @@ export function Jobs() {
                     <Button
                         type="button"
                         variant={view === "scheduled" ? "primary" : "ghost"}
+                        aria-pressed={view === "scheduled"}
                         onClick={() => setView("scheduled")}
                         className="justify-center"
                     >
@@ -718,6 +719,7 @@ export function Jobs() {
                     <Button
                         type="button"
                         variant={view === "openclaw" ? "primary" : "ghost"}
+                        aria-pressed={view === "openclaw"}
                         onClick={() => setView("openclaw")}
                         className="justify-center"
                     >
