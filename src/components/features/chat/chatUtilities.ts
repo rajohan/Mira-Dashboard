@@ -373,7 +373,11 @@ function mergeToolCallResults(
             previous.toolCalls
         );
 
-        return { ...message, toolCalls };
+        return {
+            ...message,
+            timestamp: message.timestamp || previous.timestamp,
+            toolCalls,
+        };
     });
 }
 

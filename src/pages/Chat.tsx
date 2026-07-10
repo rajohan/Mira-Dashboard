@@ -76,27 +76,6 @@ export function activeStreamRenderableText(stream: ActiveChatStream): string {
         .join("\n");
 }
 
-/** Returns whether current history already owns the exact active assistant text. */
-export function hasExactCurrentAssistantMessage(
-    messages: ChatHistoryMessage[],
-    stream: ActiveChatStream
-): boolean {
-    const streamText = (stream.message?.text || stream.text).trim();
-    if (!streamText) {
-        return false;
-    }
-
-    const lastUserMessageIndex = messages.findLastIndex(
-        (message) => message.role.toLowerCase() === "user" && message.text.trim()
-    );
-    return messages.some(
-        (message, messageIndex) =>
-            messageIndex > lastUserMessageIndex &&
-            message.role.toLowerCase() === "assistant" &&
-            message.text.trim() === streamText
-    );
-}
-
 /** Returns stable argument text for tool recovery comparisons. */
 function toolArgumentsIdentity(value: unknown): string {
     return JSON.stringify(value ?? undefined);
@@ -136,6 +115,59 @@ function isMatchingToolResult(
     );
 }
 
+/** Returns the current history row that owns the exact active assistant text. */
+function exactCurrentAssistantMessageIndex(
+    messages: ChatHistoryMessage[],
+    stream: ActiveChatStream
+): number {
+    const streamText = (stream.message?.text || stream.text).trim();
+    if (!streamText) {
+        return -1;
+    }
+
+    const lastUserMessageIndex = messages.findLastIndex(
+        (message) => message.role.toLowerCase() === "user" && message.text.trim()
+    );
+    if (lastUserMessageIndex === -1) {
+        return -1;
+    }
+
+    return messages.findIndex(
+        (message, messageIndex) =>
+            messageIndex > lastUserMessageIndex &&
+            message.role.toLowerCase() === "assistant" &&
+            message.text.trim() === streamText &&
+            (!message.runId || !stream.runId || message.runId === stream.runId)
+    );
+}
+
+/** Returns whether current history owns the exact active assistant text. */
+export function hasExactCurrentAssistantMessage(
+    messages: ChatHistoryMessage[],
+    stream: ActiveChatStream
+): boolean {
+    return exactCurrentAssistantMessageIndex(messages, stream) !== -1;
+}
+
+/** Hides mirrored primary text while keeping unrecovered active diagnostics. */
+export function visibleActiveStreamContent(
+    messages: ChatHistoryMessage[],
+    stream: ActiveChatStream
+): { beforeMessageIndex?: number; message?: ChatHistoryMessage; text: string } {
+    const matchingMessageIndex = exactCurrentAssistantMessageIndex(messages, stream);
+    if (matchingMessageIndex === -1) {
+        return { message: stream.message, text: stream.text };
+    }
+
+    return {
+        beforeMessageIndex: matchingMessageIndex,
+        message: stream.message
+            ? { ...stream.message, content: [], text: "" }
+            : undefined,
+        text: "",
+    };
+}
+
 /** Returns whether an active stream is already represented in visible history. */
 export function isActiveStreamRecoveredInMessages(
     stream: ActiveChatStream,
@@ -171,10 +203,10 @@ export function isActiveStreamRecoveredInMessages(
 
             const thinkingText =
                 message.thinking?.map((block) => block.text).join("\n") || "";
-            if (
-                streamThinkingText.trim() &&
-                thinkingText.trim() === streamThinkingText.trim()
-            ) {
+            const hasRecoveredThinking =
+                !streamThinkingText.trim() ||
+                thinkingText.trim() === streamThinkingText.trim();
+            if (streamThinkingText.trim() && hasRecoveredThinking && !hasToolDetails) {
                 return (
                     !stream.message?.text.trim() ||
                     message.text.trim() === stream.message.text.trim()
@@ -220,7 +252,7 @@ export function isActiveStreamRecoveredInMessages(
                     }
                 );
 
-                if (hasRecoveredToolCalls) {
+                if (hasRecoveredToolCalls && hasRecoveredThinking) {
                     return stream.message.text.trim()
                         ? message.text.trim() === stream.message.text.trim()
                         : true;
@@ -228,13 +260,15 @@ export function isActiveStreamRecoveredInMessages(
             }
 
             if (stream.message?.toolResult && message.toolResult) {
-                return isMatchingToolResult(
-                    stream.message.toolResult,
-                    message.toolResult
+                return (
+                    hasRecoveredThinking &&
+                    isMatchingToolResult(stream.message.toolResult, message.toolResult)
                 );
             }
 
             return (
+                !hasToolDetails &&
+                !(streamThinkingText.trim() && stream.message?.text.trim()) &&
                 isStreamQuiet &&
                 (isRecoveredAssistantText(message.text, streamText) ||
                     isRecoveredAssistantText(thinkingText, streamText))
@@ -656,31 +690,37 @@ export function Chat() {
         { key: string; statusText: string; updatedAt?: string } | undefined;
 
     for (const [streamKey, stream] of selectedStreams) {
-        const streamText = stream.text || "";
-        const streamMessage = stream.message;
         const isStreamRecoveredInHistory = isStreamRecoveredInMessages(stream);
-        const hasExactCurrentHistoryMessage = hasExactCurrentAssistantMessage(
+        const visibleStreamContent = visibleActiveStreamContent(
             visibleMessagesForRows,
             stream
         );
         const shouldShowStreamRow =
             !isStreamRecoveredInHistory &&
-            !hasExactCurrentHistoryMessage &&
-            shouldRenderStreamRow(streamText, streamMessage, chatVisibility);
+            shouldRenderStreamRow(
+                visibleStreamContent.text,
+                visibleStreamContent.message,
+                chatVisibility
+            );
         const shouldShowTypingIndicator = Boolean(
             !isStreamRecoveredInHistory && !shouldShowStreamRow && stream.statusText
         );
 
         if (shouldShowStreamRow) {
-            chatRows.push({
+            const streamRow: ChatRow = {
                 key: `stream-${streamKey}`,
                 kind: "stream",
-                message: streamMessage || {
+                message: visibleStreamContent.message || {
                     role: "assistant",
-                    content: streamText,
-                    text: streamText,
+                    content: visibleStreamContent.text,
+                    text: visibleStreamContent.text,
                 },
-            });
+            };
+            if (visibleStreamContent.beforeMessageIndex === undefined) {
+                chatRows.push(streamRow);
+            } else {
+                chatRows.splice(visibleStreamContent.beforeMessageIndex, 0, streamRow);
+            }
         }
 
         if (shouldShowTypingIndicator) {

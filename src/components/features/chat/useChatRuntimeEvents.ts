@@ -1024,6 +1024,7 @@ export function useChatRuntimeEvents({
     const pendingDeltaUpdatesReference = useRef<Record<string, PendingDeltaUpdate>>({});
     const pendingDeltaFlushTimerReference = useRef<TimerHandle | undefined>(undefined);
     const assistantTextSourcesReference = useRef(new Map<string, AssistantTextSource>());
+    const provisionalAssistantRunIdsReference = useRef(new Map<string, string>());
     const selectedSessionKeyReference = useRef(selectedSessionKey);
     const updateActiveStreamsReference = useRef(updateActiveStreams);
     const requestReference = useRef(request);
@@ -1198,8 +1199,16 @@ export function useChatRuntimeEvents({
             runId: string | undefined,
             source: AssistantTextSource
         ): boolean => {
-            const exactKey = `${sessionKey}::${runId || "provisional"}`;
-            const provisionalKey = `${sessionKey}::provisional`;
+            const activeRunId = activeStreamsReference.current[sessionKey]?.runId;
+            if (!runId && activeRunId && activeRunId !== sessionKey) {
+                provisionalAssistantRunIdsReference.current.set(sessionKey, activeRunId);
+            }
+
+            const provisionalRunId =
+                provisionalAssistantRunIdsReference.current.get(sessionKey) ||
+                "provisional";
+            const exactKey = `${sessionKey}::${runId || provisionalRunId}`;
+            const provisionalKey = `${sessionKey}::${provisionalRunId}`;
             const sources = assistantTextSourcesReference.current;
             let existingSource = sources.get(exactKey);
             const provisionalSource = sources.get(provisionalKey);
@@ -1220,6 +1229,16 @@ export function useChatRuntimeEvents({
 
         /** Clears active streams belonging to a finished chat run. */
         const clearActiveStreamsForRun = (sessionKey: string, runId?: string) => {
+            if (!runId) {
+                const provisionalRunId =
+                    provisionalAssistantRunIdsReference.current.get(sessionKey) ||
+                    "provisional";
+                assistantTextSourcesReference.current.delete(
+                    `${sessionKey}::${provisionalRunId}`
+                );
+                provisionalAssistantRunIdsReference.current.delete(sessionKey);
+            }
+
             updateActiveStreamsReference.current((wasPrevious) => {
                 const next = { ...wasPrevious };
                 for (const [key, streamEntry] of Object.entries(wasPrevious)) {
@@ -1370,17 +1389,20 @@ export function useChatRuntimeEvents({
                         ? runtimeReasoningItemMessage(payload, data)
                         : undefined;
             const shouldIgnoreRuntimeAssistantText = Boolean(
-                stream === "assistant" &&
+                (stream === "assistant" || eventName === "session.message") &&
                 runtimeMessage?.text.length &&
                 !canUseAssistantTextSource(selectedSessionKey, eventRunId, "runtime")
             );
-            const shouldApplyRuntimeMessage = runtimeMessage
-                ? hasActiveStreamContent(runtimeMessage)
+            const runtimeMessageToConsider =
+                shouldIgnoreRuntimeAssistantText && runtimeMessage
+                    ? { ...runtimeMessage, content: [], text: "" }
+                    : runtimeMessage;
+            const shouldApplyRuntimeMessage = runtimeMessageToConsider
+                ? hasActiveStreamContent(runtimeMessageToConsider)
                 : false;
-            const runtimeMessageToApply =
-                shouldApplyRuntimeMessage && !shouldIgnoreRuntimeAssistantText
-                    ? runtimeMessage
-                    : undefined;
+            const runtimeMessageToApply = shouldApplyRuntimeMessage
+                ? runtimeMessageToConsider
+                : undefined;
             const isRuntimeMessageRenderable = runtimeMessageToApply
                 ? isRenderableChatHistoryMessage(
                       runtimeMessageToApply,
@@ -1912,20 +1934,33 @@ export function useChatRuntimeEvents({
                     deltaMessage.thinking?.length ||
                     deltaMessage.toolCalls?.length
                 ) {
-                    if (
+                    const hasCompetingTextSource =
                         nextText.length > 0 &&
                         !canUseAssistantTextSource(
                             streamSessionKey,
                             payload.runId,
                             "chat"
-                        )
-                    ) {
+                        );
+                    const hasDiagnostics = Boolean(
+                        deltaMessage.thinking?.length || deltaMessage.toolCalls?.length
+                    );
+                    if (hasCompetingTextSource && !hasDiagnostics) {
                         return;
                     }
+
+                    const deltaMessageToApply = hasCompetingTextSource
+                        ? {
+                              ...deltaMessage,
+                              content: [],
+                              text: "",
+                          }
+                        : deltaMessage;
+                    const textToApply = deltaMessageToApply.text;
 
                     const existing = activeStreamsReference.current[streamSessionKey];
                     const runId = payload.runId || existing?.runId || streamSessionKey;
                     if (
+                        !hasCompetingTextSource &&
                         payload.replace === true &&
                         payload.message === undefined &&
                         typeof payload.deltaText === "string"
@@ -1941,8 +1976,8 @@ export function useChatRuntimeEvents({
 
                         const message = mergeStreamMessage(
                             undefined,
-                            deltaMessage,
-                            nextText,
+                            deltaMessageToApply,
+                            textToApply,
                             runId
                         );
                         const isStartsNewRun = isNewRunForStream(existing, payload.runId);
@@ -1956,14 +1991,14 @@ export function useChatRuntimeEvents({
                                     payload.runId,
                                     runId,
                                 ]),
-                                text: nextText,
+                                text: textToApply,
                                 message,
                                 updatedAt: currentIsoString(),
                             },
                         }));
                         return;
                     }
-                    queueDeltaUpdate(streamSessionKey, runId, deltaMessage);
+                    queueDeltaUpdate(streamSessionKey, runId, deltaMessageToApply);
                 }
                 return;
             }
@@ -2292,6 +2327,7 @@ export function useChatRuntimeEvents({
             }
             pendingDeltaUpdatesReference.current = {};
             assistantTextSourcesReference.current.clear();
+            provisionalAssistantRunIdsReference.current.clear();
         };
     }, [
         activeStreamsReference,

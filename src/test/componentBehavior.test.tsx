@@ -110,6 +110,7 @@ import {
     hasExactCurrentAssistantMessage,
     isActiveStreamRecoveredInMessages,
     nextRefreshedChatMessages,
+    visibleActiveStreamContent,
 } from "../pages/Chat";
 
 const originalFetch = fetch;
@@ -3157,14 +3158,14 @@ describe("shared component helpers", () => {
         expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
         act(() => {
             listener?.({
-                event: "agent",
+                event: "session.message",
                 payload: {
-                    data: {
-                        text: "Hello world",
+                    message: {
+                        content: "Hello world",
+                        role: "assistant",
                     },
                     runId: "overlap-run",
                     sessionKey: "agent:main:main",
-                    stream: "assistant",
                 },
                 type: "event",
             });
@@ -3220,7 +3221,19 @@ describe("shared component helpers", () => {
             listener?.({
                 event: "chat",
                 payload: {
-                    deltaText: " with chat continuation",
+                    message: {
+                        content: [
+                            { text: " with chat continuation", type: "text" },
+                            { text: "Chat-only thinking", type: "thinking" },
+                            {
+                                arguments: { command: "status" },
+                                id: "chat-only-tool",
+                                name: "functions.exec_command",
+                                type: "toolCall",
+                            },
+                        ],
+                        role: "assistant",
+                    },
                     runId: "runtime-first-run",
                     sessionKey: "agent:main:main",
                     state: "delta",
@@ -3233,7 +3246,17 @@ describe("shared component helpers", () => {
                 "agent:main:main::runtime-first-run::assistant"
             ]?.text
         ).toBe("Runtime-first answer");
-        expect(activeStreamsReference.current["agent:main:main"]).toBeUndefined();
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current["agent:main:main"]?.message?.thinking?.[0]
+                    ?.text
+            ).toBe("Chat-only thinking");
+            expect(
+                activeStreamsReference.current["agent:main:main"]?.message?.toolCalls?.[0]
+                    ?.id
+            ).toBe("chat-only-tool");
+            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe("");
+        });
         act(() => {
             listener?.({
                 event: "chat",
@@ -3258,6 +3281,71 @@ describe("shared component helpers", () => {
                     message.text === "Runtime-first answer with chat continuation"
             )
         ).toBe(true);
+
+        activeStreams = {
+            "agent:main:main": {
+                aliases: ["dashboard-chat-no-run-a"],
+                runId: "dashboard-chat-no-run-a",
+                sessionKey: "agent:main:main",
+                statusText: "Thinking",
+                text: "",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        activeStreamsReference.current = activeStreams;
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "First no-run answer",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe(
+                "First no-run answer"
+            );
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "First no-run answer",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { delta: "Second no-run answer" },
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current["agent:main:main::assistant"]?.text
+            ).toBe("Second no-run answer");
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: { sessionKey: "agent:main:main" },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
 
         act(() => {
             listener?.({
@@ -4238,6 +4326,39 @@ describe("shared component helpers", () => {
         expect(merged).toHaveLength(1);
         expect(merged[0]?.toolCalls?.[0]?.id).toBe("call-1");
         expect(merged[0]?.toolCalls?.[0]?.toolResult?.content).toBe("clean");
+        expect(merged[0]?.timestamp).toBe(localToolRow.timestamp);
+
+        const localThinkingRow = {
+            content: [{ text: "Thinking after tool", type: "thinking" }],
+            local: true,
+            role: "assistant",
+            text: "",
+            thinking: [{ text: "Thinking after tool" }],
+            timestamp: "2026-07-10T15:00:01.000Z",
+        };
+        const chronologicalMessages = mergeWithRecentOptimisticMessages(
+            [
+                {
+                    ...localToolRow,
+                    timestamp: "2026-07-10T15:00:00.000Z",
+                },
+                localThinkingRow,
+            ],
+            [
+                staleHistoryRow,
+                {
+                    content: "Final answer",
+                    role: "assistant",
+                    text: "Final answer",
+                    timestamp: "2026-07-10T15:00:02.000Z",
+                },
+            ]
+        );
+        expect(chronologicalMessages.map((message) => message.timestamp)).toEqual([
+            "2026-07-10T15:00:00.000Z",
+            "2026-07-10T15:00:01.000Z",
+            "2026-07-10T15:00:02.000Z",
+        ]);
 
         const namedLocalRow = {
             content: "",
@@ -5208,6 +5329,7 @@ describe("shared component helpers", () => {
         };
         const currentFinal = {
             ...previousAssistant,
+            runId: "current-run",
             timestamp: "2026-07-10T14:55:00.000Z",
         };
         const activeStream = {
@@ -5218,7 +5340,6 @@ describe("shared component helpers", () => {
             text: finalText,
             updatedAt: "2026-07-10T14:55:00.000Z",
         };
-
         expect(
             hasExactCurrentAssistantMessage(
                 [previousAssistant, userMessage, currentFinal],
@@ -5231,6 +5352,80 @@ describe("shared component helpers", () => {
                 activeStream
             )
         ).toBe(false);
+        expect(hasExactCurrentAssistantMessage([currentFinal], activeStream)).toBe(false);
+        expect(
+            hasExactCurrentAssistantMessage(
+                [
+                    previousAssistant,
+                    userMessage,
+                    { ...currentFinal, runId: "different-run" },
+                ],
+                activeStream
+            )
+        ).toBe(false);
+
+        const diagnosticStream = {
+            ...activeStream,
+            message: {
+                ...currentFinal,
+                thinking: [{ text: "Unrecovered thinking" }],
+                toolCalls: [
+                    {
+                        arguments: { command: "status" },
+                        id: "unrecovered-tool",
+                        name: "functions.exec_command",
+                    },
+                ],
+            },
+        };
+        expect(
+            hasExactCurrentAssistantMessage(
+                [previousAssistant, userMessage, currentFinal],
+                diagnosticStream
+            )
+        ).toBe(true);
+        expect(isActiveStreamRecoveredInMessages(diagnosticStream, [currentFinal])).toBe(
+            false
+        );
+        expect(
+            isActiveStreamRecoveredInMessages(diagnosticStream, [
+                {
+                    ...currentFinal,
+                    thinking: diagnosticStream.message.thinking,
+                },
+            ])
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(diagnosticStream, [
+                {
+                    ...currentFinal,
+                    toolCalls: diagnosticStream.message.toolCalls,
+                },
+            ])
+        ).toBe(false);
+        expect(
+            visibleActiveStreamContent(
+                [previousAssistant, userMessage, currentFinal],
+                diagnosticStream
+            )
+        ).toEqual({
+            beforeMessageIndex: 2,
+            message: {
+                ...diagnosticStream.message,
+                content: [],
+                text: "",
+            },
+            text: "",
+        });
+        expect(
+            isActiveStreamRecoveredInMessages(diagnosticStream, [
+                {
+                    ...currentFinal,
+                    thinking: diagnosticStream.message.thinking,
+                    toolCalls: diagnosticStream.message.toolCalls,
+                },
+            ])
+        ).toBe(true);
     });
 
     it("renders chat messages list helpers and primary row actions", async () => {
