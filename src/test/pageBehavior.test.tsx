@@ -2031,6 +2031,15 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getByText("Run logs")).toBeInTheDocument();
         });
 
+        const dashboardJobsButton = screen.getByRole("button", {
+            name: /dashboard jobs/i,
+        });
+        const openClawCronButton = screen.getByRole("button", {
+            name: /openclaw cron/i,
+        });
+        expect(dashboardJobsButton).toHaveAttribute("aria-pressed", "true");
+        expect(openClawCronButton).toHaveAttribute("aria-pressed", "false");
+
         await user.clear(screen.getByLabelText("Interval seconds"));
         await user.type(screen.getByLabelText("Interval seconds"), "3600");
         await user.click(screen.getByRole("button", { name: /save schedule/i }));
@@ -2044,11 +2053,13 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getByText(/manual ok/)).toBeInTheDocument();
         });
 
-        await user.click(screen.getByRole("button", { name: /openclaw cron/i }));
+        await user.click(openClawCronButton);
         await waitFor(() => {
             expect(screen.queryAllByText("heartbeat").length).toBeGreaterThan(0);
             expect(screen.getByText("Job config")).toBeInTheDocument();
         });
+        expect(dashboardJobsButton).toHaveAttribute("aria-pressed", "false");
+        expect(openClawCronButton).toHaveAttribute("aria-pressed", "true");
 
         await user.click(screen.getByRole("button", { name: /trigger now/i }));
         await waitFor(() => {

@@ -22,6 +22,7 @@ export function PreviewToggle({
             <Button
                 variant={isPreview ? "primary" : "ghost"}
                 size="sm"
+                aria-pressed={isPreview}
                 onClick={() => onToggle(true)}
                 className="rounded px-2 py-1 text-xs"
             >
@@ -31,6 +32,7 @@ export function PreviewToggle({
             <Button
                 variant={isPreview ? "ghost" : "primary"}
                 size="sm"
+                aria-pressed={!isPreview}
                 onClick={() => onToggle(false)}
                 className="rounded px-2 py-1 text-xs"
             >
