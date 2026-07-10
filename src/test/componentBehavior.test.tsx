@@ -107,6 +107,7 @@ import { useFileExplorerState } from "../hooks/useFileExplorerState";
 import { useSessionActions } from "../hooks/useSessionActions";
 import {
     activeStreamRenderableText,
+    hasExactCurrentAssistantMessage,
     isActiveStreamRecoveredInMessages,
     nextRefreshedChatMessages,
 } from "../pages/Chat";
@@ -2324,9 +2325,12 @@ describe("shared component helpers", () => {
             });
         });
         await waitFor(() => {
+            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe(
+                "Hello world"
+            );
             expect(
-                activeStreamsReference.current["agent:main:main::run-1::assistant"]?.text
-            ).toBe("Hello world");
+                activeStreamsReference.current["agent:main:main::run-1::assistant"]
+            ).toBeUndefined();
         });
         act(() => {
             listener?.({
@@ -2342,9 +2346,9 @@ describe("shared component helpers", () => {
                 type: "event",
             });
         });
-        expect(
-            activeStreamsReference.current["agent:main:main::run-1::assistant"]?.text
-        ).toBe("Hello world");
+        expect(activeStreamsReference.current["agent:main:main"]?.text).toBe(
+            "Hello world"
+        );
         expect(
             activeStreamsReference.current["agent:main:main::run-1::thinking"]
         ).toBeUndefined();
@@ -3100,6 +3104,27 @@ describe("shared component helpers", () => {
                 event: "agent",
                 payload: {
                     data: {
+                        delta: "Thinking remains separate",
+                    },
+                    runId: "overlap-run",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe("Hello");
+            expect(
+                activeStreamsReference.current["agent:main:main::overlap-run::thinking"]
+                    ?.message?.thinking?.[0]?.text
+            ).toBe("Thinking remains separate");
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
                         delta: "Hello world",
                     },
                     runId: "overlap-run",
@@ -3110,15 +3135,46 @@ describe("shared component helpers", () => {
             });
         });
         await waitFor(() => {
+            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe("Hello");
             expect(
                 activeStreamsReference.current["agent:main:main::overlap-run::assistant"]
-                    ?.text
-            ).toBe("Hello world");
+            ).toBeUndefined();
+            expect(
+                activeStreamsReference.current["agent:main:main::overlap-run::thinking"]
+                    ?.message?.thinking?.[0]?.text
+            ).toBe("Thinking remains separate");
         });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "overlap-run",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        text: "Hello world",
+                    },
+                    runId: "overlap-run",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
         act(() => {
             listener?.({
                 event: "chat",
                 payload: {
+                    message: "Hello world",
                     runId: "overlap-run",
                     sessionKey: "agent:main:main",
                     state: "final",
@@ -3138,6 +3194,70 @@ describe("shared component helpers", () => {
             )
         ).toBe(true);
         expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: {
+                        delta: "Runtime-first answer",
+                    },
+                    runId: "runtime-first-run",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current[
+                    "agent:main:main::runtime-first-run::assistant"
+                ]?.text
+            ).toBe("Runtime-first answer");
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: " with chat continuation",
+                    runId: "runtime-first-run",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            activeStreamsReference.current[
+                "agent:main:main::runtime-first-run::assistant"
+            ]?.text
+        ).toBe("Runtime-first answer");
+        expect(activeStreamsReference.current["agent:main:main"]).toBeUndefined();
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Runtime-first answer with chat continuation",
+                    runId: "runtime-first-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "role" in message &&
+                    message.role === "assistant" &&
+                    "text" in message &&
+                    message.text === "Runtime-first answer with chat continuation"
+            )
+        ).toBe(true);
 
         act(() => {
             listener?.({
@@ -5070,6 +5190,45 @@ describe("shared component helpers", () => {
                     },
                 ],
                 now
+            )
+        ).toBe(false);
+    });
+
+    it("renders an exact current final instead of its still-settling stream", () => {
+        const finalText = "Canonical final response";
+        const previousAssistant = {
+            content: finalText,
+            role: "assistant",
+            text: finalText,
+        };
+        const userMessage = {
+            content: "Please answer again",
+            role: "user",
+            text: "Please answer again",
+        };
+        const currentFinal = {
+            ...previousAssistant,
+            timestamp: "2026-07-10T14:55:00.000Z",
+        };
+        const activeStream = {
+            aliases: [],
+            message: currentFinal,
+            runId: "current-run",
+            sessionKey: "agent:main:main",
+            text: finalText,
+            updatedAt: "2026-07-10T14:55:00.000Z",
+        };
+
+        expect(
+            hasExactCurrentAssistantMessage(
+                [previousAssistant, userMessage, currentFinal],
+                activeStream
+            )
+        ).toBe(true);
+        expect(
+            hasExactCurrentAssistantMessage(
+                [previousAssistant, userMessage],
+                activeStream
             )
         ).toBe(false);
     });

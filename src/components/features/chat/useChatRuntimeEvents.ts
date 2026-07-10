@@ -45,6 +45,8 @@ interface PendingDeltaUpdate {
     deltas: ChatHistoryMessage[];
 }
 
+type AssistantTextSource = "chat" | "runtime";
+
 const TERMINAL_LIFECYCLE_PHASES = new Set(["end", "error"]);
 const TERMINAL_RUNTIME_EVENTS = new Set(["model.completed", "session.ended"]);
 const TERMINAL_CHAT_STATES = new Set(["aborted", "error", "final"]);
@@ -1021,6 +1023,7 @@ export function useChatRuntimeEvents({
 }: UseChatRuntimeEventsParameters) {
     const pendingDeltaUpdatesReference = useRef<Record<string, PendingDeltaUpdate>>({});
     const pendingDeltaFlushTimerReference = useRef<TimerHandle | undefined>(undefined);
+    const assistantTextSourcesReference = useRef(new Map<string, AssistantTextSource>());
     const selectedSessionKeyReference = useRef(selectedSessionKey);
     const updateActiveStreamsReference = useRef(updateActiveStreams);
     const requestReference = useRef(request);
@@ -1189,6 +1192,32 @@ export function useChatRuntimeEvents({
             }, delayMs);
         };
 
+        /** Claims one text event source for a run so mirrored transports share one row. */
+        const canUseAssistantTextSource = (
+            sessionKey: string,
+            runId: string | undefined,
+            source: AssistantTextSource
+        ): boolean => {
+            const exactKey = `${sessionKey}::${runId || "provisional"}`;
+            const provisionalKey = `${sessionKey}::provisional`;
+            const sources = assistantTextSourcesReference.current;
+            let existingSource = sources.get(exactKey);
+            const provisionalSource = sources.get(provisionalKey);
+
+            if (!existingSource && runId && provisionalSource) {
+                existingSource = provisionalSource;
+                sources.delete(provisionalKey);
+                sources.set(exactKey, existingSource);
+            }
+
+            if (!existingSource) {
+                sources.set(exactKey, source);
+                return true;
+            }
+
+            return existingSource === source;
+        };
+
         /** Clears active streams belonging to a finished chat run. */
         const clearActiveStreamsForRun = (sessionKey: string, runId?: string) => {
             updateActiveStreamsReference.current((wasPrevious) => {
@@ -1340,12 +1369,18 @@ export function useChatRuntimeEvents({
                       : stream === "item"
                         ? runtimeReasoningItemMessage(payload, data)
                         : undefined;
+            const shouldIgnoreRuntimeAssistantText = Boolean(
+                stream === "assistant" &&
+                runtimeMessage?.text.length &&
+                !canUseAssistantTextSource(selectedSessionKey, eventRunId, "runtime")
+            );
             const shouldApplyRuntimeMessage = runtimeMessage
                 ? hasActiveStreamContent(runtimeMessage)
                 : false;
-            const runtimeMessageToApply = shouldApplyRuntimeMessage
-                ? runtimeMessage
-                : undefined;
+            const runtimeMessageToApply =
+                shouldApplyRuntimeMessage && !shouldIgnoreRuntimeAssistantText
+                    ? runtimeMessage
+                    : undefined;
             const isRuntimeMessageRenderable = runtimeMessageToApply
                 ? isRenderableChatHistoryMessage(
                       runtimeMessageToApply,
@@ -1610,13 +1645,14 @@ export function useChatRuntimeEvents({
             }
 
             const statusText = runtimeProgressText(eventName, stream, phase, data);
-            const shouldTrackActivity = isRuntimeWorkEvent(
-                eventName,
-                stream,
-                phase,
-                statusText
-            );
-            if (runtimeMessage && !runtimeMessageToApply) {
+            const shouldTrackActivity =
+                !shouldIgnoreRuntimeAssistantText &&
+                isRuntimeWorkEvent(eventName, stream, phase, statusText);
+            if (
+                runtimeMessage &&
+                !runtimeMessageToApply &&
+                !shouldIgnoreRuntimeAssistantText
+            ) {
                 flushPendingDeltaUpdates();
                 updateActiveStreamsReference.current((wasPrevious) => {
                     const streamKey =
@@ -1876,6 +1912,17 @@ export function useChatRuntimeEvents({
                     deltaMessage.thinking?.length ||
                     deltaMessage.toolCalls?.length
                 ) {
+                    if (
+                        nextText.length > 0 &&
+                        !canUseAssistantTextSource(
+                            streamSessionKey,
+                            payload.runId,
+                            "chat"
+                        )
+                    ) {
+                        return;
+                    }
+
                     const existing = activeStreamsReference.current[streamSessionKey];
                     const runId = payload.runId || existing?.runId || streamSessionKey;
                     if (
@@ -2244,6 +2291,7 @@ export function useChatRuntimeEvents({
                 liveHistoryRefreshTimerReference.current = undefined;
             }
             pendingDeltaUpdatesReference.current = {};
+            assistantTextSourcesReference.current.clear();
         };
     }, [
         activeStreamsReference,

@@ -76,6 +76,27 @@ export function activeStreamRenderableText(stream: ActiveChatStream): string {
         .join("\n");
 }
 
+/** Returns whether current history already owns the exact active assistant text. */
+export function hasExactCurrentAssistantMessage(
+    messages: ChatHistoryMessage[],
+    stream: ActiveChatStream
+): boolean {
+    const streamText = (stream.message?.text || stream.text).trim();
+    if (!streamText) {
+        return false;
+    }
+
+    const lastUserMessageIndex = messages.findLastIndex(
+        (message) => message.role.toLowerCase() === "user" && message.text.trim()
+    );
+    return messages.some(
+        (message, messageIndex) =>
+            messageIndex > lastUserMessageIndex &&
+            message.role.toLowerCase() === "assistant" &&
+            message.text.trim() === streamText
+    );
+}
+
 /** Returns stable argument text for tool recovery comparisons. */
 function toolArgumentsIdentity(value: unknown): string {
     return JSON.stringify(value ?? undefined);
@@ -638,8 +659,13 @@ export function Chat() {
         const streamText = stream.text || "";
         const streamMessage = stream.message;
         const isStreamRecoveredInHistory = isStreamRecoveredInMessages(stream);
+        const hasExactCurrentHistoryMessage = hasExactCurrentAssistantMessage(
+            visibleMessagesForRows,
+            stream
+        );
         const shouldShowStreamRow =
             !isStreamRecoveredInHistory &&
+            !hasExactCurrentHistoryMessage &&
             shouldRenderStreamRow(streamText, streamMessage, chatVisibility);
         const shouldShowTypingIndicator = Boolean(
             !isStreamRecoveredInHistory && !shouldShowStreamRow && stream.statusText
