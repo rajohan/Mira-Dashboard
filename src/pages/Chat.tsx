@@ -1816,6 +1816,11 @@ export function Chat() {
         } catch (error_) {
             setSendError(chatErrorMessage(error_, "Failed to send message"));
             clearOptimisticSendStream(selectedSessionKey, idempotencyKey);
+            if (shouldAppendOptimisticMessage) {
+                setMessages((wasPrevious) =>
+                    wasPrevious.filter((message) => message !== userMessage)
+                );
+            }
         } finally {
             endSend(sendEpoch);
         }

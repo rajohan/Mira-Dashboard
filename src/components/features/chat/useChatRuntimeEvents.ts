@@ -49,6 +49,11 @@ interface PendingDeltaUpdate {
 
 type AssistantTextSource = "chat" | "runtime";
 
+interface CompletedAssistantText {
+    runIds: string[];
+    text: string;
+}
+
 const TERMINAL_LIFECYCLE_PHASES = new Set(["end", "error"]);
 const TERMINAL_RUNTIME_EVENTS = new Set(["model.completed", "session.ended"]);
 const TERMINAL_CHAT_STATES = new Set(["aborted", "error", "final"]);
@@ -1026,7 +1031,9 @@ export function useChatRuntimeEvents({
     const pendingDeltaUpdatesReference = useRef<Record<string, PendingDeltaUpdate>>({});
     const pendingDeltaFlushTimerReference = useRef<TimerHandle | undefined>(undefined);
     const assistantTextSourcesReference = useRef(new Map<string, AssistantTextSource>());
-    const completedAssistantTextsReference = useRef(new Map<string, string>());
+    const completedAssistantTextsReference = useRef(
+        new Map<string, CompletedAssistantText>()
+    );
     const provisionalAssistantRunIdsReference = useRef(new Map<string, string>());
     const selectedSessionKeyReference = useRef(selectedSessionKey);
     const updateActiveStreamsReference = useRef(updateActiveStreams);
@@ -1419,11 +1426,29 @@ export function useChatRuntimeEvents({
                       : stream === "item"
                         ? runtimeReasoningItemMessage(payload, data)
                         : undefined;
+            const completedAssistantText =
+                completedAssistantTextsReference.current.get(selectedSessionKey);
+            const pendingBaseStream = activeStreamsReference.current[selectedSessionKey];
+            const hasPendingNewOptimisticRun = Boolean(
+                pendingBaseStream &&
+                isOptimisticRunId(pendingBaseStream.runId) &&
+                !completedAssistantText?.runIds.some(
+                    (runId) =>
+                        pendingBaseStream.runId === runId ||
+                        pendingBaseStream.aliases.includes(runId)
+                )
+            );
+            const isMatchingCompletedRun = Boolean(
+                eventRunId && completedAssistantText?.runIds.includes(eventRunId)
+            );
+            const isUnscopedCompletedEcho = Boolean(
+                completedAssistantText && !eventRunId && !hasPendingNewOptimisticRun
+            );
             const isCompletedSessionMessageEcho = Boolean(
                 eventName === "session.message" &&
                 runtimeMessage?.text.trim() &&
-                runtimeMessage.text.trim() ===
-                    completedAssistantTextsReference.current.get(selectedSessionKey)
+                runtimeMessage.text.trim() === completedAssistantText?.text &&
+                (isMatchingCompletedRun || isUnscopedCompletedEcho)
             );
             if (runtimeMessage?.text.trim() && !isCompletedSessionMessageEcho) {
                 completedAssistantTextsReference.current.delete(selectedSessionKey);
@@ -2077,10 +2102,17 @@ export function useChatRuntimeEvents({
                     finalMessage.role.toLowerCase() === "assistant" &&
                     finalMessage.text.trim()
                 ) {
-                    completedAssistantTextsReference.current.set(
-                        streamSessionKey,
-                        finalMessage.text.trim()
-                    );
+                    completedAssistantTextsReference.current.set(streamSessionKey, {
+                        runIds: uniqueStrings([
+                            payload.runId,
+                            streamForRun?.runId,
+                            ...(streamForRun?.aliases || []),
+                            ...(!payload.runId || shouldAliasOptimisticTerminal
+                                ? selectedStreamRunIds
+                                : []),
+                        ]),
+                        text: finalMessage.text.trim(),
+                    });
                     canUseAssistantTextSource(streamSessionKey, payload.runId, "chat");
                 }
                 const bufferedText = activeAssistantTextForRun(

@@ -3514,6 +3514,47 @@ describe("shared component helpers", () => {
             listener?.({
                 event: "chat",
                 payload: {
+                    message: "OK",
+                    runId: "completed-repeat-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "session.message",
+                payload: {
+                    message: { content: "OK", role: "assistant" },
+                    runId: "next-repeat-run",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe("OK");
+            expect(activeStreamsReference.current["agent:main:main"]?.runId).toBe(
+                "next-repeat-run"
+            );
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "next-repeat-run",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
                     message: "No-run final-only chat answer",
                     sessionKey: "agent:main:main",
                     state: "final",
@@ -3545,7 +3586,19 @@ describe("shared component helpers", () => {
                 type: "event",
             });
         });
-        expect(activeStreamsReference.current["agent:main:main"]?.text).toBe("");
+        await waitFor(() => {
+            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe(
+                "No-run final-only chat answer"
+            );
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: { sessionKey: "agent:main:main" },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
         act(() => {
             listener?.({
                 event: "chat",
@@ -4718,6 +4771,42 @@ describe("shared component helpers", () => {
                 }))
             )
         ).toHaveLength(2);
+        const repeatedAssistantMediaTurns = repeatedAttachmentOnlyTurns.map((turn) => ({
+            ...turn,
+            role: "assistant",
+        }));
+        expect(
+            mergeWithRecentOptimisticMessages([], repeatedAssistantMediaTurns)
+        ).toHaveLength(2);
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [],
+                repeatedAssistantMediaTurns.map((turn) => ({
+                    ...turn,
+                    timestamp: undefined,
+                }))
+            )
+        ).toHaveLength(2);
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [],
+                repeatedAssistantMediaTurns.map((turn) => ({
+                    ...turn,
+                    runId: "same-media-run",
+                    timestamp: undefined,
+                }))
+            )
+        ).toHaveLength(1);
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [],
+                repeatedAssistantMediaTurns.map((turn, index) => ({
+                    ...turn,
+                    runId: `media-run-${index}`,
+                    timestamp: undefined,
+                }))
+            )
+        ).toHaveLength(2);
         const optimisticRepeatedAttachmentTurn = {
             ...repeatedAttachmentOnlyTurns[1]!,
             local: true,
@@ -4778,6 +4867,19 @@ describe("shared component helpers", () => {
                 [{ ...localMediaMessage, local: undefined }]
             )
         ).toHaveLength(1);
+        const reconciledAssistantMediaHistory = mergeWithRecentOptimisticMessages(
+            [{ ...localMediaMessage, runId: "local-media-run" }],
+            [
+                {
+                    ...localMediaMessage,
+                    local: undefined,
+                    runId: undefined,
+                    timestamp: "2026-07-10T15:00:01.000Z",
+                },
+            ]
+        );
+        expect(reconciledAssistantMediaHistory).toHaveLength(1);
+        expect(reconciledAssistantMediaHistory[0]?.local).toBeUndefined();
 
         const localToolRow = {
             content: "",

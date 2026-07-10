@@ -1,6 +1,7 @@
 import { timestampFromDateString } from "../../../utils/date";
 import {
     chatAttachmentIdentity,
+    chatContentFingerprint,
     type ChatHistoryMessage,
     mergeChatAttachments,
     mergeChatImages,
@@ -62,9 +63,7 @@ function messageMediaIdentity(message: ChatHistoryMessage): string | undefined {
             const data = image.data || image.source?.data || "";
             return [
                 image.mimeType || image.source?.media_type || "image",
-                data.length,
-                data.slice(0, 32),
-                data.slice(-32),
+                chatContentFingerprint(data),
             ].join(":");
         }),
         ...(message.attachments || []).map((attachment) =>
@@ -276,10 +275,17 @@ export function messageIdentity(message: ChatHistoryMessage): string {
         role === "user" && !textIdentity && mediaIdentity
             ? [mediaIdentity, message.runId || message.timestamp || "no-turn"].join("::")
             : undefined;
+    const assistantMediaTurnIdentity =
+        role === "assistant" && !textIdentity && mediaIdentity
+            ? [mediaIdentity, message.runId || message.timestamp || "no-turn"].join("::")
+            : undefined;
     const isToolResultRole = TOOL_ROLE_VARIANTS.includes(role);
     const identity = isToolResultRole
         ? diagnosticIdentity || textIdentity
-        : textIdentity || userMediaTurnIdentity || diagnosticIdentity;
+        : textIdentity ||
+          userMediaTurnIdentity ||
+          assistantMediaTurnIdentity ||
+          diagnosticIdentity;
     return `${role}::${identity || ""}`;
 }
 
@@ -326,8 +332,9 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
         }
 
         const identity = messageIdentity(message);
-        const isUnscopedTextlessUserMedia = Boolean(
-            message.role.toLowerCase() === "user" &&
+        const role = message.role.toLowerCase();
+        const isUnscopedTextlessConversationalMedia = Boolean(
+            (role === "user" || role === "assistant") &&
             !message.text.trim() &&
             messageMediaIdentity(message) &&
             !message.runId &&
@@ -336,7 +343,7 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
         if (
             (message.text.trim() || diagnosticMessageIdentity(message)) &&
             seen.has(identity) &&
-            !isUnscopedTextlessUserMedia
+            !isUnscopedTextlessConversationalMedia
         ) {
             continue;
         }
@@ -480,20 +487,21 @@ export function mergeWithRecentOptimisticMessages(
         enrichedNextMessages.map((message) => messageIdentity(message))
     );
     const nextIdentityCounts = new Map<string, number>();
-    const unmatchedNextUserMediaCounts = new Map<string, number>();
+    const unmatchedNextTextlessMediaCounts = new Map<string, number>();
     for (const message of enrichedNextMessages) {
         const identity = messageIdentity(message);
         nextIdentityCounts.set(identity, (nextIdentityCounts.get(identity) || 0) + 1);
 
         const mediaIdentity = messageMediaIdentity(message);
+        const role = message.role.toLowerCase();
         if (
-            message.role.toLowerCase() === "user" &&
+            (role === "user" || role === "assistant") &&
             !message.text.trim() &&
             mediaIdentity
         ) {
-            unmatchedNextUserMediaCounts.set(
+            unmatchedNextTextlessMediaCounts.set(
                 mediaIdentity,
-                (unmatchedNextUserMediaCounts.get(mediaIdentity) || 0) + 1
+                (unmatchedNextTextlessMediaCounts.get(mediaIdentity) || 0) + 1
             );
         }
     }
@@ -505,9 +513,10 @@ export function mergeWithRecentOptimisticMessages(
         const identity = messageIdentity(message);
         const identityCount = nextIdentityCounts.get(identity) || 0;
         const mediaIdentity = messageMediaIdentity(message);
+        const role = message.role.toLowerCase();
         if (
             identityCount === 0 ||
-            message.role.toLowerCase() !== "user" ||
+            (role !== "user" && role !== "assistant") ||
             message.text.trim() ||
             !mediaIdentity
         ) {
@@ -515,8 +524,8 @@ export function mergeWithRecentOptimisticMessages(
         }
 
         nextIdentityCounts.set(identity, identityCount - 1);
-        const mediaCount = unmatchedNextUserMediaCounts.get(mediaIdentity) || 0;
-        unmatchedNextUserMediaCounts.set(mediaIdentity, Math.max(0, mediaCount - 1));
+        const mediaCount = unmatchedNextTextlessMediaCounts.get(mediaIdentity) || 0;
+        unmatchedNextTextlessMediaCounts.set(mediaIdentity, Math.max(0, mediaCount - 1));
     }
     const nextToolCallRowsByIdentity = new Map<string, ChatHistoryMessage>();
     for (const message of enrichedNextMessages) {
@@ -552,16 +561,16 @@ export function mergeWithRecentOptimisticMessages(
 
         const mediaIdentity = messageMediaIdentity(message);
         const unmatchedMediaCount = mediaIdentity
-            ? unmatchedNextUserMediaCounts.get(mediaIdentity) || 0
+            ? unmatchedNextTextlessMediaCounts.get(mediaIdentity) || 0
             : 0;
         if (
-            role === "user" &&
+            (role === "user" || role === "assistant") &&
             isLocalMessage &&
             !message.text.trim() &&
             mediaIdentity &&
             unmatchedMediaCount > 0
         ) {
-            unmatchedNextUserMediaCounts.set(mediaIdentity, unmatchedMediaCount - 1);
+            unmatchedNextTextlessMediaCounts.set(mediaIdentity, unmatchedMediaCount - 1);
             return false;
         }
 
