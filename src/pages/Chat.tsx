@@ -28,6 +28,7 @@ import {
     isRenderableChatHistoryMessage,
     optimisticAttachmentDisplay,
     type RawChatHistoryMessage,
+    TOOL_ROLE_VARIANTS,
 } from "../components/features/chat/chatTypes";
 import {
     CHAT_HISTORY_LIMIT,
@@ -41,6 +42,7 @@ import {
     MAX_ATTACHMENTS,
     mergeWithRecentOptimisticMessages,
     messageDeleteKey,
+    messageIdentity,
     readFileAsDataUrl,
 } from "../components/features/chat/chatUtilities";
 import { buildSlashCommandSuggestions } from "../components/features/chat/slashCommands";
@@ -115,11 +117,185 @@ function isMatchingToolResult(
     );
 }
 
+/** Returns the current history row that owns the exact active assistant text. */
+function exactCurrentAssistantMessageIndex(
+    messages: ChatHistoryMessage[],
+    stream: ActiveChatStream
+): number {
+    const streamText = (stream.message?.text || stream.text).trim();
+    if (!streamText) {
+        return -1;
+    }
+
+    const lastUserMessageIndex = messages.findLastIndex(
+        (message) =>
+            message.role.toLowerCase() === "user" &&
+            Boolean(
+                message.text.trim() ||
+                message.images?.length ||
+                message.attachments?.length
+            )
+    );
+    if (lastUserMessageIndex === -1) {
+        return -1;
+    }
+
+    return messages.findIndex(
+        (message, messageIndex) =>
+            messageIndex > lastUserMessageIndex &&
+            message.role.toLowerCase() === "assistant" &&
+            message.text.trim() === streamText &&
+            (!message.runId || !stream.runId || message.runId === stream.runId)
+    );
+}
+
+/** Returns whether current history owns the exact active assistant text. */
+export function hasExactCurrentAssistantMessage(
+    messages: ChatHistoryMessage[],
+    stream: ActiveChatStream
+): boolean {
+    return exactCurrentAssistantMessageIndex(messages, stream) !== -1;
+}
+
+/** Hides mirrored primary text while keeping unrecovered active diagnostics. */
+export function visibleActiveStreamContent(
+    messages: ChatHistoryMessage[],
+    stream: ActiveChatStream
+): { beforeMessageIndex?: number; message?: ChatHistoryMessage; text: string } {
+    const matchingMessageIndex = exactCurrentAssistantMessageIndex(messages, stream);
+    if (matchingMessageIndex === -1) {
+        return { message: stream.message, text: stream.text };
+    }
+
+    return {
+        beforeMessageIndex: matchingMessageIndex,
+        message: stream.message
+            ? { ...stream.message, content: [], text: "" }
+            : undefined,
+        text: "",
+    };
+}
+
+/** Keeps current response diagnostics between its tools and final assistant text. */
+export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
+    const lastUserRowIndex = rows.findLastIndex(
+        (row) => row.message.role.toLowerCase() === "user"
+    );
+    if (lastUserRowIndex === -1) {
+        return rows;
+    }
+
+    const responseRows = rows.slice(lastUserRowIndex + 1);
+    const finalRowIndex = responseRows.findLastIndex(
+        (row) =>
+            row.kind !== "typing" &&
+            row.message.role.toLowerCase() === "assistant" &&
+            Boolean(row.message.text.trim())
+    );
+    if (finalRowIndex === -1) {
+        return rows;
+    }
+    const finalRow = responseRows[finalRowIndex]!;
+
+    const previousAssistantTextRowIndex = responseRows.findLastIndex(
+        (row, rowIndex) =>
+            rowIndex < finalRowIndex &&
+            row.kind !== "typing" &&
+            row.message.role.toLowerCase() === "assistant" &&
+            Boolean(row.message.text.trim())
+    );
+    const currentResponseStartIndex = previousAssistantTextRowIndex + 1;
+    const currentResponseRows = responseRows.slice(currentResponseStartIndex);
+    const isRowInCurrentResponse = (row: ChatRow) =>
+        !finalRow.message.runId ||
+        !row.message.runId ||
+        row.message.runId === finalRow.message.runId;
+    const activityRows = currentResponseRows.filter(
+        (row) => row.kind === "typing" && isRowInCurrentResponse(row)
+    );
+    const thinkingRows = currentResponseRows.filter(
+        (row) =>
+            isRowInCurrentResponse(row) &&
+            row.message.role.toLowerCase() === "assistant" &&
+            !row.message.text.trim() &&
+            Boolean(row.message.thinking?.length)
+    );
+    const toolRows = currentResponseRows.filter((row) => {
+        if (row === finalRow || !isRowInCurrentResponse(row)) {
+            return false;
+        }
+        const role = row.message.role.toLowerCase();
+        return Boolean(
+            TOOL_ROLE_VARIANTS.includes(role) ||
+            row.message.toolCalls?.length ||
+            row.message.toolResult
+        );
+    });
+    if (thinkingRows.length === 0 && toolRows.length === 0) {
+        return rows;
+    }
+
+    const extractedRows = new Set([
+        ...activityRows,
+        ...thinkingRows,
+        ...toolRows,
+        finalRow,
+    ]);
+    const stableCurrentResponseRows = currentResponseRows.filter(
+        (row) => !extractedRows.has(row)
+    );
+
+    return [
+        ...rows.slice(0, lastUserRowIndex + 1),
+        ...responseRows.slice(0, currentResponseStartIndex),
+        ...stableCurrentResponseRows,
+        ...toolRows,
+        ...thinkingRows,
+        finalRow,
+        ...activityRows,
+    ];
+}
+
+/** Inserts stream rows at message indexes without shifting later insertions. */
+export function insertIndexedStreamRows(
+    rows: ChatRow[],
+    insertions: Array<{ beforeMessageIndex: number; row: ChatRow }>
+): ChatRow[] {
+    const nextRows = [...rows];
+    const orderedInsertions = insertions.toSorted(
+        (left, right) => left.beforeMessageIndex - right.beforeMessageIndex
+    );
+    for (const [offset, insertion] of orderedInsertions.entries()) {
+        nextRows.splice(insertion.beforeMessageIndex + offset, 0, insertion.row);
+    }
+    return nextRows;
+}
+
+/** Removes a failed optimistic row and restores same-identity rows it replaced. */
+export function rollbackFailedOptimisticMessage(
+    messages: ChatHistoryMessage[],
+    failedMessage: ChatHistoryMessage,
+    replacedMessages: Array<{ index: number; message: ChatHistoryMessage }>
+): ChatHistoryMessage[] {
+    const restoredMessages = messages.filter((message) => message !== failedMessage);
+    for (const replaced of replacedMessages) {
+        if (!restoredMessages.includes(replaced.message)) {
+            restoredMessages.splice(
+                Math.min(replaced.index, restoredMessages.length),
+                0,
+                replaced.message
+            );
+        }
+    }
+    return restoredMessages;
+}
+
 /** Returns whether an active stream is already represented in visible history. */
 export function isActiveStreamRecoveredInMessages(
     stream: ActiveChatStream,
     visibleMessages: ChatHistoryMessage[],
-    now = Date.now()
+    now = Date.now(),
+    shouldRequireThinking = true
 ): boolean {
     const streamText = activeStreamRenderableText(stream);
     const streamThinkingText =
@@ -150,10 +326,11 @@ export function isActiveStreamRecoveredInMessages(
 
             const thinkingText =
                 message.thinking?.map((block) => block.text).join("\n") || "";
-            if (
-                streamThinkingText.trim() &&
-                thinkingText.trim() === streamThinkingText.trim()
-            ) {
+            const hasRecoveredThinking =
+                !streamThinkingText.trim() ||
+                (!shouldRequireThinking && Boolean(stream.message?.text.trim())) ||
+                thinkingText.trim() === streamThinkingText.trim();
+            if (streamThinkingText.trim() && hasRecoveredThinking && !hasToolDetails) {
                 return (
                     !stream.message?.text.trim() ||
                     message.text.trim() === stream.message.text.trim()
@@ -199,7 +376,7 @@ export function isActiveStreamRecoveredInMessages(
                     }
                 );
 
-                if (hasRecoveredToolCalls) {
+                if (hasRecoveredToolCalls && hasRecoveredThinking) {
                     return stream.message.text.trim()
                         ? message.text.trim() === stream.message.text.trim()
                         : true;
@@ -207,13 +384,15 @@ export function isActiveStreamRecoveredInMessages(
             }
 
             if (stream.message?.toolResult && message.toolResult) {
-                return isMatchingToolResult(
-                    stream.message.toolResult,
-                    message.toolResult
+                return (
+                    hasRecoveredThinking &&
+                    isMatchingToolResult(stream.message.toolResult, message.toolResult)
                 );
             }
 
             return (
+                !hasToolDetails &&
+                !(streamThinkingText.trim() && stream.message?.text.trim()) &&
                 isStreamQuiet &&
                 (isRecoveredAssistantText(message.text, streamText) ||
                     isRecoveredAssistantText(thinkingText, streamText))
@@ -622,39 +801,58 @@ export function Chat() {
         return isActiveStreamRecoveredInMessages(
             stream,
             visibleMessagesForRows,
-            Date.now()
+            Date.now(),
+            chatVisibility.shouldShowThinking
         );
     }
 
-    const chatRows: ChatRow[] = visibleMessagesForRows.map((message) => ({
+    const unorderedChatRows: ChatRow[] = visibleMessagesForRows.map((message) => ({
         key: messageDeleteKey(message),
         kind: "message",
         message,
     }));
     let latestTypingStream:
         { key: string; statusText: string; updatedAt?: string } | undefined;
+    const indexedStreamRows: Array<{
+        beforeMessageIndex: number;
+        row: ChatRow;
+    }> = [];
 
     for (const [streamKey, stream] of selectedStreams) {
-        const streamText = stream.text || "";
-        const streamMessage = stream.message;
         const isStreamRecoveredInHistory = isStreamRecoveredInMessages(stream);
+        const visibleStreamContent = visibleActiveStreamContent(
+            visibleMessagesForRows,
+            stream
+        );
         const shouldShowStreamRow =
             !isStreamRecoveredInHistory &&
-            shouldRenderStreamRow(streamText, streamMessage, chatVisibility);
+            shouldRenderStreamRow(
+                visibleStreamContent.text,
+                visibleStreamContent.message,
+                chatVisibility
+            );
         const shouldShowTypingIndicator = Boolean(
             !isStreamRecoveredInHistory && !shouldShowStreamRow && stream.statusText
         );
 
         if (shouldShowStreamRow) {
-            chatRows.push({
+            const streamRow: ChatRow = {
                 key: `stream-${streamKey}`,
                 kind: "stream",
-                message: streamMessage || {
+                message: visibleStreamContent.message || {
                     role: "assistant",
-                    content: streamText,
-                    text: streamText,
+                    content: visibleStreamContent.text,
+                    text: visibleStreamContent.text,
                 },
-            });
+            };
+            if (visibleStreamContent.beforeMessageIndex === undefined) {
+                unorderedChatRows.push(streamRow);
+            } else {
+                indexedStreamRows.push({
+                    beforeMessageIndex: visibleStreamContent.beforeMessageIndex,
+                    row: streamRow,
+                });
+            }
         }
 
         if (shouldShowTypingIndicator) {
@@ -675,8 +873,12 @@ export function Chat() {
         }
     }
 
+    const rowsWithIndexedStreams = insertIndexedStreamRows(
+        unorderedChatRows,
+        indexedStreamRows
+    );
     if (latestTypingStream) {
-        chatRows.push({
+        rowsWithIndexedStreams.push({
             key: `typing-${latestTypingStream.key}-${latestTypingStream.statusText}`,
             kind: "typing",
             message: {
@@ -686,6 +888,7 @@ export function Chat() {
             },
         });
     }
+    const chatRows = orderCurrentResponseRows(rowsWithIndexedStreams);
 
     useEffect(() => {
         if (sortedSessions.length === 0) {
@@ -905,7 +1108,12 @@ export function Chat() {
                             !stream.message || !streamMessageIsRenderable;
                         return Boolean(
                             isActiveStreamIsQuiet &&
-                            (isActiveStreamRecoveredInMessages(stream, nextMessages) ||
+                            (isActiveStreamRecoveredInMessages(
+                                stream,
+                                nextMessages,
+                                Date.now(),
+                                showThinkingOutput
+                            ) ||
                                 (streamText &&
                                     hasRecoveredStreamHistory(
                                         nextMessages,
@@ -1530,11 +1738,24 @@ export function Chat() {
             text: messageText,
             images: [],
             attachments: optimisticAttachmentDisplay(sendAttachments),
+            local: messageText ? undefined : true,
             timestamp: currentIsoString(),
         };
+        const optimisticIdentity = messageIdentity(userMessage);
+        let messagesReplacedByOptimistic: Array<{
+            index: number;
+            message: ChatHistoryMessage;
+        }> = [];
 
         if (shouldAppendOptimisticMessage) {
-            setMessages((wasPrevious) => dedupeMessages([...wasPrevious, userMessage]));
+            setMessages((wasPrevious) => {
+                messagesReplacedByOptimistic = wasPrevious.flatMap((message, index) =>
+                    messageIdentity(message) === optimisticIdentity
+                        ? [{ index, message }]
+                        : []
+                );
+                return dedupeMessages([...wasPrevious, userMessage]);
+            });
         }
         setDraft("");
         setAttachments([]);
@@ -1631,6 +1852,15 @@ export function Chat() {
         } catch (error_) {
             setSendError(chatErrorMessage(error_, "Failed to send message"));
             clearOptimisticSendStream(selectedSessionKey, idempotencyKey);
+            if (shouldAppendOptimisticMessage) {
+                setMessages((wasPrevious) =>
+                    rollbackFailedOptimisticMessage(
+                        wasPrevious,
+                        userMessage,
+                        messagesReplacedByOptimistic
+                    )
+                );
+            }
         } finally {
             endSend(sendEpoch);
         }
