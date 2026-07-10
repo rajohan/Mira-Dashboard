@@ -52,6 +52,31 @@ export interface ChatSendAttachment {
     kind: "image" | "text" | "file";
 }
 
+/** Returns a compact fingerprint that incorporates every character. */
+export function chatContentFingerprint(content: string): string {
+    let firstHash = 2_166_136_261;
+    let secondHash = 2_654_435_761;
+    for (let index = 0; index < content.length; index += 1) {
+        const code = content.codePointAt(index) ?? 0;
+        firstHash = Math.imul(firstHash ^ code, 16_777_619);
+        secondHash = Math.imul(secondHash ^ code, 2_246_822_519);
+    }
+    return `${content.length}:${(firstHash >>> 0).toString(36)}:${(
+        secondHash >>> 0
+    ).toString(36)}`;
+}
+
+/** Returns attachment content identity independent of transient row IDs. */
+export function chatAttachmentIdentity(attachment: ChatAttachmentDisplay): string {
+    const content = attachment.contentBase64 || attachment.dataUrl || "";
+    return [
+        attachment.fileName,
+        attachment.mimeType || "unknown",
+        attachment.sizeBytes ?? "unknown",
+        content ? chatContentFingerprint(content) : attachment.id,
+    ].join("::");
+}
+
 /** Represents chat gateway attachment. */
 export interface ChatGatewayAttachment {
     type: string;
@@ -60,17 +85,34 @@ export interface ChatGatewayAttachment {
     content: string;
 }
 
+/** Merges image blocks without repeating identical payloads. */
+export function mergeChatImages(
+    previous: ChatImageBlock[] = [],
+    next: ChatImageBlock[] = []
+): ChatImageBlock[] {
+    const seenImages = new Set<string>();
+    return [...previous, ...next].filter((image) => {
+        const identity = JSON.stringify(image);
+        if (seenImages.has(identity)) {
+            return false;
+        }
+        seenImages.add(identity);
+        return true;
+    });
+}
+
 /** Merges attachment display rows without repeating IDs. */
-function mergeChatAttachments(
+export function mergeChatAttachments(
     previous: ChatAttachmentDisplay[] = [],
     next: ChatAttachmentDisplay[] = []
 ): ChatAttachmentDisplay[] {
-    const seenIds = new Set<string>();
+    const seenAttachments = new Set<string>();
     return [...previous, ...next].filter((attachment) => {
-        if (seenIds.has(attachment.id)) {
+        const identity = chatAttachmentIdentity(attachment);
+        if (seenAttachments.has(identity)) {
             return false;
         }
-        seenIds.add(attachment.id);
+        seenAttachments.add(identity);
         return true;
     });
 }

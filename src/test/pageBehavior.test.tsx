@@ -2624,6 +2624,46 @@ describe("Mira Dashboard pages", () => {
             ).toHaveValue("");
         });
 
+        const fileInput = view.container.querySelector<HTMLInputElement>(
+            'input[type="file"][multiple]'
+        );
+        expect(fileInput).not.toBeNull();
+        fireEvent.change(fileInput!, {
+            target: {
+                files: [
+                    new File(["failed attachment"], "failed.txt", {
+                        type: "text/plain",
+                    }),
+                ],
+            },
+        });
+        await flushQueuedTimers();
+        await waitFor(() => {
+            expect(screen.getByText("failed.txt")).toBeInTheDocument();
+        });
+        await user.click(screen.getByRole("button", { name: "Send" }));
+
+        await waitFor(() => {
+            expect(
+                socket.sent.filter((entry) => entry.includes('"method":"sessions.patch"'))
+            ).toHaveLength(2);
+        });
+        await respondToSocketRequest(socket, "sessions.patch", {});
+        await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(
+                socket.sent.filter((entry) => entry.includes('"method":"chat.send"'))
+            ).toHaveLength(2);
+        });
+        await respondToSocketRequest(socket, "chat.send", undefined, false);
+        await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(screen.queryByText("failed.txt")).not.toBeInTheDocument();
+            expect(screen.getByText("Failed to send message")).toBeInTheDocument();
+        });
+
         view.unmount();
         view.queryClient.clear();
     });
