@@ -1252,15 +1252,32 @@ export function useChatRuntimeEvents({
 
         /** Clears active streams belonging to a finished chat run. */
         const clearActiveStreamsForRun = (sessionKey: string, runId?: string) => {
-            const provisionalRunId =
-                provisionalAssistantRunIdsReference.current.get(sessionKey) ||
-                "provisional";
+            const recordedProvisionalRunId =
+                provisionalAssistantRunIdsReference.current.get(sessionKey);
+            const concreteAssistantRunIds = uniqueStrings(
+                Object.entries(activeStreamsReference.current)
+                    .filter(
+                        ([, streamEntry]) =>
+                            isSameSessionKey(streamEntry.sessionKey, sessionKey) &&
+                            Boolean(streamEntry.text) &&
+                            !isProvisionalRunId(sessionKey, streamEntry.runId) &&
+                            !isOptimisticRunId(streamEntry.runId)
+                    )
+                    .map(([, streamEntry]) => streamEntry.runId)
+            );
+            const resolvedRunId =
+                runId ||
+                recordedProvisionalRunId ||
+                (concreteAssistantRunIds.length === 1
+                    ? concreteAssistantRunIds[0]
+                    : undefined);
             if (!runId) {
                 assistantTextSourcesReference.current.delete(
-                    `${sessionKey}::${provisionalRunId}`
+                    `${sessionKey}::${resolvedRunId || "provisional"}`
                 );
             }
 
+            const provisionalRunId = recordedProvisionalRunId || "provisional";
             const provisionalStream = Object.values(activeStreamsReference.current).find(
                 (streamEntry) =>
                     isSameSessionKey(streamEntry.sessionKey, sessionKey) &&
@@ -1268,9 +1285,8 @@ export function useChatRuntimeEvents({
                         streamEntry.aliases.includes(provisionalRunId))
             );
             if (
-                !runId ||
                 !provisionalStream ||
-                isActiveStreamMatchingRun(sessionKey, provisionalStream, runId)
+                isActiveStreamMatchingRun(sessionKey, provisionalStream, resolvedRunId)
             ) {
                 provisionalAssistantRunIdsReference.current.delete(sessionKey);
             }
@@ -1282,7 +1298,9 @@ export function useChatRuntimeEvents({
                         continue;
                     }
 
-                    if (!isActiveStreamMatchingRun(sessionKey, streamEntry, runId)) {
+                    if (
+                        !isActiveStreamMatchingRun(sessionKey, streamEntry, resolvedRunId)
+                    ) {
                         continue;
                     }
 

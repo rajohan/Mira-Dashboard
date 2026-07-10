@@ -3512,6 +3512,72 @@ describe("shared component helpers", () => {
 
         act(() => {
             listener?.({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: "Concrete runtime answer",
+                        role: "assistant",
+                    },
+                    runId: "concrete-runtime-run",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                Object.values(activeStreamsReference.current).some(
+                    (stream) =>
+                        stream.runId === "concrete-runtime-run" &&
+                        stream.text === "Concrete runtime answer"
+                )
+            ).toBe(true);
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Concrete runtime answer",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
+        act(() => {
+            listener?.({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: "Runtime-only terminal answer",
+                        role: "assistant",
+                    },
+                    runId: "runtime-only-terminal-run",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                Object.values(activeStreamsReference.current).some(
+                    (stream) => stream.runId === "runtime-only-terminal-run"
+                )
+            ).toBe(true);
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: { sessionKey: "agent:main:main" },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
+        act(() => {
+            listener?.({
                 event: "chat",
                 payload: {
                     message: "OK",
@@ -4880,6 +4946,20 @@ describe("shared component helpers", () => {
         );
         expect(reconciledAssistantMediaHistory).toHaveLength(1);
         expect(reconciledAssistantMediaHistory[0]?.local).toBeUndefined();
+        const localUserMediaMessage = {
+            ...localMediaMessage,
+            role: "user",
+        };
+        const crossRoleMediaHistory = mergeWithRecentOptimisticMessages(
+            [localUserMediaMessage],
+            [{ ...localMediaMessage, local: undefined }]
+        );
+        expect(crossRoleMediaHistory).toHaveLength(2);
+        expect(
+            crossRoleMediaHistory.some(
+                (message) => message.role === "user" && message.local === true
+            )
+        ).toBe(true);
 
         const localToolRow = {
             content: "",
@@ -6218,6 +6298,44 @@ describe("shared component helpers", () => {
                 thinkingRow,
             ]).map((row) => row.key)
         ).toEqual(["user", "preamble", "thinking", "final-stream"]);
+        const previousThinkingRow = {
+            ...thinkingRow,
+            key: "previous-thinking",
+            message: {
+                ...thinkingRow.message,
+                thinking: [{ text: "Previous reasoning" }],
+                timestamp: "2026-07-10T14:59:58.000Z",
+            },
+        };
+        const previousFinalRow = {
+            ...finalHistoryRow,
+            key: "previous-final",
+            message: {
+                ...finalHistoryRow.message,
+                text: "Previous answer",
+                timestamp: "2026-07-10T14:59:59.000Z",
+            },
+        };
+        expect(
+            orderCurrentResponseRows([
+                userRow,
+                previousThinkingRow,
+                previousFinalRow,
+                thinkingRow,
+                finalHistoryRow,
+            ]).map((row) => row.key)
+        ).toEqual([
+            "user",
+            "previous-thinking",
+            "previous-final",
+            "thinking",
+            "final-history",
+        ]);
+        expect(
+            orderCurrentResponseRows([userRow, finalHistoryRow, toolRow]).map(
+                (row) => row.key
+            )
+        ).toEqual(["user", "tool", "final-history"]);
 
         expect(
             insertIndexedStreamRows(

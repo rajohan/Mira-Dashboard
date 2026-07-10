@@ -499,9 +499,10 @@ export function mergeWithRecentOptimisticMessages(
             !message.text.trim() &&
             mediaIdentity
         ) {
+            const mediaKey = `${role}::${mediaIdentity}`;
             unmatchedNextTextlessMediaCounts.set(
-                mediaIdentity,
-                (unmatchedNextTextlessMediaCounts.get(mediaIdentity) || 0) + 1
+                mediaKey,
+                (unmatchedNextTextlessMediaCounts.get(mediaKey) || 0) + 1
             );
         }
     }
@@ -524,8 +525,9 @@ export function mergeWithRecentOptimisticMessages(
         }
 
         nextIdentityCounts.set(identity, identityCount - 1);
-        const mediaCount = unmatchedNextTextlessMediaCounts.get(mediaIdentity) || 0;
-        unmatchedNextTextlessMediaCounts.set(mediaIdentity, Math.max(0, mediaCount - 1));
+        const mediaKey = `${role}::${mediaIdentity}`;
+        const mediaCount = unmatchedNextTextlessMediaCounts.get(mediaKey) || 0;
+        unmatchedNextTextlessMediaCounts.set(mediaKey, Math.max(0, mediaCount - 1));
     }
     const nextToolCallRowsByIdentity = new Map<string, ChatHistoryMessage>();
     for (const message of enrichedNextMessages) {
@@ -560,8 +562,9 @@ export function mergeWithRecentOptimisticMessages(
         }
 
         const mediaIdentity = messageMediaIdentity(message);
+        const mediaKey = `${role}::${mediaIdentity || ""}`;
         const unmatchedMediaCount = mediaIdentity
-            ? unmatchedNextTextlessMediaCounts.get(mediaIdentity) || 0
+            ? unmatchedNextTextlessMediaCounts.get(mediaKey) || 0
             : 0;
         if (
             (role === "user" || role === "assistant") &&
@@ -570,7 +573,7 @@ export function mergeWithRecentOptimisticMessages(
             mediaIdentity &&
             unmatchedMediaCount > 0
         ) {
-            unmatchedNextTextlessMediaCounts.set(mediaIdentity, unmatchedMediaCount - 1);
+            unmatchedNextTextlessMediaCounts.set(mediaKey, unmatchedMediaCount - 1);
             return false;
         }
 

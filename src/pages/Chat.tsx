@@ -185,19 +185,14 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
     }
 
     const responseRows = rows.slice(lastUserRowIndex + 1);
-    const activityRows = responseRows.filter((row) => row.kind === "typing");
-    const thinkingRows = responseRows.filter(
+    const allThinkingRows = responseRows.filter(
         (row) =>
             row.message.role.toLowerCase() === "assistant" &&
             !row.message.text.trim() &&
             Boolean(row.message.thinking?.length)
     );
-    if (thinkingRows.length === 0) {
-        return rows;
-    }
-
     let latestThinkingTimestamp: number | undefined;
-    for (const row of thinkingRows) {
+    for (const row of allThinkingRows) {
         const timestamp = sessionTimestampMs(row.message.timestamp);
         if (timestamp !== undefined) {
             latestThinkingTimestamp =
@@ -210,22 +205,47 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
         const timestamp = sessionTimestampMs(row.message.timestamp);
         return (
             row.kind !== "typing" &&
-            (row.kind === "stream" ||
+            row.message.role.toLowerCase() === "assistant" &&
+            Boolean(row.message.text.trim()) &&
+            (allThinkingRows.length === 0 ||
+                row.kind === "stream" ||
                 (latestThinkingTimestamp !== undefined &&
                     timestamp !== undefined &&
-                    timestamp >= latestThinkingTimestamp)) &&
-            row.message.role.toLowerCase() === "assistant" &&
-            Boolean(row.message.text.trim())
+                    timestamp >= latestThinkingTimestamp))
         );
     });
-    const finalRow = finalRowIndex === -1 ? undefined : responseRows[finalRowIndex];
-    const extractedRows = new Set([
-        ...activityRows,
-        ...thinkingRows,
-        ...(finalRow ? [finalRow] : []),
-    ]);
-    const stableRows = responseRows.filter((row) => !extractedRows.has(row));
-    const lastToolRowIndex = stableRows.findLastIndex((row) => {
+    if (finalRowIndex === -1) {
+        return rows;
+    }
+    const finalRow = responseRows[finalRowIndex]!;
+
+    const previousAssistantTextRowIndex = responseRows.findLastIndex(
+        (row, rowIndex) =>
+            rowIndex < finalRowIndex &&
+            row.kind !== "typing" &&
+            row.message.role.toLowerCase() === "assistant" &&
+            Boolean(row.message.text.trim())
+    );
+    const currentResponseStartIndex = previousAssistantTextRowIndex + 1;
+    const currentResponseRows = responseRows.slice(currentResponseStartIndex);
+    const isRowInCurrentResponse = (row: ChatRow) =>
+        !finalRow.message.runId ||
+        !row.message.runId ||
+        row.message.runId === finalRow.message.runId;
+    const activityRows = currentResponseRows.filter(
+        (row) => row.kind === "typing" && isRowInCurrentResponse(row)
+    );
+    const thinkingRows = currentResponseRows.filter(
+        (row) =>
+            isRowInCurrentResponse(row) &&
+            row.message.role.toLowerCase() === "assistant" &&
+            !row.message.text.trim() &&
+            Boolean(row.message.thinking?.length)
+    );
+    const toolRows = currentResponseRows.filter((row) => {
+        if (row === finalRow || !isRowInCurrentResponse(row)) {
+            return false;
+        }
         const role = row.message.role.toLowerCase();
         return Boolean(
             TOOL_ROLE_VARIANTS.includes(role) ||
@@ -233,20 +253,27 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
             row.message.toolResult
         );
     });
-    const rowsBeforeFinal = finalRow
-        ? responseRows.slice(0, finalRowIndex)
-        : responseRows;
-    const stableRowsBeforeFinal = rowsBeforeFinal.filter(
+    if (thinkingRows.length === 0 && toolRows.length === 0) {
+        return rows;
+    }
+
+    const extractedRows = new Set([
+        ...activityRows,
+        ...thinkingRows,
+        ...toolRows,
+        finalRow,
+    ]);
+    const stableCurrentResponseRows = currentResponseRows.filter(
         (row) => !extractedRows.has(row)
-    ).length;
-    const insertionIndex = Math.max(lastToolRowIndex + 1, stableRowsBeforeFinal);
+    );
 
     return [
         ...rows.slice(0, lastUserRowIndex + 1),
-        ...stableRows.slice(0, insertionIndex),
+        ...responseRows.slice(0, currentResponseStartIndex),
+        ...stableCurrentResponseRows,
+        ...toolRows,
         ...thinkingRows,
-        ...(finalRow ? [finalRow] : []),
-        ...stableRows.slice(insertionIndex),
+        finalRow,
         ...activityRows,
     ];
 }
