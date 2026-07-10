@@ -27,7 +27,9 @@ import {
 import {
     CHAT_HISTORY_LIMIT,
     dedupeMessages,
+    hasChatMessageDetails,
     isRecoveredAssistantText,
+    mergeChatMessageDetails,
     mergeWithRecentOptimisticMessages,
 } from "./chatUtilities";
 
@@ -1024,6 +1026,7 @@ export function useChatRuntimeEvents({
     const pendingDeltaUpdatesReference = useRef<Record<string, PendingDeltaUpdate>>({});
     const pendingDeltaFlushTimerReference = useRef<TimerHandle | undefined>(undefined);
     const assistantTextSourcesReference = useRef(new Map<string, AssistantTextSource>());
+    const completedAssistantTextsReference = useRef(new Map<string, string>());
     const provisionalAssistantRunIdsReference = useRef(new Map<string, string>());
     const selectedSessionKeyReference = useRef(selectedSessionKey);
     const updateActiveStreamsReference = useRef(updateActiveStreams);
@@ -1242,13 +1245,26 @@ export function useChatRuntimeEvents({
 
         /** Clears active streams belonging to a finished chat run. */
         const clearActiveStreamsForRun = (sessionKey: string, runId?: string) => {
+            const provisionalRunId =
+                provisionalAssistantRunIdsReference.current.get(sessionKey) ||
+                "provisional";
             if (!runId) {
-                const provisionalRunId =
-                    provisionalAssistantRunIdsReference.current.get(sessionKey) ||
-                    "provisional";
                 assistantTextSourcesReference.current.delete(
                     `${sessionKey}::${provisionalRunId}`
                 );
+            }
+
+            const provisionalStream = Object.values(activeStreamsReference.current).find(
+                (streamEntry) =>
+                    isSameSessionKey(streamEntry.sessionKey, sessionKey) &&
+                    (streamEntry.runId === provisionalRunId ||
+                        streamEntry.aliases.includes(provisionalRunId))
+            );
+            if (
+                !runId ||
+                !provisionalStream ||
+                isActiveStreamMatchingRun(sessionKey, provisionalStream, runId)
+            ) {
                 provisionalAssistantRunIdsReference.current.delete(sessionKey);
             }
 
@@ -1403,10 +1419,20 @@ export function useChatRuntimeEvents({
                       : stream === "item"
                         ? runtimeReasoningItemMessage(payload, data)
                         : undefined;
+            const isCompletedSessionMessageEcho = Boolean(
+                eventName === "session.message" &&
+                runtimeMessage?.text.trim() &&
+                runtimeMessage.text.trim() ===
+                    completedAssistantTextsReference.current.get(selectedSessionKey)
+            );
+            if (runtimeMessage?.text.trim() && !isCompletedSessionMessageEcho) {
+                completedAssistantTextsReference.current.delete(selectedSessionKey);
+            }
             const shouldIgnoreRuntimeAssistantText = Boolean(
                 (stream === "assistant" || eventName === "session.message") &&
                 runtimeMessage?.text.length &&
-                !canUseAssistantTextSource(selectedSessionKey, eventRunId, "runtime")
+                (isCompletedSessionMessageEcho ||
+                    !canUseAssistantTextSource(selectedSessionKey, eventRunId, "runtime"))
             );
             const runtimeMessageToConsider =
                 shouldIgnoreRuntimeAssistantText && runtimeMessage
@@ -1923,6 +1949,9 @@ export function useChatRuntimeEvents({
                 const nextText = deltaMessage.text;
 
                 if (hasActiveStreamContent(deltaMessage)) {
+                    if (nextText.length > 0) {
+                        completedAssistantTextsReference.current.delete(streamSessionKey);
+                    }
                     const hasCompetingTextSource =
                         nextText.length > 0 &&
                         !canUseAssistantTextSource(
@@ -2044,6 +2073,16 @@ export function useChatRuntimeEvents({
             if (payload.state === "final") {
                 flushPendingDeltaUpdates();
                 const finalMessage = finalMessageFromPayload(payload);
+                if (
+                    finalMessage.role.toLowerCase() === "assistant" &&
+                    finalMessage.text.trim()
+                ) {
+                    completedAssistantTextsReference.current.set(
+                        streamSessionKey,
+                        finalMessage.text.trim()
+                    );
+                    canUseAssistantTextSource(streamSessionKey, payload.runId, "chat");
+                }
                 const bufferedText = activeAssistantTextForRun(
                     streamSessionKey,
                     payload.runId
@@ -2082,15 +2121,21 @@ export function useChatRuntimeEvents({
                         (message) => {
                             const diagnosticText = message.text.trim();
                             const finalText = finalMessageToAppend!.text.trim();
+                            const hasCompatibleRunId =
+                                !message.runId ||
+                                !finalMessageToAppend!.runId ||
+                                message.runId === finalMessageToAppend!.runId;
+                            const hasMedia = Boolean(
+                                message.images?.length || message.attachments?.length
+                            );
                             return (
                                 message.role.toLowerCase() === "assistant" &&
-                                Boolean(diagnosticText) &&
-                                (diagnosticText === finalText ||
-                                    diagnosticText.includes(finalText) ||
-                                    finalText.includes(diagnosticText)) &&
-                                (!message.runId ||
-                                    !finalMessageToAppend!.runId ||
-                                    message.runId === finalMessageToAppend!.runId)
+                                hasCompatibleRunId &&
+                                ((Boolean(diagnosticText) &&
+                                    (diagnosticText === finalText ||
+                                        diagnosticText.includes(finalText) ||
+                                        finalText.includes(diagnosticText))) ||
+                                    hasMedia)
                             );
                         }
                     );
@@ -2100,21 +2145,17 @@ export function useChatRuntimeEvents({
                             : remainingDiagnosticMessages[diagnosticIndex];
                     if (diagnosticMessage) {
                         remainingDiagnosticMessages.splice(diagnosticIndex, 1);
-                        finalMessageToAppend = {
-                            ...finalMessageToAppend,
-                            thinking: (finalMessageToAppend.thinking?.length
-                                ? finalMessageToAppend
-                                : diagnosticMessage
-                            ).thinking,
-                            toolCalls: (finalMessageToAppend.toolCalls?.length
-                                ? finalMessageToAppend
-                                : diagnosticMessage
-                            ).toolCalls,
-                            toolResult:
-                                finalMessageToAppend.toolResult ||
-                                diagnosticMessage.toolResult,
-                        };
+                        finalMessageToAppend = mergeChatMessageDetails(
+                            finalMessageToAppend,
+                            diagnosticMessage
+                        );
                     }
+                }
+                if (finalMessageToAppend && hasChatMessageDetails(finalMessageToAppend)) {
+                    finalMessageToAppend = {
+                        ...finalMessageToAppend,
+                        local: true,
+                    };
                 }
 
                 const messagesToAppend = [
@@ -2178,25 +2219,18 @@ export function useChatRuntimeEvents({
                                       return message;
                                   }
 
-                                  const thinking = (
-                                      finalAssistantMessage.thinking?.length
-                                          ? finalAssistantMessage
-                                          : message
-                                  ).thinking;
-                                  const toolCalls = (
-                                      finalAssistantMessage.toolCalls?.length
-                                          ? finalAssistantMessage
-                                          : message
-                                  ).toolCalls;
+                                  const mergedFinalMessage = mergeChatMessageDetails(
+                                      {
+                                          ...message,
+                                          ...finalAssistantMessage,
+                                      },
+                                      message
+                                  );
                                   return {
-                                      ...message,
-                                      ...finalAssistantMessage,
-                                      thinking,
-                                      toolCalls,
-                                      toolResult:
-                                          finalAssistantMessage.toolResult ||
-                                          message.toolResult,
-                                      local: undefined,
+                                      ...mergedFinalMessage,
+                                      local: hasChatMessageDetails(mergedFinalMessage)
+                                          ? true
+                                          : undefined,
                                   };
                               })
                             : wasPrevious;
@@ -2321,6 +2355,7 @@ export function useChatRuntimeEvents({
             }
             pendingDeltaUpdatesReference.current = {};
             assistantTextSourcesReference.current.clear();
+            completedAssistantTextsReference.current.clear();
             provisionalAssistantRunIdsReference.current.clear();
         };
     }, [

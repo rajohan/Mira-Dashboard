@@ -33,7 +33,10 @@ import {
     createChatVisibility,
     mergeStreamMessage,
 } from "../components/features/chat/chatRuntime";
-import { normalizeVisibleChatHistoryMessages } from "../components/features/chat/chatTypes";
+import {
+    type ChatHistoryMessage,
+    normalizeVisibleChatHistoryMessages,
+} from "../components/features/chat/chatTypes";
 import {
     mergeWithRecentOptimisticMessages,
     messageIdentity,
@@ -3321,6 +3324,257 @@ describe("shared component helpers", () => {
             )
         ).toBe(true);
 
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: {
+                        content: [
+                            { text: "Chat media answer", type: "text" },
+                            {
+                                data: "chat-final-image",
+                                mimeType: "image/png",
+                                type: "image",
+                            },
+                        ],
+                        MediaPath: "/tmp/chat-final.txt",
+                        MediaType: "text/plain",
+                        role: "assistant",
+                    },
+                    runId: "chat-media-fold-run",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(activeStreamsReference.current["agent:main:main"]?.runId).toBe(
+                "chat-media-fold-run"
+            );
+            expect(
+                activeStreamsReference.current["agent:main:main"]?.message?.images?.[0]
+                    ?.data
+            ).toBe("chat-final-image");
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Chat media answer",
+                    runId: "chat-media-fold-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        const foldedMediaFinal = messages.find(
+            (message) =>
+                typeof message === "object" &&
+                message !== null &&
+                "text" in message &&
+                message.text === "Chat media answer"
+        );
+        expect(foldedMediaFinal).toMatchObject({
+            attachments: [{ fileName: "chat-final.txt" }],
+            images: [{ data: "chat-final-image" }],
+            local: true,
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
+        messages = [
+            ...messages,
+            {
+                attachments: [
+                    {
+                        fileName: "preexisting-rich.txt",
+                        id: "preexisting-rich-media",
+                        kind: "text",
+                    },
+                ],
+                content: "Preexisting rich final",
+                images: [{ data: "preexisting-rich-image", type: "image" }],
+                local: true,
+                role: "assistant",
+                runId: "preexisting-rich-final-run",
+                text: "Preexisting rich final",
+                timestamp: new Date().toISOString(),
+            },
+        ];
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Preexisting rich final",
+                    runId: "preexisting-rich-final-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        const mergedPreexistingRichFinal = messages.find(
+            (message) =>
+                typeof message === "object" &&
+                message !== null &&
+                "runId" in message &&
+                message.runId === "preexisting-rich-final-run"
+        );
+        expect(mergedPreexistingRichFinal).toMatchObject({
+            attachments: [{ id: "preexisting-rich-media" }],
+            images: [{ data: "preexisting-rich-image" }],
+            local: true,
+        });
+        const refreshedPreexistingRichFinal = mergeWithRecentOptimisticMessages(
+            [mergedPreexistingRichFinal as ChatHistoryMessage],
+            [
+                {
+                    content: "Preexisting rich final",
+                    role: "assistant",
+                    runId: "preexisting-rich-final-run",
+                    text: "Preexisting rich final",
+                },
+            ]
+        )[0];
+        expect(refreshedPreexistingRichFinal).toMatchObject({
+            attachments: [{ id: "preexisting-rich-media" }],
+            images: [{ data: "preexisting-rich-image" }],
+        });
+        expect(refreshedPreexistingRichFinal?.local).toBeUndefined();
+
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Final-only chat answer",
+                    runId: "final-only-chat-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        activeStreams = {
+            "agent:main:main": {
+                aliases: ["dashboard-chat-after-no-run-final"],
+                runId: "dashboard-chat-after-no-run-final",
+                sessionKey: "agent:main:main",
+                statusText: "Thinking",
+                text: "",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        activeStreamsReference.current = activeStreams;
+        act(() => {
+            listener?.({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: "Final-only chat answer",
+                        role: "assistant",
+                    },
+                    runId: "final-only-chat-run",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        expect(activeStreamsReference.current["agent:main:main"]?.text).toBe("");
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "Answer after final-only runtime echo",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe(
+                "Answer after final-only runtime echo"
+            );
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Answer after final-only runtime echo",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "No-run final-only chat answer",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        activeStreams = {
+            "agent:main:main": {
+                aliases: ["dashboard-chat-after-runless-final"],
+                runId: "dashboard-chat-after-runless-final",
+                sessionKey: "agent:main:main",
+                statusText: "Thinking",
+                text: "",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        activeStreamsReference.current = activeStreams;
+        act(() => {
+            listener?.({
+                event: "session.message",
+                payload: {
+                    message: {
+                        content: "No-run final-only chat answer",
+                        role: "assistant",
+                    },
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        expect(activeStreamsReference.current["agent:main:main"]?.text).toBe("");
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "Answer after no-run final-only echo",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe(
+                "Answer after no-run final-only echo"
+            );
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Answer after no-run final-only echo",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
         activeStreams = {
             "agent:main:main": {
                 aliases: ["dashboard-chat-no-run-a"],
@@ -4386,6 +4640,110 @@ describe("shared component helpers", () => {
             })
         );
 
+        const repeatedAttachmentOnlyTurns = [
+            {
+                attachments: [
+                    {
+                        fileName: "same.txt",
+                        id: "persisted-media-path",
+                        kind: "text" as const,
+                    },
+                ],
+                content: "",
+                role: "user",
+                text: "",
+                timestamp: "2026-07-10T15:00:00.000Z",
+            },
+            {
+                attachments: [
+                    {
+                        fileName: "same.txt",
+                        id: "persisted-media-path",
+                        kind: "text" as const,
+                    },
+                ],
+                content: "",
+                role: "user",
+                text: "",
+                timestamp: "2026-07-10T15:01:00.000Z",
+            },
+        ];
+        expect(
+            mergeWithRecentOptimisticMessages([], repeatedAttachmentOnlyTurns)
+        ).toHaveLength(2);
+        const optimisticAttachmentWithTransientId = {
+            attachments: [
+                {
+                    contentBase64: "c2FtZSBjb250ZW50",
+                    fileName: "same.txt",
+                    id: "local-random-id",
+                    kind: "text" as const,
+                    mimeType: "text/plain",
+                    sizeBytes: 12,
+                },
+            ],
+            content: "",
+            local: true,
+            role: "user",
+            text: "",
+            timestamp: "2026-07-10T15:03:00.000Z",
+        };
+        const persistedAttachmentWithCanonicalId = {
+            ...optimisticAttachmentWithTransientId,
+            attachments: [
+                {
+                    ...optimisticAttachmentWithTransientId.attachments[0]!,
+                    id: "inline-same.txt-0",
+                },
+            ],
+            local: undefined,
+            timestamp: "2026-07-10T15:03:01.000Z",
+        };
+        const reconciledTransientAttachmentId = mergeWithRecentOptimisticMessages(
+            [optimisticAttachmentWithTransientId],
+            [persistedAttachmentWithCanonicalId]
+        );
+        expect(reconciledTransientAttachmentId).toHaveLength(1);
+        expect(reconciledTransientAttachmentId[0]?.attachments).toHaveLength(1);
+        expect(reconciledTransientAttachmentId[0]?.local).toBeUndefined();
+        expect(messageIdentity(repeatedAttachmentOnlyTurns[0]!)).not.toBe(
+            messageIdentity(repeatedAttachmentOnlyTurns[1]!)
+        );
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [],
+                repeatedAttachmentOnlyTurns.map((turn) => ({
+                    ...turn,
+                    timestamp: undefined,
+                }))
+            )
+        ).toHaveLength(2);
+        const optimisticRepeatedAttachmentTurn = {
+            ...repeatedAttachmentOnlyTurns[1]!,
+            local: true,
+            timestamp: "2026-07-10T15:02:00.000Z",
+        };
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [repeatedAttachmentOnlyTurns[0]!, optimisticRepeatedAttachmentTurn],
+                [repeatedAttachmentOnlyTurns[0]!]
+            )
+        ).toHaveLength(2);
+        const reconciledRepeatedAttachmentTurns = mergeWithRecentOptimisticMessages(
+            [repeatedAttachmentOnlyTurns[0]!, optimisticRepeatedAttachmentTurn],
+            [
+                repeatedAttachmentOnlyTurns[0]!,
+                {
+                    ...repeatedAttachmentOnlyTurns[1]!,
+                    timestamp: "2026-07-10T15:02:01.000Z",
+                },
+            ]
+        );
+        expect(reconciledRepeatedAttachmentTurns).toHaveLength(2);
+        expect(
+            reconciledRepeatedAttachmentTurns.some((message) => message.local === true)
+        ).toBe(false);
+
         const localMediaMessage = {
             attachments: [
                 {
@@ -4698,10 +5056,18 @@ describe("shared component helpers", () => {
         ).toBe(true);
 
         const mixedDiagnosticLocalRow = {
+            attachments: [
+                {
+                    fileName: "local-generated.txt",
+                    id: "local-generated-media",
+                    kind: "text" as const,
+                },
+            ],
             content: [
                 { text: "same visible text", type: "text" },
                 { text: "local reasoning", type: "thinking" },
             ],
+            images: [{ data: "local-generated-image", type: "image" as const }],
             local: true,
             role: "assistant",
             text: "same visible text",
@@ -4709,7 +5075,15 @@ describe("shared component helpers", () => {
             timestamp: new Date().toISOString(),
         };
         const mixedDiagnosticHistoryRow = {
+            attachments: [
+                {
+                    fileName: "history-generated.txt",
+                    id: "history-generated-media",
+                    kind: "text" as const,
+                },
+            ],
             content: "same visible text",
+            images: [{ data: "history-generated-image", type: "image" as const }],
             role: "assistant",
             text: "same visible text",
         };
@@ -4719,6 +5093,50 @@ describe("shared component helpers", () => {
                 [mixedDiagnosticHistoryRow]
             )[0]?.thinking?.[0]?.text
         ).toBe("local reasoning");
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [mixedDiagnosticLocalRow],
+                [mixedDiagnosticHistoryRow]
+            )[0]
+        ).toMatchObject({
+            attachments: [
+                { id: "history-generated-media" },
+                { id: "local-generated-media" },
+            ],
+            images: [
+                { data: "history-generated-image" },
+                { data: "local-generated-image" },
+            ],
+        });
+        expect(
+            mergeStreamMessage(
+                {
+                    attachments: mixedDiagnosticHistoryRow.attachments,
+                    content: "",
+                    images: mixedDiagnosticHistoryRow.images,
+                    role: "assistant",
+                    text: "",
+                },
+                {
+                    attachments: mixedDiagnosticLocalRow.attachments,
+                    content: "",
+                    images: mixedDiagnosticLocalRow.images,
+                    role: "assistant",
+                    text: "",
+                },
+                "",
+                "merged-media-stream"
+            )
+        ).toMatchObject({
+            attachments: [
+                { id: "history-generated-media" },
+                { id: "local-generated-media" },
+            ],
+            images: [
+                { data: "history-generated-image" },
+                { data: "local-generated-image" },
+            ],
+        });
         expect(
             mergeWithRecentOptimisticMessages(
                 [mixedDiagnosticLocalRow],

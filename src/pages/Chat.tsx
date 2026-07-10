@@ -1714,6 +1714,7 @@ export function Chat() {
             text: messageText,
             images: [],
             attachments: optimisticAttachmentDisplay(sendAttachments),
+            local: messageText ? undefined : true,
             timestamp: currentIsoString(),
         };
 

@@ -1,5 +1,11 @@
 import { timestampFromDateString } from "../../../utils/date";
-import { type ChatHistoryMessage, TOOL_ROLE_VARIANTS } from "./chatTypes";
+import {
+    chatAttachmentIdentity,
+    type ChatHistoryMessage,
+    mergeChatAttachments,
+    mergeChatImages,
+    TOOL_ROLE_VARIANTS,
+} from "./chatTypes";
 
 /** Defines max attachment bytes. */
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
@@ -44,6 +50,29 @@ export function base64ToText(base64: string): string | undefined {
     }
 }
 
+/** Returns a stable media identity independent of the turn carrying it. */
+function messageMediaIdentity(message: ChatHistoryMessage): string | undefined {
+    if (!message.images?.length && !message.attachments?.length) {
+        return undefined;
+    }
+
+    return [
+        "media",
+        ...(message.images || []).map((image) => {
+            const data = image.data || image.source?.data || "";
+            return [
+                image.mimeType || image.source?.media_type || "image",
+                data.length,
+                data.slice(0, 32),
+                data.slice(-32),
+            ].join(":");
+        }),
+        ...(message.attachments || []).map((attachment) =>
+            chatAttachmentIdentity(attachment)
+        ),
+    ].join("::");
+}
+
 /** Returns a diagnostic identity for tool/thinking rows without primary text. */
 function diagnosticMessageIdentity(message: ChatHistoryMessage): string | undefined {
     const toolCalls = message.toolCalls || [];
@@ -77,23 +106,7 @@ function diagnosticMessageIdentity(message: ChatHistoryMessage): string | undefi
         );
     }
 
-    if (message.images?.length || message.attachments?.length) {
-        return [
-            "media",
-            ...(message.images || []).map((image) => {
-                const data = image.data || image.source?.data || "";
-                return [
-                    image.mimeType || image.source?.media_type || "image",
-                    data.length,
-                    data.slice(0, 32),
-                    data.slice(-32),
-                ].join(":");
-            }),
-            ...(message.attachments || []).map((attachment) => attachment.id),
-        ].join("::");
-    }
-
-    return undefined;
+    return messageMediaIdentity(message);
 }
 
 /** Returns a stable key for carrying tool results between matching tool rows. */
@@ -115,8 +128,8 @@ function toolCallRowIdentity(message: ChatHistoryMessage): string | undefined {
     ].join("::");
 }
 
-/** Returns whether message carries diagnostic details beyond primary text. */
-function hasDiagnosticDetails(message: ChatHistoryMessage): boolean {
+/** Returns whether message carries non-text details beyond primary text. */
+export function hasChatMessageDetails(message: ChatHistoryMessage): boolean {
     return Boolean(
         (message.thinking?.length || 0) > 0 ||
         (message.toolCalls?.length || 0) > 0 ||
@@ -124,6 +137,24 @@ function hasDiagnosticDetails(message: ChatHistoryMessage): boolean {
         (message.images?.length || 0) > 0 ||
         (message.attachments?.length || 0) > 0
     );
+}
+
+/** Carries non-text message details from a richer copy onto a canonical row. */
+export function mergeChatMessageDetails(
+    message: ChatHistoryMessage,
+    fallback: ChatHistoryMessage
+): ChatHistoryMessage {
+    return {
+        ...message,
+        images: mergeChatImages(message.images, fallback.images),
+        attachments: mergeChatAttachments(message.attachments, fallback.attachments),
+        thinking: (message.thinking?.length ? message : fallback).thinking,
+        toolCalls:
+            message.toolCalls?.length && fallback.toolCalls?.length
+                ? mergeToolCallsWithResults(message.toolCalls, fallback.toolCalls)
+                : (message.toolCalls?.length ? message : fallback).toolCalls,
+        toolResult: message.toolResult || fallback.toolResult,
+    };
 }
 
 /** Returns user text normalized to the whitespace rendered by Markdown. */
@@ -205,7 +236,7 @@ function mergeDiagnosticDetails(
             candidate.local === true &&
             candidate.role.toLowerCase() === "assistant" &&
             candidate.text.trim() &&
-            hasDiagnosticDetails(candidate)
+            hasChatMessageDetails(candidate)
     );
 
     return nextMessages.map((message) => {
@@ -230,18 +261,7 @@ function mergeDiagnosticDetails(
             return message;
         }
 
-        const thinking = (message.thinking?.length ? message : previous).thinking;
-        const toolCalls =
-            message.toolCalls?.length && previous.toolCalls?.length
-                ? mergeToolCallsWithResults(message.toolCalls, previous.toolCalls)
-                : (message.toolCalls?.length ? message : previous).toolCalls;
-
-        return {
-            ...message,
-            thinking,
-            toolCalls,
-            toolResult: message.toolResult || previous.toolResult,
-        };
+        return mergeChatMessageDetails(message, previous);
     });
 }
 
@@ -249,12 +269,17 @@ function mergeDiagnosticDetails(
 export function messageIdentity(message: ChatHistoryMessage): string {
     const role = message.role.toLowerCase();
     const diagnosticIdentity = diagnosticMessageIdentity(message);
+    const mediaIdentity = messageMediaIdentity(message);
     const textIdentity =
         role === "user" ? userMessageTextIdentity(message.text) : message.text.trim();
+    const userMediaTurnIdentity =
+        role === "user" && !textIdentity && mediaIdentity
+            ? [mediaIdentity, message.runId || message.timestamp || "no-turn"].join("::")
+            : undefined;
     const isToolResultRole = TOOL_ROLE_VARIANTS.includes(role);
     const identity = isToolResultRole
         ? diagnosticIdentity || textIdentity
-        : textIdentity || diagnosticIdentity;
+        : textIdentity || userMediaTurnIdentity || diagnosticIdentity;
     return `${role}::${identity || ""}`;
 }
 
@@ -301,9 +326,17 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
         }
 
         const identity = messageIdentity(message);
+        const isUnscopedTextlessUserMedia = Boolean(
+            message.role.toLowerCase() === "user" &&
+            !message.text.trim() &&
+            messageMediaIdentity(message) &&
+            !message.runId &&
+            !message.timestamp
+        );
         if (
             (message.text.trim() || diagnosticMessageIdentity(message)) &&
-            seen.has(identity)
+            seen.has(identity) &&
+            !isUnscopedTextlessUserMedia
         ) {
             continue;
         }
@@ -446,6 +479,45 @@ export function mergeWithRecentOptimisticMessages(
     const nextIdentities = new Set(
         enrichedNextMessages.map((message) => messageIdentity(message))
     );
+    const nextIdentityCounts = new Map<string, number>();
+    const unmatchedNextUserMediaCounts = new Map<string, number>();
+    for (const message of enrichedNextMessages) {
+        const identity = messageIdentity(message);
+        nextIdentityCounts.set(identity, (nextIdentityCounts.get(identity) || 0) + 1);
+
+        const mediaIdentity = messageMediaIdentity(message);
+        if (
+            message.role.toLowerCase() === "user" &&
+            !message.text.trim() &&
+            mediaIdentity
+        ) {
+            unmatchedNextUserMediaCounts.set(
+                mediaIdentity,
+                (unmatchedNextUserMediaCounts.get(mediaIdentity) || 0) + 1
+            );
+        }
+    }
+    for (const message of previousMessages) {
+        if (message.local === true) {
+            continue;
+        }
+
+        const identity = messageIdentity(message);
+        const identityCount = nextIdentityCounts.get(identity) || 0;
+        const mediaIdentity = messageMediaIdentity(message);
+        if (
+            identityCount === 0 ||
+            message.role.toLowerCase() !== "user" ||
+            message.text.trim() ||
+            !mediaIdentity
+        ) {
+            continue;
+        }
+
+        nextIdentityCounts.set(identity, identityCount - 1);
+        const mediaCount = unmatchedNextUserMediaCounts.get(mediaIdentity) || 0;
+        unmatchedNextUserMediaCounts.set(mediaIdentity, Math.max(0, mediaCount - 1));
+    }
     const nextToolCallRowsByIdentity = new Map<string, ChatHistoryMessage>();
     for (const message of enrichedNextMessages) {
         const identity = toolCallRowIdentity(message);
@@ -464,7 +536,7 @@ export function mergeWithRecentOptimisticMessages(
         const isSystemMessage = role === "system";
         const isLocalUiMessage = isLocalMessage || isSystemMessage;
         const isLocalDiagnosticMessage =
-            message.local === true && hasDiagnosticDetails(message);
+            message.local === true && hasChatMessageDetails(message);
 
         if (!isOptimisticRole && !isLocalUiMessage && !isLocalDiagnosticMessage) {
             return false;
@@ -475,6 +547,21 @@ export function mergeWithRecentOptimisticMessages(
         }
 
         if (nextIdentities.has(messageIdentity(message))) {
+            return false;
+        }
+
+        const mediaIdentity = messageMediaIdentity(message);
+        const unmatchedMediaCount = mediaIdentity
+            ? unmatchedNextUserMediaCounts.get(mediaIdentity) || 0
+            : 0;
+        if (
+            role === "user" &&
+            isLocalMessage &&
+            !message.text.trim() &&
+            mediaIdentity &&
+            unmatchedMediaCount > 0
+        ) {
+            unmatchedNextUserMediaCounts.set(mediaIdentity, unmatchedMediaCount - 1);
             return false;
         }
 

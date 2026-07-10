@@ -4,6 +4,8 @@ import {
     type ChatStreamEventMessage,
     type ChatVisibilitySettings,
     isRenderableChatHistoryMessage,
+    mergeChatAttachments,
+    mergeChatImages,
     normalizeChatHistoryMessage,
     normalizeVisibleChatHistoryMessages,
     type RawChatHistoryMessage,
@@ -202,10 +204,8 @@ export function mergeStreamMessage(
         role: "assistant",
         content: next.content,
         text,
-        images: next.images?.length ? next.images : wasPrevious?.images || [],
-        attachments: next.attachments?.length
-            ? next.attachments
-            : wasPrevious?.attachments || [],
+        images: mergeChatImages(wasPrevious?.images, next.images),
+        attachments: mergeChatAttachments(wasPrevious?.attachments, next.attachments),
         thinking: mergeThinkingBlocks(wasPrevious, next),
         toolCalls: next.toolCalls?.length ? next.toolCalls : wasPrevious?.toolCalls,
         toolResult: next.toolResult || wasPrevious?.toolResult,

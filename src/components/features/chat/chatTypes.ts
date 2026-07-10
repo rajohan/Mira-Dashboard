@@ -52,6 +52,19 @@ export interface ChatSendAttachment {
     kind: "image" | "text" | "file";
 }
 
+/** Returns attachment content identity independent of transient row IDs. */
+export function chatAttachmentIdentity(attachment: ChatAttachmentDisplay): string {
+    const content = attachment.contentBase64 || attachment.dataUrl || "";
+    return [
+        attachment.fileName,
+        attachment.mimeType || "unknown",
+        attachment.sizeBytes ?? "unknown",
+        content
+            ? [content.length, content.slice(0, 64), content.slice(-64)].join(":")
+            : attachment.id,
+    ].join("::");
+}
+
 /** Represents chat gateway attachment. */
 export interface ChatGatewayAttachment {
     type: string;
@@ -60,17 +73,34 @@ export interface ChatGatewayAttachment {
     content: string;
 }
 
+/** Merges image blocks without repeating identical payloads. */
+export function mergeChatImages(
+    previous: ChatImageBlock[] = [],
+    next: ChatImageBlock[] = []
+): ChatImageBlock[] {
+    const seenImages = new Set<string>();
+    return [...previous, ...next].filter((image) => {
+        const identity = JSON.stringify(image);
+        if (seenImages.has(identity)) {
+            return false;
+        }
+        seenImages.add(identity);
+        return true;
+    });
+}
+
 /** Merges attachment display rows without repeating IDs. */
-function mergeChatAttachments(
+export function mergeChatAttachments(
     previous: ChatAttachmentDisplay[] = [],
     next: ChatAttachmentDisplay[] = []
 ): ChatAttachmentDisplay[] {
-    const seenIds = new Set<string>();
+    const seenAttachments = new Set<string>();
     return [...previous, ...next].filter((attachment) => {
-        if (seenIds.has(attachment.id)) {
+        const identity = chatAttachmentIdentity(attachment);
+        if (seenAttachments.has(identity)) {
             return false;
         }
-        seenIds.add(attachment.id);
+        seenAttachments.add(identity);
         return true;
     });
 }
