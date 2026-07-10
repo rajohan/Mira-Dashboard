@@ -107,6 +107,16 @@ function getTaskNumberSearchValues(taskNumber: number): string[] {
     return [taskNumber.toString(), `#${taskNumber}`];
 }
 
+/** Returns searchable board status fields for one task. */
+function getTaskColumnSearchValues(task: Task): string[] {
+    const columnId = getColumnId(task);
+    const column = COLUMN_CONFIG.find((candidate) => candidate.id === columnId);
+
+    return [columnId, column?.title, column?.label].filter(
+        (value) => value !== undefined
+    );
+}
+
 /** Returns whether a task matches task board search text. */
 export function isTaskMatchSearch(task: Task, search: string): boolean {
     const query = search.trim().toLowerCase();
@@ -115,10 +125,14 @@ export function isTaskMatchSearch(task: Task, search: string): boolean {
         return true;
     }
 
+    const priority = getPriority(task.labels);
     const searchableValues = [
         ...getTaskNumberSearchValues(task.number),
         task.title,
         task.body,
+        priority,
+        `priority-${priority}`,
+        ...getTaskColumnSearchValues(task),
         ...task.labels.map((label) => getTaskLabelSearchValue(label)),
         ...task.assignees.flatMap((assignee) => getTaskAssigneeSearchValues(assignee)),
         task.automation?.cronJobId,

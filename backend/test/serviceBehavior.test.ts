@@ -796,6 +796,12 @@ describe("backend service behavior", () => {
     });
 
     it("refreshes supported cache keys through the cache route", async () => {
+        const { waitForLocalCacheSeed } = await import("../src/services/cacheRefresh.ts");
+        try {
+            await waitForLocalCacheSeed("weather.spydeberg");
+        } catch {
+            // Startup seeding is best-effort; this test replaces it with a mock refresh.
+        }
         cleanupCallbacks.push(() => {
             database
                 .prepare("DELETE FROM cache_entries WHERE key = 'weather.spydeberg'")
