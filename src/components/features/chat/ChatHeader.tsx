@@ -93,15 +93,24 @@ export function normalizeThinkingLevel(level: string): string | undefined {
     return undefined;
 }
 
+/** Converts legacy labels to unique canonical thinking choices. */
+function normalizeThinkingOptions(labels: string[]) {
+    const seenIds = new Set<string>();
+    const levels: Array<{ id: string; label: string }> = [];
+    for (const label of labels) {
+        const id = normalizeThinkingLevel(label);
+        if (!id || seenIds.has(id)) continue;
+        seenIds.add(id);
+        levels.push({ id, label });
+    }
+    return levels;
+}
+
 /** Returns the model-supported thinking options exposed by OpenClaw. */
 export function chatThinkingOptions(session: Session | undefined): Option[] {
     const levels = session?.thinkingLevels?.length
         ? session.thinkingLevels
-        : (session?.thinkingOptions || [])
-              .map((label) => ({ id: normalizeThinkingLevel(label), label }))
-              .filter((level): level is { id: string; label: string } =>
-                  Boolean(level.id)
-              );
+        : normalizeThinkingOptions(session?.thinkingOptions || []);
     const currentLevel = session?.thinkingLevel;
     const options = levels.map((level) => ({
         label: level.label || level.id,

@@ -1157,9 +1157,7 @@ describe("Mira Dashboard frontend behavior", () => {
             expect(events).toContain("error");
 
             const pendingPromise = client.request("pending");
-            socket.close();
-            await expect(pendingPromise).rejects.toThrow("WebSocket disconnected");
-
+            socket.readyState = FakeWebSocket.CLOSED;
             client.connect();
             const replacementSocket = FakeWebSocket.instances[1]!;
             replacementSocket.open();
@@ -1170,6 +1168,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 id: string;
             };
             socket.close();
+            await expect(pendingPromise).rejects.toThrow("WebSocket disconnected");
             replacementSocket.message({
                 type: "response",
                 id: replacementRequest.id,
@@ -1182,7 +1181,7 @@ describe("Mira Dashboard frontend behavior", () => {
             client.disconnect();
             await expect(disconnectedPromise).rejects.toThrow("WebSocket disconnected");
             expect(client.isOpen()).toBe(false);
-            expect(events.filter((event) => event === "close")).toHaveLength(2);
+            expect(events.filter((event) => event === "close")).toHaveLength(1);
         } finally {
             Object.defineProperty(globalThis, "WebSocket", {
                 configurable: true,

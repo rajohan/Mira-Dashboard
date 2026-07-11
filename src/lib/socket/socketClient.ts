@@ -4,6 +4,7 @@ import type { SocketEnvelope } from "../../types/socket";
 interface PendingRequest {
     resolve: (value: unknown) => void;
     reject: (reason: unknown) => void;
+    socket: WebSocket;
     timeout: ReturnType<typeof setTimeout>;
 }
 
@@ -35,12 +36,15 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
     const pendingRequests = new Map<string, PendingRequest>();
 
     /** Rejects requests that cannot complete after the active socket closes. */
-    const rejectPendingRequests = () => {
-        for (const pending of pendingRequests.values()) {
+    const rejectPendingRequests = (socket?: WebSocket) => {
+        for (const [id, pending] of pendingRequests) {
+            if (socket && pending.socket !== socket) {
+                continue;
+            }
+            pendingRequests.delete(id);
             clearTimeout(pending.timeout);
             pending.reject(new Error("WebSocket disconnected"));
         }
-        pendingRequests.clear();
     };
 
     /** Performs connect. */
@@ -84,10 +88,10 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         });
 
         socket.addEventListener("close", () => {
+            rejectPendingRequests(socket);
             if (ws !== socket) {
                 return;
             }
-            rejectPendingRequests();
             options.onClose?.();
             if (shouldReconnect) {
                 setTimeout(() => {
@@ -119,7 +123,8 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         parameters?: Record<string, unknown>
     ): Promise<T> => {
         return new Promise((resolve, reject) => {
-            if (!ws || ws.readyState !== WebSocket.OPEN) {
+            const socket = ws;
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
                 reject(new Error("WebSocket not connected"));
                 return;
             }
@@ -136,10 +141,11 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             pendingRequests.set(id, {
                 resolve: resolve as (value: unknown) => void,
                 reject,
+                socket,
                 timeout,
             });
 
-            ws.send(
+            socket.send(
                 JSON.stringify({
                     type: "req",
                     id,

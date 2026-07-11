@@ -902,7 +902,6 @@ describe("shared component helpers", () => {
             { label: "Default", value: "" },
             { label: "off", value: "off" },
             { label: "on", value: "low" },
-            { label: "Think Hard", value: "low" },
             { label: "Think Harder", value: "medium" },
         ]);
     });

@@ -1924,12 +1924,16 @@ export function Chat() {
     const draftText = draft.trim();
     const blockedByInFlightSend = isBlockedByInFlightSend(draftText);
     const isPatchingSession = pendingSessionPatchCount > 0;
+    const isCompactingSession = selectedStreams.some(([, stream]) =>
+        stream.statusText?.toLowerCase().includes("compact")
+    );
     const canSend = Boolean(
         isConnected &&
         selectedSessionKey &&
         !isRecording &&
         !isTranscribing &&
         !isPatchingSession &&
+        !isCompactingSession &&
         !blockedByInFlightSend &&
         (draftText || attachments.length > 0)
     );
@@ -2025,9 +2029,7 @@ export function Chat() {
                         shouldShowThinking={showThinkingOutput}
                         shouldShowTools={showToolOutput}
                         sessionControlsDisabled={isSessionControlsDisabled}
-                        isCompacting={selectedStreams.some(([, stream]) =>
-                            stream.statusText?.toLowerCase().includes("compact")
-                        )}
+                        isCompacting={isCompactingSession}
                         onToggleThinking={() =>
                             setShowThinkingOutput((wasPrevious) => !wasPrevious)
                         }
