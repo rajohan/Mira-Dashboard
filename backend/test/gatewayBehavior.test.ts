@@ -134,6 +134,15 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
                         updatedAt: 1_782_345_550_000,
                     },
                     {
+                        key: "agent:legacy:subagent:options-only",
+                        label: "",
+                        model: "openai/gpt-test",
+                        modelProvider: "openai",
+                        sessionId: "sess-options-only",
+                        thinkingOptions: ["off", "on"],
+                        updatedAt: 1_782_345_525_000,
+                    },
+                    {
                         key: "agent:main:hook:deploy",
                         sessionId: "sess3",
                         thinkingLevels: [],
@@ -414,6 +423,12 @@ describe("gateway behavior", () => {
                     type: "SUBAGENT",
                 }),
                 expect.objectContaining({
+                    agentType: "legacy",
+                    model: "openai/gpt-test",
+                    thinkingOptions: ["off", "on"],
+                    type: "SUBAGENT",
+                }),
+                expect.objectContaining({
                     displayLabel: "Deploy",
                     effectiveFastMode: true,
                     hookName: "deploy",
@@ -440,6 +455,11 @@ describe("gateway behavior", () => {
             (session) => (session as { key?: string }).key === "agent:main:hook:deploy"
         ) as Record<string, unknown> | undefined;
         expect(hookSession).not.toHaveProperty("fastMode");
+        const legacyOptionsSession = sessionsMessage?.sessions?.find(
+            (session) =>
+                (session as { key?: string }).key === "agent:legacy:subagent:options-only"
+        ) as Record<string, unknown> | undefined;
+        expect(legacyOptionsSession).not.toHaveProperty("thinkingLevels");
         const providerMismatchSession = sessionsMessage?.sessions?.find(
             (session) =>
                 (session as { key?: string }).key === "agent:other:subagent:same-model"
@@ -520,14 +540,14 @@ describe("gateway behavior", () => {
         await expect(stats.json()).resolves.toMatchObject({
             byModel: {
                 "anthropic/claude-test": 1,
-                "openai/gpt-test": 3,
+                "openai/gpt-test": 4,
             },
             byType: {
                 HOOK: 1,
                 MAIN: 1,
-                SUBAGENT: 2,
+                SUBAGENT: 3,
             },
-            total: 4,
+            total: 5,
             totalTokens: 42,
         });
 

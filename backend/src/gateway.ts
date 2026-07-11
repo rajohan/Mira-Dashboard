@@ -754,6 +754,9 @@ async function refreshSessions(
                         !defaults?.modelProvider ||
                         session.modelProvider === defaults.modelProvider);
                 const matchingDefaults = shouldApplyDefaults ? defaults : undefined;
+                const hasSessionThinkingChoices = Boolean(
+                    session.thinkingLevels?.length || session.thinkingOptions?.length
+                );
                 return transformSession({
                     ...matchingDefaults,
                     ...session,
@@ -763,10 +766,14 @@ async function refreshSessions(
                         session.thinkingDefault ?? matchingDefaults?.thinkingDefault,
                     thinkingLevels: session.thinkingLevels?.length
                         ? session.thinkingLevels
-                        : matchingDefaults?.thinkingLevels,
+                        : hasSessionThinkingChoices
+                          ? undefined
+                          : matchingDefaults?.thinkingLevels,
                     thinkingOptions: session.thinkingOptions?.length
                         ? session.thinkingOptions
-                        : matchingDefaults?.thinkingOptions,
+                        : hasSessionThinkingChoices
+                          ? undefined
+                          : matchingDefaults?.thinkingOptions,
                     fastMode: session.fastMode,
                     effectiveFastMode:
                         session.effectiveFastMode ??
