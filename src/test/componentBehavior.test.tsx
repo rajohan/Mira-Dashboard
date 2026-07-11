@@ -7851,6 +7851,17 @@ describe("shared component helpers", () => {
         expect(onCompact).toHaveBeenCalledWith("agent:main:main");
         expect(onReset).toHaveBeenCalledWith("agent:main:main");
         expect(onDelete).toHaveBeenCalledWith(session);
+
+        rerender(
+            <SessionsTable
+                sessions={[{ ...session, maxTokens: 0, tokenCount: 0 }]}
+                onCompact={onCompact}
+                onReset={onReset}
+                onDelete={onDelete}
+            />
+        );
+        expect(screen.getAllByText("Unknown")).toHaveLength(2);
+        expect(screen.queryByText("0.0k / 200k")).not.toBeInTheDocument();
     });
 
     it("drives cron job details controls and edit form", async () => {
