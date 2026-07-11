@@ -11,7 +11,7 @@
     ],
     "scripts": {
         "dev": "bun --watch scripts/developmentFrontend.ts",
-        "build": "tsc -b && bun scripts/buildFrontend.ts",
+        "build": "bun node_modules/@typescript/native/bin/tsc -b && bun scripts/buildFrontend.ts",
         "lint": "eslint . --max-warnings=0",
         "lint:fix": "eslint . --fix",
         "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css}\" \"backend/**/*.{ts,js}\"",
@@ -69,6 +69,7 @@
         "@types/react": "^19.2.17",
         "@types/react-dom": "^19.2.3",
         "@types/react-syntax-highlighter": "^15.5.13",
+        "@typescript/native": "npm:typescript@^7.0.2",
         "babel-plugin-react-compiler": "^1.0.0",
         "bun-plugin-tailwind": "^0.1.2",
         "eslint": "^10.7.0",
