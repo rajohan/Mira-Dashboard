@@ -86,7 +86,11 @@ interface Session {
     isRunning?: boolean;
     running?: boolean;
     thinkingLevel?: string;
-    fastMode?: boolean;
+    thinkingLevels?: Array<{ id: string; label: string }>;
+    thinkingOptions?: string[];
+    thinkingDefault?: string;
+    fastMode?: boolean | "auto";
+    effectiveFastMode?: boolean;
     verboseLevel?: string;
     reasoningLevel?: string;
     elevatedLevel?: string;
@@ -113,7 +117,11 @@ interface GatewaySession {
     isRunning?: boolean;
     running?: boolean;
     thinkingLevel?: string;
-    fastMode?: boolean;
+    thinkingLevels?: Array<{ id: string; label: string }>;
+    thinkingOptions?: string[];
+    thinkingDefault?: string;
+    fastMode?: boolean | "auto";
+    effectiveFastMode?: boolean;
     verboseLevel?: string;
     reasoningLevel?: string;
     elevatedLevel?: string;
@@ -324,7 +332,11 @@ function transformSession(session: GatewaySession): Session {
         isRunning: session.isRunning,
         running: session.running,
         thinkingLevel: session.thinkingLevel,
+        thinkingLevels: session.thinkingLevels,
+        thinkingOptions: session.thinkingOptions,
+        thinkingDefault: session.thinkingDefault,
         fastMode: session.fastMode,
+        effectiveFastMode: session.effectiveFastMode,
         verboseLevel: session.verboseLevel,
         reasoningLevel: session.reasoningLevel,
         elevatedLevel: session.elevatedLevel,

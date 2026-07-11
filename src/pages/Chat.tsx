@@ -618,6 +618,16 @@ export function writeStoredChatDiagnosticVisibility(
     }
 }
 
+/** Maps the speed selector value to the OpenClaw session override contract. */
+export function chatFastModePatchValue(speed: string): boolean | "auto" | null {
+    if (speed === "auto") return "auto";
+    if (speed === "on") return true;
+    if (speed === "off") return false;
+    // Gateway uses null to clear an inherited override.
+    // eslint-disable-next-line unicorn/no-null
+    return null;
+}
+
 /** Performs supported audio recording MIME type. */
 export function supportedAudioRecordingMimeType(): string | undefined {
     if (typeof MediaRecorder === "undefined") {
@@ -1876,6 +1886,27 @@ export function Chat() {
         !blockedByInFlightSend &&
         (draftText || attachments.length > 0)
     );
+    const isSessionControlsDisabled = Boolean(
+        !isConnected ||
+        isSending ||
+        selectedStreams.length > 0 ||
+        selectedSession?.isRunning ||
+        selectedSession?.running
+    );
+
+    /** Updates one OpenClaw session preference without interrupting the chat. */
+    const patchSelectedSession = async (patch: Record<string, unknown>) => {
+        if (!selectedSessionKey || isSessionControlsDisabled) {
+            return;
+        }
+
+        setSendError(undefined);
+        try {
+            await request("sessions.patch", { key: selectedSessionKey, ...patch });
+        } catch (error_) {
+            setSendError(chatErrorMessage(error_, "Failed to update chat settings"));
+        }
+    };
 
     return (
         <div className="flex h-full min-h-0 flex-col overflow-hidden p-3 sm:p-4 lg:p-6">
@@ -1889,6 +1920,7 @@ export function Chat() {
                         agentOptions={agentOptions}
                         shouldShowThinking={showThinkingOutput}
                         shouldShowTools={showToolOutput}
+                        sessionControlsDisabled={isSessionControlsDisabled}
                         onToggleThinking={() =>
                             setShowThinkingOutput((wasPrevious) => !wasPrevious)
                         }
@@ -1897,6 +1929,18 @@ export function Chat() {
                         }
                         onSelectAgent={handleSelectAgent}
                         onSelectSession={setSelectedSessionKey}
+                        onSelectThinkingLevel={(thinkingLevel) =>
+                            void patchSelectedSession({
+                                // Gateway uses null to clear an inherited override.
+                                // eslint-disable-next-line unicorn/no-null
+                                thinkingLevel: thinkingLevel || null,
+                            })
+                        }
+                        onSelectSpeed={(speed) =>
+                            void patchSelectedSession({
+                                fastMode: chatFastModePatchValue(speed),
+                            })
+                        }
                     />
 
                     <ChatMessagesList

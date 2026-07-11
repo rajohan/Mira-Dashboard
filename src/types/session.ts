@@ -36,7 +36,11 @@ export interface Session {
     isRunning?: boolean;
     running?: boolean;
     thinkingLevel?: string;
-    fastMode?: boolean;
+    thinkingLevels?: Array<{ id: string; label: string }>;
+    thinkingOptions?: string[];
+    thinkingDefault?: string;
+    fastMode?: boolean | "auto";
+    effectiveFastMode?: boolean;
     verboseLevel?: string;
     reasoningLevel?: string;
     elevatedLevel?: string;

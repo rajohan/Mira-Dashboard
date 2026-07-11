@@ -537,6 +537,8 @@ describe("shared component helpers", () => {
         const onToggleTools = jest.fn();
         const onSelectAgent = jest.fn();
         const onSelectSession = jest.fn();
+        const onSelectThinkingLevel = jest.fn();
+        const onSelectSpeed = jest.fn();
 
         const { rerender } = render(
             <AttachmentPreviewModal
@@ -605,7 +607,12 @@ describe("shared component helpers", () => {
                         maxTokens: 1000,
                         model: "codex",
                         thinkingLevel: "high",
-                        tokenCount: 5,
+                        thinkingDefault: "low",
+                        thinkingLevels: [
+                            { id: "low", label: "low" },
+                            { id: "high", label: "high" },
+                        ],
+                        tokenCount: 525,
                         type: "agent",
                         updatedAt: Date.now(),
                     }}
@@ -615,10 +622,13 @@ describe("shared component helpers", () => {
                     sessionOptions={[{ label: "Main session", value: "agent:main:main" }]}
                     shouldShowThinking={true}
                     shouldShowTools={false}
+                    sessionControlsDisabled={false}
                     onToggleThinking={onToggleThinking}
                     onToggleTools={onToggleTools}
                     onSelectAgent={onSelectAgent}
                     onSelectSession={onSelectSession}
+                    onSelectThinkingLevel={onSelectThinkingLevel}
+                    onSelectSpeed={onSelectSpeed}
                 />
                 <ChatMessageDetails
                     visibility={{ shouldShowThinking: true, shouldShowTools: true }}
@@ -683,11 +693,17 @@ describe("shared component helpers", () => {
             </>
         );
 
-        await user.click(screen.getByRole("button", { name: /thinking/i }));
-        await user.click(screen.getByRole("button", { name: /tools/i }));
+        await user.click(screen.getByRole("button", { name: "Thinking" }));
+        await user.click(screen.getByRole("button", { name: "Tools" }));
+        await user.click(screen.getByRole("button", { name: "Thinking level: high" }));
+        await user.click(screen.getByRole("menuitem", { name: "low" }));
+        await user.click(screen.getByRole("button", { name: "Speed: Default" }));
+        await user.click(screen.getByRole("menuitem", { name: "Fast" }));
         expect(onToggleThinking).toHaveBeenCalledTimes(1);
         expect(onToggleTools).toHaveBeenCalledTimes(1);
-        expect(screen.getByText(/Thinking: high/)).toBeInTheDocument();
+        expect(onSelectThinkingLevel).toHaveBeenCalledWith("low");
+        expect(onSelectSpeed).toHaveBeenCalledWith("on");
+        expect(screen.getByText(/Context: 0.5k \/ 1k \(53%\)/)).toBeInTheDocument();
         expect(screen.getByText("Thinking / working")).toBeInTheDocument();
         expect(screen.getByText("Run")).toBeInTheDocument();
         expect(screen.getAllByText("Tool input")).toHaveLength(3);

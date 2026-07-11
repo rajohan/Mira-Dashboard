@@ -2529,7 +2529,15 @@ describe("Mira Dashboard pages", () => {
                     agentType: "main",
                     displayLabel: "Main chat",
                     model: "codex",
+                    tokenCount: 525,
+                    maxTokens: 1000,
+                    thinkingDefault: "low",
                     thinkingLevel: "medium",
+                    thinkingLevels: [
+                        { id: "low", label: "low" },
+                        { id: "medium", label: "medium" },
+                        { id: "high", label: "high" },
+                    ],
                     verboseLevel: "compact",
                     updatedAt: "2026-06-24T08:00:00.000Z",
                 },
@@ -2573,9 +2581,43 @@ describe("Mira Dashboard pages", () => {
 
         await waitFor(() => {
             expect(
-                screen.getByText(/MAIN · codex · Thinking: medium/)
+                screen.getByText(/MAIN · codex · Context: 0.5k \/ 1k \(53%\)/)
             ).toBeInTheDocument();
         });
+
+        await user.click(screen.getByRole("button", { name: "Thinking level: medium" }));
+        await user.click(screen.getByRole("menuitem", { name: "high" }));
+        await waitFor(() => {
+            expect(
+                socket.sent.filter((entry) => entry.includes('"method":"sessions.patch"'))
+            ).toHaveLength(1);
+        });
+        expect(
+            socket.sent
+                .map(
+                    (entry) => JSON.parse(entry) as { method?: string; params?: unknown }
+                )
+                .findLast((entry) => entry.method === "sessions.patch")?.params
+        ).toMatchObject({ key: "agent:main:main", thinkingLevel: "high" });
+        await respondToSocketRequest(socket, "sessions.patch", {});
+        await flushQueuedTimers();
+
+        await user.click(screen.getByRole("button", { name: "Speed: Default" }));
+        await user.click(screen.getByRole("menuitem", { name: "Fast" }));
+        await waitFor(() => {
+            expect(
+                socket.sent.filter((entry) => entry.includes('"method":"sessions.patch"'))
+            ).toHaveLength(2);
+        });
+        expect(
+            socket.sent
+                .map(
+                    (entry) => JSON.parse(entry) as { method?: string; params?: unknown }
+                )
+                .findLast((entry) => entry.method === "sessions.patch")?.params
+        ).toMatchObject({ fastMode: true, key: "agent:main:main" });
+        await respondToSocketRequest(socket, "sessions.patch", {});
+        await flushQueuedTimers();
 
         const thinkingToggle = screen.getByRole("button", { name: "Thinking" });
         const toolsToggle = screen.getByRole("button", { name: "Tools" });
@@ -2594,8 +2636,8 @@ describe("Mira Dashboard pages", () => {
 
         await waitFor(() => {
             expect(
-                socket.sent.some((entry) => entry.includes('"method":"sessions.patch"'))
-            ).toBe(true);
+                socket.sent.filter((entry) => entry.includes('"method":"sessions.patch"'))
+            ).toHaveLength(3);
         });
         await respondToSocketRequest(socket, "sessions.patch", {});
         await flushQueuedTimers();
@@ -2646,7 +2688,7 @@ describe("Mira Dashboard pages", () => {
         await waitFor(() => {
             expect(
                 socket.sent.filter((entry) => entry.includes('"method":"sessions.patch"'))
-            ).toHaveLength(2);
+            ).toHaveLength(4);
         });
         await respondToSocketRequest(socket, "sessions.patch", {});
         await flushQueuedTimers();
