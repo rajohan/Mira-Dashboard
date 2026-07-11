@@ -1924,8 +1924,10 @@ export function Chat() {
     const draftText = draft.trim();
     const blockedByInFlightSend = isBlockedByInFlightSend(draftText);
     const isPatchingSession = pendingSessionPatchCount > 0;
-    const isCompactingSession = selectedStreams.some(([, stream]) =>
-        stream.statusText?.toLowerCase().includes("compact")
+    const isCompactingSession = selectedStreams.some(
+        ([, stream]) =>
+            stream.operation === "compact" ||
+            stream.statusText?.toLowerCase().includes("compact")
     );
     const canSend = Boolean(
         isConnected &&
@@ -1991,6 +1993,7 @@ export function Chat() {
                 sessionKey: selectedSessionKey,
                 runId: idempotencyKey,
                 aliases: [idempotencyKey],
+                operation: "compact",
                 text: "",
                 statusText: "Compacting context",
                 updatedAt: currentIsoString(),

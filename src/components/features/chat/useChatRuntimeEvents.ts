@@ -1108,6 +1108,10 @@ export function useChatRuntimeEvents({
                     ]),
                     text,
                     message,
+                    operation:
+                        isStartsNewRun && !promotesProvisionalRun
+                            ? undefined
+                            : existing?.operation,
                     statusText: undefined,
                     updatedAt: currentIsoString(),
                 };
@@ -1939,6 +1943,10 @@ export function useChatRuntimeEvents({
                                 : isStartsNewRun
                                   ? undefined
                                   : existing?.message,
+                            operation:
+                                isStartsNewRun && !promotesProvisionalRun
+                                    ? undefined
+                                    : existing?.operation,
                             statusText: nextStatusText,
                             updatedAt: currentIsoString(),
                         },
@@ -2114,6 +2122,9 @@ export function useChatRuntimeEvents({
                                 ]),
                                 text: textToApply,
                                 message,
+                                operation: isStartsNewRun
+                                    ? undefined
+                                    : existing?.operation,
                                 updatedAt: currentIsoString(),
                             },
                         }));
