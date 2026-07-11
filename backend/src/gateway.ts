@@ -91,7 +91,7 @@ interface Session {
     thinkingOptions?: string[];
     thinkingDefault?: string;
     fastMode?: boolean | "auto";
-    effectiveFastMode?: boolean;
+    effectiveFastMode?: boolean | "auto";
     verboseLevel?: string;
     reasoningLevel?: string;
     elevatedLevel?: string;
@@ -124,7 +124,7 @@ interface GatewaySession {
     thinkingOptions?: string[];
     thinkingDefault?: string;
     fastMode?: boolean | "auto";
-    effectiveFastMode?: boolean;
+    effectiveFastMode?: boolean | "auto";
     verboseLevel?: string;
     reasoningLevel?: string;
     elevatedLevel?: string;
@@ -320,7 +320,7 @@ function transformSession(session: GatewaySession): Session {
         kind: session.kind,
         model: session.model || "Unknown",
         tokenCount: session.totalTokens || 0,
-        maxTokens: session.contextTokens || 200_000,
+        maxTokens: session.contextTokens || 0,
         createdAt,
         updatedAt: session.updatedAt,
         displayName: session.displayName || "",
@@ -716,6 +716,7 @@ async function refreshSessions(
     if (gatewayState.isConnected && isCurrentGatewayClient(expectedClient)) {
         const payload = asRecord(response);
         const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
+        const defaults = asRecord(payload?.defaults) as GatewaySession | undefined;
         gatewayState.sessions = sessions
             .map((entry) => asRecord(entry))
             .filter(
@@ -745,7 +746,12 @@ async function refreshSessions(
                         ? Date.parse(entry.updatedAt)
                         : entry.updatedAt;
                 return transformSession({
+                    ...defaults,
                     ...session,
+                    contextTokens: session.contextTokens ?? defaults?.contextTokens,
+                    thinkingDefault: session.thinkingDefault ?? defaults?.thinkingDefault,
+                    thinkingLevels: session.thinkingLevels ?? defaults?.thinkingLevels,
+                    thinkingOptions: session.thinkingOptions ?? defaults?.thinkingOptions,
                     activeRunId:
                         session.activeRunId === null ? undefined : session.activeRunId,
                     currentRunId:

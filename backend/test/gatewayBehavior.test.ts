@@ -79,6 +79,15 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
         this.requests.push({ method, parameters: requestParameters });
         if (method === "sessions.list") {
             return {
+                defaults: {
+                    contextTokens: 32_000,
+                    thinkingDefault: "minimal",
+                    thinkingLevels: [
+                        { id: "minimal", label: "minimal" },
+                        { id: "high", label: "high" },
+                    ],
+                    thinkingOptions: ["minimal", "high"],
+                },
                 sessions: [
                     {
                         activeRunId: "run-1",
@@ -384,6 +393,13 @@ describe("gateway behavior", () => {
                 expect.objectContaining({
                     agentType: "researcher",
                     displayLabel: "Researcher",
+                    maxTokens: 32_000,
+                    thinkingDefault: "minimal",
+                    thinkingLevels: [
+                        { id: "minimal", label: "minimal" },
+                        { id: "high", label: "high" },
+                    ],
+                    thinkingOptions: ["minimal", "high"],
                     type: "SUBAGENT",
                 }),
                 expect.objectContaining({

@@ -600,7 +600,7 @@ describe("shared component helpers", () => {
                         createdAt: "2026-06-24T10:00:00.000Z",
                         displayLabel: "Main",
                         displayName: "Main",
-                        effectiveFastMode: true,
+                        effectiveFastMode: "auto",
                         hookName: "",
                         id: "session-1",
                         key: "agent:main:main",
@@ -703,7 +703,7 @@ describe("shared component helpers", () => {
         await user.click(screen.getByRole("button", { name: "Compact" }));
         await user.click(screen.getByRole("button", { name: "Thinking level: high" }));
         await user.click(screen.getByRole("menuitem", { name: "low" }));
-        await user.click(screen.getByRole("button", { name: "Speed: Default (Fast)" }));
+        await user.click(screen.getByRole("button", { name: "Speed: Default (Auto)" }));
         await user.click(screen.getByRole("menuitem", { name: "Fast" }));
         expect(onToggleThinking).toHaveBeenCalledTimes(1);
         expect(onToggleTools).toHaveBeenCalledTimes(1);

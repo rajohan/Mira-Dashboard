@@ -94,10 +94,16 @@ export function chatThinkingOptions(session: Session | undefined): Option[] {
 
 /** Returns the OpenClaw fast-mode choices. */
 export function chatSpeedOptions(session?: Session): Option[] {
-    const defaultLabel =
-        session?.effectiveFastMode === undefined
-            ? "Default"
-            : `Default (${session.effectiveFastMode ? "Fast" : "Standard"})`;
+    const effectiveMode = session?.effectiveFastMode;
+    const effectiveLabel =
+        effectiveMode === "auto"
+            ? "Auto"
+            : effectiveMode === true
+              ? "Fast"
+              : effectiveMode === false
+                ? "Standard"
+                : undefined;
+    const defaultLabel = effectiveLabel ? `Default (${effectiveLabel})` : "Default";
     return [
         { label: defaultLabel, value: "" },
         { label: "Fast", value: "on" },

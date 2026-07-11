@@ -41,7 +41,7 @@ export interface Session {
     thinkingOptions?: string[];
     thinkingDefault?: string;
     fastMode?: boolean | "auto";
-    effectiveFastMode?: boolean;
+    effectiveFastMode?: boolean | "auto";
     verboseLevel?: string;
     reasoningLevel?: string;
     elevatedLevel?: string;
