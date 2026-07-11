@@ -71,11 +71,37 @@ interface ChatHeaderProperties {
     onCompact: () => void;
 }
 
+/** Normalizes legacy thinking labels to OpenClaw's canonical level ids. */
+export function normalizeThinkingLevel(level: string): string | undefined {
+    const key = level.trim().toLowerCase();
+    const collapsed = key.replaceAll(/[\s_-]+/g, "");
+    if (collapsed === "adaptive" || collapsed === "auto") return "adaptive";
+    if (collapsed === "max") return "max";
+    if (collapsed === "xhigh" || collapsed === "extrahigh") return "xhigh";
+    if (key === "off") return "off";
+    if (["on", "enable", "enabled"].includes(key)) return "low";
+    if (["min", "minimal", "think"].includes(key)) return "minimal";
+    if (["low", "thinkhard", "think-hard", "think_hard"].includes(key)) {
+        return "low";
+    }
+    if (["mid", "med", "medium", "thinkharder", "think-harder", "harder"].includes(key)) {
+        return "medium";
+    }
+    if (["high", "ultra", "ultrathink", "thinkhardest", "highest"].includes(key)) {
+        return "high";
+    }
+    return undefined;
+}
+
 /** Returns the model-supported thinking options exposed by OpenClaw. */
 export function chatThinkingOptions(session: Session | undefined): Option[] {
     const levels = session?.thinkingLevels?.length
         ? session.thinkingLevels
-        : (session?.thinkingOptions || []).map((level) => ({ id: level, label: level }));
+        : (session?.thinkingOptions || [])
+              .map((label) => ({ id: normalizeThinkingLevel(label), label }))
+              .filter((level): level is { id: string; label: string } =>
+                  Boolean(level.id)
+              );
     const currentLevel = session?.thinkingLevel;
     const options = levels.map((level) => ({
         label: level.label || level.id,

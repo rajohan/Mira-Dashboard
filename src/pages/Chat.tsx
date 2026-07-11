@@ -1798,7 +1798,7 @@ export function Chat() {
         if (text.startsWith("/")) {
             let isHandledCommand: boolean;
             try {
-                isHandledCommand = await handleSlashCommand(text);
+                isHandledCommand = await handleSlashCommand(text, currentAttachments);
             } catch (error_) {
                 setSendError(chatErrorMessage(error_, "Failed to run slash command"));
                 endSend(sendEpoch);

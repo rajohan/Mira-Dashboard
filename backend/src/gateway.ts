@@ -761,10 +761,12 @@ async function refreshSessions(
                         session.contextTokens ?? matchingDefaults?.contextTokens,
                     thinkingDefault:
                         session.thinkingDefault ?? matchingDefaults?.thinkingDefault,
-                    thinkingLevels:
-                        session.thinkingLevels ?? matchingDefaults?.thinkingLevels,
-                    thinkingOptions:
-                        session.thinkingOptions ?? matchingDefaults?.thinkingOptions,
+                    thinkingLevels: session.thinkingLevels?.length
+                        ? session.thinkingLevels
+                        : matchingDefaults?.thinkingLevels,
+                    thinkingOptions: session.thinkingOptions?.length
+                        ? session.thinkingOptions
+                        : matchingDefaults?.thinkingOptions,
                     activeRunId:
                         session.activeRunId === null ? undefined : session.activeRunId,
                     currentRunId:

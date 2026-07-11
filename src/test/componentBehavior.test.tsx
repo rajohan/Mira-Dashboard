@@ -14,7 +14,7 @@ import type { ReactNode, RefObject } from "react";
 import { TaskHistorySidebar } from "../components/features/agents/TaskHistorySidebar";
 import { AttachmentPreviewModal } from "../components/features/chat/AttachmentPreviewModal";
 import { ChatComposer } from "../components/features/chat/ChatComposer";
-import { ChatHeader } from "../components/features/chat/ChatHeader";
+import { ChatHeader, chatThinkingOptions } from "../components/features/chat/ChatHeader";
 import {
     ChatMarkdown,
     childrenToText,
@@ -122,6 +122,7 @@ import {
     rollbackFailedOptimisticMessage,
     visibleActiveStreamContent,
 } from "../pages/Chat";
+import type { Session } from "../types/session";
 
 const originalFetch = fetch;
 const originalAnimationFrame = {
@@ -876,6 +877,32 @@ describe("shared component helpers", () => {
         });
         await expect(blocked("/stop")).resolves.toBe(true);
         expect(setSendError).toHaveBeenCalledWith("/stop cannot include attachments.");
+
+        await expect(
+            runSlashCommand("/compact", [
+                {
+                    contentBase64: "b",
+                    file: new File(["b"], "late.txt", { type: "text/plain" }),
+                    fileName: "late.txt",
+                    id: "late",
+                    kind: "text",
+                    mimeType: "text/plain",
+                    sizeBytes: 1,
+                },
+            ])
+        ).resolves.toBe(true);
+        expect(setSendError).toHaveBeenCalledWith("/compact cannot include attachments.");
+
+        expect(
+            chatThinkingOptions({
+                thinkingLevel: "low",
+                thinkingOptions: ["off", "on"],
+            } as Session)
+        ).toEqual([
+            { label: "Default", value: "" },
+            { label: "off", value: "off" },
+            { label: "on", value: "low" },
+        ]);
     });
 
     it("normalizes chat runtime event helper output", () => {
