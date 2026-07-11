@@ -896,12 +896,14 @@ describe("shared component helpers", () => {
         expect(
             chatThinkingOptions({
                 thinkingLevel: "low",
-                thinkingOptions: ["off", "on"],
+                thinkingOptions: ["off", "on", "Think Hard", "Think Harder"],
             } as Session)
         ).toEqual([
             { label: "Default", value: "" },
             { label: "off", value: "off" },
             { label: "on", value: "low" },
+            { label: "Think Hard", value: "low" },
+            { label: "Think Harder", value: "medium" },
         ]);
     });
 

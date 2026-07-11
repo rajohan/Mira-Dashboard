@@ -1160,7 +1160,21 @@ describe("Mira Dashboard frontend behavior", () => {
             socket.close();
             await expect(pendingPromise).rejects.toThrow("WebSocket disconnected");
 
-            socket.open();
+            client.connect();
+            const replacementSocket = FakeWebSocket.instances[1]!;
+            replacementSocket.open();
+            const replacementPromise = client.request<{ current: boolean }>(
+                "replacement"
+            );
+            socket.close();
+            replacementSocket.message({
+                type: "response",
+                id: "4",
+                isOk: true,
+                payload: { current: true },
+            });
+            await expect(replacementPromise).resolves.toEqual({ current: true });
+
             const disconnectedPromise = client.request("disconnect");
             client.disconnect();
             await expect(disconnectedPromise).rejects.toThrow("WebSocket disconnected");

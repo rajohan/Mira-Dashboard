@@ -78,16 +78,16 @@ export function normalizeThinkingLevel(level: string): string | undefined {
     if (collapsed === "adaptive" || collapsed === "auto") return "adaptive";
     if (collapsed === "max") return "max";
     if (collapsed === "xhigh" || collapsed === "extrahigh") return "xhigh";
-    if (key === "off") return "off";
-    if (["on", "enable", "enabled"].includes(key)) return "low";
-    if (["min", "minimal", "think"].includes(key)) return "minimal";
-    if (["low", "thinkhard", "think-hard", "think_hard"].includes(key)) {
+    if (collapsed === "off") return "off";
+    if (["on", "enable", "enabled"].includes(collapsed)) return "low";
+    if (["min", "minimal", "think"].includes(collapsed)) return "minimal";
+    if (["low", "thinkhard"].includes(collapsed)) {
         return "low";
     }
-    if (["mid", "med", "medium", "thinkharder", "think-harder", "harder"].includes(key)) {
+    if (["mid", "med", "medium", "thinkharder", "harder"].includes(collapsed)) {
         return "medium";
     }
-    if (["high", "ultra", "ultrathink", "thinkhardest", "highest"].includes(key)) {
+    if (["high", "ultra", "ultrathink", "thinkhardest", "highest"].includes(collapsed)) {
         return "high";
     }
     return undefined;

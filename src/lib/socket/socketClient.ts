@@ -53,13 +53,14 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         }
 
         shouldReconnect = true;
-        ws = new WebSocket(options.url);
+        const socket = new WebSocket(options.url);
+        ws = socket;
 
-        ws.addEventListener("open", () => {
+        socket.addEventListener("open", () => {
             options.onOpen?.();
         });
 
-        ws.addEventListener("message", (event) => {
+        socket.addEventListener("message", (event) => {
             try {
                 const data = JSON.parse(event.data) as SocketEnvelope;
 
@@ -82,7 +83,10 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             }
         });
 
-        ws.addEventListener("close", () => {
+        socket.addEventListener("close", () => {
+            if (ws !== socket) {
+                return;
+            }
             rejectPendingRequests();
             options.onClose?.();
             if (shouldReconnect) {
@@ -94,7 +98,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             }
         });
 
-        ws.addEventListener("error", () => {
+        socket.addEventListener("error", () => {
             options.onError?.();
         });
     };
