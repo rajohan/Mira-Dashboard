@@ -34,6 +34,7 @@ import { Agents } from "../pages/Agents";
 import {
     Chat,
     hasNewerAssistantMessageInHistory,
+    isSessionActive,
     nextHistoryBottomState,
     nextHistoryLoadSendError,
     readDeletedMessageKeys,
@@ -242,6 +243,11 @@ function parseRequestBody(init: RequestInit | undefined) {
 }
 
 function apiResponse(url: string, method: string, init?: RequestInit) {
+    if (method === "POST" && url === "/api/sessions/agent%3Amain%3Amain/action") {
+        expect(parseRequestBody(init)).toEqual({ action: "compact" });
+        return Response.json({ isSuccess: true });
+    }
+
     if (method === "POST" && url === "/api/docker/containers/abc123/action") {
         expect(parseRequestBody(init)).toEqual({ action: "restart" });
         return Response.json({ output: "container action output" });
@@ -2585,6 +2591,14 @@ describe("Mira Dashboard pages", () => {
             ).toBeInTheDocument();
         });
 
+        await user.click(screen.getByRole("button", { name: "Compact" }));
+        await waitFor(() => {
+            expect(fetch).toHaveBeenCalledWith(
+                "/api/sessions/agent%3Amain%3Amain/action",
+                expect.objectContaining({ method: "POST" })
+            );
+        });
+
         await user.click(screen.getByRole("button", { name: "Thinking level: medium" }));
         await user.click(screen.getByRole("menuitem", { name: "high" }));
         await waitFor(() => {
@@ -2616,8 +2630,19 @@ describe("Mira Dashboard pages", () => {
                 )
                 .findLast((entry) => entry.method === "sessions.patch")?.params
         ).toMatchObject({ fastMode: true, key: "agent:main:main" });
+        await user.type(
+            screen.getByPlaceholderText(
+                "Message, attach files, or use / commands (try /help)"
+            ),
+            "Ship it"
+        );
+        expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
         await respondToSocketRequest(socket, "sessions.patch", {});
         await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+        });
 
         const thinkingToggle = screen.getByRole("button", { name: "Thinking" });
         const toolsToggle = screen.getByRole("button", { name: "Tools" });
@@ -2626,12 +2651,6 @@ describe("Mira Dashboard pages", () => {
         expect(thinkingToggle).toHaveAttribute("aria-pressed", "true");
         expect(toolsToggle).toHaveAttribute("aria-pressed", "true");
 
-        await user.type(
-            screen.getByPlaceholderText(
-                "Message, attach files, or use / commands (try /help)"
-            ),
-            "Ship it"
-        );
         await user.click(screen.getByRole("button", { name: "Send" }));
 
         await waitFor(() => {
@@ -3117,6 +3136,22 @@ describe("Mira Dashboard pages", () => {
         expect(nextHistoryBottomState(false, false, false)).toBe(false);
         expect(nextHistoryLoadSendError("old", true, "new")).toBe("old");
         expect(nextHistoryLoadSendError(undefined, false, "new")).toBe("new");
+        expect(isSessionActive(undefined)).toBe(false);
+        expect(
+            isSessionActive({ status: "running" } as Parameters<
+                typeof isSessionActive
+            >[0])
+        ).toBe(true);
+        expect(
+            isSessionActive({ activeRunId: "run-1" } as Parameters<
+                typeof isSessionActive
+            >[0])
+        ).toBe(true);
+        expect(
+            isSessionActive({ currentRunId: "run-2" } as Parameters<
+                typeof isSessionActive
+            >[0])
+        ).toBe(true);
 
         const scheduled: string[] = [];
         scheduleBottomFollowWhenNeeded(true, () => {

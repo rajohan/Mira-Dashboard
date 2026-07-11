@@ -52,6 +52,7 @@ import { Card } from "../components/ui/Card";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { useAgentsStatus } from "../hooks/useAgents";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
+import { useSessionAction } from "../hooks/useSessions";
 import type { Session } from "../types/session";
 import { currentIsoString, timestampFromDateString } from "../utils/date";
 import { formatSize } from "../utils/format";
@@ -645,6 +646,17 @@ export function supportedAudioRecordingMimeType(): string | undefined {
     return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
 }
 
+/** Returns whether OpenClaw reports an active run for a session. */
+export function isSessionActive(session: Session | undefined): boolean {
+    return Boolean(
+        session?.isRunning ||
+        session?.running ||
+        session?.status?.toLowerCase() === "running" ||
+        session?.activeRunId ||
+        session?.currentRunId
+    );
+}
+
 /** Renders the chat UI. */
 export function Chat() {
     const { connectionId, isConnected, error, request, subscribe } = useOpenClawSocket();
@@ -674,6 +686,7 @@ export function Chat() {
     const resetConfirmResolverReference = useRef<
         ((wasConfirmed: boolean) => void) | undefined
     >(undefined);
+    const pendingSessionPatchReference = useRef<Promise<boolean>>(Promise.resolve(true));
 
     const [selectedSessionKey, setSelectedSessionKey] = useState("");
     const [draft, setDraft] = useState("");
@@ -691,6 +704,7 @@ export function Chat() {
     const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [isSending, setIsSending] = useState(false);
+    const [isPatchingSession, setIsPatchingSession] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [previewItem, setPreviewItem] = useState<ChatPreviewItem | undefined>(
@@ -709,6 +723,7 @@ export function Chat() {
         query.from({ session: sessionsCollection })
     );
     const { data: agentsStatus } = useAgentsStatus();
+    const sessionAction = useSessionAction();
     const agents = agentsStatus?.agents || [];
 
     /** Performs update active streamilliseconds. */
@@ -1720,6 +1735,10 @@ export function Chat() {
             return;
         }
 
+        if (!(await pendingSessionPatchReference.current)) {
+            return;
+        }
+
         const sendEpoch = beginSend();
 
         if (text.startsWith("/")) {
@@ -1883,15 +1902,17 @@ export function Chat() {
         selectedSessionKey &&
         !isRecording &&
         !isTranscribing &&
+        !isPatchingSession &&
         !blockedByInFlightSend &&
         (draftText || attachments.length > 0)
     );
     const isSessionControlsDisabled = Boolean(
         !isConnected ||
         isSending ||
+        isPatchingSession ||
+        sessionAction.isPending ||
         selectedStreams.length > 0 ||
-        selectedSession?.isRunning ||
-        selectedSession?.running
+        isSessionActive(selectedSession)
     );
 
     /** Updates one OpenClaw session preference without interrupting the chat. */
@@ -1901,10 +1922,37 @@ export function Chat() {
         }
 
         setSendError(undefined);
+        setIsPatchingSession(true);
+        const pendingPatch = (async () => {
+            try {
+                await request("sessions.patch", {
+                    key: selectedSessionKey,
+                    ...patch,
+                });
+                return true;
+            } catch (error_) {
+                setSendError(chatErrorMessage(error_, "Failed to update chat settings"));
+                return false;
+            } finally {
+                setIsPatchingSession(false);
+            }
+        })();
+        pendingSessionPatchReference.current = pendingPatch;
+        await pendingPatch;
+    };
+
+    /** Compacts the selected session through the existing session action API. */
+    const compactSelectedSession = async () => {
+        if (!selectedSessionKey || isSessionControlsDisabled) return;
+
+        setSendError(undefined);
         try {
-            await request("sessions.patch", { key: selectedSessionKey, ...patch });
+            await sessionAction.mutateAsync({
+                key: selectedSessionKey,
+                action: "compact",
+            });
         } catch (error_) {
-            setSendError(chatErrorMessage(error_, "Failed to update chat settings"));
+            setSendError(chatErrorMessage(error_, "Failed to compact context"));
         }
     };
 
@@ -1921,6 +1969,7 @@ export function Chat() {
                         shouldShowThinking={showThinkingOutput}
                         shouldShowTools={showToolOutput}
                         sessionControlsDisabled={isSessionControlsDisabled}
+                        isCompacting={sessionAction.isPending}
                         onToggleThinking={() =>
                             setShowThinkingOutput((wasPrevious) => !wasPrevious)
                         }
@@ -1941,6 +1990,7 @@ export function Chat() {
                                 fastMode: chatFastModePatchValue(speed),
                             })
                         }
+                        onCompact={() => void compactSelectedSession()}
                     />
 
                     <ChatMessagesList

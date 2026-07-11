@@ -1,4 +1,4 @@
-import { Brain, type LucideIcon, Wrench } from "lucide-react";
+import { Brain, type LucideIcon, Minimize2, Wrench } from "lucide-react";
 
 import type { Session } from "../../../types/session";
 import { formatDuration, formatTokens, getTokenPercent } from "../../../utils/format";
@@ -61,12 +61,14 @@ interface ChatHeaderProperties {
     shouldShowThinking: boolean;
     shouldShowTools: boolean;
     sessionControlsDisabled: boolean;
+    isCompacting: boolean;
     onToggleThinking: () => void;
     onToggleTools: () => void;
     onSelectAgent: (agentId: string) => void;
     onSelectSession: (sessionKey: string) => void;
     onSelectThinkingLevel: (thinkingLevel: string) => void;
     onSelectSpeed: (speed: string) => void;
+    onCompact: () => void;
 }
 
 /** Returns the model-supported thinking options exposed by OpenClaw. */
@@ -76,7 +78,7 @@ export function chatThinkingOptions(session: Session | undefined): Option[] {
         : (session?.thinkingOptions || []).map((level) => ({ id: level, label: level }));
     const currentLevel = session?.thinkingLevel;
     const options = levels.map((level) => ({
-        label: level.label,
+        label: level.label || level.id,
         value: level.id,
     }));
 
@@ -133,12 +135,14 @@ export function ChatHeader({
     shouldShowThinking,
     shouldShowTools,
     sessionControlsDisabled,
+    isCompacting,
     onToggleThinking,
     onToggleTools,
     onSelectAgent,
     onSelectSession,
     onSelectThinkingLevel,
     onSelectSpeed,
+    onCompact,
 }: ChatHeaderProperties) {
     const thinkingOptions = chatThinkingOptions(selectedSession);
     const speedOptions = chatSpeedOptions();
@@ -147,9 +151,27 @@ export function ChatHeader({
         <div className="border-b border-primary-700 pb-2 sm:pb-3">
             <div className="flex flex-col gap-2 sm:gap-3 lg:flex-row lg:items-end lg:justify-between">
                 <div className="min-w-0">
-                    <p className="text-xs wrap-break-word text-primary-400 sm:truncate sm:text-sm">
-                        {formatHeaderStatus(selectedSession)}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                        <p className="text-xs wrap-break-word text-primary-400 sm:truncate sm:text-sm">
+                            {formatHeaderStatus(selectedSession)}
+                        </p>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="rounded-full border border-primary-700/80 px-2 py-1 text-xs"
+                            disabled={
+                                !selectedSession ||
+                                sessionControlsDisabled ||
+                                isCompacting
+                            }
+                            onClick={onCompact}
+                            title="Compact the selected session context"
+                        >
+                            <Minimize2 className="size-3.5" aria-hidden="true" />
+                            {isCompacting ? "Compacting…" : "Compact"}
+                        </Button>
+                    </div>
                 </div>
                 <div className="flex w-full flex-col gap-2 lg:ml-auto lg:w-auto lg:flex-row lg:items-center lg:justify-end">
                     <div className="flex shrink-0 flex-wrap justify-start gap-1.5 lg:justify-end">
