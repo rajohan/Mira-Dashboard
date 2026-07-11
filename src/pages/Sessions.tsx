@@ -57,6 +57,7 @@ export function Sessions() {
         <div className="p-3 sm:p-4 lg:p-6">
             <div className="mb-4 overflow-x-auto pb-1">
                 <FilterButtonGroup
+                    ariaLabel="Session type"
                     options={filterOptions}
                     value={typeFilter}
                     onChange={setTypeFilter}

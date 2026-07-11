@@ -108,6 +108,7 @@ import { Badge, getSessionTypeVariant } from "../components/ui/Badge";
 import { Checkbox } from "../components/ui/Checkbox";
 import { ConnectionStatus } from "../components/ui/ConnectionStatus";
 import { ExpandableCard, ReadOnlyField } from "../components/ui/ExpandableCard";
+import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { getProgressColor, ProgressBar } from "../components/ui/ProgressBar";
 import { useFileExplorerState } from "../hooks/useFileExplorerState";
 import { useSessionActions } from "../hooks/useSessionActions";
@@ -216,6 +217,31 @@ function thinkingTexts(stream?: ActiveChatStreams[string]) {
 }
 
 describe("shared component helpers", () => {
+    it("names filter button groups and exposes their selected option", () => {
+        render(
+            <FilterButtonGroup
+                ariaLabel="Example filter"
+                options={[
+                    { value: "all", label: "All" },
+                    { value: "active", label: "Active" },
+                ]}
+                value="active"
+                onChange={() => {}}
+            />
+        );
+
+        const filterGroup = screen.getByRole("group", { name: "Example filter" });
+        expect(filterGroup).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "All" })).toHaveAttribute(
+            "aria-pressed",
+            "false"
+        );
+        expect(screen.getByRole("button", { name: "Active" })).toHaveAttribute(
+            "aria-pressed",
+            "true"
+        );
+    });
+
     it("flattens nested React children and detects fenced code blocks", () => {
         expect(
             childrenToText([

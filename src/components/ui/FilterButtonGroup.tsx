@@ -11,6 +11,7 @@ interface FilterOption<T extends string> {
 
 /** Provides props for filter button group. */
 interface FilterButtonGroupProperties<T extends string> {
+    ariaLabel: string;
     options: readonly FilterOption<T>[];
     value: T;
     onChange: (value: T) => void;
@@ -19,13 +20,18 @@ interface FilterButtonGroupProperties<T extends string> {
 
 /** Renders the filter button group UI. */
 export function FilterButtonGroup<T extends string>({
+    ariaLabel,
     options,
     value,
     onChange,
     className,
 }: FilterButtonGroupProperties<T>) {
     return (
-        <div className={"flex flex-wrap gap-1.5 " + (className || "")}>
+        <div
+            role="group"
+            aria-label={ariaLabel}
+            className={"flex flex-wrap gap-1.5 " + (className || "")}
+        >
             {options.map((option) => (
                 <Button
                     key={option.value}
