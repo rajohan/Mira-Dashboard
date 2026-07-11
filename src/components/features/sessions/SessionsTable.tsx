@@ -97,6 +97,13 @@ export function SessionsTable({
                 if (!max) {
                     return <span className="text-sm text-primary-300">Unknown</span>;
                 }
+                if (info.row.original.totalTokensFresh === false) {
+                    return (
+                        <span className="text-sm text-primary-300">
+                            ~{formatTokens(current, max)} (stale)
+                        </span>
+                    );
+                }
                 const percent = getTokenPercent(current, max);
                 return (
                     <div className="flex items-center gap-2">
@@ -155,7 +162,8 @@ export function SessionsTable({
                     const session = row.original;
                     const current = session.tokenCount || 0;
                     const max = session.maxTokens || 0;
-                    const percent = getTokenPercent(current, max);
+                    const isStale = session.totalTokensFresh === false;
+                    const percent = max && !isStale ? getTokenPercent(current, max) : 0;
                     const name = getSessionName(session);
 
                     return (
@@ -188,13 +196,24 @@ export function SessionsTable({
                                 </div>
                                 <div>
                                     {max ? (
-                                        <>
-                                            <div className="mb-1 flex items-center justify-between gap-2">
-                                                <span>{formatTokens(current, max)}</span>
-                                                <span>{percent}%</span>
-                                            </div>
-                                            <ProgressBar percent={percent} size="sm" />
-                                        </>
+                                        isStale ? (
+                                            <span>
+                                                ~{formatTokens(current, max)} (stale)
+                                            </span>
+                                        ) : (
+                                            <>
+                                                <div className="mb-1 flex items-center justify-between gap-2">
+                                                    <span>
+                                                        {formatTokens(current, max)}
+                                                    </span>
+                                                    <span>{percent}%</span>
+                                                </div>
+                                                <ProgressBar
+                                                    percent={percent}
+                                                    size="sm"
+                                                />
+                                            </>
+                                        )
                                     ) : (
                                         <span>Unknown</span>
                                     )}

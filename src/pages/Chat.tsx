@@ -1767,6 +1767,7 @@ export function Chat() {
         if (!selectedSessionKey) {
             return;
         }
+        const pendingSendSessionKey = selectedSessionKey;
 
         let text = draft.trim();
 
@@ -1779,7 +1780,10 @@ export function Chat() {
         }
 
         const patchResults = await Promise.all(pendingSessionPatchesReference.current);
-        if (patchResults.includes(false)) {
+        if (
+            patchResults.includes(false) ||
+            selectedSessionKeyReference.current !== pendingSendSessionKey
+        ) {
             return;
         }
 

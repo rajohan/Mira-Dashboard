@@ -7862,6 +7862,18 @@ describe("shared component helpers", () => {
         );
         expect(screen.getAllByText("Unknown")).toHaveLength(2);
         expect(screen.queryByText("0.0k / 200k")).not.toBeInTheDocument();
+
+        rerender(
+            <SessionsTable
+                sessions={[{ ...session, totalTokensFresh: false }]}
+                onCompact={onCompact}
+                onReset={onReset}
+                onDelete={onDelete}
+            />
+        );
+        expect(screen.getAllByText("~0.1k / 1k (stale)")).toHaveLength(2);
+        expect(screen.queryByText("13%")).not.toBeInTheDocument();
+        expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     });
 
     it("drives cron job details controls and edit form", async () => {
