@@ -19,6 +19,7 @@ export interface Session {
     hookName: string;
     kind: string;
     model: string;
+    modelProvider?: string;
     tokenCount: number;
     maxTokens: number;
     createdAt: string | undefined;

@@ -69,6 +69,7 @@ interface Session {
     hookName: string;
     kind?: string;
     model: string;
+    modelProvider?: string;
     tokenCount: number;
     maxTokens: number;
     createdAt: string | undefined;
@@ -104,6 +105,7 @@ interface GatewaySession {
     key?: string;
     kind?: string;
     model?: string;
+    modelProvider?: string;
     totalTokens?: number;
     contextTokens?: number;
     updatedAt?: number;
@@ -319,6 +321,7 @@ function transformSession(session: GatewaySession): Session {
         hookName,
         kind: session.kind,
         model: session.model || "Unknown",
+        modelProvider: session.modelProvider,
         tokenCount: session.totalTokens || 0,
         maxTokens: session.contextTokens || 0,
         createdAt,
@@ -746,7 +749,9 @@ async function refreshSessions(
                         ? Date.parse(entry.updatedAt)
                         : entry.updatedAt;
                 const shouldApplyDefaults =
-                    !session.model || session.model === defaults?.model;
+                    (!session.model || session.model === defaults?.model) &&
+                    (!defaults?.modelProvider ||
+                        session.modelProvider === defaults.modelProvider);
                 const matchingDefaults = shouldApplyDefaults ? defaults : undefined;
                 return transformSession({
                     ...matchingDefaults,

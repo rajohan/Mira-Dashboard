@@ -82,6 +82,7 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
                 defaults: {
                     contextTokens: 32_000,
                     model: "openai/gpt-test",
+                    modelProvider: "openai",
                     thinkingDefault: "minimal",
                     thinkingLevels: [
                         { id: "minimal", label: "minimal" },
@@ -100,6 +101,7 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
                         kind: "chat",
                         label: "",
                         model: "openai/gpt-test",
+                        modelProvider: "openai",
                         sessionId: "sess1",
                         status: "running",
                         thinkingDefault: "low",
@@ -121,6 +123,14 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
                         model: "anthropic/claude-test",
                         sessionId: "sess2",
                         updatedAt: 1_782_345_600_000,
+                    },
+                    {
+                        key: "agent:other:subagent:same-model",
+                        label: "",
+                        model: "openai/gpt-test",
+                        modelProvider: "openrouter",
+                        sessionId: "sess-provider-mismatch",
+                        updatedAt: 1_782_345_550_000,
                     },
                     {
                         key: "agent:main:hook:deploy",
@@ -379,6 +389,7 @@ describe("gateway behavior", () => {
                     id: "sess1",
                     key: "agent:main:main",
                     model: "openai/gpt-test",
+                    modelProvider: "openai",
                     thinkingDefault: "low",
                     thinkingLevel: "medium",
                     thinkingLevels: [
@@ -413,6 +424,18 @@ describe("gateway behavior", () => {
         expect(researcherSession).not.toHaveProperty("thinkingDefault");
         expect(researcherSession).not.toHaveProperty("thinkingLevels");
         expect(researcherSession).not.toHaveProperty("thinkingOptions");
+        const providerMismatchSession = sessionsMessage?.sessions?.find(
+            (session) =>
+                (session as { key?: string }).key === "agent:other:subagent:same-model"
+        ) as Record<string, unknown> | undefined;
+        expect(providerMismatchSession).toMatchObject({
+            maxTokens: 0,
+            model: "openai/gpt-test",
+            modelProvider: "openrouter",
+        });
+        expect(providerMismatchSession).not.toHaveProperty("thinkingDefault");
+        expect(providerMismatchSession).not.toHaveProperty("thinkingLevels");
+        expect(providerMismatchSession).not.toHaveProperty("thinkingOptions");
 
         client?.options.onEvent?.({
             event: "session.tool",
@@ -486,9 +509,9 @@ describe("gateway behavior", () => {
             byType: {
                 HOOK: 1,
                 MAIN: 1,
-                SUBAGENT: 1,
+                SUBAGENT: 2,
             },
-            total: 3,
+            total: 4,
             totalTokens: 42,
         });
 
