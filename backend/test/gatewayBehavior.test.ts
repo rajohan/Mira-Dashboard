@@ -81,6 +81,7 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
             return {
                 defaults: {
                     contextTokens: 32_000,
+                    model: "openai/gpt-test",
                     thinkingDefault: "minimal",
                     thinkingLevels: [
                         { id: "minimal", label: "minimal" },
@@ -117,6 +118,7 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
                     {
                         key: "agent:researcher:subagent:abc",
                         label: "",
+                        model: "anthropic/claude-test",
                         sessionId: "sess2",
                         updatedAt: 1_782_345_600_000,
                     },
@@ -393,13 +395,8 @@ describe("gateway behavior", () => {
                 expect.objectContaining({
                     agentType: "researcher",
                     displayLabel: "Researcher",
-                    maxTokens: 32_000,
-                    thinkingDefault: "minimal",
-                    thinkingLevels: [
-                        { id: "minimal", label: "minimal" },
-                        { id: "high", label: "high" },
-                    ],
-                    thinkingOptions: ["minimal", "high"],
+                    maxTokens: 0,
+                    model: "anthropic/claude-test",
                     type: "SUBAGENT",
                 }),
                 expect.objectContaining({
@@ -409,6 +406,13 @@ describe("gateway behavior", () => {
                 }),
             ])
         );
+        const researcherSession = sessionsMessage?.sessions?.find(
+            (session) =>
+                (session as { key?: string }).key === "agent:researcher:subagent:abc"
+        ) as Record<string, unknown> | undefined;
+        expect(researcherSession).not.toHaveProperty("thinkingDefault");
+        expect(researcherSession).not.toHaveProperty("thinkingLevels");
+        expect(researcherSession).not.toHaveProperty("thinkingOptions");
 
         client?.options.onEvent?.({
             event: "session.tool",
@@ -476,8 +480,8 @@ describe("gateway behavior", () => {
         const stats = await sessionRoutes["/api/sessions/stats"].GET();
         await expect(stats.json()).resolves.toMatchObject({
             byModel: {
-                Unknown: 2,
-                "openai/gpt-test": 1,
+                "anthropic/claude-test": 1,
+                "openai/gpt-test": 2,
             },
             byType: {
                 HOOK: 1,

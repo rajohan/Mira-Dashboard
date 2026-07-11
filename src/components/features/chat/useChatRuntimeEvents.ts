@@ -100,7 +100,7 @@ function isProvisionalRunId(streamSessionKey: string, runId: string): boolean {
 
 /** Returns whether a stream run id came from an optimistic dashboard send. */
 function isOptimisticRunId(runId: string): boolean {
-    return runId.startsWith("dashboard-chat-");
+    return runId.startsWith("dashboard-chat-") || runId.startsWith("dashboard-compact-");
 }
 
 /** Returns whether an active stream belongs to a concrete run id. */

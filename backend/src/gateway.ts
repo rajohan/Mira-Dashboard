@@ -745,13 +745,20 @@ async function refreshSessions(
                     typeof entry.updatedAt === "string"
                         ? Date.parse(entry.updatedAt)
                         : entry.updatedAt;
+                const shouldApplyDefaults =
+                    !session.model || session.model === defaults?.model;
+                const matchingDefaults = shouldApplyDefaults ? defaults : undefined;
                 return transformSession({
-                    ...defaults,
+                    ...matchingDefaults,
                     ...session,
-                    contextTokens: session.contextTokens ?? defaults?.contextTokens,
-                    thinkingDefault: session.thinkingDefault ?? defaults?.thinkingDefault,
-                    thinkingLevels: session.thinkingLevels ?? defaults?.thinkingLevels,
-                    thinkingOptions: session.thinkingOptions ?? defaults?.thinkingOptions,
+                    contextTokens:
+                        session.contextTokens ?? matchingDefaults?.contextTokens,
+                    thinkingDefault:
+                        session.thinkingDefault ?? matchingDefaults?.thinkingDefault,
+                    thinkingLevels:
+                        session.thinkingLevels ?? matchingDefaults?.thinkingLevels,
+                    thinkingOptions:
+                        session.thinkingOptions ?? matchingDefaults?.thinkingOptions,
                     activeRunId:
                         session.activeRunId === null ? undefined : session.activeRunId,
                     currentRunId:

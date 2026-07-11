@@ -687,6 +687,8 @@ export function Chat() {
         ((wasConfirmed: boolean) => void) | undefined
     >(undefined);
     const pendingSessionPatchesReference = useRef(new Set<Promise<boolean>>());
+    const draftReference = useRef("");
+    const attachmentsReference = useRef<ChatSendAttachment[]>([]);
 
     const [selectedSessionKey, setSelectedSessionKey] = useState("");
     const [draft, setDraft] = useState("");
@@ -718,6 +720,9 @@ export function Chat() {
     );
     const [chatModelOptions, setChatModelOptions] = useState<ChatModelOption[]>([]);
     const [, setHistoryLoadVersion] = useState(0);
+
+    draftReference.current = draft;
+    attachmentsReference.current = attachments;
 
     const { data: sessions = [] } = useLiveQuery((query) =>
         query.from({ session: sessionsCollection })
@@ -1763,7 +1768,7 @@ export function Chat() {
             return;
         }
 
-        const text = draft.trim();
+        let text = draft.trim();
 
         if (isBlockedByInFlightSend(text)) {
             return;
@@ -1775,6 +1780,12 @@ export function Chat() {
 
         const patchResults = await Promise.all(pendingSessionPatchesReference.current);
         if (patchResults.includes(false)) {
+            return;
+        }
+
+        text = draftReference.current.trim();
+        const currentAttachments = attachmentsReference.current;
+        if (isBlockedByInFlightSend(text) || (!text && currentAttachments.length === 0)) {
             return;
         }
 
@@ -1797,7 +1808,7 @@ export function Chat() {
         }
 
         const messageText = text;
-        const sendAttachments = attachments;
+        const sendAttachments = currentAttachments;
         const isResetCommand = isResetSlashCommand(messageText);
         const shouldAppendOptimisticMessage = !isResetCommand;
         const userMessage: ChatHistoryMessage = {
