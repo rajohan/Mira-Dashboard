@@ -106,10 +106,11 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
     /** Performs disconnect. */
     const disconnect = () => {
         shouldReconnect = false;
-        ws?.close(1000, "Intentional disconnect");
+        const socket = ws;
         ws = undefined;
-
         rejectPendingRequests();
+        socket?.close(1000, "Intentional disconnect");
+        options.onClose?.();
     };
 
     /** Performs request. */

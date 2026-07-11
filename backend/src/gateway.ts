@@ -760,6 +760,12 @@ async function refreshSessions(
                 return transformSession({
                     ...matchingDefaults,
                     ...session,
+                    model: session.model?.trim()
+                        ? session.model
+                        : matchingDefaults?.model,
+                    modelProvider: session.modelProvider?.trim()
+                        ? session.modelProvider
+                        : matchingDefaults?.modelProvider,
                     contextTokens:
                         session.contextTokens ?? matchingDefaults?.contextTokens,
                     thinkingDefault:

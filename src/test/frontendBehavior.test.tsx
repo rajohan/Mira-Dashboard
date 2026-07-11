@@ -1166,10 +1166,13 @@ describe("Mira Dashboard frontend behavior", () => {
             const replacementPromise = client.request<{ current: boolean }>(
                 "replacement"
             );
+            const replacementRequest = JSON.parse(replacementSocket.sent.at(-1)!) as {
+                id: string;
+            };
             socket.close();
             replacementSocket.message({
                 type: "response",
-                id: "4",
+                id: replacementRequest.id,
                 isOk: true,
                 payload: { current: true },
             });
@@ -1179,6 +1182,7 @@ describe("Mira Dashboard frontend behavior", () => {
             client.disconnect();
             await expect(disconnectedPromise).rejects.toThrow("WebSocket disconnected");
             expect(client.isOpen()).toBe(false);
+            expect(events.filter((event) => event === "close")).toHaveLength(2);
         } finally {
             Object.defineProperty(globalThis, "WebSocket", {
                 configurable: true,

@@ -144,6 +144,8 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
                     },
                     {
                         key: "agent:main:hook:deploy",
+                        model: "",
+                        modelProvider: "",
                         sessionId: "sess3",
                         thinkingLevels: [],
                         thinkingOptions: [],
