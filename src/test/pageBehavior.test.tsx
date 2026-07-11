@@ -2591,14 +2591,6 @@ describe("Mira Dashboard pages", () => {
             ).toBeInTheDocument();
         });
 
-        await user.click(screen.getByRole("button", { name: "Compact" }));
-        await waitFor(() => {
-            expect(fetch).toHaveBeenCalledWith(
-                "/api/sessions/agent%3Amain%3Amain/action",
-                expect.objectContaining({ method: "POST" })
-            );
-        });
-
         await user.click(screen.getByRole("button", { name: "Thinking level: medium" }));
         await user.click(screen.getByRole("menuitem", { name: "high" }));
         await waitFor(() => {
@@ -2668,7 +2660,12 @@ describe("Mira Dashboard pages", () => {
         });
         const chatSendRequest = socket.sent
             .map((entry) => JSON.parse(entry) as { method?: string; params?: unknown })
-            .find((entry) => entry.method === "chat.send");
+            .find(
+                (entry) =>
+                    entry.method === "chat.send" &&
+                    (entry.params as { message?: string } | undefined)?.message ===
+                        "Ship it"
+            );
         expect(chatSendRequest?.params).toMatchObject({
             sessionKey: "agent:main:main",
             sessionId: "session-main",

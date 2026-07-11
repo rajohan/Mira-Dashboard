@@ -52,7 +52,6 @@ import { Card } from "../components/ui/Card";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { useAgentsStatus } from "../hooks/useAgents";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
-import { useSessionAction } from "../hooks/useSessions";
 import type { Session } from "../types/session";
 import { currentIsoString, timestampFromDateString } from "../utils/date";
 import { formatSize } from "../utils/format";
@@ -724,7 +723,6 @@ export function Chat() {
         query.from({ session: sessionsCollection })
     );
     const { data: agentsStatus } = useAgentsStatus();
-    const sessionAction = useSessionAction();
     const agents = agentsStatus?.agents || [];
 
     /** Performs update active streamilliseconds. */
@@ -1720,6 +1718,45 @@ export function Chat() {
         );
     };
 
+    /** Reconciles an optimistic stream identifier with the Gateway run id. */
+    const acknowledgeActiveStreamRun = (
+        sessionKey: string,
+        optimisticRunId: string,
+        acknowledgedRunId: string | undefined
+    ) => {
+        if (!acknowledgedRunId) return;
+
+        updateActiveStreams((wasPrevious) => {
+            let hasChanged = false;
+            const next = { ...wasPrevious };
+            for (const [key, stream] of Object.entries(wasPrevious)) {
+                if (
+                    !isSameSessionKey(stream.sessionKey, sessionKey) ||
+                    (stream.runId !== optimisticRunId &&
+                        !stream.aliases.includes(optimisticRunId))
+                ) {
+                    continue;
+                }
+
+                hasChanged = true;
+                next[key] = {
+                    ...stream,
+                    runId:
+                        stream.runId === optimisticRunId
+                            ? acknowledgedRunId
+                            : stream.runId,
+                    aliases: uniqueStrings([
+                        ...stream.aliases,
+                        optimisticRunId,
+                        acknowledgedRunId,
+                    ]),
+                };
+            }
+
+            return hasChanged ? next : wasPrevious;
+        });
+    };
+
     /** Responds to send events. */
     const handleSend = async () => {
         if (!selectedSessionKey) {
@@ -1844,40 +1881,12 @@ export function Chat() {
                 setMessages([]);
                 clearActiveStreamsForSession(selectedSessionKey);
             } else {
-                const acknowledgedRunId = result?.runId;
-                if (acknowledgedRunId && idempotencyKey) {
-                    updateActiveStreams((wasPrevious) => {
-                        let hasChanged = false;
-                        const next = { ...wasPrevious };
-                        for (const [key, stream] of Object.entries(wasPrevious)) {
-                            if (
-                                !isSameSessionKey(
-                                    stream.sessionKey,
-                                    selectedSessionKey
-                                ) ||
-                                (stream.runId !== idempotencyKey &&
-                                    !stream.aliases.includes(idempotencyKey))
-                            ) {
-                                continue;
-                            }
-
-                            hasChanged = true;
-                            next[key] = {
-                                ...stream,
-                                runId:
-                                    stream.runId === idempotencyKey
-                                        ? acknowledgedRunId
-                                        : stream.runId,
-                                aliases: uniqueStrings([
-                                    ...stream.aliases,
-                                    idempotencyKey,
-                                    acknowledgedRunId,
-                                ]),
-                            };
-                        }
-
-                        return hasChanged ? next : wasPrevious;
-                    });
+                if (idempotencyKey) {
+                    acknowledgeActiveStreamRun(
+                        selectedSessionKey,
+                        idempotencyKey,
+                        result?.runId
+                    );
                 }
             }
         } catch (error_) {
@@ -1906,7 +1915,6 @@ export function Chat() {
         !isRecording &&
         !isTranscribing &&
         !isPatchingSession &&
-        !sessionAction.isPending &&
         !blockedByInFlightSend &&
         (draftText || attachments.length > 0)
     );
@@ -1914,7 +1922,6 @@ export function Chat() {
         !isConnected ||
         isSending ||
         isPatchingSession ||
-        sessionAction.isPending ||
         selectedStreams.length > 0 ||
         isSessionActive(selectedSession)
     );
@@ -1952,13 +1959,34 @@ export function Chat() {
     const compactSelectedSession = async () => {
         if (!selectedSessionKey || isSessionControlsDisabled) return;
 
+        const idempotencyKey = `dashboard-compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        updateActiveStreams((wasPrevious) => ({
+            ...wasPrevious,
+            [selectedSessionKey]: {
+                sessionKey: selectedSessionKey,
+                runId: idempotencyKey,
+                aliases: [idempotencyKey],
+                text: "",
+                statusText: "Compacting context",
+                updatedAt: currentIsoString(),
+            },
+        }));
         setSendError(undefined);
         try {
-            await sessionAction.mutateAsync({
-                key: selectedSessionKey,
-                action: "compact",
-            });
+            const result = (await request("chat.send", {
+                sessionKey: selectedSessionKey,
+                sessionId:
+                    selectedSession?.id &&
+                    selectedSession.id !== "unknown" &&
+                    selectedSession.id !== selectedSessionKey
+                        ? selectedSession.id
+                        : undefined,
+                message: "/compact",
+                idempotencyKey,
+            })) as undefined | { runId?: string };
+            acknowledgeActiveStreamRun(selectedSessionKey, idempotencyKey, result?.runId);
         } catch (error_) {
+            clearOptimisticSendStream(selectedSessionKey, idempotencyKey);
             setSendError(chatErrorMessage(error_, "Failed to compact context"));
         }
     };
@@ -1976,7 +2004,9 @@ export function Chat() {
                         shouldShowThinking={showThinkingOutput}
                         shouldShowTools={showToolOutput}
                         sessionControlsDisabled={isSessionControlsDisabled}
-                        isCompacting={sessionAction.isPending}
+                        isCompacting={selectedStreams.some(([, stream]) =>
+                            stream.statusText?.toLowerCase().includes("compact")
+                        )}
                         onToggleThinking={() =>
                             setShowThinkingOutput((wasPrevious) => !wasPrevious)
                         }
