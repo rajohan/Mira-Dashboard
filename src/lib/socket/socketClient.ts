@@ -103,6 +103,9 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         });
 
         socket.addEventListener("error", () => {
+            if (ws !== socket) {
+                return;
+            }
             options.onError?.();
         });
     };

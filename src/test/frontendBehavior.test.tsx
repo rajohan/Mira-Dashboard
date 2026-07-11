@@ -1168,6 +1168,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 id: string;
             };
             socket.close();
+            socket.error();
             await expect(pendingPromise).rejects.toThrow("WebSocket disconnected");
             replacementSocket.message({
                 type: "response",
@@ -1176,6 +1177,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 payload: { current: true },
             });
             await expect(replacementPromise).resolves.toEqual({ current: true });
+            expect(events.filter((event) => event === "error")).toHaveLength(1);
 
             const disconnectedPromise = client.request("disconnect");
             client.disconnect();

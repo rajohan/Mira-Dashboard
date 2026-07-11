@@ -2016,7 +2016,6 @@ export function useChatRuntimeEvents({
             const shouldAliasOptimisticTerminal =
                 eventMatchesSelected &&
                 selectedStream &&
-                !streamForRun &&
                 payload.runId &&
                 TERMINAL_CHAT_STATES.has(payload.state || "") &&
                 isOptimisticRunId(selectedStream.runId);

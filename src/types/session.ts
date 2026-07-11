@@ -13,6 +13,7 @@ export interface AgentStatus {
 /** Represents session. */
 export interface Session {
     id: string;
+    sessionId?: string;
     key: string;
     type: string;
     agentType: string;
