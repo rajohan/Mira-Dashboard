@@ -327,11 +327,13 @@ export function Tasks() {
                                 clearLabel="Clear task search"
                             />
                             <FilterButtonGroup
+                                ariaLabel="Task assignee"
                                 options={ASSIGNMENT_FILTERS}
                                 value={filter}
                                 onChange={setFilter}
                             />
                             <FilterButtonGroup
+                                ariaLabel="Task automation"
                                 options={AUTOMATION_FILTERS}
                                 value={automationFilter}
                                 onChange={setAutomationFilter}

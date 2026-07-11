@@ -66,6 +66,7 @@ export function Moltbook() {
 
             {/* Tabs */}
             <FilterButtonGroup
+                ariaLabel="Moltbook content"
                 options={TAB_OPTIONS}
                 value={activeTab}
                 onChange={(v) => setActiveTab(v)}
@@ -76,6 +77,7 @@ export function Moltbook() {
             {activeTab === "feed" && (
                 <>
                     <FilterButtonGroup
+                        ariaLabel="Moltbook feed sort"
                         options={SORT_OPTIONS}
                         value={sort}
                         onChange={(v) => setSort(v)}
