@@ -11,7 +11,7 @@
     ],
     "scripts": {
         "dev": "bun --watch scripts/developmentFrontend.ts",
-        "build": "tsc -b && bun scripts/buildFrontend.ts",
+        "build": "bun node_modules/@typescript/native/bin/tsc -b && bun scripts/buildFrontend.ts",
         "lint": "eslint . --max-warnings=0",
         "lint:fix": "eslint . --fix",
         "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css}\" \"backend/**/*.{ts,js}\"",
