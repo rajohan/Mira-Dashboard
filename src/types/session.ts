@@ -33,6 +33,7 @@ export interface Session {
     runId?: string | undefined;
     activeRunId?: string | undefined;
     currentRunId?: string | undefined;
+    hasActiveRun?: boolean;
     isRunning?: boolean;
     running?: boolean;
     thinkingLevel?: string;
@@ -44,6 +45,7 @@ export interface Session {
     verboseLevel?: string;
     reasoningLevel?: string;
     elevatedLevel?: string;
+    totalTokensFresh?: boolean;
 }
 
 /** Represents agent info. */

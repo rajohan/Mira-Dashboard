@@ -652,6 +652,7 @@ export function isSessionActive(session: Session | undefined): boolean {
         session?.isRunning ||
         session?.running ||
         session?.status?.toLowerCase() === "running" ||
+        session?.hasActiveRun ||
         session?.activeRunId ||
         session?.currentRunId
     );
@@ -686,7 +687,7 @@ export function Chat() {
     const resetConfirmResolverReference = useRef<
         ((wasConfirmed: boolean) => void) | undefined
     >(undefined);
-    const pendingSessionPatchReference = useRef<Promise<boolean>>(Promise.resolve(true));
+    const pendingSessionPatchesReference = useRef(new Set<Promise<boolean>>());
 
     const [selectedSessionKey, setSelectedSessionKey] = useState("");
     const [draft, setDraft] = useState("");
@@ -704,7 +705,7 @@ export function Chat() {
     const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [isSending, setIsSending] = useState(false);
-    const [isPatchingSession, setIsPatchingSession] = useState(false);
+    const [pendingSessionPatchCount, setPendingSessionPatchCount] = useState(0);
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [previewItem, setPreviewItem] = useState<ChatPreviewItem | undefined>(
@@ -1735,7 +1736,8 @@ export function Chat() {
             return;
         }
 
-        if (!(await pendingSessionPatchReference.current)) {
+        const patchResults = await Promise.all(pendingSessionPatchesReference.current);
+        if (patchResults.includes(false)) {
             return;
         }
 
@@ -1897,12 +1899,14 @@ export function Chat() {
 
     const draftText = draft.trim();
     const blockedByInFlightSend = isBlockedByInFlightSend(draftText);
+    const isPatchingSession = pendingSessionPatchCount > 0;
     const canSend = Boolean(
         isConnected &&
         selectedSessionKey &&
         !isRecording &&
         !isTranscribing &&
         !isPatchingSession &&
+        !sessionAction.isPending &&
         !blockedByInFlightSend &&
         (draftText || attachments.length > 0)
     );
@@ -1922,7 +1926,7 @@ export function Chat() {
         }
 
         setSendError(undefined);
-        setIsPatchingSession(true);
+        setPendingSessionPatchCount((wasPrevious) => wasPrevious + 1);
         const pendingPatch = (async () => {
             try {
                 await request("sessions.patch", {
@@ -1934,11 +1938,14 @@ export function Chat() {
                 setSendError(chatErrorMessage(error_, "Failed to update chat settings"));
                 return false;
             } finally {
-                setIsPatchingSession(false);
+                setPendingSessionPatchCount((wasPrevious) =>
+                    Math.max(0, wasPrevious - 1)
+                );
             }
         })();
-        pendingSessionPatchReference.current = pendingPatch;
+        pendingSessionPatchesReference.current.add(pendingPatch);
         await pendingPatch;
+        pendingSessionPatchesReference.current.delete(pendingPatch);
     };
 
     /** Compacts the selected session through the existing session action API. */

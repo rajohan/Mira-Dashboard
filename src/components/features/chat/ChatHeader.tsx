@@ -93,9 +93,13 @@ export function chatThinkingOptions(session: Session | undefined): Option[] {
 }
 
 /** Returns the OpenClaw fast-mode choices. */
-export function chatSpeedOptions(): Option[] {
+export function chatSpeedOptions(session?: Session): Option[] {
+    const defaultLabel =
+        session?.effectiveFastMode === undefined
+            ? "Default"
+            : `Default (${session.effectiveFastMode ? "Fast" : "Standard"})`;
     return [
-        { label: "Default", value: "" },
+        { label: defaultLabel, value: "" },
         { label: "Fast", value: "on" },
         { label: "Standard", value: "off" },
         { label: "Auto", value: "auto" },
@@ -119,7 +123,9 @@ function formatHeaderStatus(selectedSession: Session | undefined): string {
     const usedTokens = Math.max(0, selectedSession.tokenCount || 0);
     const maxTokens = Math.max(0, selectedSession.maxTokens || 0);
     const contextText = maxTokens
-        ? `${formatTokens(usedTokens, maxTokens)} (${getTokenPercent(usedTokens, maxTokens)}%)`
+        ? selectedSession.totalTokensFresh === false
+            ? `~${formatTokens(usedTokens, maxTokens)} (stale)`
+            : `${formatTokens(usedTokens, maxTokens)} (${getTokenPercent(usedTokens, maxTokens)}%)`
         : "Unknown";
 
     return `${formatSessionType(selectedSession)} · ${selectedSession.model || "Unknown"} · Context: ${contextText} · ${formatDuration(selectedSession.updatedAt)}`;
@@ -145,7 +151,7 @@ export function ChatHeader({
     onCompact,
 }: ChatHeaderProperties) {
     const thinkingOptions = chatThinkingOptions(selectedSession);
-    const speedOptions = chatSpeedOptions();
+    const speedOptions = chatSpeedOptions(selectedSession);
 
     return (
         <div className="border-b border-primary-700 pb-2 sm:pb-3">

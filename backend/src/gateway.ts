@@ -83,6 +83,7 @@ interface Session {
     runId?: string | undefined;
     activeRunId?: string | undefined;
     currentRunId?: string | undefined;
+    hasActiveRun?: boolean;
     isRunning?: boolean;
     running?: boolean;
     thinkingLevel?: string;
@@ -94,6 +95,7 @@ interface Session {
     verboseLevel?: string;
     reasoningLevel?: string;
     elevatedLevel?: string;
+    totalTokensFresh?: boolean;
 }
 
 /** Represents gateway session. */
@@ -114,6 +116,7 @@ interface GatewaySession {
     runId?: string | undefined;
     activeRunId?: string | undefined;
     currentRunId?: string | undefined;
+    hasActiveRun?: boolean;
     isRunning?: boolean;
     running?: boolean;
     thinkingLevel?: string;
@@ -125,6 +128,7 @@ interface GatewaySession {
     verboseLevel?: string;
     reasoningLevel?: string;
     elevatedLevel?: string;
+    totalTokensFresh?: boolean;
 }
 
 /** Represents pending request. */
@@ -329,6 +333,7 @@ function transformSession(session: GatewaySession): Session {
         runId: session.runId,
         activeRunId: session.activeRunId,
         currentRunId: session.currentRunId,
+        hasActiveRun: session.hasActiveRun,
         isRunning: session.isRunning,
         running: session.running,
         thinkingLevel: session.thinkingLevel,
@@ -340,6 +345,7 @@ function transformSession(session: GatewaySession): Session {
         verboseLevel: session.verboseLevel,
         reasoningLevel: session.reasoningLevel,
         elevatedLevel: session.elevatedLevel,
+        totalTokensFresh: session.totalTokensFresh,
     };
 }
 

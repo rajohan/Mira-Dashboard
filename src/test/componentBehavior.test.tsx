@@ -600,6 +600,7 @@ describe("shared component helpers", () => {
                         createdAt: "2026-06-24T10:00:00.000Z",
                         displayLabel: "Main",
                         displayName: "Main",
+                        effectiveFastMode: true,
                         hookName: "",
                         id: "session-1",
                         key: "agent:main:main",
@@ -614,6 +615,7 @@ describe("shared component helpers", () => {
                             { id: "high", label: "high" },
                         ],
                         tokenCount: 525,
+                        totalTokensFresh: false,
                         type: "agent",
                         updatedAt: Date.now(),
                     }}
@@ -701,14 +703,14 @@ describe("shared component helpers", () => {
         await user.click(screen.getByRole("button", { name: "Compact" }));
         await user.click(screen.getByRole("button", { name: "Thinking level: high" }));
         await user.click(screen.getByRole("menuitem", { name: "low" }));
-        await user.click(screen.getByRole("button", { name: "Speed: Default" }));
+        await user.click(screen.getByRole("button", { name: "Speed: Default (Fast)" }));
         await user.click(screen.getByRole("menuitem", { name: "Fast" }));
         expect(onToggleThinking).toHaveBeenCalledTimes(1);
         expect(onToggleTools).toHaveBeenCalledTimes(1);
         expect(onCompact).toHaveBeenCalledTimes(1);
         expect(onSelectThinkingLevel).toHaveBeenCalledWith("low");
         expect(onSelectSpeed).toHaveBeenCalledWith("on");
-        expect(screen.getByText(/Context: 0.5k \/ 1k \(53%\)/)).toBeInTheDocument();
+        expect(screen.getByText(/Context: ~0.5k \/ 1k \(stale\)/)).toBeInTheDocument();
         expect(screen.getByText("Thinking / working")).toBeInTheDocument();
         expect(screen.getByText("Run")).toBeInTheDocument();
         expect(screen.getAllByText("Tool input")).toHaveLength(3);

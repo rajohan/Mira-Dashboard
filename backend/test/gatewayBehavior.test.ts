@@ -82,6 +82,7 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
                 sessions: [
                     {
                         activeRunId: "run-1",
+                        hasActiveRun: true,
                         channel: "main",
                         contextTokens: 20_000,
                         displayName: "Main",
@@ -101,6 +102,7 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
                         fastMode: "auto",
                         effectiveFastMode: true,
                         totalTokens: 42,
+                        totalTokensFresh: false,
                         updatedAt: "2026-06-25T00:00:00.000Z",
                     },
                     {
@@ -375,6 +377,8 @@ describe("gateway behavior", () => {
                     thinkingOptions: ["low", "medium"],
                     fastMode: "auto",
                     effectiveFastMode: true,
+                    hasActiveRun: true,
+                    totalTokensFresh: false,
                     type: "MAIN",
                 }),
                 expect.objectContaining({

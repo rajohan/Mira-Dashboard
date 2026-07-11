@@ -3148,6 +3148,11 @@ describe("Mira Dashboard pages", () => {
             >[0])
         ).toBe(true);
         expect(
+            isSessionActive({ hasActiveRun: true } as Parameters<
+                typeof isSessionActive
+            >[0])
+        ).toBe(true);
+        expect(
             isSessionActive({ currentRunId: "run-2" } as Parameters<
                 typeof isSessionActive
             >[0])
