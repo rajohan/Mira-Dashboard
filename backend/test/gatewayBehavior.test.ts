@@ -413,6 +413,14 @@ describe("gateway behavior", () => {
                 expect.objectContaining({
                     displayLabel: "Deploy",
                     hookName: "deploy",
+                    maxTokens: 32_000,
+                    model: "openai/gpt-test",
+                    modelProvider: "openai",
+                    thinkingDefault: "minimal",
+                    thinkingLevels: [
+                        { id: "minimal", label: "minimal" },
+                        { id: "high", label: "high" },
+                    ],
                     type: "HOOK",
                 }),
             ])
@@ -504,7 +512,7 @@ describe("gateway behavior", () => {
         await expect(stats.json()).resolves.toMatchObject({
             byModel: {
                 "anthropic/claude-test": 1,
-                "openai/gpt-test": 2,
+                "openai/gpt-test": 3,
             },
             byType: {
                 HOOK: 1,

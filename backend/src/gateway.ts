@@ -750,7 +750,8 @@ async function refreshSessions(
                         : entry.updatedAt;
                 const shouldApplyDefaults =
                     (!session.model || session.model === defaults?.model) &&
-                    (!defaults?.modelProvider ||
+                    (!session.modelProvider ||
+                        !defaults?.modelProvider ||
                         session.modelProvider === defaults.modelProvider);
                 const matchingDefaults = shouldApplyDefaults ? defaults : undefined;
                 return transformSession({
