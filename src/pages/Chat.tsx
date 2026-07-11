@@ -1953,6 +1953,12 @@ export function Chat() {
             try {
                 await request("sessions.patch", {
                     key: selectedSessionKey,
+                    sessionId:
+                        selectedSession?.id &&
+                        selectedSession.id !== "unknown" &&
+                        selectedSession.id !== selectedSessionKey
+                            ? selectedSession.id
+                            : undefined,
                     ...patch,
                 });
                 return true;

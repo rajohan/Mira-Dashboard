@@ -1157,8 +1157,13 @@ describe("Mira Dashboard frontend behavior", () => {
             expect(events).toContain("error");
 
             const pendingPromise = client.request("pending");
-            client.disconnect();
+            socket.close();
             await expect(pendingPromise).rejects.toThrow("WebSocket disconnected");
+
+            socket.open();
+            const disconnectedPromise = client.request("disconnect");
+            client.disconnect();
+            await expect(disconnectedPromise).rejects.toThrow("WebSocket disconnected");
             expect(client.isOpen()).toBe(false);
         } finally {
             Object.defineProperty(globalThis, "WebSocket", {

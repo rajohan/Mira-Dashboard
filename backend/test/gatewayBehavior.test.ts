@@ -83,6 +83,7 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
                     contextTokens: 32_000,
                     model: "openai/gpt-test",
                     modelProvider: "openai",
+                    fastMode: true,
                     thinkingDefault: "minimal",
                     thinkingLevels: [
                         { id: "minimal", label: "minimal" },
@@ -414,6 +415,7 @@ describe("gateway behavior", () => {
                 }),
                 expect.objectContaining({
                     displayLabel: "Deploy",
+                    effectiveFastMode: true,
                     hookName: "deploy",
                     maxTokens: 32_000,
                     model: "openai/gpt-test",
@@ -434,6 +436,10 @@ describe("gateway behavior", () => {
         expect(researcherSession).not.toHaveProperty("thinkingDefault");
         expect(researcherSession).not.toHaveProperty("thinkingLevels");
         expect(researcherSession).not.toHaveProperty("thinkingOptions");
+        const hookSession = sessionsMessage?.sessions?.find(
+            (session) => (session as { key?: string }).key === "agent:main:hook:deploy"
+        ) as Record<string, unknown> | undefined;
+        expect(hookSession).not.toHaveProperty("fastMode");
         const providerMismatchSession = sessionsMessage?.sessions?.find(
             (session) =>
                 (session as { key?: string }).key === "agent:other:subagent:same-model"

@@ -34,6 +34,15 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
     let requestId = 0;
     const pendingRequests = new Map<string, PendingRequest>();
 
+    /** Rejects requests that cannot complete after the active socket closes. */
+    const rejectPendingRequests = () => {
+        for (const pending of pendingRequests.values()) {
+            clearTimeout(pending.timeout);
+            pending.reject(new Error("WebSocket disconnected"));
+        }
+        pendingRequests.clear();
+    };
+
     /** Performs connect. */
     const connect = () => {
         if (
@@ -74,6 +83,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         });
 
         ws.addEventListener("close", () => {
+            rejectPendingRequests();
             options.onClose?.();
             if (shouldReconnect) {
                 setTimeout(() => {
@@ -95,11 +105,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         ws?.close(1000, "Intentional disconnect");
         ws = undefined;
 
-        for (const pending of pendingRequests.values()) {
-            clearTimeout(pending.timeout);
-            pending.reject(new Error("WebSocket disconnected"));
-        }
-        pendingRequests.clear();
+        rejectPendingRequests();
     };
 
     /** Performs request. */

@@ -767,6 +767,11 @@ async function refreshSessions(
                     thinkingOptions: session.thinkingOptions?.length
                         ? session.thinkingOptions
                         : matchingDefaults?.thinkingOptions,
+                    fastMode: session.fastMode,
+                    effectiveFastMode:
+                        session.effectiveFastMode ??
+                        matchingDefaults?.effectiveFastMode ??
+                        matchingDefaults?.fastMode,
                     activeRunId:
                         session.activeRunId === null ? undefined : session.activeRunId,
                     currentRunId:

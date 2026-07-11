@@ -2604,7 +2604,11 @@ describe("Mira Dashboard pages", () => {
                     (entry) => JSON.parse(entry) as { method?: string; params?: unknown }
                 )
                 .findLast((entry) => entry.method === "sessions.patch")?.params
-        ).toMatchObject({ key: "agent:main:main", thinkingLevel: "high" });
+        ).toMatchObject({
+            key: "agent:main:main",
+            sessionId: "session-main",
+            thinkingLevel: "high",
+        });
         await respondToSocketRequest(socket, "sessions.patch", {});
         await flushQueuedTimers();
 
@@ -2621,7 +2625,11 @@ describe("Mira Dashboard pages", () => {
                     (entry) => JSON.parse(entry) as { method?: string; params?: unknown }
                 )
                 .findLast((entry) => entry.method === "sessions.patch")?.params
-        ).toMatchObject({ fastMode: true, key: "agent:main:main" });
+        ).toMatchObject({
+            fastMode: true,
+            key: "agent:main:main",
+            sessionId: "session-main",
+        });
         await user.type(
             screen.getByPlaceholderText(
                 "Message, attach files, or use / commands (try /help)"
