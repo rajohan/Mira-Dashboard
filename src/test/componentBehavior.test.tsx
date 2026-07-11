@@ -7827,14 +7827,16 @@ describe("shared component helpers", () => {
         );
         expect(screen.getByText("No cron sessions found")).toBeInTheDocument();
 
-        rerender(
-            <SessionsTable
-                sessions={[session]}
-                onCompact={onCompact}
-                onReset={onReset}
-                onDelete={onDelete}
-            />
-        );
+        await act(async () => {
+            rerender(
+                <SessionsTable
+                    sessions={[session]}
+                    onCompact={onCompact}
+                    onReset={onReset}
+                    onDelete={onDelete}
+                />
+            );
+        });
         expect(screen.getAllByText("Main Session").length).toBeGreaterThan(0);
         await user.click(
             screen.getAllByRole("button", { name: /actions for main/i })[0]!
@@ -7852,25 +7854,29 @@ describe("shared component helpers", () => {
         expect(onReset).toHaveBeenCalledWith("agent:main:main");
         expect(onDelete).toHaveBeenCalledWith(session);
 
-        rerender(
-            <SessionsTable
-                sessions={[{ ...session, maxTokens: 0, tokenCount: 0 }]}
-                onCompact={onCompact}
-                onReset={onReset}
-                onDelete={onDelete}
-            />
-        );
+        await act(async () => {
+            rerender(
+                <SessionsTable
+                    sessions={[{ ...session, maxTokens: 0, tokenCount: 0 }]}
+                    onCompact={onCompact}
+                    onReset={onReset}
+                    onDelete={onDelete}
+                />
+            );
+        });
         expect(screen.getAllByText("Unknown")).toHaveLength(2);
         expect(screen.queryByText("0.0k / 200k")).not.toBeInTheDocument();
 
-        rerender(
-            <SessionsTable
-                sessions={[{ ...session, totalTokensFresh: false }]}
-                onCompact={onCompact}
-                onReset={onReset}
-                onDelete={onDelete}
-            />
-        );
+        await act(async () => {
+            rerender(
+                <SessionsTable
+                    sessions={[{ ...session, totalTokensFresh: false }]}
+                    onCompact={onCompact}
+                    onReset={onReset}
+                    onDelete={onDelete}
+                />
+            );
+        });
         expect(screen.getAllByText("~0.1k / 1k (stale)")).toHaveLength(2);
         expect(screen.queryByText("13%")).not.toBeInTheDocument();
         expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
