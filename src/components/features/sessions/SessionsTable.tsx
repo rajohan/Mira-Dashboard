@@ -93,7 +93,17 @@ export function SessionsTable({
             /** Renders token usage text and progress for the session row. */
             cell: (info) => {
                 const current = info.getValue() || 0;
-                const max = info.row.original.maxTokens || 200_000;
+                const max = info.row.original.maxTokens || 0;
+                if (!max) {
+                    return <span className="text-sm text-primary-300">Unknown</span>;
+                }
+                if (info.row.original.totalTokensFresh === false) {
+                    return (
+                        <span className="text-sm text-primary-300">
+                            ~{formatTokens(current, max)} (stale)
+                        </span>
+                    );
+                }
                 const percent = getTokenPercent(current, max);
                 return (
                     <div className="flex items-center gap-2">
@@ -151,8 +161,9 @@ export function SessionsTable({
                 {table.getRowModel().rows.map((row) => {
                     const session = row.original;
                     const current = session.tokenCount || 0;
-                    const max = session.maxTokens || 200_000;
-                    const percent = getTokenPercent(current, max);
+                    const max = session.maxTokens || 0;
+                    const isStale = session.totalTokensFresh === false;
+                    const percent = max && !isStale ? getTokenPercent(current, max) : 0;
                     const name = getSessionName(session);
 
                     return (
@@ -184,11 +195,28 @@ export function SessionsTable({
                                     Model: {session.model || "Unknown"}
                                 </div>
                                 <div>
-                                    <div className="mb-1 flex items-center justify-between gap-2">
-                                        <span>{formatTokens(current, max)}</span>
-                                        <span>{percent}%</span>
-                                    </div>
-                                    <ProgressBar percent={percent} size="sm" />
+                                    {max ? (
+                                        isStale ? (
+                                            <span>
+                                                ~{formatTokens(current, max)} (stale)
+                                            </span>
+                                        ) : (
+                                            <>
+                                                <div className="mb-1 flex items-center justify-between gap-2">
+                                                    <span>
+                                                        {formatTokens(current, max)}
+                                                    </span>
+                                                    <span>{percent}%</span>
+                                                </div>
+                                                <ProgressBar
+                                                    percent={percent}
+                                                    size="sm"
+                                                />
+                                            </>
+                                        )
+                                    ) : (
+                                        <span>Unknown</span>
+                                    )}
                                 </div>
                                 <div>Last active {formatDuration(session.updatedAt)}</div>
                             </div>

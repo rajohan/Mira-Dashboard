@@ -21,6 +21,7 @@ interface SelectProperties {
     className?: string;
     width?: string;
     menuWidth?: string;
+    disabled?: boolean;
 }
 
 /** Renders the select UI. */
@@ -34,6 +35,7 @@ export function Select({
     className,
     width = "min-w-45",
     menuWidth,
+    disabled = false,
 }: SelectProperties) {
     const selectedOption = options.find((opt) => opt.value === value);
     const selectedLabel = selectedOption?.label || placeholder;
@@ -46,10 +48,12 @@ export function Select({
         >
             <MenuButton
                 aria-label={buttonLabel}
+                disabled={disabled}
                 className={cn(
                     "flex h-9 items-center gap-2 rounded-lg border border-primary-700 bg-primary-800 px-3 text-sm transition-colors outline-none",
                     "hover:border-accent-500 hover:bg-primary-700 focus:outline-none data-focus:border-accent-500 data-focus:outline-none",
                     width,
+                    disabled && "cursor-not-allowed opacity-50",
                     className
                 )}
             >

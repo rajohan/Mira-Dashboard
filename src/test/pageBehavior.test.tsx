@@ -34,6 +34,7 @@ import { Agents } from "../pages/Agents";
 import {
     Chat,
     hasNewerAssistantMessageInHistory,
+    isSessionActive,
     nextHistoryBottomState,
     nextHistoryLoadSendError,
     readDeletedMessageKeys,
@@ -242,6 +243,11 @@ function parseRequestBody(init: RequestInit | undefined) {
 }
 
 function apiResponse(url: string, method: string, init?: RequestInit) {
+    if (method === "POST" && url === "/api/sessions/agent%3Amain%3Amain/action") {
+        expect(parseRequestBody(init)).toEqual({ action: "compact" });
+        return Response.json({ isSuccess: true });
+    }
+
     if (method === "POST" && url === "/api/docker/containers/abc123/action") {
         expect(parseRequestBody(init)).toEqual({ action: "restart" });
         return Response.json({ output: "container action output" });
@@ -2529,7 +2535,15 @@ describe("Mira Dashboard pages", () => {
                     agentType: "main",
                     displayLabel: "Main chat",
                     model: "codex",
+                    tokenCount: 525,
+                    maxTokens: 1000,
+                    thinkingDefault: "low",
                     thinkingLevel: "medium",
+                    thinkingLevels: [
+                        { id: "low", label: "low" },
+                        { id: "medium", label: "medium" },
+                        { id: "high", label: "high" },
+                    ],
                     verboseLevel: "compact",
                     updatedAt: "2026-06-24T08:00:00.000Z",
                 },
@@ -2573,8 +2587,61 @@ describe("Mira Dashboard pages", () => {
 
         await waitFor(() => {
             expect(
-                screen.getByText(/MAIN · codex · Thinking: medium/)
+                screen.getByText(/MAIN · codex · Context: 0.5k \/ 1k \(53%\)/)
             ).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: "Thinking level: medium" }));
+        await user.click(screen.getByRole("menuitem", { name: "high" }));
+        await waitFor(() => {
+            expect(
+                socket.sent.filter((entry) => entry.includes('"method":"sessions.patch"'))
+            ).toHaveLength(1);
+        });
+        expect(
+            socket.sent
+                .map(
+                    (entry) => JSON.parse(entry) as { method?: string; params?: unknown }
+                )
+                .findLast((entry) => entry.method === "sessions.patch")?.params
+        ).toMatchObject({
+            key: "agent:main:main",
+            sessionId: "session-main",
+            thinkingLevel: "high",
+        });
+        await respondToSocketRequest(socket, "sessions.patch", {});
+        await flushQueuedTimers();
+
+        await user.click(screen.getByRole("button", { name: "Speed: Default" }));
+        await user.click(screen.getByRole("menuitem", { name: "Fast" }));
+        await waitFor(() => {
+            expect(
+                socket.sent.filter((entry) => entry.includes('"method":"sessions.patch"'))
+            ).toHaveLength(2);
+        });
+        expect(
+            socket.sent
+                .map(
+                    (entry) => JSON.parse(entry) as { method?: string; params?: unknown }
+                )
+                .findLast((entry) => entry.method === "sessions.patch")?.params
+        ).toMatchObject({
+            fastMode: true,
+            key: "agent:main:main",
+            sessionId: "session-main",
+        });
+        await user.type(
+            screen.getByPlaceholderText(
+                "Message, attach files, or use / commands (try /help)"
+            ),
+            "Ship it"
+        );
+        expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+        await respondToSocketRequest(socket, "sessions.patch", {});
+        await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
         });
 
         const thinkingToggle = screen.getByRole("button", { name: "Thinking" });
@@ -2584,18 +2651,12 @@ describe("Mira Dashboard pages", () => {
         expect(thinkingToggle).toHaveAttribute("aria-pressed", "true");
         expect(toolsToggle).toHaveAttribute("aria-pressed", "true");
 
-        await user.type(
-            screen.getByPlaceholderText(
-                "Message, attach files, or use / commands (try /help)"
-            ),
-            "Ship it"
-        );
         await user.click(screen.getByRole("button", { name: "Send" }));
 
         await waitFor(() => {
             expect(
-                socket.sent.some((entry) => entry.includes('"method":"sessions.patch"'))
-            ).toBe(true);
+                socket.sent.filter((entry) => entry.includes('"method":"sessions.patch"'))
+            ).toHaveLength(3);
         });
         await respondToSocketRequest(socket, "sessions.patch", {});
         await flushQueuedTimers();
@@ -2607,7 +2668,12 @@ describe("Mira Dashboard pages", () => {
         });
         const chatSendRequest = socket.sent
             .map((entry) => JSON.parse(entry) as { method?: string; params?: unknown })
-            .find((entry) => entry.method === "chat.send");
+            .find(
+                (entry) =>
+                    entry.method === "chat.send" &&
+                    (entry.params as { message?: string } | undefined)?.message ===
+                        "Ship it"
+            );
         expect(chatSendRequest?.params).toMatchObject({
             sessionKey: "agent:main:main",
             sessionId: "session-main",
@@ -2646,7 +2712,7 @@ describe("Mira Dashboard pages", () => {
         await waitFor(() => {
             expect(
                 socket.sent.filter((entry) => entry.includes('"method":"sessions.patch"'))
-            ).toHaveLength(2);
+            ).toHaveLength(4);
         });
         await respondToSocketRequest(socket, "sessions.patch", {});
         await flushQueuedTimers();
@@ -3075,6 +3141,35 @@ describe("Mira Dashboard pages", () => {
         expect(nextHistoryBottomState(false, false, false)).toBe(false);
         expect(nextHistoryLoadSendError("old", true, "new")).toBe("old");
         expect(nextHistoryLoadSendError(undefined, false, "new")).toBe("new");
+        expect(isSessionActive(undefined)).toBe(false);
+        expect(
+            isSessionActive({ status: "running" } as Parameters<
+                typeof isSessionActive
+            >[0])
+        ).toBe(true);
+        expect(
+            isSessionActive({ activeRunId: "run-1" } as Parameters<
+                typeof isSessionActive
+            >[0])
+        ).toBe(true);
+        expect(
+            isSessionActive({ hasActiveRun: true } as Parameters<
+                typeof isSessionActive
+            >[0])
+        ).toBe(true);
+        expect(
+            isSessionActive({ currentRunId: "run-2" } as Parameters<
+                typeof isSessionActive
+            >[0])
+        ).toBe(true);
+        expect(
+            isSessionActive({
+                activeRunId: "stale-run",
+                currentRunId: "stale-current-run",
+                endedAt: "2026-06-24T08:01:00.000Z",
+                status: "running",
+            } as Parameters<typeof isSessionActive>[0])
+        ).toBe(false);
 
         const scheduled: string[] = [];
         scheduleBottomFollowWhenNeeded(true, () => {

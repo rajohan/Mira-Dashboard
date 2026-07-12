@@ -100,7 +100,11 @@ function isProvisionalRunId(streamSessionKey: string, runId: string): boolean {
 
 /** Returns whether a stream run id came from an optimistic dashboard send. */
 function isOptimisticRunId(runId: string): boolean {
-    return runId.startsWith("dashboard-chat-");
+    return runId.startsWith("dashboard-chat-") || runId.startsWith("dashboard-compact-");
+}
+
+function isCompactOptimisticRunId(runId: string): boolean {
+    return runId.startsWith("dashboard-compact-");
 }
 
 /** Returns whether an active stream belongs to a concrete run id. */
@@ -1085,7 +1089,8 @@ export function useChatRuntimeEvents({
                 const promotesProvisionalRun =
                     isStartsNewRun &&
                     existing &&
-                    isProvisionalRunId(streamSessionKey, existing.runId);
+                    (isProvisionalRunId(streamSessionKey, existing.runId) ||
+                        isCompactOptimisticRunId(existing.runId));
                 let text =
                     isStartsNewRun && !promotesProvisionalRun ? "" : existing?.text || "";
                 let message =
@@ -1108,6 +1113,10 @@ export function useChatRuntimeEvents({
                     ]),
                     text,
                     message,
+                    operation:
+                        isStartsNewRun && !promotesProvisionalRun
+                            ? undefined
+                            : existing?.operation,
                     statusText: undefined,
                     updatedAt: currentIsoString(),
                 };
@@ -1939,6 +1948,10 @@ export function useChatRuntimeEvents({
                                 : isStartsNewRun
                                   ? undefined
                                   : existing?.message,
+                            operation:
+                                isStartsNewRun && !promotesProvisionalRun
+                                    ? undefined
+                                    : existing?.operation,
                             statusText: nextStatusText,
                             updatedAt: currentIsoString(),
                         },
@@ -2102,6 +2115,10 @@ export function useChatRuntimeEvents({
                             runId
                         );
                         const isStartsNewRun = isNewRunForStream(existing, payload.runId);
+                        const promotesCompactRun =
+                            isStartsNewRun &&
+                            existing &&
+                            isCompactOptimisticRunId(existing.runId);
                         updateActiveStreamsReference.current((wasPrevious) => ({
                             ...wasPrevious,
                             [streamSessionKey]: {
@@ -2114,6 +2131,10 @@ export function useChatRuntimeEvents({
                                 ]),
                                 text: textToApply,
                                 message,
+                                operation:
+                                    isStartsNewRun && !promotesCompactRun
+                                        ? undefined
+                                        : existing?.operation,
                                 updatedAt: currentIsoString(),
                             },
                         }));

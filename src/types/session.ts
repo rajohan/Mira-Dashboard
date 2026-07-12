@@ -13,12 +13,14 @@ export interface AgentStatus {
 /** Represents session. */
 export interface Session {
     id: string;
+    sessionId?: string;
     key: string;
     type: string;
     agentType: string;
     hookName: string;
     kind: string;
     model: string;
+    modelProvider?: string;
     tokenCount: number;
     maxTokens: number;
     createdAt: string | undefined;
@@ -33,13 +35,19 @@ export interface Session {
     runId?: string | undefined;
     activeRunId?: string | undefined;
     currentRunId?: string | undefined;
+    hasActiveRun?: boolean;
     isRunning?: boolean;
     running?: boolean;
     thinkingLevel?: string;
-    fastMode?: boolean;
+    thinkingLevels?: Array<{ id: string; label: string }>;
+    thinkingOptions?: string[];
+    thinkingDefault?: string;
+    fastMode?: boolean | "auto";
+    effectiveFastMode?: boolean | "auto";
     verboseLevel?: string;
     reasoningLevel?: string;
     elevatedLevel?: string;
+    totalTokensFresh?: boolean;
 }
 
 /** Represents agent info. */

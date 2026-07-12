@@ -14,7 +14,7 @@ import type { ReactNode, RefObject } from "react";
 import { TaskHistorySidebar } from "../components/features/agents/TaskHistorySidebar";
 import { AttachmentPreviewModal } from "../components/features/chat/AttachmentPreviewModal";
 import { ChatComposer } from "../components/features/chat/ChatComposer";
-import { ChatHeader } from "../components/features/chat/ChatHeader";
+import { ChatHeader, chatThinkingOptions } from "../components/features/chat/ChatHeader";
 import {
     ChatMarkdown,
     childrenToText,
@@ -111,6 +111,7 @@ import { ExpandableCard, ReadOnlyField } from "../components/ui/ExpandableCard";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { getProgressColor, ProgressBar } from "../components/ui/ProgressBar";
 import { useFileExplorerState } from "../hooks/useFileExplorerState";
+import { reportKeys } from "../hooks/useReports";
 import { useSessionActions } from "../hooks/useSessionActions";
 import {
     activeStreamRenderableText,
@@ -122,6 +123,7 @@ import {
     rollbackFailedOptimisticMessage,
     visibleActiveStreamContent,
 } from "../pages/Chat";
+import type { Session } from "../types/session";
 
 const originalFetch = fetch;
 const originalAnimationFrame = {
@@ -537,6 +539,9 @@ describe("shared component helpers", () => {
         const onToggleTools = jest.fn();
         const onSelectAgent = jest.fn();
         const onSelectSession = jest.fn();
+        const onSelectThinkingLevel = jest.fn();
+        const onSelectSpeed = jest.fn();
+        const onCompact = jest.fn();
 
         const { rerender } = render(
             <AttachmentPreviewModal
@@ -597,6 +602,7 @@ describe("shared component helpers", () => {
                         createdAt: "2026-06-24T10:00:00.000Z",
                         displayLabel: "Main",
                         displayName: "Main",
+                        effectiveFastMode: "auto",
                         hookName: "",
                         id: "session-1",
                         key: "agent:main:main",
@@ -605,7 +611,13 @@ describe("shared component helpers", () => {
                         maxTokens: 1000,
                         model: "codex",
                         thinkingLevel: "high",
-                        tokenCount: 5,
+                        thinkingDefault: "low",
+                        thinkingLevels: [
+                            { id: "low", label: "" },
+                            { id: "high", label: "high" },
+                        ],
+                        tokenCount: 525,
+                        totalTokensFresh: false,
                         type: "agent",
                         updatedAt: Date.now(),
                     }}
@@ -615,10 +627,15 @@ describe("shared component helpers", () => {
                     sessionOptions={[{ label: "Main session", value: "agent:main:main" }]}
                     shouldShowThinking={true}
                     shouldShowTools={false}
+                    sessionControlsDisabled={false}
+                    isCompacting={false}
                     onToggleThinking={onToggleThinking}
                     onToggleTools={onToggleTools}
                     onSelectAgent={onSelectAgent}
                     onSelectSession={onSelectSession}
+                    onSelectThinkingLevel={onSelectThinkingLevel}
+                    onSelectSpeed={onSelectSpeed}
+                    onCompact={onCompact}
                 />
                 <ChatMessageDetails
                     visibility={{ shouldShowThinking: true, shouldShowTools: true }}
@@ -683,11 +700,19 @@ describe("shared component helpers", () => {
             </>
         );
 
-        await user.click(screen.getByRole("button", { name: /thinking/i }));
-        await user.click(screen.getByRole("button", { name: /tools/i }));
+        await user.click(screen.getByRole("button", { name: "Thinking" }));
+        await user.click(screen.getByRole("button", { name: "Tools" }));
+        await user.click(screen.getByRole("button", { name: "Compact" }));
+        await user.click(screen.getByRole("button", { name: "Thinking level: high" }));
+        await user.click(screen.getByRole("menuitem", { name: "low" }));
+        await user.click(screen.getByRole("button", { name: "Speed: Default (Auto)" }));
+        await user.click(screen.getByRole("menuitem", { name: "Fast" }));
         expect(onToggleThinking).toHaveBeenCalledTimes(1);
         expect(onToggleTools).toHaveBeenCalledTimes(1);
-        expect(screen.getByText(/Thinking: high/)).toBeInTheDocument();
+        expect(onCompact).toHaveBeenCalledTimes(1);
+        expect(onSelectThinkingLevel).toHaveBeenCalledWith("low");
+        expect(onSelectSpeed).toHaveBeenCalledWith("on");
+        expect(screen.getByText(/Context: ~0.5k \/ 1k \(stale\)/)).toBeInTheDocument();
         expect(screen.getByText("Thinking / working")).toBeInTheDocument();
         expect(screen.getByText("Run")).toBeInTheDocument();
         expect(screen.getAllByText("Tool input")).toHaveLength(3);
@@ -853,6 +878,33 @@ describe("shared component helpers", () => {
         });
         await expect(blocked("/stop")).resolves.toBe(true);
         expect(setSendError).toHaveBeenCalledWith("/stop cannot include attachments.");
+
+        await expect(
+            runSlashCommand("/compact", [
+                {
+                    contentBase64: "b",
+                    file: new File(["b"], "late.txt", { type: "text/plain" }),
+                    fileName: "late.txt",
+                    id: "late",
+                    kind: "text",
+                    mimeType: "text/plain",
+                    sizeBytes: 1,
+                },
+            ])
+        ).resolves.toBe(true);
+        expect(setSendError).toHaveBeenCalledWith("/compact cannot include attachments.");
+
+        expect(
+            chatThinkingOptions({
+                thinkingLevel: "low",
+                thinkingOptions: ["off", "on", "Think Hard", "Think Harder"],
+            } as Session)
+        ).toEqual([
+            { label: "Default", value: "" },
+            { label: "off", value: "off" },
+            { label: "on", value: "low" },
+            { label: "Think Harder", value: "medium" },
+        ]);
     });
 
     it("normalizes chat runtime event helper output", () => {
@@ -7086,6 +7138,65 @@ describe("shared component helpers", () => {
         queryClient.clear();
     });
 
+    it("keeps cached report metrics visible when a refresh fails", async () => {
+        const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
+            const url = String(input);
+            if (url === "/api/reports") {
+                throw new Error("Reports refresh failed");
+            }
+
+            throw new Error(`Unexpected reports overview fetch: ${url}`);
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const queryClient = createQueryClient();
+        queryClient.setQueryData(reportKeys.list(), {
+            items: [
+                {
+                    bodyMd: "Heartbeat looks good.",
+                    createdAt: "2026-06-24T10:05:00.000Z",
+                    dedupeKey: "heartbeat:ok",
+                    id: 1,
+                    metadata: {},
+                    occurredAt: "2026-06-24T10:05:00.000Z",
+                    source: "openclaw",
+                    sourceJobId: "heartbeat",
+                    status: "ok",
+                    summary: "Heartbeat looks good.",
+                    title: "Cached heartbeat report",
+                    type: "heartbeat",
+                    updatedAt: "2026-06-24T10:05:00.000Z",
+                },
+            ],
+        });
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ReportsOverviewCard />
+            </QueryClientProvider>
+        );
+
+        await act(async () => {
+            await queryClient.invalidateQueries({ queryKey: reportKeys.list() });
+        });
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/reports",
+                expect.objectContaining({ credentials: "include" })
+            );
+            expect(queryClient.getQueryState(reportKeys.list())?.status).toBe("error");
+        });
+
+        expect(screen.queryByText("Reports unavailable.")).not.toBeInTheDocument();
+        expect(screen.getByText(/Cached heartbeat report/)).toBeInTheDocument();
+
+        queryClient.clear();
+    });
+
     it("drives dashboard cards, file tree/config branches, and session action hook", async () => {
         const user = userEvent.setup();
         const fetchMock = jest.fn(
@@ -7804,14 +7915,16 @@ describe("shared component helpers", () => {
         );
         expect(screen.getByText("No cron sessions found")).toBeInTheDocument();
 
-        rerender(
-            <SessionsTable
-                sessions={[session]}
-                onCompact={onCompact}
-                onReset={onReset}
-                onDelete={onDelete}
-            />
-        );
+        await act(async () => {
+            rerender(
+                <SessionsTable
+                    sessions={[session]}
+                    onCompact={onCompact}
+                    onReset={onReset}
+                    onDelete={onDelete}
+                />
+            );
+        });
         expect(screen.getAllByText("Main Session").length).toBeGreaterThan(0);
         await user.click(
             screen.getAllByRole("button", { name: /actions for main/i })[0]!
@@ -7828,6 +7941,33 @@ describe("shared component helpers", () => {
         expect(onCompact).toHaveBeenCalledWith("agent:main:main");
         expect(onReset).toHaveBeenCalledWith("agent:main:main");
         expect(onDelete).toHaveBeenCalledWith(session);
+
+        await act(async () => {
+            rerender(
+                <SessionsTable
+                    sessions={[{ ...session, maxTokens: 0, tokenCount: 0 }]}
+                    onCompact={onCompact}
+                    onReset={onReset}
+                    onDelete={onDelete}
+                />
+            );
+        });
+        expect(screen.getAllByText("Unknown")).toHaveLength(2);
+        expect(screen.queryByText("0.0k / 200k")).not.toBeInTheDocument();
+
+        await act(async () => {
+            rerender(
+                <SessionsTable
+                    sessions={[{ ...session, totalTokensFresh: false }]}
+                    onCompact={onCompact}
+                    onReset={onReset}
+                    onDelete={onDelete}
+                />
+            );
+        });
+        expect(screen.getAllByText("~0.1k / 1k (stale)")).toHaveLength(2);
+        expect(screen.queryByText("13%")).not.toBeInTheDocument();
+        expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     });
 
     it("drives cron job details controls and edit form", async () => {
