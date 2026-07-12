@@ -7578,14 +7578,14 @@ describe("shared component helpers", () => {
         );
 
         await user.click(screen.getByRole("button", { name: "Skills" }));
-        await user.type(screen.getByPlaceholderText("Search skills..."), "browser");
+        await user.type(screen.getByPlaceholderText("Search skills..."), " browser ");
         await user.click(screen.getByRole("button", { name: "disabled" }));
         await user.click(screen.getByRole("button", { name: "Built-in 1 skills" }));
         await user.click(screen.getAllByRole("switch").at(-1)!);
         expect(onToggleSkill).toHaveBeenCalledWith("browser", true);
 
         await user.click(screen.getByRole("button", { name: "Agent access control" }));
-        await user.type(screen.getByPlaceholderText("Filter tools..."), "web search");
+        await user.type(screen.getByPlaceholderText("Filter tools..."), " web search ");
         await user.click(screen.getByText("Researcher"));
         await user.click(screen.getAllByRole("switch").at(-1)!);
         await user.click(screen.getByRole("button", { name: "Save access control" }));

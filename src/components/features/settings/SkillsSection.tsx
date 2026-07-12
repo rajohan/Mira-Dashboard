@@ -29,15 +29,16 @@ export function SkillsSection({ skills, onToggle }: SkillsSectionProperties) {
     const [statusFilter, setStatusFilter] = useState<SkillStatusFilter>("all");
     const [sourceFilter, setSourceFilter] = useState<SkillSourceFilter>("all");
     const [search, setSearch] = useState("");
+    const normalizedSearch = search.trim().toLowerCase();
 
     const filteredSkills = skills.filter((skill) => {
         if (statusFilter === "enabled" && !skill.enabled) return false;
         if (statusFilter === "disabled" && skill.enabled) return false;
         if (sourceFilter !== "all" && skill.source !== sourceFilter) return false;
-        if (search.trim()) {
+        if (normalizedSearch) {
             return `${skill.name} ${skill.description || ""}`
                 .toLowerCase()
-                .includes(search.toLowerCase());
+                .includes(normalizedSearch);
         }
         return true;
     });
