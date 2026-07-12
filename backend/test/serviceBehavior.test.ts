@@ -1860,7 +1860,10 @@ fi
             .mockResolvedValueOnce({
                 code: 0,
                 stderr: "",
-                stdout: "Codex was updated. Restarting…",
+                stdout: [
+                    "5h limit: loading",
+                    "Weekly limit: 65% left (resets Monday)",
+                ].join("\n"),
             })
             .mockResolvedValue({
                 code: 0,

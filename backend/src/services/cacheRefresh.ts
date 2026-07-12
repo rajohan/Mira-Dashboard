@@ -1612,7 +1612,16 @@ function parseOpenAiQuotaOutput(output: string) {
             line.toLowerCase().includes(prefix.toLowerCase())
         );
         if (index === -1) return;
-        const joined = `${lines[index]} ${lines[index + 1] || ""} ${lines[index + 2] || ""}`;
+        const followingLines = lines.slice(index + 1, index + 3);
+        const nextLimitIndex = followingLines.findIndex((line) =>
+            /\blimit:/iu.test(line)
+        );
+        const joined = [
+            lines[index],
+            ...(nextLimitIndex === -1
+                ? followingLines
+                : followingLines.slice(0, nextLimitIndex)),
+        ].join(" ");
         const leftMatch = joined.match(/(\d+)%\s*left/iu);
         if (!leftMatch) return;
         const resetMatch = joined.match(/\(resets\s*([^)]+)\)/iu);
@@ -1621,9 +1630,10 @@ function parseOpenAiQuotaOutput(output: string) {
             resetAt: resetMatch?.[1]?.trim() || undefined,
         };
     }
+    const hasFiveHourLimit = /5h limit:/iu.test(output);
     const fiveHour = parseLimit("5h limit:");
     const weekly = parseLimit("weekly limit:");
-    if (!weekly) {
+    if (!weekly || (hasFiveHourLimit && !fiveHour)) {
         return { status: "error", note: "Could not parse Codex /status output" };
     }
     return {
