@@ -414,93 +414,99 @@ export function ChatComposer({
                                 : "Choose a session first"
                         }
                         rows={4}
-                        className="min-h-24 resize-y pr-14 pb-16 text-base sm:min-h-32 sm:text-sm"
+                        className="min-h-24 resize-y rounded-b-none border-b-0 text-base sm:min-h-32 sm:text-sm"
                     />
-                    <div className="absolute bottom-2 left-2 flex items-center gap-1">
-                        <Popover className="relative">
-                            <PopoverButton
-                                aria-label="Model and response settings"
-                                className="flex items-center rounded p-1.5 text-primary-400 outline-none hover:bg-primary-700 hover:text-primary-100 data-focus:bg-primary-700 data-focus:text-primary-100"
-                            >
-                                <Settings2 className="size-4" />
-                            </PopoverButton>
-                            <PopoverPanel
-                                anchor={{ to: "top start", gap: 8 }}
-                                className="z-50 w-72 space-y-3 rounded-lg border border-primary-600 bg-primary-800 p-3 text-sm shadow-xl outline-none"
-                            >
-                                <Select
-                                    ariaLabel="Model"
-                                    width="w-full"
-                                    value={selectedSession?.model || ""}
-                                    disabled={sessionControlsDisabled}
-                                    onChange={(value) => onSelectModel?.(value)}
-                                    options={modelSelectOptions}
-                                />
-                                <Select
-                                    ariaLabel="Thinking"
-                                    width="w-full"
-                                    value={selectedSession?.thinkingLevel || ""}
-                                    disabled={sessionControlsDisabled}
-                                    onChange={(value) => onSelectThinkingLevel?.(value)}
-                                    options={chatThinkingOptions(selectedSession)}
-                                />
-                                <Select
-                                    ariaLabel="Speed"
-                                    width="w-full"
-                                    value={selectedChatSpeed(selectedSession)}
-                                    disabled={sessionControlsDisabled}
-                                    onChange={(value) => onSelectSpeed?.(value)}
-                                    options={chatSpeedOptions(selectedSession)}
-                                />
-                                <Button
-                                    variant="primary"
-                                    size="sm"
-                                    className="w-full justify-center"
-                                    disabled={sessionControlsDisabled || isCompacting}
-                                    onClick={() => onCompact?.()}
+                    <div className="flex min-h-11 items-center justify-between rounded-b-lg border border-t-0 border-primary-600 bg-primary-700 px-2 py-1">
+                        <div className="flex items-center gap-1">
+                            <Popover className="relative">
+                                <PopoverButton
+                                    aria-label="Model and response settings"
+                                    className="flex items-center rounded p-1.5 text-primary-400 outline-none hover:bg-primary-700 hover:text-primary-100 data-focus:bg-primary-700 data-focus:text-primary-100"
                                 >
-                                    <Minimize2 className="size-4" />
-                                    {isCompacting ? "Compacting…" : "Compact context"}
-                                </Button>
-                            </PopoverPanel>
-                        </Popover>
+                                    <Settings2 className="size-4" />
+                                </PopoverButton>
+                                <PopoverPanel
+                                    anchor={{ to: "top start", gap: 8 }}
+                                    className="z-50 w-72 space-y-3 rounded-lg border border-primary-600 bg-primary-800 p-3 text-sm shadow-xl outline-none"
+                                >
+                                    <Select
+                                        ariaLabel="Model"
+                                        width="w-full"
+                                        value={selectedSession?.model || ""}
+                                        disabled={sessionControlsDisabled}
+                                        onChange={(value) => onSelectModel?.(value)}
+                                        options={modelSelectOptions}
+                                    />
+                                    <Select
+                                        ariaLabel="Thinking"
+                                        width="w-full"
+                                        value={selectedSession?.thinkingLevel || ""}
+                                        disabled={sessionControlsDisabled}
+                                        onChange={(value) =>
+                                            onSelectThinkingLevel?.(value)
+                                        }
+                                        options={chatThinkingOptions(selectedSession)}
+                                    />
+                                    <Select
+                                        ariaLabel="Speed"
+                                        width="w-full"
+                                        value={selectedChatSpeed(selectedSession)}
+                                        disabled={sessionControlsDisabled}
+                                        onChange={(value) => onSelectSpeed?.(value)}
+                                        options={chatSpeedOptions(selectedSession)}
+                                    />
+                                    <Button
+                                        variant="primary"
+                                        size="sm"
+                                        className="w-full justify-center"
+                                        disabled={sessionControlsDisabled || isCompacting}
+                                        onClick={() => onCompact?.()}
+                                    >
+                                        <Minimize2 className="size-4" />
+                                        {isCompacting ? "Compacting…" : "Compact context"}
+                                    </Button>
+                                </PopoverPanel>
+                            </Popover>
+                            <button
+                                type="button"
+                                aria-pressed={shouldShowThinking}
+                                onClick={() => onToggleThinking?.()}
+                                className={
+                                    shouldShowThinking
+                                        ? "rounded p-1.5 text-accent-300"
+                                        : "rounded p-1.5 text-primary-500"
+                                }
+                                title="Show thinking"
+                            >
+                                <Brain className="size-4" />
+                            </button>
+                            <button
+                                type="button"
+                                aria-pressed={shouldShowTools}
+                                onClick={() => onToggleTools?.()}
+                                className={
+                                    shouldShowTools
+                                        ? "rounded p-1.5 text-accent-300"
+                                        : "rounded p-1.5 text-primary-500"
+                                }
+                                title="Show tools"
+                            >
+                                <Wrench className="size-4" />
+                            </button>
+                        </div>
                         <button
                             type="button"
-                            aria-pressed={shouldShowThinking}
-                            onClick={() => onToggleThinking?.()}
-                            className={
-                                shouldShowThinking
-                                    ? "rounded p-1.5 text-accent-300"
-                                    : "rounded p-1.5 text-primary-500"
+                            onClick={() =>
+                                setShowEmojiPicker((wasPrevious) => !wasPrevious)
                             }
-                            title="Show thinking"
+                            disabled={!isConnected || !selectedSessionKey || isSending}
+                            className="rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+                            title="Insert emoji"
+                            aria-label="Insert emoji"
                         >
-                            <Brain className="size-4" />
-                        </button>
-                        <button
-                            type="button"
-                            aria-pressed={shouldShowTools}
-                            onClick={() => onToggleTools?.()}
-                            className={
-                                shouldShowTools
-                                    ? "rounded p-1.5 text-accent-300"
-                                    : "rounded p-1.5 text-primary-500"
-                            }
-                            title="Show tools"
-                        >
-                            <Wrench className="size-4" />
+                            <Smile className="size-5" />
                         </button>
                     </div>
-                    <button
-                        type="button"
-                        onClick={() => setShowEmojiPicker((wasPrevious) => !wasPrevious)}
-                        disabled={!isConnected || !selectedSessionKey || isSending}
-                        className="absolute right-2 bottom-2 rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
-                        title="Insert emoji"
-                        aria-label="Insert emoji"
-                    >
-                        <Smile className="size-5" />
-                    </button>
                 </div>
                 <div className="grid grid-cols-3 gap-2 md:flex md:flex-col">
                     <Button
