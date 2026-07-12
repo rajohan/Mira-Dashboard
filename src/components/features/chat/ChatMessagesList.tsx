@@ -448,6 +448,11 @@ export function ChatMessagesList({
                         const shouldRenderPrimaryText = Boolean(
                             row.message.text && !isToolResult
                         );
+                        const hasPrimaryMessageContent = Boolean(
+                            shouldRenderPrimaryText ||
+                            row.message.images?.length ||
+                            row.message.attachments?.length
+                        );
 
                         return (
                             <div
@@ -598,10 +603,12 @@ export function ChatMessagesList({
                                             }
                                             onPreview={onPreview}
                                         />
-                                        <ChatMessageDetails
-                                            message={row.message}
-                                            visibility={visibility}
-                                        />
+                                        {hasPrimaryMessageContent ? undefined : (
+                                            <ChatMessageDetails
+                                                message={row.message}
+                                                visibility={visibility}
+                                            />
+                                        )}
                                         {row.message.timestamp ? (
                                             <div className="mt-1.5 text-[11px] opacity-60">
                                                 {formatDate(row.message.timestamp)}
@@ -609,6 +616,14 @@ export function ChatMessagesList({
                                         ) : undefined}
                                     </div>
                                 </div>
+                                {!isUser && hasPrimaryMessageContent ? (
+                                    <div className="max-w-[94%] min-w-0 sm:max-w-[86%] lg:max-w-[80%]">
+                                        <ChatMessageDetails
+                                            message={row.message}
+                                            visibility={visibility}
+                                        />
+                                    </div>
+                                ) : undefined}
                             </div>
                         );
                     })}

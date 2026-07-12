@@ -6790,6 +6790,7 @@ describe("shared component helpers", () => {
                                 role: "assistant",
                                 text: "answer",
                                 timestamp: "2026-06-24T10:01:00.000Z",
+                                toolCalls: [{ id: "tool-1", name: "exec" }],
                             },
                         },
                         {
@@ -6817,6 +6818,10 @@ describe("shared component helpers", () => {
                 />
             </>
         );
+
+        expect(
+            screen.getByText("Exec").closest("[class*='border-amber']")
+        ).not.toContainElement(screen.getByText("answer"));
 
         fireEvent.scroll(messagesContainerReference.current!);
         await user.click(screen.getByRole("button", { name: /follow/i }));
