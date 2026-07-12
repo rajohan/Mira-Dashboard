@@ -3705,6 +3705,13 @@ fi
                     },
                 },
             });
+            expect(
+                (
+                    run.output.logRotation as {
+                        result: { stdout?: string };
+                    }
+                ).result.stdout
+            ).toHaveLength(100_000);
             const row = database
                 .prepare(
                     "SELECT data_json FROM cache_entries WHERE key = 'log_rotation.state'"
