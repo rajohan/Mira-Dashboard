@@ -6,6 +6,7 @@ import {
 } from "../../../hooks/useLogRotation";
 import {
     type ScheduledJob,
+    ScheduledJobRunError,
     useRunScheduledJobNow,
     useScheduledJobs,
 } from "../../../hooks/useScheduledJobs";
@@ -78,7 +79,9 @@ export function LogRotationCard() {
     const scheduledJobs = useScheduledJobs();
     const isDryRun = useRunLogRotationDryRun();
     const realRun = useRunScheduledJobNow();
-    const lastAction = realRun.data || isDryRun.data;
+    const failedRealRun =
+        realRun.error instanceof ScheduledJobRunError ? realRun.error.run : undefined;
+    const lastAction = realRun.data || failedRealRun || isDryRun.data;
     const lastRun = status.data?.lastRun;
     const logRotationJob = scheduledJobs.data?.find(
         (job) => job.id === "ops.log-rotation"
@@ -162,7 +165,8 @@ export function LogRotationCard() {
             {lastAction ? (
                 <div className="mt-4 border-t border-primary-700 pt-3">
                     <div className="mb-2 text-xs font-semibold tracking-wide text-primary-400 uppercase">
-                        Last {realRun.data ? "real run" : "dry-run"} output
+                        Last {realRun.data || failedRealRun ? "real run" : "dry-run"}{" "}
+                        output
                     </div>
                     <pre className="max-h-52 overflow-auto rounded-lg bg-black/40 p-3 text-xs text-primary-100">
                         {JSON.stringify(lastAction, undefined, 2)}

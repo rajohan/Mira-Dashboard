@@ -7336,15 +7336,16 @@ describe("shared component helpers", () => {
 
                 if (url === "/api/jobs/ops.log-rotation/run") {
                     return Response.json({
-                        isOk: true,
+                        isOk: false,
                         run: {
                             id: 2,
                             jobId: "ops.log-rotation",
-                            status: "success",
+                            status: "failed",
                             triggerType: "manual",
                             startedAt: "2026-06-24T10:00:00.000Z",
                             finishedAt: "2026-06-24T10:01:00.000Z",
-                            output: {},
+                            message: "Log file changed during rotation",
+                            output: { errors: ["Jackett log changed"] },
                         },
                     });
                 }
@@ -7568,6 +7569,12 @@ describe("shared component helpers", () => {
                 "/api/jobs/ops.log-rotation/run",
                 expect.objectContaining({ method: "POST" })
             );
+            expect(
+                screen.getByText("Log file changed during rotation", { exact: false })
+            ).toBeInTheDocument();
+            expect(
+                screen.getByText("Jackett log changed", { exact: false })
+            ).toBeInTheDocument();
         });
 
         unmount();
