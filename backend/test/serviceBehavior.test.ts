@@ -1925,6 +1925,33 @@ fi
         runProcessSpy.mockReset().mockResolvedValue({
             code: 0,
             stderr: "",
+            stdout: [
+                "Account: raymond@example.com",
+                "Model: gpt-5.6-sol (max)",
+                "Weekly limit: 65% left (resets Monday)",
+                "",
+            ].join("\n"),
+        });
+        await refreshCacheProducer("quotas.summary", undefined, { force: true });
+        expect(runProcessSpy).toHaveBeenCalledTimes(1);
+        const weeklyOnlyQuota = JSON.parse(
+            (
+                database
+                    .prepare(
+                        "SELECT data_json FROM cache_entries WHERE key = 'quotas.summary'"
+                    )
+                    .get() as { data_json: string }
+            ).data_json
+        );
+        expect(weeklyOnlyQuota.openai).toMatchObject({
+            percentUsed: 35,
+            weeklyLeftPercent: 65,
+        });
+        expect(weeklyOnlyQuota.openai.fiveHourLeftPercent).toBeUndefined();
+
+        runProcessSpy.mockReset().mockResolvedValue({
+            code: 0,
+            stderr: "",
             stdout: "Codex update screen without quota limits",
         });
         await refreshCacheProducer("quotas.summary", undefined, { force: true });

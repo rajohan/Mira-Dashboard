@@ -1623,18 +1623,18 @@ function parseOpenAiQuotaOutput(output: string) {
     }
     const fiveHour = parseLimit("5h limit:");
     const weekly = parseLimit("weekly limit:");
-    if (!fiveHour || !weekly) {
+    if (!weekly) {
         return { status: "error", note: "Could not parse Codex /status output" };
     }
     return {
         account: cleanPanelText(output.match(/Account:\s*(.+)/iu)?.[1]),
         model: cleanPanelText(output.match(/Model:\s*(.+?)(?:\s*\(|$)/iu)?.[1]),
-        fiveHourLeftPercent: fiveHour.leftPercent,
+        fiveHourLeftPercent: fiveHour?.leftPercent,
         weeklyLeftPercent: weekly.leftPercent,
-        fiveHourReset: fiveHour.resetAt,
+        fiveHourReset: fiveHour?.resetAt,
         weeklyReset: weekly.resetAt,
         percentUsed: Math.max(
-            100 - Math.min(fiveHour.leftPercent, weekly.leftPercent),
+            100 - Math.min(fiveHour?.leftPercent ?? 100, weekly.leftPercent),
             0
         ),
         resetAt: weekly.resetAt,

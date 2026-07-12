@@ -97,7 +97,7 @@ function getNotificationPayload(
     if (provider === "openai" && !hasQuotaStatus(quotas.openai)) {
         return {
             title: `OpenAI / Codex usage high (${bucket}%)`,
-            description: `${quotas.openai.percentUsed}% used (5h ${quotas.openai.fiveHourLeftPercent}% left · weekly ${quotas.openai.weeklyLeftPercent}% left)`,
+            description: `${quotas.openai.percentUsed}% used (5h ${quotas.openai.fiveHourLeftPercent === undefined ? "unlimited" : `${quotas.openai.fiveHourLeftPercent}% left`} · weekly ${quotas.openai.weeklyLeftPercent}% left)`,
         };
     }
     return;

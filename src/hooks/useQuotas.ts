@@ -35,7 +35,7 @@ export interface ElevenLabsQuota {
 export interface OpenAiQuota {
     account: string | undefined;
     model: string | undefined;
-    fiveHourLeftPercent: number;
+    fiveHourLeftPercent: number | undefined;
     weeklyLeftPercent: number;
     fiveHourReset: string | undefined;
     weeklyReset: string | undefined;
