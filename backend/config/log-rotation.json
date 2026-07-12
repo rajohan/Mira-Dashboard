@@ -3,6 +3,9 @@
   "approvedRoots": [
     "/opt/docker/data"
   ],
+  "excludePaths": [
+    "/opt/docker/data/jackett/Jackett/log.txt"
+  ],
   "defaults": {
     "shouldCompress": true,
     "skipEmpty": true,

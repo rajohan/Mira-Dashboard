@@ -7312,10 +7312,7 @@ describe("shared component helpers", () => {
                     });
                 }
 
-                if (
-                    url === "/api/ops/log-rotation/dry-run" ||
-                    url === "/api/ops/log-rotation/run"
-                ) {
+                if (url === "/api/ops/log-rotation/dry-run") {
                     return Response.json({
                         isSuccess: true,
                         result: {
@@ -7326,7 +7323,7 @@ describe("shared component helpers", () => {
                             errors: [],
                             finishedAt: "2026-06-24T10:01:00.000Z",
                             groups: [],
-                            isDryRun: url.endsWith("dry-run"),
+                            isDryRun: true,
                             isOk: true,
                             rotatedFiles: 0,
                             skippedFiles: 0,
@@ -7334,6 +7331,21 @@ describe("shared component helpers", () => {
                             warnings: [],
                         },
                         stderr: "",
+                    });
+                }
+
+                if (url === "/api/jobs/ops.log-rotation/run") {
+                    return Response.json({
+                        isOk: true,
+                        run: {
+                            id: 2,
+                            jobId: "ops.log-rotation",
+                            status: "success",
+                            triggerType: "manual",
+                            startedAt: "2026-06-24T10:00:00.000Z",
+                            finishedAt: "2026-06-24T10:01:00.000Z",
+                            output: {},
+                        },
                     });
                 }
 
@@ -7553,7 +7565,7 @@ describe("shared component helpers", () => {
                 screen.getAllByText(/unavailable|rate limited|unknown/).length
             ).toBeGreaterThan(0);
             expect(fetchMock).toHaveBeenCalledWith(
-                "/api/ops/log-rotation/run",
+                "/api/jobs/ops.log-rotation/run",
                 expect.objectContaining({ method: "POST" })
             );
         });
