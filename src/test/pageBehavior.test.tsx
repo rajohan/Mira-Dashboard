@@ -2591,8 +2591,8 @@ describe("Mira Dashboard pages", () => {
             ).toBeInTheDocument();
         });
 
-        await user.click(screen.getByRole("button", { name: "Thinking level: medium" }));
-        await user.click(screen.getByRole("menuitem", { name: "high" }));
+        await user.click(screen.getByLabelText("Model and response settings"));
+        await user.selectOptions(screen.getByLabelText("Thinking"), "high");
         await waitFor(() => {
             expect(
                 socket.sent.filter((entry) => entry.includes('"method":"sessions.patch"'))
@@ -2612,8 +2612,7 @@ describe("Mira Dashboard pages", () => {
         await respondToSocketRequest(socket, "sessions.patch", {});
         await flushQueuedTimers();
 
-        await user.click(screen.getByRole("button", { name: "Speed: Default" }));
-        await user.click(screen.getByRole("menuitem", { name: "Fast" }));
+        await user.selectOptions(screen.getByLabelText("Speed"), "on");
         await waitFor(() => {
             expect(
                 socket.sent.filter((entry) => entry.includes('"method":"sessions.patch"'))
@@ -2644,8 +2643,8 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
         });
 
-        const thinkingToggle = screen.getByRole("button", { name: "Thinking" });
-        const toolsToggle = screen.getByRole("button", { name: "Tools" });
+        const thinkingToggle = screen.getByRole("button", { name: "Show thinking" });
+        const toolsToggle = screen.getByRole("button", { name: "Show tools" });
         await user.click(thinkingToggle);
         await user.click(toolsToggle);
         expect(thinkingToggle).toHaveAttribute("aria-pressed", "true");

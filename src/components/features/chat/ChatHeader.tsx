@@ -1,9 +1,6 @@
-import { Brain, type LucideIcon, Minimize2, Wrench } from "lucide-react";
-
 import type { Session } from "../../../types/session";
 import { formatDuration, formatTokens, getTokenPercent } from "../../../utils/format";
 import { formatSessionType } from "../../../utils/sessionUtilities";
-import { Button } from "../../ui/Button";
 import { Select } from "../../ui/Select";
 
 /** Represents option. */
@@ -13,44 +10,6 @@ interface Option {
     description?: string;
 }
 
-/** Provides props for diagnostic toggle. */
-interface DiagnosticToggleProperties {
-    active: boolean;
-    icon: LucideIcon;
-    label: string;
-    title: string;
-    onClick: () => void;
-}
-
-/** Renders the diagnostic toggle UI. */
-function DiagnosticToggle({
-    active,
-    icon: Icon,
-    label,
-    title,
-    onClick,
-}: DiagnosticToggleProperties) {
-    return (
-        <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            aria-pressed={active}
-            className={[
-                "gap-1.5 rounded-full border px-2.5 py-1.5 text-xs",
-                active
-                    ? "border-accent-400/40 bg-accent-500/20 text-accent-100 shadow-[0_0_0_1px_rgba(99,102,241,0.12)] hover:bg-accent-500/25"
-                    : "border-primary-700/80 bg-primary-900/40 text-primary-300 hover:border-primary-600 hover:bg-primary-800/80 hover:text-primary-100",
-            ].join(" ")}
-            onClick={onClick}
-            title={title}
-        >
-            <Icon className="size-3.5" aria-hidden="true" />
-            <span>{label}</span>
-        </Button>
-    );
-}
-
 /** Provides props for chat header. */
 interface ChatHeaderProperties {
     selectedSession: Session | undefined;
@@ -58,17 +17,17 @@ interface ChatHeaderProperties {
     selectedSessionKey: string;
     sessionOptions: Option[];
     agentOptions: Option[];
-    shouldShowThinking: boolean;
-    shouldShowTools: boolean;
-    sessionControlsDisabled: boolean;
-    isCompacting: boolean;
-    onToggleThinking: () => void;
-    onToggleTools: () => void;
     onSelectAgent: (agentId: string) => void;
     onSelectSession: (sessionKey: string) => void;
-    onSelectThinkingLevel: (thinkingLevel: string) => void;
-    onSelectSpeed: (speed: string) => void;
-    onCompact: () => void;
+    shouldShowThinking?: boolean;
+    shouldShowTools?: boolean;
+    sessionControlsDisabled?: boolean;
+    isCompacting?: boolean;
+    onToggleThinking?: () => void;
+    onToggleTools?: () => void;
+    onSelectThinkingLevel?: (value: string) => void;
+    onSelectSpeed?: (value: string) => void;
+    onCompact?: () => void;
 }
 
 /** Normalizes legacy thinking labels to OpenClaw's canonical level ids. */
@@ -179,21 +138,9 @@ export function ChatHeader({
     selectedSessionKey,
     sessionOptions,
     agentOptions,
-    shouldShowThinking,
-    shouldShowTools,
-    sessionControlsDisabled,
-    isCompacting,
-    onToggleThinking,
-    onToggleTools,
     onSelectAgent,
     onSelectSession,
-    onSelectThinkingLevel,
-    onSelectSpeed,
-    onCompact,
 }: ChatHeaderProperties) {
-    const thinkingOptions = chatThinkingOptions(selectedSession);
-    const speedOptions = chatSpeedOptions(selectedSession);
-
     return (
         <div className="border-b border-primary-700 pb-2 sm:pb-3">
             <div className="flex flex-col gap-2 sm:gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -202,47 +149,15 @@ export function ChatHeader({
                         <p className="text-xs wrap-break-word text-primary-400 sm:truncate sm:text-sm">
                             {formatHeaderStatus(selectedSession)}
                         </p>
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="rounded-full border border-primary-700/80 px-2 py-1 text-xs"
-                            disabled={
-                                !selectedSession ||
-                                sessionControlsDisabled ||
-                                isCompacting
-                            }
-                            onClick={onCompact}
-                            title="Compact the selected session context"
-                        >
-                            <Minimize2 className="size-3.5" aria-hidden="true" />
-                            {isCompacting ? "Compacting…" : "Compact"}
-                        </Button>
                     </div>
                 </div>
                 <div className="flex w-full flex-col gap-2 lg:ml-auto lg:w-auto lg:flex-row lg:items-center lg:justify-end">
-                    <div className="flex shrink-0 flex-wrap justify-start gap-1.5 lg:justify-end">
-                        <DiagnosticToggle
-                            active={shouldShowThinking}
-                            icon={Brain}
-                            label="Thinking"
-                            title="Toggle assistant thinking / working output"
-                            onClick={onToggleThinking}
-                        />
-                        <DiagnosticToggle
-                            active={shouldShowTools}
-                            icon={Wrench}
-                            label="Tools"
-                            title="Toggle tool calls and tool result output"
-                            onClick={onToggleTools}
-                        />
-                    </div>
                     <div
                         className={[
                             "grid w-full gap-2",
                             agentOptions.length > 0
-                                ? "sm:grid-cols-2 xl:grid-cols-4 lg:w-[min(54rem,78vw)] xl:w-228"
-                                : "sm:grid-cols-3 lg:w-[min(42rem,60vw)] xl:w-168",
+                                ? "sm:grid-cols-2 lg:w-[min(36rem,54vw)]"
+                                : "lg:w-[min(24rem,40vw)]",
                         ].join(" ")}
                     >
                         {agentOptions.length > 0 ? (
@@ -264,24 +179,6 @@ export function ChatHeader({
                             ariaLabel="Session"
                             width="w-full"
                             menuWidth="max-w-[min(42rem,calc(100vw-2rem))]"
-                        />
-                        <Select
-                            value={selectedSession?.thinkingLevel || ""}
-                            onChange={onSelectThinkingLevel}
-                            options={thinkingOptions}
-                            placeholder="Thinking"
-                            ariaLabel="Thinking level"
-                            width="w-full"
-                            disabled={!selectedSession || sessionControlsDisabled}
-                        />
-                        <Select
-                            value={selectedChatSpeed(selectedSession)}
-                            onChange={onSelectSpeed}
-                            options={speedOptions}
-                            placeholder="Speed"
-                            ariaLabel="Speed"
-                            width="w-full"
-                            disabled={!selectedSession || sessionControlsDisabled}
                         />
                     </div>
                 </div>

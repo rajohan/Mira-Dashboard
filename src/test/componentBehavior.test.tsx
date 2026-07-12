@@ -532,8 +532,7 @@ describe("shared component helpers", () => {
         );
     });
 
-    it("renders chat attachment previews, header toggles, and diagnostic details", async () => {
-        const user = userEvent.setup();
+    it("renders chat attachment previews, header status, and diagnostic details", () => {
         const onClose = jest.fn();
         const onToggleThinking = jest.fn();
         const onToggleTools = jest.fn();
@@ -700,18 +699,11 @@ describe("shared component helpers", () => {
             </>
         );
 
-        await user.click(screen.getByRole("button", { name: "Thinking" }));
-        await user.click(screen.getByRole("button", { name: "Tools" }));
-        await user.click(screen.getByRole("button", { name: "Compact" }));
-        await user.click(screen.getByRole("button", { name: "Thinking level: high" }));
-        await user.click(screen.getByRole("menuitem", { name: "low" }));
-        await user.click(screen.getByRole("button", { name: "Speed: Default (Auto)" }));
-        await user.click(screen.getByRole("menuitem", { name: "Fast" }));
-        expect(onToggleThinking).toHaveBeenCalledTimes(1);
-        expect(onToggleTools).toHaveBeenCalledTimes(1);
-        expect(onCompact).toHaveBeenCalledTimes(1);
-        expect(onSelectThinkingLevel).toHaveBeenCalledWith("low");
-        expect(onSelectSpeed).toHaveBeenCalledWith("on");
+        expect(onToggleThinking).not.toHaveBeenCalled();
+        expect(onToggleTools).not.toHaveBeenCalled();
+        expect(onCompact).not.toHaveBeenCalled();
+        expect(onSelectThinkingLevel).not.toHaveBeenCalled();
+        expect(onSelectSpeed).not.toHaveBeenCalled();
         expect(screen.getByText(/Context: ~0.5k \/ 1k \(stale\)/)).toBeInTheDocument();
         expect(screen.getByText("Thinking / working")).toBeInTheDocument();
         expect(screen.getByText("Run")).toBeInTheDocument();

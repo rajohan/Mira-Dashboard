@@ -1,4 +1,14 @@
-import { Mic, Paperclip, Send, Smile, Square, X } from "lucide-react";
+import {
+    Brain,
+    Mic,
+    Paperclip,
+    Send,
+    Settings2,
+    Smile,
+    Square,
+    Wrench,
+    X,
+} from "lucide-react";
 import {
     type KeyboardEvent as ReactKeyboardEvent,
     type RefObject,
@@ -10,8 +20,10 @@ import {
 import { formatSize } from "../../../utils/format";
 import { Button } from "../../ui/Button";
 import { Textarea } from "../../ui/Textarea";
+import type { Session } from "../../../types/session";
+import { chatSpeedOptions, chatThinkingOptions, selectedChatSpeed } from "./ChatHeader";
 import type { ChatPreviewItem, ChatSendAttachment } from "./chatTypes";
-import { base64ToText } from "./chatUtilities";
+import { base64ToText, type ChatModelOption } from "./chatUtilities";
 import type { SlashCommandSuggestion } from "./slashCommands";
 
 const CHAT_EMOJIS = [
@@ -67,6 +79,12 @@ interface ChatComposerProperties {
     isSending: boolean;
     isTranscribing: boolean;
     selectedSessionKey: string;
+    selectedSession?: Session;
+    modelOptions?: ChatModelOption[];
+    shouldShowThinking?: boolean;
+    shouldShowTools?: boolean;
+    sessionControlsDisabled?: boolean;
+    isCompacting?: boolean;
     slashCommandSuggestions: SlashCommandSuggestion[];
     onApplySlashSuggestion: (value: string) => void;
     onAttachFiles: (files: FileList | undefined) => void;
@@ -75,6 +93,12 @@ interface ChatComposerProperties {
     onRemoveAttachment: (attachmentId: string) => void;
     onSend: () => void;
     onToggleRecording: () => void;
+    onToggleThinking?: () => void;
+    onToggleTools?: () => void;
+    onSelectThinkingLevel?: (value: string) => void;
+    onSelectSpeed?: (value: string) => void;
+    onSelectModel?: (value: string) => void;
+    onCompact?: () => void;
 }
 
 /** Renders the chat composer UI. */
@@ -88,6 +112,12 @@ export function ChatComposer({
     isSending,
     isTranscribing,
     selectedSessionKey,
+    selectedSession,
+    modelOptions = [],
+    shouldShowThinking,
+    shouldShowTools,
+    sessionControlsDisabled,
+    isCompacting,
     slashCommandSuggestions,
     onApplySlashSuggestion,
     onAttachFiles,
@@ -96,6 +126,12 @@ export function ChatComposer({
     onRemoveAttachment,
     onSend,
     onToggleRecording,
+    onToggleThinking,
+    onToggleTools,
+    onSelectThinkingLevel,
+    onSelectSpeed,
+    onSelectModel,
+    onCompact,
 }: ChatComposerProperties) {
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const [slashSuggestionsDismissed, setSlashSuggestionsDismissed] = useState(false);
@@ -361,8 +397,130 @@ export function ChatComposer({
                                 : "Choose a session first"
                         }
                         rows={4}
-                        className="min-h-24 resize-y pr-12 text-base sm:min-h-32 sm:text-sm"
+                        className="min-h-24 resize-y pr-12 pb-12 text-base sm:min-h-32 sm:text-sm"
                     />
+                    <div className="absolute bottom-2 left-2 flex items-center gap-1">
+                        <details className="group relative">
+                            <summary
+                                aria-label="Model and response settings"
+                                className="flex cursor-pointer list-none items-center rounded p-1.5 text-primary-400 hover:bg-primary-700 hover:text-primary-100"
+                            >
+                                <Settings2 className="size-4" />
+                            </summary>
+                            <div className="absolute bottom-full left-0 z-50 mb-2 w-64 space-y-3 rounded-lg border border-primary-600 bg-primary-800 p-3 text-sm shadow-xl">
+                                <label className="block text-xs text-primary-400">
+                                    Model
+                                    <select
+                                        className="mt-1 w-full rounded bg-primary-700 p-2 text-primary-100"
+                                        value={selectedSession?.model || ""}
+                                        disabled={sessionControlsDisabled}
+                                        onChange={(event) =>
+                                            onSelectModel?.(event.target.value)
+                                        }
+                                    >
+                                        {modelOptions.length === 0 ? (
+                                            <option value={selectedSession?.model || ""}>
+                                                {selectedSession?.model || "Default"}
+                                            </option>
+                                        ) : (
+                                            modelOptions.map((option) => {
+                                                const value =
+                                                    option.id ||
+                                                    option.name ||
+                                                    option.label ||
+                                                    "";
+                                                return (
+                                                    <option key={value} value={value}>
+                                                        {option.label ||
+                                                            option.name ||
+                                                            option.id}
+                                                    </option>
+                                                );
+                                            })
+                                        )}
+                                    </select>
+                                </label>
+                                <label className="block text-xs text-primary-400">
+                                    Thinking
+                                    <select
+                                        className="mt-1 w-full rounded bg-primary-700 p-2 text-primary-100"
+                                        value={selectedSession?.thinkingLevel || ""}
+                                        disabled={sessionControlsDisabled}
+                                        onChange={(event) =>
+                                            onSelectThinkingLevel?.(event.target.value)
+                                        }
+                                    >
+                                        {chatThinkingOptions(selectedSession).map(
+                                            (option) => (
+                                                <option
+                                                    key={option.value}
+                                                    value={option.value}
+                                                >
+                                                    {option.label}
+                                                </option>
+                                            )
+                                        )}
+                                    </select>
+                                </label>
+                                <label className="block text-xs text-primary-400">
+                                    Speed
+                                    <select
+                                        className="mt-1 w-full rounded bg-primary-700 p-2 text-primary-100"
+                                        value={selectedChatSpeed(selectedSession)}
+                                        disabled={sessionControlsDisabled}
+                                        onChange={(event) =>
+                                            onSelectSpeed?.(event.target.value)
+                                        }
+                                    >
+                                        {chatSpeedOptions(selectedSession).map(
+                                            (option) => (
+                                                <option
+                                                    key={option.value}
+                                                    value={option.value}
+                                                >
+                                                    {option.label}
+                                                </option>
+                                            )
+                                        )}
+                                    </select>
+                                </label>
+                                <button
+                                    type="button"
+                                    className="w-full rounded bg-primary-700 p-2 text-left text-primary-100 disabled:opacity-50"
+                                    disabled={sessionControlsDisabled || isCompacting}
+                                    onClick={() => onCompact?.()}
+                                >
+                                    {isCompacting ? "Compacting…" : "Compact context"}
+                                </button>
+                            </div>
+                        </details>
+                        <button
+                            type="button"
+                            aria-pressed={shouldShowThinking}
+                            onClick={() => onToggleThinking?.()}
+                            className={
+                                shouldShowThinking
+                                    ? "rounded p-1.5 text-accent-300"
+                                    : "rounded p-1.5 text-primary-500"
+                            }
+                            title="Show thinking"
+                        >
+                            <Brain className="size-4" />
+                        </button>
+                        <button
+                            type="button"
+                            aria-pressed={shouldShowTools}
+                            onClick={() => onToggleTools?.()}
+                            className={
+                                shouldShowTools
+                                    ? "rounded p-1.5 text-accent-300"
+                                    : "rounded p-1.5 text-primary-500"
+                            }
+                            title="Show tools"
+                        >
+                            <Wrench className="size-4" />
+                        </button>
+                    </div>
                     <button
                         type="button"
                         onClick={() => setShowEmojiPicker((wasPrevious) => !wasPrevious)}
