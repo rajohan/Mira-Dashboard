@@ -71,6 +71,7 @@ export function AgentAccessSection({
     const [activeAgentId, setActiveAgentId] = useState(agents[0]?.id || "");
     const [toolFilter, setToolFilter] = useState("");
     const [draftAgents, setDraftAgents] = useState(() => agents);
+    const normalizedToolFilter = toolFilter.trim().toLowerCase();
 
     useEffect(() => {
         setDraftAgents(agents);
@@ -86,7 +87,7 @@ export function AgentAccessSection({
     const filteredTools = TOOL_CATALOG.filter((tool) =>
         `${tool.label} ${tool.description} ${tool.id}`
             .toLowerCase()
-            .includes(toolFilter.toLowerCase())
+            .includes(normalizedToolFilter)
     );
 
     /** Performs update agent. */

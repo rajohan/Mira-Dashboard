@@ -327,6 +327,7 @@ export function Logs() {
         void loadLogContent();
     }, [selectedFile, lineCount, availableLogFiles.length]);
 
+    const normalizedSearch = search.trim().toLowerCase();
     const filteredLogs = orderedLogs.filter((log) => {
         const level = typeof log.level === "string" ? log.level.toLowerCase() : undefined;
         if (level && !levelFilter.has(level)) {
@@ -334,7 +335,7 @@ export function Logs() {
         }
 
         const raw = typeof log.raw === "string" ? log.raw : String(log.msg || "");
-        return !(search && !raw.toLowerCase().includes(search.toLowerCase()));
+        return !(normalizedSearch && !raw.toLowerCase().includes(normalizedSearch));
     });
 
     /** Performs toggle level. */

@@ -2435,7 +2435,7 @@ describe("Mira Dashboard pages", () => {
 
             const searchInput = screen.getByPlaceholderText("Search logs...");
 
-            await user.type(searchInput, "failed");
+            await user.type(searchInput, " failed ");
             await waitFor(() => {
                 expect(screen.getByText(/1 of 2 entries/)).toBeInTheDocument();
             });
