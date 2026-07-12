@@ -50,9 +50,12 @@ interface ScheduledJobsResponse {
 
 /** Preserves a failed scheduled run so callers can surface its recorded output. */
 export class ScheduledJobRunError extends Error {
-    constructor(readonly run: ScheduledJobRun) {
+    readonly run: ScheduledJobRun;
+
+    constructor(run: ScheduledJobRun) {
         super(run.message || "Scheduled job run failed");
         this.name = "ScheduledJobRunError";
+        this.run = run;
     }
 }
 
@@ -120,7 +123,7 @@ export function useRunScheduledJobNow() {
             }
             return result;
         },
-        onSuccess: (_data, variables) => {
+        onSettled: (_data, _error, variables) => {
             void queryClient.invalidateQueries({ queryKey: scheduledJobKeys.list() });
             void queryClient.invalidateQueries({
                 queryKey: scheduledJobKeys.runs(variables.id),

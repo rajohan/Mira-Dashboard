@@ -3637,6 +3637,12 @@ fi
 
             expect(run.status).toBe("failed");
             expect(run.message).toContain("sudo denied");
+            expect(run.output).toMatchObject({
+                logRotation: {
+                    result: { isOk: false },
+                    stderr: "sudo denied",
+                },
+            });
             const row = database
                 .prepare(
                     "SELECT data_json FROM cache_entries WHERE key = 'log_rotation.state'"
@@ -3691,6 +3697,14 @@ fi
             expect(run.message).toContain("policy rejected group");
             expect(run.message).toContain("matched no files");
             expect(run.message).toContain("docker");
+            expect(run.output).toMatchObject({
+                logRotation: {
+                    result: {
+                        errors: [{ message: "policy rejected group" }],
+                        isOk: false,
+                    },
+                },
+            });
             const row = database
                 .prepare(
                     "SELECT data_json FROM cache_entries WHERE key = 'log_rotation.state'"

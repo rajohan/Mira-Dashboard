@@ -9,6 +9,7 @@ import {
     getScheduledJob,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
+    ScheduledJobActionError,
     upsertScheduledJob,
 } from "./scheduledJobs.ts";
 
@@ -1955,7 +1956,7 @@ export function registerLogRotationScheduledJobs(): void {
         if (logRotation.result?.isOk !== true) {
             const message = logRotationFailureMessage(logRotation);
             persistLogRotationScheduledFailure(logRotation, message);
-            throw new Error(message);
+            throw new ScheduledJobActionError(message, { logRotation });
         }
         return { logRotation };
     });
