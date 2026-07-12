@@ -1,4 +1,16 @@
-import { Mic, Paperclip, Send, Smile, Square, X } from "lucide-react";
+import { Popover, PopoverButton, PopoverPanel } from "@headlessui/react";
+import {
+    Brain,
+    Mic,
+    Minimize2,
+    Paperclip,
+    Send,
+    Settings2,
+    Smile,
+    Square,
+    Wrench,
+    X,
+} from "lucide-react";
 import {
     type KeyboardEvent as ReactKeyboardEvent,
     type RefObject,
@@ -7,11 +19,19 @@ import {
     useState,
 } from "react";
 
+import type { Session } from "../../../types/session";
 import { formatSize } from "../../../utils/format";
 import { Button } from "../../ui/Button";
+import { Select } from "../../ui/Select";
 import { Textarea } from "../../ui/Textarea";
 import type { ChatPreviewItem, ChatSendAttachment } from "./chatTypes";
-import { base64ToText } from "./chatUtilities";
+import {
+    base64ToText,
+    type ChatModelOption,
+    chatSpeedOptions,
+    chatThinkingOptions,
+    selectedChatSpeed,
+} from "./chatUtilities";
 import type { SlashCommandSuggestion } from "./slashCommands";
 
 const CHAT_EMOJIS = [
@@ -67,6 +87,12 @@ interface ChatComposerProperties {
     isSending: boolean;
     isTranscribing: boolean;
     selectedSessionKey: string;
+    selectedSession?: Session;
+    modelOptions?: ChatModelOption[];
+    shouldShowThinking?: boolean;
+    shouldShowTools?: boolean;
+    sessionControlsDisabled?: boolean;
+    isCompacting?: boolean;
     slashCommandSuggestions: SlashCommandSuggestion[];
     onApplySlashSuggestion: (value: string) => void;
     onAttachFiles: (files: FileList | undefined) => void;
@@ -75,6 +101,12 @@ interface ChatComposerProperties {
     onRemoveAttachment: (attachmentId: string) => void;
     onSend: () => void;
     onToggleRecording: () => void;
+    onToggleThinking?: () => void;
+    onToggleTools?: () => void;
+    onSelectThinkingLevel?: (value: string) => void;
+    onSelectSpeed?: (value: string) => void;
+    onSelectModel?: (value: string) => void;
+    onCompact?: () => void;
 }
 
 /** Renders the chat composer UI. */
@@ -88,6 +120,12 @@ export function ChatComposer({
     isSending,
     isTranscribing,
     selectedSessionKey,
+    selectedSession,
+    modelOptions = [],
+    shouldShowThinking,
+    shouldShowTools,
+    sessionControlsDisabled,
+    isCompacting,
     slashCommandSuggestions,
     onApplySlashSuggestion,
     onAttachFiles,
@@ -96,6 +134,12 @@ export function ChatComposer({
     onRemoveAttachment,
     onSend,
     onToggleRecording,
+    onToggleThinking,
+    onToggleTools,
+    onSelectThinkingLevel,
+    onSelectSpeed,
+    onSelectModel,
+    onCompact,
 }: ChatComposerProperties) {
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const [slashSuggestionsDismissed, setSlashSuggestionsDismissed] = useState(false);
@@ -104,6 +148,20 @@ export function ChatComposer({
     const visibleSlashCommandSuggestions = slashSuggestionsDismissed
         ? []
         : slashCommandSuggestions;
+    const modelSelectOptions = modelOptions.map((option) => ({
+        value: option.id || option.name || option.label || "",
+        label: option.label || option.name || option.id || "Unknown",
+    }));
+    const currentModel = selectedSession?.model || "";
+    if (
+        currentModel &&
+        modelSelectOptions.every((option) => option.value !== currentModel)
+    ) {
+        modelSelectOptions.unshift({ value: currentModel, label: currentModel });
+    }
+    if (modelSelectOptions.length === 0) {
+        modelSelectOptions.push({ value: "", label: "Default" });
+    }
 
     useEffect(() => {
         if (!showEmojiPicker) {
@@ -270,7 +328,7 @@ export function ChatComposer({
                     className="hidden"
                     onChange={(event) => onAttachFiles(event.target.files ?? undefined)}
                 />
-                <div className="relative min-w-0 flex-1">
+                <div className="relative min-w-0 flex-1 rounded-lg border border-primary-600 bg-primary-700 transition-colors focus-within:border-accent-500 hover:border-primary-500 focus-within:hover:border-accent-500">
                     {visibleSlashCommandSuggestions.length > 0 ? (
                         <div className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-primary-700 bg-primary-900 shadow-2xl">
                             <div className="border-b border-primary-700 px-3 py-2 text-xs font-medium tracking-wide text-primary-400 uppercase">
@@ -300,7 +358,7 @@ export function ChatComposer({
                         </div>
                     ) : undefined}
                     {showEmojiPicker ? (
-                        <div className="absolute inset-x-0 bottom-full z-30 mb-2 rounded-xl border border-primary-700 bg-primary-900 p-2 shadow-2xl sm:left-auto sm:w-80">
+                        <div className="absolute inset-x-1 bottom-12 z-30 rounded-xl border border-primary-700 bg-primary-900 p-2 shadow-2xl sm:left-auto sm:w-80">
                             <div className="mb-2 flex items-center justify-between px-1 text-xs font-medium tracking-wide text-primary-400 uppercase">
                                 <span>Emoji</span>
                                 <button
@@ -361,18 +419,129 @@ export function ChatComposer({
                                 : "Choose a session first"
                         }
                         rows={4}
-                        className="min-h-24 resize-y pr-12 text-base sm:min-h-32 sm:text-sm"
+                        className="block min-h-24 resize-none rounded-t-lg! rounded-b-none! border-0! bg-transparent! text-base focus:border-0! sm:min-h-32 sm:text-sm"
                     />
-                    <button
-                        type="button"
-                        onClick={() => setShowEmojiPicker((wasPrevious) => !wasPrevious)}
-                        disabled={!isConnected || !selectedSessionKey || isSending}
-                        className="absolute right-2 bottom-2 rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
-                        title="Insert emoji"
-                        aria-label="Insert emoji"
-                    >
-                        <Smile className="size-5" />
-                    </button>
+                    <div className="flex min-h-10 items-center justify-between rounded-b-lg border-t border-primary-600 bg-primary-800 px-2 py-1">
+                        <div className="flex items-center gap-1">
+                            <Popover className="relative">
+                                <PopoverButton
+                                    aria-label="Model and response settings"
+                                    className="flex items-center rounded p-1.5 text-primary-400 outline-none hover:bg-primary-700 hover:text-primary-100 data-focus:bg-primary-700 data-focus:text-primary-100"
+                                >
+                                    <Settings2 className="size-4" />
+                                </PopoverButton>
+                                <PopoverPanel
+                                    anchor={{ to: "top start", gap: 8 }}
+                                    className="z-50 w-72 space-y-3 rounded-lg border border-primary-600 bg-primary-800 p-3 text-sm shadow-xl outline-none"
+                                >
+                                    <div className="space-y-1">
+                                        <div className="text-xs font-medium text-primary-400">
+                                            Model
+                                        </div>
+                                        <Select
+                                            ariaLabel="Model"
+                                            width="w-full"
+                                            value={selectedSession?.model || ""}
+                                            disabled={
+                                                !selectedSessionKey ||
+                                                sessionControlsDisabled
+                                            }
+                                            onChange={(value) => onSelectModel?.(value)}
+                                            options={modelSelectOptions}
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <div className="text-xs font-medium text-primary-400">
+                                            Thinking
+                                        </div>
+                                        <Select
+                                            ariaLabel="Thinking"
+                                            width="w-full"
+                                            value={selectedSession?.thinkingLevel || ""}
+                                            disabled={
+                                                !selectedSessionKey ||
+                                                sessionControlsDisabled
+                                            }
+                                            onChange={(value) =>
+                                                onSelectThinkingLevel?.(value)
+                                            }
+                                            options={chatThinkingOptions(selectedSession)}
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <div className="text-xs font-medium text-primary-400">
+                                            Speed
+                                        </div>
+                                        <Select
+                                            ariaLabel="Speed"
+                                            width="w-full"
+                                            value={selectedChatSpeed(selectedSession)}
+                                            disabled={
+                                                !selectedSessionKey ||
+                                                sessionControlsDisabled
+                                            }
+                                            onChange={(value) => onSelectSpeed?.(value)}
+                                            options={chatSpeedOptions(selectedSession)}
+                                        />
+                                    </div>
+                                    <Button
+                                        variant="primary"
+                                        size="sm"
+                                        className="w-full justify-center"
+                                        disabled={
+                                            !selectedSessionKey ||
+                                            sessionControlsDisabled ||
+                                            isCompacting
+                                        }
+                                        onClick={() => onCompact?.()}
+                                    >
+                                        <Minimize2 className="size-4" />
+                                        {isCompacting ? "Compacting…" : "Compact context"}
+                                    </Button>
+                                </PopoverPanel>
+                            </Popover>
+                            <button
+                                type="button"
+                                aria-pressed={shouldShowThinking}
+                                onClick={() => onToggleThinking?.()}
+                                disabled={!selectedSessionKey}
+                                className={
+                                    shouldShowThinking
+                                        ? "rounded p-1.5 text-accent-300"
+                                        : "rounded p-1.5 text-primary-500"
+                                }
+                                title="Show thinking"
+                            >
+                                <Brain className="size-4" />
+                            </button>
+                            <button
+                                type="button"
+                                aria-pressed={shouldShowTools}
+                                onClick={() => onToggleTools?.()}
+                                disabled={!selectedSessionKey}
+                                className={
+                                    shouldShowTools
+                                        ? "rounded p-1.5 text-accent-300"
+                                        : "rounded p-1.5 text-primary-500"
+                                }
+                                title="Show tools"
+                            >
+                                <Wrench className="size-4" />
+                            </button>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() =>
+                                setShowEmojiPicker((wasPrevious) => !wasPrevious)
+                            }
+                            disabled={!isConnected || !selectedSessionKey || isSending}
+                            className="rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+                            title="Insert emoji"
+                            aria-label="Insert emoji"
+                        >
+                            <Smile className="size-5" />
+                        </button>
+                    </div>
                 </div>
                 <div className="grid grid-cols-3 gap-2 md:flex md:flex-col">
                     <Button

@@ -2591,7 +2591,8 @@ describe("Mira Dashboard pages", () => {
             ).toBeInTheDocument();
         });
 
-        await user.click(screen.getByRole("button", { name: "Thinking level: medium" }));
+        await user.click(screen.getByLabelText("Model and response settings"));
+        await user.click(screen.getByRole("button", { name: "Thinking: medium" }));
         await user.click(screen.getByRole("menuitem", { name: "high" }));
         await waitFor(() => {
             expect(
@@ -2644,8 +2645,8 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
         });
 
-        const thinkingToggle = screen.getByRole("button", { name: "Thinking" });
-        const toolsToggle = screen.getByRole("button", { name: "Tools" });
+        const thinkingToggle = screen.getByRole("button", { name: "Show thinking" });
+        const toolsToggle = screen.getByRole("button", { name: "Show tools" });
         await user.click(thinkingToggle);
         await user.click(toolsToggle);
         expect(thinkingToggle).toHaveAttribute("aria-pressed", "true");

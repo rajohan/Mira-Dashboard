@@ -14,7 +14,7 @@ import type { ReactNode, RefObject } from "react";
 import { TaskHistorySidebar } from "../components/features/agents/TaskHistorySidebar";
 import { AttachmentPreviewModal } from "../components/features/chat/AttachmentPreviewModal";
 import { ChatComposer } from "../components/features/chat/ChatComposer";
-import { ChatHeader, chatThinkingOptions } from "../components/features/chat/ChatHeader";
+import { ChatHeader } from "../components/features/chat/ChatHeader";
 import {
     ChatMarkdown,
     childrenToText,
@@ -37,6 +37,7 @@ import {
     type ChatHistoryMessage,
     normalizeVisibleChatHistoryMessages,
 } from "../components/features/chat/chatTypes";
+import { chatThinkingOptions } from "../components/features/chat/chatUtilities";
 import {
     mergeWithRecentOptimisticMessages,
     messageIdentity,
@@ -532,8 +533,7 @@ describe("shared component helpers", () => {
         );
     });
 
-    it("renders chat attachment previews, header toggles, and diagnostic details", async () => {
-        const user = userEvent.setup();
+    it("renders chat attachment previews, header status, and diagnostic details", () => {
         const onClose = jest.fn();
         const onToggleThinking = jest.fn();
         const onToggleTools = jest.fn();
@@ -625,17 +625,8 @@ describe("shared component helpers", () => {
                     selectedSessionKey="agent:main:main"
                     agentOptions={[{ label: "Main agent", value: "main" }]}
                     sessionOptions={[{ label: "Main session", value: "agent:main:main" }]}
-                    shouldShowThinking={true}
-                    shouldShowTools={false}
-                    sessionControlsDisabled={false}
-                    isCompacting={false}
-                    onToggleThinking={onToggleThinking}
-                    onToggleTools={onToggleTools}
                     onSelectAgent={onSelectAgent}
                     onSelectSession={onSelectSession}
-                    onSelectThinkingLevel={onSelectThinkingLevel}
-                    onSelectSpeed={onSelectSpeed}
-                    onCompact={onCompact}
                 />
                 <ChatMessageDetails
                     visibility={{ shouldShowThinking: true, shouldShowTools: true }}
@@ -700,18 +691,11 @@ describe("shared component helpers", () => {
             </>
         );
 
-        await user.click(screen.getByRole("button", { name: "Thinking" }));
-        await user.click(screen.getByRole("button", { name: "Tools" }));
-        await user.click(screen.getByRole("button", { name: "Compact" }));
-        await user.click(screen.getByRole("button", { name: "Thinking level: high" }));
-        await user.click(screen.getByRole("menuitem", { name: "low" }));
-        await user.click(screen.getByRole("button", { name: "Speed: Default (Auto)" }));
-        await user.click(screen.getByRole("menuitem", { name: "Fast" }));
-        expect(onToggleThinking).toHaveBeenCalledTimes(1);
-        expect(onToggleTools).toHaveBeenCalledTimes(1);
-        expect(onCompact).toHaveBeenCalledTimes(1);
-        expect(onSelectThinkingLevel).toHaveBeenCalledWith("low");
-        expect(onSelectSpeed).toHaveBeenCalledWith("on");
+        expect(onToggleThinking).not.toHaveBeenCalled();
+        expect(onToggleTools).not.toHaveBeenCalled();
+        expect(onCompact).not.toHaveBeenCalled();
+        expect(onSelectThinkingLevel).not.toHaveBeenCalled();
+        expect(onSelectSpeed).not.toHaveBeenCalled();
         expect(screen.getByText(/Context: ~0.5k \/ 1k \(stale\)/)).toBeInTheDocument();
         expect(screen.getByText("Thinking / working")).toBeInTheDocument();
         expect(screen.getByText("Run")).toBeInTheDocument();
@@ -897,13 +881,20 @@ describe("shared component helpers", () => {
         expect(
             chatThinkingOptions({
                 thinkingLevel: "low",
-                thinkingOptions: ["off", "on", "Think Hard", "Think Harder"],
+                thinkingOptions: [
+                    "off",
+                    "on",
+                    "Think Hard",
+                    "Think Harder",
+                    "Extra High",
+                ],
             } as Session)
         ).toEqual([
             { label: "Default", value: "" },
             { label: "off", value: "off" },
             { label: "on", value: "low" },
             { label: "Think Harder", value: "medium" },
+            { label: "Extra High", value: "xhigh" },
         ]);
     });
 

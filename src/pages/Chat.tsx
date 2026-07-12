@@ -2058,31 +2058,8 @@ export function Chat() {
                         selectedSessionKey={selectedSessionKey}
                         sessionOptions={sessionOptions}
                         agentOptions={agentOptions}
-                        shouldShowThinking={showThinkingOutput}
-                        shouldShowTools={showToolOutput}
-                        sessionControlsDisabled={isSessionControlsDisabled}
-                        isCompacting={isCompactingSession}
-                        onToggleThinking={() =>
-                            setShowThinkingOutput((wasPrevious) => !wasPrevious)
-                        }
-                        onToggleTools={() =>
-                            setShowToolOutput((wasPrevious) => !wasPrevious)
-                        }
                         onSelectAgent={handleSelectAgent}
                         onSelectSession={setSelectedSessionKey}
-                        onSelectThinkingLevel={(thinkingLevel) =>
-                            void patchSelectedSession({
-                                // Gateway uses null to clear an inherited override.
-                                // eslint-disable-next-line unicorn/no-null
-                                thinkingLevel: thinkingLevel || null,
-                            })
-                        }
-                        onSelectSpeed={(speed) =>
-                            void patchSelectedSession({
-                                fastMode: chatFastModePatchValue(speed),
-                            })
-                        }
-                        onCompact={() => void compactSelectedSession()}
                     />
 
                     <ChatMessagesList
@@ -2128,6 +2105,7 @@ export function Chat() {
 
                     <ChatComposer
                         attachments={attachments}
+                        modelOptions={chatModelOptions}
                         canSend={canSend}
                         draft={draft}
                         fileInputReference={fileInputReference}
@@ -2136,6 +2114,11 @@ export function Chat() {
                         isSending={isSending}
                         isTranscribing={isTranscribing}
                         selectedSessionKey={selectedSessionKey}
+                        selectedSession={selectedSession}
+                        shouldShowThinking={showThinkingOutput}
+                        shouldShowTools={showToolOutput}
+                        sessionControlsDisabled={isSessionControlsDisabled}
+                        isCompacting={isCompactingSession}
                         slashCommandSuggestions={slashCommandSuggestions}
                         onApplySlashSuggestion={applySlashSuggestion}
                         onAttachFiles={(files) => void handleFilesSelected(files)}
@@ -2144,6 +2127,22 @@ export function Chat() {
                         onRemoveAttachment={removeAttachment}
                         onSend={() => void handleSend()}
                         onToggleRecording={() => void handleToggleRecording()}
+                        onToggleThinking={() => setShowThinkingOutput((value) => !value)}
+                        onToggleTools={() => setShowToolOutput((value) => !value)}
+                        onSelectThinkingLevel={(thinkingLevel) =>
+                            void patchSelectedSession({
+                                // Gateway uses null to clear an inherited override.
+                                // eslint-disable-next-line unicorn/no-null
+                                thinkingLevel: thinkingLevel || null,
+                            })
+                        }
+                        onSelectSpeed={(speed) =>
+                            void patchSelectedSession({
+                                fastMode: chatFastModePatchValue(speed),
+                            })
+                        }
+                        onSelectModel={(model) => void patchSelectedSession({ model })}
+                        onCompact={() => void compactSelectedSession()}
                     />
                 </Card>
             </div>
