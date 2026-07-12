@@ -22,6 +22,7 @@ interface SelectProperties {
     width?: string;
     menuWidth?: string;
     disabled?: boolean;
+    compactOnMobile?: boolean;
 }
 
 /** Renders the select UI. */
@@ -36,6 +37,7 @@ export function Select({
     width = "min-w-45",
     menuWidth,
     disabled = false,
+    compactOnMobile = false,
 }: SelectProperties) {
     const selectedOption = options.find((opt) => opt.value === value);
     const selectedLabel = selectedOption?.label || placeholder;
@@ -58,7 +60,14 @@ export function Select({
                 )}
             >
                 {icon && <span className="shrink-0 text-primary-400">{icon}</span>}
-                <span className="flex-1 truncate text-left">{selectedLabel}</span>
+                <span
+                    className={cn(
+                        "flex-1 truncate text-left",
+                        compactOnMobile && "hidden sm:block"
+                    )}
+                >
+                    {selectedLabel}
+                </span>
                 <ChevronDown className="size-4 shrink-0 text-primary-400 transition-transform data-open:rotate-180" />
             </MenuButton>
             <MenuItems

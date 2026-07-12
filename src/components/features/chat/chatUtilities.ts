@@ -1,5 +1,5 @@
-import { timestampFromDateString } from "../../../utils/date";
 import type { Session } from "../../../types/session";
+import { timestampFromDateString } from "../../../utils/date";
 import {
     chatAttachmentIdentity,
     chatContentFingerprint,
@@ -47,7 +47,8 @@ function normalizeThinkingLevel(level: string): string | undefined {
         .toLowerCase()
         .replaceAll(/[\s_-]+/g, "");
     if (["adaptive", "auto"].includes(collapsed)) return "adaptive";
-    if (["max", "xhigh", "off"].includes(collapsed)) return collapsed;
+    if (["xhigh", "extrahigh"].includes(collapsed)) return "xhigh";
+    if (["max", "off"].includes(collapsed)) return collapsed;
     if (["on", "enable", "enabled"].includes(collapsed)) return "low";
     if (["min", "minimal", "think"].includes(collapsed)) return "minimal";
     if (["low", "thinkhard"].includes(collapsed)) return "low";

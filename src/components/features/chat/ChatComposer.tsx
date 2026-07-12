@@ -328,7 +328,7 @@ export function ChatComposer({
                     className="hidden"
                     onChange={(event) => onAttachFiles(event.target.files ?? undefined)}
                 />
-                <div className="relative min-w-0 flex-1 rounded-lg border border-primary-600 bg-primary-700 transition-colors hover:border-primary-500 focus-within:border-accent-500 focus-within:hover:border-accent-500">
+                <div className="relative min-w-0 flex-1 rounded-lg border border-primary-600 bg-primary-700 transition-colors focus-within:border-accent-500 hover:border-primary-500 focus-within:hover:border-accent-500">
                     {visibleSlashCommandSuggestions.length > 0 ? (
                         <div className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-primary-700 bg-primary-900 shadow-2xl">
                             <div className="border-b border-primary-700 px-3 py-2 text-xs font-medium tracking-wide text-primary-400 uppercase">
@@ -358,7 +358,7 @@ export function ChatComposer({
                         </div>
                     ) : undefined}
                     {showEmojiPicker ? (
-                        <div className="absolute inset-x-0 bottom-full z-30 mb-2 rounded-xl border border-primary-700 bg-primary-900 p-2 shadow-2xl sm:left-auto sm:w-80">
+                        <div className="absolute inset-x-1 bottom-12 z-30 rounded-xl border border-primary-700 bg-primary-900 p-2 shadow-2xl sm:left-auto sm:w-80">
                             <div className="mb-2 flex items-center justify-between px-1 text-xs font-medium tracking-wide text-primary-400 uppercase">
                                 <span>Emoji</span>
                                 <button
@@ -419,11 +419,11 @@ export function ChatComposer({
                                 : "Choose a session first"
                         }
                         rows={4}
-                        className="min-h-24 resize-none !rounded-lg !border-0 !bg-transparent pb-12 text-base focus:!border-0 sm:min-h-32 sm:text-sm"
+                        className="block min-h-24 resize-none rounded-t-lg! rounded-b-none! border-0! bg-transparent! text-base focus:border-0! sm:min-h-32 sm:text-sm"
                     />
-                    <div className="pointer-events-none absolute inset-x-1 bottom-1 flex min-h-10 items-center justify-between rounded-md bg-primary-700 px-1">
+                    <div className="flex min-h-10 items-center justify-between rounded-b-lg border-t border-primary-600 bg-primary-800 px-2 py-1">
                         <div className="flex items-center gap-1">
-                            <Popover className="pointer-events-auto relative">
+                            <Popover className="relative">
                                 <PopoverButton
                                     aria-label="Model and response settings"
                                     className="flex items-center rounded p-1.5 text-primary-400 outline-none hover:bg-primary-700 hover:text-primary-100 data-focus:bg-primary-700 data-focus:text-primary-100"
@@ -434,38 +434,56 @@ export function ChatComposer({
                                     anchor={{ to: "top start", gap: 8 }}
                                     className="z-50 w-72 space-y-3 rounded-lg border border-primary-600 bg-primary-800 p-3 text-sm shadow-xl outline-none"
                                 >
-                                    <Select
-                                        ariaLabel="Model"
-                                        width="w-full"
-                                        value={selectedSession?.model || ""}
-                                        disabled={
-                                            !selectedSessionKey || sessionControlsDisabled
-                                        }
-                                        onChange={(value) => onSelectModel?.(value)}
-                                        options={modelSelectOptions}
-                                    />
-                                    <Select
-                                        ariaLabel="Thinking"
-                                        width="w-full"
-                                        value={selectedSession?.thinkingLevel || ""}
-                                        disabled={
-                                            !selectedSessionKey || sessionControlsDisabled
-                                        }
-                                        onChange={(value) =>
-                                            onSelectThinkingLevel?.(value)
-                                        }
-                                        options={chatThinkingOptions(selectedSession)}
-                                    />
-                                    <Select
-                                        ariaLabel="Speed"
-                                        width="w-full"
-                                        value={selectedChatSpeed(selectedSession)}
-                                        disabled={
-                                            !selectedSessionKey || sessionControlsDisabled
-                                        }
-                                        onChange={(value) => onSelectSpeed?.(value)}
-                                        options={chatSpeedOptions(selectedSession)}
-                                    />
+                                    <div className="space-y-1">
+                                        <div className="text-xs font-medium text-primary-400">
+                                            Model
+                                        </div>
+                                        <Select
+                                            ariaLabel="Model"
+                                            width="w-full"
+                                            value={selectedSession?.model || ""}
+                                            disabled={
+                                                !selectedSessionKey ||
+                                                sessionControlsDisabled
+                                            }
+                                            onChange={(value) => onSelectModel?.(value)}
+                                            options={modelSelectOptions}
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <div className="text-xs font-medium text-primary-400">
+                                            Thinking
+                                        </div>
+                                        <Select
+                                            ariaLabel="Thinking"
+                                            width="w-full"
+                                            value={selectedSession?.thinkingLevel || ""}
+                                            disabled={
+                                                !selectedSessionKey ||
+                                                sessionControlsDisabled
+                                            }
+                                            onChange={(value) =>
+                                                onSelectThinkingLevel?.(value)
+                                            }
+                                            options={chatThinkingOptions(selectedSession)}
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <div className="text-xs font-medium text-primary-400">
+                                            Speed
+                                        </div>
+                                        <Select
+                                            ariaLabel="Speed"
+                                            width="w-full"
+                                            value={selectedChatSpeed(selectedSession)}
+                                            disabled={
+                                                !selectedSessionKey ||
+                                                sessionControlsDisabled
+                                            }
+                                            onChange={(value) => onSelectSpeed?.(value)}
+                                            options={chatSpeedOptions(selectedSession)}
+                                        />
+                                    </div>
                                     <Button
                                         variant="primary"
                                         size="sm"
@@ -517,7 +535,7 @@ export function ChatComposer({
                                 setShowEmojiPicker((wasPrevious) => !wasPrevious)
                             }
                             disabled={!isConnected || !selectedSessionKey || isSending}
-                            className="pointer-events-auto rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+                            className="rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
                             title="Insert emoji"
                             aria-label="Insert emoji"
                         >

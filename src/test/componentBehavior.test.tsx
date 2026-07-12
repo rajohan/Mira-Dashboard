@@ -33,11 +33,11 @@ import {
     createChatVisibility,
     mergeStreamMessage,
 } from "../components/features/chat/chatRuntime";
-import { chatThinkingOptions } from "../components/features/chat/chatUtilities";
 import {
     type ChatHistoryMessage,
     normalizeVisibleChatHistoryMessages,
 } from "../components/features/chat/chatTypes";
+import { chatThinkingOptions } from "../components/features/chat/chatUtilities";
 import {
     mergeWithRecentOptimisticMessages,
     messageIdentity,
@@ -881,13 +881,20 @@ describe("shared component helpers", () => {
         expect(
             chatThinkingOptions({
                 thinkingLevel: "low",
-                thinkingOptions: ["off", "on", "Think Hard", "Think Harder"],
+                thinkingOptions: [
+                    "off",
+                    "on",
+                    "Think Hard",
+                    "Think Harder",
+                    "Extra High",
+                ],
             } as Session)
         ).toEqual([
             { label: "Default", value: "" },
             { label: "off", value: "off" },
             { label: "on", value: "low" },
             { label: "Think Harder", value: "medium" },
+            { label: "Extra High", value: "xhigh" },
         ]);
     });
 

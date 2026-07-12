@@ -1,3 +1,5 @@
+import { Bot, MessagesSquare } from "lucide-react";
+
 import type { Session } from "../../../types/session";
 import { formatDuration, formatTokens, getTokenPercent } from "../../../utils/format";
 import { formatSessionType } from "../../../utils/sessionUtilities";
@@ -61,10 +63,10 @@ export function ChatHeader({
                 <div className="flex w-full flex-col gap-2 lg:ml-auto lg:w-auto lg:flex-row lg:items-center lg:justify-end">
                     <div
                         className={[
-                            "grid w-full gap-2",
+                            "grid w-full grid-cols-2 gap-2",
                             agentOptions.length > 0
-                                ? "sm:grid-cols-2 lg:w-[min(36rem,54vw)]"
-                                : "lg:w-[min(24rem,40vw)]",
+                                ? "lg:w-[min(32rem,48vw)]"
+                                : "grid-cols-1 lg:w-[min(20rem,34vw)]",
                         ].join(" ")}
                     >
                         {agentOptions.length > 0 ? (
@@ -75,6 +77,9 @@ export function ChatHeader({
                                 placeholder="Select agent"
                                 ariaLabel="Agent"
                                 width="w-full"
+                                icon={<Bot className="size-4" />}
+                                compactOnMobile
+                                className="justify-center px-2 sm:justify-start"
                                 menuWidth="max-w-[min(42rem,calc(100vw-2rem))]"
                             />
                         ) : undefined}
@@ -85,6 +90,9 @@ export function ChatHeader({
                             placeholder="Select session"
                             ariaLabel="Session"
                             width="w-full"
+                            icon={<MessagesSquare className="size-4" />}
+                            compactOnMobile
+                            className="justify-center px-2 sm:justify-start"
                             menuWidth="max-w-[min(42rem,calc(100vw-2rem))]"
                         />
                     </div>
