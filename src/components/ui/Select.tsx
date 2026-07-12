@@ -64,7 +64,7 @@ export function Select({
             <MenuItems
                 anchor={{ to: "bottom start", gap: 8 }}
                 className={cn(
-                    "z-10 max-h-60 max-w-[min(36rem,calc(100vw-2rem))] min-w-(--button-width) overflow-y-auto rounded-lg border border-primary-700 bg-primary-900 shadow-xl ring-1 shadow-black/30 ring-black/20 outline-none focus:outline-none data-focus:outline-none",
+                    "z-70 max-h-60 max-w-[min(36rem,calc(100vw-2rem))] min-w-(--button-width) overflow-y-auto rounded-lg border border-primary-700 bg-primary-900 shadow-xl ring-1 shadow-black/30 ring-black/20 outline-none focus:outline-none data-focus:outline-none",
                     menuWidth || "w-max"
                 )}
             >

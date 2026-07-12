@@ -1,6 +1,8 @@
+import { Popover, PopoverButton, PopoverPanel } from "@headlessui/react";
 import {
     Brain,
     Mic,
+    Minimize2,
     Paperclip,
     Send,
     Settings2,
@@ -16,13 +18,12 @@ import {
     useRef,
     useState,
 } from "react";
-import { Popover, PopoverButton, PopoverPanel } from "@headlessui/react";
 
+import type { Session } from "../../../types/session";
 import { formatSize } from "../../../utils/format";
 import { Button } from "../../ui/Button";
-import { Textarea } from "../../ui/Textarea";
 import { Select } from "../../ui/Select";
-import type { Session } from "../../../types/session";
+import { Textarea } from "../../ui/Textarea";
 import { chatSpeedOptions, chatThinkingOptions, selectedChatSpeed } from "./ChatHeader";
 import type { ChatPreviewItem, ChatSendAttachment } from "./chatTypes";
 import { base64ToText, type ChatModelOption } from "./chatUtilities";
@@ -142,6 +143,20 @@ export function ChatComposer({
     const visibleSlashCommandSuggestions = slashSuggestionsDismissed
         ? []
         : slashCommandSuggestions;
+    const modelSelectOptions = modelOptions.map((option) => ({
+        value: option.id || option.name || option.label || "",
+        label: option.label || option.name || option.id || "Unknown",
+    }));
+    const currentModel = selectedSession?.model || "";
+    if (
+        currentModel &&
+        modelSelectOptions.every((option) => option.value !== currentModel)
+    ) {
+        modelSelectOptions.unshift({ value: currentModel, label: currentModel });
+    }
+    if (modelSelectOptions.length === 0) {
+        modelSelectOptions.push({ value: "", label: "Default" });
+    }
 
     useEffect(() => {
         if (!showEmojiPicker) {
@@ -399,7 +414,7 @@ export function ChatComposer({
                                 : "Choose a session first"
                         }
                         rows={4}
-                        className="min-h-24 resize-y pr-12 pb-12 text-base sm:min-h-32 sm:text-sm"
+                        className="min-h-24 resize-y pr-14 pb-16 text-base sm:min-h-32 sm:text-sm"
                     />
                     <div className="absolute bottom-2 left-2 flex items-center gap-1">
                         <Popover className="relative">
@@ -419,29 +434,7 @@ export function ChatComposer({
                                     value={selectedSession?.model || ""}
                                     disabled={sessionControlsDisabled}
                                     onChange={(value) => onSelectModel?.(value)}
-                                    options={
-                                        modelOptions.length === 0
-                                            ? [
-                                                  {
-                                                      value: selectedSession?.model || "",
-                                                      label:
-                                                          selectedSession?.model ||
-                                                          "Default",
-                                                  },
-                                              ]
-                                            : modelOptions.map((option) => ({
-                                                  value:
-                                                      option.id ||
-                                                      option.name ||
-                                                      option.label ||
-                                                      "",
-                                                  label:
-                                                      option.label ||
-                                                      option.name ||
-                                                      option.id ||
-                                                      "Unknown",
-                                              }))
-                                    }
+                                    options={modelSelectOptions}
                                 />
                                 <Select
                                     ariaLabel="Thinking"
@@ -460,12 +453,13 @@ export function ChatComposer({
                                     options={chatSpeedOptions(selectedSession)}
                                 />
                                 <Button
-                                    variant="secondary"
+                                    variant="primary"
                                     size="sm"
-                                    className="w-full justify-start"
+                                    className="w-full justify-center"
                                     disabled={sessionControlsDisabled || isCompacting}
                                     onClick={() => onCompact?.()}
                                 >
+                                    <Minimize2 className="size-4" />
                                     {isCompacting ? "Compacting…" : "Compact context"}
                                 </Button>
                             </PopoverPanel>

@@ -2131,6 +2131,8 @@ export function Chat() {
                         onToggleTools={() => setShowToolOutput((value) => !value)}
                         onSelectThinkingLevel={(thinkingLevel) =>
                             void patchSelectedSession({
+                                // Gateway uses null to clear an inherited override.
+                                // eslint-disable-next-line unicorn/no-null
                                 thinkingLevel: thinkingLevel || null,
                             })
                         }
