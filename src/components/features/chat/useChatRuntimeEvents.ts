@@ -2115,6 +2115,10 @@ export function useChatRuntimeEvents({
                             runId
                         );
                         const isStartsNewRun = isNewRunForStream(existing, payload.runId);
+                        const promotesCompactRun =
+                            isStartsNewRun &&
+                            existing &&
+                            isCompactOptimisticRunId(existing.runId);
                         updateActiveStreamsReference.current((wasPrevious) => ({
                             ...wasPrevious,
                             [streamSessionKey]: {
@@ -2127,9 +2131,10 @@ export function useChatRuntimeEvents({
                                 ]),
                                 text: textToApply,
                                 message,
-                                operation: isStartsNewRun
-                                    ? undefined
-                                    : existing?.operation,
+                                operation:
+                                    isStartsNewRun && !promotesCompactRun
+                                        ? undefined
+                                        : existing?.operation,
                                 updatedAt: currentIsoString(),
                             },
                         }));

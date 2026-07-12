@@ -2028,11 +2028,12 @@ export function Chat() {
             const result = (await request("chat.send", {
                 sessionKey: selectedSessionKey,
                 sessionId:
-                    selectedSession?.id &&
+                    selectedSession?.sessionId ||
+                    (selectedSession?.id &&
                     selectedSession.id !== "unknown" &&
                     selectedSession.id !== selectedSessionKey
                         ? selectedSession.id
-                        : undefined,
+                        : undefined),
                 message: "/compact",
                 idempotencyKey,
             })) as undefined | { runId?: string };
