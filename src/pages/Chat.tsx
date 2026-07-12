@@ -618,6 +618,16 @@ export function writeStoredChatDiagnosticVisibility(
     }
 }
 
+/** Maps the speed selector value to the OpenClaw session override contract. */
+export function chatFastModePatchValue(speed: string): boolean | "auto" | null {
+    if (speed === "auto") return "auto";
+    if (speed === "on") return true;
+    if (speed === "off") return false;
+    // Gateway uses null to clear an inherited override.
+    // eslint-disable-next-line unicorn/no-null
+    return null;
+}
+
 /** Performs supported audio recording MIME type. */
 export function supportedAudioRecordingMimeType(): string | undefined {
     if (typeof MediaRecorder === "undefined") {
@@ -633,6 +643,22 @@ export function supportedAudioRecordingMimeType(): string | undefined {
     ];
 
     return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
+}
+
+/** Returns whether OpenClaw reports an active run for a session. */
+export function isSessionActive(session: Session | undefined): boolean {
+    if (!session || sessionTimestampMs(session.endedAt) !== undefined) {
+        return false;
+    }
+
+    return Boolean(
+        session.isRunning ||
+        session.running ||
+        session.status?.toLowerCase() === "running" ||
+        session.hasActiveRun ||
+        session.activeRunId ||
+        session.currentRunId
+    );
 }
 
 /** Renders the chat UI. */
@@ -664,6 +690,11 @@ export function Chat() {
     const resetConfirmResolverReference = useRef<
         ((wasConfirmed: boolean) => void) | undefined
     >(undefined);
+    const pendingSessionPatchesReference = useRef(
+        new Map<string, Set<Promise<boolean>>>()
+    );
+    const draftReference = useRef("");
+    const attachmentsReference = useRef<ChatSendAttachment[]>([]);
 
     const [selectedSessionKey, setSelectedSessionKey] = useState("");
     const [draft, setDraft] = useState("");
@@ -681,6 +712,9 @@ export function Chat() {
     const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [isSending, setIsSending] = useState(false);
+    const [pendingSessionPatchCounts, setPendingSessionPatchCounts] = useState<
+        Record<string, number>
+    >({});
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [previewItem, setPreviewItem] = useState<ChatPreviewItem | undefined>(
@@ -694,6 +728,9 @@ export function Chat() {
     );
     const [chatModelOptions, setChatModelOptions] = useState<ChatModelOption[]>([]);
     const [, setHistoryLoadVersion] = useState(0);
+
+    draftReference.current = draft;
+    attachmentsReference.current = attachments;
 
     const { data: sessions = [] } = useLiveQuery((query) =>
         query.from({ session: sessionsCollection })
@@ -1694,13 +1731,53 @@ export function Chat() {
         );
     };
 
+    /** Reconciles an optimistic stream identifier with the Gateway run id. */
+    const acknowledgeActiveStreamRun = (
+        sessionKey: string,
+        optimisticRunId: string,
+        acknowledgedRunId: string | undefined
+    ) => {
+        if (!acknowledgedRunId) return;
+
+        updateActiveStreams((wasPrevious) => {
+            let hasChanged = false;
+            const next = { ...wasPrevious };
+            for (const [key, stream] of Object.entries(wasPrevious)) {
+                if (
+                    !isSameSessionKey(stream.sessionKey, sessionKey) ||
+                    (stream.runId !== optimisticRunId &&
+                        !stream.aliases.includes(optimisticRunId))
+                ) {
+                    continue;
+                }
+
+                hasChanged = true;
+                next[key] = {
+                    ...stream,
+                    runId:
+                        stream.runId === optimisticRunId
+                            ? acknowledgedRunId
+                            : stream.runId,
+                    aliases: uniqueStrings([
+                        ...stream.aliases,
+                        optimisticRunId,
+                        acknowledgedRunId,
+                    ]),
+                };
+            }
+
+            return hasChanged ? next : wasPrevious;
+        });
+    };
+
     /** Responds to send events. */
     const handleSend = async () => {
         if (!selectedSessionKey) {
             return;
         }
+        const pendingSendSessionKey = selectedSessionKey;
 
-        const text = draft.trim();
+        let text = draft.trim();
 
         if (isBlockedByInFlightSend(text)) {
             return;
@@ -1710,12 +1787,28 @@ export function Chat() {
             return;
         }
 
+        const patchResults = await Promise.all(
+            pendingSessionPatchesReference.current.get(pendingSendSessionKey) || []
+        );
+        if (
+            patchResults.includes(false) ||
+            selectedSessionKeyReference.current !== pendingSendSessionKey
+        ) {
+            return;
+        }
+
+        text = draftReference.current.trim();
+        const currentAttachments = attachmentsReference.current;
+        if (isBlockedByInFlightSend(text) || (!text && currentAttachments.length === 0)) {
+            return;
+        }
+
         const sendEpoch = beginSend();
 
         if (text.startsWith("/")) {
             let isHandledCommand: boolean;
             try {
-                isHandledCommand = await handleSlashCommand(text);
+                isHandledCommand = await handleSlashCommand(text, currentAttachments);
             } catch (error_) {
                 setSendError(chatErrorMessage(error_, "Failed to run slash command"));
                 endSend(sendEpoch);
@@ -1729,7 +1822,7 @@ export function Chat() {
         }
 
         const messageText = text;
-        const sendAttachments = attachments;
+        const sendAttachments = currentAttachments;
         const isResetCommand = isResetSlashCommand(messageText);
         const shouldAppendOptimisticMessage = !isResetCommand;
         const userMessage: ChatHistoryMessage = {
@@ -1813,40 +1906,12 @@ export function Chat() {
                 setMessages([]);
                 clearActiveStreamsForSession(selectedSessionKey);
             } else {
-                const acknowledgedRunId = result?.runId;
-                if (acknowledgedRunId && idempotencyKey) {
-                    updateActiveStreams((wasPrevious) => {
-                        let hasChanged = false;
-                        const next = { ...wasPrevious };
-                        for (const [key, stream] of Object.entries(wasPrevious)) {
-                            if (
-                                !isSameSessionKey(
-                                    stream.sessionKey,
-                                    selectedSessionKey
-                                ) ||
-                                (stream.runId !== idempotencyKey &&
-                                    !stream.aliases.includes(idempotencyKey))
-                            ) {
-                                continue;
-                            }
-
-                            hasChanged = true;
-                            next[key] = {
-                                ...stream,
-                                runId:
-                                    stream.runId === idempotencyKey
-                                        ? acknowledgedRunId
-                                        : stream.runId,
-                                aliases: uniqueStrings([
-                                    ...stream.aliases,
-                                    idempotencyKey,
-                                    acknowledgedRunId,
-                                ]),
-                            };
-                        }
-
-                        return hasChanged ? next : wasPrevious;
-                    });
+                if (idempotencyKey) {
+                    acknowledgeActiveStreamRun(
+                        selectedSessionKey,
+                        idempotencyKey,
+                        result?.runId
+                    );
                 }
             }
         } catch (error_) {
@@ -1868,14 +1933,120 @@ export function Chat() {
 
     const draftText = draft.trim();
     const blockedByInFlightSend = isBlockedByInFlightSend(draftText);
+    const isPatchingSession = (pendingSessionPatchCounts[selectedSessionKey] || 0) > 0;
+    const isCompactingSession = selectedStreams.some(
+        ([, stream]) =>
+            stream.operation === "compact" ||
+            stream.statusText?.toLowerCase().includes("compact")
+    );
     const canSend = Boolean(
         isConnected &&
         selectedSessionKey &&
         !isRecording &&
         !isTranscribing &&
+        !isPatchingSession &&
+        !isCompactingSession &&
         !blockedByInFlightSend &&
         (draftText || attachments.length > 0)
     );
+    const isSessionControlsDisabled = Boolean(
+        !isConnected ||
+        isSending ||
+        isPatchingSession ||
+        selectedStreams.length > 0 ||
+        isSessionActive(selectedSession)
+    );
+
+    /** Updates one OpenClaw session preference without interrupting the chat. */
+    const patchSelectedSession = async (patch: Record<string, unknown>) => {
+        if (!selectedSessionKey || isSessionControlsDisabled) {
+            return;
+        }
+        const patchSessionKey = selectedSessionKey;
+
+        setSendError(undefined);
+        setPendingSessionPatchCounts((wasPrevious) => ({
+            ...wasPrevious,
+            [patchSessionKey]: (wasPrevious[patchSessionKey] || 0) + 1,
+        }));
+        const pendingPatch = (async () => {
+            try {
+                await request("sessions.patch", {
+                    key: patchSessionKey,
+                    sessionId:
+                        selectedSession?.sessionId ||
+                        (selectedSession?.id &&
+                        selectedSession.id !== "unknown" &&
+                        selectedSession.id !== selectedSessionKey
+                            ? selectedSession.id
+                            : undefined),
+                    ...patch,
+                });
+                return true;
+            } catch (error_) {
+                setSendError(chatErrorMessage(error_, "Failed to update chat settings"));
+                return false;
+            } finally {
+                setPendingSessionPatchCounts((wasPrevious) => ({
+                    ...wasPrevious,
+                    [patchSessionKey]: Math.max(
+                        0,
+                        (wasPrevious[patchSessionKey] || 0) - 1
+                    ),
+                }));
+            }
+        })();
+        const pendingSessionPatches =
+            pendingSessionPatchesReference.current.get(patchSessionKey) || new Set();
+        pendingSessionPatches.add(pendingPatch);
+        pendingSessionPatchesReference.current.set(
+            patchSessionKey,
+            pendingSessionPatches
+        );
+        await pendingPatch;
+        pendingSessionPatches.delete(pendingPatch);
+        if (pendingSessionPatches.size === 0) {
+            pendingSessionPatchesReference.current.delete(patchSessionKey);
+        }
+    };
+
+    /** Compacts the selected session through the existing session action API. */
+    const compactSelectedSession = async () => {
+        if (!selectedSessionKey || isSessionControlsDisabled) return;
+
+        const idempotencyKey = `dashboard-compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        updateActiveStreams((wasPrevious) => ({
+            ...wasPrevious,
+            [selectedSessionKey]: {
+                sessionKey: selectedSessionKey,
+                runId: idempotencyKey,
+                aliases: [idempotencyKey],
+                operation: "compact",
+                text: "",
+                statusText: "Compacting context",
+                updatedAt: currentIsoString(),
+            },
+        }));
+        setSendError(undefined);
+        try {
+            const result = (await request("chat.send", {
+                sessionKey: selectedSessionKey,
+                sessionId:
+                    selectedSession?.sessionId ||
+                    (selectedSession?.id &&
+                    selectedSession.id !== "unknown" &&
+                    selectedSession.id !== selectedSessionKey
+                        ? selectedSession.id
+                        : undefined),
+                message: "/compact",
+                idempotencyKey,
+            })) as undefined | { runId?: string };
+            acknowledgeActiveStreamRun(selectedSessionKey, idempotencyKey, result?.runId);
+        } catch (error_) {
+            clearOptimisticSendStream(selectedSessionKey, idempotencyKey);
+            setSendError(chatErrorMessage(error_, "Failed to compact context"));
+        }
+    };
 
     return (
         <div className="flex h-full min-h-0 flex-col overflow-hidden p-3 sm:p-4 lg:p-6">
@@ -1889,6 +2060,8 @@ export function Chat() {
                         agentOptions={agentOptions}
                         shouldShowThinking={showThinkingOutput}
                         shouldShowTools={showToolOutput}
+                        sessionControlsDisabled={isSessionControlsDisabled}
+                        isCompacting={isCompactingSession}
                         onToggleThinking={() =>
                             setShowThinkingOutput((wasPrevious) => !wasPrevious)
                         }
@@ -1897,6 +2070,19 @@ export function Chat() {
                         }
                         onSelectAgent={handleSelectAgent}
                         onSelectSession={setSelectedSessionKey}
+                        onSelectThinkingLevel={(thinkingLevel) =>
+                            void patchSelectedSession({
+                                // Gateway uses null to clear an inherited override.
+                                // eslint-disable-next-line unicorn/no-null
+                                thinkingLevel: thinkingLevel || null,
+                            })
+                        }
+                        onSelectSpeed={(speed) =>
+                            void patchSelectedSession({
+                                fastMode: chatFastModePatchValue(speed),
+                            })
+                        }
+                        onCompact={() => void compactSelectedSession()}
                     />
 
                     <ChatMessagesList
