@@ -1612,7 +1612,16 @@ function parseOpenAiQuotaOutput(output: string) {
             line.toLowerCase().includes(prefix.toLowerCase())
         );
         if (index === -1) return;
-        const joined = `${lines[index]} ${lines[index + 1] || ""} ${lines[index + 2] || ""}`;
+        const followingLines = lines.slice(index + 1, index + 3);
+        const nextLimitIndex = followingLines.findIndex((line) =>
+            /\blimit:/iu.test(line)
+        );
+        const joined = [
+            lines[index],
+            ...(nextLimitIndex === -1
+                ? followingLines
+                : followingLines.slice(0, nextLimitIndex)),
+        ].join(" ");
         const leftMatch = joined.match(/(\d+)%\s*left/iu);
         if (!leftMatch) return;
         const resetMatch = joined.match(/\(resets\s*([^)]+)\)/iu);
@@ -1621,20 +1630,21 @@ function parseOpenAiQuotaOutput(output: string) {
             resetAt: resetMatch?.[1]?.trim() || undefined,
         };
     }
+    const hasFiveHourLimit = /5h limit:/iu.test(output);
     const fiveHour = parseLimit("5h limit:");
     const weekly = parseLimit("weekly limit:");
-    if (!fiveHour || !weekly) {
+    if (!weekly || (hasFiveHourLimit && !fiveHour)) {
         return { status: "error", note: "Could not parse Codex /status output" };
     }
     return {
         account: cleanPanelText(output.match(/Account:\s*(.+)/iu)?.[1]),
         model: cleanPanelText(output.match(/Model:\s*(.+?)(?:\s*\(|$)/iu)?.[1]),
-        fiveHourLeftPercent: fiveHour.leftPercent,
+        fiveHourLeftPercent: fiveHour?.leftPercent,
         weeklyLeftPercent: weekly.leftPercent,
-        fiveHourReset: fiveHour.resetAt,
+        fiveHourReset: fiveHour?.resetAt,
         weeklyReset: weekly.resetAt,
         percentUsed: Math.max(
-            100 - Math.min(fiveHour.leftPercent, weekly.leftPercent),
+            100 - Math.min(fiveHour?.leftPercent ?? 100, weekly.leftPercent),
             0
         ),
         resetAt: weekly.resetAt,
@@ -1661,7 +1671,7 @@ else
 fi
 tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw env CODEX_HOME="$MIRA_QUOTA_CODEX_HOME" CODEX_DISABLE_UPDATE_CHECK=1 NO_UPDATE_NOTIFIER=1 "$MIRA_QUOTA_CODEX_BIN" --cd /home/ubuntu/.openclaw --no-alt-screen
 	OUT=""
-	has_limits(){ echo "$OUT" | grep -Eiq "5h limit:" && echo "$OUT" | grep -Eiq "Weekly limit:"; }
+	has_limits(){ echo "$OUT" | grep -Eiq "Weekly limit:"; }
 	for i in $(seq 1 12); do
 	  tmux send-keys -t "$SESSION" C-u
 	  tmux send-keys -t "$SESSION" "/status" Enter

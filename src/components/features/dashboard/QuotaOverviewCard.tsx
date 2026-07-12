@@ -265,10 +265,12 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
             icon: <DollarSign className="size-4" />,
             line1: hasQuotaStatus(quotas.openai)
                 ? quotas.openai.status.replaceAll("_", " ")
-                : `5h ${quotas.openai.fiveHourLeftPercent}% left · weekly ${quotas.openai.weeklyLeftPercent}% left`,
+                : `5h ${quotas.openai.fiveHourLeftPercent === undefined ? "unlimited" : `${quotas.openai.fiveHourLeftPercent}% left`} · weekly ${quotas.openai.weeklyLeftPercent}% left`,
             line2: hasQuotaStatus(quotas.openai)
                 ? quotas.openai.note || ""
-                : `Resets: 5h ${formatResetTime(quotas.openai.fiveHourReset)} · weekly ${formatResetValue(quotas.openai.weeklyReset)}`,
+                : quotas.openai.fiveHourLeftPercent === undefined
+                  ? `Resets weekly ${formatResetValue(quotas.openai.weeklyReset)}`
+                  : `Resets: 5h ${formatResetTime(quotas.openai.fiveHourReset)} · weekly ${formatResetValue(quotas.openai.weeklyReset)}`,
             percent: hasQuotaStatus(quotas.openai)
                 ? undefined
                 : quotas.openai.percentUsed,
