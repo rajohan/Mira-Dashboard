@@ -38,7 +38,10 @@ export function useChatSlashCommands({
         setMessages((wasPrevious) => [...wasPrevious, createLocalSystemMessage(text)]);
     };
 
-    return async (commandText: string): Promise<boolean> => {
+    return async (
+        commandText: string,
+        currentAttachments: ChatSendAttachment[] = attachments
+    ): Promise<boolean> => {
         const [rawCommand = ""] = commandText.trim().split(/\s+/);
         const command = slashCommandCanonicalName(rawCommand);
 
@@ -46,7 +49,7 @@ export function useChatSlashCommands({
             return false;
         }
 
-        if (attachments.length > 0) {
+        if (currentAttachments.length > 0) {
             setSendError(`${rawCommand} cannot include attachments.`);
             return true;
         }

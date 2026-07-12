@@ -4,6 +4,7 @@ import type { SocketEnvelope } from "../../types/socket";
 interface PendingRequest {
     resolve: (value: unknown) => void;
     reject: (reason: unknown) => void;
+    socket: WebSocket;
     timeout: ReturnType<typeof setTimeout>;
 }
 
@@ -34,6 +35,18 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
     let requestId = 0;
     const pendingRequests = new Map<string, PendingRequest>();
 
+    /** Rejects requests that cannot complete after the active socket closes. */
+    const rejectPendingRequests = (socket?: WebSocket) => {
+        for (const [id, pending] of pendingRequests) {
+            if (socket && pending.socket !== socket) {
+                continue;
+            }
+            pendingRequests.delete(id);
+            clearTimeout(pending.timeout);
+            pending.reject(new Error("WebSocket disconnected"));
+        }
+    };
+
     /** Performs connect. */
     const connect = () => {
         if (
@@ -44,13 +57,14 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         }
 
         shouldReconnect = true;
-        ws = new WebSocket(options.url);
+        const socket = new WebSocket(options.url);
+        ws = socket;
 
-        ws.addEventListener("open", () => {
+        socket.addEventListener("open", () => {
             options.onOpen?.();
         });
 
-        ws.addEventListener("message", (event) => {
+        socket.addEventListener("message", (event) => {
             try {
                 const data = JSON.parse(event.data) as SocketEnvelope;
 
@@ -73,7 +87,11 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             }
         });
 
-        ws.addEventListener("close", () => {
+        socket.addEventListener("close", () => {
+            rejectPendingRequests(socket);
+            if (ws !== socket) {
+                return;
+            }
             options.onClose?.();
             if (shouldReconnect) {
                 setTimeout(() => {
@@ -84,7 +102,10 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             }
         });
 
-        ws.addEventListener("error", () => {
+        socket.addEventListener("error", () => {
+            if (ws !== socket) {
+                return;
+            }
             options.onError?.();
         });
     };
@@ -92,14 +113,11 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
     /** Performs disconnect. */
     const disconnect = () => {
         shouldReconnect = false;
-        ws?.close(1000, "Intentional disconnect");
+        const socket = ws;
         ws = undefined;
-
-        for (const pending of pendingRequests.values()) {
-            clearTimeout(pending.timeout);
-            pending.reject(new Error("WebSocket disconnected"));
-        }
-        pendingRequests.clear();
+        rejectPendingRequests();
+        socket?.close(1000, "Intentional disconnect");
+        options.onClose?.();
     };
 
     /** Performs request. */
@@ -108,7 +126,8 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         parameters?: Record<string, unknown>
     ): Promise<T> => {
         return new Promise((resolve, reject) => {
-            if (!ws || ws.readyState !== WebSocket.OPEN) {
+            const socket = ws;
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
                 reject(new Error("WebSocket not connected"));
                 return;
             }
@@ -125,10 +144,11 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             pendingRequests.set(id, {
                 resolve: resolve as (value: unknown) => void,
                 reject,
+                socket,
                 timeout,
             });
 
-            ws.send(
+            socket.send(
                 JSON.stringify({
                     type: "req",
                     id,

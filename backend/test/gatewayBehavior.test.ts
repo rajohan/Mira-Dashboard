@@ -79,9 +79,22 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
         this.requests.push({ method, parameters: requestParameters });
         if (method === "sessions.list") {
             return {
+                defaults: {
+                    contextTokens: 32_000,
+                    model: "openai/gpt-test",
+                    modelProvider: "openai",
+                    fastMode: true,
+                    thinkingDefault: "minimal",
+                    thinkingLevels: [
+                        { id: "minimal", label: "minimal" },
+                        { id: "high", label: "high" },
+                    ],
+                    thinkingOptions: ["minimal", "high"],
+                },
                 sessions: [
                     {
                         activeRunId: "run-1",
+                        hasActiveRun: true,
                         channel: "main",
                         contextTokens: 20_000,
                         displayName: "Main",
@@ -89,20 +102,53 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
                         kind: "chat",
                         label: "",
                         model: "openai/gpt-test",
+                        modelProvider: "openai",
                         sessionId: "sess1",
                         status: "running",
+                        thinkingDefault: "low",
+                        thinkingLevel: "medium",
+                        thinkingLevels: [
+                            { id: "low", label: "low" },
+                            { id: "medium", label: "medium" },
+                        ],
+                        thinkingOptions: ["low", "medium"],
+                        fastMode: "auto",
+                        effectiveFastMode: true,
                         totalTokens: 42,
+                        totalTokensFresh: false,
                         updatedAt: "2026-06-25T00:00:00.000Z",
                     },
                     {
                         key: "agent:researcher:subagent:abc",
                         label: "",
+                        model: "anthropic/claude-test",
                         sessionId: "sess2",
                         updatedAt: 1_782_345_600_000,
                     },
                     {
+                        key: "agent:other:subagent:same-model",
+                        label: "",
+                        model: "openai/gpt-test",
+                        modelProvider: "openrouter",
+                        sessionId: "sess-provider-mismatch",
+                        updatedAt: 1_782_345_550_000,
+                    },
+                    {
+                        key: "agent:legacy:subagent:options-only",
+                        label: "",
+                        model: "openai/gpt-test",
+                        modelProvider: "openai",
+                        sessionId: "sess-options-only",
+                        thinkingOptions: ["off", "on"],
+                        updatedAt: 1_782_345_525_000,
+                    },
+                    {
                         key: "agent:main:hook:deploy",
+                        model: "",
+                        modelProvider: "",
                         sessionId: "sess3",
+                        thinkingLevels: [],
+                        thinkingOptions: [],
                         updatedAt: 1_782_345_500_000,
                     },
                     { key: "", sessionId: "", updatedAt: "invalid" },
@@ -357,20 +403,77 @@ describe("gateway behavior", () => {
                     id: "sess1",
                     key: "agent:main:main",
                     model: "openai/gpt-test",
+                    modelProvider: "openai",
+                    thinkingDefault: "low",
+                    thinkingLevel: "medium",
+                    thinkingLevels: [
+                        { id: "low", label: "low" },
+                        { id: "medium", label: "medium" },
+                    ],
+                    thinkingOptions: ["low", "medium"],
+                    fastMode: "auto",
+                    effectiveFastMode: true,
+                    hasActiveRun: true,
+                    totalTokensFresh: false,
                     type: "MAIN",
                 }),
                 expect.objectContaining({
                     agentType: "researcher",
                     displayLabel: "Researcher",
+                    maxTokens: 0,
+                    model: "anthropic/claude-test",
+                    type: "SUBAGENT",
+                }),
+                expect.objectContaining({
+                    agentType: "legacy",
+                    model: "openai/gpt-test",
+                    thinkingOptions: ["off", "on"],
                     type: "SUBAGENT",
                 }),
                 expect.objectContaining({
                     displayLabel: "Deploy",
+                    effectiveFastMode: true,
                     hookName: "deploy",
+                    maxTokens: 32_000,
+                    model: "openai/gpt-test",
+                    modelProvider: "openai",
+                    thinkingDefault: "minimal",
+                    thinkingLevels: [
+                        { id: "minimal", label: "minimal" },
+                        { id: "high", label: "high" },
+                    ],
                     type: "HOOK",
                 }),
             ])
         );
+        const researcherSession = sessionsMessage?.sessions?.find(
+            (session) =>
+                (session as { key?: string }).key === "agent:researcher:subagent:abc"
+        ) as Record<string, unknown> | undefined;
+        expect(researcherSession).not.toHaveProperty("thinkingDefault");
+        expect(researcherSession).not.toHaveProperty("thinkingLevels");
+        expect(researcherSession).not.toHaveProperty("thinkingOptions");
+        const hookSession = sessionsMessage?.sessions?.find(
+            (session) => (session as { key?: string }).key === "agent:main:hook:deploy"
+        ) as Record<string, unknown> | undefined;
+        expect(hookSession).not.toHaveProperty("fastMode");
+        const legacyOptionsSession = sessionsMessage?.sessions?.find(
+            (session) =>
+                (session as { key?: string }).key === "agent:legacy:subagent:options-only"
+        ) as Record<string, unknown> | undefined;
+        expect(legacyOptionsSession).not.toHaveProperty("thinkingLevels");
+        const providerMismatchSession = sessionsMessage?.sessions?.find(
+            (session) =>
+                (session as { key?: string }).key === "agent:other:subagent:same-model"
+        ) as Record<string, unknown> | undefined;
+        expect(providerMismatchSession).toMatchObject({
+            maxTokens: 0,
+            model: "openai/gpt-test",
+            modelProvider: "openrouter",
+        });
+        expect(providerMismatchSession).not.toHaveProperty("thinkingDefault");
+        expect(providerMismatchSession).not.toHaveProperty("thinkingLevels");
+        expect(providerMismatchSession).not.toHaveProperty("thinkingOptions");
 
         client?.options.onEvent?.({
             event: "session.tool",
@@ -438,15 +541,15 @@ describe("gateway behavior", () => {
         const stats = await sessionRoutes["/api/sessions/stats"].GET();
         await expect(stats.json()).resolves.toMatchObject({
             byModel: {
-                Unknown: 2,
-                "openai/gpt-test": 1,
+                "anthropic/claude-test": 1,
+                "openai/gpt-test": 4,
             },
             byType: {
                 HOOK: 1,
                 MAIN: 1,
-                SUBAGENT: 1,
+                SUBAGENT: 3,
             },
-            total: 3,
+            total: 5,
             totalTokens: 42,
         });
 

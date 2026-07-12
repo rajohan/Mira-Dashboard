@@ -69,6 +69,7 @@ interface Session {
     hookName: string;
     kind?: string;
     model: string;
+    modelProvider?: string;
     tokenCount: number;
     maxTokens: number;
     createdAt: string | undefined;
@@ -83,13 +84,19 @@ interface Session {
     runId?: string | undefined;
     activeRunId?: string | undefined;
     currentRunId?: string | undefined;
+    hasActiveRun?: boolean;
     isRunning?: boolean;
     running?: boolean;
     thinkingLevel?: string;
-    fastMode?: boolean;
+    thinkingLevels?: Array<{ id: string; label: string }>;
+    thinkingOptions?: string[];
+    thinkingDefault?: string;
+    fastMode?: boolean | "auto";
+    effectiveFastMode?: boolean | "auto";
     verboseLevel?: string;
     reasoningLevel?: string;
     elevatedLevel?: string;
+    totalTokensFresh?: boolean;
 }
 
 /** Represents gateway session. */
@@ -98,6 +105,7 @@ interface GatewaySession {
     key?: string;
     kind?: string;
     model?: string;
+    modelProvider?: string;
     totalTokens?: number;
     contextTokens?: number;
     updatedAt?: number;
@@ -110,13 +118,19 @@ interface GatewaySession {
     runId?: string | undefined;
     activeRunId?: string | undefined;
     currentRunId?: string | undefined;
+    hasActiveRun?: boolean;
     isRunning?: boolean;
     running?: boolean;
     thinkingLevel?: string;
-    fastMode?: boolean;
+    thinkingLevels?: Array<{ id: string; label: string }>;
+    thinkingOptions?: string[];
+    thinkingDefault?: string;
+    fastMode?: boolean | "auto";
+    effectiveFastMode?: boolean | "auto";
     verboseLevel?: string;
     reasoningLevel?: string;
     elevatedLevel?: string;
+    totalTokensFresh?: boolean;
 }
 
 /** Represents pending request. */
@@ -307,8 +321,9 @@ function transformSession(session: GatewaySession): Session {
         hookName,
         kind: session.kind,
         model: session.model || "Unknown",
+        modelProvider: session.modelProvider,
         tokenCount: session.totalTokens || 0,
-        maxTokens: session.contextTokens || 200_000,
+        maxTokens: session.contextTokens || 0,
         createdAt,
         updatedAt: session.updatedAt,
         displayName: session.displayName || "",
@@ -321,13 +336,19 @@ function transformSession(session: GatewaySession): Session {
         runId: session.runId,
         activeRunId: session.activeRunId,
         currentRunId: session.currentRunId,
+        hasActiveRun: session.hasActiveRun,
         isRunning: session.isRunning,
         running: session.running,
         thinkingLevel: session.thinkingLevel,
+        thinkingLevels: session.thinkingLevels,
+        thinkingOptions: session.thinkingOptions,
+        thinkingDefault: session.thinkingDefault,
         fastMode: session.fastMode,
+        effectiveFastMode: session.effectiveFastMode,
         verboseLevel: session.verboseLevel,
         reasoningLevel: session.reasoningLevel,
         elevatedLevel: session.elevatedLevel,
+        totalTokensFresh: session.totalTokensFresh,
     };
 }
 
@@ -698,6 +719,7 @@ async function refreshSessions(
     if (gatewayState.isConnected && isCurrentGatewayClient(expectedClient)) {
         const payload = asRecord(response);
         const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
+        const defaults = asRecord(payload?.defaults) as GatewaySession | undefined;
         gatewayState.sessions = sessions
             .map((entry) => asRecord(entry))
             .filter(
@@ -726,8 +748,43 @@ async function refreshSessions(
                     typeof entry.updatedAt === "string"
                         ? Date.parse(entry.updatedAt)
                         : entry.updatedAt;
+                const shouldApplyDefaults =
+                    (!session.model || session.model === defaults?.model) &&
+                    (!session.modelProvider ||
+                        !defaults?.modelProvider ||
+                        session.modelProvider === defaults.modelProvider);
+                const matchingDefaults = shouldApplyDefaults ? defaults : undefined;
+                const hasSessionThinkingChoices = Boolean(
+                    session.thinkingLevels?.length || session.thinkingOptions?.length
+                );
                 return transformSession({
+                    ...matchingDefaults,
                     ...session,
+                    model: session.model?.trim()
+                        ? session.model
+                        : matchingDefaults?.model,
+                    modelProvider: session.modelProvider?.trim()
+                        ? session.modelProvider
+                        : matchingDefaults?.modelProvider,
+                    contextTokens:
+                        session.contextTokens ?? matchingDefaults?.contextTokens,
+                    thinkingDefault:
+                        session.thinkingDefault ?? matchingDefaults?.thinkingDefault,
+                    thinkingLevels: session.thinkingLevels?.length
+                        ? session.thinkingLevels
+                        : hasSessionThinkingChoices
+                          ? undefined
+                          : matchingDefaults?.thinkingLevels,
+                    thinkingOptions: session.thinkingOptions?.length
+                        ? session.thinkingOptions
+                        : hasSessionThinkingChoices
+                          ? undefined
+                          : matchingDefaults?.thinkingOptions,
+                    fastMode: session.fastMode,
+                    effectiveFastMode:
+                        session.effectiveFastMode ??
+                        matchingDefaults?.effectiveFastMode ??
+                        matchingDefaults?.fastMode,
                     activeRunId:
                         session.activeRunId === null ? undefined : session.activeRunId,
                     currentRunId:
