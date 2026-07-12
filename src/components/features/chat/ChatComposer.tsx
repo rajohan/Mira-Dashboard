@@ -16,10 +16,12 @@ import {
     useRef,
     useState,
 } from "react";
+import { Popover, PopoverButton, PopoverPanel } from "@headlessui/react";
 
 import { formatSize } from "../../../utils/format";
 import { Button } from "../../ui/Button";
 import { Textarea } from "../../ui/Textarea";
+import { Select } from "../../ui/Select";
 import type { Session } from "../../../types/session";
 import { chatSpeedOptions, chatThinkingOptions, selectedChatSpeed } from "./ChatHeader";
 import type { ChatPreviewItem, ChatSendAttachment } from "./chatTypes";
@@ -400,100 +402,74 @@ export function ChatComposer({
                         className="min-h-24 resize-y pr-12 pb-12 text-base sm:min-h-32 sm:text-sm"
                     />
                     <div className="absolute bottom-2 left-2 flex items-center gap-1">
-                        <details className="group relative">
-                            <summary
+                        <Popover className="relative">
+                            <PopoverButton
                                 aria-label="Model and response settings"
-                                className="flex cursor-pointer list-none items-center rounded p-1.5 text-primary-400 hover:bg-primary-700 hover:text-primary-100"
+                                className="flex items-center rounded p-1.5 text-primary-400 outline-none hover:bg-primary-700 hover:text-primary-100 data-focus:bg-primary-700 data-focus:text-primary-100"
                             >
                                 <Settings2 className="size-4" />
-                            </summary>
-                            <div className="absolute bottom-full left-0 z-50 mb-2 w-64 space-y-3 rounded-lg border border-primary-600 bg-primary-800 p-3 text-sm shadow-xl">
-                                <label className="block text-xs text-primary-400">
-                                    Model
-                                    <select
-                                        className="mt-1 w-full rounded bg-primary-700 p-2 text-primary-100"
-                                        value={selectedSession?.model || ""}
-                                        disabled={sessionControlsDisabled}
-                                        onChange={(event) =>
-                                            onSelectModel?.(event.target.value)
-                                        }
-                                    >
-                                        {modelOptions.length === 0 ? (
-                                            <option value={selectedSession?.model || ""}>
-                                                {selectedSession?.model || "Default"}
-                                            </option>
-                                        ) : (
-                                            modelOptions.map((option) => {
-                                                const value =
-                                                    option.id ||
-                                                    option.name ||
-                                                    option.label ||
-                                                    "";
-                                                return (
-                                                    <option key={value} value={value}>
-                                                        {option.label ||
-                                                            option.name ||
-                                                            option.id}
-                                                    </option>
-                                                );
-                                            })
-                                        )}
-                                    </select>
-                                </label>
-                                <label className="block text-xs text-primary-400">
-                                    Thinking
-                                    <select
-                                        className="mt-1 w-full rounded bg-primary-700 p-2 text-primary-100"
-                                        value={selectedSession?.thinkingLevel || ""}
-                                        disabled={sessionControlsDisabled}
-                                        onChange={(event) =>
-                                            onSelectThinkingLevel?.(event.target.value)
-                                        }
-                                    >
-                                        {chatThinkingOptions(selectedSession).map(
-                                            (option) => (
-                                                <option
-                                                    key={option.value}
-                                                    value={option.value}
-                                                >
-                                                    {option.label}
-                                                </option>
-                                            )
-                                        )}
-                                    </select>
-                                </label>
-                                <label className="block text-xs text-primary-400">
-                                    Speed
-                                    <select
-                                        className="mt-1 w-full rounded bg-primary-700 p-2 text-primary-100"
-                                        value={selectedChatSpeed(selectedSession)}
-                                        disabled={sessionControlsDisabled}
-                                        onChange={(event) =>
-                                            onSelectSpeed?.(event.target.value)
-                                        }
-                                    >
-                                        {chatSpeedOptions(selectedSession).map(
-                                            (option) => (
-                                                <option
-                                                    key={option.value}
-                                                    value={option.value}
-                                                >
-                                                    {option.label}
-                                                </option>
-                                            )
-                                        )}
-                                    </select>
-                                </label>
-                                <button
-                                    type="button"
-                                    className="w-full rounded bg-primary-700 p-2 text-left text-primary-100 disabled:opacity-50"
+                            </PopoverButton>
+                            <PopoverPanel
+                                anchor={{ to: "top start", gap: 8 }}
+                                className="z-50 w-72 space-y-3 rounded-lg border border-primary-600 bg-primary-800 p-3 text-sm shadow-xl outline-none"
+                            >
+                                <Select
+                                    ariaLabel="Model"
+                                    width="w-full"
+                                    value={selectedSession?.model || ""}
+                                    disabled={sessionControlsDisabled}
+                                    onChange={(value) => onSelectModel?.(value)}
+                                    options={
+                                        modelOptions.length === 0
+                                            ? [
+                                                  {
+                                                      value: selectedSession?.model || "",
+                                                      label:
+                                                          selectedSession?.model ||
+                                                          "Default",
+                                                  },
+                                              ]
+                                            : modelOptions.map((option) => ({
+                                                  value:
+                                                      option.id ||
+                                                      option.name ||
+                                                      option.label ||
+                                                      "",
+                                                  label:
+                                                      option.label ||
+                                                      option.name ||
+                                                      option.id ||
+                                                      "Unknown",
+                                              }))
+                                    }
+                                />
+                                <Select
+                                    ariaLabel="Thinking"
+                                    width="w-full"
+                                    value={selectedSession?.thinkingLevel || ""}
+                                    disabled={sessionControlsDisabled}
+                                    onChange={(value) => onSelectThinkingLevel?.(value)}
+                                    options={chatThinkingOptions(selectedSession)}
+                                />
+                                <Select
+                                    ariaLabel="Speed"
+                                    width="w-full"
+                                    value={selectedChatSpeed(selectedSession)}
+                                    disabled={sessionControlsDisabled}
+                                    onChange={(value) => onSelectSpeed?.(value)}
+                                    options={chatSpeedOptions(selectedSession)}
+                                />
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    className="w-full justify-start"
                                     disabled={sessionControlsDisabled || isCompacting}
                                     onClick={() => onCompact?.()}
                                 >
                                     {isCompacting ? "Compacting…" : "Compact context"}
-                                </button>
-                            </div>
-                        </details>
+                                </Button>
+                            </PopoverPanel>
+                        </Popover>
                         <button
                             type="button"
                             aria-pressed={shouldShowThinking}
