@@ -7199,6 +7199,7 @@ describe("shared component helpers", () => {
 
     it("drives dashboard cards, file tree/config branches, and session action hook", async () => {
         const user = userEvent.setup();
+        let realRunRequests = 0;
         const fetchMock = jest.fn(
             async (input: RequestInfo | URL, init?: RequestInit) => {
                 const url = String(input);
@@ -7312,10 +7313,7 @@ describe("shared component helpers", () => {
                     });
                 }
 
-                if (
-                    url === "/api/ops/log-rotation/dry-run" ||
-                    url === "/api/ops/log-rotation/run"
-                ) {
+                if (url === "/api/ops/log-rotation/dry-run") {
                     return Response.json({
                         isSuccess: true,
                         result: {
@@ -7326,7 +7324,7 @@ describe("shared component helpers", () => {
                             errors: [],
                             finishedAt: "2026-06-24T10:01:00.000Z",
                             groups: [],
-                            isDryRun: url.endsWith("dry-run"),
+                            isDryRun: true,
                             isOk: true,
                             rotatedFiles: 0,
                             skippedFiles: 0,
@@ -7334,6 +7332,37 @@ describe("shared component helpers", () => {
                             warnings: [],
                         },
                         stderr: "",
+                    });
+                }
+
+                if (url === "/api/jobs/ops.log-rotation/run") {
+                    realRunRequests += 1;
+                    if (realRunRequests === 1) {
+                        return Response.json(
+                            { error: "Scheduled job is already running" },
+                            { status: 409 }
+                        );
+                    }
+                    return Response.json({
+                        isOk: false,
+                        run: {
+                            id: 2,
+                            jobId: "ops.log-rotation",
+                            status: "failed",
+                            triggerType: "manual",
+                            startedAt: "2026-06-24T10:00:00.000Z",
+                            finishedAt: "2026-06-24T10:01:00.000Z",
+                            message: "Log file changed during rotation",
+                            output: {
+                                logRotation: {
+                                    result: {
+                                        errors: ["Jackett log changed"],
+                                        isOk: false,
+                                    },
+                                    stderr: "rotation stderr",
+                                },
+                            },
+                        },
                     });
                 }
 
@@ -7543,6 +7572,13 @@ describe("shared component helpers", () => {
         await user.click(screen.getByRole("button", { name: "Run real now" }));
 
         await waitFor(() => {
+            expect(
+                screen.getByText("Scheduled job is already running", { exact: false })
+            ).toBeInTheDocument();
+        });
+        await user.click(screen.getByRole("button", { name: "Run real now" }));
+
+        await waitFor(() => {
             expect(onConfigSelect).toHaveBeenCalledWith(
                 "config:hooks/transforms/agentmail.ts"
             );
@@ -7553,9 +7589,18 @@ describe("shared component helpers", () => {
                 screen.getAllByText(/unavailable|rate limited|unknown/).length
             ).toBeGreaterThan(0);
             expect(fetchMock).toHaveBeenCalledWith(
-                "/api/ops/log-rotation/run",
+                "/api/jobs/ops.log-rotation/run",
                 expect.objectContaining({ method: "POST" })
             );
+            expect(
+                screen.getByText("Log file changed during rotation", { exact: false })
+            ).toBeInTheDocument();
+            expect(
+                screen.getByText("Jackett log changed", { exact: false })
+            ).toBeInTheDocument();
+            expect(
+                screen.getByText("rotation stderr", { exact: false })
+            ).toBeInTheDocument();
         });
 
         unmount();

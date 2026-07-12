@@ -1,11 +1,18 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { FlaskConical, Play, RotateCw } from "lucide-react";
 
+import { cacheKeys } from "../../../hooks/useCache";
 import {
+    logRotationKeys,
     useLogRotationStatus,
     useRunLogRotationDryRun,
-    useRunLogRotationNow,
 } from "../../../hooks/useLogRotation";
-import { type ScheduledJob, useScheduledJobs } from "../../../hooks/useScheduledJobs";
+import {
+    type ScheduledJob,
+    ScheduledJobRunError,
+    useRunScheduledJobNow,
+    useScheduledJobs,
+} from "../../../hooks/useScheduledJobs";
 import {
     formatDate,
     formatOsloClock,
@@ -71,11 +78,16 @@ function formatCronSchedule(job: ScheduledJob, expression: string): string {
 
 /** Renders the log rotation card UI. */
 export function LogRotationCard() {
+    const queryClient = useQueryClient();
     const status = useLogRotationStatus(30_000);
     const scheduledJobs = useScheduledJobs();
     const isDryRun = useRunLogRotationDryRun();
-    const realRun = useRunLogRotationNow();
-    const lastAction = realRun.data || isDryRun.data;
+    const realRun = useRunScheduledJobNow();
+    const failedRealRun =
+        realRun.error instanceof ScheduledJobRunError ? realRun.error.run : undefined;
+    const requestError =
+        realRun.error && !failedRealRun ? { error: realRun.error.message } : undefined;
+    const lastAction = realRun.data || failedRealRun || requestError || isDryRun.data;
     const lastRun = status.data?.lastRun;
     const logRotationJob = scheduledJobs.data?.find(
         (job) => job.id === "ops.log-rotation"
@@ -142,8 +154,33 @@ export function LogRotationCard() {
                 <Button
                     size="sm"
                     variant="danger"
-                    onClick={() => realRun.mutate()}
-                    disabled={isDryRun.isPending || realRun.isPending}
+                    onClick={() =>
+                        realRun.mutate(
+                            { id: "ops.log-rotation" },
+                            {
+                                onSettled: () => {
+                                    void Promise.all([
+                                        queryClient.invalidateQueries({
+                                            queryKey: logRotationKeys.status,
+                                        }),
+                                        queryClient.invalidateQueries({
+                                            queryKey: cacheKeys.heartbeat(),
+                                        }),
+                                        queryClient.invalidateQueries({
+                                            queryKey:
+                                                cacheKeys.entry("log_rotation.state"),
+                                        }),
+                                    ]);
+                                },
+                            }
+                        )
+                    }
+                    disabled={
+                        isDryRun.isPending ||
+                        realRun.isPending ||
+                        !logRotationJob ||
+                        logRotationJob.isRunning
+                    }
                     className="w-full justify-center"
                 >
                     <Play className="size-4" />
@@ -154,7 +191,8 @@ export function LogRotationCard() {
             {lastAction ? (
                 <div className="mt-4 border-t border-primary-700 pt-3">
                     <div className="mb-2 text-xs font-semibold tracking-wide text-primary-400 uppercase">
-                        Last {lastAction.result?.isDryRun ? "dry-run" : "real run"} output
+                        Last {realRun.data || realRun.error ? "real run" : "dry-run"}{" "}
+                        output
                     </div>
                     <pre className="max-h-52 overflow-auto rounded-lg bg-black/40 p-3 text-xs text-primary-100">
                         {JSON.stringify(lastAction, undefined, 2)}

@@ -9,6 +9,7 @@ import {
     getScheduledJob,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
+    ScheduledJobActionError,
     upsertScheduledJob,
 } from "./scheduledJobs.ts";
 
@@ -1902,6 +1903,19 @@ function capLogRotationFailureOutput(value: unknown): string | undefined {
     return value.slice(-LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS);
 }
 
+function capScheduledLogRotationFailure(
+    logRotation: ElevatedLogRotationResult
+): ElevatedLogRotationResult {
+    const result = asRecord(logRotation.result);
+    return {
+        result: {
+            ...result,
+            stdout: capLogRotationFailureOutput(result.stdout),
+        },
+        stderr: capLogRotationFailureOutput(logRotation.stderr) ?? "",
+    };
+}
+
 function readLogRotationStateCacheForFailure(): Record<string, unknown> {
     const fallback = { version: 1, files: {} };
     const row = database
@@ -1955,7 +1969,9 @@ export function registerLogRotationScheduledJobs(): void {
         if (logRotation.result?.isOk !== true) {
             const message = logRotationFailureMessage(logRotation);
             persistLogRotationScheduledFailure(logRotation, message);
-            throw new Error(message);
+            throw new ScheduledJobActionError(message, {
+                logRotation: capScheduledLogRotationFailure(logRotation),
+            });
         }
         return { logRotation };
     });

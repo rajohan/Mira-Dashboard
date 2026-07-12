@@ -40,6 +40,17 @@ interface ScheduledJobActionRegistration {
     timeoutMs?: number;
 }
 
+/** Allows an action failure to persist structured output with the failed run. */
+export class ScheduledJobActionError extends Error {
+    readonly output: Record<string, unknown>;
+
+    constructor(message: string, output: Record<string, unknown>) {
+        super(message);
+        this.name = "ScheduledJobActionError";
+        this.output = output;
+    }
+}
+
 class ScheduledJobAbortError extends Error {
     constructor(handlerSettled: Promise<unknown>) {
         super("Scheduled job aborted");
@@ -919,7 +930,7 @@ export async function runScheduledJob(
                 run,
                 "failed",
                 errorMessage(error, "Scheduled job failed"),
-                {}
+                error instanceof ScheduledJobActionError ? error.output : {}
             );
         }
         return finishRunOrReport(run, "success", undefined, output);

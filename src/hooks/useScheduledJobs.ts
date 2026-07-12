@@ -48,6 +48,17 @@ interface ScheduledJobsResponse {
     jobs: ScheduledJob[];
 }
 
+/** Preserves a failed scheduled run so callers can surface its recorded output. */
+export class ScheduledJobRunError extends Error {
+    readonly run: ScheduledJobRun;
+
+    constructor(run: ScheduledJobRun) {
+        super(run.message || "Scheduled job run failed");
+        this.name = "ScheduledJobRunError";
+        this.run = run;
+    }
+}
+
 /** Defines scheduled job query keys. */
 export const scheduledJobKeys = {
     all: ["scheduled-jobs"] as const,
@@ -108,11 +119,11 @@ export function useRunScheduledJobNow() {
                 `/jobs/${encodeURIComponent(id)}/run`
             );
             if (!result.isOk || result.run.status === "failed") {
-                throw new Error(result.run.message || "Scheduled job run failed");
+                throw new ScheduledJobRunError(result.run);
             }
             return result;
         },
-        onSuccess: (_data, variables) => {
+        onSettled: (_data, _error, variables) => {
             void queryClient.invalidateQueries({ queryKey: scheduledJobKeys.list() });
             void queryClient.invalidateQueries({
                 queryKey: scheduledJobKeys.runs(variables.id),
