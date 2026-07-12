@@ -1,4 +1,4 @@
-import { Brain, type LucideIcon, Minimize2, Wrench } from "lucide-react";
+import { Brain, Gauge, type LucideIcon, Minimize2, Wrench } from "lucide-react";
 
 import type { Session } from "../../../types/session";
 import { formatDuration, formatTokens, getTokenPercent } from "../../../utils/format";
@@ -198,27 +198,9 @@ export function ChatHeader({
         <div className="border-b border-primary-700 pb-2 sm:pb-3">
             <div className="flex flex-col gap-2 sm:gap-3 lg:flex-row lg:items-end lg:justify-between">
                 <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                        <p className="text-xs wrap-break-word text-primary-400 sm:truncate sm:text-sm">
-                            {formatHeaderStatus(selectedSession)}
-                        </p>
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="rounded-full border border-primary-700/80 px-2 py-1 text-xs"
-                            disabled={
-                                !selectedSession ||
-                                sessionControlsDisabled ||
-                                isCompacting
-                            }
-                            onClick={onCompact}
-                            title="Compact the selected session context"
-                        >
-                            <Minimize2 className="size-3.5" aria-hidden="true" />
-                            {isCompacting ? "Compacting…" : "Compact"}
-                        </Button>
-                    </div>
+                    <p className="text-xs wrap-break-word text-primary-400 sm:truncate sm:text-sm">
+                        {formatHeaderStatus(selectedSession)}
+                    </p>
                 </div>
                 <div className="flex w-full flex-col gap-2 lg:ml-auto lg:w-auto lg:flex-row lg:items-center lg:justify-end">
                     <div className="flex shrink-0 flex-wrap justify-start gap-1.5 lg:justify-end">
@@ -237,14 +219,7 @@ export function ChatHeader({
                             onClick={onToggleTools}
                         />
                     </div>
-                    <div
-                        className={[
-                            "grid w-full gap-2",
-                            agentOptions.length > 0
-                                ? "sm:grid-cols-2 xl:grid-cols-4 lg:w-[min(54rem,78vw)] xl:w-228"
-                                : "sm:grid-cols-3 lg:w-[min(42rem,60vw)] xl:w-168",
-                        ].join(" ")}
-                    >
+                    <div className="flex w-full flex-wrap items-center gap-1.5 lg:w-auto lg:justify-end">
                         {agentOptions.length > 0 ? (
                             <Select
                                 value={selectedAgentId}
@@ -252,7 +227,7 @@ export function ChatHeader({
                                 options={agentOptions}
                                 placeholder="Select agent"
                                 ariaLabel="Agent"
-                                width="w-full"
+                                width="w-full sm:w-44"
                                 menuWidth="max-w-[min(42rem,calc(100vw-2rem))]"
                             />
                         ) : undefined}
@@ -262,7 +237,7 @@ export function ChatHeader({
                             options={sessionOptions}
                             placeholder="Select session"
                             ariaLabel="Session"
-                            width="w-full"
+                            width="w-full sm:w-56"
                             menuWidth="max-w-[min(42rem,calc(100vw-2rem))]"
                         />
                         <Select
@@ -271,7 +246,9 @@ export function ChatHeader({
                             options={thinkingOptions}
                             placeholder="Thinking"
                             ariaLabel="Thinking level"
-                            width="w-full"
+                            icon={<Brain className="size-3.5" aria-hidden="true" />}
+                            width="w-[calc(50%-0.1875rem)] sm:w-auto sm:min-w-32"
+                            className="h-8 px-2.5 text-xs"
                             disabled={!selectedSession || sessionControlsDisabled}
                         />
                         <Select
@@ -280,9 +257,27 @@ export function ChatHeader({
                             options={speedOptions}
                             placeholder="Speed"
                             ariaLabel="Speed"
-                            width="w-full"
+                            icon={<Gauge className="size-3.5" aria-hidden="true" />}
+                            width="w-[calc(50%-0.1875rem)] sm:w-auto sm:min-w-30"
+                            className="h-8 px-2.5 text-xs"
                             disabled={!selectedSession || sessionControlsDisabled}
                         />
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 gap-1.5 rounded-lg border border-primary-700 bg-primary-800 px-2.5 text-xs hover:border-accent-500 hover:bg-primary-700"
+                            disabled={
+                                !selectedSession ||
+                                sessionControlsDisabled ||
+                                isCompacting
+                            }
+                            onClick={onCompact}
+                            title="Compact the selected session context"
+                        >
+                            <Minimize2 className="size-3.5" aria-hidden="true" />
+                            {isCompacting ? "Compacting…" : "Compact"}
+                        </Button>
                     </div>
                 </div>
             </div>
