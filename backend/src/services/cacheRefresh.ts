@@ -1672,28 +1672,33 @@ tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw env CODEX_HOME="$MIR
 	for i in $(seq 1 20); do OUT=$(tmux capture-pane -pt "$SESSION" -S -320 || true); has_limits && break; sleep 1; done
 	printf "%s\n" "$OUT"
 	`;
-        const { code, stderr, stdout } = await runProcess("bash", ["-c", command], {
-            env: {
-                PATH: process.env.PATH,
-                NODE_ENV: process.env.NODE_ENV,
-                MIRA_QUOTA_CODEX_BIN: codexPath,
-                MIRA_QUOTA_CODEX_HOME: codexHome,
-            },
-            timeoutMs: 120_000,
-            maxBuffer: 1024 * 1024,
-        });
-        if (code !== 0) {
-            const output = stripAnsi(`${stderr}\n${stdout}`)
-                .replaceAll("\r", "")
-                .trim()
-                .slice(-1000);
-            return {
-                status: "error",
-                note: `codex quota exited ${code}${output ? `: ${output}` : ""}`,
-            };
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            const { code, stderr, stdout } = await runProcess("bash", ["-c", command], {
+                env: {
+                    PATH: process.env.PATH,
+                    NODE_ENV: process.env.NODE_ENV,
+                    MIRA_QUOTA_CODEX_BIN: codexPath,
+                    MIRA_QUOTA_CODEX_HOME: codexHome,
+                },
+                timeoutMs: 120_000,
+                maxBuffer: 1024 * 1024,
+            });
+            if (code !== 0) {
+                const output = stripAnsi(`${stderr}\n${stdout}`)
+                    .replaceAll("\r", "")
+                    .trim()
+                    .slice(-1000);
+                return {
+                    status: "error",
+                    note: `codex quota exited ${code}${output ? `: ${output}` : ""}`,
+                };
+            }
+            const parsed = parseOpenAiQuotaOutput(stripAnsi(stdout).replaceAll("\r", ""));
+            if (parsed.status !== "error" || attempt === 1) {
+                return parsed;
+            }
         }
-        const output = stripAnsi(stdout).replaceAll("\r", "");
-        return parseOpenAiQuotaOutput(output);
+        return { status: "error", note: "Could not parse Codex /status output" };
     } catch (error) {
         return { status: "error", note: errorMessage(error) };
     }

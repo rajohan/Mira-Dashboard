@@ -1855,23 +1855,30 @@ fi
             return new Response("not found", { status: 404 });
         }) as typeof fetch);
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
-        const runProcessSpy = jest.spyOn(processModule, "runProcess").mockResolvedValue({
-            code: 0,
-            stderr: "",
-            stdout: [
-                "Account: raymond@example.com",
-                "Model: gpt-5.5 (high)",
-                "5h limit: 80% left (resets 13:00)",
-                "Weekly limit: 65% left (resets Monday)",
-                "",
-            ].join("\n"),
-        });
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockResolvedValueOnce({
+                code: 0,
+                stderr: "",
+                stdout: "Codex was updated. Restarting…",
+            })
+            .mockResolvedValue({
+                code: 0,
+                stderr: "",
+                stdout: [
+                    "Account: raymond@example.com",
+                    "Model: gpt-5.5 (high)",
+                    "5h limit: 80% left (resets 13:00)",
+                    "Weekly limit: 65% left (resets Monday)",
+                    "",
+                ].join("\n"),
+            });
         cleanupCallbacks.push(() => runProcessSpy.mockRestore());
         const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
 
-        await expect(
-            refreshCacheProducer("quotas.summary", undefined, { force: true })
-        ).resolves.toEqual({ refreshed: ["quotas.summary"] });
+        expect(
+            await refreshCacheProducer("quotas.summary", undefined, { force: true })
+        ).toEqual({ refreshed: ["quotas.summary"] });
 
         const row = database
             .prepare(
@@ -1879,6 +1886,7 @@ fi
             )
             .get() as { data_json: string; metadata_json: string; status: string };
         expect(row.status).toBe("fresh");
+        expect(runProcessSpy).toHaveBeenCalledTimes(2);
         const data = JSON.parse(row.data_json);
         expect(data.openrouter).toMatchObject({
             percentUsed: 20,
@@ -1912,6 +1920,48 @@ fi
         expect(JSON.parse(row.metadata_json)).toMatchObject({
             missing: [],
             producers: ["openrouter", "elevenlabs", "synthetic", "openai"],
+        });
+
+        runProcessSpy.mockReset().mockResolvedValue({
+            code: 0,
+            stderr: "",
+            stdout: "Codex update screen without quota limits",
+        });
+        await refreshCacheProducer("quotas.summary", undefined, { force: true });
+        expect(runProcessSpy).toHaveBeenCalledTimes(2);
+        const repeatedParseFailure = JSON.parse(
+            (
+                database
+                    .prepare(
+                        "SELECT data_json FROM cache_entries WHERE key = 'quotas.summary'"
+                    )
+                    .get() as { data_json: string }
+            ).data_json
+        );
+        expect(repeatedParseFailure.openai).toEqual({
+            note: "Could not parse Codex /status output",
+            status: "error",
+        });
+
+        runProcessSpy.mockReset().mockResolvedValue({
+            code: 1,
+            stderr: "update failed",
+            stdout: "",
+        });
+        await refreshCacheProducer("quotas.summary", undefined, { force: true });
+        expect(runProcessSpy).toHaveBeenCalledTimes(1);
+        const commandFailure = JSON.parse(
+            (
+                database
+                    .prepare(
+                        "SELECT data_json FROM cache_entries WHERE key = 'quotas.summary'"
+                    )
+                    .get() as { data_json: string }
+            ).data_json
+        );
+        expect(commandFailure.openai).toEqual({
+            note: "codex quota exited 1: update failed",
+            status: "error",
         });
     });
 
