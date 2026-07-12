@@ -3162,6 +3162,14 @@ describe("Mira Dashboard pages", () => {
                 typeof isSessionActive
             >[0])
         ).toBe(true);
+        expect(
+            isSessionActive({
+                activeRunId: "stale-run",
+                currentRunId: "stale-current-run",
+                endedAt: "2026-06-24T08:01:00.000Z",
+                status: "running",
+            } as Parameters<typeof isSessionActive>[0])
+        ).toBe(false);
 
         const scheduled: string[] = [];
         scheduleBottomFollowWhenNeeded(true, () => {

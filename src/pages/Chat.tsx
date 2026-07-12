@@ -647,13 +647,17 @@ export function supportedAudioRecordingMimeType(): string | undefined {
 
 /** Returns whether OpenClaw reports an active run for a session. */
 export function isSessionActive(session: Session | undefined): boolean {
+    if (!session || sessionTimestampMs(session.endedAt) !== undefined) {
+        return false;
+    }
+
     return Boolean(
-        session?.isRunning ||
-        session?.running ||
-        session?.status?.toLowerCase() === "running" ||
-        session?.hasActiveRun ||
-        session?.activeRunId ||
-        session?.currentRunId
+        session.isRunning ||
+        session.running ||
+        session.status?.toLowerCase() === "running" ||
+        session.hasActiveRun ||
+        session.activeRunId ||
+        session.currentRunId
     );
 }
 
