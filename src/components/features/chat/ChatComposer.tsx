@@ -323,7 +323,7 @@ export function ChatComposer({
                     className="hidden"
                     onChange={(event) => onAttachFiles(event.target.files ?? undefined)}
                 />
-                <div className="relative min-w-0 flex-1">
+                <div className="relative min-w-0 flex-1 rounded-lg border border-primary-600 bg-primary-700 transition-colors hover:border-primary-500 focus-within:border-accent-500">
                     {visibleSlashCommandSuggestions.length > 0 ? (
                         <div className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-primary-700 bg-primary-900 shadow-2xl">
                             <div className="border-b border-primary-700 px-3 py-2 text-xs font-medium tracking-wide text-primary-400 uppercase">
@@ -414,9 +414,9 @@ export function ChatComposer({
                                 : "Choose a session first"
                         }
                         rows={4}
-                        className="min-h-24 resize-y rounded-b-none border-b-0 text-base sm:min-h-32 sm:text-sm"
+                        className="min-h-24 resize-none !rounded-none !border-0 !bg-transparent text-base focus:!border-0 sm:min-h-32 sm:text-sm"
                     />
-                    <div className="flex min-h-11 items-center justify-between rounded-b-lg border border-t-0 border-primary-600 bg-primary-700 px-2 py-1">
+                    <div className="flex min-h-11 items-center justify-between px-2 py-1">
                         <div className="flex items-center gap-1">
                             <Popover className="relative">
                                 <PopoverButton
