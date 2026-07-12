@@ -1921,6 +1921,48 @@ fi
             missing: [],
             producers: ["openrouter", "elevenlabs", "synthetic", "openai"],
         });
+
+        runProcessSpy.mockReset().mockResolvedValue({
+            code: 0,
+            stderr: "",
+            stdout: "Codex update screen without quota limits",
+        });
+        await refreshCacheProducer("quotas.summary", undefined, { force: true });
+        expect(runProcessSpy).toHaveBeenCalledTimes(2);
+        const repeatedParseFailure = JSON.parse(
+            (
+                database
+                    .prepare(
+                        "SELECT data_json FROM cache_entries WHERE key = 'quotas.summary'"
+                    )
+                    .get() as { data_json: string }
+            ).data_json
+        );
+        expect(repeatedParseFailure.openai).toEqual({
+            note: "Could not parse Codex /status output",
+            status: "error",
+        });
+
+        runProcessSpy.mockReset().mockResolvedValue({
+            code: 1,
+            stderr: "update failed",
+            stdout: "",
+        });
+        await refreshCacheProducer("quotas.summary", undefined, { force: true });
+        expect(runProcessSpy).toHaveBeenCalledTimes(1);
+        const commandFailure = JSON.parse(
+            (
+                database
+                    .prepare(
+                        "SELECT data_json FROM cache_entries WHERE key = 'quotas.summary'"
+                    )
+                    .get() as { data_json: string }
+            ).data_json
+        );
+        expect(commandFailure.openai).toEqual({
+            note: "codex quota exited 1: update failed",
+            status: "error",
+        });
     });
 
     it("refreshes weather through the Open-Meteo fallback when wttr.in fails", async () => {
