@@ -686,7 +686,9 @@ export function Chat() {
     const resetConfirmResolverReference = useRef<
         ((wasConfirmed: boolean) => void) | undefined
     >(undefined);
-    const pendingSessionPatchesReference = useRef(new Set<Promise<boolean>>());
+    const pendingSessionPatchesReference = useRef(
+        new Map<string, Set<Promise<boolean>>>()
+    );
     const draftReference = useRef("");
     const attachmentsReference = useRef<ChatSendAttachment[]>([]);
 
@@ -706,7 +708,9 @@ export function Chat() {
     const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [isSending, setIsSending] = useState(false);
-    const [pendingSessionPatchCount, setPendingSessionPatchCount] = useState(0);
+    const [pendingSessionPatchCounts, setPendingSessionPatchCounts] = useState<
+        Record<string, number>
+    >({});
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [previewItem, setPreviewItem] = useState<ChatPreviewItem | undefined>(
@@ -1779,7 +1783,9 @@ export function Chat() {
             return;
         }
 
-        const patchResults = await Promise.all(pendingSessionPatchesReference.current);
+        const patchResults = await Promise.all(
+            pendingSessionPatchesReference.current.get(pendingSendSessionKey) || []
+        );
         if (
             patchResults.includes(false) ||
             selectedSessionKeyReference.current !== pendingSendSessionKey
@@ -1923,7 +1929,7 @@ export function Chat() {
 
     const draftText = draft.trim();
     const blockedByInFlightSend = isBlockedByInFlightSend(draftText);
-    const isPatchingSession = pendingSessionPatchCount > 0;
+    const isPatchingSession = (pendingSessionPatchCounts[selectedSessionKey] || 0) > 0;
     const isCompactingSession = selectedStreams.some(
         ([, stream]) =>
             stream.operation === "compact" ||
@@ -1952,13 +1958,17 @@ export function Chat() {
         if (!selectedSessionKey || isSessionControlsDisabled) {
             return;
         }
+        const patchSessionKey = selectedSessionKey;
 
         setSendError(undefined);
-        setPendingSessionPatchCount((wasPrevious) => wasPrevious + 1);
+        setPendingSessionPatchCounts((wasPrevious) => ({
+            ...wasPrevious,
+            [patchSessionKey]: (wasPrevious[patchSessionKey] || 0) + 1,
+        }));
         const pendingPatch = (async () => {
             try {
                 await request("sessions.patch", {
-                    key: selectedSessionKey,
+                    key: patchSessionKey,
                     sessionId:
                         selectedSession?.sessionId ||
                         (selectedSession?.id &&
@@ -1973,14 +1983,27 @@ export function Chat() {
                 setSendError(chatErrorMessage(error_, "Failed to update chat settings"));
                 return false;
             } finally {
-                setPendingSessionPatchCount((wasPrevious) =>
-                    Math.max(0, wasPrevious - 1)
-                );
+                setPendingSessionPatchCounts((wasPrevious) => ({
+                    ...wasPrevious,
+                    [patchSessionKey]: Math.max(
+                        0,
+                        (wasPrevious[patchSessionKey] || 0) - 1
+                    ),
+                }));
             }
         })();
-        pendingSessionPatchesReference.current.add(pendingPatch);
+        const pendingSessionPatches =
+            pendingSessionPatchesReference.current.get(patchSessionKey) || new Set();
+        pendingSessionPatches.add(pendingPatch);
+        pendingSessionPatchesReference.current.set(
+            patchSessionKey,
+            pendingSessionPatches
+        );
         await pendingPatch;
-        pendingSessionPatchesReference.current.delete(pendingPatch);
+        pendingSessionPatches.delete(pendingPatch);
+        if (pendingSessionPatches.size === 0) {
+            pendingSessionPatchesReference.current.delete(patchSessionKey);
+        }
     };
 
     /** Compacts the selected session through the existing session action API. */

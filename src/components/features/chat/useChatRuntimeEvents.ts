@@ -103,6 +103,10 @@ function isOptimisticRunId(runId: string): boolean {
     return runId.startsWith("dashboard-chat-") || runId.startsWith("dashboard-compact-");
 }
 
+function isCompactOptimisticRunId(runId: string): boolean {
+    return runId.startsWith("dashboard-compact-");
+}
+
 /** Returns whether an active stream belongs to a concrete run id. */
 function isActiveStreamMatchingRun(
     sessionKey: string,
@@ -1085,7 +1089,8 @@ export function useChatRuntimeEvents({
                 const promotesProvisionalRun =
                     isStartsNewRun &&
                     existing &&
-                    isProvisionalRunId(streamSessionKey, existing.runId);
+                    (isProvisionalRunId(streamSessionKey, existing.runId) ||
+                        isCompactOptimisticRunId(existing.runId));
                 let text =
                     isStartsNewRun && !promotesProvisionalRun ? "" : existing?.text || "";
                 let message =
@@ -2016,6 +2021,7 @@ export function useChatRuntimeEvents({
             const shouldAliasOptimisticTerminal =
                 eventMatchesSelected &&
                 selectedStream &&
+                !streamForRun &&
                 payload.runId &&
                 TERMINAL_CHAT_STATES.has(payload.state || "") &&
                 isOptimisticRunId(selectedStream.runId);
