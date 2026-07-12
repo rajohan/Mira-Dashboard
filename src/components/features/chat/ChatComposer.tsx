@@ -24,9 +24,14 @@ import { formatSize } from "../../../utils/format";
 import { Button } from "../../ui/Button";
 import { Select } from "../../ui/Select";
 import { Textarea } from "../../ui/Textarea";
-import { chatSpeedOptions, chatThinkingOptions, selectedChatSpeed } from "./ChatHeader";
 import type { ChatPreviewItem, ChatSendAttachment } from "./chatTypes";
-import { base64ToText, type ChatModelOption } from "./chatUtilities";
+import {
+    base64ToText,
+    type ChatModelOption,
+    chatSpeedOptions,
+    chatThinkingOptions,
+    selectedChatSpeed,
+} from "./chatUtilities";
 import type { SlashCommandSuggestion } from "./slashCommands";
 
 const CHAT_EMOJIS = [
@@ -323,7 +328,7 @@ export function ChatComposer({
                     className="hidden"
                     onChange={(event) => onAttachFiles(event.target.files ?? undefined)}
                 />
-                <div className="relative min-w-0 flex-1 rounded-lg border border-primary-600 bg-primary-700 transition-colors hover:border-primary-500 focus-within:border-accent-500">
+                <div className="relative min-w-0 flex-1 rounded-lg border border-primary-600 bg-primary-700 transition-colors hover:border-primary-500 focus-within:border-accent-500 focus-within:hover:border-accent-500">
                     {visibleSlashCommandSuggestions.length > 0 ? (
                         <div className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-primary-700 bg-primary-900 shadow-2xl">
                             <div className="border-b border-primary-700 px-3 py-2 text-xs font-medium tracking-wide text-primary-400 uppercase">
@@ -414,11 +419,11 @@ export function ChatComposer({
                                 : "Choose a session first"
                         }
                         rows={4}
-                        className="min-h-24 resize-none !rounded-none !border-0 !bg-transparent text-base focus:!border-0 sm:min-h-32 sm:text-sm"
+                        className="min-h-24 resize-none !rounded-lg !border-0 !bg-transparent pb-12 text-base focus:!border-0 sm:min-h-32 sm:text-sm"
                     />
-                    <div className="flex min-h-11 items-center justify-between px-2 py-1">
+                    <div className="pointer-events-none absolute inset-x-1 bottom-1 flex min-h-10 items-center justify-between rounded-md bg-primary-700 px-1">
                         <div className="flex items-center gap-1">
-                            <Popover className="relative">
+                            <Popover className="pointer-events-auto relative">
                                 <PopoverButton
                                     aria-label="Model and response settings"
                                     className="flex items-center rounded p-1.5 text-primary-400 outline-none hover:bg-primary-700 hover:text-primary-100 data-focus:bg-primary-700 data-focus:text-primary-100"
@@ -433,7 +438,9 @@ export function ChatComposer({
                                         ariaLabel="Model"
                                         width="w-full"
                                         value={selectedSession?.model || ""}
-                                        disabled={sessionControlsDisabled}
+                                        disabled={
+                                            !selectedSessionKey || sessionControlsDisabled
+                                        }
                                         onChange={(value) => onSelectModel?.(value)}
                                         options={modelSelectOptions}
                                     />
@@ -441,7 +448,9 @@ export function ChatComposer({
                                         ariaLabel="Thinking"
                                         width="w-full"
                                         value={selectedSession?.thinkingLevel || ""}
-                                        disabled={sessionControlsDisabled}
+                                        disabled={
+                                            !selectedSessionKey || sessionControlsDisabled
+                                        }
                                         onChange={(value) =>
                                             onSelectThinkingLevel?.(value)
                                         }
@@ -451,7 +460,9 @@ export function ChatComposer({
                                         ariaLabel="Speed"
                                         width="w-full"
                                         value={selectedChatSpeed(selectedSession)}
-                                        disabled={sessionControlsDisabled}
+                                        disabled={
+                                            !selectedSessionKey || sessionControlsDisabled
+                                        }
                                         onChange={(value) => onSelectSpeed?.(value)}
                                         options={chatSpeedOptions(selectedSession)}
                                     />
@@ -459,7 +470,11 @@ export function ChatComposer({
                                         variant="primary"
                                         size="sm"
                                         className="w-full justify-center"
-                                        disabled={sessionControlsDisabled || isCompacting}
+                                        disabled={
+                                            !selectedSessionKey ||
+                                            sessionControlsDisabled ||
+                                            isCompacting
+                                        }
                                         onClick={() => onCompact?.()}
                                     >
                                         <Minimize2 className="size-4" />
@@ -471,6 +486,7 @@ export function ChatComposer({
                                 type="button"
                                 aria-pressed={shouldShowThinking}
                                 onClick={() => onToggleThinking?.()}
+                                disabled={!selectedSessionKey}
                                 className={
                                     shouldShowThinking
                                         ? "rounded p-1.5 text-accent-300"
@@ -484,6 +500,7 @@ export function ChatComposer({
                                 type="button"
                                 aria-pressed={shouldShowTools}
                                 onClick={() => onToggleTools?.()}
+                                disabled={!selectedSessionKey}
                                 className={
                                     shouldShowTools
                                         ? "rounded p-1.5 text-accent-300"
@@ -500,7 +517,7 @@ export function ChatComposer({
                                 setShowEmojiPicker((wasPrevious) => !wasPrevious)
                             }
                             disabled={!isConnected || !selectedSessionKey || isSending}
-                            className="rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+                            className="pointer-events-auto rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
                             title="Insert emoji"
                             aria-label="Insert emoji"
                         >

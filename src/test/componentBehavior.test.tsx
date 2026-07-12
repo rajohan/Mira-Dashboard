@@ -14,7 +14,7 @@ import type { ReactNode, RefObject } from "react";
 import { TaskHistorySidebar } from "../components/features/agents/TaskHistorySidebar";
 import { AttachmentPreviewModal } from "../components/features/chat/AttachmentPreviewModal";
 import { ChatComposer } from "../components/features/chat/ChatComposer";
-import { ChatHeader, chatThinkingOptions } from "../components/features/chat/ChatHeader";
+import { ChatHeader } from "../components/features/chat/ChatHeader";
 import {
     ChatMarkdown,
     childrenToText,
@@ -33,6 +33,7 @@ import {
     createChatVisibility,
     mergeStreamMessage,
 } from "../components/features/chat/chatRuntime";
+import { chatThinkingOptions } from "../components/features/chat/chatUtilities";
 import {
     type ChatHistoryMessage,
     normalizeVisibleChatHistoryMessages,
@@ -624,17 +625,8 @@ describe("shared component helpers", () => {
                     selectedSessionKey="agent:main:main"
                     agentOptions={[{ label: "Main agent", value: "main" }]}
                     sessionOptions={[{ label: "Main session", value: "agent:main:main" }]}
-                    shouldShowThinking={true}
-                    shouldShowTools={false}
-                    sessionControlsDisabled={false}
-                    isCompacting={false}
-                    onToggleThinking={onToggleThinking}
-                    onToggleTools={onToggleTools}
                     onSelectAgent={onSelectAgent}
                     onSelectSession={onSelectSession}
-                    onSelectThinkingLevel={onSelectThinkingLevel}
-                    onSelectSpeed={onSelectSpeed}
-                    onCompact={onCompact}
                 />
                 <ChatMessageDetails
                     visibility={{ shouldShowThinking: true, shouldShowTools: true }}
