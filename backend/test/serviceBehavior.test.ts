@@ -1888,7 +1888,7 @@ fi
         expect(row.status).toBe("fresh");
         expect(runProcessSpy).toHaveBeenCalledTimes(2);
         expect(runProcessSpy.mock.calls[0]?.[1]?.[1]).toContain(
-            'grep -Eiq "(5h|Weekly) limit:"'
+            'grep -Eiq "Weekly limit:"'
         );
         const data = JSON.parse(row.data_json);
         expect(data.openrouter).toMatchObject({
