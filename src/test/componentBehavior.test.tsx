@@ -7554,7 +7554,7 @@ describe("shared component helpers", () => {
             expect(
                 screen.getByText(/5h unlimited · weekly 30% left/i)
             ).toBeInTheDocument();
-            expect(screen.getByText(/Resets: weekly only weekly/i)).toBeInTheDocument();
+            expect(screen.getByText(/Resets weekly/i)).toBeInTheDocument();
         });
 
         await user.click(screen.getByRole("button", { name: "hooks" }));

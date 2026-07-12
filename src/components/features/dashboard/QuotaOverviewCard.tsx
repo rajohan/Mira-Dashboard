@@ -268,7 +268,9 @@ export function QuotaOverviewCard({ quotas }: QuotaOverviewCardProperties) {
                 : `5h ${quotas.openai.fiveHourLeftPercent === undefined ? "unlimited" : `${quotas.openai.fiveHourLeftPercent}% left`} · weekly ${quotas.openai.weeklyLeftPercent}% left`,
             line2: hasQuotaStatus(quotas.openai)
                 ? quotas.openai.note || ""
-                : `Resets: ${quotas.openai.fiveHourLeftPercent === undefined ? "weekly only" : `5h ${formatResetTime(quotas.openai.fiveHourReset)} ·`} weekly ${formatResetValue(quotas.openai.weeklyReset)}`,
+                : quotas.openai.fiveHourLeftPercent === undefined
+                  ? `Resets weekly ${formatResetValue(quotas.openai.weeklyReset)}`
+                  : `Resets: 5h ${formatResetTime(quotas.openai.fiveHourReset)} · weekly ${formatResetValue(quotas.openai.weeklyReset)}`,
             percent: hasQuotaStatus(quotas.openai)
                 ? undefined
                 : quotas.openai.percentUsed,
