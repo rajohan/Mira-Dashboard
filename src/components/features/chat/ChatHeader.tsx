@@ -1,6 +1,7 @@
 import { Bot, MessagesSquare } from "lucide-react";
 
 import type { Session } from "../../../types/session";
+import { cn } from "../../../utils/cn";
 import { formatDuration, formatTokens, getTokenPercent } from "../../../utils/format";
 import { formatSessionType } from "../../../utils/sessionUtilities";
 import { Select } from "../../ui/Select";
@@ -62,12 +63,12 @@ export function ChatHeader({
                 </div>
                 <div className="flex w-full flex-col gap-2 lg:ml-auto lg:w-auto lg:flex-row lg:items-center lg:justify-end">
                     <div
-                        className={[
+                        className={cn(
                             "grid w-full grid-cols-2 gap-2",
                             agentOptions.length > 0
                                 ? "lg:w-[min(32rem,48vw)]"
-                                : "grid-cols-1 lg:w-[min(20rem,34vw)]",
-                        ].join(" ")}
+                                : "grid-cols-1 lg:w-[min(20rem,34vw)]"
+                        )}
                     >
                         {agentOptions.length > 0 ? (
                             <Select
