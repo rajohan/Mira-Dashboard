@@ -40,7 +40,7 @@ export function ReportsOverviewCard() {
 
             {isLoading ? (
                 <div className="text-sm text-primary-300">Loading reports…</div>
-            ) : isError ? (
+            ) : isError && !data ? (
                 <div className="text-sm text-rose-300">Reports unavailable.</div>
             ) : (
                 <div className="space-y-2 text-sm text-primary-200">

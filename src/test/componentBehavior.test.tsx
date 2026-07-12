@@ -111,6 +111,7 @@ import { ExpandableCard, ReadOnlyField } from "../components/ui/ExpandableCard";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { getProgressColor, ProgressBar } from "../components/ui/ProgressBar";
 import { useFileExplorerState } from "../hooks/useFileExplorerState";
+import { reportKeys } from "../hooks/useReports";
 import { useSessionActions } from "../hooks/useSessionActions";
 import {
     activeStreamRenderableText,
@@ -7134,6 +7135,65 @@ describe("shared component helpers", () => {
         });
         expect(result.current.hasChanges).toBe(false);
         unmount();
+        queryClient.clear();
+    });
+
+    it("keeps cached report metrics visible when a refresh fails", async () => {
+        const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
+            const url = String(input);
+            if (url === "/api/reports") {
+                throw new Error("Reports refresh failed");
+            }
+
+            throw new Error(`Unexpected reports overview fetch: ${url}`);
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const queryClient = createQueryClient();
+        queryClient.setQueryData(reportKeys.list(), {
+            items: [
+                {
+                    bodyMd: "Heartbeat looks good.",
+                    createdAt: "2026-06-24T10:05:00.000Z",
+                    dedupeKey: "heartbeat:ok",
+                    id: 1,
+                    metadata: {},
+                    occurredAt: "2026-06-24T10:05:00.000Z",
+                    source: "openclaw",
+                    sourceJobId: "heartbeat",
+                    status: "ok",
+                    summary: "Heartbeat looks good.",
+                    title: "Cached heartbeat report",
+                    type: "heartbeat",
+                    updatedAt: "2026-06-24T10:05:00.000Z",
+                },
+            ],
+        });
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ReportsOverviewCard />
+            </QueryClientProvider>
+        );
+
+        await act(async () => {
+            await queryClient.invalidateQueries({ queryKey: reportKeys.list() });
+        });
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/reports",
+                expect.objectContaining({ credentials: "include" })
+            );
+            expect(queryClient.getQueryState(reportKeys.list())?.status).toBe("error");
+        });
+
+        expect(screen.queryByText("Reports unavailable.")).not.toBeInTheDocument();
+        expect(screen.getByText(/Cached heartbeat report/)).toBeInTheDocument();
+
         queryClient.clear();
     });
 
