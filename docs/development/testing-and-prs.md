@@ -23,17 +23,38 @@ bun run test:coverage
 bun run format:check
 ```
 
-Docs-only changes usually need:
+Every documentation change, whether docs-only or accompanying code, must run
+the Markdown formatter check and validate local Markdown links:
 
 ```bash
+git diff --name-only --diff-filter=ACMR "$(git merge-base HEAD origin/main)" -- "*.md" \
+  | xargs -r bunx prettier --check
+
+python3 - <<'PY'
+from pathlib import Path
+import re
+
+missing = []
+for path in Path("docs").rglob("*.md"):
+    for target in re.findall(r"\[[^]]+\]\(([^)]+)\)", path.read_text()):
+        if "://" in target or target.startswith("#"):
+            continue
+        local_target = target.split("#", 1)[0]
+        if local_target and not (path.parent / local_target).resolve().exists():
+            missing.append(f"{path}: {target}")
+
+if missing:
+    raise SystemExit("\n".join(missing))
+print("All local Markdown links resolve.")
+PY
+
 git diff --check
 ```
 
-Also verify local Markdown links and run the project format check when a docs
-change accompanies code. Documentation must be considered for changes to route
-families, response shapes, cache projections, database state, operational
-workflows, user-facing controls, and fallback/error behavior. If none applies,
-state `Docs: not needed` with a reason in the PR body.
+Documentation must be considered for changes to route families, response
+shapes, cache projections, database state, operational workflows, user-facing
+controls, and fallback/error behavior. If none applies, state
+`Docs: not needed` with a reason in the PR body.
 
 ## Coverage
 

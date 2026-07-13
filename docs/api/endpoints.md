@@ -231,6 +231,8 @@ their consumer contracts.
 | `POST` | `/api/terminal/cd`       | Resolves validated directory changes. |
 
 The Terminal page executes commands through `/api/exec/start` and polls the
-result by job ID. The backend validates the argv contract and prevents
-conflicting starts. A missing/expired job is presented as a synthetic terminal
-failure instead of leaving the UI permanently pending.
+result by job ID. The backend validates the argv contract. The Terminal UI
+prevents another submission while a start is pending or its current job is
+active; the API itself permits concurrent jobs up to its global limit. A
+missing/expired job is presented as a synthetic terminal failure instead of
+leaving the UI permanently pending.
