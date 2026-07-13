@@ -5,7 +5,6 @@ import path from "node:path";
 import type { Server } from "bun";
 import { describe, expect, it } from "bun:test";
 
-import { compactHeartbeatData } from "../src/routes/cacheRoutes.ts";
 import {
     isAllowedDashboardOrigin,
     readJson,
@@ -31,6 +30,7 @@ import {
     stringFallback,
 } from "../src/lib/values.ts";
 import { resetRequestPolicyForTests, withRequestPolicy } from "../src/requestPolicy.ts";
+import { compactHeartbeatData } from "../src/routes/cacheRoutes.ts";
 import { isValidAgentId } from "../src/services/agents.ts";
 import { mapBackupJob } from "../src/services/backups.ts";
 import { getResolvedRoots, validatePrNumber } from "../src/services/pullRequests.ts";
