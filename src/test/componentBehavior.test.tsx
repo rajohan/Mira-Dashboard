@@ -67,6 +67,7 @@ import { QuotaOverviewCard } from "../components/features/dashboard/QuotaOvervie
 import { ReportsOverviewCard } from "../components/features/dashboard/ReportsOverviewCard";
 import { ServiceActionsCard } from "../components/features/dashboard/ServiceActionsCard";
 import { AutovacuumHealthTable } from "../components/features/database/AutovacuumHealthTable";
+import { DatabaseOverviewCards } from "../components/features/database/DatabaseOverviewCards";
 import { DatabasesTable } from "../components/features/database/DatabaseSizesTable";
 import { DatabaseTableShell } from "../components/features/database/DatabaseTableShell";
 import { PgBouncerPoolsTable } from "../components/features/database/PgBouncerPoolsTable";
@@ -8708,6 +8709,133 @@ describe("shared component helpers", () => {
         ).toBeInTheDocument();
         view.unmount();
         view.queryClient.clear();
+    });
+
+    it("shows compact database maintenance review status", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () =>
+                Response.json({
+                    consecutiveFailures: 0,
+                    data: {
+                        overview: {
+                            totalDatabaseSizeBytes: 10_737_418_240,
+                            totalBackends: 2,
+                            averageCacheHitRatio: 99,
+                            connections: {},
+                            pgStatStatementsEnabled: true,
+                            torrentCounts: { comet: 1, bitmagnet: 2 },
+                            pgbouncer: {
+                                clientConnections: 2,
+                                serverConnections: 2,
+                                waitingClients: 0,
+                                maxWait: 0,
+                                avgQueryTime: 1,
+                                avgTransactionTime: 1,
+                            },
+                            maintenance: {
+                                status: "review",
+                                hintCount: 3,
+                                requiresBloatReview: true,
+                                isBloatAssessmentIncomplete: false,
+                                unassessedTableCount: 0,
+                                unassessedPhysicalBytes: 0,
+                                slowQueryCount: 1,
+                                highDeadTupleTableCount: 1,
+                                physicalTableBytes: 8_589_934_592,
+                                estimatedReclaimableBytes: 6_442_450_944,
+                                estimatedReclaimablePercent: 75,
+                                reviewThresholdBytes: 5_368_709_120,
+                                reviewMinimumBytes: 1_073_741_824,
+                                reviewThresholdPercent: 25,
+                            },
+                        },
+                        databases: [],
+                        deadTuples: [],
+                        bloatEstimates: [],
+                        topQueries: [],
+                        pgbouncerPools: [],
+                        pgbouncerStats: [],
+                    },
+                    key: "database.summary",
+                    meta: {},
+                    source: "backend",
+                    status: "fresh",
+                })
+            ),
+            writable: true,
+        });
+
+        const view = renderWithQueryClient(<DatabaseOverviewCard />);
+
+        expect(await screen.findByText("Review · 3 hints")).toBeInTheDocument();
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("keeps total database size status scoped to bloat", () => {
+        const overview = {
+            totalDatabaseSizeBytes: 10_737_418_240,
+            totalBackends: 2,
+            averageCacheHitRatio: 99,
+            connections: {},
+            pgStatStatementsEnabled: true,
+            torrentCounts: { comet: 1, bitmagnet: 2 },
+            pgbouncer: {
+                clientConnections: 2,
+                serverConnections: 2,
+                waitingClients: 0,
+                maxWait: 0,
+                avgQueryTime: 1,
+                avgTransactionTime: 1,
+            },
+            maintenance: {
+                status: "review" as const,
+                hintCount: 1,
+                requiresBloatReview: false,
+                isBloatAssessmentIncomplete: false,
+                unassessedTableCount: 0,
+                unassessedPhysicalBytes: 0,
+                slowQueryCount: 1,
+                highDeadTupleTableCount: 0,
+                physicalTableBytes: 8_589_934_592,
+                estimatedReclaimableBytes: 1_048_576,
+                estimatedReclaimablePercent: 0.01,
+                reviewThresholdBytes: 5_368_709_120,
+                reviewMinimumBytes: 1_073_741_824,
+                reviewThresholdPercent: 25,
+            },
+        };
+        const view = render(<DatabaseOverviewCards overview={overview} />);
+
+        expect(screen.getByText("Healthy · ~1.0 MB reclaimable")).toBeInTheDocument();
+
+        view.rerender(
+            <DatabaseOverviewCards
+                overview={{
+                    ...overview,
+                    maintenance: {
+                        ...overview.maintenance,
+                        isBloatAssessmentIncomplete: true,
+                    },
+                }}
+            />
+        );
+        expect(screen.getByText("Bloat not assessed")).toBeInTheDocument();
+
+        view.rerender(
+            <DatabaseOverviewCards
+                overview={{
+                    ...overview,
+                    maintenance: {
+                        ...overview.maintenance,
+                        isBloatAssessmentIncomplete: true,
+                        requiresBloatReview: true,
+                    },
+                }}
+            />
+        );
+        expect(screen.getByText("Review · ~1.0 MB reclaimable")).toBeInTheDocument();
     });
 
     it("drives service action confirmation, exec polling, and cache refresh", async () => {

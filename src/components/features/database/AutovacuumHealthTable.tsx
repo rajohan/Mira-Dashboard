@@ -6,10 +6,14 @@ import { DatabaseTableShell } from "./DatabaseTableShell";
 const columnHelper = createColumnHelper<DatabaseOverviewResponse["deadTuples"][number]>();
 
 const columns = [
-    columnHelper.accessor((row) => `${row.schemaname}.${row.relname}`, {
-        id: "table",
-        header: "Table",
-    }),
+    columnHelper.accessor(
+        (row) =>
+            `${row.database ? `${row.database}.` : ""}${row.schemaname}.${row.relname}`,
+        {
+            id: "table",
+            header: "Table",
+        }
+    ),
     columnHelper.accessor((row) => Number(row.n_dead_tup), {
         id: "deadTuples",
         header: "Dead tuples",
@@ -39,6 +43,7 @@ export function AutovacuumHealthTable({
             renderMobileCard={(row) => (
                 <div>
                     <div className="font-medium break-all text-primary-50">
+                        {row.database ? `${row.database}.` : ""}
                         {row.schemaname}.{row.relname}
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-primary-300">

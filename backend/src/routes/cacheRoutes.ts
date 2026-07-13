@@ -64,6 +64,10 @@ export function compactHeartbeatData(key: string, data: unknown): unknown {
                           };
                       })
                     : [],
+                maintenance:
+                    value.overview && typeof value.overview === "object"
+                        ? (value.overview as Record<string, unknown>).maintenance
+                        : undefined,
                 overview: value.overview,
             };
         }

@@ -25,8 +25,22 @@ function writeFakeDocker(binaryPath: string): void {
             ]
         ),
         bitmagnet: table(["count"], [["11"]]),
+        bloatEstimates: table(
+            [
+                "schemaname",
+                "relname",
+                "physical_bytes",
+                "estimated_reclaimable_bytes",
+                "assessed",
+            ],
+            [
+                ["public", "events", "4294967296", "3221225472", "true"],
+                ["public", "emptied", "2147483648", "", "false"],
+            ]
+        ),
         comet: table(["count"], [["7"]]),
         databases: table(["datname"], [["mira"], ["logs"]]),
+        databasesUnfiltered: table(["datname"], [["mira"], ["logs"], ["postgres"]]),
         deadTuples: table(
             [
                 "schemaname",
@@ -39,7 +53,7 @@ function writeFakeDocker(binaryPath: string): void {
             ],
             [
                 ["public", "tasks", "100", "5", "5", "2026-06-23", ""],
-                ["public", "logs", "20", "8", "40", "", "2026-06-22"],
+                ["public", "logs", "2000", "1001", "50.05", "", "2026-06-22"],
             ]
         ),
         extensions: table(["extname"], [["pg_stat_statements"]]),
@@ -98,7 +112,7 @@ function writeFakeDocker(binaryPath: string): void {
                 "shared_blks_hit",
                 "shared_blks_read",
             ],
-            [["SELECT 1", "4", "12.5", "3.13", "4", "10", "1"]]
+            [["SELECT 1", "4", "2500", "625", "4", "10", "1"]]
         ),
     };
     const script = `#!/usr/bin/env bun
@@ -114,7 +128,9 @@ if (sql.includes("FROM torrents")) {
 } else if (sql.includes("FROM pg_stat_activity")) {
   key = "activity";
 } else if (sql.includes("FROM pg_database")) {
-  key = "databases";
+  key = sql.includes("datname <> 'postgres'") ? "databases" : "databasesUnfiltered";
+} else if (sql.includes("estimated_reclaimable_bytes")) {
+  key = "bloatEstimates";
 } else if (sql.includes("FROM pg_stat_user_tables")) {
   key = "deadTuples";
 } else if (sql.includes("FROM pg_extension")) {
@@ -171,8 +187,26 @@ describe("database overview service", () => {
             });
             expect(overview.databases).toHaveLength(2);
             expect(overview.deadTuples[0]).toMatchObject({
+                database: "mira",
                 relname: "logs",
-                n_dead_tup: "8",
+                n_dead_tup: "1001",
+            });
+            expect(overview.overview.maintenance).toMatchObject({
+                status: "review",
+                hintCount: 4,
+                requiresBloatReview: true,
+                isBloatAssessmentIncomplete: true,
+                unassessedTableCount: 2,
+                unassessedPhysicalBytes: 4_294_967_296,
+                slowQueryCount: 1,
+                highDeadTupleTableCount: 2,
+                physicalTableBytes: 8_589_934_592,
+                estimatedReclaimableBytes: 6_442_450_944,
+                estimatedReclaimablePercent: 75,
+            });
+            expect(overview.bloatEstimates[0]).toMatchObject({
+                database: "mira",
+                relname: "events",
             });
             expect(overview.topQueries[0]).toMatchObject({
                 query: "SELECT 1",

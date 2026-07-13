@@ -21,6 +21,22 @@ export interface DatabaseOverviewResponse {
             avgQueryTime: number;
             avgTransactionTime: number;
         };
+        maintenance?: {
+            status: "healthy" | "not_assessed" | "review";
+            hintCount: number;
+            requiresBloatReview: boolean;
+            isBloatAssessmentIncomplete: boolean;
+            unassessedTableCount: number;
+            unassessedPhysicalBytes: number;
+            slowQueryCount: number;
+            highDeadTupleTableCount: number;
+            physicalTableBytes: number;
+            estimatedReclaimableBytes: number;
+            estimatedReclaimablePercent: number;
+            reviewThresholdBytes: number;
+            reviewMinimumBytes: number;
+            reviewThresholdPercent: number;
+        };
     };
     databases: Array<{
         datname: string;
@@ -34,6 +50,7 @@ export interface DatabaseOverviewResponse {
         cache_hit_ratio: string;
     }>;
     deadTuples: Array<{
+        database?: string;
         schemaname: string;
         relname: string;
         n_live_tup: string;
@@ -41,6 +58,14 @@ export interface DatabaseOverviewResponse {
         dead_pct: string;
         last_autovacuum: string;
         last_autoanalyze: string;
+    }>;
+    bloatEstimates?: Array<{
+        database: string;
+        schemaname: string;
+        relname: string;
+        physical_bytes: string;
+        estimated_reclaimable_bytes: string;
+        assessed: string;
     }>;
     topQueries: Array<{
         query: string;
