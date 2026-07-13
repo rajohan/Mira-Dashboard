@@ -15,7 +15,7 @@ function parseJsonFieldOrValue(value: string) {
     return parsed ?? value;
 }
 
-function compactHeartbeatData(key: string, data: unknown): unknown {
+export function compactHeartbeatData(key: string, data: unknown): unknown {
     const missingValue = JSON.parse("null") as null;
     if (!data || typeof data !== "object" || Array.isArray(data)) {
         return missingValue;
@@ -109,24 +109,38 @@ function compactHeartbeatData(key: string, data: unknown): unknown {
                 value.gatewayService && typeof value.gatewayService === "object"
                     ? (value.gatewayService as Record<string, unknown>)
                     : {};
+            const nodeService =
+                value.nodeService && typeof value.nodeService === "object"
+                    ? (value.nodeService as Record<string, unknown>)
+                    : {};
             const security =
                 value.security && typeof value.security === "object"
                     ? (value.security as Record<string, unknown>)
                     : {};
             return {
                 checkedAt: value.checkedAt,
+                doctorError: value.doctorError,
+                doctorWarningCount: value.doctorWarningCount,
                 doctorWarnings: value.doctorWarnings,
                 gateway: {
                     authWarning: gateway.authWarning,
                     error: gateway.error,
                     reachable: gateway.reachable,
+                    status: gateway.status,
                 },
                 gatewayService: {
+                    active: gatewayService.active,
                     loaded: gatewayService.loaded,
                     runtime: gatewayService.runtime,
                     runtimeShort: gatewayService.runtimeShort,
                 },
                 heartbeat: value.heartbeat,
+                nodeService: {
+                    active: nodeService.active,
+                    loaded: nodeService.loaded,
+                    runtime: nodeService.runtime,
+                    runtimeShort: nodeService.runtimeShort,
+                },
                 security: {
                     findings: Array.isArray(security.findings)
                         ? security.findings.map((finding) => {
@@ -138,10 +152,13 @@ function compactHeartbeatData(key: string, data: unknown): unknown {
                               };
                           })
                         : [],
+                    isOk: security.isOk,
                     summary: security.summary,
                 },
+                securityError: value.securityError,
                 taskAudit: value.taskAudit,
                 tasks: value.tasks,
+                updateStatusError: value.updateStatusError,
                 version: value.version,
             };
         }

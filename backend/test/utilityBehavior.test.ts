@@ -5,6 +5,7 @@ import path from "node:path";
 import type { Server } from "bun";
 import { describe, expect, it } from "bun:test";
 
+import { compactHeartbeatData } from "../src/routes/cacheRoutes.ts";
 import {
     isAllowedDashboardOrigin,
     readJson,
@@ -60,6 +61,202 @@ async function callTestRoute(
 }
 
 describe("backend service utilities", () => {
+    it("compacts every heartbeat cache payload without dropping health failures", () => {
+        const kopia = compactHeartbeatData("backup.kopia.status", {
+            checkedAt: "checked",
+            isOk: false,
+            latest: [
+                {
+                    endTime: "ended",
+                    errorCount: 1,
+                    ignoredErrorCount: 2,
+                    path: "/source",
+                    snapshots: ["omitted"],
+                },
+            ],
+            stale: ["/source"],
+        });
+        expect(kopia).toEqual({
+            checkedAt: "checked",
+            isOk: false,
+            latest: [
+                {
+                    endTime: "ended",
+                    errorCount: 1,
+                    ignoredErrorCount: 2,
+                    path: "/source",
+                },
+            ],
+            stale: ["/source"],
+        });
+
+        expect(
+            compactHeartbeatData("backup.walg.status", {
+                backupCount: 1,
+                backups: ["omitted"],
+                checkedAt: "checked",
+                isOk: false,
+                latest: { backupName: "latest" },
+                latestAgeHours: 25,
+                stale: true,
+            })
+        ).toEqual({
+            backupCount: 1,
+            checkedAt: "checked",
+            isOk: false,
+            latest: { backupName: "latest" },
+            latestAgeHours: 25,
+            stale: true,
+        });
+
+        expect(
+            compactHeartbeatData("database.summary", {
+                checkedAt: "checked",
+                databases: [
+                    {
+                        cache_hit_ratio: "91",
+                        datname: "mira",
+                        numbackends: "2",
+                        query: "omitted",
+                        size_bytes: "100",
+                    },
+                ],
+                overview: { totalBackends: 2 },
+                topQueries: ["omitted"],
+            })
+        ).toEqual({
+            checkedAt: "checked",
+            databases: [
+                {
+                    cacheHitRatio: "91",
+                    connections: "2",
+                    name: "mira",
+                    sizeBytes: "100",
+                },
+            ],
+            overview: { totalBackends: 2 },
+        });
+
+        expect(
+            compactHeartbeatData("docker.summary", {
+                checkedAt: "checked",
+                containers: [
+                    {
+                        command: "omitted",
+                        health: "unhealthy",
+                        name: "app",
+                        restartCount: 3,
+                        state: "running",
+                        status: "Up",
+                    },
+                ],
+                images: ["omitted"],
+                updaterSummary: { failed: 1 },
+            })
+        ).toEqual({
+            checkedAt: "checked",
+            containers: [
+                {
+                    health: "unhealthy",
+                    name: "app",
+                    restartCount: 3,
+                    state: "running",
+                    status: "Up",
+                },
+            ],
+            updaterSummary: { failed: 1 },
+        });
+
+        expect(
+            compactHeartbeatData("log_rotation.state", {
+                files: { omitted: true },
+                lastRun: {
+                    errors: ["failed"],
+                    finishedAt: "finished",
+                    groups: ["omitted"],
+                    isOk: false,
+                    skippedFiles: 1,
+                    warnings: ["warning"],
+                },
+            })
+        ).toEqual({
+            lastRun: {
+                errors: ["failed"],
+                finishedAt: "finished",
+                isOk: false,
+                skippedFiles: 1,
+                warnings: ["warning"],
+            },
+        });
+
+        expect(
+            compactHeartbeatData("system.openclaw", {
+                checkedAt: "checked",
+                doctorError: "doctor failed",
+                doctorWarningCount: 0,
+                doctorWarnings: [],
+                gateway: { reachable: false, status: "error" },
+                gatewayService: { active: false, loaded: true },
+                heartbeat: { ok: false },
+                nodeService: { active: false, loaded: false },
+                security: {
+                    findings: [
+                        {
+                            checkId: "audit.failed",
+                            detail: "omitted",
+                            severity: "warn",
+                            title: "Audit failed",
+                        },
+                    ],
+                    isOk: false,
+                    summary: { warn: 1 },
+                },
+                securityError: "security failed",
+                taskAudit: { errors: 1 },
+                tasks: { failed: 1 },
+                updateStatusError: "update failed",
+                version: { current: "1.0.0" },
+            })
+        ).toEqual({
+            checkedAt: "checked",
+            doctorError: "doctor failed",
+            doctorWarningCount: 0,
+            doctorWarnings: [],
+            gateway: { reachable: false, status: "error" },
+            gatewayService: { active: false, loaded: true },
+            heartbeat: { ok: false },
+            nodeService: { active: false, loaded: false },
+            security: {
+                findings: [
+                    {
+                        checkId: "audit.failed",
+                        severity: "warn",
+                        title: "Audit failed",
+                    },
+                ],
+                isOk: false,
+                summary: { warn: 1 },
+            },
+            securityError: "security failed",
+            taskAudit: { errors: 1 },
+            tasks: { failed: 1 },
+            updateStatusError: "update failed",
+            version: { current: "1.0.0" },
+        });
+
+        for (const key of [
+            "git.workspace",
+            "moltbook.home",
+            "quotas.summary",
+            "system.host",
+            "weather.spydeberg",
+        ]) {
+            expect(compactHeartbeatData(key, { direct: key })).toEqual({ direct: key });
+        }
+        expect(compactHeartbeatData("moltbook.feed.hot", { posts: [] })).toBeNull();
+        expect(compactHeartbeatData("unknown", "invalid")).toBeNull();
+    });
+
     it("validates agent ids before they can become filesystem path segments", () => {
         expect(isValidAgentId("mira-2026")).toBe(true);
         expect(isValidAgentId("agent.main_1")).toBe(true);
