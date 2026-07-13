@@ -8,6 +8,9 @@ const BLOAT_REVIEW_BYTES = 5 * 1024 * 1024 * 1024;
 const BLOAT_REVIEW_MINIMUM_BYTES = 1024 * 1024 * 1024;
 const BLOAT_REVIEW_PERCENT = 25;
 const BLOAT_DETAIL_MINIMUM_BYTES = 64 * 1024 * 1024;
+const SLOW_QUERY_MEAN_MS = 500;
+const HIGH_DEAD_TUPLE_PERCENT = 20;
+const HIGH_DEAD_TUPLE_MINIMUM = 1000;
 
 /** Represents one PostgreSQL database row from pg_stat_database with numeric values encoded as psql strings. */
 interface PostgresDatabaseRow {
@@ -411,10 +414,11 @@ export async function getDatabaseOverview() {
                 0
             )::bigint::text AS estimated_reclaimable_bytes
         FROM pg_stat_user_tables AS tables
-        LEFT JOIN average_row_widths AS widths
+        INNER JOIN average_row_widths AS widths
           ON widths.schemaname = tables.schemaname
          AND widths.tablename = tables.relname
-        WHERE pg_relation_size(tables.relid) > 0;
+        WHERE pg_relation_size(tables.relid) > 0
+          AND tables.n_live_tup > 0;
     `);
     const physicalTableBytes = sumBy(bloatEstimates, (row) =>
         numberFrom(row.physical_bytes)
@@ -426,12 +430,10 @@ export async function getDatabaseOverview() {
         physicalTableBytes > 0
             ? (estimatedReclaimableBytes / physicalTableBytes) * 100
             : 0;
-    const maintenanceStatus =
+    const bloatNeedsReview =
         estimatedReclaimableBytes >= BLOAT_REVIEW_BYTES ||
         (estimatedReclaimableBytes >= BLOAT_REVIEW_MINIMUM_BYTES &&
-            estimatedReclaimablePercent >= BLOAT_REVIEW_PERCENT)
-            ? "review"
-            : "healthy";
+            estimatedReclaimablePercent >= BLOAT_REVIEW_PERCENT);
 
     const pgStatStatementsResult = await queryPostgres(`
         SELECT extname FROM pg_extension WHERE extname = 'pg_stat_statements';
@@ -454,6 +456,16 @@ export async function getDatabaseOverview() {
             `)
           ) as TopQueryRow[])
         : [];
+    const slowQueryCount = topQueries.filter(
+        (query) => numberFrom(query.mean_exec_time) >= SLOW_QUERY_MEAN_MS
+    ).length;
+    const highDeadTupleTableCount = deadTupleRows.filter(
+        (table) =>
+            numberFrom(table.dead_pct) >= HIGH_DEAD_TUPLE_PERCENT &&
+            numberFrom(table.n_dead_tup) >= HIGH_DEAD_TUPLE_MINIMUM
+    ).length;
+    const maintenanceHintCount =
+        slowQueryCount + highDeadTupleTableCount + (bloatNeedsReview ? 1 : 0);
 
     const pgBouncerPools = parseTable<PgBouncerPoolRow>(
         await queryPgBouncer("SHOW POOLS;")
@@ -519,7 +531,11 @@ export async function getDatabaseOverview() {
                 avgTransactionTime,
             },
             maintenance: {
-                status: maintenanceStatus,
+                status: maintenanceHintCount > 0 ? "review" : "healthy",
+                hintCount: maintenanceHintCount,
+                bloatNeedsReview,
+                slowQueryCount,
+                highDeadTupleTableCount,
                 physicalTableBytes,
                 estimatedReclaimableBytes,
                 estimatedReclaimablePercent,

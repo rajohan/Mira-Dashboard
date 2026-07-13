@@ -27,6 +27,8 @@ export function DatabaseOverviewCard() {
     const overview = database?.overview;
     const waitingClients = overview?.pgbouncer.waitingClients ?? 0;
     const maintenance = overview?.maintenance;
+    const maintenanceHintCount =
+        maintenance?.hintCount ?? (maintenance?.status === "review" ? 1 : 0);
 
     return (
         <Card>
@@ -88,7 +90,7 @@ export function DatabaseOverviewCard() {
                         >
                             {maintenance
                                 ? maintenance.status === "review"
-                                    ? `Review · ${formatBytes(maintenance.estimatedReclaimableBytes)}`
+                                    ? `Review · ${maintenanceHintCount} ${maintenanceHintCount === 1 ? "hint" : "hints"}`
                                     : "Healthy"
                                 : "Not assessed"}
                         </span>

@@ -8734,6 +8734,10 @@ describe("shared component helpers", () => {
                             },
                             maintenance: {
                                 status: "review",
+                                hintCount: 3,
+                                bloatNeedsReview: true,
+                                slowQueryCount: 1,
+                                highDeadTupleTableCount: 1,
                                 physicalTableBytes: 8_589_934_592,
                                 estimatedReclaimableBytes: 6_442_450_944,
                                 estimatedReclaimablePercent: 75,
@@ -8760,7 +8764,7 @@ describe("shared component helpers", () => {
 
         const view = renderWithQueryClient(<DatabaseOverviewCard />);
 
-        expect(await screen.findByText("Review · 6.0 GB")).toBeInTheDocument();
+        expect(await screen.findByText("Review · 3 hints")).toBeInTheDocument();
         view.unmount();
         view.queryClient.clear();
     });

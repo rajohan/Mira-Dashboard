@@ -43,7 +43,7 @@ function writeFakeDocker(binaryPath: string): void {
             ],
             [
                 ["public", "tasks", "100", "5", "5", "2026-06-23", ""],
-                ["public", "logs", "20", "8", "40", "", "2026-06-22"],
+                ["public", "logs", "2000", "1001", "50.05", "", "2026-06-22"],
             ]
         ),
         extensions: table(["extname"], [["pg_stat_statements"]]),
@@ -102,7 +102,7 @@ function writeFakeDocker(binaryPath: string): void {
                 "shared_blks_hit",
                 "shared_blks_read",
             ],
-            [["SELECT 1", "4", "12.5", "3.13", "4", "10", "1"]]
+            [["SELECT 1", "4", "2500", "625", "4", "10", "1"]]
         ),
     };
     const script = `#!/usr/bin/env bun
@@ -179,10 +179,14 @@ describe("database overview service", () => {
             expect(overview.deadTuples[0]).toMatchObject({
                 database: "mira",
                 relname: "logs",
-                n_dead_tup: "8",
+                n_dead_tup: "1001",
             });
             expect(overview.overview.maintenance).toMatchObject({
                 status: "review",
+                hintCount: 4,
+                bloatNeedsReview: true,
+                slowQueryCount: 1,
+                highDeadTupleTableCount: 2,
                 physicalTableBytes: 8_589_934_592,
                 estimatedReclaimableBytes: 6_442_450_944,
                 estimatedReclaimablePercent: 75,

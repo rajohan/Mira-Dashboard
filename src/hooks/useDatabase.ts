@@ -23,6 +23,10 @@ export interface DatabaseOverviewResponse {
         };
         maintenance?: {
             status: "healthy" | "review";
+            hintCount: number;
+            bloatNeedsReview: boolean;
+            slowQueryCount: number;
+            highDeadTupleTableCount: number;
             physicalTableBytes: number;
             estimatedReclaimableBytes: number;
             estimatedReclaimablePercent: number;
