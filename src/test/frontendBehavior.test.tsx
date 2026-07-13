@@ -4205,6 +4205,42 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
+    it("keeps loaded tasks visible when a refresh fails", async () => {
+        const user = userEvent.setup();
+        const fetchMock = jest
+            .fn()
+            .mockResolvedValueOnce(
+                Response.json([
+                    task({
+                        number: 1,
+                        title: "Keep the cached task visible",
+                    }),
+                ])
+            )
+            .mockResolvedValueOnce(
+                Response.json({ error: "Tasks temporarily unavailable" }, { status: 503 })
+            );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        renderWithQueryClient(createElement(Tasks));
+
+        expect(
+            await screen.findByText("Keep the cached task visible")
+        ).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+        expect(
+            await screen.findByText(
+                "Task refresh failed. Showing the last loaded tasks. Tasks temporarily unavailable"
+            )
+        ).toBeInTheDocument();
+        expect(screen.getByText("Keep the cached task visible")).toBeInTheDocument();
+    });
+
     it("keeps task classification and search aligned with dashboard behavior", () => {
         const unlabelled = task({ number: 2, title: "Default priority" });
         const lowPriority = task({

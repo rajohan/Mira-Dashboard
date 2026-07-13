@@ -16,6 +16,7 @@ import {
     TaskDetailModal,
     TaskOverlay,
 } from "../components/features/tasks";
+import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
@@ -57,7 +58,8 @@ const AUTOMATION_FILTERS = [
 
 /** Renders the tasks UI. */
 export function Tasks() {
-    const { data: tasks = [], isLoading, error, refetch } = useTasks();
+    const { data: tasksData, isLoading, error, refetch } = useTasks();
+    const tasks = tasksData ?? [];
     const moveTask = useMoveTask();
     const createTask = useCreateTask();
     const assignTask = useAssignTask();
@@ -304,7 +306,7 @@ export function Tasks() {
         <PageState
             isLoading={isLoading}
             loading={<LoadingState size="lg" />}
-            error={error?.message ?? undefined}
+            error={tasksData === undefined ? (error?.message ?? undefined) : undefined}
             errorView={
                 <div className="flex h-full min-h-0 flex-col items-center justify-center gap-4 p-6">
                     <p className="text-red-400">{error?.message}</p>
@@ -318,6 +320,13 @@ export function Tasks() {
                 onDragEnd={handleDragEnd}
             >
                 <div className="flex h-full min-h-0 flex-col p-3 sm:p-4 lg:p-6">
+                    {error && tasksData !== undefined && (
+                        <Alert variant="warning" className="mb-4">
+                            Task refresh failed. Showing the last loaded tasks.{" "}
+                            {error.message}
+                        </Alert>
+                    )}
+
                     <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                         <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center lg:gap-4">
                             <SearchInput
