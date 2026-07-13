@@ -112,10 +112,10 @@ Healthy `/api/health`:
 
 ```json
 {
-  "status": "isOk",
-  "gatewayConnected": true,
-  "sessionCount": 9,
-  "backendCommit": "abc1234"
+    "status": "isOk",
+    "gatewayConnected": true,
+    "sessionCount": 9,
+    "backendCommit": "abc1234"
 }
 ```
 

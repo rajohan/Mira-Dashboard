@@ -5,12 +5,12 @@ heartbeats, and custom operational output.
 
 ## Report Types
 
-| Type | Source | Notification behavior |
-| --- | --- | --- |
-| `daily_brief` | OpenClaw daily brief cron | Creates/updates notification by default. |
-| `daily_summary` | OpenClaw daily summary cron | Creates/updates notification by default. |
-| `heartbeat` | OpenClaw ops heartbeat | `ok` does not notify; `warning` and `error` notify. |
-| `custom` | Manual or integration-created reports | Notifies by default unless `notify:false`. |
+| Type            | Source                                | Notification behavior                               |
+| --------------- | ------------------------------------- | --------------------------------------------------- |
+| `daily_brief`   | OpenClaw daily brief cron             | Creates/updates notification by default.            |
+| `daily_summary` | OpenClaw daily summary cron           | Creates/updates notification by default.            |
+| `heartbeat`     | OpenClaw ops heartbeat                | `ok` does not notify; `warning` and `error` notify. |
+| `custom`        | Manual or integration-created reports | Notifies by default unless `notify:false`.          |
 
 ## OpenClaw Delivery Shape
 
@@ -66,19 +66,19 @@ Content-Type: application/json
 
 ```json
 {
-  "type": "heartbeat",
-  "status": "warning",
-  "title": "Heartbeat warning",
-  "bodyMd": "Git workspace needs attention.",
-  "summary": "Git workspace needs attention.",
-  "source": "openclaw",
-  "sourceJobId": "ops-check",
-  "dedupeKey": "heartbeat:ops-check:2026-06-30T01-20:warning:git-dirty",
-  "metadata": {
-    "problemKey": "git-dirty"
-  },
-  "occurredAt": "2026-06-29T23:20:00.000Z",
-  "notify": true
+    "type": "heartbeat",
+    "status": "warning",
+    "title": "Heartbeat warning",
+    "bodyMd": "Git workspace needs attention.",
+    "summary": "Git workspace needs attention.",
+    "source": "openclaw",
+    "sourceJobId": "ops-check",
+    "dedupeKey": "heartbeat:ops-check:2026-06-30T01-20:warning:git-dirty",
+    "metadata": {
+        "problemKey": "git-dirty"
+    },
+    "occurredAt": "2026-06-29T23:20:00.000Z",
+    "notify": true
 }
 ```
 
@@ -104,10 +104,10 @@ Report notifications store:
 
 ```json
 {
-  "reportId": 123,
-  "reportStatus": "warning",
-  "reportType": "heartbeat",
-  "sourceJobId": "ops-check"
+    "reportId": 123,
+    "reportStatus": "warning",
+    "reportType": "heartbeat",
+    "sourceJobId": "ops-check"
 }
 ```
 

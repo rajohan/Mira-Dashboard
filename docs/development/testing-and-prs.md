@@ -27,8 +27,7 @@ Every documentation change, whether docs-only or accompanying code, must run
 the Markdown formatter check and validate local Markdown links:
 
 ```bash
-git diff --name-only --diff-filter=ACMR "$(git merge-base HEAD origin/main)" -- "*.md" \
-  | xargs -r bunx prettier --check
+bunx prettier --check "docs/**/*.md"
 
 python3 - <<'PY'
 from pathlib import Path

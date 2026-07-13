@@ -132,13 +132,13 @@ curl http://127.0.0.1:3100/api/auth/bootstrap
 Expected before setup:
 
 ```json
-{"isBootstrapRequired":true,"hasGatewayToken":false}
+{ "isBootstrapRequired": true, "hasGatewayToken": false }
 ```
 
 Expected after setup:
 
 ```json
-{"isBootstrapRequired":false,"hasGatewayToken":true}
+{ "isBootstrapRequired": false, "hasGatewayToken": true }
 ```
 
 ## Verify Runtime
@@ -153,10 +153,10 @@ Healthy response shape:
 
 ```json
 {
-  "status": "isOk",
-  "gatewayConnected": true,
-  "sessionCount": 9,
-  "backendCommit": "abc1234"
+    "status": "isOk",
+    "gatewayConnected": true,
+    "sessionCount": 9,
+    "backendCommit": "abc1234"
 }
 ```
 

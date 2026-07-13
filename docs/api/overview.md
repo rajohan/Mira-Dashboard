@@ -21,13 +21,13 @@ The API is an internal flat JSON API. Success responses return the resource or
 a small object such as:
 
 ```json
-{"isOk":true}
+{ "isOk": true }
 ```
 
 Errors generally use:
 
 ```json
-{"error":"Message"}
+{ "error": "Message" }
 ```
 
 ## Authentication
@@ -45,9 +45,9 @@ The WebSocket endpoint `/ws` is also authenticated and origin-checked.
 
 `backend/src/requestPolicy.ts` applies in-memory per-client buckets:
 
-| Scope | Limit |
-| --- | --- |
-| Auth routes | 20 requests/minute |
+| Scope            | Limit               |
+| ---------------- | ------------------- |
+| Auth routes      | 20 requests/minute  |
 | Other API routes | 600 requests/minute |
 
 Responses include `RateLimit-Policy` and `RateLimit` headers. Limited requests
@@ -57,19 +57,19 @@ return HTTP `429` with `Retry-After`.
 
 Common statuses:
 
-| Status | Meaning |
-| --- | --- |
-| `200` | Read/update/action succeeded. |
-| `201` | Resource created. |
-| `400` | Invalid request JSON, params, or body. |
-| `401` | Missing/invalid authentication or invalid Gateway token during bootstrap. |
-| `403` | Origin/path/proxy policy rejection. |
-| `404` | Resource/path not found. |
-| `409` | Bootstrap closed or operation conflicts with current state. |
-| `413` | File/media payload too large. |
-| `429` | Rate limited. |
-| `500` | Unexpected backend failure. |
-| `503` | Frontend build missing for static page serving. |
+| Status | Meaning                                                                   |
+| ------ | ------------------------------------------------------------------------- |
+| `200`  | Read/update/action succeeded.                                             |
+| `201`  | Resource created.                                                         |
+| `400`  | Invalid request JSON, params, or body.                                    |
+| `401`  | Missing/invalid authentication or invalid Gateway token during bootstrap. |
+| `403`  | Origin/path/proxy policy rejection.                                       |
+| `404`  | Resource/path not found.                                                  |
+| `409`  | Bootstrap closed or operation conflicts with current state.               |
+| `413`  | File/media payload too large.                                             |
+| `429`  | Rate limited.                                                             |
+| `500`  | Unexpected backend failure.                                               |
+| `503`  | Frontend build missing for static page serving.                           |
 
 ## Route Families
 

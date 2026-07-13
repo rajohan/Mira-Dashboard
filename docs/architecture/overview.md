@@ -36,23 +36,23 @@ OpenClaw Gateway on :18789
 
 Primary pages:
 
-| Path | Purpose |
-| --- | --- |
-| `/` | Operations dashboard overview. |
-| `/tasks` | Local task board and task updates. |
-| `/agents` | Agent status and task history. |
-| `/sessions` | OpenClaw session table and actions. |
-| `/chat` | Gateway-backed chat UI. |
-| `/logs` | Log file browsing/tailing. |
-| `/jobs` | Dashboard scheduled jobs. |
-| `/reports` | Daily briefs, summaries, heartbeats, and custom reports. |
-| `/pull-requests` | Dashboard PR review/deploy operations. |
-| `/files` | Workspace file browser/editor. |
-| `/docker` | Docker state and managed updater. |
-| `/database` | Postgres/PgBouncer overview. |
-| `/moltbook` | Moltbook dashboard. |
-| `/settings` | OpenClaw/Dashboard settings. |
-| `/terminal` | Terminal helper/completion UI. |
+| Path             | Purpose                                                  |
+| ---------------- | -------------------------------------------------------- |
+| `/`              | Operations dashboard overview.                           |
+| `/tasks`         | Local task board and task updates.                       |
+| `/agents`        | Agent status and task history.                           |
+| `/sessions`      | OpenClaw session table and actions.                      |
+| `/chat`          | Gateway-backed chat UI.                                  |
+| `/logs`          | Log file browsing/tailing.                               |
+| `/jobs`          | Dashboard scheduled jobs.                                |
+| `/reports`       | Daily briefs, summaries, heartbeats, and custom reports. |
+| `/pull-requests` | Dashboard PR review/deploy operations.                   |
+| `/files`         | Workspace file browser/editor.                           |
+| `/docker`        | Docker state and managed updater.                        |
+| `/database`      | Postgres/PgBouncer overview.                             |
+| `/moltbook`      | Moltbook dashboard.                                      |
+| `/settings`      | OpenClaw/Dashboard settings.                             |
+| `/terminal`      | Terminal helper/completion UI.                           |
 
 ## Backend
 
@@ -65,15 +65,15 @@ The backend is native Bun:
 
 Key files:
 
-| File | Responsibility |
-| --- | --- |
-| `backend/src/server.ts` | HTTP server, static frontend serving, `/ws` upgrade. |
-| `backend/src/routes.ts` | Route table assembly. |
-| `backend/src/requestPolicy.ts` | Auth requirement, rate limiting, error wrapper. |
-| `backend/src/http.ts` | JSON helpers, cookies, origin/proxy/IP helpers. |
-| `backend/src/gateway.ts` | OpenClaw Gateway client lifecycle and Dashboard WebSocket fanout. |
-| `backend/src/database.ts` | SQLite path, schema, PRAGMAs, database proxy. |
-| `backend/src/serverStart.ts` | Production startup and background scheduler registration. |
+| File                           | Responsibility                                                    |
+| ------------------------------ | ----------------------------------------------------------------- |
+| `backend/src/server.ts`        | HTTP server, static frontend serving, `/ws` upgrade.              |
+| `backend/src/routes.ts`        | Route table assembly.                                             |
+| `backend/src/requestPolicy.ts` | Auth requirement, rate limiting, error wrapper.                   |
+| `backend/src/http.ts`          | JSON helpers, cookies, origin/proxy/IP helpers.                   |
+| `backend/src/gateway.ts`       | OpenClaw Gateway client lifecycle and Dashboard WebSocket fanout. |
+| `backend/src/database.ts`      | SQLite path, schema, PRAGMAs, database proxy.                     |
+| `backend/src/serverStart.ts`   | Production startup and background scheduler registration.         |
 
 ## Authentication
 
