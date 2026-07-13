@@ -15,6 +15,149 @@ function parseJsonFieldOrValue(value: string) {
     return parsed ?? value;
 }
 
+function compactHeartbeatData(key: string, data: unknown): unknown {
+    const missingValue = JSON.parse("null") as null;
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+        return missingValue;
+    }
+    const value = data as Record<string, unknown>;
+    switch (key) {
+        case "backup.kopia.status": {
+            return {
+                checkedAt: value.checkedAt,
+                isOk: value.isOk,
+                latest: Array.isArray(value.latest)
+                    ? value.latest.map((snapshot) => {
+                          const item = snapshot as Record<string, unknown>;
+                          return {
+                              endTime: item.endTime,
+                              errorCount: item.errorCount,
+                              ignoredErrorCount: item.ignoredErrorCount,
+                              path: item.path,
+                          };
+                      })
+                    : [],
+                stale: value.stale,
+            };
+        }
+        case "backup.walg.status": {
+            return {
+                backupCount: value.backupCount,
+                checkedAt: value.checkedAt,
+                isOk: value.isOk,
+                latest: value.latest,
+                latestAgeHours: value.latestAgeHours,
+                stale: value.stale,
+            };
+        }
+        case "database.summary": {
+            return {
+                checkedAt: value.checkedAt,
+                databases: Array.isArray(value.databases)
+                    ? value.databases.map((database) => {
+                          const item = database as Record<string, unknown>;
+                          return {
+                              cacheHitRatio: item.cache_hit_ratio,
+                              name: item.datname,
+                              connections: item.numbackends,
+                              sizeBytes: item.size_bytes,
+                          };
+                      })
+                    : [],
+                overview: value.overview,
+            };
+        }
+        case "docker.summary": {
+            return {
+                checkedAt: value.checkedAt,
+                containers: Array.isArray(value.containers)
+                    ? value.containers.map((container) => {
+                          const item = container as Record<string, unknown>;
+                          return {
+                              health: item.health,
+                              name: item.name,
+                              restartCount: item.restartCount,
+                              state: item.state,
+                              status: item.status,
+                          };
+                      })
+                    : [],
+                updaterSummary: value.updaterSummary,
+            };
+        }
+        case "log_rotation.state": {
+            const lastRun =
+                value.lastRun && typeof value.lastRun === "object"
+                    ? (value.lastRun as Record<string, unknown>)
+                    : {};
+            return {
+                lastRun: {
+                    errors: lastRun.errors,
+                    finishedAt: lastRun.finishedAt,
+                    isOk: lastRun.isOk,
+                    skippedFiles: lastRun.skippedFiles,
+                    warnings: lastRun.warnings,
+                },
+            };
+        }
+        case "system.openclaw": {
+            const gateway =
+                value.gateway && typeof value.gateway === "object"
+                    ? (value.gateway as Record<string, unknown>)
+                    : {};
+            const gatewayService =
+                value.gatewayService && typeof value.gatewayService === "object"
+                    ? (value.gatewayService as Record<string, unknown>)
+                    : {};
+            const security =
+                value.security && typeof value.security === "object"
+                    ? (value.security as Record<string, unknown>)
+                    : {};
+            return {
+                checkedAt: value.checkedAt,
+                doctorWarnings: value.doctorWarnings,
+                gateway: {
+                    authWarning: gateway.authWarning,
+                    error: gateway.error,
+                    reachable: gateway.reachable,
+                },
+                gatewayService: {
+                    loaded: gatewayService.loaded,
+                    runtime: gatewayService.runtime,
+                    runtimeShort: gatewayService.runtimeShort,
+                },
+                heartbeat: value.heartbeat,
+                security: {
+                    findings: Array.isArray(security.findings)
+                        ? security.findings.map((finding) => {
+                              const item = finding as Record<string, unknown>;
+                              return {
+                                  checkId: item.checkId,
+                                  severity: item.severity,
+                                  title: item.title,
+                              };
+                          })
+                        : [],
+                    summary: security.summary,
+                },
+                taskAudit: value.taskAudit,
+                tasks: value.tasks,
+                version: value.version,
+            };
+        }
+        case "git.workspace":
+        case "moltbook.home":
+        case "quotas.summary":
+        case "system.host":
+        case "weather.spydeberg": {
+            return value;
+        }
+        default: {
+            return missingValue;
+        }
+    }
+}
+
 function mapCacheRowForResponse(
     row: CacheEntryRow,
     options: { includeData?: boolean } = {}
@@ -68,11 +211,18 @@ export const cacheRoutes = {
     "/api/cache/heartbeat": {
         GET: async () => {
             const rows = await getAllCacheEntries();
-            const entries = rows.map((row) => mapCacheRowForResponse(row));
+            const entries = rows.map((row) => {
+                const entry = mapCacheRowForResponse(row);
+                return {
+                    ...entry,
+                    data: compactHeartbeatData(entry.key, entry.data),
+                };
+            });
             return json({
                 count: entries.length,
                 entries,
                 generatedAt: new Date().toISOString(),
+                schemaVersion: 2,
             });
         },
     },
