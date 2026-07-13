@@ -22,6 +22,7 @@ export interface CacheHeartbeatResponse {
     generatedAt: string;
     count: number;
     entries: CacheEnvelope<unknown>[];
+    schemaVersion: 2;
 }
 
 /** Represents the lightweight cache status API response. */
