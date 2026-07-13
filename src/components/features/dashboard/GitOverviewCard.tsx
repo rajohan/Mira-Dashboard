@@ -10,7 +10,7 @@ const DEFAULT_BRANCH = "main";
 interface GitRepoSummary {
     key: string;
     name: string;
-    exists: boolean;
+    exists?: boolean;
     branch: string | undefined;
     remote: string | undefined;
     dirty: boolean;
@@ -142,7 +142,7 @@ export function GitOverviewCard() {
 
 function GitRepoRow({ repo }: { repo: GitRepoSummary }) {
     const repoUrl = repoUrlFromRemote(repo.remote);
-    const isMissing = !repo.exists;
+    const isMissing = repo.exists === false;
 
     return (
         <div className="rounded-lg border border-primary-700 bg-primary-800/40 px-3 py-2">
@@ -165,7 +165,7 @@ function GitRepoRow({ repo }: { repo: GitRepoSummary }) {
                     )}
                 </div>
                 <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                    {repo.branch && repo.branch !== DEFAULT_BRANCH ? (
+                    {!isMissing && repo.branch && repo.branch !== DEFAULT_BRANCH ? (
                         <Badge variant="warning">Off main</Badge>
                     ) : undefined}
                     <Badge

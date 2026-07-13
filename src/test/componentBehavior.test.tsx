@@ -7207,11 +7207,27 @@ describe("shared component helpers", () => {
                         missingRepos: ["workspace"],
                         repos: [
                             {
-                                branch: undefined,
+                                branch: "stale/missing-checkout",
                                 dirty: false,
                                 exists: false,
                                 key: "workspace",
                                 name: "Mira Workspace",
+                                remote: undefined,
+                                statusSummary: {
+                                    conflicted: 0,
+                                    deleted: 0,
+                                    modified: 0,
+                                    renamed: 0,
+                                    staged: 0,
+                                    total: 0,
+                                    untracked: 0,
+                                },
+                            },
+                            {
+                                branch: "feature/legacy-cache",
+                                dirty: false,
+                                key: "legacy",
+                                name: "Legacy Cache Repo",
                                 remote: undefined,
                                 statusSummary: {
                                     conflicted: 0,
@@ -7244,10 +7260,13 @@ describe("shared component helpers", () => {
         expect(await screen.findByText("Mira Workspace")).toBeInTheDocument();
         expect(screen.getByText("Missing")).toBeInTheDocument();
         expect(screen.getByText("repository unavailable")).toBeInTheDocument();
+        expect(screen.getByText("Legacy Cache Repo")).toBeInTheDocument();
+        expect(screen.getByText("feature/legacy-cache · no changes")).toBeInTheDocument();
+        expect(screen.getByText("Off main")).toBeInTheDocument();
         expect(screen.getByText("Missing repos").nextElementSibling).toHaveTextContent(
             "1"
         );
-        expect(screen.queryByText("Clean")).not.toBeInTheDocument();
+        expect(screen.getByText("Clean")).toBeInTheDocument();
         view.unmount();
         view.queryClient.clear();
     });
