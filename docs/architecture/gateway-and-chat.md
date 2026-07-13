@@ -49,12 +49,12 @@ server may need manual inspection.
 
 `GET /api/health` reports:
 
-| Field | Meaning |
-| --- | --- |
-| `status` | Backend health state. |
+| Field              | Meaning                                                            |
+| ------------------ | ------------------------------------------------------------------ |
+| `status`           | Backend health state.                                              |
 | `gatewayConnected` | Whether the backend Gateway client is authenticated and connected. |
-| `sessionCount` | Gateway session count known to Dashboard. |
-| `backendCommit` | Git commit served by the backend when available. |
+| `sessionCount`     | Gateway session count known to Dashboard.                          |
+| `backendCommit`    | Git commit served by the backend when available.                   |
 
 If `gatewayConnected:false`, check:
 
@@ -86,6 +86,19 @@ The chat UI combines several event sources into one visible conversation:
 - tool result diagnostics;
 - terminal chat state events.
 
+Session controls are Gateway-backed rather than Dashboard-only preferences:
+
+- model selection patches the selected session;
+- thinking options come from the selected session/model capabilities;
+- speed maps to the Gateway fast-mode override (`auto`, enabled, or disabled);
+- compact context invokes the Gateway compaction flow for that session;
+- sparse session records inherit matching Gateway defaults instead of being
+  treated as unsupported.
+
+Thinking/reasoning and tool diagnostics have separate visibility toggles stored
+in browser local storage. The composer owns these controls so the setting and
+the message it affects stay in one interaction surface.
+
 Tool-call failures should render as tool diagnostics, not as the global chat
 error banner. The global error banner is reserved for send failures, Gateway
 disconnects, and terminal chat/runtime failures that are not already represented
@@ -94,10 +107,15 @@ by a visible failed tool result.
 When changing chat event handling, test these cases:
 
 - streaming text merges with final assistant messages;
+- a final message does not duplicate a local pending row, recovered-text echo,
+  diagnostic-only row, or an earlier final from the same run;
+- overlapping follow-up runs retain their own legitimate final messages;
 - live tool result updates merge into the matching row;
 - failed tool results stay visible when tool output is enabled;
 - hiding tool output does not also hide a real terminal chat error;
 - run IDs are scoped by session, not treated as globally unique.
+- socket reconnects, compaction replacement runs, and selected-session changes
+  cannot leak control or stream state between sessions.
 
 ## Local Debug Commands
 

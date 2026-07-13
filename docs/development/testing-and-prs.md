@@ -29,6 +29,12 @@ Docs-only changes usually need:
 git diff --check
 ```
 
+Also verify local Markdown links and run the project format check when a docs
+change accompanies code. Documentation must be considered for changes to route
+families, response shapes, cache projections, database state, operational
+workflows, user-facing controls, and fallback/error behavior. If none applies,
+state `Docs: not needed` with a reason in the PR body.
+
 ## Coverage
 
 Coverage is uploaded to Codecov with two flags:

@@ -56,5 +56,8 @@ The production service is `mira-dashboard.service`, running from
 - Do not store secret values in docs.
 - Document new env vars, new route families, new database tables, and new
   operational workflows in the same PR that introduces them.
+- Treat changes to an existing API response, cache projection, user-facing
+  control, or failure/fallback behavior as documentation changes too. Update
+  the owning page or state explicitly in the PR why no docs change is needed.
 - Prefer concrete commands and file paths over vague descriptions.
 - Keep README short; put setup, operations, and API detail here.
