@@ -1488,24 +1488,26 @@ describe("backend route and service behavior", () => {
                 .run();
         });
 
+        const missingValue = JSON.parse("null") as null;
         const cacheHeartbeat = await cacheRoutes["/api/cache/heartbeat"].GET();
         const cacheHeartbeatText = await cacheHeartbeat.text();
         const cacheHeartbeatJson = JSON.parse(cacheHeartbeatText) as {
             count: number;
+            schemaVersion: number;
             entries: Record<string, { data?: unknown; key?: string }>;
         };
         expect(cacheHeartbeatJson).toMatchObject({
             count: expect.any(Number),
+            schemaVersion: 2,
             entries: expect.arrayContaining([
                 expect.objectContaining({
                     consecutiveFailures: 2,
-                    data: "raw-value",
+                    data: missingValue,
                     key: "route.string",
                     meta: {},
                 }),
             ]),
         });
-        const missingValue = JSON.parse("null") as null;
         const cacheStatus = await cacheRoutes["/api/cache/status"].GET();
         await expect(cacheStatus.json()).resolves.toMatchObject({
             count: expect.any(Number),
