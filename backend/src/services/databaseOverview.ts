@@ -269,6 +269,7 @@ async function queryAllUserDatabases<T extends object>(
             FROM pg_database
             WHERE datistemplate = false
               AND datallowconn = true
+              AND datname <> 'postgres'
             ORDER BY datname;
         `)
     );

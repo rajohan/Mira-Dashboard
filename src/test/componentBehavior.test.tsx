@@ -8822,6 +8822,20 @@ describe("shared component helpers", () => {
             />
         );
         expect(screen.getByText("Bloat not assessed")).toBeInTheDocument();
+
+        view.rerender(
+            <DatabaseOverviewCards
+                overview={{
+                    ...overview,
+                    maintenance: {
+                        ...overview.maintenance,
+                        isBloatAssessmentIncomplete: true,
+                        requiresBloatReview: true,
+                    },
+                }}
+            />
+        );
+        expect(screen.getByText("Review · ~1.0 MB reclaimable")).toBeInTheDocument();
     });
 
     it("drives service action confirmation, exec polling, and cache refresh", async () => {

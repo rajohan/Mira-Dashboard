@@ -40,6 +40,7 @@ function writeFakeDocker(binaryPath: string): void {
         ),
         comet: table(["count"], [["7"]]),
         databases: table(["datname"], [["mira"], ["logs"]]),
+        databasesUnfiltered: table(["datname"], [["mira"], ["logs"], ["postgres"]]),
         deadTuples: table(
             [
                 "schemaname",
@@ -127,7 +128,7 @@ if (sql.includes("FROM torrents")) {
 } else if (sql.includes("FROM pg_stat_activity")) {
   key = "activity";
 } else if (sql.includes("FROM pg_database")) {
-  key = "databases";
+  key = sql.includes("datname <> 'postgres'") ? "databases" : "databasesUnfiltered";
 } else if (sql.includes("estimated_reclaimable_bytes")) {
   key = "bloatEstimates";
 } else if (sql.includes("FROM pg_stat_user_tables")) {
