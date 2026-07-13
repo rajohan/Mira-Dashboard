@@ -283,57 +283,22 @@ async function queryAllUserDatabases<T extends object>(
     return results;
 }
 
-const TORRENT_COUNT_TTL = 60 * 60 * 1000; // 1 hour
-const databaseRouteState: {
-    torrentCountCache:
-        | undefined
-        | {
-              data: { comet: number; bitmagnet: number };
-              timestamp: number;
-          };
-} = { torrentCountCache: undefined };
-
-/** Returns cached torrent counts for Comet and Bitmagnet, refreshing at most once per hour. */
+/** Returns current torrent counts for Comet and Bitmagnet. */
 async function getTorrentCounts() {
-    if (
-        databaseRouteState.torrentCountCache &&
-        Date.now() - databaseRouteState.torrentCountCache.timestamp < TORRENT_COUNT_TTL
-    ) {
-        return databaseRouteState.torrentCountCache.data;
-    }
+    const [cometOutput, bitmagnetOutput] = await Promise.all([
+        queryPostgres("SELECT count(*)::text AS count FROM torrents;", "comet"),
+        queryPostgres("SELECT count(*)::text AS count FROM torrents;", "bitmagnet"),
+    ]);
+    const cometCount = stringFallback(
+        parseTable<{ count: string }>(cometOutput)[0]?.count,
+        "0"
+    );
+    const bitmagnetCount = stringFallback(
+        parseTable<{ count: string }>(bitmagnetOutput)[0]?.count,
+        "0"
+    );
 
-    let cometCount = "0";
-    let bitmagnetCount = "0";
-    try {
-        cometCount = stringFallback(
-            parseTable<{ count: string }>(
-                await queryPostgres(
-                    "SELECT count(*)::text AS count FROM torrents;",
-                    "comet"
-                )
-            )[0]?.count,
-            "0"
-        );
-    } catch (error) {
-        console.warn("[DatabaseOverview] Failed to read Comet torrent count:", error);
-    }
-    try {
-        bitmagnetCount = stringFallback(
-            parseTable<{ count: string }>(
-                await queryPostgres(
-                    "SELECT count(*)::text AS count FROM torrents;",
-                    "bitmagnet"
-                )
-            )[0]?.count,
-            "0"
-        );
-    } catch (error) {
-        console.warn("[DatabaseOverview] Failed to read Bitmagnet torrent count:", error);
-    }
-
-    const data = { comet: numberFrom(cometCount), bitmagnet: numberFrom(bitmagnetCount) };
-    databaseRouteState.torrentCountCache = { data, timestamp: Date.now() };
-    return data;
+    return { comet: numberFrom(cometCount), bitmagnet: numberFrom(bitmagnetCount) };
 }
 
 /** Collects PostgreSQL and PgBouncer metrics used by the database overview endpoint. */

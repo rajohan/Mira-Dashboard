@@ -7,6 +7,8 @@ import { describe, expect, it, jest } from "bun:test";
 const DATABASE_OVERVIEW_ENV_KEYS = [
     "DATABASE_HOST",
     "DATABASE_PORT",
+    "FAKE_DOCKER_FAIL_COMET",
+    "FAKE_DOCKER_INVOCATION_LOG",
     "PGBOUNCER_HOST",
     "PGBOUNCER_PORT",
 ] as const;
@@ -115,11 +117,19 @@ function writeFakeDocker(binaryPath: string): void {
             [["SELECT 1", "4", "2500", "625", "4", "10", "1"]]
         ),
     };
-    const script = `#!/usr/bin/env bun
+    const script = String.raw`#!/usr/bin/env bun
+import { appendFileSync } from "node:fs";
 const arguments_ = process.argv.slice(2);
 const sql = arguments_.at(-1) ?? "";
 const command = arguments_.join(" ");
 const outputs = ${JSON.stringify(outputs)};
+if (process.env.FAKE_DOCKER_INVOCATION_LOG) {
+  appendFileSync(process.env.FAKE_DOCKER_INVOCATION_LOG, command + "\n");
+}
+if (process.env.FAKE_DOCKER_FAIL_COMET && sql.includes("FROM torrents") && command.includes("/comet")) {
+  process.stderr.write("Comet unavailable");
+  process.exit(1);
+}
 let key = "";
 if (sql.includes("FROM torrents")) {
   key = command.includes("/comet") ? "comet" : "bitmagnet";
@@ -157,11 +167,13 @@ describe("database overview service", () => {
         const temporaryRoot = mkdtempSync(path.join(tmpdir(), "mira-fake-docker-"));
         try {
             writeFakeDocker(path.join(temporaryRoot, "docker"));
+            const invocationLog = path.join(temporaryRoot, "invocations.log");
             const { getDatabaseOverview } =
                 await import("../src/services/databaseOverview.ts");
             process.env.PATH = `${temporaryRoot}${path.delimiter}${originalPath ?? ""}`;
             process.env.DATABASE_HOST = "postgres";
             process.env.DATABASE_PORT = "5432";
+            process.env.FAKE_DOCKER_INVOCATION_LOG = invocationLog;
             process.env.PGBOUNCER_HOST = "pgbouncer";
             process.env.PGBOUNCER_PORT = "6432";
             const overview = await getDatabaseOverview();
@@ -220,6 +232,18 @@ describe("database overview service", () => {
                 clientConnections: 3,
                 serverConnections: 6,
             });
+            const invocationLogContents = await Bun.file(invocationLog).text();
+            const torrentCountQueries = invocationLogContents
+                .split("\n")
+                .filter((line) =>
+                    line.includes("SELECT count(*)::text AS count FROM torrents")
+                );
+            expect(torrentCountQueries).toHaveLength(4);
+
+            process.env.FAKE_DOCKER_FAIL_COMET = "1";
+            await expect(getDatabaseOverview()).rejects.toThrow(
+                "docker exec failed with exit code 1"
+            );
         } finally {
             if (originalPath === undefined) {
                 delete process.env.PATH;
